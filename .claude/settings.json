@@ -1,0 +1,32 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE=$(cat /dev/stdin | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path',''))\" 2>/dev/null); if [ -n \"$FILE\" ] && echo \"$FILE\" | grep -q '\\.py$'; then echo \"Python file edited: $FILE\"; python3 -m py_compile \"$FILE\" 2>&1; fi",
+            "timeout": 30,
+            "statusMessage": "Checking Python file..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Review the conversation and check ALL of the following. Block if ANY check fails:\n\n1. BUILD CHECK: If Python files were edited, was the code verified (py_compile, pytest, or import check)? If not: block with reason 'Python files were edited but the code was not verified.'\n\n2. LEARNING CHECK: Did the user correct the agent, or did a fix take multiple attempts, or was a non-obvious pattern discovered? If yes, was docs/LESSONS_LEARNED.md updated? If correction happened but no lesson was filed: block with reason 'A correction or non-obvious pattern was encountered but LESSONS_LEARNED.md was not updated. File the lesson before finishing.'\n\n3. QUALITY CHECK: If code was written, do the changes look like they address root causes (not band-aids)? Were only necessary files touched? If the changes look like a workaround or if unrelated files were modified without explanation: block with reason 'Changes may not address the root cause or include unnecessary modifications. Review before finishing.'\n\n4. SELF-CHALLENGE CHECK: If non-trivial code or fixes were produced, did the agent demonstrate self-critique before presenting? Look for evidence that the agent considered simpler alternatives, checked edge cases, or iterated on its solution. If the agent produced complex code without any sign of self-review or immediately presented a first-draft solution for a non-trivial problem: block with reason 'Non-trivial work was presented without evidence of self-challenge. Run the Self-Challenge Gate from CLAUDE.md before finishing.'\n\nIf all checks pass, respond with {\"decision\": \"allow\"}. If any fail, respond with {\"decision\": \"block\", \"reason\": \"<specific reason>\"}.",
+            "model": "haiku",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}
