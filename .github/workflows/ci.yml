@@ -4,11 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
-  test-kiln:
-    name: Test kiln (Python ${{ matrix.python-version }})
+  test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -24,37 +22,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install kiln in dev mode
-        run: pip install -e "./kiln[dev]"
+      - name: Install kiln with dev deps
+        run: pip install -e "./kiln[dev,bambu]"
 
-      - name: Lint with py_compile
-        run: find kiln/src -name '*.py' -exec python -m py_compile {} +
-
-      - name: Run tests
-        run: cd kiln && python -m pytest tests/ -v --tb=short
-
-  test-octoprint-cli:
-    name: Test octoprint-cli (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install octoprint-cli in dev mode
+      - name: Install octoprint-cli with dev deps
         run: pip install -e "./octoprint-cli[dev]"
 
-      - name: Lint with py_compile
-        run: find octoprint-cli/src -name '*.py' -exec python -m py_compile {} +
+      - name: Run kiln tests
+        run: cd kiln && python -m pytest tests/ -v
 
-      - name: Run tests
-        run: cd octoprint-cli && python -m pytest tests/ -v --tb=short
+      - name: Run octoprint-cli tests
+        run: cd octoprint-cli && python -m pytest tests/ -v

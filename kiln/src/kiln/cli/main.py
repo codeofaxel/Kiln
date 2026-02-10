@@ -105,26 +105,44 @@ def cli(ctx: click.Context, printer: Optional[str]) -> None:
 
 
 @cli.command()
-@click.option("--timeout", "-t", default=3.0, help="Scan duration in seconds.")
+@click.option("--timeout", "-t", default=5.0, help="Scan duration in seconds.")
+@click.option(
+    "--subnet", "-s", default=None,
+    help="Subnet to scan (e.g. '192.168.1'). Auto-detected if omitted.",
+)
+@click.option(
+    "--method", "-m", "methods", multiple=True,
+    type=click.Choice(["mdns", "http_probe"]),
+    help="Discovery method(s) to use (repeatable). Default: mdns + http_probe.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def discover(timeout: float, json_mode: bool) -> None:
-    """Scan the local network for 3D printers via mDNS."""
-    try:
-        from kiln.cli.discovery import discover_printers
-    except RuntimeError as exc:
-        click.echo(format_error(str(exc), code="MISSING_DEPENDENCY", json_mode=json_mode))
-        sys.exit(1)
+def discover(timeout: float, subnet: Optional[str], methods: tuple, json_mode: bool) -> None:
+    """Scan the local network for 3D printers.
+
+    Uses mDNS and HTTP probing by default. Results are deduplicated
+    by host+port.  Use --method to restrict to a single strategy.
+    """
+    from kiln.cli.discovery import discover_printers
+
+    method_list = list(methods) if methods else None  # None = use defaults
 
     try:
-        found = discover_printers(timeout=timeout)
-    except RuntimeError as exc:
+        found = discover_printers(
+            timeout=timeout,
+            subnet=subnet,
+            methods=method_list,
+        )
+    except Exception as exc:
         click.echo(format_error(str(exc), code="DISCOVERY_ERROR", json_mode=json_mode))
         sys.exit(1)
 
     click.echo(format_discovered([p.to_dict() for p in found], json_mode=json_mode))
 
     if not json_mode and not found:
-        click.echo("\nTip: Bambu printers don't advertise via mDNS. Use 'kiln auth' with the IP address.")
+        click.echo(
+            "\nTip: Bambu printers don't advertise via mDNS. "
+            "Use 'kiln auth' with the IP address."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -467,9 +485,15 @@ def remove(name: str) -> None:
 
 @cli.command()
 def serve() -> None:
-    """Start the Kiln MCP server."""
-    from kiln.server import mcp
-    mcp.run()
+    """Start the Kiln MCP server.
+
+    Launches the MCP server with the job scheduler, webhook delivery,
+    and persistence subsystems.  Configure your printer via environment
+    variables (KILN_PRINTER_HOST, KILN_PRINTER_API_KEY, KILN_PRINTER_TYPE)
+    or register printers dynamically via the register_printer tool.
+    """
+    from kiln.server import main as _server_main
+    _server_main()
 
 
 # ---------------------------------------------------------------------------

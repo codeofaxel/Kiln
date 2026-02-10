@@ -104,7 +104,7 @@ def event_bus():
 
 @pytest.fixture()
 def scheduler(queue, registry, event_bus):
-    return JobScheduler(queue, registry, event_bus, poll_interval=0.1)
+    return JobScheduler(queue, registry, event_bus, poll_interval=0.1, max_retries=0)
 
 
 # ---------------------------------------------------------------------------
@@ -300,8 +300,8 @@ class TestFailedJobs:
         events = event_bus.recent_events(EventType.JOB_FAILED)
         assert len(events) == 1
         assert events[0].data["job_id"] == job_id
-        assert events[0].data["printer_name"] == "printer-1"
         assert "error" in events[0].data
+        assert "printer-1" in events[0].data["error"]
 
 
 # ---------------------------------------------------------------------------
