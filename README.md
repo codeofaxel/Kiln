@@ -14,9 +14,10 @@ AI Agent (Claude, GPT, custom)
 +-------------------+
 |       Kiln        |  <-- CLI + MCP server for printer control
 +-------------------+
-    |
-    | PrinterAdapter abstraction
-    v
+    |           |            |
+    |   PrinterAdapter   Marketplaces (Thingiverse, MMF, Cults3D)
+    |        |               |
+    v        v               v
 +------------+  +------------+  +--------+
 | OctoPrint  |  | Moonraker  |  | Bambu  |
 +------------+  +------------+  +--------+
@@ -55,8 +56,20 @@ kiln status
 kiln upload model.gcode
 kiln print model.gcode
 
+# Slice an STL and print in one step
+kiln slice model.stl --print-after
+
+# Batch print multiple files
+kiln print *.gcode --queue
+
 # Monitor a running print
-kiln print --status
+kiln wait
+
+# Take a webcam snapshot
+kiln snapshot --save photo.jpg
+
+# View print history
+kiln history --status completed
 
 # All commands support --json for agent consumption
 kiln status --json
@@ -70,8 +83,7 @@ kiln auth --name N --host H --type T       # Save printer credentials
 kiln status [--json]                       # Printer state + job progress
 kiln files [--json]                        # List files on printer
 kiln upload <file> [--json]                # Upload G-code file
-kiln print <file> [--json]                 # Start printing a file
-kiln print --status [--json]               # Check print progress
+kiln print <files>... [--queue] [--json]   # Start printing (supports batch + queue)
 kiln cancel [--json]                       # Cancel current print
 kiln pause [--json]                        # Pause current print
 kiln resume [--json]                       # Resume paused print
@@ -79,6 +91,12 @@ kiln temp [--tool N] [--bed N] [--json]    # Get/set temperatures
 kiln gcode <cmds>... [--json]              # Send raw G-code
 kiln printers [--json]                     # List saved printers
 kiln use <name>                            # Switch active printer
+kiln remove <name>                         # Remove a saved printer
+kiln preflight [--material MAT] [--json]   # Pre-print safety checks
+kiln slice <file> [--print-after] [--json] # Slice STL/3MF to G-code
+kiln snapshot [--save PATH] [--json]       # Capture webcam snapshot
+kiln wait [--timeout N] [--json]           # Wait for print to finish
+kiln history [--status S] [--json]         # View past prints
 kiln serve                                 # Start MCP server
 ```
 
@@ -166,6 +184,10 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `download_model` | Download a model file from Thingiverse |
 | `browse_models` | Browse popular/newest/featured models |
 | `list_model_categories` | List Thingiverse categories |
+| `slice_model` | Slice an STL/3MF file to G-code |
+| `find_slicer_tool` | Detect installed slicer (PrusaSlicer/OrcaSlicer) |
+| `slice_and_print` | Slice a model then upload and print in one step |
+| `printer_snapshot` | Capture a webcam snapshot from the printer |
 
 ## Supported Printers
 
@@ -195,6 +217,8 @@ The server also exposes read-only resources that agents can use for context:
 |---|---|
 | `server.py` | MCP server with tools, resources, and subsystem wiring |
 | `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Bambu) |
+| `marketplaces/` | Model marketplace adapters (Thingiverse, MyMiniFactory, Cults3D) |
+| `slicer.py` | Slicer integration (PrusaSlicer, OrcaSlicer) with auto-detection |
 | `registry.py` | Fleet registry for multi-printer management |
 | `queue.py` | Priority job queue with status tracking |
 | `scheduler.py` | Background job dispatcher (queue -> idle printers) |
@@ -205,7 +229,7 @@ The server also exposes read-only resources that agents can use for context:
 | `billing.py` | Fee tracking for 3DOS network-routed jobs |
 | `discovery.py` | Network printer discovery (mDNS + HTTP probe) |
 | `gcode.py` | G-code safety validator |
-| `thingiverse.py` | Thingiverse API client for model search/download |
+| `cli/` | Click CLI with 20+ subcommands and JSON output |
 
 ## Authentication (Optional)
 
@@ -242,15 +266,49 @@ kiln discover
 
 Discovery uses mDNS/Bonjour and HTTP subnet probing to find OctoPrint, Moonraker, and Bambu printers.
 
-## Thingiverse Integration
+## Model Marketplaces
 
-Kiln includes a built-in Thingiverse client for discovering and downloading 3D models. Set your API token to enable:
+Kiln includes adapters for discovering and downloading 3D models from popular marketplaces:
+
+| Marketplace | Status | Features |
+|---|---|---|
+| **Thingiverse** | Stable | Search, browse, download, categories |
+| **MyMiniFactory** | Stable | Search, download, curated collections |
+| **Cults3D** | Stable | Search, download, trending models |
 
 ```bash
 export KILN_THINGIVERSE_TOKEN=your_token
 ```
 
 Agents can search for models, inspect details, and download files directly to the printer — enabling a full design-to-print workflow without human intervention.
+
+## Slicer Integration
+
+Kiln wraps PrusaSlicer and OrcaSlicer for headless slicing. Auto-detects installed slicers on PATH, macOS app bundles, or via `KILN_SLICER_PATH`.
+
+```bash
+# Slice an STL to G-code
+kiln slice model.stl
+
+# Slice and immediately print
+kiln slice model.stl --print-after
+
+# Supported formats: STL, 3MF, STEP, OBJ, AMF
+```
+
+## Webcam Snapshots
+
+Capture point-in-time images from printer webcams for monitoring and quality checks:
+
+```bash
+# Save snapshot to file
+kiln snapshot --save photo.jpg
+
+# Get base64-encoded snapshot (for agents)
+kiln snapshot --json
+```
+
+Supported on OctoPrint and Moonraker backends. Agents use the `printer_snapshot` MCP tool.
 
 ## Development
 
@@ -259,8 +317,8 @@ Agents can search for models, inspect details, and download files directly to th
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (1349 total)
-cd kiln && python3 -m pytest tests/ -v        # 1110 tests
+# Run tests (1404 total)
+cd kiln && python3 -m pytest tests/ -v        # 1165 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 

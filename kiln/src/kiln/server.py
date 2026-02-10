@@ -78,6 +78,9 @@ _PRINTER_API_KEY: str = os.environ.get("KILN_PRINTER_API_KEY", "")
 _PRINTER_TYPE: str = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
 _PRINTER_SERIAL: str = os.environ.get("KILN_PRINTER_SERIAL", "")
 _THINGIVERSE_TOKEN: str = os.environ.get("KILN_THINGIVERSE_TOKEN", "")
+_MMF_API_KEY: str = os.environ.get("KILN_MMF_API_KEY", "")
+_CULTS3D_USERNAME: str = os.environ.get("KILN_CULTS3D_USERNAME", "")
+_CULTS3D_API_KEY: str = os.environ.get("KILN_CULTS3D_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # MCP server instance
@@ -94,9 +97,10 @@ mcp = FastMCP(
         "Use `preflight_check` before printing. Use `fleet_status` to "
         "manage multiple printers. Use `validate_gcode` before `send_gcode` "
         "for raw commands. Submit jobs via `submit_job` for queued execution. "
-        "Use `search_models` to find printable models on Thingiverse, "
-        "`model_details` to inspect them, and `download_model` to fetch "
-        "files for printing."
+        "Use `search_all_models` to search across Thingiverse, MyMiniFactory, "
+        "and Cults3D simultaneously, or `search_models` for Thingiverse only. "
+        "Use `download_model` to fetch files and `download_and_upload` to go "
+        "straight from marketplace to printer."
     ),
 )
 
@@ -213,6 +217,32 @@ def _get_thingiverse() -> ThingiverseClient:
         )
     _thingiverse = ThingiverseClient(token=token)
     return _thingiverse
+
+
+# Marketplace registry (auto-registers adapters based on env vars)
+_marketplace_registry = MarketplaceRegistry()
+
+
+def _init_marketplace_registry() -> None:
+    """Register marketplace adapters based on available credentials."""
+    if _THINGIVERSE_TOKEN:
+        try:
+            client = _get_thingiverse()
+            _marketplace_registry.register(ThingiverseAdapter(client))
+        except Exception:
+            logger.debug("Could not register Thingiverse adapter", exc_info=True)
+    if _MMF_API_KEY:
+        try:
+            _marketplace_registry.register(MyMiniFactoryAdapter(api_key=_MMF_API_KEY))
+        except Exception:
+            logger.debug("Could not register MyMiniFactory adapter", exc_info=True)
+    if _CULTS3D_USERNAME and _CULTS3D_API_KEY:
+        try:
+            _marketplace_registry.register(
+                Cults3DAdapter(username=_CULTS3D_USERNAME, api_key=_CULTS3D_API_KEY)
+            )
+        except Exception:
+            logger.debug("Could not register Cults3D adapter", exc_info=True)
 
 
 def _error_dict(message: str, code: str = "ERROR") -> Dict[str, Any]:
@@ -1178,6 +1208,116 @@ def billing_summary() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Multi-marketplace tools — unified search across all sources
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def search_all_models(
+    query: str,
+    page: int = 1,
+    per_page: int = 10,
+    sort: str = "relevant",
+    sources: list[str] | None = None,
+) -> dict:
+    """Search across all connected 3D model marketplaces simultaneously.
+
+    Searches Thingiverse, MyMiniFactory, and Cults3D in parallel and
+    returns interleaved results from all sources.
+
+    Args:
+        query: Search keywords (e.g. "raspberry pi case", "benchy").
+        page: Page number (1-based, default 1).
+        per_page: Results per source (default 10).
+        sort: Sort order — "relevant", "popular", or "newest".
+        sources: Optional list to restrict search (e.g. ["thingiverse",
+            "myminifactory"]).  Omit to search all connected sources.
+
+    Each result includes a ``source`` field identifying the marketplace.
+    Results also include ``is_free``, ``has_printable_files`` (has G-code),
+    and ``has_sliceable_files`` (has STL/3MF) hints.
+
+    Use ``model_details`` with the ``id`` to inspect, ``model_files``
+    to see downloadable files, and ``download_model`` to save locally.
+    """
+    try:
+        if _marketplace_registry.count == 0:
+            _init_marketplace_registry()
+
+        if _marketplace_registry.count == 0:
+            return _error_dict(
+                "No marketplace credentials configured.  Set at least one of: "
+                "KILN_THINGIVERSE_TOKEN, KILN_MMF_API_KEY, "
+                "KILN_CULTS3D_USERNAME + KILN_CULTS3D_API_KEY.",
+                code="NO_MARKETPLACES",
+            )
+
+        results = _marketplace_registry.search_all(
+            query,
+            page=page,
+            per_page=per_page,
+            sort=sort,
+            sources=sources,
+        )
+        return {
+            "success": True,
+            "query": query,
+            "models": [r.to_dict() for r in results],
+            "count": len(results),
+            "page": page,
+            "sources": _marketplace_registry.connected,
+        }
+    except MarketplaceError as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in search_all_models")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def marketplace_info() -> dict:
+    """Show which 3D model marketplaces are connected and available.
+
+    Returns the list of connected marketplace sources and their
+    capabilities (search, download support, etc.).  Configure
+    marketplaces via environment variables.
+    """
+    try:
+        if _marketplace_registry.count == 0:
+            _init_marketplace_registry()
+
+        sources = []
+        for name in _marketplace_registry.connected:
+            adapter = _marketplace_registry.get(name)
+            sources.append({
+                "name": adapter.name,
+                "display_name": adapter.display_name,
+                "supports_download": adapter.supports_download,
+            })
+
+        env_hints = []
+        if not _THINGIVERSE_TOKEN:
+            env_hints.append("Set KILN_THINGIVERSE_TOKEN to enable Thingiverse")
+        if not _MMF_API_KEY:
+            env_hints.append("Set KILN_MMF_API_KEY to enable MyMiniFactory")
+        if not (_CULTS3D_USERNAME and _CULTS3D_API_KEY):
+            env_hints.append(
+                "Set KILN_CULTS3D_USERNAME + KILN_CULTS3D_API_KEY to enable Cults3D"
+            )
+
+        return {
+            "success": True,
+            "connected": [s["name"] for s in sources],
+            "sources": sources,
+            "count": len(sources),
+            "setup_hints": env_hints if env_hints else None,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in marketplace_info")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
 # Thingiverse tools — 3D model discovery and download
 # ---------------------------------------------------------------------------
 
@@ -1310,26 +1450,42 @@ def download_model(
 
 @mcp.tool()
 def download_and_upload(
-    file_id: int,
+    file_id: str,
+    source: str = "thingiverse",
     printer_name: str | None = None,
 ) -> dict:
-    """Download a Thingiverse file and upload it to the printer in one step.
+    """Download a model file from any marketplace and upload it to a printer.
 
     Args:
-        file_id: Numeric file ID (from ``model_files`` results).
-        printer_name: Target printer name.  Omit to use the default
-            (env-configured) printer.
+        file_id: File ID (from ``model_files`` results).  For Thingiverse
+            this is a numeric ID; for MyMiniFactory it's the file ID string.
+        source: Which marketplace to download from — "thingiverse" (default)
+            or "myminifactory".  Cults3D does not support direct downloads.
+        printer_name: Target printer name.  Omit to use the default printer.
 
-    This is the fastest way to go from a Thingiverse model to a file on
-    the printer ready to print.  Combines ``download_model`` and
-    ``upload_file`` into a single action.
+    This is the fastest way to go from a marketplace model to a file on
+    the printer ready to print.  Combines download and upload into one step.
     """
     if err := _check_auth("files"):
         return err
     try:
-        # Step 1: Download from Thingiverse
-        client = _get_thingiverse()
-        local_path = client.download_file(file_id, "/tmp/kiln_downloads")
+        if _marketplace_registry.count == 0:
+            _init_marketplace_registry()
+
+        mkt = _marketplace_registry.get(source) if source != "thingiverse" else None
+
+        # Step 1: Download from marketplace
+        if mkt is not None:
+            if not mkt.supports_download:
+                return _error_dict(
+                    f"{mkt.display_name} does not support direct downloads.",
+                    code="UNSUPPORTED",
+                )
+            local_path = mkt.download_file(str(file_id), "/tmp/kiln_downloads")
+        else:
+            # Fallback to legacy Thingiverse client
+            client = _get_thingiverse()
+            local_path = client.download_file(int(file_id), "/tmp/kiln_downloads")
 
         # Step 2: Upload to printer
         if printer_name:
@@ -1341,16 +1497,17 @@ def download_and_upload(
 
         return {
             "success": True,
-            "file_id": file_id,
+            "file_id": str(file_id),
+            "source": source,
             "local_path": local_path,
             "upload": result.to_dict(),
-            "message": f"Downloaded and uploaded to printer.",
+            "message": f"Downloaded from {source} and uploaded to printer.",
         }
-    except ThingiverseNotFoundError:
-        return _error_dict(f"File {file_id} not found on Thingiverse.", code="NOT_FOUND")
+    except (ThingiverseNotFoundError, MktNotFoundError):
+        return _error_dict(f"File {file_id} not found on {source}.", code="NOT_FOUND")
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
-    except (ThingiverseError, PrinterError, RuntimeError) as exc:
+    except (ThingiverseError, MarketplaceError, PrinterError, RuntimeError) as exc:
         return _error_dict(str(exc))
     except Exception as exc:
         logger.exception("Unexpected error in download_and_upload")
@@ -2027,6 +2184,13 @@ def main() -> None:
             logger.debug(
                 "Could not auto-register env-configured printer", exc_info=True
             )
+
+    # Auto-register marketplace adapters from env credentials
+    _init_marketplace_registry()
+    if _marketplace_registry.count > 0:
+        logger.info(
+            "Marketplace sources: %s", ", ".join(_marketplace_registry.connected)
+        )
 
     # Start background services
     _scheduler.start()
