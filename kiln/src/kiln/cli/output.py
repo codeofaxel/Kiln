@@ -371,6 +371,93 @@ def format_printers(
 # ---------------------------------------------------------------------------
 
 
+def format_history(
+    jobs: List[Dict[str, Any]],
+    *,
+    json_mode: bool = False,
+) -> str:
+    """Format job history records.
+
+    Expects dicts from ``KilnDB.list_jobs()`` or ``PrintQueue.list_jobs()``.
+    """
+    if json_mode:
+        return json.dumps(
+            {"status": "success", "data": {"jobs": jobs, "count": len(jobs)}},
+            indent=2,
+            sort_keys=False,
+        )
+
+    if not jobs:
+        msg = "No print history found."
+        if RICH_AVAILABLE:
+            return _render(Panel(msg, title="History", border_style="yellow"))
+        return msg
+
+    if RICH_AVAILABLE:
+        table = Table(title="Print History", border_style="blue")
+        table.add_column("File", style="bold")
+        table.add_column("Status")
+        table.add_column("Printer")
+        table.add_column("Duration", justify="right")
+        table.add_column("Date")
+
+        for j in jobs:
+            status = j.get("status", "unknown")
+            color = {"completed": "green", "failed": "red", "cancelled": "yellow"}.get(
+                status, "white"
+            )
+
+            # Duration from timestamps
+            started = j.get("started_at")
+            completed = j.get("completed_at")
+            if started and completed:
+                duration = format_time(completed - started)
+            else:
+                duration = "N/A"
+
+            # Date
+            submitted = j.get("submitted_at")
+            if submitted is not None:
+                try:
+                    date_str = datetime.fromtimestamp(submitted).strftime("%Y-%m-%d %H:%M")
+                except (OSError, ValueError, TypeError):
+                    date_str = ""
+            else:
+                date_str = ""
+
+            table.add_row(
+                j.get("file_name", ""),
+                f"[{color}]{status}[/{color}]",
+                j.get("printer_name", "") or "",
+                duration,
+                date_str,
+            )
+        return _render(table)
+
+    # Plain-text fallback
+    lines = [f"{'File':<30} {'Status':<12} {'Printer':<15} {'Duration':>10} {'Date'}"]
+    lines.append("-" * 80)
+    for j in jobs:
+        started = j.get("started_at")
+        completed = j.get("completed_at")
+        duration = format_time(completed - started) if started and completed else "N/A"
+
+        submitted = j.get("submitted_at")
+        if submitted is not None:
+            try:
+                date_str = datetime.fromtimestamp(submitted).strftime("%Y-%m-%d %H:%M")
+            except (OSError, ValueError, TypeError):
+                date_str = ""
+        else:
+            date_str = ""
+
+        lines.append(
+            f"{j.get('file_name', ''):<30} {j.get('status', ''):<12} "
+            f"{(j.get('printer_name') or ''):<15} {duration:>10} {date_str}"
+        )
+    return "\n".join(lines)
+
+
 def format_discovered(
     printers: List[Dict[str, Any]],
     *,

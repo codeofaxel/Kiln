@@ -574,6 +574,30 @@ class OctoPrintAdapter(PrinterAdapter):
         return True
 
     # ------------------------------------------------------------------
+    # PrinterAdapter -- webcam snapshot
+    # ------------------------------------------------------------------
+
+    def get_snapshot(self) -> Optional[bytes]:
+        """Capture a webcam snapshot from OctoPrint.
+
+        Attempts ``GET /webcam/?action=snapshot`` which is the standard
+        mjpg-streamer endpoint exposed by OctoPrint.
+
+        Returns:
+            Raw JPEG image bytes, or ``None`` if the webcam is not available.
+        """
+        try:
+            response = self._session.get(
+                self._url("/webcam/?action=snapshot"),
+                timeout=10,
+            )
+            if response.ok and response.content:
+                return response.content
+        except Exception:
+            logger.debug("Webcam snapshot failed", exc_info=True)
+        return None
+
+    # ------------------------------------------------------------------
     # Dunder helpers
     # ------------------------------------------------------------------
 
