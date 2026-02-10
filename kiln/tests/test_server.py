@@ -821,3 +821,758 @@ class TestValidateLocalFile:
             assert result["valid"] is True
         finally:
             os.unlink(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# New tool imports
+# ---------------------------------------------------------------------------
+
+from kiln.server import (
+    validate_gcode as server_validate_gcode,
+    fleet_status,
+    register_printer,
+    submit_job as server_submit_job,
+    job_status as server_job_status,
+    queue_summary,
+    cancel_job as server_cancel_job,
+    recent_events,
+)
+from kiln.registry import PrinterRegistry
+from kiln.queue import PrintQueue, JobStatus
+from kiln.events import EventBus, EventType
+
+
+# ---------------------------------------------------------------------------
+# validate_gcode()
+# ---------------------------------------------------------------------------
+
+class TestValidateGcode:
+    """Tests for the validate_gcode MCP tool."""
+
+    def test_valid_commands(self):
+        result = server_validate_gcode("G28\nG1 X10 Y10 Z5 F1200")
+        assert result["success"] is True
+        assert result["valid"] is True
+        assert result["commands"] == ["G28", "G1 X10 Y10 Z5 F1200"]
+        assert result["errors"] == []
+        assert result["blocked_commands"] == []
+
+    def test_blocked_command_m112(self):
+        result = server_validate_gcode("M112")
+        assert result["success"] is True
+        assert result["valid"] is False
+        assert len(result["errors"]) > 0
+        assert "M112" in result["blocked_commands"][0]
+
+    def test_blocked_command_m502(self):
+        result = server_validate_gcode("M502")
+        assert result["success"] is True
+        assert result["valid"] is False
+        assert len(result["blocked_commands"]) == 1
+
+    def test_blocked_high_temp(self):
+        result = server_validate_gcode("M104 S999")
+        assert result["success"] is True
+        assert result["valid"] is False
+        assert any("temperature" in e.lower() for e in result["errors"])
+        assert "M104 S999" in result["blocked_commands"]
+
+    def test_blocked_high_bed_temp(self):
+        result = server_validate_gcode("M140 S200")
+        assert result["success"] is True
+        assert result["valid"] is False
+        assert any("bed" in e.lower() for e in result["errors"])
+
+    def test_empty_input(self):
+        result = server_validate_gcode("")
+        assert result["success"] is False
+        assert result["error"]["code"] == "INVALID_ARGS"
+
+    def test_whitespace_only_input(self):
+        result = server_validate_gcode("  \n  \n  ")
+        assert result["success"] is False
+        assert result["error"]["code"] == "INVALID_ARGS"
+
+    def test_warnings_included(self):
+        """G28 should produce a warning but still be valid."""
+        result = server_validate_gcode("G28")
+        assert result["success"] is True
+        assert result["valid"] is True
+        assert len(result["warnings"]) > 0
+        assert any("home" in w.lower() or "G28" in w for w in result["warnings"])
+
+    def test_mixed_valid_and_blocked(self):
+        """When one command is blocked, the whole set is invalid."""
+        result = server_validate_gcode("G28\nM112\nG1 X10")
+        assert result["success"] is True
+        assert result["valid"] is False
+        assert len(result["blocked_commands"]) == 1
+
+    def test_safe_temperature(self):
+        result = server_validate_gcode("M104 S200")
+        assert result["success"] is True
+        assert result["valid"] is True
+
+    def test_comments_stripped(self):
+        result = server_validate_gcode("G28 ; home all axes")
+        assert result["success"] is True
+        assert result["valid"] is True
+        assert result["commands"] == ["G28"]
+
+
+# ---------------------------------------------------------------------------
+# send_gcode() with G-code safety validation
+# ---------------------------------------------------------------------------
+
+class TestSendGcodeWithValidation:
+    """Tests for send_gcode with integrated G-code safety validation."""
+
+    @patch("kiln.server._get_adapter")
+    def test_blocked_command_returns_gcode_blocked(self, mock_get_adapter):
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        mock_get_adapter.return_value = adapter
+
+        result = send_gcode("M112")
+        assert result["success"] is False
+        assert result["error"]["code"] == "GCODE_BLOCKED"
+        assert "blocked_commands" in result
+        assert len(result["blocked_commands"]) > 0
+        # Verify adapter was NOT called
+        adapter._post.assert_not_called()
+
+    @patch("kiln.server._get_adapter")
+    def test_blocked_high_hotend_temp(self, mock_get_adapter):
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        mock_get_adapter.return_value = adapter
+
+        result = send_gcode("M104 S999")
+        assert result["success"] is False
+        assert result["error"]["code"] == "GCODE_BLOCKED"
+        assert any("temperature" in e.lower() for e in result["errors"])
+        adapter._post.assert_not_called()
+
+    @patch("kiln.server._get_adapter")
+    def test_blocked_eeprom_save(self, mock_get_adapter):
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        mock_get_adapter.return_value = adapter
+
+        result = send_gcode("M500")
+        assert result["success"] is False
+        assert result["error"]["code"] == "GCODE_BLOCKED"
+        adapter._post.assert_not_called()
+
+    @patch("kiln.server._get_adapter")
+    def test_warnings_included_in_success(self, mock_get_adapter):
+        """Commands that trigger warnings (e.g. G28) should succeed but include warnings."""
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        mock_get_adapter.return_value = adapter
+
+        result = send_gcode("G28")
+        assert result["success"] is True
+        assert "warnings" in result
+        assert len(result["warnings"]) > 0
+
+    @patch("kiln.server._get_adapter")
+    def test_no_warnings_field_when_clean(self, mock_get_adapter):
+        """Safe command with no warnings should not have a warnings key."""
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        mock_get_adapter.return_value = adapter
+
+        result = send_gcode("G1 X10 Y10 Z5 F1200")
+        assert result["success"] is True
+        # When there are no warnings the key should be absent
+        assert "warnings" not in result
+
+    @patch("kiln.server._get_adapter")
+    def test_partial_block_blocks_all(self, mock_get_adapter):
+        """If any command in a batch is blocked, nothing is sent."""
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        mock_get_adapter.return_value = adapter
+
+        result = send_gcode("G28\nM112\nG1 X10")
+        assert result["success"] is False
+        assert result["error"]["code"] == "GCODE_BLOCKED"
+        adapter._post.assert_not_called()
+
+    @patch("kiln.server._get_adapter")
+    def test_firmware_settings_blocked(self, mock_get_adapter):
+        """M500, M501, M502 should all be blocked."""
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        mock_get_adapter.return_value = adapter
+
+        for cmd in ["M500", "M501", "M502"]:
+            result = send_gcode(cmd)
+            assert result["success"] is False, f"{cmd} should be blocked"
+            assert result["error"]["code"] == "GCODE_BLOCKED"
+
+
+# ---------------------------------------------------------------------------
+# fleet_status()
+# ---------------------------------------------------------------------------
+
+class TestFleetStatus:
+    """Tests for the fleet_status MCP tool."""
+
+    def test_empty_registry_no_env(self, monkeypatch):
+        """Empty registry with no env adapter returns empty list."""
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_PRINTER_HOST", "")
+        monkeypatch.setattr(mod, "_PRINTER_TYPE", "octoprint")
+
+        result = fleet_status()
+        assert result["success"] is True
+        assert result["printers"] == []
+        assert result["count"] == 0
+
+    def test_auto_register_from_env(self, monkeypatch):
+        """When the registry is empty but env is configured, default printer is auto-registered."""
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        mock_adapter = MagicMock(spec=OctoPrintAdapter)
+        mock_adapter.name = "OctoPrint"
+        mock_adapter.get_state.return_value = PrinterState(
+            connected=True,
+            state=PrinterStatus.IDLE,
+            tool_temp_actual=24.0,
+            tool_temp_target=0.0,
+            bed_temp_actual=22.0,
+            bed_temp_target=0.0,
+        )
+
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+        monkeypatch.setattr(mod, "_adapter", mock_adapter)
+
+        result = fleet_status()
+        assert result["success"] is True
+        assert result["count"] == 1
+        assert result["printers"][0]["name"] == "default"
+        assert "idle_printers" in result
+
+    def test_with_pre_registered_printers(self, monkeypatch):
+        """Registry with existing printers returns their status."""
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        adapter1 = MagicMock(spec=OctoPrintAdapter)
+        adapter1.name = "OctoPrint"
+        adapter1.get_state.return_value = PrinterState(
+            connected=True,
+            state=PrinterStatus.IDLE,
+            tool_temp_actual=24.0,
+            tool_temp_target=0.0,
+            bed_temp_actual=22.0,
+            bed_temp_target=0.0,
+        )
+
+        adapter2 = MagicMock(spec=MoonrakerAdapter)
+        adapter2.name = "Moonraker"
+        adapter2.get_state.return_value = PrinterState(
+            connected=True,
+            state=PrinterStatus.PRINTING,
+            tool_temp_actual=210.0,
+            tool_temp_target=210.0,
+            bed_temp_actual=60.0,
+            bed_temp_target=60.0,
+        )
+
+        fresh_registry.register("printer-1", adapter1)
+        fresh_registry.register("printer-2", adapter2)
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        result = fleet_status()
+        assert result["success"] is True
+        assert result["count"] == 2
+        names = [p["name"] for p in result["printers"]]
+        assert "printer-1" in names
+        assert "printer-2" in names
+
+
+# ---------------------------------------------------------------------------
+# register_printer()
+# ---------------------------------------------------------------------------
+
+class TestRegisterPrinter:
+    """Tests for the register_printer MCP tool."""
+
+    def test_octoprint_success(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        result = register_printer(
+            name="my-octoprint",
+            printer_type="octoprint",
+            host="http://octo.local",
+            api_key="KEY123",
+        )
+        assert result["success"] is True
+        assert result["name"] == "my-octoprint"
+        assert "my-octoprint" in fresh_registry
+
+    def test_moonraker_success(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        result = register_printer(
+            name="my-moonraker",
+            printer_type="moonraker",
+            host="http://moonraker.local",
+        )
+        assert result["success"] is True
+        assert result["name"] == "my-moonraker"
+        assert "my-moonraker" in fresh_registry
+
+    def test_moonraker_no_api_key(self, monkeypatch):
+        """Moonraker does not require an api_key."""
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        result = register_printer(
+            name="klipper-box",
+            printer_type="moonraker",
+            host="http://klipper.local",
+            api_key=None,
+        )
+        assert result["success"] is True
+
+    def test_unsupported_type(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        result = register_printer(
+            name="bambu",
+            printer_type="bambu",
+            host="http://bambu.local",
+        )
+        assert result["success"] is False
+        assert result["error"]["code"] == "INVALID_ARGS"
+        assert "bambu" in result["error"]["message"].lower()
+
+    def test_octoprint_missing_api_key(self, monkeypatch):
+        """OctoPrint requires an api_key."""
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        result = register_printer(
+            name="no-key",
+            printer_type="octoprint",
+            host="http://octo.local",
+            api_key=None,
+        )
+        assert result["success"] is False
+        assert result["error"]["code"] == "INVALID_ARGS"
+        assert "api_key" in result["error"]["message"].lower()
+
+    def test_octoprint_empty_api_key(self, monkeypatch):
+        """Empty string api_key is treated as missing for OctoPrint."""
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        result = register_printer(
+            name="empty-key",
+            printer_type="octoprint",
+            host="http://octo.local",
+            api_key="",
+        )
+        assert result["success"] is False
+        assert result["error"]["code"] == "INVALID_ARGS"
+
+
+# ---------------------------------------------------------------------------
+# submit_job()
+# ---------------------------------------------------------------------------
+
+class TestSubmitJob:
+    """Tests for the submit_job MCP tool."""
+
+    def test_basic_submission(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        result = server_submit_job("benchy.gcode", printer_name="voron-350", priority=5)
+        assert result["success"] is True
+        assert "job_id" in result
+        assert result["message"].startswith("Job")
+
+    def test_job_appears_in_queue(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        result = server_submit_job("cube.gcode")
+        assert result["success"] is True
+        job_id = result["job_id"]
+
+        job = fresh_queue.get_job(job_id)
+        assert job.file_name == "cube.gcode"
+        assert job.status == JobStatus.QUEUED
+        assert job.submitted_by == "mcp-agent"
+
+    def test_submission_publishes_event(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        server_submit_job("test.gcode")
+        events = fresh_bus.recent_events()
+        assert len(events) == 1
+        assert events[0].type == EventType.JOB_QUEUED
+
+    def test_priority_ordering(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        server_submit_job("low.gcode", priority=0)
+        server_submit_job("high.gcode", priority=10)
+
+        next_job = fresh_queue.next_job()
+        assert next_job is not None
+        assert next_job.file_name == "high.gcode"
+
+    def test_submit_with_no_printer_name(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        result = server_submit_job("any_printer.gcode")
+        assert result["success"] is True
+        job_id = result["job_id"]
+        job = fresh_queue.get_job(job_id)
+        assert job.printer_name is None
+
+
+# ---------------------------------------------------------------------------
+# job_status()
+# ---------------------------------------------------------------------------
+
+class TestJobStatus:
+    """Tests for the job_status MCP tool."""
+
+    def test_found_job(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+
+        job_id = fresh_queue.submit(
+            file_name="benchy.gcode",
+            printer_name="voron",
+            submitted_by="test",
+        )
+        result = server_job_status(job_id)
+        assert result["success"] is True
+        assert result["job"]["id"] == job_id
+        assert result["job"]["file_name"] == "benchy.gcode"
+        assert result["job"]["status"] == "queued"
+
+    def test_not_found(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+
+        result = server_job_status("nonexistent-id")
+        assert result["success"] is False
+        assert result["error"]["code"] == "NOT_FOUND"
+
+    def test_completed_job(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+
+        job_id = fresh_queue.submit(file_name="done.gcode", submitted_by="test")
+        fresh_queue.mark_completed(job_id)
+
+        result = server_job_status(job_id)
+        assert result["success"] is True
+        assert result["job"]["status"] == "completed"
+
+
+# ---------------------------------------------------------------------------
+# queue_summary()
+# ---------------------------------------------------------------------------
+
+class TestQueueSummary:
+    """Tests for the queue_summary MCP tool."""
+
+    def test_empty_queue(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+
+        result = queue_summary()
+        assert result["success"] is True
+        assert result["total"] == 0
+        assert result["pending"] == 0
+        assert result["active"] == 0
+        assert result["next_job"] is None
+        assert result["recent_jobs"] == []
+
+    def test_with_queued_jobs(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+
+        fresh_queue.submit(file_name="a.gcode", submitted_by="test", priority=0)
+        fresh_queue.submit(file_name="b.gcode", submitted_by="test", priority=5)
+
+        result = queue_summary()
+        assert result["success"] is True
+        assert result["total"] == 2
+        assert result["pending"] == 2
+        assert result["active"] == 0
+        assert result["next_job"] is not None
+        assert result["next_job"]["file_name"] == "b.gcode"
+        assert len(result["recent_jobs"]) == 2
+
+    def test_with_mixed_statuses(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+
+        id1 = fresh_queue.submit(file_name="printing.gcode", submitted_by="test")
+        fresh_queue.mark_printing(id1)
+        fresh_queue.submit(file_name="queued.gcode", submitted_by="test")
+
+        result = queue_summary()
+        assert result["success"] is True
+        assert result["total"] == 2
+        assert result["pending"] == 1
+        assert result["active"] == 1
+        assert "queued" in result["counts"]
+        assert "printing" in result["counts"]
+
+
+# ---------------------------------------------------------------------------
+# cancel_job()
+# ---------------------------------------------------------------------------
+
+class TestCancelJob:
+    """Tests for the cancel_job MCP tool."""
+
+    def test_cancel_queued_job(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        job_id = fresh_queue.submit(file_name="cancel_me.gcode", submitted_by="test")
+        result = server_cancel_job(job_id)
+        assert result["success"] is True
+        assert result["job"]["status"] == "cancelled"
+
+        # Verify event was published
+        events = fresh_bus.recent_events()
+        assert any(e.type == EventType.JOB_CANCELLED for e in events)
+
+    def test_cancel_printing_job(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        job_id = fresh_queue.submit(file_name="active.gcode", submitted_by="test")
+        fresh_queue.mark_printing(job_id)
+
+        result = server_cancel_job(job_id)
+        assert result["success"] is True
+        assert result["job"]["status"] == "cancelled"
+
+    def test_cancel_not_found(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        result = server_cancel_job("nonexistent-id")
+        assert result["success"] is False
+        assert result["error"]["code"] == "NOT_FOUND"
+
+    def test_cancel_already_completed(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        job_id = fresh_queue.submit(file_name="done.gcode", submitted_by="test")
+        fresh_queue.mark_completed(job_id)
+
+        result = server_cancel_job(job_id)
+        assert result["success"] is False
+        assert result["error"]["code"] == "INVALID_STATE"
+
+    def test_cancel_already_cancelled(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        job_id = fresh_queue.submit(file_name="twice.gcode", submitted_by="test")
+        fresh_queue.cancel(job_id)
+
+        result = server_cancel_job(job_id)
+        assert result["success"] is False
+        assert result["error"]["code"] == "INVALID_STATE"
+
+
+# ---------------------------------------------------------------------------
+# recent_events()
+# ---------------------------------------------------------------------------
+
+class TestRecentEvents:
+    """Tests for the recent_events MCP tool."""
+
+    def test_empty_bus(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        result = recent_events()
+        assert result["success"] is True
+        assert result["events"] == []
+        assert result["count"] == 0
+
+    def test_after_publishing_events(self, monkeypatch):
+        import kiln.server as mod
+        from kiln.events import Event
+
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        fresh_bus.publish(Event(
+            type=EventType.PRINT_STARTED,
+            data={"file": "benchy.gcode"},
+            source="test",
+        ))
+        fresh_bus.publish(Event(
+            type=EventType.PRINT_COMPLETED,
+            data={"file": "benchy.gcode"},
+            source="test",
+        ))
+
+        result = recent_events()
+        assert result["success"] is True
+        assert result["count"] == 2
+        # Events are returned newest first
+        assert result["events"][0]["type"] == "print.completed"
+        assert result["events"][1]["type"] == "print.started"
+
+    def test_limit_parameter(self, monkeypatch):
+        import kiln.server as mod
+        from kiln.events import Event
+
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        for i in range(10):
+            fresh_bus.publish(Event(
+                type=EventType.PRINT_PROGRESS,
+                data={"progress": i * 10},
+                source="test",
+            ))
+
+        result = recent_events(limit=3)
+        assert result["success"] is True
+        assert result["count"] == 3
+
+    def test_limit_capped_at_100(self, monkeypatch):
+        """Limit is capped at 100 even if larger value is requested."""
+        import kiln.server as mod
+
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        # Just verify the function doesn't error with a high limit
+        result = recent_events(limit=200)
+        assert result["success"] is True
+        # With empty bus the count should be 0
+        assert result["count"] == 0
+
+    def test_limit_capped_at_1_minimum(self, monkeypatch):
+        """Limit is at least 1 even if 0 or negative is requested."""
+        import kiln.server as mod
+        from kiln.events import Event
+
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        fresh_bus.publish(Event(
+            type=EventType.PRINT_STARTED,
+            data={},
+            source="test",
+        ))
+
+        result = recent_events(limit=0)
+        assert result["success"] is True
+        assert result["count"] == 1
+
+    def test_event_data_structure(self, monkeypatch):
+        """Each event in the response has the expected keys."""
+        import kiln.server as mod
+        from kiln.events import Event
+
+        fresh_bus = EventBus()
+        monkeypatch.setattr(mod, "_event_bus", fresh_bus)
+
+        fresh_bus.publish(Event(
+            type=EventType.JOB_CANCELLED,
+            data={"job_id": "abc123"},
+            source="mcp",
+        ))
+
+        result = recent_events()
+        assert result["count"] == 1
+        event = result["events"][0]
+        assert "type" in event
+        assert "data" in event
+        assert "timestamp" in event
+        assert "source" in event
+        assert event["data"]["job_id"] == "abc123"
