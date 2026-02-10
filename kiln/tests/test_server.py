@@ -916,10 +916,25 @@ from kiln.server import (
     queue_summary,
     cancel_job as server_cancel_job,
     recent_events,
+    search_models,
+    model_details,
+    model_files,
+    download_model,
+    browse_models,
+    list_model_categories,
 )
 from kiln.registry import PrinterRegistry
 from kiln.queue import PrintQueue, JobStatus
 from kiln.events import EventBus, EventType
+from kiln.thingiverse import (
+    ThingiverseClient,
+    ThingiverseError,
+    ThingiverseNotFoundError,
+    ThingSummary,
+    ThingDetail,
+    ThingFile as TvFile,
+    Category as TvCategory,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1702,3 +1717,296 @@ class TestRecentEvents:
         assert "timestamp" in event
         assert "source" in event
         assert event["data"]["job_id"] == "abc123"
+
+
+# ---------------------------------------------------------------------------
+# _get_thingiverse() tests
+# ---------------------------------------------------------------------------
+
+class TestGetThingiverse:
+    """Tests for the _get_thingiverse lazy-initialisation function."""
+
+    def test_missing_token(self, monkeypatch):
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "_thingiverse", None)
+        monkeypatch.setattr(mod, "_THINGIVERSE_TOKEN", "")
+
+        with pytest.raises(RuntimeError, match="KILN_THINGIVERSE_TOKEN"):
+            mod._get_thingiverse()
+
+    def test_creates_client_with_token(self, monkeypatch):
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "_thingiverse", None)
+        monkeypatch.setattr(mod, "_THINGIVERSE_TOKEN", "test-token-xyz")
+
+        client = mod._get_thingiverse()
+        assert isinstance(client, ThingiverseClient)
+        assert client._token == "test-token-xyz"
+        # Clean up
+        monkeypatch.setattr(mod, "_thingiverse", None)
+
+    def test_returns_cached_client(self, monkeypatch):
+        import kiln.server as mod
+
+        mock_client = MagicMock(spec=ThingiverseClient)
+        monkeypatch.setattr(mod, "_thingiverse", mock_client)
+
+        result = mod._get_thingiverse()
+        assert result is mock_client
+
+
+# ---------------------------------------------------------------------------
+# search_models()
+# ---------------------------------------------------------------------------
+
+class TestSearchModels:
+    """Tests for the search_models MCP tool."""
+
+    @patch("kiln.server._get_thingiverse")
+    def test_success(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.search.return_value = [
+            ThingSummary(id=1, name="Benchy", url="/t/1", creator="u"),
+            ThingSummary(id=2, name="Cube", url="/t/2", creator="v"),
+        ]
+        mock_get_tv.return_value = client
+
+        result = search_models("benchy")
+        assert result["success"] is True
+        assert result["count"] == 2
+        assert result["query"] == "benchy"
+        assert result["models"][0]["name"] == "Benchy"
+        client.search.assert_called_once_with(
+            "benchy", page=1, per_page=10, sort="relevant",
+        )
+
+    @patch("kiln.server._get_thingiverse")
+    def test_empty_results(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.search.return_value = []
+        mock_get_tv.return_value = client
+
+        result = search_models("noresults")
+        assert result["success"] is True
+        assert result["count"] == 0
+
+    @patch("kiln.server._get_thingiverse")
+    def test_api_error(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.search.side_effect = ThingiverseError("rate limit")
+        mock_get_tv.return_value = client
+
+        result = search_models("test")
+        assert result["success"] is False
+
+    def test_missing_token(self, monkeypatch):
+        import kiln.server as mod
+        monkeypatch.setattr(mod, "_thingiverse", None)
+        monkeypatch.setattr(mod, "_THINGIVERSE_TOKEN", "")
+
+        result = search_models("test")
+        assert result["success"] is False
+        assert "KILN_THINGIVERSE_TOKEN" in result["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# model_details()
+# ---------------------------------------------------------------------------
+
+class TestModelDetails:
+    """Tests for the model_details MCP tool."""
+
+    @patch("kiln.server._get_thingiverse")
+    def test_success(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.get_thing.return_value = ThingDetail(
+            id=123, name="Benchy", url="/t/123", creator="user",
+            description="A boat", tags=["benchy"],
+        )
+        mock_get_tv.return_value = client
+
+        result = model_details(123)
+        assert result["success"] is True
+        assert result["model"]["name"] == "Benchy"
+        assert result["model"]["description"] == "A boat"
+
+    @patch("kiln.server._get_thingiverse")
+    def test_not_found(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.get_thing.side_effect = ThingiverseNotFoundError("not found")
+        mock_get_tv.return_value = client
+
+        result = model_details(999)
+        assert result["success"] is False
+        assert result["error"]["code"] == "NOT_FOUND"
+
+
+# ---------------------------------------------------------------------------
+# model_files()
+# ---------------------------------------------------------------------------
+
+class TestModelFiles:
+    """Tests for the model_files MCP tool."""
+
+    @patch("kiln.server._get_thingiverse")
+    def test_success(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.get_files.return_value = [
+            TvFile(id=10, name="model.stl", size_bytes=5000, download_url="/dl"),
+        ]
+        mock_get_tv.return_value = client
+
+        result = model_files(123)
+        assert result["success"] is True
+        assert result["count"] == 1
+        assert result["files"][0]["name"] == "model.stl"
+        assert result["thing_id"] == 123
+
+    @patch("kiln.server._get_thingiverse")
+    def test_not_found(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.get_files.side_effect = ThingiverseNotFoundError("not found")
+        mock_get_tv.return_value = client
+
+        result = model_files(999)
+        assert result["success"] is False
+        assert result["error"]["code"] == "NOT_FOUND"
+
+
+# ---------------------------------------------------------------------------
+# download_model()
+# ---------------------------------------------------------------------------
+
+class TestDownloadModel:
+    """Tests for the download_model MCP tool."""
+
+    @patch("kiln.server._get_thingiverse")
+    def test_success(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.download_file.return_value = "/tmp/kiln_downloads/model.stl"
+        mock_get_tv.return_value = client
+
+        result = download_model(10)
+        assert result["success"] is True
+        assert result["local_path"] == "/tmp/kiln_downloads/model.stl"
+        assert result["file_id"] == 10
+
+    @patch("kiln.server._get_thingiverse")
+    def test_custom_dest_and_name(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.download_file.return_value = "/custom/dir/custom.stl"
+        mock_get_tv.return_value = client
+
+        result = download_model(10, dest_dir="/custom/dir", file_name="custom.stl")
+        assert result["success"] is True
+        client.download_file.assert_called_once_with(
+            10, "/custom/dir", file_name="custom.stl",
+        )
+
+    @patch("kiln.server._get_thingiverse")
+    def test_not_found(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.download_file.side_effect = ThingiverseNotFoundError("not found")
+        mock_get_tv.return_value = client
+
+        result = download_model(999)
+        assert result["success"] is False
+        assert result["error"]["code"] == "NOT_FOUND"
+
+
+# ---------------------------------------------------------------------------
+# browse_models()
+# ---------------------------------------------------------------------------
+
+class TestBrowseModels:
+    """Tests for the browse_models MCP tool."""
+
+    @patch("kiln.server._get_thingiverse")
+    def test_popular(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.popular.return_value = [
+            ThingSummary(id=1, name="Hot", url="/t/1", creator="u"),
+        ]
+        mock_get_tv.return_value = client
+
+        result = browse_models("popular")
+        assert result["success"] is True
+        assert result["browse_type"] == "popular"
+        assert result["count"] == 1
+
+    @patch("kiln.server._get_thingiverse")
+    def test_newest(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.newest.return_value = []
+        mock_get_tv.return_value = client
+
+        result = browse_models("newest")
+        assert result["success"] is True
+        assert result["browse_type"] == "newest"
+
+    @patch("kiln.server._get_thingiverse")
+    def test_featured(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.featured.return_value = []
+        mock_get_tv.return_value = client
+
+        result = browse_models("featured")
+        assert result["success"] is True
+        assert result["browse_type"] == "featured"
+
+    @patch("kiln.server._get_thingiverse")
+    def test_by_category(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.category_things.return_value = [
+            ThingSummary(id=5, name="Art", url="/t/5", creator="u"),
+        ]
+        mock_get_tv.return_value = client
+
+        result = browse_models(category="art")
+        assert result["success"] is True
+        assert result["browse_type"] == "category:art"
+        client.category_things.assert_called_once_with(
+            "art", page=1, per_page=10,
+        )
+
+    def test_invalid_browse_type(self, monkeypatch):
+        import kiln.server as mod
+        mock_client = MagicMock(spec=ThingiverseClient)
+        monkeypatch.setattr(mod, "_thingiverse", mock_client)
+
+        result = browse_models("invalid")
+        assert result["success"] is False
+        assert result["error"]["code"] == "INVALID_ARGS"
+
+
+# ---------------------------------------------------------------------------
+# list_model_categories()
+# ---------------------------------------------------------------------------
+
+class TestListModelCategories:
+    """Tests for the list_model_categories MCP tool."""
+
+    @patch("kiln.server._get_thingiverse")
+    def test_success(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.list_categories.return_value = [
+            TvCategory(name="Art", slug="art", url="/cat/art", count=100),
+            TvCategory(name="Tools", slug="tools", url="/cat/tools", count=50),
+        ]
+        mock_get_tv.return_value = client
+
+        result = list_model_categories()
+        assert result["success"] is True
+        assert result["count"] == 2
+        assert result["categories"][0]["name"] == "Art"
+
+    @patch("kiln.server._get_thingiverse")
+    def test_api_error(self, mock_get_tv):
+        client = MagicMock(spec=ThingiverseClient)
+        client.list_categories.side_effect = ThingiverseError("timeout")
+        mock_get_tv.return_value = client
+
+        result = list_model_categories()
+        assert result["success"] is False

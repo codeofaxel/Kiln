@@ -48,5 +48,9 @@ kiln = "kiln.server:main"
 Homepage = "https://github.com/codeofaxel/Kiln"
 Issues = "https://github.com/codeofaxel/Kiln/issues"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
