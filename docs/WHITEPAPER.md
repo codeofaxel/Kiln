@@ -88,7 +88,11 @@ An agent may request any operation, but Kiln will refuse operations that violate
 
 ### 3.1 Marketplace Integration
 
-Kiln includes adapters for model marketplaces (Thingiverse, MyMiniFactory, Cults3D) that expose search, browse, and download operations. This enables an agent to find a design by description, inspect its details, and download it — all without human navigation.
+Kiln mirrors its printer adapter pattern for model marketplaces. A `MarketplaceAdapter` abstract base class defines a uniform interface — `search()`, `get_details()`, `get_files()`, `download_file()` — implemented by concrete adapters for Thingiverse (REST), MyMiniFactory (REST v2), and Cults3D (GraphQL). Each adapter normalizes API-specific JSON into shared dataclasses (`ModelSummary`, `ModelDetail`, `ModelFile`) with computed properties like `is_printable` (ready-to-print G-code) and `needs_slicing` (STL/3MF that requires slicing first).
+
+A `MarketplaceRegistry` manages connected adapters and provides `search_all()`, which fans out queries in parallel using a thread pool and interleaves results round-robin across sources for variety. Per-adapter failures are caught and logged without poisoning the aggregate response — if one marketplace is down, results from the others still return. Not all adapters support downloads: Cults3D is metadata-only due to API limitations, and its adapter signals this via `supports_download = False`.
+
+The `download_and_upload` MCP tool combines marketplace download and printer upload into a single action, accepting any supported source as a parameter. This reduces the design-to-printer pipeline to a single tool call for agents that already know which file they want.
 
 ### 3.2 Slicer Integration
 
@@ -123,7 +127,7 @@ The `JobQueue` accepts print jobs with optional priority levels and dispatches t
 
 ### 4.3 Scheduler
 
-The `Scheduler` runs a background loop that matches pending jobs to idle printers. When a printer finishes a job, the scheduler automatically dispatches the next job in the queue. This enables unattended batch production.
+The `Scheduler` runs a background loop that matches pending jobs to idle printers. When a printer finishes a job, the scheduler automatically dispatches the next job in the queue. Failed jobs are retried up to a configurable limit (default 2 retries) before being permanently marked as failed — transient errors like network timeouts don't kill a batch run. This enables unattended batch production.
 
 ## 5. Event System and Webhooks
 

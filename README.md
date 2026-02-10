@@ -178,10 +178,13 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `register_webhook` | Register a webhook for event notifications |
 | `list_webhooks` | List all registered webhooks |
 | `delete_webhook` | Remove a webhook endpoint |
+| `search_all_models` | Search Thingiverse, MyMiniFactory, and Cults3D simultaneously |
+| `marketplace_info` | Show connected marketplaces and setup hints |
 | `search_models` | Search Thingiverse for 3D models |
 | `model_details` | Get details for a Thingiverse model |
 | `model_files` | List files for a Thingiverse model |
 | `download_model` | Download a model file from Thingiverse |
+| `download_and_upload` | Download from any marketplace and upload to printer in one step |
 | `browse_models` | Browse popular/newest/featured models |
 | `list_model_categories` | List Thingiverse categories |
 | `slice_model` | Slice an STL/3MF file to G-code |
@@ -273,14 +276,19 @@ Kiln includes adapters for discovering and downloading 3D models from popular ma
 | Marketplace | Status | Features |
 |---|---|---|
 | **Thingiverse** | Stable | Search, browse, download, categories |
-| **MyMiniFactory** | Stable | Search, download, curated collections |
-| **Cults3D** | Stable | Search, download, trending models |
+| **MyMiniFactory** | Stable | Search, details, download |
+| **Cults3D** | Stable | Search, details (metadata-only, no direct download) |
+
+Configure credentials for the marketplaces you use:
 
 ```bash
-export KILN_THINGIVERSE_TOKEN=your_token
+export KILN_THINGIVERSE_TOKEN=your_token       # Thingiverse
+export KILN_MMF_API_KEY=your_key               # MyMiniFactory
+export KILN_CULTS3D_USERNAME=your_username      # Cults3D
+export KILN_CULTS3D_API_KEY=your_key            # Cults3D
 ```
 
-Agents can search for models, inspect details, and download files directly to the printer — enabling a full design-to-print workflow without human intervention.
+All configured marketplaces are searched simultaneously via `search_all_models`. Agents can inspect details, download files, and upload directly to a printer — enabling a full design-to-print workflow without human intervention.
 
 ## Slicer Integration
 
@@ -317,8 +325,8 @@ Supported on OctoPrint and Moonraker backends. Agents use the `printer_snapshot`
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (1404 total)
-cd kiln && python3 -m pytest tests/ -v        # 1165 tests
+# Run tests (1511 total)
+cd kiln && python3 -m pytest tests/ -v        # 1272 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
