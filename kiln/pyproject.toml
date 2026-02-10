@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kiln"
+version = "0.1.0"
+description = "Agentic infrastructure for physical fabrication via 3D printing"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Kiln Contributors"},
+]
+keywords = ["3d-printing", "mcp", "agent", "fabrication", "manufacturing", "octoprint"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Printing",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "mcp>=1.0",
+    "requests>=2.25",
+    "pyyaml>=5.4",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.6",
+    "responses>=0.20",
+]
+
+[project.scripts]
+kiln = "kiln.server:main"
+
+[project.urls]
+Homepage = "https://github.com/codeofaxel/Kiln"
+Issues = "https://github.com/codeofaxel/Kiln/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
