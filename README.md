@@ -156,6 +156,10 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `queue_summary` | Overview of the job queue |
 | `cancel_job` | Cancel a queued or running job |
 | `recent_events` | Get recent events from the event bus |
+| `kiln_health` | System health check (version, uptime, modules) |
+| `register_webhook` | Register a webhook for event notifications |
+| `list_webhooks` | List all registered webhooks |
+| `delete_webhook` | Remove a webhook endpoint |
 | `search_models` | Search Thingiverse for 3D models |
 | `model_details` | Get details for a Thingiverse model |
 | `model_files` | List files for a Thingiverse model |
@@ -171,6 +175,72 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
 | **Bambu** | Stable | Bambu Lab X1C, P1S, A1 (via LAN MQTT) |
 | **Prusa Connect** | Planned | Prusa MK4, XL, Mini |
+
+## MCP Resources
+
+The server also exposes read-only resources that agents can use for context:
+
+| Resource URI | Description |
+|---|---|
+| `kiln://status` | System-wide snapshot (printers, queue, events) |
+| `kiln://printers` | Fleet listing with idle printers |
+| `kiln://printers/{name}` | Detailed status for a specific printer |
+| `kiln://queue` | Job queue summary and recent jobs |
+| `kiln://queue/{job_id}` | Detail for a specific job |
+| `kiln://events` | Recent events (last 50) |
+
+## Modules
+
+| Module | Description |
+|---|---|
+| `server.py` | MCP server with tools, resources, and subsystem wiring |
+| `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Bambu) |
+| `registry.py` | Fleet registry for multi-printer management |
+| `queue.py` | Priority job queue with status tracking |
+| `scheduler.py` | Background job dispatcher (queue -> idle printers) |
+| `events.py` | Pub/sub event bus with history |
+| `persistence.py` | SQLite storage for jobs, events, and settings |
+| `webhooks.py` | Event-driven webhook delivery with HMAC signing |
+| `auth.py` | Optional API key authentication with scope-based access |
+| `billing.py` | Fee tracking for 3DOS network-routed jobs |
+| `discovery.py` | Network printer discovery (mDNS + HTTP probe) |
+| `gcode.py` | G-code safety validator |
+| `thingiverse.py` | Thingiverse API client for model search/download |
+
+## Authentication (Optional)
+
+Kiln supports optional API key authentication for MCP tools. Disabled by default.
+
+```bash
+# Enable auth
+export KILN_AUTH_ENABLED=1
+export KILN_AUTH_KEY=your_secret_key
+
+# Clients provide their key via
+export KILN_MCP_AUTH_TOKEN=your_secret_key
+```
+
+Scopes: `print`, `files`, `queue`, `temperature`, `admin`. Read-only tools (status, list) never require auth.
+
+## Webhooks
+
+Register HTTP endpoints to receive real-time event notifications:
+
+```
+register_webhook(url="https://example.com/hook", events=["job.completed", "print.failed"])
+```
+
+Payloads are signed with HMAC-SHA256 when a secret is provided.
+
+## Printer Discovery
+
+Kiln can automatically find printers on your local network:
+
+```bash
+kiln discover
+```
+
+Discovery uses mDNS/Bonjour and HTTP subnet probing to find OctoPrint, Moonraker, and Bambu printers.
 
 ## Thingiverse Integration
 
@@ -189,10 +259,17 @@ Agents can search for models, inspect details, and download files directly to th
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests
-cd kiln && python -m pytest tests/ -v
-cd ../octoprint-cli && python -m pytest tests/ -v
+# Run tests (1349 total)
+cd kiln && python3 -m pytest tests/ -v        # 1110 tests
+cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
+
+## Revenue Model
+
+All local printing is **free forever**. Kiln only charges a 5% fee on jobs routed through the 3DOS distributed manufacturing network, with:
+
+- First 5 network jobs per month free
+- $0.25 minimum / $50 maximum per-job cap
 
 ## Safety
 
@@ -202,6 +279,7 @@ Kiln is safety-first infrastructure for controlling physical machines:
 - **G-code validation** blocks dangerous commands (firmware reset, unsafe temperatures)
 - **Temperature limits** enforce safe maximums (300C hotend, 130C bed)
 - **Confirmation required** for destructive operations (cancel, raw G-code)
+- **Optional authentication** with scope-based API keys for multi-user setups
 - **Structured errors** ensure agents always know when something fails
 
 ## License
