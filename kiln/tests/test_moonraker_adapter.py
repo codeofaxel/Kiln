@@ -900,6 +900,84 @@ class TestSendGcode:
 
 
 # ---------------------------------------------------------------------------
+# send_gcode (public interface) tests
+# ---------------------------------------------------------------------------
+
+class TestSendGcodePublic:
+
+    def test_single_command(self) -> None:
+        adapter = _adapter()
+        resp = _mock_response(json_data={"result": "ok"})
+
+        with mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
+            ok = adapter.send_gcode(["G28"])
+
+        assert ok is True
+        call_kwargs = mock_req.call_args
+        assert call_kwargs.kwargs.get("params") == {"script": "G28"}
+
+    def test_multiple_commands_joined(self) -> None:
+        adapter = _adapter()
+        resp = _mock_response(json_data={"result": "ok"})
+
+        with mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
+            ok = adapter.send_gcode(["G28", "G1 X10 Y10 F300", "M104 S200"])
+
+        assert ok is True
+        call_kwargs = mock_req.call_args
+        assert call_kwargs.kwargs.get("params") == {"script": "G28\nG1 X10 Y10 F300\nM104 S200"}
+
+    def test_error_raises(self) -> None:
+        adapter = _adapter()
+        with mock.patch.object(
+            adapter._session,
+            "request",
+            side_effect=ReqConnectionError("down"),
+        ):
+            with pytest.raises(PrinterError):
+                adapter.send_gcode(["G28"])
+
+
+# ---------------------------------------------------------------------------
+# delete_file tests
+# ---------------------------------------------------------------------------
+
+class TestDeleteFile:
+
+    def test_success(self) -> None:
+        adapter = _adapter()
+        resp = _mock_response(json_data={"result": "ok"})
+
+        with mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
+            ok = adapter.delete_file("benchy.gcode")
+
+        assert ok is True
+        # Verify the DELETE request was made to the correct endpoint.
+        args, kwargs = mock_req.call_args
+        assert args[0] == "DELETE"
+        assert "benchy.gcode" in args[1]
+
+    def test_url_encodes_path(self) -> None:
+        adapter = _adapter()
+        resp = _mock_response(json_data={"result": "ok"})
+
+        with mock.patch.object(adapter._session, "request", return_value=resp) as mock_req:
+            adapter.delete_file("folder/my file.gcode")
+
+        args, _kwargs = mock_req.call_args
+        # Spaces and slashes should be encoded.
+        assert "folder%2Fmy%20file.gcode" in args[1]
+
+    def test_error_raises(self) -> None:
+        adapter = _adapter()
+        resp = _mock_response(status_code=404, json_data=None, text="Not Found")
+
+        with mock.patch.object(adapter._session, "request", return_value=resp):
+            with pytest.raises(PrinterError):
+                adapter.delete_file("nonexistent.gcode")
+
+
+# ---------------------------------------------------------------------------
 # PrinterState serialisation
 # ---------------------------------------------------------------------------
 

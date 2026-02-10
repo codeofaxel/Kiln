@@ -632,6 +632,51 @@ class MoonrakerAdapter(PrinterAdapter):
         return True
 
     # ------------------------------------------------------------------
+    # PrinterAdapter -- G-code
+    # ------------------------------------------------------------------
+
+    def send_gcode(self, commands: List[str]) -> bool:
+        """Send G-code commands to Klipper via Moonraker.
+
+        Joins all commands into a single newline-separated script and
+        sends them via ``POST /printer/gcode/script``.
+
+        Args:
+            commands: List of G-code command strings.
+
+        Returns:
+            ``True`` if the commands were accepted.
+
+        Raises:
+            PrinterError: If sending fails.
+        """
+        script = "\n".join(commands)
+        self._send_gcode(script)
+        return True
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- file deletion
+    # ------------------------------------------------------------------
+
+    def delete_file(self, file_path: str) -> bool:
+        """Delete a G-code file from the Klipper host via Moonraker.
+
+        Calls ``DELETE /server/files/gcodes/{file_path}``.
+
+        Args:
+            file_path: Path of the file as returned by ``list_files()``.
+
+        Returns:
+            ``True`` if the file was deleted.
+
+        Raises:
+            PrinterError: If deletion fails.
+        """
+        encoded = quote(file_path, safe="")
+        self._request("DELETE", f"/server/files/gcodes/{encoded}")
+        return True
+
+    # ------------------------------------------------------------------
     # Dunder helpers
     # ------------------------------------------------------------------
 

@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 authors = [
     {name = "Kiln Contributors"},
 ]
-keywords = ["3d-printing", "mcp", "agent", "fabrication", "manufacturing", "octoprint"]
+keywords = ["3d-printing", "mcp", "agent", "fabrication", "manufacturing", "octoprint", "moonraker", "klipper", "bambu"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -31,6 +31,7 @@ dependencies = [
     "requests>=2.25",
     "pyyaml>=5.4",
     "pydantic>=2.0",
+    "paho-mqtt>=2.0",
 ]
 
 [project.optional-dependencies]

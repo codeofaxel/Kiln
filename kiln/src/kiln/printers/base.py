@@ -303,6 +303,39 @@ class PrinterAdapter(ABC):
             PrinterError: If the command fails.
         """
 
+    # -- G-code ---------------------------------------------------------
+
+    @abstractmethod
+    def send_gcode(self, commands: List[str]) -> bool:
+        """Send one or more G-code commands to the printer.
+
+        Args:
+            commands: List of G-code command strings, e.g.
+                ``["G28", "G1 X10 Y10 Z5 F1200"]``.
+
+        Returns:
+            ``True`` if all commands were accepted.
+
+        Raises:
+            PrinterError: If sending fails.
+        """
+
+    # -- file deletion --------------------------------------------------
+
+    @abstractmethod
+    def delete_file(self, file_path: str) -> bool:
+        """Delete a G-code file from the printer's storage.
+
+        Args:
+            file_path: Path (or name) of the file as known by the printer.
+
+        Returns:
+            ``True`` if the file was deleted.
+
+        Raises:
+            PrinterError: If deletion fails.
+        """
+
     # -- convenience / dunder helpers -----------------------------------
 
     def __repr__(self) -> str:  # pragma: no cover

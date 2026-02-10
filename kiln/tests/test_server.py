@@ -36,12 +36,14 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+from kiln.printers.bambu import BambuAdapter
 from kiln.printers.octoprint import OctoPrintAdapter
 from kiln.printers.moonraker import MoonrakerAdapter
 from kiln.server import (
     _error_dict,
     _validate_local_file,
     cancel_print as server_cancel_print,
+    delete_file as server_delete_file,
     pause_print as server_pause_print,
     preflight_check,
     printer_files,
@@ -194,6 +196,40 @@ class TestUploadFile:
         result = server_upload_file("/some/file.gcode")
         assert result["success"] is False
         assert "upload failed" in result["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# delete_file()
+# ---------------------------------------------------------------------------
+
+class TestDeleteFile:
+    """Tests for the delete_file MCP tool."""
+
+    @patch("kiln.server._get_adapter")
+    def test_success(self, mock_get_adapter):
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        adapter.delete_file.return_value = True
+        mock_get_adapter.return_value = adapter
+
+        result = server_delete_file("benchy.gcode")
+        assert result["success"] is True
+        assert "Deleted" in result["message"]
+        adapter.delete_file.assert_called_once_with("benchy.gcode")
+
+    @patch("kiln.server._get_adapter")
+    def test_printer_error(self, mock_get_adapter):
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        adapter.delete_file.side_effect = PrinterError("file not found")
+        mock_get_adapter.return_value = adapter
+
+        result = server_delete_file("missing.gcode")
+        assert result["success"] is False
+
+    @patch("kiln.server._get_adapter")
+    def test_runtime_error(self, mock_get_adapter):
+        mock_get_adapter.side_effect = RuntimeError("no adapter")
+        result = server_delete_file("test.gcode")
+        assert result["success"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -598,7 +634,8 @@ class TestSendGcode:
     @patch("kiln.server._get_adapter")
     def test_printer_error(self, mock_get_adapter):
         adapter = MagicMock(spec=OctoPrintAdapter)
-        adapter._post.side_effect = PrinterError("printer busy")
+        adapter.capabilities.can_send_gcode = True
+        adapter.send_gcode.side_effect = PrinterError("printer busy")
         mock_get_adapter.return_value = adapter
 
         result = send_gcode("G28")
@@ -606,21 +643,22 @@ class TestSendGcode:
 
     @patch("kiln.server._get_adapter")
     def test_moonraker_adapter(self, mock_get_adapter):
-        """send_gcode works with MoonrakerAdapter via _send_gcode."""
+        """send_gcode works with MoonrakerAdapter via adapter.send_gcode."""
         adapter = MagicMock(spec=MoonrakerAdapter)
+        adapter.capabilities.can_send_gcode = True
         mock_get_adapter.return_value = adapter
 
         result = send_gcode("G28\nG1 Z10")
         assert result["success"] is True
         assert result["count"] == 2
-        adapter._send_gcode.assert_called_once_with("G28\nG1 Z10")
+        adapter.send_gcode.assert_called_once_with(["G28", "G1 Z10"])
 
     @patch("kiln.server._get_adapter")
     def test_unsupported_adapter(self, mock_get_adapter):
-        """send_gcode returns UNSUPPORTED for unknown adapter types."""
+        """send_gcode returns UNSUPPORTED when capabilities.can_send_gcode is False."""
         adapter = MagicMock()
         adapter.name = "other_printer"
-        # Not spec'd to OctoPrintAdapter or MoonrakerAdapter
+        adapter.capabilities.can_send_gcode = False
         mock_get_adapter.return_value = adapter
 
         result = send_gcode("G28")
@@ -666,7 +704,7 @@ class TestGetAdapter:
         monkeypatch.setattr(mod, "_adapter", None)
         monkeypatch.setattr(mod, "_PRINTER_HOST", "http://localhost")
         monkeypatch.setattr(mod, "_PRINTER_API_KEY", "key123")
-        monkeypatch.setattr(mod, "_PRINTER_TYPE", "bambu")
+        monkeypatch.setattr(mod, "_PRINTER_TYPE", "unknown_brand")
 
         with pytest.raises(RuntimeError, match="Unsupported printer type"):
             mod._get_adapter()
@@ -700,6 +738,48 @@ class TestGetAdapter:
 
         # Clean up the global singleton
         monkeypatch.setattr(mod, "_adapter", None)
+
+    def test_bambu_type_creates_adapter(self, monkeypatch):
+        """Valid config with type='bambu' creates a BambuAdapter."""
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_PRINTER_HOST", "192.168.1.100")
+        monkeypatch.setattr(mod, "_PRINTER_API_KEY", "12345678")
+        monkeypatch.setattr(mod, "_PRINTER_TYPE", "bambu")
+        monkeypatch.setattr(mod, "_PRINTER_SERIAL", "01P00A000000001")
+
+        adapter = mod._get_adapter()
+        assert isinstance(adapter, BambuAdapter)
+
+        # Clean up the global singleton
+        monkeypatch.setattr(mod, "_adapter", None)
+
+    def test_bambu_missing_api_key(self, monkeypatch):
+        """Bambu requires access code (via api_key env var)."""
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_PRINTER_HOST", "192.168.1.100")
+        monkeypatch.setattr(mod, "_PRINTER_API_KEY", "")
+        monkeypatch.setattr(mod, "_PRINTER_TYPE", "bambu")
+        monkeypatch.setattr(mod, "_PRINTER_SERIAL", "01P00A000000001")
+
+        with pytest.raises(RuntimeError, match="KILN_PRINTER_API_KEY"):
+            mod._get_adapter()
+
+    def test_bambu_missing_serial(self, monkeypatch):
+        """Bambu requires serial number."""
+        import kiln.server as mod
+
+        monkeypatch.setattr(mod, "_adapter", None)
+        monkeypatch.setattr(mod, "_PRINTER_HOST", "192.168.1.100")
+        monkeypatch.setattr(mod, "_PRINTER_API_KEY", "12345678")
+        monkeypatch.setattr(mod, "_PRINTER_TYPE", "bambu")
+        monkeypatch.setattr(mod, "_PRINTER_SERIAL", "")
+
+        with pytest.raises(RuntimeError, match="KILN_PRINTER_SERIAL"):
+            mod._get_adapter()
 
     def test_returns_cached_adapter(self, monkeypatch):
         """Second call returns the same cached adapter."""
@@ -1145,6 +1225,53 @@ class TestRegisterPrinter:
         )
         assert result["success"] is True
 
+    def test_bambu_success(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        result = register_printer(
+            name="my-bambu",
+            printer_type="bambu",
+            host="192.168.1.100",
+            api_key="12345678",
+            serial="01P00A000000001",
+        )
+        assert result["success"] is True
+        assert result["name"] == "my-bambu"
+        assert "my-bambu" in fresh_registry
+
+    def test_bambu_missing_api_key(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        result = register_printer(
+            name="bambu-nokey",
+            printer_type="bambu",
+            host="192.168.1.100",
+            serial="01P00A000000001",
+        )
+        assert result["success"] is False
+        assert result["error"]["code"] == "INVALID_ARGS"
+
+    def test_bambu_missing_serial(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        result = register_printer(
+            name="bambu-noserial",
+            printer_type="bambu",
+            host="192.168.1.100",
+            api_key="12345678",
+        )
+        assert result["success"] is False
+        assert result["error"]["code"] == "INVALID_ARGS"
+
     def test_unsupported_type(self, monkeypatch):
         import kiln.server as mod
 
@@ -1152,13 +1279,12 @@ class TestRegisterPrinter:
         monkeypatch.setattr(mod, "_registry", fresh_registry)
 
         result = register_printer(
-            name="bambu",
-            printer_type="bambu",
-            host="http://bambu.local",
+            name="unknown",
+            printer_type="prusa_connect",
+            host="http://prusa.local",
         )
         assert result["success"] is False
         assert result["error"]["code"] == "INVALID_ARGS"
-        assert "bambu" in result["error"]["message"].lower()
 
     def test_octoprint_missing_api_key(self, monkeypatch):
         """OctoPrint requires an api_key."""
