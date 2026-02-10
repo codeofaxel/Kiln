@@ -804,6 +804,80 @@ class TestRetryLogic:
 
 
 # ---------------------------------------------------------------------------
+# send_gcode tests
+# ---------------------------------------------------------------------------
+
+class TestOctoPrintSendGcode:
+    """Tests for the public send_gcode interface."""
+
+    @responses.activate
+    def test_single_command(self, adapter):
+        responses.add(
+            responses.POST,
+            f"{OCTOPRINT_HOST}/api/printer/command",
+            json={"ok": True},
+            status=200,
+        )
+        ok = adapter.send_gcode(["G28"])
+        assert ok is True
+        body = json.loads(responses.calls[0].request.body)
+        assert body == {"commands": ["G28"]}
+
+    @responses.activate
+    def test_multiple_commands(self, adapter):
+        responses.add(
+            responses.POST,
+            f"{OCTOPRINT_HOST}/api/printer/command",
+            json={"ok": True},
+            status=200,
+        )
+        ok = adapter.send_gcode(["G28", "M104 S200", "G1 X10 F300"])
+        assert ok is True
+        body = json.loads(responses.calls[0].request.body)
+        assert body == {"commands": ["G28", "M104 S200", "G1 X10 F300"]}
+
+    @responses.activate
+    def test_error_raises(self, adapter):
+        responses.add(
+            responses.POST,
+            f"{OCTOPRINT_HOST}/api/printer/command",
+            json={"error": "Printer is not operational"},
+            status=409,
+        )
+        with pytest.raises(PrinterError):
+            adapter.send_gcode(["G28"])
+
+
+# ---------------------------------------------------------------------------
+# delete_file tests
+# ---------------------------------------------------------------------------
+
+class TestOctoPrintDeleteFile:
+    """Tests for the delete_file method."""
+
+    @responses.activate
+    def test_success(self, adapter):
+        responses.add(
+            responses.DELETE,
+            f"{OCTOPRINT_HOST}/api/files/local/benchy.gcode",
+            status=204,
+        )
+        ok = adapter.delete_file("benchy.gcode")
+        assert ok is True
+
+    @responses.activate
+    def test_not_found_raises(self, adapter):
+        responses.add(
+            responses.DELETE,
+            f"{OCTOPRINT_HOST}/api/files/local/missing.gcode",
+            json={"error": "File not found"},
+            status=404,
+        )
+        with pytest.raises(PrinterError):
+            adapter.delete_file("missing.gcode")
+
+
+# ---------------------------------------------------------------------------
 # _request method edge cases
 # ---------------------------------------------------------------------------
 

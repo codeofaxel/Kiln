@@ -18,11 +18,15 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+from kiln.printers.bambu import BambuAdapter
 from kiln.printers.moonraker import MoonrakerAdapter
+from kiln.printers.octoprint import OctoPrintAdapter
 
 __all__ = [
+    "BambuAdapter",
     "JobProgress",
     "MoonrakerAdapter",
+    "OctoPrintAdapter",
     "PrinterAdapter",
     "PrinterCapabilities",
     "PrinterError",

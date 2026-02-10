@@ -528,6 +528,52 @@ class OctoPrintAdapter(PrinterAdapter):
         return True
 
     # ------------------------------------------------------------------
+    # PrinterAdapter -- G-code
+    # ------------------------------------------------------------------
+
+    def send_gcode(self, commands: List[str]) -> bool:
+        """Send G-code commands to OctoPrint.
+
+        Calls ``POST /api/printer/command`` with a JSON body containing
+        the list of commands.
+
+        Args:
+            commands: List of G-code command strings.
+
+        Returns:
+            ``True`` if the commands were accepted.
+
+        Raises:
+            PrinterError: If sending fails.
+        """
+        self._post(
+            "/api/printer/command",
+            json={"commands": commands},
+        )
+        return True
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- file deletion
+    # ------------------------------------------------------------------
+
+    def delete_file(self, file_path: str) -> bool:
+        """Delete a G-code file from OctoPrint's local storage.
+
+        Calls ``DELETE /api/files/local/{file_path}``.
+
+        Args:
+            file_path: Path of the file as returned by ``list_files()``.
+
+        Returns:
+            ``True`` if the file was deleted.
+
+        Raises:
+            PrinterError: If deletion fails.
+        """
+        self._request("DELETE", f"/api/files/local/{quote(file_path, safe='')}")
+        return True
+
+    # ------------------------------------------------------------------
     # Dunder helpers
     # ------------------------------------------------------------------
 

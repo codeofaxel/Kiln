@@ -13,8 +13,11 @@ Environment variables
 ``KILN_PRINTER_API_KEY``
     API key used for authenticating with the printer server.
 ``KILN_PRINTER_TYPE``
-    Printer backend type.  Supported values: ``"octoprint"`` and
-    ``"moonraker"``.  Defaults to ``"octoprint"``.
+    Printer backend type.  Supported values: ``"octoprint"``,
+    ``"moonraker"``, and ``"bambu"``.  Defaults to ``"octoprint"``.
+``KILN_PRINTER_SERIAL``
+    Bambu printer serial number (required when ``KILN_PRINTER_TYPE``
+    is ``"bambu"``).
 """
 
 from __future__ import annotations
@@ -27,13 +30,14 @@ from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from kiln.printers.base import (
+from kiln.printers import (
+    BambuAdapter,
+    MoonrakerAdapter,
+    OctoPrintAdapter,
     PrinterAdapter,
     PrinterError,
     PrinterStatus,
 )
-from kiln.printers.moonraker import MoonrakerAdapter
-from kiln.printers.octoprint import OctoPrintAdapter
 from kiln.gcode import validate_gcode as _validate_gcode_impl
 from kiln.registry import PrinterRegistry, PrinterNotFoundError
 from kiln.queue import PrintQueue, JobStatus, JobNotFoundError
@@ -48,6 +52,7 @@ logger = logging.getLogger(__name__)
 _PRINTER_HOST: str = os.environ.get("KILN_PRINTER_HOST", "")
 _PRINTER_API_KEY: str = os.environ.get("KILN_PRINTER_API_KEY", "")
 _PRINTER_TYPE: str = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
+_PRINTER_SERIAL: str = os.environ.get("KILN_PRINTER_SERIAL", "")
 
 # ---------------------------------------------------------------------------
 # MCP server instance
@@ -55,11 +60,15 @@ _PRINTER_TYPE: str = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
 
 mcp = FastMCP(
     "kiln",
-    description=(
+    instructions=(
         "Agent infrastructure for physical fabrication via 3D printing. "
         "Provides tools to monitor printer status, manage files, control "
         "print jobs, adjust temperatures, send raw G-code, and run "
-        "pre-flight safety checks."
+        "pre-flight safety checks.\n\n"
+        "Start with `printer_status` to see what the printer is doing. "
+        "Use `preflight_check` before printing. Use `fleet_status` to "
+        "manage multiple printers. Use `validate_gcode` before `send_gcode` "
+        "for raw commands. Submit jobs via `submit_job` for queued execution."
     ),
 )
 
@@ -110,10 +119,23 @@ def _get_adapter() -> PrinterAdapter:
         # Moonraker typically does not require an API key, but one can
         # optionally be provided via KILN_PRINTER_API_KEY.
         _adapter = MoonrakerAdapter(host=host, api_key=api_key or None)
+    elif printer_type == "bambu":
+        if not api_key:
+            raise RuntimeError(
+                "KILN_PRINTER_API_KEY environment variable is not set.  "
+                "Set it to your Bambu printer's LAN Access Code."
+            )
+        serial = _PRINTER_SERIAL
+        if not serial:
+            raise RuntimeError(
+                "KILN_PRINTER_SERIAL environment variable is not set.  "
+                "Set it to your Bambu printer's serial number."
+            )
+        _adapter = BambuAdapter(host=host, access_code=api_key, serial=serial)
     else:
         raise RuntimeError(
             f"Unsupported printer type: {printer_type!r}.  "
-            f"Supported types are 'octoprint' and 'moonraker'."
+            f"Supported types are 'octoprint', 'moonraker', and 'bambu'."
         )
 
     logger.info(
@@ -224,6 +246,29 @@ def upload_file(file_path: str) -> dict:
         return _error_dict(str(exc))
     except Exception as exc:
         logger.exception("Unexpected error in upload_file")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def delete_file(file_path: str) -> dict:
+    """Delete a G-code file from the printer's storage.
+
+    Args:
+        file_path: Path of the file as shown by ``printer_files()``.
+
+    This is irreversible -- the file cannot be recovered once deleted.
+    """
+    try:
+        adapter = _get_adapter()
+        ok = adapter.delete_file(file_path)
+        return {
+            "success": ok,
+            "message": f"Deleted {file_path}." if ok else f"Failed to delete {file_path}.",
+        }
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in delete_file")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
@@ -528,23 +573,13 @@ def send_gcode(commands: str) -> dict:
                 "warnings": validation.warnings,
             }
 
-        # Both OctoPrint and Moonraker adapters expose _post / _send_gcode
-        # but not a public send_gcode method on the base interface.  We
-        # call through the adapter's internal API for raw G-code.
-        if isinstance(adapter, OctoPrintAdapter):
-            adapter._post(
-                "/api/printer/command",
-                json={"commands": cmd_list},
-            )
-        elif isinstance(adapter, MoonrakerAdapter):
-            # Moonraker accepts a newline-separated script in a single call.
-            script = "\n".join(cmd_list)
-            adapter._send_gcode(script)
-        else:
+        if not adapter.capabilities.can_send_gcode:
             return _error_dict(
                 f"send_gcode is not supported by the {adapter.name} adapter.",
                 code="UNSUPPORTED",
             )
+
+        adapter.send_gcode(cmd_list)
 
         result: Dict[str, Any] = {
             "success": True,
@@ -653,14 +688,17 @@ def register_printer(
     printer_type: str,
     host: str,
     api_key: str | None = None,
+    serial: str | None = None,
 ) -> dict:
     """Register a new printer in the fleet.
 
     Args:
-        name: Unique human-readable name (e.g. "voron-350", "ender-farm-1").
-        printer_type: Backend type -- "octoprint" or "moonraker".
-        host: Base URL of the printer server.
-        api_key: API key (required for OctoPrint, optional for Moonraker).
+        name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
+        printer_type: Backend type -- "octoprint", "moonraker", or "bambu".
+        host: Base URL or IP address of the printer.
+        api_key: API key (required for OctoPrint and Bambu, optional for
+            Moonraker).  For Bambu printers this is the LAN Access Code.
+        serial: Printer serial number (required for Bambu printers).
 
     Once registered the printer appears in ``fleet_status()`` and can be
     targeted by ``submit_job()``.
@@ -675,10 +713,22 @@ def register_printer(
             adapter = OctoPrintAdapter(host=host, api_key=api_key)
         elif printer_type == "moonraker":
             adapter = MoonrakerAdapter(host=host, api_key=api_key or None)
+        elif printer_type == "bambu":
+            if not api_key:
+                return _error_dict(
+                    "api_key (LAN Access Code) is required for Bambu printers.",
+                    code="INVALID_ARGS",
+                )
+            if not serial:
+                return _error_dict(
+                    "serial is required for Bambu printers.",
+                    code="INVALID_ARGS",
+                )
+            adapter = BambuAdapter(host=host, access_code=api_key, serial=serial)
         else:
             return _error_dict(
                 f"Unsupported printer_type: {printer_type!r}. "
-                "Supported: 'octoprint', 'moonraker'.",
+                "Supported: 'octoprint', 'moonraker', 'bambu'.",
                 code="INVALID_ARGS",
             )
 
