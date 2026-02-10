@@ -18,7 +18,11 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
-from kiln.printers.bambu import BambuAdapter
+try:
+    from kiln.printers.bambu import BambuAdapter
+except ImportError:
+    BambuAdapter = None  # type: ignore[assignment,misc]
+
 from kiln.printers.moonraker import MoonrakerAdapter
 from kiln.printers.octoprint import OctoPrintAdapter
 

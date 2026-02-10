@@ -24,9 +24,11 @@ Environment variables
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -44,6 +46,11 @@ from kiln.gcode import validate_gcode as _validate_gcode_impl
 from kiln.registry import PrinterRegistry, PrinterNotFoundError
 from kiln.queue import PrintQueue, JobStatus, JobNotFoundError
 from kiln.events import Event, EventBus, EventType
+from kiln.scheduler import JobScheduler
+from kiln.persistence import get_db
+from kiln.webhooks import WebhookManager
+from kiln.auth import AuthManager
+from kiln.billing import BillingLedger, FeePolicy
 from kiln.thingiverse import (
     ThingiverseClient,
     ThingiverseError,
@@ -133,6 +140,11 @@ def _get_adapter() -> PrinterAdapter:
         # optionally be provided via KILN_PRINTER_API_KEY.
         _adapter = MoonrakerAdapter(host=host, api_key=api_key or None)
     elif printer_type == "bambu":
+        if BambuAdapter is None:
+            raise RuntimeError(
+                "Bambu support requires paho-mqtt.  "
+                "Install it with: pip install 'kiln[bambu]' or pip install paho-mqtt"
+            )
         if not api_key:
             raise RuntimeError(
                 "KILN_PRINTER_API_KEY environment variable is not set.  "
@@ -166,6 +178,11 @@ def _get_adapter() -> PrinterAdapter:
 _registry = PrinterRegistry()
 _queue = PrintQueue()
 _event_bus = EventBus()
+_scheduler = JobScheduler(_queue, _registry, _event_bus)
+_webhook_mgr = WebhookManager(_event_bus)
+_auth = AuthManager()
+_billing = BillingLedger()
+_start_time = time.time()
 
 # Thingiverse client (lazy -- created on first use so the module can be
 # imported without requiring the token env var).
@@ -193,6 +210,101 @@ def _get_thingiverse() -> ThingiverseClient:
 def _error_dict(message: str, code: str = "ERROR") -> Dict[str, Any]:
     """Build a standardised error response dict."""
     return {"success": False, "error": {"code": code, "message": message}}
+
+
+def _check_auth(scope: str) -> Optional[Dict[str, Any]]:
+    """Check authentication for a tool invocation.
+
+    Returns ``None`` if the request is allowed (either auth is disabled or the
+    token is valid with the required *scope*).  Returns an error dict suitable
+    for direct return from a tool handler when the request must be rejected.
+
+    This is intentionally a no-op when authentication is not configured so
+    that existing deployments continue to work without changes.
+    """
+    if not _auth.enabled:
+        return None
+
+    token = os.environ.get("KILN_MCP_AUTH_TOKEN", "")
+    result = _auth.check_request(key=token, scope=scope)
+    if result.get("authenticated"):
+        return None
+    return _error_dict(
+        result.get("error", "Authentication failed."),
+        code="AUTH_ERROR",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Persistence hooks — save job/event changes to SQLite
+# ---------------------------------------------------------------------------
+
+def _persist_event(event: Event) -> None:
+    """EventBus subscriber that writes every event to SQLite."""
+    try:
+        db = get_db()
+        db.log_event(
+            event_type=event.type.value,
+            data=event.data,
+            source=event.source,
+            timestamp=event.timestamp,
+        )
+    except Exception:
+        logger.debug("Failed to persist event %s", event.type.value, exc_info=True)
+
+    # Also persist job state changes
+    job_events = {
+        EventType.JOB_QUEUED, EventType.JOB_STARTED,
+        EventType.JOB_COMPLETED, EventType.JOB_FAILED, EventType.JOB_CANCELLED,
+    }
+    if event.type in job_events and "job_id" in event.data:
+        try:
+            job = _queue.get_job(event.data["job_id"])
+            db = get_db()
+            db.save_job({
+                "id": job.id,
+                "file_name": job.file_name,
+                "printer_name": job.printer_name,
+                "status": job.status.value,
+                "priority": job.priority,
+                "submitted_by": job.submitted_by,
+                "submitted_at": job.created_at,
+                "started_at": job.started_at,
+                "completed_at": job.completed_at,
+                "error_message": job.error,
+            })
+        except Exception:
+            logger.debug("Failed to persist job %s", event.data.get("job_id"), exc_info=True)
+
+
+def _billing_hook(event: Event) -> None:
+    """EventBus subscriber that records fees for completed network jobs.
+
+    Only jobs with ``network_cost`` in event data are billable — all
+    local printing is free.
+    """
+    if event.type != EventType.JOB_COMPLETED:
+        return
+    network_cost = event.data.get("network_cost")
+    if network_cost is None:
+        return  # Local job — free
+    try:
+        fee_calc = _billing.calculate_fee(float(network_cost))
+        _billing.record_charge(event.data["job_id"], fee_calc)
+        logger.info(
+            "Billing: job %s network_cost=%.2f fee=%.2f (waived=%s)",
+            event.data["job_id"],
+            network_cost,
+            fee_calc.fee_amount,
+            fee_calc.waived,
+        )
+    except Exception:
+        logger.debug("Failed to record billing for job %s", event.data.get("job_id"), exc_info=True)
+
+
+# Wire subscribers (runs automatically on import)
+_event_bus.subscribe(None, _persist_event)
+_event_bus.subscribe(EventType.JOB_COMPLETED, _billing_hook)
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +383,8 @@ def upload_file(file_path: str) -> dict:
     After a successful upload the file will appear in ``printer_files()`` and
     can be started with ``start_print()``.
     """
+    if err := _check_auth("files"):
+        return err
     try:
         adapter = _get_adapter()
         result = adapter.upload_file(file_path)
@@ -293,6 +407,8 @@ def delete_file(file_path: str) -> dict:
 
     This is irreversible -- the file cannot be recovered once deleted.
     """
+    if err := _check_auth("files"):
+        return err
     try:
         adapter = _get_adapter()
         ok = adapter.delete_file(file_path)
@@ -318,6 +434,8 @@ def start_print(file_name: str) -> dict:
     to verify the printer is ready.  This will select the file and
     immediately begin printing.
     """
+    if err := _check_auth("print"):
+        return err
     try:
         adapter = _get_adapter()
         result = adapter.start_print(file_name)
@@ -339,6 +457,8 @@ def cancel_print() -> dict:
     WARNING: Cancellation is irreversible -- the print cannot be resumed
     from where it left off.
     """
+    if err := _check_auth("print"):
+        return err
     try:
         adapter = _get_adapter()
         result = adapter.cancel_print()
@@ -357,6 +477,8 @@ def pause_print() -> dict:
     Pausing lifts the nozzle and parks the head.  The heaters stay on.
     Use ``resume_print()`` to continue from where the print left off.
     """
+    if err := _check_auth("print"):
+        return err
     try:
         adapter = _get_adapter()
         result = adapter.pause_print()
@@ -375,6 +497,8 @@ def resume_print() -> dict:
     The printer must currently be in a paused state.  Resuming will return
     the nozzle to its previous position and continue extruding.
     """
+    if err := _check_auth("print"):
+        return err
     try:
         adapter = _get_adapter()
         result = adapter.resume_print()
@@ -405,6 +529,8 @@ def set_temperature(
     Common PETG temperatures: tool 230-250C, bed 80-85C.
     Common ABS temperatures: tool 240-260C, bed 100-110C.
     """
+    if err := _check_auth("temperature"):
+        return err
     if tool_temp is None and bed_temp is None:
         return _error_dict(
             "At least one of tool_temp or bed_temp must be provided.",
@@ -579,6 +705,8 @@ def send_gcode(commands: str) -> dict:
     limits or modify firmware settings are blocked.  Use ``validate_gcode``
     to preview what would be allowed without actually sending.
     """
+    if err := _check_auth("print"):
+        return err
     try:
         adapter = _get_adapter()
 
@@ -738,6 +866,8 @@ def register_printer(
     Once registered the printer appears in ``fleet_status()`` and can be
     targeted by ``submit_job()``.
     """
+    if err := _check_auth("admin"):
+        return err
     try:
         if printer_type == "octoprint":
             if not api_key:
@@ -749,6 +879,12 @@ def register_printer(
         elif printer_type == "moonraker":
             adapter = MoonrakerAdapter(host=host, api_key=api_key or None)
         elif printer_type == "bambu":
+            if BambuAdapter is None:
+                return _error_dict(
+                    "Bambu support requires paho-mqtt.  "
+                    "Install it with: pip install paho-mqtt",
+                    code="MISSING_DEPENDENCY",
+                )
             if not api_key:
                 return _error_dict(
                     "api_key (LAN Access Code) is required for Bambu printers.",
@@ -800,6 +936,8 @@ def submit_job(
     Jobs are executed in priority order, with FIFO tie-breaking.
     Use ``job_status`` to check progress and ``queue_summary`` for an overview.
     """
+    if err := _check_auth("queue"):
+        return err
     try:
         job_id = _queue.submit(
             file_name=file_name,
@@ -877,6 +1015,8 @@ def cancel_job(job_id: str) -> dict:
 
     Only jobs in QUEUED or PRINTING state can be cancelled.
     """
+    if err := _check_auth("queue"):
+        return err
     try:
         job = _queue.cancel(job_id)
         _event_bus.publish(Event(
@@ -1205,6 +1345,144 @@ def _validate_local_file(file_path: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@mcp.tool()
+def kiln_health() -> dict:
+    """Get a health check for the Kiln system.
+
+    Returns versions, uptime, module availability, scheduler status,
+    webhook status, and overall system health.  Use this to verify the
+    system is running correctly.
+    """
+    import kiln
+
+    uptime_secs = time.time() - _start_time
+    hours, rem = divmod(int(uptime_secs), 3600)
+    mins, secs = divmod(rem, 60)
+
+    modules = {
+        "scheduler": _scheduler.is_running,
+        "webhooks": _webhook_mgr.is_running,
+        "persistence": True,
+        "auth_enabled": _auth.enabled,
+        "billing": True,
+        "thingiverse": bool(_THINGIVERSE_TOKEN),
+    }
+
+    try:
+        from kiln.printers.bambu import BambuAdapter as _Bambu
+        modules["bambu_available"] = True
+    except ImportError:
+        modules["bambu_available"] = False
+
+    return {
+        "success": True,
+        "version": kiln.__version__,
+        "uptime_seconds": round(uptime_secs, 1),
+        "uptime_human": f"{hours}h {mins}m {secs}s",
+        "printers_registered": _registry.count,
+        "queue_depth": _queue.total_count,
+        "scheduler_running": _scheduler.is_running,
+        "webhook_endpoints": len(_webhook_mgr.list_endpoints()),
+        "modules": modules,
+        "healthy": True,
+    }
+
+
+@mcp.tool()
+def register_webhook(
+    url: str,
+    events: list[str] | None = None,
+    secret: str | None = None,
+    description: str = "",
+) -> dict:
+    """Register a webhook endpoint to receive Kiln event notifications.
+
+    Args:
+        url: The HTTPS URL that will receive POST requests with event payloads.
+        events: Optional list of event types to subscribe to (e.g.
+            ["job.completed", "print.failed"]).  If omitted, all events are sent.
+        secret: Optional shared secret for HMAC-SHA256 payload signing.
+        description: Human-readable label for this endpoint.
+
+    Returns the registered endpoint ID.  Use ``list_webhooks`` to see all
+    endpoints and ``delete_webhook`` to remove one.
+    """
+    if err := _check_auth("admin"):
+        return err
+    try:
+        endpoint = _webhook_mgr.register(
+            url=url,
+            events=events,
+            secret=secret,
+            description=description,
+        )
+        return {
+            "success": True,
+            "endpoint_id": endpoint.id,
+            "url": endpoint.url,
+            "events": sorted(endpoint.events),
+            "message": f"Webhook registered: {endpoint.id}",
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in register_webhook")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def list_webhooks() -> dict:
+    """List all registered webhook endpoints.
+
+    Returns endpoint details including URL, subscribed events, and
+    delivery statistics.
+    """
+    try:
+        endpoints = _webhook_mgr.list_endpoints()
+        return {
+            "success": True,
+            "endpoints": [
+                {
+                    "id": ep.id,
+                    "url": ep.url,
+                    "events": sorted(ep.events),
+                    "description": ep.description,
+                    "active": ep.active,
+                }
+                for ep in endpoints
+            ],
+            "count": len(endpoints),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in list_webhooks")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def delete_webhook(endpoint_id: str) -> dict:
+    """Delete a registered webhook endpoint.
+
+    Args:
+        endpoint_id: The endpoint ID returned by ``register_webhook``.
+
+    Once deleted, the endpoint will no longer receive event notifications.
+    """
+    if err := _check_auth("admin"):
+        return err
+    try:
+        removed = _webhook_mgr.unregister(endpoint_id)
+        if removed:
+            return {
+                "success": True,
+                "message": f"Webhook {endpoint_id} deleted.",
+            }
+        return _error_dict(
+            f"Webhook {endpoint_id!r} not found.",
+            code="NOT_FOUND",
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error in delete_webhook")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
 @mcp.resource("kiln://status")
 def resource_status() -> str:
     """Live snapshot of the entire Kiln system: printers, queue, and recent events."""
@@ -1341,6 +1619,15 @@ def resource_events() -> str:
 
 def main() -> None:
     """Run the Kiln MCP server."""
+    # Start background services
+    _scheduler.start()
+    _webhook_mgr.start()
+    logger.info("Kiln scheduler and webhook delivery started")
+
+    # Graceful shutdown on exit
+    atexit.register(_scheduler.stop)
+    atexit.register(_webhook_mgr.stop)
+
     mcp.run()
 
 
