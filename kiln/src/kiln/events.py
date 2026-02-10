@@ -34,6 +34,7 @@ class EventType(enum.Enum):
     """All event types emitted by the Kiln system."""
 
     # Job lifecycle
+    JOB_SUBMITTED = "job.submitted"
     JOB_QUEUED = "job.queued"
     JOB_STARTED = "job.started"
     JOB_COMPLETED = "job.completed"
@@ -143,12 +144,26 @@ class EventBus:
                 except ValueError:
                     pass
 
-    def publish(self, event: Event) -> None:
+    def publish(
+        self,
+        event_or_type: Event | EventType,
+        data: Optional[Dict[str, Any]] = None,
+        source: str = "",
+    ) -> None:
         """Dispatch an event to all matching handlers.
+
+        Can be called in two ways:
+        - ``publish(event)`` -- pass a pre-built :class:`Event`.
+        - ``publish(event_type, data_dict, source="...")`` -- build an
+          :class:`Event` from the arguments.
 
         Handlers are invoked synchronously.  Exceptions in handlers are
         logged but do not propagate.
         """
+        if isinstance(event_or_type, EventType):
+            event = Event(type=event_or_type, data=data or {}, source=source)
+        else:
+            event = event_or_type
         with self._lock:
             # Record in history
             self._history.append(event)

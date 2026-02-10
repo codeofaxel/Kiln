@@ -34,6 +34,10 @@ from kiln.printers.base import (
 )
 from kiln.printers.moonraker import MoonrakerAdapter
 from kiln.printers.octoprint import OctoPrintAdapter
+from kiln.gcode import validate_gcode as _validate_gcode_impl
+from kiln.registry import PrinterRegistry, PrinterNotFoundError
+from kiln.queue import PrintQueue, JobStatus, JobNotFoundError
+from kiln.events import Event, EventBus, EventType
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +122,15 @@ def _get_adapter() -> PrinterAdapter:
         host,
     )
     return _adapter
+
+
+# ---------------------------------------------------------------------------
+# Fleet singletons (registry, queue, event bus)
+# ---------------------------------------------------------------------------
+
+_registry = PrinterRegistry()
+_queue = PrintQueue()
+_event_bus = EventBus()
 
 
 def _error_dict(message: str, code: str = "ERROR") -> Dict[str, Any]:
@@ -482,9 +495,9 @@ def send_gcode(commands: str) -> dict:
     The commands are sent sequentially in order.  The printer must be
     connected.
 
-    WARNING: Raw G-code bypasses safety checks.  Use with caution.  Prefer
-    the higher-level tools (``set_temperature``, ``start_print``, etc.)
-    when possible.
+    G-code is validated before sending.  Commands that exceed temperature
+    limits or modify firmware settings are blocked.  Use ``validate_gcode``
+    to preview what would be allowed without actually sending.
     """
     try:
         adapter = _get_adapter()
@@ -500,6 +513,20 @@ def send_gcode(commands: str) -> dict:
 
         if not cmd_list:
             return _error_dict("No commands provided.", code="INVALID_ARGS")
+
+        # -- Safety validation -------------------------------------------------
+        validation = _validate_gcode_impl(cmd_list)
+        if not validation.valid:
+            return {
+                "success": False,
+                "error": {
+                    "code": "GCODE_BLOCKED",
+                    "message": "G-code blocked by safety validator.",
+                },
+                "blocked_commands": validation.blocked_commands,
+                "errors": validation.errors,
+                "warnings": validation.warnings,
+            }
 
         # Both OctoPrint and Moonraker adapters expose _post / _send_gcode
         # but not a public send_gcode method on the base interface.  We
@@ -519,17 +546,298 @@ def send_gcode(commands: str) -> dict:
                 code="UNSUPPORTED",
             )
 
-        return {
+        result: Dict[str, Any] = {
             "success": True,
             "commands_sent": cmd_list,
             "count": len(cmd_list),
             "message": f"Sent {len(cmd_list)} G-code command(s).",
         }
+        if validation.warnings:
+            result["warnings"] = validation.warnings
+        return result
 
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(str(exc))
     except Exception as exc:
         logger.exception("Unexpected error in send_gcode")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# G-code validation tool
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def validate_gcode(commands: str) -> dict:
+    """Validate G-code commands without sending them to the printer.
+
+    Args:
+        commands: One or more G-code commands separated by newlines.
+
+    Returns a JSON object with:
+    - ``valid``: whether all commands passed safety checks
+    - ``commands``: the parsed command list
+    - ``errors``: blocking issues (temperature limits, firmware commands)
+    - ``warnings``: non-blocking advisories (Z below bed, high feedrate)
+    - ``blocked_commands``: specific commands that were blocked
+
+    Use this to preview what ``send_gcode`` would accept or reject.
+    """
+    raw_lines = re.split(r"[\n\r]+", commands.strip())
+    cmd_list = [line.strip() for line in raw_lines if line.strip()]
+
+    if not cmd_list:
+        return _error_dict("No commands provided.", code="INVALID_ARGS")
+
+    result = _validate_gcode_impl(cmd_list)
+    return {
+        "success": True,
+        "valid": result.valid,
+        "commands": result.commands,
+        "errors": result.errors,
+        "warnings": result.warnings,
+        "blocked_commands": result.blocked_commands,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Fleet management tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def fleet_status() -> dict:
+    """Get the status of all registered printers in the fleet.
+
+    Returns a list of printer snapshots including name, backend type,
+    connection status, operational state, and temperatures.  Printers
+    that fail to respond are reported as offline rather than raising.
+
+    If no printers are registered yet, the current adapter (from env config)
+    is auto-registered as "default".
+    """
+    try:
+        # Auto-register the env-configured adapter if registry is empty
+        if _registry.count == 0:
+            try:
+                adapter = _get_adapter()
+                _registry.register("default", adapter)
+            except RuntimeError:
+                pass  # No adapter configured
+
+        if _registry.count == 0:
+            return {
+                "success": True,
+                "printers": [],
+                "count": 0,
+                "message": "No printers registered.",
+            }
+
+        status = _registry.get_fleet_status()
+        idle = _registry.get_idle_printers()
+        return {
+            "success": True,
+            "printers": status,
+            "count": len(status),
+            "idle_printers": idle,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in fleet_status")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def register_printer(
+    name: str,
+    printer_type: str,
+    host: str,
+    api_key: str | None = None,
+) -> dict:
+    """Register a new printer in the fleet.
+
+    Args:
+        name: Unique human-readable name (e.g. "voron-350", "ender-farm-1").
+        printer_type: Backend type -- "octoprint" or "moonraker".
+        host: Base URL of the printer server.
+        api_key: API key (required for OctoPrint, optional for Moonraker).
+
+    Once registered the printer appears in ``fleet_status()`` and can be
+    targeted by ``submit_job()``.
+    """
+    try:
+        if printer_type == "octoprint":
+            if not api_key:
+                return _error_dict(
+                    "api_key is required for OctoPrint printers.",
+                    code="INVALID_ARGS",
+                )
+            adapter = OctoPrintAdapter(host=host, api_key=api_key)
+        elif printer_type == "moonraker":
+            adapter = MoonrakerAdapter(host=host, api_key=api_key or None)
+        else:
+            return _error_dict(
+                f"Unsupported printer_type: {printer_type!r}. "
+                "Supported: 'octoprint', 'moonraker'.",
+                code="INVALID_ARGS",
+            )
+
+        _registry.register(name, adapter)
+        return {
+            "success": True,
+            "message": f"Registered printer {name!r} ({printer_type} @ {host}).",
+            "name": name,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in register_printer")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Job queue tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def submit_job(
+    file_name: str,
+    printer_name: str | None = None,
+    priority: int = 0,
+) -> dict:
+    """Submit a print job to the queue.
+
+    Args:
+        file_name: G-code file name (must already exist on the printer).
+        printer_name: Target printer name, or omit to let the scheduler
+            pick any idle printer.
+        priority: Higher values are scheduled first (default 0).
+
+    Jobs are executed in priority order, with FIFO tie-breaking.
+    Use ``job_status`` to check progress and ``queue_summary`` for an overview.
+    """
+    try:
+        job_id = _queue.submit(
+            file_name=file_name,
+            printer_name=printer_name,
+            submitted_by="mcp-agent",
+            priority=priority,
+        )
+        _event_bus.publish(Event(
+            type=EventType.JOB_QUEUED,
+            data={"job_id": job_id, "file_name": file_name, "printer_name": printer_name},
+            source="mcp",
+        ))
+        return {
+            "success": True,
+            "job_id": job_id,
+            "message": f"Job {job_id} submitted to queue.",
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in submit_job")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def job_status(job_id: str) -> dict:
+    """Get the status of a queued or completed print job.
+
+    Args:
+        job_id: The job ID returned by ``submit_job``.
+
+    Returns the full job record including status, timing, and metadata.
+    """
+    try:
+        job = _queue.get_job(job_id)
+        return {
+            "success": True,
+            "job": job.to_dict(),
+        }
+    except JobNotFoundError:
+        return _error_dict(f"Job not found: {job_id!r}", code="NOT_FOUND")
+    except Exception as exc:
+        logger.exception("Unexpected error in job_status")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def queue_summary() -> dict:
+    """Get an overview of the print job queue.
+
+    Returns counts by status, next job to execute, and recent jobs.
+    """
+    try:
+        summary = _queue.summary()
+        next_job = _queue.next_job()
+        recent = _queue.list_jobs(limit=10)
+        return {
+            "success": True,
+            "counts": summary,
+            "pending": _queue.pending_count(),
+            "active": _queue.active_count(),
+            "total": _queue.total_count,
+            "next_job": next_job.to_dict() if next_job else None,
+            "recent_jobs": [j.to_dict() for j in recent],
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in queue_summary")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def cancel_job(job_id: str) -> dict:
+    """Cancel a queued or running print job.
+
+    Args:
+        job_id: The job ID to cancel.
+
+    Only jobs in QUEUED or PRINTING state can be cancelled.
+    """
+    try:
+        job = _queue.cancel(job_id)
+        _event_bus.publish(Event(
+            type=EventType.JOB_CANCELLED,
+            data={"job_id": job_id},
+            source="mcp",
+        ))
+        return {
+            "success": True,
+            "job": job.to_dict(),
+            "message": f"Job {job_id} cancelled.",
+        }
+    except JobNotFoundError:
+        return _error_dict(f"Job not found: {job_id!r}", code="NOT_FOUND")
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_STATE")
+    except Exception as exc:
+        logger.exception("Unexpected error in cancel_job")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Event tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def recent_events(limit: int = 20) -> dict:
+    """Get recent events from the Kiln event bus.
+
+    Args:
+        limit: Maximum number of events to return (default 20, max 100).
+
+    Returns events covering job lifecycle, printer state changes,
+    safety warnings, and more.
+    """
+    try:
+        capped = min(max(limit, 1), 100)
+        events = _event_bus.recent_events(limit=capped)
+        return {
+            "success": True,
+            "events": [e.to_dict() for e in events],
+            "count": len(events),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in recent_events")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
