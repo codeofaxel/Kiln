@@ -349,6 +349,12 @@ class TestPrinterAdapterABC:
             def set_bed_temp(self, target):
                 return True
 
+            def send_gcode(self, commands):
+                return True
+
+            def delete_file(self, file_path):
+                return True
+
         instance = Complete()
         assert instance.name == "test"
         assert isinstance(instance.capabilities, PrinterCapabilities)
