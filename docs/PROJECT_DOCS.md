@@ -30,6 +30,10 @@ Kiln is agentic infrastructure for physical fabrication. It provides a unified i
 
 **MCP Tools** — Typed functions exposed to agents via the Model Context Protocol. Each tool has a defined input schema and returns structured JSON.
 
+**MarketplaceAdapter** — Abstract base class for 3D model repositories. Implements: search, details, files, download. Concrete adapters for Thingiverse, MyMiniFactory, and Cults3D.
+
+**MarketplaceRegistry** — Manages connected marketplace adapters. Provides `search_all()` for parallel fan-out search across all sources with round-robin result interleaving.
+
 **Job Queue** — Priority queue backed by SQLite. Jobs are dispatched to idle printers by a background scheduler.
 
 ---
@@ -330,6 +334,46 @@ serial: "01P00A000000001"
 
 ---
 
+## Model Marketplaces
+
+Kiln provides a `MarketplaceAdapter` interface (mirroring the printer adapter pattern) for searching and downloading 3D models from external repositories. A `MarketplaceRegistry` manages connected adapters and exposes `search_all()` for parallel fan-out across all sources.
+
+### Supported Marketplaces
+
+| Marketplace | Protocol | Auth | Download Support |
+|---|---|---|---|
+| Thingiverse | HTTP REST | Bearer token | Yes |
+| MyMiniFactory | HTTP REST v2 | API key (`?key=`) | Yes |
+| Cults3D | GraphQL | HTTP Basic | No (metadata-only) |
+
+### Configuration
+
+Set environment variables for each marketplace you want to enable:
+
+```bash
+export KILN_THINGIVERSE_TOKEN=your_token       # https://www.thingiverse.com/apps/create
+export KILN_MMF_API_KEY=your_key               # MyMiniFactory developer key
+export KILN_CULTS3D_USERNAME=your_username      # Cults3D account username
+export KILN_CULTS3D_API_KEY=your_key            # https://cults3d.com/en/api/keys
+```
+
+Adapters are auto-registered at server startup based on available credentials. Only configured marketplaces participate in searches.
+
+### Unified Search
+
+`search_all_models` fans out the query to all connected marketplaces in parallel using a thread pool. Results are interleaved round-robin across sources for variety. If one marketplace fails (rate limit, timeout), results from the others still return.
+
+Each result includes a `source` field identifying the marketplace, plus print-readiness hints:
+- `is_free` — whether the model is free to download
+- `has_sliceable_files` — has STL/3MF/OBJ files that need slicing
+- `has_printable_files` — has ready-to-print G-code
+
+### Download and Upload
+
+`download_and_upload` combines marketplace file download with printer upload in a single tool call. Accepts a `source` parameter to target any marketplace that supports downloads. Cults3D is excluded (metadata-only).
+
+---
+
 ## Safety Systems
 
 ### Pre-flight Checks
@@ -456,7 +500,7 @@ pip install -e "./octoprint-cli[dev]"
 ### Running Tests
 
 ```bash
-cd kiln && python3 -m pytest tests/ -v    # 1165 tests
+cd kiln && python3 -m pytest tests/ -v    # 1272 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
