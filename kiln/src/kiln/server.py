@@ -1301,6 +1301,55 @@ def download_model(
 
 
 @mcp.tool()
+def download_and_upload(
+    file_id: int,
+    printer_name: str | None = None,
+) -> dict:
+    """Download a Thingiverse file and upload it to the printer in one step.
+
+    Args:
+        file_id: Numeric file ID (from ``model_files`` results).
+        printer_name: Target printer name.  Omit to use the default
+            (env-configured) printer.
+
+    This is the fastest way to go from a Thingiverse model to a file on
+    the printer ready to print.  Combines ``download_model`` and
+    ``upload_file`` into a single action.
+    """
+    if err := _check_auth("files"):
+        return err
+    try:
+        # Step 1: Download from Thingiverse
+        client = _get_thingiverse()
+        local_path = client.download_file(file_id, "/tmp/kiln_downloads")
+
+        # Step 2: Upload to printer
+        if printer_name:
+            adapter = _registry.get(printer_name)
+        else:
+            adapter = _get_adapter()
+
+        result = adapter.upload_file(local_path)
+
+        return {
+            "success": True,
+            "file_id": file_id,
+            "local_path": local_path,
+            "upload": result.to_dict(),
+            "message": f"Downloaded and uploaded to printer.",
+        }
+    except ThingiverseNotFoundError:
+        return _error_dict(f"File {file_id} not found on Thingiverse.", code="NOT_FOUND")
+    except PrinterNotFoundError:
+        return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
+    except (ThingiverseError, PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in download_and_upload")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
 def browse_models(
     browse_type: str = "popular",
     page: int = 1,
