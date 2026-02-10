@@ -18,6 +18,8 @@ Environment variables
 ``KILN_PRINTER_SERIAL``
     Bambu printer serial number (required when ``KILN_PRINTER_TYPE``
     is ``"bambu"``).
+``KILN_THINGIVERSE_TOKEN``
+    Thingiverse API app token for model search and download.
 """
 
 from __future__ import annotations
@@ -42,6 +44,13 @@ from kiln.gcode import validate_gcode as _validate_gcode_impl
 from kiln.registry import PrinterRegistry, PrinterNotFoundError
 from kiln.queue import PrintQueue, JobStatus, JobNotFoundError
 from kiln.events import Event, EventBus, EventType
+from kiln.thingiverse import (
+    ThingiverseClient,
+    ThingiverseError,
+    ThingiverseAuthError,
+    ThingiverseNotFoundError,
+    ThingiverseRateLimitError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +62,7 @@ _PRINTER_HOST: str = os.environ.get("KILN_PRINTER_HOST", "")
 _PRINTER_API_KEY: str = os.environ.get("KILN_PRINTER_API_KEY", "")
 _PRINTER_TYPE: str = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
 _PRINTER_SERIAL: str = os.environ.get("KILN_PRINTER_SERIAL", "")
+_THINGIVERSE_TOKEN: str = os.environ.get("KILN_THINGIVERSE_TOKEN", "")
 
 # ---------------------------------------------------------------------------
 # MCP server instance
@@ -63,12 +73,15 @@ mcp = FastMCP(
     instructions=(
         "Agent infrastructure for physical fabrication via 3D printing. "
         "Provides tools to monitor printer status, manage files, control "
-        "print jobs, adjust temperatures, send raw G-code, and run "
-        "pre-flight safety checks.\n\n"
+        "print jobs, adjust temperatures, send raw G-code, run "
+        "pre-flight safety checks, and discover 3D models on Thingiverse.\n\n"
         "Start with `printer_status` to see what the printer is doing. "
         "Use `preflight_check` before printing. Use `fleet_status` to "
         "manage multiple printers. Use `validate_gcode` before `send_gcode` "
-        "for raw commands. Submit jobs via `submit_job` for queued execution."
+        "for raw commands. Submit jobs via `submit_job` for queued execution. "
+        "Use `search_models` to find printable models on Thingiverse, "
+        "`model_details` to inspect them, and `download_model` to fetch "
+        "files for printing."
     ),
 )
 
@@ -153,6 +166,28 @@ def _get_adapter() -> PrinterAdapter:
 _registry = PrinterRegistry()
 _queue = PrintQueue()
 _event_bus = EventBus()
+
+# Thingiverse client (lazy -- created on first use so the module can be
+# imported without requiring the token env var).
+_thingiverse: Optional[ThingiverseClient] = None
+
+
+def _get_thingiverse() -> ThingiverseClient:
+    """Return the lazily-initialised Thingiverse client."""
+    global _thingiverse  # noqa: PLW0603
+
+    if _thingiverse is not None:
+        return _thingiverse
+
+    token = _THINGIVERSE_TOKEN
+    if not token:
+        raise RuntimeError(
+            "KILN_THINGIVERSE_TOKEN environment variable is not set.  "
+            "Set it to your Thingiverse API app token "
+            "(create one at https://www.thingiverse.com/apps/create)."
+        )
+    _thingiverse = ThingiverseClient(token=token)
+    return _thingiverse
 
 
 def _error_dict(message: str, code: str = "ERROR") -> Dict[str, Any]:
@@ -892,6 +927,209 @@ def recent_events(limit: int = 20) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Thingiverse tools — 3D model discovery and download
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def search_models(
+    query: str,
+    page: int = 1,
+    per_page: int = 10,
+    sort: str = "relevant",
+) -> dict:
+    """Search Thingiverse for 3D-printable models.
+
+    Args:
+        query: Search keywords (e.g. "raspberry pi case", "benchy").
+        page: Page number for pagination (1-based, default 1).
+        per_page: Results per page (default 10, max 100).
+        sort: Sort order — "relevant", "popular", "newest", or "makes".
+
+    Returns a list of model summaries including name, creator, thumbnail,
+    and download/like counts.  Use ``model_details`` with the ``id`` to
+    get full information, and ``model_files`` to see downloadable files.
+    """
+    try:
+        client = _get_thingiverse()
+        results = client.search(query, page=page, per_page=per_page, sort=sort)
+        return {
+            "success": True,
+            "query": query,
+            "models": [r.to_dict() for r in results],
+            "count": len(results),
+            "page": page,
+        }
+    except (ThingiverseError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in search_models")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def model_details(thing_id: int) -> dict:
+    """Get full details for a Thingiverse model.
+
+    Args:
+        thing_id: Numeric thing ID (from ``search_models`` results).
+
+    Returns comprehensive metadata including description, instructions,
+    license, tags, and file count.
+    """
+    try:
+        client = _get_thingiverse()
+        thing = client.get_thing(thing_id)
+        return {
+            "success": True,
+            "model": thing.to_dict(),
+        }
+    except ThingiverseNotFoundError:
+        return _error_dict(f"Model {thing_id} not found.", code="NOT_FOUND")
+    except (ThingiverseError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in model_details")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def model_files(thing_id: int) -> dict:
+    """List downloadable files for a Thingiverse model.
+
+    Args:
+        thing_id: Numeric thing ID.
+
+    Returns a list of files with name, size, and download URL.
+    Use ``download_model`` with the ``file_id`` to save a file locally.
+    """
+    try:
+        client = _get_thingiverse()
+        files = client.get_files(thing_id)
+        return {
+            "success": True,
+            "thing_id": thing_id,
+            "files": [f.to_dict() for f in files],
+            "count": len(files),
+        }
+    except ThingiverseNotFoundError:
+        return _error_dict(f"Model {thing_id} not found.", code="NOT_FOUND")
+    except (ThingiverseError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in model_files")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def download_model(
+    file_id: int,
+    dest_dir: str = "/tmp/kiln_downloads",
+    file_name: str | None = None,
+) -> dict:
+    """Download a model file from Thingiverse to local storage.
+
+    Args:
+        file_id: Numeric file ID (from ``model_files`` results).
+        dest_dir: Local directory to save the file in (default:
+            ``/tmp/kiln_downloads``).
+        file_name: Override the saved file name.  Defaults to the
+            original name from Thingiverse.
+
+    After downloading, the file can be uploaded to a printer with
+    ``upload_file`` and then printed with ``start_print``.
+    """
+    try:
+        client = _get_thingiverse()
+        path = client.download_file(file_id, dest_dir, file_name=file_name)
+        return {
+            "success": True,
+            "file_id": file_id,
+            "local_path": path,
+            "message": f"Downloaded to {path}",
+        }
+    except ThingiverseNotFoundError:
+        return _error_dict(f"File {file_id} not found.", code="NOT_FOUND")
+    except (ThingiverseError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in download_model")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def browse_models(
+    browse_type: str = "popular",
+    page: int = 1,
+    per_page: int = 10,
+    category: str | None = None,
+) -> dict:
+    """Browse Thingiverse models by popularity, recency, or category.
+
+    Args:
+        browse_type: One of "popular", "newest", or "featured".
+        page: Page number (1-based, default 1).
+        per_page: Results per page (default 10, max 100).
+        category: Optional category slug to filter by (e.g. "3d-printing",
+            "art").  Use ``list_categories`` to see available slugs.
+
+    Returns model summaries similar to ``search_models``.
+    """
+    try:
+        client = _get_thingiverse()
+
+        if category:
+            results = client.category_things(category, page=page, per_page=per_page)
+        elif browse_type == "popular":
+            results = client.popular(page=page, per_page=per_page)
+        elif browse_type == "newest":
+            results = client.newest(page=page, per_page=per_page)
+        elif browse_type == "featured":
+            results = client.featured(page=page, per_page=per_page)
+        else:
+            return _error_dict(
+                f"Unknown browse_type: {browse_type!r}.  "
+                "Supported: 'popular', 'newest', 'featured'.",
+                code="INVALID_ARGS",
+            )
+
+        return {
+            "success": True,
+            "browse_type": browse_type if not category else f"category:{category}",
+            "models": [r.to_dict() for r in results],
+            "count": len(results),
+            "page": page,
+        }
+    except (ThingiverseError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in browse_models")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def list_model_categories() -> dict:
+    """List available Thingiverse content categories.
+
+    Returns category names and slugs.  Pass a slug to
+    ``browse_models(category=...)`` to browse models in that category.
+    """
+    try:
+        client = _get_thingiverse()
+        cats = client.list_categories()
+        return {
+            "success": True,
+            "categories": [c.to_dict() for c in cats],
+            "count": len(cats),
+        }
+    except (ThingiverseError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in list_model_categories")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
@@ -960,6 +1198,140 @@ def _validate_local_file(file_path: str) -> Dict[str, Any]:
 
     valid = len(errors) == 0
     return {"valid": valid, "errors": errors, "warnings": warnings, "info": info}
+
+
+# ---------------------------------------------------------------------------
+# MCP Resources — read-only data endpoints for agent context
+# ---------------------------------------------------------------------------
+
+
+@mcp.resource("kiln://status")
+def resource_status() -> str:
+    """Live snapshot of the entire Kiln system: printers, queue, and recent events."""
+    import json
+
+    # Fleet
+    printers: List[Dict[str, Any]] = []
+    if _registry.count > 0:
+        printers = _registry.get_fleet_status()
+    elif _PRINTER_HOST:
+        try:
+            adapter = _get_adapter()
+            state = adapter.get_state()
+            printers = [{
+                "name": "default",
+                "backend": adapter.name,
+                "connected": state.connected,
+                "state": state.state.value,
+            }]
+        except Exception:
+            pass
+
+    # Queue
+    q_summary = _queue.summary()
+
+    # Events
+    events = _event_bus.recent_events(limit=10)
+
+    return json.dumps({
+        "printers": printers,
+        "printer_count": len(printers),
+        "queue": {
+            "counts": q_summary,
+            "pending": _queue.pending_count(),
+            "active": _queue.active_count(),
+            "total": _queue.total_count,
+        },
+        "recent_events": [e.to_dict() for e in events],
+    }, default=str)
+
+
+@mcp.resource("kiln://printers")
+def resource_printers() -> str:
+    """Fleet status for all registered printers."""
+    import json
+
+    if _registry.count == 0:
+        try:
+            adapter = _get_adapter()
+            _registry.register("default", adapter)
+        except RuntimeError:
+            pass
+
+    printers = _registry.get_fleet_status() if _registry.count > 0 else []
+    idle = _registry.get_idle_printers() if _registry.count > 0 else []
+
+    return json.dumps({
+        "printers": printers,
+        "count": len(printers),
+        "idle_printers": idle,
+    }, default=str)
+
+
+@mcp.resource("kiln://printers/{printer_name}")
+def resource_printer_detail(printer_name: str) -> str:
+    """Detailed status for a specific printer by name."""
+    import json
+
+    try:
+        adapter = _registry.get(printer_name)
+        state = adapter.get_state()
+        job = adapter.get_job()
+        caps = adapter.capabilities
+        return json.dumps({
+            "name": printer_name,
+            "backend": adapter.name,
+            "state": state.to_dict(),
+            "job": job.to_dict(),
+            "capabilities": caps.to_dict(),
+        }, default=str)
+    except PrinterNotFoundError:
+        return json.dumps({"error": f"Printer {printer_name!r} not found"})
+    except Exception as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.resource("kiln://queue")
+def resource_queue() -> str:
+    """Current job queue summary and recent jobs."""
+    import json
+
+    summary = _queue.summary()
+    next_job = _queue.next_job()
+    recent = _queue.list_jobs(limit=20)
+
+    return json.dumps({
+        "counts": summary,
+        "pending": _queue.pending_count(),
+        "active": _queue.active_count(),
+        "total": _queue.total_count,
+        "next_job": next_job.to_dict() if next_job else None,
+        "recent_jobs": [j.to_dict() for j in recent],
+    }, default=str)
+
+
+@mcp.resource("kiln://queue/{job_id}")
+def resource_job_detail(job_id: str) -> str:
+    """Detailed status for a specific job by ID."""
+    import json
+
+    try:
+        job = _queue.get_job(job_id)
+        return json.dumps({"job": job.to_dict()}, default=str)
+    except JobNotFoundError:
+        return json.dumps({"error": f"Job {job_id!r} not found"})
+
+
+@mcp.resource("kiln://events")
+def resource_events() -> str:
+    """Recent events from the Kiln event bus (last 50)."""
+    import json
+
+    events = _event_bus.recent_events(limit=50)
+    return json.dumps({
+        "events": [e.to_dict() for e in events],
+        "count": len(events),
+    }, default=str)
 
 
 # ---------------------------------------------------------------------------
