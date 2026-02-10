@@ -1,0 +1,15 @@
+# OctoPrint CLI Configuration
+# Copy this file to ~/.octoprint-cli/config.yaml
+# or run: octoprint-cli init
+
+# OctoPrint server URL (required)
+host: "http://octopi.local"
+
+# API key from OctoPrint Settings > API (required)
+api_key: "YOUR_API_KEY_HERE"
+
+# Request timeout in seconds (optional, default: 30)
+timeout: 30
+
+# Number of retry attempts for transient failures (optional, default: 3)
+retries: 3

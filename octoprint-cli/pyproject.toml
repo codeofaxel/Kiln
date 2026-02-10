@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "octoprint-cli"
+version = "1.0.0"
+description = "Agent-friendly CLI for OctoPrint 3D printer management"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [
+    {name = "OctoPrint CLI Contributors"},
+]
+keywords = ["octoprint", "3d-printing", "cli", "automation", "agent"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Manufacturing",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Printing",
+    "Topic :: System :: Hardware",
+]
+dependencies = [
+    "click>=8.0",
+    "requests>=2.25",
+    "pyyaml>=5.4",
+    "rich>=12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.6",
+    "responses>=0.20",
+]
+
+[project.scripts]
+octoprint-cli = "octoprint_cli.cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/codeofaxel/Kiln"
+Issues = "https://github.com/codeofaxel/Kiln/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
