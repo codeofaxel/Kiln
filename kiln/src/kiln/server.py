@@ -58,6 +58,14 @@ from kiln.thingiverse import (
     ThingiverseNotFoundError,
     ThingiverseRateLimitError,
 )
+from kiln.marketplaces import (
+    MarketplaceRegistry,
+    MarketplaceError,
+    MarketplaceNotFoundError as MktNotFoundError,
+    ThingiverseAdapter,
+    MyMiniFactoryAdapter,
+    Cults3DAdapter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1418,6 +1426,190 @@ def list_model_categories() -> dict:
         return _error_dict(str(exc))
     except Exception as exc:
         logger.exception("Unexpected error in list_model_categories")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Slicer tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def slice_model(
+    input_path: str,
+    output_dir: str | None = None,
+    profile: str | None = None,
+    slicer_path: str | None = None,
+) -> dict:
+    """Slice a 3D model (STL/3MF/STEP) to G-code using PrusaSlicer or OrcaSlicer.
+
+    Args:
+        input_path: Path to the input file (STL, 3MF, STEP, OBJ, AMF).
+        output_dir: Directory for the output G-code.  Defaults to
+            ``/tmp/kiln_sliced``.
+        profile: Path to a slicer profile/config file (.ini or .json).
+        slicer_path: Explicit path to the slicer binary.  Auto-detected
+            if omitted.
+
+    Returns a JSON object with the output G-code path.  The output file
+    can then be uploaded to a printer with ``upload_file`` and printed
+    with ``start_print``.
+    """
+    try:
+        from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
+
+        result = slice_file(
+            input_path,
+            output_dir=output_dir,
+            profile=profile,
+            slicer_path=slicer_path,
+        )
+        return {
+            "success": True,
+            **result.to_dict(),
+        }
+    except SlicerNotFoundError as exc:
+        return _error_dict(str(exc), code="SLICER_NOT_FOUND")
+    except SlicerError as exc:
+        return _error_dict(str(exc), code="SLICER_ERROR")
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except Exception as exc:
+        logger.exception("Unexpected error in slice_model")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def find_slicer_tool() -> dict:
+    """Check if a slicer (PrusaSlicer/OrcaSlicer) is available on the system.
+
+    Returns the slicer path, name, and version if found.
+    """
+    try:
+        from kiln.slicer import SlicerNotFoundError
+        from kiln.slicer import find_slicer as _find_slicer
+
+        info = _find_slicer()
+        return {
+            "success": True,
+            **info.to_dict(),
+        }
+    except SlicerNotFoundError as exc:
+        return _error_dict(str(exc), code="SLICER_NOT_FOUND")
+    except Exception as exc:
+        logger.exception("Unexpected error in find_slicer_tool")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def slice_and_print(
+    input_path: str,
+    printer_name: str | None = None,
+    profile: str | None = None,
+) -> dict:
+    """Slice a 3D model and immediately upload + print it in one step.
+
+    Args:
+        input_path: Path to the 3D model file (STL, 3MF, STEP, etc.).
+        printer_name: Target printer name.  Omit for the default printer.
+        profile: Path to a slicer profile/config file.
+
+    Combines ``slice_model``, ``upload_file``, and ``start_print`` into
+    a single action.
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
+
+        result = slice_file(input_path, profile=profile)
+
+        if printer_name:
+            adapter = _registry.get(printer_name)
+        else:
+            adapter = _get_adapter()
+
+        upload = adapter.upload_file(result.output_path)
+        file_name = upload.file_name or os.path.basename(result.output_path)
+        print_result = adapter.start_print(file_name)
+
+        return {
+            "success": True,
+            "slice": result.to_dict(),
+            "upload": upload.to_dict(),
+            "print": print_result.to_dict(),
+            "message": f"Sliced, uploaded, and started printing {os.path.basename(input_path)}.",
+        }
+    except SlicerNotFoundError as exc:
+        return _error_dict(str(exc), code="SLICER_NOT_FOUND")
+    except SlicerError as exc:
+        return _error_dict(str(exc), code="SLICER_ERROR")
+    except PrinterNotFoundError:
+        return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
+    except (PrinterError, RuntimeError, FileNotFoundError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in slice_and_print")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Webcam snapshot tool
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def printer_snapshot(
+    printer_name: str | None = None,
+    save_path: str | None = None,
+) -> dict:
+    """Capture a webcam snapshot from the printer.
+
+    Args:
+        printer_name: Target printer name.  Omit for the default printer.
+        save_path: Optional path to save the image file.  If omitted, the
+            image is returned as a base64-encoded string.
+
+    Supports OctoPrint and Moonraker webcams.  Bambu printers do not
+    expose a webcam API over LAN.
+    """
+    try:
+        if printer_name:
+            adapter = _registry.get(printer_name)
+        else:
+            adapter = _get_adapter()
+
+        image_data = adapter.get_snapshot()
+        if image_data is None:
+            return _error_dict(
+                "Webcam not available or not supported by this printer backend.",
+                code="NO_WEBCAM",
+            )
+
+        result: Dict[str, Any] = {
+            "success": True,
+            "size_bytes": len(image_data),
+        }
+
+        if save_path:
+            os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+            with open(save_path, "wb") as f:
+                f.write(image_data)
+            result["saved_to"] = save_path
+            result["message"] = f"Snapshot saved to {save_path}"
+        else:
+            import base64
+            result["image_base64"] = base64.b64encode(image_data).decode("ascii")
+            result["message"] = "Snapshot captured (base64 encoded)"
+
+        return result
+
+    except PrinterNotFoundError:
+        return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in printer_snapshot")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 

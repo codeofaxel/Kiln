@@ -320,6 +320,17 @@ class PrinterAdapter(ABC):
             PrinterError: If sending fails.
         """
 
+    # -- webcam snapshot (optional) ------------------------------------
+
+    def get_snapshot(self) -> Optional[bytes]:
+        """Capture a webcam snapshot from the printer.
+
+        Returns raw JPEG/PNG image bytes, or ``None`` if webcam is not
+        available or not supported by this adapter.  This is an optional
+        method -- the default implementation returns ``None``.
+        """
+        return None
+
     # -- file deletion --------------------------------------------------
 
     @abstractmethod

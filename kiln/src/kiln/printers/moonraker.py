@@ -677,6 +677,47 @@ class MoonrakerAdapter(PrinterAdapter):
         return True
 
     # ------------------------------------------------------------------
+    # PrinterAdapter -- webcam snapshot
+    # ------------------------------------------------------------------
+
+    def get_snapshot(self) -> Optional[bytes]:
+        """Capture a webcam snapshot from Moonraker.
+
+        Discovers the webcam snapshot URL via
+        ``GET /server/webcams/list`` and then fetches the image.
+
+        Returns:
+            Raw JPEG/PNG image bytes, or ``None`` if no webcam is configured.
+        """
+        try:
+            payload = self._get_json("/server/webcams/list")
+            webcams = _safe_get(payload, "result", "webcams", default=[])
+            if not isinstance(webcams, list) or not webcams:
+                return None
+
+            # Use the first webcam's snapshot_url
+            cam = webcams[0]
+            snapshot_url = cam.get("snapshot_url") or cam.get("urlSnapshot")
+            if not snapshot_url:
+                # Fall back to stream_url if available
+                stream_url = cam.get("stream_url") or cam.get("urlStream")
+                if stream_url:
+                    snapshot_url = stream_url.replace("/stream", "/?action=snapshot")
+                else:
+                    return None
+
+            # If the URL is relative, prepend the host
+            if snapshot_url.startswith("/"):
+                snapshot_url = f"{self._host}{snapshot_url}"
+
+            response = self._session.get(snapshot_url, timeout=10)
+            if response.ok and response.content:
+                return response.content
+        except Exception:
+            logger.debug("Webcam snapshot failed", exc_info=True)
+        return None
+
+    # ------------------------------------------------------------------
     # Dunder helpers
     # ------------------------------------------------------------------
 
