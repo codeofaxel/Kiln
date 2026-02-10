@@ -1,0 +1,309 @@
+"""Abstract printer adapter interface for the Kiln project.
+
+Every printer backend (OctoPrint, Klipper/Moonraker, Bambu, Prusa Connect,
+etc.) must subclass :class:`PrinterAdapter` and implement every abstract
+method so that the rest of the Kiln stack can interact with any printer
+through a single, uniform API.
+"""
+
+from __future__ import annotations
+
+import enum
+from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+class PrinterError(Exception):
+    """Base exception for all printer-related errors.
+
+    Adapter implementations should raise subclasses (or this class directly)
+    whenever an operation fails in a way that the caller can reasonably
+    handle -- e.g. connection timeouts, authentication failures, or
+    unexpected responses from the printer firmware.
+    """
+
+    def __init__(self, message: str, *, cause: Optional[Exception] = None) -> None:
+        super().__init__(message)
+        self.cause = cause
+
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
+
+class PrinterStatus(enum.Enum):
+    """High-level operational state of a printer."""
+
+    IDLE = "idle"
+    PRINTING = "printing"
+    PAUSED = "paused"
+    ERROR = "error"
+    OFFLINE = "offline"
+    BUSY = "busy"
+    CANCELLING = "cancelling"
+    UNKNOWN = "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Dataclasses -- structured return types
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PrinterState:
+    """Snapshot of the printer's current state and temperatures."""
+
+    connected: bool
+    state: PrinterStatus
+    tool_temp_actual: Optional[float] = None
+    tool_temp_target: Optional[float] = None
+    bed_temp_actual: Optional[float] = None
+    bed_temp_target: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serialisable dictionary.
+
+        The :attr:`state` enum is converted to its string value so the
+        result can be passed directly to ``json.dumps``.
+        """
+        data = asdict(self)
+        data["state"] = self.state.value
+        return data
+
+
+@dataclass
+class JobProgress:
+    """Progress information for the currently active (or most recent) job."""
+
+    file_name: Optional[str] = None
+    completion: Optional[float] = None  # 0.0 -- 100.0
+    print_time_seconds: Optional[int] = None
+    print_time_left_seconds: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serialisable dictionary."""
+        return asdict(self)
+
+
+@dataclass
+class PrinterFile:
+    """Metadata for a single file stored on the printer / print server."""
+
+    name: str
+    path: str
+    size_bytes: Optional[int] = None
+    date: Optional[int] = None  # Unix timestamp
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serialisable dictionary."""
+        return asdict(self)
+
+
+@dataclass
+class UploadResult:
+    """Outcome of a file-upload operation."""
+
+    success: bool
+    file_name: str
+    message: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serialisable dictionary."""
+        return asdict(self)
+
+
+@dataclass
+class PrintResult:
+    """Outcome of a print-control operation (start / cancel / pause / resume)."""
+
+    success: bool
+    message: str
+    job_id: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serialisable dictionary."""
+        return asdict(self)
+
+
+@dataclass
+class PrinterCapabilities:
+    """Declares what a specific adapter is able to do.
+
+    Not every printer backend supports every operation.  Adapters override
+    the defaults here to accurately describe their feature set.
+    """
+
+    can_upload: bool = True
+    can_set_temp: bool = True
+    can_send_gcode: bool = True
+    can_pause: bool = True
+    supported_extensions: Tuple[str, ...] = (".gcode", ".gco", ".g")
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serialisable dictionary.
+
+        The :attr:`supported_extensions` tuple is converted to a list for
+        JSON compatibility.
+        """
+        data = asdict(self)
+        data["supported_extensions"] = list(self.supported_extensions)
+        return data
+
+
+# ---------------------------------------------------------------------------
+# Abstract base class
+# ---------------------------------------------------------------------------
+
+class PrinterAdapter(ABC):
+    """Abstract base for all printer backend adapters.
+
+    Concrete subclasses must implement **every** abstract method and
+    property listed below.  The Kiln orchestration layer relies on this
+    contract to drive any supported printer without knowledge of the
+    underlying protocol.
+
+    Example minimal implementation::
+
+        class MyPrinter(PrinterAdapter):
+
+            @property
+            def name(self) -> str:
+                return "my-printer"
+
+            @property
+            def capabilities(self) -> PrinterCapabilities:
+                return PrinterCapabilities()
+
+            def get_state(self) -> PrinterState:
+                ...
+
+            # ... remaining abstract methods ...
+    """
+
+    # -- identity & feature discovery -----------------------------------
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Human-readable identifier for this adapter (e.g. ``"octoprint"``)."""
+
+    @property
+    @abstractmethod
+    def capabilities(self) -> PrinterCapabilities:
+        """Return the set of capabilities this adapter supports."""
+
+    # -- state queries --------------------------------------------------
+
+    @abstractmethod
+    def get_state(self) -> PrinterState:
+        """Retrieve the current printer state and temperatures.
+
+        Raises:
+            PrinterError: If communication with the printer fails.
+        """
+
+    @abstractmethod
+    def get_job(self) -> JobProgress:
+        """Retrieve progress info for the active (or last) print job.
+
+        Raises:
+            PrinterError: If communication with the printer fails.
+        """
+
+    @abstractmethod
+    def list_files(self) -> List[PrinterFile]:
+        """Return a list of files available on the printer / print server.
+
+        Raises:
+            PrinterError: If communication with the printer fails.
+        """
+
+    # -- file management ------------------------------------------------
+
+    @abstractmethod
+    def upload_file(self, file_path: str) -> UploadResult:
+        """Upload a local G-code file to the printer.
+
+        Args:
+            file_path: Absolute or relative path to the local file.
+
+        Raises:
+            PrinterError: If the upload fails.
+            FileNotFoundError: If *file_path* does not exist locally.
+        """
+
+    # -- print control --------------------------------------------------
+
+    @abstractmethod
+    def start_print(self, file_name: str) -> PrintResult:
+        """Begin printing a file that already exists on the printer.
+
+        Args:
+            file_name: Name (or path) of the file as known by the printer.
+
+        Raises:
+            PrinterError: If the printer cannot start the job.
+        """
+
+    @abstractmethod
+    def cancel_print(self) -> PrintResult:
+        """Cancel the currently running print job.
+
+        Raises:
+            PrinterError: If the cancellation fails.
+        """
+
+    @abstractmethod
+    def pause_print(self) -> PrintResult:
+        """Pause the currently running print job.
+
+        Raises:
+            PrinterError: If the printer cannot pause.
+        """
+
+    @abstractmethod
+    def resume_print(self) -> PrintResult:
+        """Resume a previously paused print job.
+
+        Raises:
+            PrinterError: If the printer cannot resume.
+        """
+
+    # -- temperature control --------------------------------------------
+
+    @abstractmethod
+    def set_tool_temp(self, target: float) -> bool:
+        """Set the hot-end (tool) target temperature in degrees Celsius.
+
+        Args:
+            target: Desired temperature.  Pass ``0`` to turn the heater off.
+
+        Returns:
+            ``True`` if the command was accepted, ``False`` otherwise.
+
+        Raises:
+            PrinterError: If the command fails.
+        """
+
+    @abstractmethod
+    def set_bed_temp(self, target: float) -> bool:
+        """Set the heated-bed target temperature in degrees Celsius.
+
+        Args:
+            target: Desired temperature.  Pass ``0`` to turn the heater off.
+
+        Returns:
+            ``True`` if the command was accepted, ``False`` otherwise.
+
+        Raises:
+            PrinterError: If the command fails.
+        """
+
+    # -- convenience / dunder helpers -----------------------------------
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<{type(self).__name__} name={self.name!r}>"
