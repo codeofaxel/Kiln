@@ -248,10 +248,13 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 | Tool | Input | Output |
 |---|---|---|
-| `search_models` | `query`, `page` | Model list |
+| `search_all_models` | `query`, `page`, `sources` | Interleaved results from all marketplaces |
+| `marketplace_info` | — | Connected sources, setup hints |
+| `search_models` | `query`, `page` | Thingiverse-only model list |
 | `model_details` | `thing_id` | Model metadata |
 | `model_files` | `thing_id` | File list |
 | `download_model` | `thing_id`, `file_id` | Local path |
+| `download_and_upload` | `file_id`, `source`, `printer_name` | Download + upload in one step |
 | `browse_models` | `sort`, `category` | Model list |
 | `list_model_categories` | — | Category list |
 
@@ -427,6 +430,9 @@ settings:
 | `KILN_PRINTER_TYPE` | Backend type |
 | `KILN_SLICER_PATH` | Explicit path to slicer binary |
 | `KILN_THINGIVERSE_TOKEN` | Thingiverse API token |
+| `KILN_MMF_API_KEY` | MyMiniFactory API key |
+| `KILN_CULTS3D_USERNAME` | Cults3D account username |
+| `KILN_CULTS3D_API_KEY` | Cults3D API key |
 | `KILN_AUTH_ENABLED` | Enable API key auth (1/0) |
 | `KILN_AUTH_KEY` | Secret key for auth |
 
