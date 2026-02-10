@@ -119,9 +119,9 @@ class TestHelp:
         assert "Kiln" in result.output
 
     def test_subcommand_help(self, runner):
-        for cmd in ["discover", "auth", "status", "files", "upload", "print",
-                     "cancel", "pause", "resume", "temp", "gcode", "printers",
-                     "use", "serve"]:
+        for cmd in ["discover", "auth", "status", "files", "upload", "preflight",
+                     "print", "cancel", "pause", "resume", "temp", "gcode",
+                     "printers", "use", "serve"]:
             result = runner.invoke(cli, [cmd, "--help"])
             assert result.exit_code == 0, f"{cmd} --help failed: {result.output}"
 
@@ -196,6 +196,92 @@ class TestPrint:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert "printer" in data["data"]
+
+    def test_print_auto_uploads_local_file(self, runner, mock_adapter, config_file, tmp_path):
+        # Create a real local .gcode file
+        gcode_file = tmp_path / "model.gcode"
+        gcode_file.write_text("G28\nG1 X10\n")
+        mock_adapter.upload_file.return_value = UploadResult(
+            success=True, message="Uploaded model.gcode", file_name="model.gcode",
+        )
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3:
+            result = runner.invoke(cli, ["print", str(gcode_file), "--json"])
+        assert result.exit_code == 0, result.output
+        # upload_file should have been called with the local path
+        mock_adapter.upload_file.assert_called_once_with(str(gcode_file))
+        # start_print should use the printer filename, not the local path
+        mock_adapter.start_print.assert_called_once_with("model.gcode")
+
+    def test_print_auto_upload_failure(self, runner, mock_adapter, config_file, tmp_path):
+        gcode_file = tmp_path / "bad.gcode"
+        gcode_file.write_text("G28\n")
+        mock_adapter.upload_file.return_value = UploadResult(
+            success=False, message="Upload rejected", file_name=None,
+        )
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3:
+            result = runner.invoke(cli, ["print", str(gcode_file), "--json"])
+        assert result.exit_code != 0
+        mock_adapter.start_print.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# preflight
+# ---------------------------------------------------------------------------
+
+
+class TestPreflight:
+    def test_preflight_pass_json(self, runner, mock_adapter, config_file):
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3:
+            result = runner.invoke(cli, ["preflight", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["data"]["ready"] is True
+        assert len(data["data"]["checks"]) >= 3
+
+    def test_preflight_fail_not_idle(self, runner, mock_adapter, config_file):
+        mock_adapter.get_state.return_value = PrinterState(
+            state=PrinterStatus.PRINTING,
+            connected=True,
+            tool_temp_actual=210.0,
+            tool_temp_target=210.0,
+            bed_temp_actual=60.0,
+            bed_temp_target=60.0,
+        )
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3:
+            result = runner.invoke(cli, ["preflight", "--json"])
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert data["data"]["ready"] is False
+
+    def test_preflight_human_output(self, runner, mock_adapter, config_file):
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3:
+            result = runner.invoke(cli, ["preflight"])
+        assert result.exit_code == 0
+        assert "PASS" in result.output
+        assert "Ready to print" in result.output
+
+    def test_preflight_with_file(self, runner, mock_adapter, config_file, tmp_path):
+        gcode = tmp_path / "test.gcode"
+        gcode.write_text("G28\n")
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3:
+            result = runner.invoke(cli, ["preflight", "--file", str(gcode), "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["data"]["ready"] is True
+
+    def test_preflight_with_missing_file(self, runner, mock_adapter, config_file):
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3:
+            result = runner.invoke(cli, ["preflight", "--file", "/nonexistent.gcode", "--json"])
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert data["data"]["ready"] is False
 
 
 # ---------------------------------------------------------------------------

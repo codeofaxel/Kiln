@@ -55,6 +55,11 @@ def _make_adapter(cfg: Dict[str, Any]):
     elif ptype == "moonraker":
         return MoonrakerAdapter(host=host, api_key=cfg.get("api_key") or None)
     elif ptype == "bambu":
+        if BambuAdapter is None:
+            raise click.ClickException(
+                "Bambu support requires paho-mqtt. "
+                "Install it with: pip install 'kiln[bambu]'"
+            )
         return BambuAdapter(
             host=host,
             access_code=cfg.get("access_code", ""),
@@ -260,6 +265,124 @@ def upload(ctx: click.Context, file_path: str, json_mode: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# preflight
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--file", "-f", "file_path", default=None, type=click.Path(), help="Local G-code file to validate.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def preflight(ctx: click.Context, file_path: Optional[str], json_mode: bool) -> None:
+    """Run pre-print safety checks.
+
+    Validates printer state, temperatures, and connectivity.
+    Optionally validates a local G-code file with --file.
+    """
+    from kiln.printers.base import PrinterStatus
+
+    try:
+        adapter = _get_adapter_from_ctx(ctx)
+        state = adapter.get_state()
+
+        checks = []
+        errors = []
+
+        # Connected
+        checks.append({
+            "name": "printer_connected",
+            "passed": state.connected,
+            "message": "Printer is connected" if state.connected else "Printer is offline",
+        })
+        if not state.connected:
+            errors.append("Printer is not connected / offline")
+
+        # Idle
+        is_idle = state.state == PrinterStatus.IDLE
+        checks.append({
+            "name": "printer_idle",
+            "passed": is_idle,
+            "message": f"Printer state: {state.state.value}",
+        })
+        if not is_idle:
+            errors.append(f"Printer is not idle (state: {state.state.value})")
+
+        # No error
+        no_error = state.state != PrinterStatus.ERROR
+        checks.append({
+            "name": "no_errors",
+            "passed": no_error,
+            "message": "No errors" if no_error else "Printer is in error state",
+        })
+        if not no_error:
+            errors.append("Printer is in an error state")
+
+        # Temperature safety
+        MAX_TOOL, MAX_BED = 260.0, 110.0
+        temp_warnings = []
+        if state.tool_temp_actual is not None and state.tool_temp_actual > MAX_TOOL:
+            temp_warnings.append(f"Tool temp ({state.tool_temp_actual:.1f}C) exceeds {MAX_TOOL:.0f}C")
+        if state.bed_temp_actual is not None and state.bed_temp_actual > MAX_BED:
+            temp_warnings.append(f"Bed temp ({state.bed_temp_actual:.1f}C) exceeds {MAX_BED:.0f}C")
+        temps_safe = len(temp_warnings) == 0
+        checks.append({
+            "name": "temperatures_safe",
+            "passed": temps_safe,
+            "message": "Temperatures within limits" if temps_safe else "; ".join(temp_warnings),
+        })
+        if not temps_safe:
+            errors.extend(temp_warnings)
+
+        # File validation (optional)
+        if file_path is not None:
+            import os
+            file_errors = []
+            if not os.path.isfile(file_path):
+                file_errors.append(f"File not found: {file_path}")
+            elif not file_path.lower().endswith((".gcode", ".gco", ".g")):
+                file_errors.append(f"Unsupported extension: {os.path.splitext(file_path)[1]}")
+            file_ok = len(file_errors) == 0
+            checks.append({
+                "name": "file_valid",
+                "passed": file_ok,
+                "message": "File OK" if file_ok else "; ".join(file_errors),
+            })
+            if not file_ok:
+                errors.extend(file_errors)
+
+        ready = all(c["passed"] for c in checks)
+
+        if json_mode:
+            import json
+            click.echo(json.dumps({
+                "status": "success",
+                "data": {
+                    "ready": ready,
+                    "checks": checks,
+                    "errors": errors,
+                },
+            }, indent=2))
+        else:
+            for c in checks:
+                symbol = "PASS" if c["passed"] else "FAIL"
+                click.echo(f"  [{symbol}] {c['name']}: {c['message']}")
+            click.echo()
+            if ready:
+                click.echo("Ready to print.")
+            else:
+                click.echo(f"Not ready: {'; '.join(errors)}")
+
+        if not ready:
+            sys.exit(1)
+
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # print
 # ---------------------------------------------------------------------------
 
@@ -273,7 +396,13 @@ def print_cmd(ctx: click.Context, file: Optional[str], show_status: bool, json_m
     """Start a print or check print status.
 
     Pass a file name/path to start printing.  Use --status to check progress.
+
+    If the argument is a local file that exists on disk, it will be
+    auto-uploaded to the printer first, then printing starts immediately.
+    If it's a file name already on the printer, it starts directly.
     """
+    import os
+
     try:
         adapter = _get_adapter_from_ctx(ctx)
 
@@ -283,7 +412,22 @@ def print_cmd(ctx: click.Context, file: Optional[str], show_status: bool, json_m
             click.echo(format_status(state.to_dict(), job.to_dict(), json_mode=json_mode))
             return
 
-        result = adapter.start_print(file)
+        # Auto-upload if the argument is a local file path
+        file_name = file
+        if os.path.isfile(file):
+            if not json_mode:
+                click.echo(f"Uploading {file}...")
+            upload_result = adapter.upload_file(file)
+            if not upload_result.success:
+                click.echo(format_error(
+                    upload_result.message or "Upload failed",
+                    code="UPLOAD_FAILED",
+                    json_mode=json_mode,
+                ))
+                sys.exit(1)
+            file_name = upload_result.file_name or os.path.basename(file)
+
+        result = adapter.start_print(file_name)
         click.echo(format_action("start", result.to_dict(), json_mode=json_mode))
     except click.ClickException:
         raise
