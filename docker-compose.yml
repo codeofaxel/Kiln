@@ -1,0 +1,10 @@
+services:
+  kiln:
+    build: .
+    environment:
+      - KILN_PRINTER_TYPE=${KILN_PRINTER_TYPE:-octoprint}
+      - KILN_PRINTER_HOST=${KILN_PRINTER_HOST}
+      - KILN_PRINTER_API_KEY=${KILN_PRINTER_API_KEY}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped

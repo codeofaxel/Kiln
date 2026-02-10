@@ -13,8 +13,8 @@ Environment variables
 ``KILN_PRINTER_API_KEY``
     API key used for authenticating with the printer server.
 ``KILN_PRINTER_TYPE``
-    Printer backend type.  Currently only ``"octoprint"`` is supported.
-    Defaults to ``"octoprint"``.
+    Printer backend type.  Supported values: ``"octoprint"`` and
+    ``"moonraker"``.  Defaults to ``"octoprint"``.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from kiln.printers.base import (
     PrinterError,
     PrinterStatus,
 )
+from kiln.printers.moonraker import MoonrakerAdapter
 from kiln.printers.octoprint import OctoPrintAdapter
 
 logger = logging.getLogger(__name__)
@@ -94,18 +95,21 @@ def _get_adapter() -> PrinterAdapter:
             "Set it to the base URL of your printer server "
             "(e.g. http://octopi.local)."
         )
-    if not api_key:
-        raise RuntimeError(
-            "KILN_PRINTER_API_KEY environment variable is not set.  "
-            "Set it to your printer server's API key."
-        )
-
     if printer_type == "octoprint":
+        if not api_key:
+            raise RuntimeError(
+                "KILN_PRINTER_API_KEY environment variable is not set.  "
+                "Set it to your printer server's API key."
+            )
         _adapter = OctoPrintAdapter(host=host, api_key=api_key)
+    elif printer_type == "moonraker":
+        # Moonraker typically does not require an API key, but one can
+        # optionally be provided via KILN_PRINTER_API_KEY.
+        _adapter = MoonrakerAdapter(host=host, api_key=api_key or None)
     else:
         raise RuntimeError(
             f"Unsupported printer type: {printer_type!r}.  "
-            f"Currently only 'octoprint' is supported."
+            f"Supported types are 'octoprint' and 'moonraker'."
         )
 
     logger.info(
@@ -497,24 +501,30 @@ def send_gcode(commands: str) -> dict:
         if not cmd_list:
             return _error_dict("No commands provided.", code="INVALID_ARGS")
 
-        # The OctoPrintAdapter exposes _post but not a public send_gcode.
-        # We call through the adapter's internal API for raw G-code.
+        # Both OctoPrint and Moonraker adapters expose _post / _send_gcode
+        # but not a public send_gcode method on the base interface.  We
+        # call through the adapter's internal API for raw G-code.
         if isinstance(adapter, OctoPrintAdapter):
             adapter._post(
                 "/api/printer/command",
                 json={"commands": cmd_list},
             )
-            return {
-                "success": True,
-                "commands_sent": cmd_list,
-                "count": len(cmd_list),
-                "message": f"Sent {len(cmd_list)} G-code command(s).",
-            }
+        elif isinstance(adapter, MoonrakerAdapter):
+            # Moonraker accepts a newline-separated script in a single call.
+            script = "\n".join(cmd_list)
+            adapter._send_gcode(script)
         else:
             return _error_dict(
                 f"send_gcode is not supported by the {adapter.name} adapter.",
                 code="UNSUPPORTED",
             )
+
+        return {
+            "success": True,
+            "commands_sent": cmd_list,
+            "count": len(cmd_list),
+            "message": f"Sent {len(cmd_list)} G-code command(s).",
+        }
 
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(str(exc))
