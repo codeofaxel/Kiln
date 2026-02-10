@@ -58,29 +58,54 @@ kiln/                           — MCP Server package
   src/kiln/
     __init__.py
     __main__.py                 — Entry point (python -m kiln)
-    server.py                   — FastMCP server, all 10 MCP tools
+    server.py                   — FastMCP server, 30+ MCP tools
+    slicer.py                   — PrusaSlicer/OrcaSlicer integration
+    registry.py                 — Fleet printer registry
+    queue.py                    — Priority job queue
+    scheduler.py                — Background job dispatcher
+    events.py                   — Pub/sub event bus
+    persistence.py              — SQLite storage
+    webhooks.py                 — Webhook delivery with HMAC
+    auth.py                     — API key authentication
+    billing.py                  — Fee tracking
+    gcode.py                    — G-code safety validator
     printers/
-      __init__.py
-      base.py                   — Abstract PrinterAdapter interface, enums, dataclasses
+      base.py                   — Abstract PrinterAdapter, enums, dataclasses
       octoprint.py              — OctoPrint REST adapter
-  tests/                        — pytest tests
+      moonraker.py              — Moonraker REST adapter
+      bambu.py                  — Bambu Lab MQTT adapter
+    marketplaces/
+      base.py                   — Marketplace adapter interface
+      thingiverse.py            — Thingiverse API client
+      myminifactory.py          — MyMiniFactory API client
+      cults3d.py                — Cults3D API client
+    cli/
+      main.py                   — Click CLI (20+ commands)
+      config.py                 — Config management (YAML/env/flags)
+      discovery.py              — mDNS printer scanning
+      output.py                 — JSON/text output formatting
+  tests/                        — pytest tests (1165)
   pyproject.toml
 
 octoprint-cli/                  — CLI Tool package
   src/octoprint_cli/
-    __init__.py
     cli.py                      — Click CLI entry point
     client.py                   — OctoPrint REST client
-    config.py                   — Config management (YAML/env/flags)
+    config.py                   — Config management
     output.py                   — JSON/text output formatting
-    safety.py                   — Pre-flight checks, validation
-    exit_codes.py               — Standard exit codes for agents
-  tests/                        — pytest tests
+    safety.py                   — Pre-flight checks
+    exit_codes.py               — Standard exit codes
+  tests/                        — pytest tests (239)
   pyproject.toml
 
 docs/                           — Documentation
-  roles/                        — Swarm teammate role references
+  WHITEPAPER.md                 — Technical whitepaper
+  GUIDE.md                      — Full project documentation
+  COMPLETED_TASKS.md            — Shipped features log
+  TASKS.md                      — Open backlog
   LESSONS_LEARNED.md            — Hard-won patterns (auto-updated)
+  PRINT_FLOW.md                 — End-to-end flow diagram
+  roles/                        — Swarm teammate role references
   SWARM_GUIDE.md                — System guide
 ```
 
@@ -150,7 +175,37 @@ Before reporting ANY non-trivial work as complete, run this checklist. If ANY an
 
 **The rule:** Do not present output you wouldn't ship to production. If your internal confidence is below "I'd bet money this is correct and clean," keep working. When in doubt, iterate one more time — the cost of one extra pass is always less than the cost of a sloppy delivery.
 
+## Documentation Auto-Update Triggers
+
+Kiln maintains three living documents that must stay in sync with the codebase:
+- `README.md` — Project overview, quick start, feature summary
+- `docs/WHITEPAPER.md` — Technical whitepaper (architecture, protocol, safety model)
+- `docs/GUIDE.md` — Full project documentation (CLI reference, MCP tools, adapter details)
+
+**When to update these documents:**
+
+1. **New CLI command added** → Update README command table + GUIDE CLI Reference section.
+2. **New MCP tool added** → Update README MCP Tools table + GUIDE Tool Catalog section.
+3. **New printer adapter added** → Update README Supported Printers table + GUIDE Printer Adapters section + WHITEPAPER adapter list.
+4. **New marketplace adapter added** → Update README Model Marketplaces table + GUIDE Project Structure.
+5. **New module created** → Update README Modules table + GUIDE Project Structure.
+6. **Test count changes significantly (±50)** → Update README Development section test counts.
+7. **Safety system changes** → Update WHITEPAPER safety section + GUIDE Safety Systems section.
+8. **Architecture changes** (new subsystem, protocol change) → Update WHITEPAPER architecture section.
+
+**When NOT to update:**
+- Bug fixes, refactors, or internal changes that don't add user-facing features.
+- Test additions without new features.
+- Documentation-only changes (avoid circular updates).
+
+**How to update:** Append or edit the specific section — don't rewrite the entire document. Keep the whitepaper formal and the guide reference-dense.
+
 ## Reference Docs
+- `README.md` — Project overview and quick start. Keep concise.
+- `docs/WHITEPAPER.md` — Technical whitepaper in academic style. Covers architecture, safety, protocol design.
+- `docs/GUIDE.md` — Full project documentation (Gitbook-style). CLI reference, MCP tool catalog, adapter details, configuration.
+- `docs/COMPLETED_TASKS.md` — Record of shipped features. Append after each feature lands.
+- `docs/TASKS.md` — Open task backlog.
 - `docs/LESSONS_LEARNED.md` — Hard-won technical patterns and bug fixes. Consult when hitting unfamiliar issues. **Append to this file when you learn something new.**
 - `docs/roles/` — Slim role references (LOGIC.md, INTERFACE.md, QA.md, INTEGRATION.md) used for swarm teammate spawn prompts.
 - `docs/SWARM_GUIDE.md` — Full guide to the agent swarm system.
