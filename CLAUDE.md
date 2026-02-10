@@ -100,7 +100,7 @@ octoprint-cli/                  — CLI Tool package
 
 docs/                           — Documentation
   WHITEPAPER.md                 — Technical whitepaper
-  GUIDE.md                      — Full project documentation
+  PROJECT_DOCS.md               — Full project documentation
   COMPLETED_TASKS.md            — Shipped features log
   TASKS.md                      — Open backlog
   LESSONS_LEARNED.md            — Hard-won patterns (auto-updated)
@@ -180,17 +180,17 @@ Before reporting ANY non-trivial work as complete, run this checklist. If ANY an
 Kiln maintains three living documents that must stay in sync with the codebase:
 - `README.md` — Project overview, quick start, feature summary
 - `docs/WHITEPAPER.md` — Technical whitepaper (architecture, protocol, safety model)
-- `docs/GUIDE.md` — Full project documentation (CLI reference, MCP tools, adapter details)
+- `docs/PROJECT_DOCS.md` — Full project documentation (CLI reference, MCP tools, adapter details)
 
 **When to update these documents:**
 
-1. **New CLI command added** → Update README command table + GUIDE CLI Reference section.
-2. **New MCP tool added** → Update README MCP Tools table + GUIDE Tool Catalog section.
-3. **New printer adapter added** → Update README Supported Printers table + GUIDE Printer Adapters section + WHITEPAPER adapter list.
-4. **New marketplace adapter added** → Update README Model Marketplaces table + GUIDE Project Structure.
-5. **New module created** → Update README Modules table + GUIDE Project Structure.
+1. **New CLI command added** → Update README command table + PROJECT_DOCS CLI Reference section.
+2. **New MCP tool added** → Update README MCP Tools table + PROJECT_DOCS Tool Catalog section.
+3. **New printer adapter added** → Update README Supported Printers table + PROJECT_DOCS Printer Adapters section + WHITEPAPER adapter list.
+4. **New marketplace adapter added** → Update README Model Marketplaces table + PROJECT_DOCS Project Structure.
+5. **New module created** → Update README Modules table + PROJECT_DOCS Project Structure.
 6. **Test count changes significantly (±50)** → Update README Development section test counts.
-7. **Safety system changes** → Update WHITEPAPER safety section + GUIDE Safety Systems section.
+7. **Safety system changes** → Update WHITEPAPER safety section + PROJECT_DOCS Safety Systems section.
 8. **Architecture changes** (new subsystem, protocol change) → Update WHITEPAPER architecture section.
 
 **When NOT to update:**
@@ -203,7 +203,7 @@ Kiln maintains three living documents that must stay in sync with the codebase:
 ## Reference Docs
 - `README.md` — Project overview and quick start. Keep concise.
 - `docs/WHITEPAPER.md` — Technical whitepaper in academic style. Covers architecture, safety, protocol design.
-- `docs/GUIDE.md` — Full project documentation (Gitbook-style). CLI reference, MCP tool catalog, adapter details, configuration.
+- `docs/PROJECT_DOCS.md` — Full project documentation (Gitbook-style). CLI reference, MCP tool catalog, adapter details, configuration.
 - `docs/COMPLETED_TASKS.md` — Record of shipped features. Append after each feature lands.
 - `docs/TASKS.md` — Open task backlog.
 - `docs/LESSONS_LEARNED.md` — Hard-won technical patterns and bug fixes. Consult when hitting unfamiliar issues. **Append to this file when you learn something new.**
