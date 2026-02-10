@@ -18,9 +18,11 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+from kiln.printers.moonraker import MoonrakerAdapter
 
 __all__ = [
     "JobProgress",
+    "MoonrakerAdapter",
     "PrinterAdapter",
     "PrinterCapabilities",
     "PrinterError",
