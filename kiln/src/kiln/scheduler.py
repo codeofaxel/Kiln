@@ -42,14 +42,17 @@ class JobScheduler:
         registry: PrinterRegistry,
         event_bus: EventBus,
         poll_interval: float = 5.0,
+        max_retries: int = 2,
     ) -> None:
         self._queue = queue
         self._registry = registry
         self._event_bus = event_bus
         self._poll_interval = poll_interval
+        self._max_retries = max_retries
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._active_jobs: Dict[str, str] = {}  # job_id -> printer_name
+        self._retry_counts: Dict[str, int] = {}  # job_id -> attempts so far
         self._lock = threading.Lock()
 
     @property
@@ -84,6 +87,55 @@ class JobScheduler:
             self._thread = None
         logger.info("Job scheduler stopped")
 
+    def _requeue_or_fail(
+        self,
+        job_id: str,
+        error_msg: str,
+        failed_list: list[Dict[str, str]],
+    ) -> bool:
+        """Try to re-queue a failed job if retries remain.
+
+        Returns ``True`` if the job was re-queued, ``False`` if it was
+        permanently marked as failed (appended to *failed_list*).
+        """
+        count = self._retry_counts.get(job_id, 0)
+        if count < self._max_retries:
+            self._retry_counts[job_id] = count + 1
+            # Reset the job back to QUEUED so the next tick can redispatch it
+            job = self._queue.get_job(job_id)
+            job.status = JobStatus.QUEUED
+            job.started_at = None
+            job.error = None
+            self._event_bus.publish(
+                EventType.JOB_SUBMITTED,
+                {
+                    "job_id": job_id,
+                    "retry": count + 1,
+                    "max_retries": self._max_retries,
+                    "reason": error_msg,
+                },
+                source="scheduler",
+            )
+            logger.info(
+                "Re-queued job %s (retry %d/%d): %s",
+                job_id,
+                count + 1,
+                self._max_retries,
+                error_msg,
+            )
+            return True
+
+        # Retries exhausted — mark permanently failed
+        self._retry_counts.pop(job_id, None)
+        self._queue.mark_failed(job_id, error_msg)
+        self._event_bus.publish(
+            EventType.JOB_FAILED,
+            {"job_id": job_id, "error": error_msg},
+            source="scheduler",
+        )
+        failed_list.append({"job_id": job_id, "error": error_msg})
+        return False
+
     def tick(self) -> Dict[str, Any]:
         """Run one scheduling cycle.  Can be called manually for testing.
 
@@ -114,6 +166,7 @@ class JobScheduler:
                     self._queue.mark_completed(job_id)
                     with self._lock:
                         self._active_jobs.pop(job_id, None)
+                    self._retry_counts.pop(job_id, None)
                     self._event_bus.publish(
                         EventType.JOB_COMPLETED,
                         {"job_id": job_id, "printer_name": printer_name},
@@ -123,19 +176,9 @@ class JobScheduler:
 
                 elif state.state == PrinterStatus.ERROR:
                     error_msg = f"Printer {printer_name} entered error state"
-                    self._queue.mark_failed(job_id, error_msg)
                     with self._lock:
                         self._active_jobs.pop(job_id, None)
-                    self._event_bus.publish(
-                        EventType.JOB_FAILED,
-                        {
-                            "job_id": job_id,
-                            "printer_name": printer_name,
-                            "error": error_msg,
-                        },
-                        source="scheduler",
-                    )
-                    failed.append({"job_id": job_id, "error": error_msg})
+                    self._requeue_or_fail(job_id, error_msg, failed)
 
                 elif state.state == PrinterStatus.PRINTING:
                     # Promote STARTING -> PRINTING when the printer confirms
@@ -161,10 +204,9 @@ class JobScheduler:
 
             except PrinterNotFoundError:
                 error_msg = f"Printer {printer_name} no longer registered"
-                self._queue.mark_failed(job_id, error_msg)
                 with self._lock:
                     self._active_jobs.pop(job_id, None)
-                failed.append({"job_id": job_id, "error": error_msg})
+                self._requeue_or_fail(job_id, error_msg, failed)
             except Exception as exc:
                 logger.warning(
                     "Error checking job %s on %s: %s", job_id, printer_name, exc
@@ -211,27 +253,14 @@ class JobScheduler:
                     )
                 else:
                     error_msg = result.message or "start_print returned failure"
-                    self._queue.mark_failed(next_job.id, error_msg)
-                    self._event_bus.publish(
-                        EventType.JOB_FAILED,
-                        {"job_id": next_job.id, "error": error_msg},
-                        source="scheduler",
-                    )
-                    failed.append({"job_id": next_job.id, "error": error_msg})
+                    self._requeue_or_fail(next_job.id, error_msg, failed)
 
             except PrinterError as exc:
                 error_msg = f"Failed to start print on {printer_name}: {exc}"
-                self._queue.mark_failed(next_job.id, error_msg)
-                self._event_bus.publish(
-                    EventType.JOB_FAILED,
-                    {"job_id": next_job.id, "error": error_msg},
-                    source="scheduler",
-                )
-                failed.append({"job_id": next_job.id, "error": error_msg})
+                self._requeue_or_fail(next_job.id, error_msg, failed)
             except Exception as exc:
                 logger.exception("Unexpected error dispatching job %s", next_job.id)
-                self._queue.mark_failed(next_job.id, str(exc))
-                failed.append({"job_id": next_job.id, "error": str(exc)})
+                self._requeue_or_fail(next_job.id, str(exc), failed)
 
         return {
             "dispatched": dispatched,

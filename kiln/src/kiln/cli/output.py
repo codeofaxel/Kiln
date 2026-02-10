@@ -376,7 +376,12 @@ def format_discovered(
     *,
     json_mode: bool = False,
 ) -> str:
-    """Format discovered printers from mDNS scan."""
+    """Format discovered printers.
+
+    Handles both the core ``kiln.discovery.DiscoveredPrinter`` dict layout
+    (keys: host, port, printer_type, name, version, api_available,
+    discovery_method) and the legacy CLI-only layout (name, type, host).
+    """
     if json_mode:
         return json.dumps(
             {"status": "success", "data": {"printers": printers, "count": len(printers)}},
@@ -390,17 +395,58 @@ def format_discovered(
             return _render(Panel(msg, border_style="yellow"))
         return msg
 
+    def _type(p: Dict[str, Any]) -> str:
+        return p.get("printer_type") or p.get("type") or ""
+
+    def _host_display(p: Dict[str, Any]) -> str:
+        host = p.get("host", "")
+        port = p.get("port")
+        if port and port not in (80, 443):
+            return f"{host}:{port}"
+        return host
+
+    def _api_badge(p: Dict[str, Any]) -> str:
+        avail = p.get("api_available")
+        if avail is None:
+            return ""
+        return "yes" if avail else "no"
+
     if RICH_AVAILABLE:
         table = Table(title="Discovered Printers", border_style="green")
         table.add_column("Name", style="bold")
         table.add_column("Type")
         table.add_column("Host")
+        table.add_column("Version")
+        table.add_column("API", justify="center")
+        table.add_column("Method")
+
         for p in printers:
-            table.add_row(p.get("name", ""), p.get("type", ""), p.get("host", ""))
+            api_text = _api_badge(p)
+            if RICH_AVAILABLE and api_text == "yes":
+                api_text = "[green]yes[/green]"
+            elif RICH_AVAILABLE and api_text == "no":
+                api_text = "[red]no[/red]"
+
+            table.add_row(
+                p.get("name", ""),
+                _type(p),
+                _host_display(p),
+                p.get("version", ""),
+                api_text,
+                p.get("discovery_method", ""),
+            )
         return _render(table)
 
-    lines = [f"{'Name':<30} {'Type':<12} {'Host'}"]
-    lines.append("-" * 65)
+    # Plain-text fallback
+    header = (
+        f"{'Name':<25} {'Type':<12} {'Host':<25} {'Version':<12} "
+        f"{'API':<5} {'Method'}"
+    )
+    lines = [header, "-" * len(header)]
     for p in printers:
-        lines.append(f"{p.get('name', ''):<30} {p.get('type', ''):<12} {p.get('host', '')}")
+        lines.append(
+            f"{p.get('name', ''):<25} {_type(p):<12} "
+            f"{_host_display(p):<25} {p.get('version', ''):<12} "
+            f"{_api_badge(p):<5} {p.get('discovery_method', '')}"
+        )
     return "\n".join(lines)

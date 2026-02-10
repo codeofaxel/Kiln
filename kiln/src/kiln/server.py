@@ -914,6 +914,34 @@ def register_printer(
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
+@mcp.tool()
+def discover_printers(timeout: float = 5.0) -> dict:
+    """Scan the local network for 3D printers.
+
+    Uses mDNS/Bonjour and HTTP subnet probing to find OctoPrint,
+    Moonraker, and Bambu Lab printers on the local network.
+
+    Args:
+        timeout: Maximum scan duration in seconds (default 5).
+
+    Returns a list of discovered printers with host, port, type, and
+    whether the API is reachable.  Use ``register_printer`` to add
+    discovered printers to the fleet.
+    """
+    try:
+        from kiln.discovery import discover_printers as _discover
+        results = _discover(timeout=timeout)
+        return {
+            "success": True,
+            "printers": [p.to_dict() for p in results],
+            "count": len(results),
+            "message": f"Found {len(results)} printer(s) on the network.",
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in discover_printers")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
 # ---------------------------------------------------------------------------
 # Job queue tools
 # ---------------------------------------------------------------------------
@@ -1038,6 +1066,48 @@ def cancel_job(job_id: str) -> dict:
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
+@mcp.tool()
+def job_history(limit: int = 20, status: str | None = None) -> dict:
+    """Get history of completed, failed, and cancelled print jobs.
+
+    Args:
+        limit: Maximum number of jobs to return (default 20, max 100).
+        status: Optional filter by status -- "completed", "failed", or
+            "cancelled".  Omit to show all finished jobs.
+
+    Returns recent job records from newest to oldest.
+    """
+    try:
+        capped = min(max(limit, 1), 100)
+        all_jobs = _queue.list_jobs(limit=capped)
+
+        finished_statuses = {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}
+        if status:
+            status_map = {
+                "completed": JobStatus.COMPLETED,
+                "failed": JobStatus.FAILED,
+                "cancelled": JobStatus.CANCELLED,
+            }
+            target = status_map.get(status.lower())
+            if target is None:
+                return _error_dict(
+                    f"Invalid status filter: {status!r}. Use 'completed', 'failed', or 'cancelled'.",
+                    code="INVALID_ARGS",
+                )
+            jobs = [j for j in all_jobs if j.status == target]
+        else:
+            jobs = [j for j in all_jobs if j.status in finished_statuses]
+
+        return {
+            "success": True,
+            "jobs": [j.to_dict() for j in jobs],
+            "count": len(jobs),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in job_history")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
 # ---------------------------------------------------------------------------
 # Event tools
 # ---------------------------------------------------------------------------
@@ -1063,6 +1133,39 @@ def recent_events(limit: int = 20) -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in recent_events")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Billing tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def billing_summary() -> dict:
+    """Get a summary of Kiln network job fees for the current month.
+
+    Shows total fees collected, number of network jobs, free tier usage,
+    and the current fee policy.  Only network-routed jobs (e.g. 3DOS)
+    incur fees -- all local printing is free.
+    """
+    try:
+        revenue = _billing.monthly_revenue()
+        policy = _billing._policy
+        return {
+            "success": True,
+            "month_revenue": revenue,
+            "fee_policy": {
+                "network_fee_percent": policy.network_fee_percent,
+                "min_fee_usd": policy.min_fee_usd,
+                "max_fee_usd": policy.max_fee_usd,
+                "free_tier_jobs": policy.free_tier_jobs,
+                "currency": policy.currency,
+            },
+            "network_jobs_this_month": _billing.network_jobs_this_month(),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in billing_summary")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
@@ -1613,12 +1716,77 @@ def resource_events() -> str:
 
 
 # ---------------------------------------------------------------------------
+# MCP Prompt templates — multi-step workflow guides for agents
+# ---------------------------------------------------------------------------
+
+
+@mcp.prompt()
+def print_workflow() -> str:
+    """Step-by-step guide for printing a file on a 3D printer."""
+    return (
+        "To print a file on a 3D printer, follow these steps:\n\n"
+        "1. Call `printer_status` to check the printer is connected and idle\n"
+        "2. Call `preflight_check` to verify the printer is ready\n"
+        "3. Call `printer_files` to see available files, or `upload_file` to upload a new one\n"
+        "4. Call `start_print` with the file name to begin printing\n"
+        "5. Call `printer_status` periodically to monitor progress\n\n"
+        "If you need to find a model first, use `search_models` to search Thingiverse, "
+        "then `download_model` to save it locally, then `upload_file` to send it to the printer."
+    )
+
+
+@mcp.prompt()
+def fleet_workflow() -> str:
+    """Guide for managing multiple printers in a fleet."""
+    return (
+        "To manage a fleet of printers:\n\n"
+        "1. Call `fleet_status` to see all registered printers and their states\n"
+        "2. Use `register_printer` to add new printers (octoprint, moonraker, or bambu)\n"
+        "3. Submit jobs with `submit_job` — the scheduler auto-dispatches to idle printers\n"
+        "4. Monitor via `queue_summary` and `job_status`\n"
+        "5. Check `recent_events` for lifecycle updates\n\n"
+        "The scheduler runs in the background, automatically assigning queued jobs "
+        "to available printers based on priority."
+    )
+
+
+@mcp.prompt()
+def troubleshooting() -> str:
+    """Common troubleshooting steps for 3D printing issues."""
+    return (
+        "Common troubleshooting steps:\n\n"
+        "1. Call `kiln_health` to verify the system is healthy\n"
+        "2. Call `printer_status` to check connection and state\n"
+        "3. If printer shows 'error', check temperatures with `printer_status`\n"
+        "4. Use `send_gcode` with 'M999' to reset the printer from error state\n"
+        "5. Use `preflight_check` to run a full readiness diagnosis\n"
+        "6. Check `recent_events` for error history\n\n"
+        "For temperature issues:\n"
+        "- PLA: hotend 200-210C, bed 60C\n"
+        "- PETG: hotend 230-250C, bed 80-85C\n"
+        "- ABS: hotend 240-260C, bed 100-110C"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 
 def main() -> None:
     """Run the Kiln MCP server."""
+    # Auto-register the env-configured printer so the scheduler can
+    # dispatch jobs even if no explicit register_printer call is made.
+    if _PRINTER_HOST and _registry.count == 0:
+        try:
+            adapter = _get_adapter()
+            _registry.register("default", adapter)
+            logger.info("Auto-registered env-configured printer as 'default'")
+        except Exception:
+            logger.debug(
+                "Could not auto-register env-configured printer", exc_info=True
+            )
+
     # Start background services
     _scheduler.start()
     _webhook_mgr.start()
