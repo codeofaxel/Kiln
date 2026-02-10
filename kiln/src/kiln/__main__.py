@@ -1,5 +1,5 @@
-"""Allow running ``python -m kiln`` to start the MCP server."""
+"""Allow running ``python -m kiln`` to start the Kiln CLI."""
 
-from kiln.server import mcp
+from kiln.cli.main import cli
 
-mcp.run()
+cli()
