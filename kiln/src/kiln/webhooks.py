@@ -104,6 +104,10 @@ class WebhookManager:
         # HTTP sender (injectable for testing)
         self._send_func = self._default_send
 
+        # Dead-letter queue for events that fail all retries
+        self._dead_letters: List[Dict[str, Any]] = []
+        self._max_dead_letters = 1000
+
     @property
     def is_running(self) -> bool:
         return self._running
@@ -227,7 +231,9 @@ class WebhookManager:
 
     def _deliver(self, endpoint: WebhookEndpoint, event: Event) -> DeliveryRecord:
         """Attempt to deliver an event to an endpoint with retries."""
-        payload = json.dumps(event.to_dict(), default=str)
+        event_data = event.to_dict()
+        event_data["event_id"] = uuid.uuid4().hex
+        payload = json.dumps(event_data, default=str)
         headers = {"Content-Type": "application/json"}
 
         if endpoint.secret:
@@ -283,8 +289,39 @@ class WebhookManager:
                 record.attempts,
                 record.error,
             )
+            # Add to dead-letter list for later inspection
+            dead_entry: Dict[str, Any] = {
+                "event_id": event_data["event_id"],
+                "event_type": event.type.value,
+                "webhook_id": endpoint.id,
+                "url": endpoint.url,
+                "error": record.error,
+                "attempts": record.attempts,
+                "timestamp": record.timestamp,
+            }
+            with self._lock:
+                self._dead_letters.append(dead_entry)
+                if len(self._dead_letters) > self._max_dead_letters:
+                    self._dead_letters = self._dead_letters[-self._max_dead_letters:]
+            logger.info(
+                "Dead-lettered event %s for webhook %s (%d total)",
+                event_data["event_id"],
+                endpoint.id,
+                len(self._dead_letters),
+            )
 
         return record
+
+    def get_dead_letters(self) -> List[Dict[str, Any]]:
+        """Return the dead-letter list (failed deliveries after all retries)."""
+        with self._lock:
+            return list(self._dead_letters)
+
+    @property
+    def dead_letter_count(self) -> int:
+        """Return the number of dead-lettered events."""
+        with self._lock:
+            return len(self._dead_letters)
 
     def recent_deliveries(self, limit: int = 50) -> List[DeliveryRecord]:
         """Return recent delivery records, newest first."""

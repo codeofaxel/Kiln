@@ -242,6 +242,21 @@ class PrinterAdapter(ABC):
             # ... remaining abstract methods ...
     """
 
+    # -- safety profile --------------------------------------------------
+
+    _safety_profile_id: Optional[str] = None
+
+    def set_safety_profile(self, profile_id: str) -> None:
+        """Bind a printer safety profile for temperature validation.
+
+        When set, :meth:`_validate_temp` will use the profile's limits
+        instead of the caller-supplied default.
+
+        Args:
+            profile_id: Profile identifier (e.g. ``"ender3"``, ``"bambu_x1c"``).
+        """
+        self._safety_profile_id = profile_id
+
     # -- identity & feature discovery -----------------------------------
 
     @property
@@ -348,14 +363,30 @@ class PrinterAdapter(ABC):
     def _validate_temp(self, target: float, max_temp: float, heater: str) -> None:
         """Validate a temperature value before sending to the printer.
 
+        When a safety profile is bound via :meth:`set_safety_profile`, the
+        profile's limit overrides *max_temp* for defense-in-depth.
+
         Args:
             target: Desired temperature in Celsius.
-            max_temp: Maximum safe temperature for this heater.
+            max_temp: Maximum safe temperature for this heater (fallback).
             heater: Human-readable heater name for error messages.
 
         Raises:
             PrinterError: If the temperature is out of safe range.
         """
+        # Use per-printer profile limits when available (defense-in-depth).
+        if self._safety_profile_id:
+            try:
+                from kiln.safety_profiles import get_profile  # noqa: E402
+                profile = get_profile(self._safety_profile_id)
+                lower_heater = heater.lower()
+                if lower_heater in ("hotend", "tool"):
+                    max_temp = min(max_temp, profile.max_hotend_temp)
+                elif lower_heater == "bed":
+                    max_temp = min(max_temp, profile.max_bed_temp)
+            except (KeyError, ImportError):
+                pass  # fall back to caller-supplied max_temp
+
         if target < 0:
             raise PrinterError(
                 f"{heater} temperature {target}°C is negative -- must be >= 0."

@@ -123,6 +123,45 @@ from kiln.generation import (
     validate_mesh,
 )
 
+
+
+class _JsonLogFormatter(logging.Formatter):
+    """Simple JSON-lines log formatter for structured log output.
+
+    Produces one JSON object per log record with keys: timestamp, level,
+    logger, message.  Activated when ``KILN_LOG_FORMAT=json``.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        import json as _json_mod
+        entry = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[0] is not None:
+            entry["exception"] = self.formatException(record.exc_info)
+        return _json_mod.dumps(entry)
+
+
+def _configure_logging() -> None:
+    """Configure root logger format based on ``KILN_LOG_FORMAT`` env var.
+
+    Supported values:
+        - ``"text"`` (default): standard human-readable log lines.
+        - ``"json"``: structured JSON-lines output for log aggregators.
+    """
+    log_format = os.environ.get("KILN_LOG_FORMAT", "text").strip().lower()
+    root = logging.getLogger()
+    if log_format == "json":
+        handler = logging.StreamHandler()
+        handler.setFormatter(_JsonLogFormatter())
+        root.handlers.clear()
+        root.addHandler(handler)
+        root.setLevel(logging.INFO)
+
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -133,6 +172,10 @@ _PRINTER_HOST: str = os.environ.get("KILN_PRINTER_HOST", "")
 _PRINTER_API_KEY: str = os.environ.get("KILN_PRINTER_API_KEY", "")
 _PRINTER_TYPE: str = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
 _PRINTER_SERIAL: str = os.environ.get("KILN_PRINTER_SERIAL", "")
+_PRINTER_MODEL: str = os.environ.get("KILN_PRINTER_MODEL", "")
+_CONFIRM_UPLOAD: bool = (
+    os.environ.get("KILN_CONFIRM_UPLOAD", "").lower() in ("1", "true", "yes")
+)
 _THINGIVERSE_TOKEN: str = os.environ.get("KILN_THINGIVERSE_TOKEN", "")
 _MMF_API_KEY: str = os.environ.get("KILN_MMF_API_KEY", "")
 _CULTS3D_USERNAME: str = os.environ.get("KILN_CULTS3D_USERNAME", "")
@@ -257,12 +300,114 @@ def _get_adapter() -> PrinterAdapter:
             f"Supported types are 'octoprint', 'moonraker', 'bambu', and 'prusaconnect'."
         )
 
+    # Propagate safety profile to adapter for defense-in-depth temp limits.
+    if _PRINTER_MODEL:
+        _adapter.set_safety_profile(_PRINTER_MODEL)
+
     logger.info(
         "Initialised %s adapter for %s",
         _adapter.name,
         host,
     )
     return _adapter
+
+
+# ---------------------------------------------------------------------------
+# Per-printer temperature limits
+# ---------------------------------------------------------------------------
+
+def _get_temp_limits() -> tuple:
+    """Return ``(max_tool, max_bed)`` from the printer's safety profile.
+
+    When ``KILN_PRINTER_MODEL`` is set, loads the matching profile from the
+    bundled database.  Falls back to conservative generic limits (300/130).
+    """
+    if _PRINTER_MODEL:
+        try:
+            from kiln.safety_profiles import get_profile  # noqa: E402
+            profile = get_profile(_PRINTER_MODEL)
+            return profile.max_hotend_temp, profile.max_bed_temp
+        except (KeyError, ImportError):
+            pass
+    return 300.0, 130.0
+
+
+# ---------------------------------------------------------------------------
+# MCP tool rate limiter
+# ---------------------------------------------------------------------------
+
+class _ToolRateLimiter:
+    """Per-tool rate limiter for MCP tool calls.
+
+    Prevents agents from spamming physically-dangerous commands in tight
+    retry loops.  Uses a simple minimum-interval + max-per-minute model.
+    """
+
+    def __init__(self) -> None:
+        self._last_call: dict[str, float] = {}
+        self._call_history: dict[str, list[float]] = {}
+
+    def check(
+        self, tool_name: str, min_interval_ms: int = 0, max_per_minute: int = 0
+    ) -> Optional[str]:
+        """Return ``None`` if allowed, or an error message if rate-limited."""
+        now = time.monotonic()
+
+        # Minimum interval between consecutive calls.
+        if min_interval_ms > 0:
+            last = self._last_call.get(tool_name, 0.0)
+            elapsed_ms = (now - last) * 1000
+            if elapsed_ms < min_interval_ms:
+                wait = (min_interval_ms - elapsed_ms) / 1000
+                return (
+                    f"Rate limited: {tool_name} called too rapidly. "
+                    f"Wait {wait:.1f}s before retrying."
+                )
+
+        # Max calls per rolling 60-second window.
+        if max_per_minute > 0:
+            history = self._call_history.get(tool_name, [])
+            cutoff = now - 60.0
+            history = [t for t in history if t > cutoff]
+            if len(history) >= max_per_minute:
+                return (
+                    f"Rate limited: {tool_name} called {max_per_minute} times "
+                    f"in the last minute. Wait before retrying."
+                )
+            self._call_history[tool_name] = history
+
+        self._last_call[tool_name] = now
+        self._call_history.setdefault(tool_name, []).append(now)
+        return None
+
+
+_tool_limiter = _ToolRateLimiter()
+
+# Pending upload confirmations (token -> file_path).
+# Only populated when KILN_CONFIRM_UPLOAD is enabled.
+_pending_uploads: dict[str, str] = {}
+
+# Rate limits: {tool_name: (min_interval_ms, max_per_minute)}.
+# Read-only tools have no limits.  Physically-dangerous tools get cooldowns.
+_TOOL_RATE_LIMITS: dict[str, tuple[int, int]] = {
+    "set_temperature": (2000, 10),
+    "send_gcode":      (500, 30),
+    "emergency_stop":  (5000, 3),
+    "cancel_print":    (5000, 3),
+    "start_print":     (5000, 3),
+    "upload_file":     (2000, 10),
+}
+
+
+def _check_rate_limit(tool_name: str) -> Optional[dict]:
+    """Return an error dict if *tool_name* is rate-limited, else ``None``."""
+    limits = _TOOL_RATE_LIMITS.get(tool_name)
+    if not limits:
+        return None
+    msg = _tool_limiter.check(tool_name, limits[0], limits[1])
+    if msg:
+        return _error_dict(msg, code="RATE_LIMITED")
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -680,6 +825,8 @@ def upload_file(file_path: str) -> dict:
     """
     if err := _check_auth("files"):
         return err
+    if err := _check_rate_limit("upload_file"):
+        return err
     try:
         adapter = _get_adapter()
 
@@ -703,6 +850,89 @@ def upload_file(file_path: str) -> dict:
                 code="VALIDATION_ERROR",
             )
 
+        # -- G-code safety scan (blocked commands + temperature limits) ------
+        _GCODE_EXTENSIONS = {".gcode", ".gco", ".g"}
+        scan_warnings: list[str] = []
+        if os.path.splitext(file_path)[1].lower() in _GCODE_EXTENSIONS:
+            try:
+                from kiln.gcode import scan_gcode_file
+
+                scan = scan_gcode_file(file_path, printer_id=_PRINTER_MODEL or None)
+                if not scan.valid:
+                    return {
+                        "success": False,
+                        "error": {
+                            "code": "GCODE_BLOCKED",
+                            "message": "File contains blocked G-code commands and was not uploaded.",
+                        },
+                        "blocked_commands": scan.blocked_commands[:10],
+                        "errors": scan.errors[:10],
+                    }
+                scan_warnings = scan.warnings[:10]
+            except (ImportError, FileNotFoundError, PermissionError):
+                pass  # scan is best-effort; file existence was already verified above
+
+        # -- Upload confirmation gate (when KILN_CONFIRM_UPLOAD is set) ------
+        file_name = os.path.basename(file_path)
+        if _CONFIRM_UPLOAD:
+            import hashlib
+
+            token = hashlib.sha256(
+                f"{file_path}:{file_size}".encode()
+            ).hexdigest()[:16]
+            # Store token for upload_file_confirm() to verify.
+            _pending_uploads[token] = file_path
+            summary: dict[str, Any] = {
+                "confirmation_required": True,
+                "token": token,
+                "file_name": file_name,
+                "file_size_bytes": file_size,
+                "message": (
+                    f"Upload of {file_name} ({file_size / 1024:.1f} KB) "
+                    f"requires confirmation. Call upload_file_confirm(token='{token}') "
+                    f"to proceed."
+                ),
+            }
+            if scan_warnings:
+                summary["warnings"] = scan_warnings
+            return summary
+
+        result = adapter.upload_file(file_path)
+        resp = result.to_dict()
+        if scan_warnings:
+            resp["warnings"] = scan_warnings
+        return resp
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in upload_file")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def upload_file_confirm(token: str) -> dict:
+    """Confirm and execute a pending file upload.
+
+    When ``KILN_CONFIRM_UPLOAD`` is enabled, ``upload_file()`` returns a
+    confirmation token instead of uploading immediately.  Pass that token
+    here to proceed with the upload.
+
+    Args:
+        token: The confirmation token returned by ``upload_file()``.
+    """
+    if err := _check_auth("files"):
+        return err
+    file_path = _pending_uploads.pop(token, None)
+    if file_path is None:
+        return _error_dict(
+            f"Invalid or expired upload token: {token!r}. "
+            f"Call upload_file() again to get a new token.",
+            code="INVALID_TOKEN",
+        )
+    try:
+        adapter = _get_adapter()
         result = adapter.upload_file(file_path)
         return result.to_dict()
     except FileNotFoundError as exc:
@@ -710,7 +940,7 @@ def upload_file(file_path: str) -> dict:
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(str(exc))
     except Exception as exc:
-        logger.exception("Unexpected error in upload_file")
+        logger.exception("Unexpected error in upload_file_confirm")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
@@ -754,6 +984,8 @@ def start_print(file_name: str) -> dict:
     """
     if err := _check_auth("print"):
         return err
+    if err := _check_rate_limit("start_print"):
+        return err
     try:
         adapter = _get_adapter()
 
@@ -788,6 +1020,8 @@ def cancel_print() -> dict:
     """
     if err := _check_auth("print"):
         return err
+    if err := _check_rate_limit("cancel_print"):
+        return err
     try:
         adapter = _get_adapter()
         result = adapter.cancel_print()
@@ -815,6 +1049,8 @@ def emergency_stop() -> dict:
     power cycle or firmware restart before it can print again.
     """
     if err := _check_auth("print"):
+        return err
+    if err := _check_rate_limit("emergency_stop"):
         return err
     try:
         adapter = _get_adapter()
@@ -888,15 +1124,16 @@ def set_temperature(
     """
     if err := _check_auth("temperature"):
         return err
+    if err := _check_rate_limit("set_temperature"):
+        return err
     if tool_temp is None and bed_temp is None:
         return _error_dict(
             "At least one of tool_temp or bed_temp must be provided.",
             code="INVALID_ARGS",
         )
 
-    # -- Temperature safety validation ------------------------------------
-    _MAX_TOOL = 300.0
-    _MAX_BED = 130.0
+    # -- Temperature safety validation (per-printer when configured) ------
+    _MAX_TOOL, _MAX_BED = _get_temp_limits()
     if tool_temp is not None:
         if tool_temp < 0:
             return _error_dict(
@@ -926,6 +1163,39 @@ def set_temperature(
         adapter = _get_adapter()
         results: Dict[str, Any] = {"success": True}
 
+        # -- Relative temperature change advisory (non-blocking) ----------
+        _DELTA_WARN_TOOL = 10.0
+        _DELTA_WARN_BED = 50.0
+        rate_warnings: list[str] = []
+        try:
+            state = adapter.get_state()
+            if (
+                tool_temp is not None
+                and state.tool_temp_target is not None
+                and state.tool_temp_target > 0
+            ):
+                delta = abs(tool_temp - state.tool_temp_target)
+                if delta > _DELTA_WARN_TOOL:
+                    rate_warnings.append(
+                        f"Large hotend temperature change: "
+                        f"{state.tool_temp_target:.0f}°C -> {tool_temp:.0f}°C "
+                        f"(delta {delta:.0f}°C)."
+                    )
+            if (
+                bed_temp is not None
+                and state.bed_temp_target is not None
+                and state.bed_temp_target > 0
+            ):
+                delta = abs(bed_temp - state.bed_temp_target)
+                if delta > _DELTA_WARN_BED:
+                    rate_warnings.append(
+                        f"Large bed temperature change: "
+                        f"{state.bed_temp_target:.0f}°C -> {bed_temp:.0f}°C "
+                        f"(delta {delta:.0f}°C)."
+                    )
+        except Exception:
+            pass  # Don't let warning logic block the actual operation.
+
         if tool_temp is not None:
             ok = adapter.set_tool_temp(tool_temp)
             results["tool"] = {
@@ -940,6 +1210,9 @@ def set_temperature(
                 "accepted": ok,
             }
 
+        if rate_warnings:
+            results["warnings"] = rate_warnings
+
         return results
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(str(exc))
@@ -949,7 +1222,7 @@ def set_temperature(
 
 
 @mcp.tool()
-def preflight_check(file_path: str | None = None, expected_material: str | None = None) -> dict:
+def preflight_check(file_path: str | None = None, expected_material: str | None = None, remote_file: str | None = None) -> dict:
     """Run pre-print safety checks to verify the printer is ready.
 
     Checks performed:
@@ -959,6 +1232,7 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
     - Temperatures are within safe limits
     - (Optional) Material loaded matches expected material
     - (Optional) Local G-code file is valid and readable
+    - (Optional) Remote file exists on the printer
 
     Args:
         file_path: Optional path to a local G-code file to validate before
@@ -966,6 +1240,8 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
         expected_material: Optional material type (e.g. "PLA", "ABS", "PETG").
             If provided and a material is loaded, checks for a mismatch.
 
+        remote_file: Optional filename to verify exists on the printer.
+            If provided, checks the printer's file list for a matching file.
     Call this before ``start_print()`` to catch problems early.  The result
     includes a ``ready`` boolean and detailed per-check breakdowns.
     """
@@ -1072,6 +1348,35 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
             if not file_ok:
                 errors.extend(file_result.get("errors", []))
 
+
+        # -- Remote file check (optional) ----------------------------------
+        if remote_file is not None:
+            try:
+                printer_files = adapter.list_files()
+                remote_lower = remote_file.lower()
+                file_found = any(
+                    f.name.lower() == remote_lower or f.path.lower() == remote_lower
+                    for f in printer_files
+                )
+                checks.append({
+                    "name": "file_on_printer",
+                    "passed": file_found,
+                    "message": (
+                        f"File '{remote_file}' found on printer"
+                        if file_found
+                        else f"File '{remote_file}' not found on printer"
+                    ),
+                })
+                if not file_found:
+                    errors.append(f"File '{remote_file}' not found on printer")
+            except Exception:
+                checks.append({
+                    "name": "file_on_printer",
+                    "passed": False,
+                    "message": "Unable to list files on printer to verify remote file",
+                })
+                errors.append("Unable to list files on printer to verify remote file")
+
         # -- Summary -------------------------------------------------------
         ready = all(c["passed"] for c in checks)
         summary = (
@@ -1122,6 +1427,8 @@ def send_gcode(commands: str) -> dict:
     to preview what would be allowed without actually sending.
     """
     if err := _check_auth("print"):
+        return err
+    if err := _check_rate_limit("send_gcode"):
         return err
     try:
         adapter = _get_adapter()
@@ -4759,6 +5066,9 @@ def monitor_print_vision(
     printer_name: str | None = None,
     include_snapshot: bool = True,
     save_snapshot: str | None = None,
+    failure_type: str | None = None,
+    failure_confidence: float | None = None,
+    auto_pause: bool | None = None,
 ) -> dict:
     """Capture a snapshot and printer state for visual inspection of an in-progress print.
 
@@ -4773,6 +5083,13 @@ def monitor_print_vision(
         printer_name: Target printer.  Omit for the default printer.
         include_snapshot: Whether to capture a webcam snapshot (default True).
         save_snapshot: Optional path to save the snapshot image.
+        failure_type: Optional detected failure type (e.g. "spaghetti",
+            "layer_shift", "warping").  Reported by the agent after visual
+            inspection of a previous snapshot.
+        failure_confidence: Confidence score (0.0-1.0) of the failure detection.
+        auto_pause: If True, automatically pause the print when a failure is
+            detected with confidence >= 0.8.  Defaults to the value of the
+            ``KILN_VISION_AUTO_PAUSE`` environment variable (default False).
     """
     if err := _check_auth("monitoring"):
         return err
@@ -4838,6 +5155,38 @@ def monitor_print_vision(
         else:
             result["snapshot"] = {"available": False, "reason": "not_requested"}
 
+        # -- Auto-pause on failure detection ----------------------------
+        _auto_pause = auto_pause
+        if _auto_pause is None:
+            _auto_pause = os.environ.get("KILN_VISION_AUTO_PAUSE", "").lower() in ("1", "true", "yes")
+
+        auto_paused = False
+        if failure_type and failure_confidence is not None:
+            result["failure_detection"] = {
+                "type": failure_type,
+                "confidence": failure_confidence,
+                "auto_pause_enabled": _auto_pause,
+            }
+            if _auto_pause and failure_confidence >= 0.8 and is_printing:
+                try:
+                    adapter.pause_print()
+                    auto_paused = True
+                    result["failure_detection"]["auto_paused"] = True
+                    result["failure_detection"]["message"] = (
+                        f"Print auto-paused due to detected {failure_type} "
+                        f"(confidence: {failure_confidence:.0%})"
+                    )
+                    logger.warning(
+                        "Vision auto-pause triggered: %s (confidence=%.2f) on printer %s",
+                        failure_type, failure_confidence, printer_name or "default",
+                    )
+                except Exception as pause_exc:
+                    result["failure_detection"]["auto_pause_error"] = str(pause_exc)
+                    logger.error(
+                        "Vision auto-pause failed: %s on printer %s",
+                        pause_exc, printer_name or "default",
+                    )
+
         # Publish vision check event
         _event_bus.publish(
             EventType.VISION_CHECK,
@@ -4846,9 +5195,24 @@ def monitor_print_vision(
                 "completion": job.completion,
                 "phase": phase,
                 "snapshot_captured": result["snapshot"].get("available", False),
+                "auto_paused": auto_paused,
             },
             source="vision",
         )
+
+
+        if auto_paused:
+            _event_bus.publish(
+                EventType.VISION_ALERT,
+                {
+                    "printer_name": printer_name or "default",
+                    "alert_type": "auto_pause",
+                    "failure_type": failure_type,
+                    "failure_confidence": failure_confidence,
+                    "completion": job.completion,
+                },
+                source="vision",
+            )
 
         return result
 
@@ -5835,6 +6199,9 @@ def run_benchmark(
 
 def main() -> None:
     """Run the Kiln MCP server."""
+    # Configure structured logging if requested (before any log calls).
+    _configure_logging()
+
     # Auto-register the env-configured printer so the scheduler can
     # dispatch jobs even if no explicit register_printer call is made.
     if _PRINTER_HOST and _registry.count == 0:

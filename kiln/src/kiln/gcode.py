@@ -32,6 +32,7 @@ Usage::
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -127,6 +128,29 @@ _PARAM_RE = re.compile(r"([A-Za-z])\s*([+-]?\d*\.?\d+)")
 # a stripped line.  Tolerates an optional space between letter and number.
 _CMD_RE = re.compile(r"^([A-Za-z])\s*(\d+(?:\.\d+)?)")
 
+# Regex to match a leading line-number word (e.g. ``N10``, ``N100``).
+# The N-word is optional and is stripped before parsing the actual command.
+_LINE_NUMBER_RE = re.compile(r"^[Nn]\d+\s*")
+
+
+def _strip_line_number(line: str) -> str:
+    """Remove a leading G-code line number (N-word) if present.
+
+    G-code lines may be prefixed with ``N<digits>`` (with or without a
+    trailing space) for transmission error-checking.  This prefix is not
+    part of the command and must be removed before parsing.
+
+    Examples::
+
+        >>> _strip_line_number("N10 G28")
+        'G28'
+        >>> _strip_line_number("N100G28")
+        'G28'
+        >>> _strip_line_number("G28")
+        'G28'
+    """
+    return _LINE_NUMBER_RE.sub("", line)
+
 
 def _parse_command_word(line: str) -> Optional[str]:
     """Extract and normalise the command word from a G-code line.
@@ -195,6 +219,7 @@ def _validate_single(
     cleaned = _strip_comment(raw_line)
     if not cleaned:
         return None  # blank / comment-only line -- skip silently
+    cleaned = _strip_line_number(cleaned)
 
     cmd = _parse_command_word(cleaned)
     if cmd is None:
@@ -415,6 +440,7 @@ def _validate_single_with_profile(
     cleaned = _strip_comment(raw_line)
     if not cleaned:
         return None
+    cleaned = _strip_line_number(cleaned)
 
     cmd = _parse_command_word(cleaned)
     if cmd is None:
@@ -512,3 +538,102 @@ def _validate_single_with_profile(
             )
 
     return cleaned
+
+
+# ---------------------------------------------------------------------------
+# File-level scanning
+# ---------------------------------------------------------------------------
+
+_MAX_SCAN_BYTES: int = 500 * 1024 * 1024  # 500 MB text cap
+_MAX_WARNINGS: int = 50
+
+
+def scan_gcode_file(
+    file_path: str,
+    *,
+    printer_id: Optional[str] = None,
+) -> GCodeValidationResult:
+    """Stream-validate an entire G-code file for safety.
+
+    Reads the file line-by-line without loading it into memory.  Checks
+    every line against blocked commands and temperature limits.  Fails fast
+    on the first **blocked** command to avoid reading unnecessarily large
+    files.  Warnings are collected but capped at :data:`_MAX_WARNINGS`.
+
+    When *printer_id* is provided the per-printer safety profile is used
+    for temperature and feedrate limits.  Otherwise the generic module-level
+    limits apply.
+
+    Args:
+        file_path: Path to a ``.gcode`` / ``.gco`` / ``.g`` file.
+        printer_id: Optional printer profile id (e.g. ``"ender3"``).
+
+    Returns:
+        A :class:`GCodeValidationResult`.  ``valid`` is ``False`` if any
+        blocked command was found.
+
+    Raises:
+        FileNotFoundError: If *file_path* does not exist.
+        PermissionError: If the file cannot be read.
+    """
+    abs_path = os.path.abspath(file_path)
+    if not os.path.isfile(abs_path):
+        raise FileNotFoundError(f"File not found: {abs_path}")
+
+    file_size = os.path.getsize(abs_path)
+    if file_size > _MAX_SCAN_BYTES:
+        result = GCodeValidationResult(valid=False)
+        result.errors.append(
+            f"File is too large to scan ({file_size / 1024 / 1024:.1f} MB). "
+            f"Maximum scannable size is {_MAX_SCAN_BYTES / 1024 / 1024:.0f} MB."
+        )
+        return result
+
+    # Resolve validation function based on printer profile.
+    profile = None
+    if printer_id:
+        try:
+            from kiln.safety_profiles import get_profile  # noqa: E402
+
+            profile = get_profile(printer_id)
+        except KeyError:
+            pass  # fall back to generic validation
+
+    result = GCodeValidationResult()
+
+    with open(abs_path, "r", errors="replace") as fh:
+        for raw_line in fh:
+            if profile is not None:
+                cleaned = _validate_single_with_profile(
+                    raw_line,
+                    result.warnings,
+                    result.errors,
+                    result.blocked_commands,
+                    profile,
+                )
+            else:
+                cleaned = _validate_single(
+                    raw_line,
+                    result.warnings,
+                    result.errors,
+                    result.blocked_commands,
+                )
+
+            if cleaned is not None:
+                result.commands.append(cleaned)
+
+            # Fail fast on blocked commands.
+            if result.errors:
+                result.valid = False
+                return result
+
+            # Cap warnings to avoid unbounded memory growth.
+            if len(result.warnings) > _MAX_WARNINGS:
+                result.warnings = result.warnings[:_MAX_WARNINGS]
+                result.warnings.append(
+                    f"(warnings capped at {_MAX_WARNINGS} -- additional warnings suppressed)"
+                )
+                break
+
+    result.valid = len(result.errors) == 0
+    return result

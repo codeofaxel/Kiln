@@ -1382,6 +1382,50 @@ class KilnDB:
         return d
 
     # ------------------------------------------------------------------
+    # Cleanup & Maintenance
+    # ------------------------------------------------------------------
+
+    def cleanup(self, max_age_days: int = 90) -> Dict[str, int]:
+        """Delete old completed/failed jobs and events, then VACUUM.
+
+        Parameters:
+            max_age_days: Records older than this many days are purged.
+
+        Returns:
+            A dict with ``"jobs_deleted"``, ``"events_deleted"`` counts.
+        """
+        cutoff = time.time() - (max_age_days * 86400)
+        jobs_deleted = 0
+        events_deleted = 0
+
+        with self._write_lock:
+            cursor = self._conn.execute(
+                "DELETE FROM jobs WHERE status IN ('completed', 'failed', 'cancelled') "
+                "AND submitted_at < ?",
+                (cutoff,),
+            )
+            jobs_deleted = cursor.rowcount
+
+            cursor = self._conn.execute(
+                "DELETE FROM events WHERE timestamp < ?",
+                (cutoff,),
+            )
+            events_deleted = cursor.rowcount
+
+            self._conn.commit()
+            self._conn.execute("VACUUM")
+
+        return {"jobs_deleted": jobs_deleted, "events_deleted": events_deleted}
+
+    def db_size_bytes(self) -> int:
+        """Return the current size of the database file in bytes."""
+        try:
+            return os.path.getsize(self._db_path)
+        except OSError:
+            return 0
+
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 

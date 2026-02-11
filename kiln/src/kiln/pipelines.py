@@ -170,11 +170,8 @@ def quick_print(
     if printer_id and gcode_path:
         step_start = time.time()
         try:
-            from kiln.gcode import validate_gcode_for_printer
-            with open(gcode_path, "r") as fh:
-                # Read first 2000 lines for spot-check (full files too large).
-                sample = "".join(fh.readline() for _ in range(2000))
-            vr = validate_gcode_for_printer(sample, printer_id)
+            from kiln.gcode import scan_gcode_file
+            vr = scan_gcode_file(gcode_path, printer_id=printer_id)
             steps.append(PipelineStep(
                 name="safety_check",
                 success=vr.valid,
