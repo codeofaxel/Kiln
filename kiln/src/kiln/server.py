@@ -37,6 +37,9 @@ import atexit
 import logging
 import os
 import re
+import shutil
+import signal
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -267,7 +270,7 @@ def _get_adapter() -> PrinterAdapter:
 # ---------------------------------------------------------------------------
 
 _registry = PrinterRegistry()
-_queue = PrintQueue()
+_queue = PrintQueue(db_path=os.path.join(str(Path.home()), ".kiln", "queue.db"))
 _event_bus = EventBus()
 _scheduler = JobScheduler(_queue, _registry, _event_bus)
 _webhook_mgr = WebhookManager(_event_bus)
@@ -404,6 +407,47 @@ _RETRYABLE_CODES = frozenset({
     "GENERATION_TIMEOUT",
     "RATE_LIMIT",
 })
+
+
+# ---------------------------------------------------------------------------
+# Safety helpers
+# ---------------------------------------------------------------------------
+
+# Environment variable names containing secrets — used to sanitize logs.
+_SECRET_ENV_VARS = (
+    "KILN_PRINTER_API_KEY", "KILN_THINGIVERSE_TOKEN", "KILN_MMF_API_KEY",
+    "KILN_CULTS3D_API_KEY", "KILN_MESHY_API_KEY", "KILN_CRAFTCLOUD_API_KEY",
+    "KILN_PRINTER_ACCESS_CODE", "KILN_CIRCLE_API_KEY", "KILN_STRIPE_API_KEY",
+    "KILN_STRIPE_WEBHOOK_SECRET", "KILN_API_AUTH_TOKEN",
+)
+
+
+def _sanitize_log_msg(msg: str) -> str:
+    """Replace any env var secret values in *msg* with ``***``."""
+    for var in _SECRET_ENV_VARS:
+        val = os.environ.get(var, "")
+        if len(val) > 4:
+            msg = msg.replace(val, "***")
+    return msg
+
+
+def _check_disk_space(path: str, required_mb: int = 100) -> Optional[Dict[str, Any]]:
+    """Return an error dict if fewer than *required_mb* MB are free at *path*.
+
+    Returns ``None`` if there's enough space.
+    """
+    try:
+        usage = shutil.disk_usage(path)
+        free_mb = usage.free / (1024 * 1024)
+        if free_mb < required_mb:
+            return _error_dict(
+                f"Insufficient disk space: {free_mb:.0f} MB free, "
+                f"need at least {required_mb} MB.",
+                code="DISK_FULL",
+            )
+    except OSError:
+        pass  # Can't check — proceed optimistically
+    return None
 
 
 def _error_dict(
@@ -877,7 +921,7 @@ def set_temperature(
 
 
 @mcp.tool()
-def preflight_check(file_path: str | None = None) -> dict:
+def preflight_check(file_path: str | None = None, expected_material: str | None = None) -> dict:
     """Run pre-print safety checks to verify the printer is ready.
 
     Checks performed:
@@ -885,11 +929,14 @@ def preflight_check(file_path: str | None = None) -> dict:
     - Printer is not currently printing
     - No error flags are set
     - Temperatures are within safe limits
+    - (Optional) Material loaded matches expected material
     - (Optional) Local G-code file is valid and readable
 
     Args:
         file_path: Optional path to a local G-code file to validate before
             upload.  If omitted, only printer-state checks are performed.
+        expected_material: Optional material type (e.g. "PLA", "ABS", "PETG").
+            If provided and a material is loaded, checks for a mismatch.
 
     Call this before ``start_print()`` to catch problems early.  The result
     includes a ``ready`` boolean and detailed per-check breakdowns.
@@ -955,6 +1002,34 @@ def preflight_check(file_path: str | None = None) -> dict:
         })
         if not temps_safe:
             errors.extend(temp_warnings)
+
+        # -- Material mismatch check (optional) ----------------------------
+        if expected_material is not None:
+            try:
+                # Use the default printer name for material check
+                printer_name = "default"
+                if _registry.count > 0:
+                    names = _registry.list_names()
+                    if names:
+                        printer_name = names[0]
+                warning = _material_tracker.check_match(printer_name, expected_material)
+                if warning is not None:
+                    mat_msg = warning.message
+                    checks.append({
+                        "name": "material_match",
+                        "passed": False,
+                        "message": mat_msg,
+                    })
+                    errors.append(mat_msg)
+                else:
+                    checks.append({
+                        "name": "material_match",
+                        "passed": True,
+                        "message": f"Loaded material matches expected ({expected_material.upper()})",
+                    })
+            except Exception:
+                # Material tracking not configured — skip silently
+                pass
 
         # -- File validation (optional) ------------------------------------
         file_result: Optional[Dict[str, Any]] = None
@@ -1174,6 +1249,7 @@ def register_printer(
     host: str,
     api_key: str | None = None,
     serial: str | None = None,
+    verify_ssl: bool = True,
 ) -> dict:
     """Register a new printer in the fleet.
 
@@ -1184,6 +1260,8 @@ def register_printer(
         api_key: API key (required for OctoPrint and Bambu, optional for
             Moonraker).  For Bambu printers this is the LAN Access Code.
         serial: Printer serial number (required for Bambu printers).
+        verify_ssl: Whether to verify SSL certificates (default True).
+            Set to False for printers using self-signed certificates.
 
     Once registered the printer appears in ``fleet_status()`` and can be
     targeted by ``submit_job()``.
@@ -1197,9 +1275,9 @@ def register_printer(
                     "api_key is required for OctoPrint printers.",
                     code="INVALID_ARGS",
                 )
-            adapter = OctoPrintAdapter(host=host, api_key=api_key)
+            adapter = OctoPrintAdapter(host=host, api_key=api_key, verify_ssl=verify_ssl)
         elif printer_type == "moonraker":
-            adapter = MoonrakerAdapter(host=host, api_key=api_key or None)
+            adapter = MoonrakerAdapter(host=host, api_key=api_key or None, verify_ssl=verify_ssl)
         elif printer_type == "bambu":
             if BambuAdapter is None:
                 return _error_dict(
@@ -1622,6 +1700,45 @@ def search_all_models(
 
 
 @mcp.tool()
+def health_check() -> dict:
+    """Return system health information for monitoring.
+
+    No authentication required.  Useful for container healthchecks,
+    dashboards, and verifying the server is responsive.
+    """
+    import platform
+
+    uptime_s = time.time() - _start_time
+    hours = int(uptime_s // 3600)
+    minutes = int((uptime_s % 3600) // 60)
+    secs = int(uptime_s % 60)
+
+    db_ok = False
+    try:
+        get_db()._conn.execute("SELECT 1")
+        db_ok = True
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "status": "healthy",
+        "uptime": f"{hours}h {minutes}m {secs}s",
+        "uptime_seconds": round(uptime_s, 1),
+        "printers_registered": _registry.count,
+        "queue_pending": _queue.pending_count(),
+        "queue_active": _queue.active_count(),
+        "queue_total": _queue.total_count,
+        "scheduler_running": _scheduler.is_running,
+        "database_reachable": db_ok,
+        "python_version": platform.python_version(),
+        "platform": platform.system(),
+        "auth_enabled": os.environ.get("KILN_AUTH_ENABLED", "").lower()
+            in ("1", "true", "yes"),
+    }
+
+
+@mcp.tool()
 def safety_settings() -> dict:
     """Show current safety and auto-print settings.
 
@@ -1837,6 +1954,8 @@ def download_model(
     After downloading, validate with ``validate_generated_mesh``, then
     upload to a printer with ``upload_file`` and print with ``start_print``.
     """
+    if disk_err := _check_disk_space(dest_dir):
+        return disk_err
     try:
         client = _get_thingiverse()
         path = client.download_file(file_id, dest_dir, file_name=file_name)
@@ -1887,6 +2006,8 @@ def download_and_upload(
     """
     if err := _check_auth("files"):
         return err
+    if disk_err := _check_disk_space("/tmp/kiln_downloads"):
+        return disk_err
     try:
         if _marketplace_registry.count == 0:
             _init_marketplace_registry()
@@ -4018,9 +4139,11 @@ def download_generated_model(
     """
     if err := _check_auth("generate"):
         return err
+    output_dir = output_path or "/tmp/kiln_generated"
+    if disk_err := _check_disk_space(output_dir):
+        return disk_err
     try:
         gen = _get_generation_provider(provider)
-        output_dir = output_path or "/tmp/kiln_generated"
         result = gen.download_result(job_id, output_dir=output_dir)
 
         # Auto-convert OBJ to STL for maximum slicer compatibility.
@@ -5691,9 +5814,10 @@ def main() -> None:
             adapter = _get_adapter()
             _registry.register("default", adapter)
             logger.info("Auto-registered env-configured printer as 'default'")
-        except Exception:
+        except Exception as exc:
             logger.debug(
-                "Could not auto-register env-configured printer", exc_info=True
+                "Could not auto-register env-configured printer: %s",
+                _sanitize_log_msg(str(exc)),
             )
 
     # Auto-register marketplace adapters from env credentials
@@ -5730,12 +5854,37 @@ def main() -> None:
         except Exception:
             logger.debug("Could not restore cloud sync config", exc_info=True)
 
+    # Warn if auth is disabled
+    auth_enabled = os.environ.get("KILN_AUTH_ENABLED", "").lower() in ("1", "true", "yes")
+    if not auth_enabled:
+        msg = (
+            "WARNING: Authentication is DISABLED. Anyone with network access "
+            "can control your printer. Set KILN_AUTH_ENABLED=true and "
+            "configure API keys for production use."
+        )
+        logger.warning(msg)
+        print(f"\n  ⚠  {msg}\n", file=sys.stderr)
+
     # Start background services
     _scheduler.start()
     _webhook_mgr.start()
     logger.info("Kiln scheduler and webhook delivery started")
 
-    # Graceful shutdown on exit
+    # Graceful shutdown handler
+    def _shutdown_handler(signum: int, frame: Any) -> None:
+        sig_name = signal.Signals(signum).name
+        logger.info("Received %s — shutting down gracefully...", sig_name)
+        _scheduler.stop()
+        _webhook_mgr.stop()
+        _stream_proxy.stop()
+        if _cloud_sync is not None:
+            _cloud_sync.stop()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _shutdown_handler)
+    signal.signal(signal.SIGINT, _shutdown_handler)
+
+    # Atexit as fallback
     atexit.register(_scheduler.stop)
     atexit.register(_webhook_mgr.stop)
     atexit.register(_stream_proxy.stop)

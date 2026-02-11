@@ -284,8 +284,23 @@ def resumable_download(
                 for chunk in resp.iter_content(chunk_size=chunk_size):
                     fh.write(chunk)
 
-            # Verify we got content
+            # Verify we got content and file integrity
             if part_path.exists() and part_path.stat().st_size > 0:
+                actual_size = part_path.stat().st_size
+                # Check Content-Length if the server provided it
+                expected_size = resp.headers.get("Content-Length")
+                if expected_size is not None:
+                    try:
+                        expected = int(expected_size) + existing_bytes
+                        if actual_size < expected:
+                            _logger.warning(
+                                "Incomplete download: got %d bytes, expected %d",
+                                actual_size, expected,
+                            )
+                            # Don't rename — leave .part for resume on next attempt
+                            continue
+                    except (ValueError, TypeError):
+                        pass  # Malformed Content-Length, skip check
                 part_path.rename(out_path)
                 _logger.info(
                     "Downloaded %s (%d bytes)",

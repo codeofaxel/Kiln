@@ -43,6 +43,7 @@ class PrinterRegistry:
     def __init__(self) -> None:
         self._printers: Dict[str, PrinterAdapter] = {}
         self._lock = threading.Lock()
+        self._printer_locks: Dict[str, threading.Lock] = {}
 
     # ------------------------------------------------------------------
     # Registration
@@ -57,6 +58,8 @@ class PrinterRegistry:
         """
         with self._lock:
             self._printers[name] = adapter
+            if name not in self._printer_locks:
+                self._printer_locks[name] = threading.Lock()
             logger.info("Registered printer %r (%s)", name, adapter.name)
 
     def unregister(self, name: str) -> None:
@@ -181,3 +184,23 @@ class PrinterRegistry:
                     matched.append(name)
 
         return sorted(matched)
+
+    # ------------------------------------------------------------------
+    # Per-printer mutex
+    # ------------------------------------------------------------------
+
+    def printer_lock(self, name: str) -> threading.Lock:
+        """Return the per-printer lock for exclusive operations.
+
+        Use this to prevent concurrent agents from controlling the same
+        printer simultaneously (e.g. uploading files or starting prints).
+
+        Raises:
+            PrinterNotFoundError: If *name* is not registered.
+        """
+        with self._lock:
+            if name not in self._printers:
+                raise PrinterNotFoundError(name)
+            if name not in self._printer_locks:
+                self._printer_locks[name] = threading.Lock()
+            return self._printer_locks[name]
