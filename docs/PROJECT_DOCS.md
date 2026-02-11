@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/kiln-horizontal-dark.svg" alt="Kiln" width="400">
+</p>
+
 # Kiln Documentation
 
 ## About Kiln
