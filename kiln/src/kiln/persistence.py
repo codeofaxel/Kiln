@@ -226,6 +226,29 @@ class KilnDB:
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_memory_agent
                     ON agent_memory(agent_id, scope);
+
+                CREATE TABLE IF NOT EXISTS print_outcomes (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id          TEXT NOT NULL,
+                    printer_name    TEXT NOT NULL,
+                    file_name       TEXT,
+                    file_hash       TEXT,
+                    material_type   TEXT,
+                    outcome         TEXT NOT NULL,
+                    quality_grade   TEXT,
+                    failure_mode    TEXT,
+                    settings        TEXT,
+                    environment     TEXT,
+                    notes           TEXT,
+                    agent_id        TEXT,
+                    created_at      REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_print_outcomes_printer
+                    ON print_outcomes(printer_name);
+                CREATE INDEX IF NOT EXISTS idx_print_outcomes_file
+                    ON print_outcomes(file_hash);
+                CREATE INDEX IF NOT EXISTS idx_print_outcomes_outcome
+                    ON print_outcomes(outcome);
                 """
             )
             self._conn.commit()
@@ -1146,6 +1169,200 @@ class KilnDB:
             )
             self._conn.commit()
             return cur.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Print outcomes (cross-printer learning)
+    # ------------------------------------------------------------------
+
+    def save_print_outcome(self, outcome: Dict[str, Any]) -> int:
+        """Save an agent-curated print outcome record.  Returns row id."""
+        with self._write_lock:
+            cur = self._conn.execute(
+                """INSERT INTO print_outcomes
+                   (job_id, printer_name, file_name, file_hash, material_type,
+                    outcome, quality_grade, failure_mode, settings, environment,
+                    notes, agent_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    outcome["job_id"],
+                    outcome["printer_name"],
+                    outcome.get("file_name"),
+                    outcome.get("file_hash"),
+                    outcome.get("material_type"),
+                    outcome["outcome"],
+                    outcome.get("quality_grade"),
+                    outcome.get("failure_mode"),
+                    json.dumps(outcome["settings"]) if outcome.get("settings") else None,
+                    json.dumps(outcome["environment"]) if outcome.get("environment") else None,
+                    outcome.get("notes"),
+                    outcome.get("agent_id"),
+                    outcome.get("created_at", time.time()),
+                ),
+            )
+            self._conn.commit()
+            return cur.lastrowid  # type: ignore[return-value]
+
+    def get_print_outcome(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Return the outcome record for *job_id*, or ``None``."""
+        with self._write_lock:
+            row = self._conn.execute(
+                "SELECT * FROM print_outcomes WHERE job_id = ? ORDER BY created_at DESC LIMIT 1",
+                (job_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._outcome_row_to_dict(row)
+
+    def list_print_outcomes(
+        self,
+        printer_name: Optional[str] = None,
+        file_hash: Optional[str] = None,
+        outcome: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Return outcome records, optionally filtered."""
+        clauses: List[str] = []
+        params: List[Any] = []
+        if printer_name:
+            clauses.append("printer_name = ?")
+            params.append(printer_name)
+        if file_hash:
+            clauses.append("file_hash = ?")
+            params.append(file_hash)
+        if outcome:
+            clauses.append("outcome = ?")
+            params.append(outcome)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        with self._write_lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM print_outcomes{where} ORDER BY created_at DESC LIMIT ?",
+                params,
+            ).fetchall()
+        return [self._outcome_row_to_dict(r) for r in rows]
+
+    def get_printer_learning_insights(self, printer_name: str) -> Dict[str, Any]:
+        """Return aggregated outcome insights for a single printer."""
+        with self._write_lock:
+            total = self._conn.execute(
+                "SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ?",
+                (printer_name,),
+            ).fetchone()[0]
+            if total == 0:
+                return {
+                    "printer_name": printer_name,
+                    "total_outcomes": 0,
+                    "success_rate": 0.0,
+                    "failure_breakdown": {},
+                    "material_stats": {},
+                }
+            successes = self._conn.execute(
+                "SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ? AND outcome = 'success'",
+                (printer_name,),
+            ).fetchone()[0]
+            # Failure breakdown
+            failure_rows = self._conn.execute(
+                "SELECT failure_mode, COUNT(*) FROM print_outcomes "
+                "WHERE printer_name = ? AND outcome = 'failed' AND failure_mode IS NOT NULL "
+                "GROUP BY failure_mode ORDER BY COUNT(*) DESC",
+                (printer_name,),
+            ).fetchall()
+            failure_breakdown = {row[0]: row[1] for row in failure_rows}
+            # Material stats
+            material_rows = self._conn.execute(
+                "SELECT material_type, "
+                "  COUNT(*) as total, "
+                "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
+                "FROM print_outcomes "
+                "WHERE printer_name = ? AND material_type IS NOT NULL "
+                "GROUP BY material_type ORDER BY total DESC",
+                (printer_name,),
+            ).fetchall()
+            material_stats = {}
+            for row in material_rows:
+                material_stats[row[0]] = {
+                    "count": row[1],
+                    "success_rate": round(row[2] / row[1], 2) if row[1] else 0.0,
+                }
+        return {
+            "printer_name": printer_name,
+            "total_outcomes": total,
+            "success_rate": round(successes / total, 2) if total else 0.0,
+            "failure_breakdown": failure_breakdown,
+            "material_stats": material_stats,
+        }
+
+    def get_file_outcomes(self, file_hash: str) -> Dict[str, Any]:
+        """Return outcome data for a specific file across all printers."""
+        with self._write_lock:
+            rows = self._conn.execute(
+                "SELECT printer_name, "
+                "  COUNT(*) as total, "
+                "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
+                "FROM print_outcomes "
+                "WHERE file_hash = ? "
+                "GROUP BY printer_name ORDER BY wins DESC",
+                (file_hash,),
+            ).fetchall()
+        outcomes_by_printer = {}
+        for row in rows:
+            outcomes_by_printer[row[0]] = {
+                "total": row[1],
+                "successes": row[2],
+                "success_rate": round(row[2] / row[1], 2) if row[1] else 0.0,
+            }
+        printers_tried = list(outcomes_by_printer.keys())
+        best = printers_tried[0] if printers_tried else None
+        return {
+            "file_hash": file_hash,
+            "printers_tried": printers_tried,
+            "best_printer": best,
+            "outcomes_by_printer": outcomes_by_printer,
+        }
+
+    def suggest_printer_for_outcome(
+        self,
+        file_hash: Optional[str] = None,
+        material_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return printers ranked by success rate for the given criteria."""
+        clauses: List[str] = []
+        params: List[Any] = []
+        if file_hash:
+            clauses.append("file_hash = ?")
+            params.append(file_hash)
+        if material_type:
+            clauses.append("material_type = ?")
+            params.append(material_type)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        with self._write_lock:
+            rows = self._conn.execute(
+                f"SELECT printer_name, "
+                f"  COUNT(*) as total, "
+                f"  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
+                f"FROM print_outcomes{where} "
+                f"GROUP BY printer_name "
+                f"ORDER BY (CAST(wins AS REAL) / total) DESC, total DESC",
+                params,
+            ).fetchall()
+        results = []
+        for row in rows:
+            results.append({
+                "printer_name": row[0],
+                "total_prints": row[1],
+                "successes": row[2],
+                "success_rate": round(row[2] / row[1], 2) if row[1] else 0.0,
+            })
+        return results
+
+    def _outcome_row_to_dict(self, row) -> Dict[str, Any]:
+        """Convert a print_outcomes row to a dictionary."""
+        d = dict(row)
+        if d.get("settings"):
+            d["settings"] = json.loads(d["settings"])
+        if d.get("environment"):
+            d["environment"] = json.loads(d["environment"])
+        return d
 
     # ------------------------------------------------------------------
     # Lifecycle

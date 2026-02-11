@@ -95,6 +95,10 @@ class EventType(enum.Enum):
     BILLING_SETUP_COMPLETED = "billing.setup_completed"
     SPEND_LIMIT_REACHED = "billing.spend_limit_reached"
 
+    # Vision monitoring
+    VISION_CHECK = "vision.check"
+    VISION_ALERT = "vision.alert"
+
 
 @dataclass
 class Event:

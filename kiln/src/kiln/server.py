@@ -45,6 +45,20 @@ from kiln.printers import (
 )
 from kiln.gcode import validate_gcode as _validate_gcode_impl, validate_gcode_for_printer
 from kiln.safety_profiles import get_profile, list_profiles, profile_to_dict
+from kiln.slicer_profiles import (
+    get_slicer_profile, list_slicer_profiles, resolve_slicer_profile,
+    slicer_profile_to_dict,
+)
+from kiln.printer_intelligence import (
+    get_printer_intel, list_intel_profiles, get_material_settings,
+    diagnose_issue, intel_to_dict,
+)
+from kiln.pipelines import (
+    quick_print as _pipeline_quick_print,
+    calibrate as _pipeline_calibrate,
+    benchmark as _pipeline_benchmark,
+    list_pipelines as _list_pipelines,
+)
 from kiln.registry import PrinterRegistry, PrinterNotFoundError
 from kiln.queue import PrintQueue, JobStatus, JobNotFoundError
 from kiln.events import Event, EventBus, EventType
@@ -4453,6 +4467,304 @@ def validate_gcode_safe(
         }
     except Exception as exc:
         logger.exception("Unexpected error in validate_gcode_safe")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Slicer profile tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def list_slicer_profiles_tool() -> dict:
+    """List all bundled slicer profiles for supported printers.
+
+    Returns profile IDs, display names, and recommended slicer for each.
+    Use with ``get_slicer_profile_tool`` to see full settings, or
+    ``slice_model`` with printer_id for auto-profile selection.
+    """
+    if err := _check_auth("slicer"):
+        return err
+    try:
+        ids = list_slicer_profiles()
+        profiles = []
+        for pid in ids:
+            try:
+                p = get_slicer_profile(pid)
+                profiles.append({
+                    "id": p.id,
+                    "display_name": p.display_name,
+                    "slicer": p.slicer,
+                })
+            except KeyError:
+                continue
+        return {"success": True, "count": len(profiles), "profiles": profiles}
+    except Exception as exc:
+        logger.exception("Unexpected error in list_slicer_profiles_tool")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def get_slicer_profile_tool(printer_id: str) -> dict:
+    """Get the full bundled slicer profile for a printer model.
+
+    Returns all INI settings (layer height, speeds, temps, retraction, etc.)
+    and the recommended slicer.
+
+    Args:
+        printer_id: Printer model identifier (e.g. ``"ender3"``,
+            ``"bambu_x1c"``).
+    """
+    if err := _check_auth("slicer"):
+        return err
+    try:
+        profile = get_slicer_profile(printer_id)
+        return {"success": True, "profile": slicer_profile_to_dict(profile)}
+    except KeyError:
+        return _error_dict(
+            f"No slicer profile for '{printer_id}' and no default available.",
+            code="NOT_FOUND",
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error in get_slicer_profile_tool")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Printer intelligence tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def get_printer_intelligence(printer_id: str) -> dict:
+    """Get operational intelligence for a printer: firmware quirks, material
+    compatibility, calibration guidance, and known failure modes.
+
+    This is the knowledge base that helps you make informed decisions about
+    print settings, troubleshooting, and calibration without trial-and-error.
+
+    Args:
+        printer_id: Printer model identifier (e.g. ``"ender3"``,
+            ``"bambu_x1c"``, ``"voron_2"``).
+    """
+    if err := _check_auth("intel"):
+        return err
+    try:
+        intel = get_printer_intel(printer_id)
+        return {"success": True, "intel": intel_to_dict(intel)}
+    except KeyError:
+        return _error_dict(
+            f"No intelligence data for '{printer_id}'.",
+            code="NOT_FOUND",
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error in get_printer_intelligence")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def get_material_recommendation(
+    printer_id: str,
+    material: str,
+) -> dict:
+    """Get recommended print settings for a specific material on a specific printer.
+
+    Returns hotend temperature, bed temperature, fan speed, and
+    material-specific tips.
+
+    Args:
+        printer_id: Printer model identifier.
+        material: Material name (e.g. ``"PLA"``, ``"PETG"``, ``"ABS"``,
+            ``"TPU"``).
+    """
+    if err := _check_auth("intel"):
+        return err
+    try:
+        mp = get_material_settings(printer_id, material)
+        if mp is None:
+            intel = get_printer_intel(printer_id)
+            available = list(intel.materials.keys())
+            return _error_dict(
+                f"No settings for '{material}' on {intel.display_name}. "
+                f"Available: {', '.join(available)}",
+                code="NOT_FOUND",
+            )
+        intel = get_printer_intel(printer_id)
+        return {
+            "success": True,
+            "printer": intel.display_name,
+            "material": material.upper(),
+            "hotend_temp": mp.hotend,
+            "bed_temp": mp.bed,
+            "fan_speed": mp.fan,
+            "notes": mp.notes,
+        }
+    except KeyError:
+        return _error_dict(
+            f"No intelligence data for '{printer_id}'.",
+            code="NOT_FOUND",
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error in get_material_recommendation")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def troubleshoot_printer(
+    printer_id: str,
+    symptom: str,
+) -> dict:
+    """Diagnose a printer issue by searching the known failure modes database.
+
+    Describe the symptom (e.g. ``"under-extrusion"``, ``"layer shifting"``,
+    ``"stringing"``) and get possible causes and fixes specific to your
+    printer model.
+
+    Args:
+        printer_id: Printer model identifier.
+        symptom: Description of the problem.
+    """
+    if err := _check_auth("intel"):
+        return err
+    try:
+        matches = diagnose_issue(printer_id, symptom)
+        intel = get_printer_intel(printer_id)
+        return {
+            "success": True,
+            "printer": intel.display_name,
+            "symptom": symptom,
+            "matches": matches,
+            "count": len(matches),
+            "quirks": intel.quirks,
+        }
+    except KeyError:
+        return _error_dict(
+            f"No intelligence data for '{printer_id}'.",
+            code="NOT_FOUND",
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error in troubleshoot_printer")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Pipeline tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def list_print_pipelines() -> dict:
+    """List all available pre-validated print pipelines.
+
+    Pipelines are named command sequences that chain multiple operations
+    into reliable one-shot workflows (e.g. quick_print, calibrate, benchmark).
+    """
+    if err := _check_auth("pipeline"):
+        return err
+    return {"success": True, "pipelines": _list_pipelines()}
+
+
+@mcp.tool()
+def run_quick_print(
+    model_path: str,
+    printer_name: str | None = None,
+    printer_id: str | None = None,
+    profile_path: str | None = None,
+    skip_preflight: bool = False,
+) -> dict:
+    """Slice → validate → upload → print in one shot.
+
+    The full quick-print pipeline:
+    1. Resolve slicer profile (bundled, by printer_id)
+    2. Slice the model to G-code
+    3. Safety-validate the G-code against printer limits
+    4. Upload G-code to the printer
+    5. Run preflight checks
+    6. Start printing
+
+    Args:
+        model_path: Path to input model (STL, 3MF, STEP, OBJ).
+        printer_name: Registered printer name in fleet.
+        printer_id: Printer model ID for auto-profile selection
+            (e.g. ``"ender3"``, ``"bambu_x1c"``).
+        profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
+        skip_preflight: Skip preflight checks (not recommended).
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        result = _pipeline_quick_print(
+            model_path=model_path,
+            printer_name=printer_name,
+            printer_id=printer_id,
+            profile_path=profile_path,
+            skip_preflight=skip_preflight,
+        )
+        return {"success": result.success, **result.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in run_quick_print")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def run_calibrate(
+    printer_name: str | None = None,
+    printer_id: str | None = None,
+) -> dict:
+    """Run a printer calibration sequence: home → bed level → guidance.
+
+    Performs physical calibration steps (homing, auto bed leveling) and
+    returns printer-specific calibration guidance from the intelligence
+    database.
+
+    Args:
+        printer_name: Registered printer name.
+        printer_id: Printer model ID for calibration guidance.
+    """
+    if err := _check_auth("calibrate"):
+        return err
+    try:
+        result = _pipeline_calibrate(
+            printer_name=printer_name,
+            printer_id=printer_id,
+        )
+        return {"success": result.success, **result.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in run_calibrate")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def run_benchmark(
+    model_path: str,
+    printer_name: str | None = None,
+    printer_id: str | None = None,
+    profile_path: str | None = None,
+) -> dict:
+    """Prepare a benchmark print: slice → upload → report stats.
+
+    Slices a model with the printer's profile and uploads it, then
+    reports printer stats from history. The print is NOT started
+    automatically — benchmarks should be manually observed.
+
+    Args:
+        model_path: Path to benchmark model (STL).
+        printer_name: Registered printer name.
+        printer_id: Printer model ID for profile selection.
+        profile_path: Explicit slicer profile path.
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        result = _pipeline_benchmark(
+            model_path=model_path,
+            printer_name=printer_name,
+            printer_id=printer_id,
+            profile_path=profile_path,
+        )
+        return {"success": result.success, **result.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in run_benchmark")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
