@@ -4,6 +4,26 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-11
 
+### Model Safety Guardrails — Auto-Print Toggles
+Added safety guardrails for AI-generated and marketplace-downloaded 3D models:
+
+- `generate_and_print()` no longer auto-starts prints — uploads only, requires explicit `start_print` call
+- `download_and_upload()` same — uploads only, explicit start required
+- Two independent opt-in toggles via env vars: `KILN_AUTO_PRINT_MARKETPLACE` (moderate risk) and `KILN_AUTO_PRINT_GENERATED` (higher risk), both default OFF
+- All generation/download tools return `experimental` or `verification_status` flags plus safety notices
+- New `safety_settings` MCP tool shows current auto-print configuration and recommendations
+- Setup wizard (`kiln setup`) now prompts users to configure auto-print preferences during onboarding
+- MCP server system prompt updated to guide agents toward proven community models over generation
+- Setup complete summary shows current toggle values and env var names for later changes
+
+### Bambu A1/A1 Mini Compatibility
+Fixed 3 bugs reported by Chris Miller during real-hardware testing on Bambu A1 mini:
+
+- **Uppercase state parsing**: A1/A1 mini sends UPPERCASE `gcode_state` (e.g. "RUNNING" instead of "running"). Added `.lower()` normalization in `get_state()` and case-insensitive command matching in `_on_message()`.
+- **Implicit FTPS on port 990**: A-series uses implicit TLS (wraps socket in TLS immediately), not explicit STARTTLS. Added `_ImplicitFTP_TLS` subclass with socket wrapping and TLS session reuse for data channels.
+- **Print start confirmation**: `start_print()` now polls MQTT for `gcode_state` to confirm the printer actually started (up to 30s). Returns failure if printer enters error state or times out.
+- Added 121 Bambu adapter tests including new test classes for uppercase states, print confirmation, and implicit FTPS.
+
 ### Comprehensive Security Hardening
 Full-project security audit and fix pass — 70+ vulnerabilities identified and fixed across 25+ files.
 

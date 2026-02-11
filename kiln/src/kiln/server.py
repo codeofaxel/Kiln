@@ -20,6 +20,15 @@ Environment variables
     is ``"bambu"``).
 ``KILN_THINGIVERSE_TOKEN``
     Thingiverse API app token for model search and download.
+``KILN_AUTO_PRINT_MARKETPLACE``
+    Set to ``"true"`` to auto-start printing after downloading and
+    uploading marketplace models.  Default: ``"false"`` (upload only,
+    require explicit ``start_print``).
+``KILN_AUTO_PRINT_GENERATED``
+    Set to ``"true"`` to auto-start printing AI-generated models after
+    generation, validation, slicing, and upload.  Default: ``"false"``
+    (upload only, require explicit ``start_print``).  **Higher risk than
+    marketplace auto-print** — generated geometry is experimental.
 """
 
 from __future__ import annotations
@@ -129,6 +138,16 @@ _CRAFTCLOUD_API_KEY: str = os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
 _FULFILLMENT_PROVIDER: str = os.environ.get("KILN_FULFILLMENT_PROVIDER", "")
 _MESHY_API_KEY: str = os.environ.get("KILN_MESHY_API_KEY", "")
 
+# Auto-print toggles: OFF by default for safety.  Generated models are
+# higher risk than marketplace downloads — two independent toggles let
+# users opt in to each separately.
+_AUTO_PRINT_MARKETPLACE: bool = (
+    os.environ.get("KILN_AUTO_PRINT_MARKETPLACE", "").lower() in ("1", "true", "yes")
+)
+_AUTO_PRINT_GENERATED: bool = (
+    os.environ.get("KILN_AUTO_PRINT_GENERATED", "").lower() in ("1", "true", "yes")
+)
+
 # ---------------------------------------------------------------------------
 # MCP server instance
 # ---------------------------------------------------------------------------
@@ -150,7 +169,15 @@ mcp = FastMCP(
         "straight from marketplace to printer. "
         "Use `fulfillment_materials` and `fulfillment_quote` to outsource "
         "prints to external services like Craftcloud when local printers "
-        "lack the material or capacity."
+        "lack the material or capacity.\n\n"
+        "SAFETY: 3D printers are delicate hardware. Prefer downloading "
+        "proven community models over generating new ones. AI-generated "
+        "models are experimental and may damage hardware. By default, "
+        "downloaded and generated models are uploaded but NOT auto-printed "
+        "— you must call `start_print` separately. Users can opt in to "
+        "auto-print via KILN_AUTO_PRINT_MARKETPLACE (for community models) "
+        "or KILN_AUTO_PRINT_GENERATED (for AI models, higher risk). "
+        "Use `safety_settings` to check current auto-print status."
     ),
 )
 
@@ -1595,12 +1622,66 @@ def search_all_models(
 
 
 @mcp.tool()
+def safety_settings() -> dict:
+    """Show current safety and auto-print settings.
+
+    Displays whether auto-print is enabled for marketplace downloads
+    and AI-generated models, along with guidance on how to change them.
+    Call this early in a session to understand what safety protections
+    are active.
+    """
+    return {
+        "success": True,
+        "auto_print_marketplace": {
+            "enabled": _AUTO_PRINT_MARKETPLACE,
+            "env_var": "KILN_AUTO_PRINT_MARKETPLACE",
+            "risk_level": "moderate",
+            "description": (
+                "When enabled, marketplace models are auto-printed after "
+                "download+upload. When disabled (default), models are "
+                "uploaded but require explicit start_print call."
+            ),
+        },
+        "auto_print_generated": {
+            "enabled": _AUTO_PRINT_GENERATED,
+            "env_var": "KILN_AUTO_PRINT_GENERATED",
+            "risk_level": "high",
+            "description": (
+                "When enabled, AI-generated models are auto-printed after "
+                "generation+validation+slicing+upload. When disabled "
+                "(default), models are uploaded but require explicit "
+                "start_print call. Higher risk than marketplace models."
+            ),
+        },
+        "recommendations": [
+            "Prefer downloading proven community models over generating new ones.",
+            "Always validate meshes before printing (validate_generated_mesh).",
+            "Review model dimensions against your printer's build volume.",
+            "Keep auto-print disabled unless you understand the risks.",
+            "AI model generation is experimental — generated geometry may "
+            "have thin walls, non-manifold faces, or impossible overhangs.",
+        ],
+        "how_to_change": (
+            "Set environment variables before starting the MCP server:\n"
+            "  export KILN_AUTO_PRINT_MARKETPLACE=true   # moderate risk\n"
+            "  export KILN_AUTO_PRINT_GENERATED=true     # higher risk\n"
+            "Or run 'kiln setup' to configure interactively."
+        ),
+    }
+
+
+@mcp.tool()
 def marketplace_info() -> dict:
     """Show which 3D model marketplaces are connected and available.
 
     Returns the list of connected marketplace sources and their
     capabilities (search, download support, etc.).  Configure
     marketplaces via environment variables.
+
+    **Safety note:** Community-uploaded models are unverified.  Always
+    review model dimensions and preview prints before starting.
+    Proven, popular models with high download counts are safer choices
+    than untested uploads.
     """
     try:
         if _marketplace_registry.count == 0:
@@ -1740,6 +1821,12 @@ def download_model(
 ) -> dict:
     """Download a model file from Thingiverse to local storage.
 
+    **Community models are unverified.** Always preview dimensions and
+    validate the mesh (``validate_generated_mesh``) before printing.
+    Models with high download counts and positive ratings are generally
+    safer.  AI-generated or untested designs can damage delicate printer
+    hardware — prefer proven blueprints when possible.
+
     Args:
         file_id: Numeric file ID (from ``model_files`` results).
         dest_dir: Local directory to save the file in (default:
@@ -1747,8 +1834,8 @@ def download_model(
         file_name: Override the saved file name.  Defaults to the
             original name from Thingiverse.
 
-    After downloading, the file can be uploaded to a printer with
-    ``upload_file`` and then printed with ``start_print``.
+    After downloading, validate with ``validate_generated_mesh``, then
+    upload to a printer with ``upload_file`` and print with ``start_print``.
     """
     try:
         client = _get_thingiverse()
@@ -1757,6 +1844,13 @@ def download_model(
             "success": True,
             "file_id": file_id,
             "local_path": path,
+            "verification_status": "unverified",
+            "safety_notice": (
+                "This is a community-uploaded model and has NOT been "
+                "verified for print safety or quality. Validate the mesh "
+                "with validate_generated_mesh before printing. Prefer "
+                "proven models with high download counts."
+            ),
             "message": f"Downloaded to {path}",
         }
     except ThingiverseNotFoundError:
@@ -1776,6 +1870,12 @@ def download_and_upload(
 ) -> dict:
     """Download a model file from any marketplace and upload it to a printer.
 
+    **Community models are unverified.** This tool downloads and uploads
+    but does NOT start printing automatically.  You must call
+    ``start_print`` separately after reviewing the uploaded file.
+    3D printers are delicate hardware — misconfigured or malformed models
+    can cause physical damage.
+
     Args:
         file_id: File ID (from ``model_files`` results).  For Thingiverse
             this is a numeric ID; for MyMiniFactory it's the file ID string.
@@ -1783,8 +1883,7 @@ def download_and_upload(
             or "myminifactory".  Cults3D does not support direct downloads.
         printer_name: Target printer name.  Omit to use the default printer.
 
-    This is the fastest way to go from a marketplace model to a file on
-    the printer ready to print.  Combines download and upload into one step.
+    After uploading, review the model and call ``start_print`` to begin.
     """
     if err := _check_auth("files"):
         return err
@@ -1813,16 +1912,53 @@ def download_and_upload(
         else:
             adapter = _get_adapter()
 
-        result = adapter.upload_file(local_path)
+        upload_result = adapter.upload_file(local_path)
+        file_name = upload_result.file_name or os.path.basename(local_path)
 
-        return {
+        # Auto-print only if user opted in via KILN_AUTO_PRINT_MARKETPLACE.
+        print_data = None
+        auto_printed = False
+        if _AUTO_PRINT_MARKETPLACE:
+            print_res = adapter.start_print(file_name)
+            print_data = print_res.to_dict()
+            auto_printed = True
+
+        resp = {
             "success": True,
             "file_id": str(file_id),
             "source": source,
             "local_path": local_path,
-            "upload": result.to_dict(),
-            "message": f"Downloaded from {source} and uploaded to printer.",
+            "upload": upload_result.to_dict(),
+            "file_name": file_name,
+            "verification_status": "unverified",
+            "auto_print_enabled": _AUTO_PRINT_MARKETPLACE,
         }
+
+        if auto_printed:
+            resp["print"] = print_data
+            resp["safety_notice"] = (
+                "WARNING: Auto-print for marketplace models is enabled "
+                "(KILN_AUTO_PRINT_MARKETPLACE=true). Community models "
+                "are unverified and could cause print failures. "
+                "Disable this setting unless you accept the risk."
+            )
+            resp["message"] = (
+                f"Downloaded from {source}, uploaded, and started "
+                f"printing (auto-print ON)."
+            )
+        else:
+            resp["safety_notice"] = (
+                "Model uploaded but NOT started. Community models are "
+                "unverified — review before printing. Call start_print "
+                "to begin printing after review. Set "
+                "KILN_AUTO_PRINT_MARKETPLACE=true to enable auto-print."
+            )
+            resp["message"] = (
+                f"Downloaded from {source} and uploaded to printer. "
+                f"Call start_print('{file_name}') to begin printing."
+            )
+
+        return resp
     except (ThingiverseNotFoundError, MktNotFoundError):
         return _error_dict(f"File {file_id} not found on {source}.", code="NOT_FOUND")
     except PrinterNotFoundError:
@@ -3777,6 +3913,16 @@ def generate_model(
 ) -> dict:
     """Generate a 3D model from a text description.
 
+    **EXPERIMENTAL:** AI-generated 3D models are experimental and may not
+    be suitable for printing without manual review.  Generated geometry
+    can have thin walls, non-manifold faces, floating islands, or
+    dimensions that exceed printer build volume.  3D printers are delicate
+    hardware — always validate the generated mesh before printing.
+
+    **When possible, prefer downloading proven community models from
+    marketplaces** (Thingiverse, MyMiniFactory) over generating new ones.
+    Use generation for custom/unique objects only.
+
     Submits a generation job to the specified provider and returns a
     job ID for status tracking.  Use ``generation_status`` to poll for
     completion, then ``download_generated_model`` to retrieve the file.
@@ -3809,6 +3955,13 @@ def generate_model(
         return {
             "success": True,
             "job": job.to_dict(),
+            "experimental": True,
+            "safety_notice": (
+                "AI-generated models are experimental. Always validate "
+                "the mesh with validate_generated_mesh and review "
+                "dimensions before printing. Generated models may require "
+                "manual refinement."
+            ),
             "message": f"Generation job submitted to {gen.display_name}.",
         }
     except GenerationAuthError as exc:
@@ -3909,6 +4062,13 @@ def download_generated_model(
             "result": result.to_dict(),
             "validation": validation,
             "dimensions": dimensions,
+            "experimental": True,
+            "safety_notice": (
+                "AI-generated model. Inspect validation results and "
+                "dimensions carefully before printing. Generated geometry "
+                "may have thin walls, overhangs, or non-manifold faces "
+                "that can fail during printing or damage hardware."
+            ),
             "message": f"Model downloaded to {result.local_path}.",
         }
     except GenerationAuthError as exc:
@@ -4011,10 +4171,16 @@ def generate_and_print(
     profile: str | None = None,
     timeout: int = 600,
 ) -> dict:
-    """Full pipeline: generate a model, validate, slice, upload, and print.
+    """Full pipeline: generate a model, validate, slice, and upload (preview).
 
-    This is the end-to-end workflow from text description to physical
-    object.  Combines generate -> validate -> slice -> upload -> print.
+    **EXPERIMENTAL:** This generates a 3D model, validates it, slices it,
+    and uploads it to the printer — but does NOT start printing.  3D
+    printers are delicate hardware and AI-generated models are not
+    guaranteed to be safe or printable.  You MUST call ``start_print``
+    separately after reviewing the preview results.
+
+    When possible, prefer downloading proven models from marketplaces
+    (Thingiverse, MyMiniFactory) instead of generating new ones.
 
     Args:
         prompt: Text description of the 3D model to generate.
@@ -4085,7 +4251,7 @@ def generate_and_print(
 
         slice_result = slice_file(result.local_path, profile=profile)
 
-        # Step 6: Upload + Print
+        # Step 6: Upload (but do NOT auto-start — require explicit start_print)
         if printer_name:
             adapter = _registry.get(printer_name)
         else:
@@ -4093,19 +4259,73 @@ def generate_and_print(
 
         upload = adapter.upload_file(slice_result.output_path)
         file_name = upload.file_name or os.path.basename(slice_result.output_path)
-        print_result = adapter.start_print(file_name)
 
-        return {
+        # Compute dimensions for review
+        gen_validation = None
+        gen_dimensions = None
+        if result.format in ("stl", "obj"):
+            val_result = validate_mesh(result.local_path)
+            gen_validation = val_result.to_dict()
+            if val_result.bounding_box:
+                bb = val_result.bounding_box
+                w = bb.get("x_max", 0) - bb.get("x_min", 0)
+                d = bb.get("y_max", 0) - bb.get("y_min", 0)
+                h = bb.get("z_max", 0) - bb.get("z_min", 0)
+                gen_dimensions = {
+                    "width_mm": round(w, 2),
+                    "depth_mm": round(d, 2),
+                    "height_mm": round(h, 2),
+                    "summary": f"{w:.1f} x {d:.1f} x {h:.1f} mm",
+                }
+
+        # Auto-print only if the user has opted in via KILN_AUTO_PRINT_GENERATED.
+        print_data = None
+        auto_printed = False
+        if _AUTO_PRINT_GENERATED:
+            print_result = adapter.start_print(file_name)
+            print_data = print_result.to_dict()
+            auto_printed = True
+
+        resp = {
             "success": True,
             "generation": result.to_dict(),
             "slice": slice_result.to_dict(),
             "upload": upload.to_dict(),
-            "print": print_result.to_dict(),
-            "message": (
-                f"Generated '{prompt[:80]}' via {gen.display_name}, "
-                f"sliced, and started printing."
-            ),
+            "file_name": file_name,
+            "validation": gen_validation,
+            "dimensions": gen_dimensions,
+            "experimental": True,
+            "auto_print_enabled": _AUTO_PRINT_GENERATED,
         }
+
+        if auto_printed:
+            resp["print"] = print_data
+            resp["safety_notice"] = (
+                "WARNING: Auto-print for generated models is enabled "
+                "(KILN_AUTO_PRINT_GENERATED=true). AI-generated models "
+                "are experimental and may damage printer hardware. "
+                "Disable this setting unless you accept the risk."
+            )
+            resp["message"] = (
+                f"Generated '{prompt[:80]}' via {gen.display_name}, "
+                f"sliced, and started printing (auto-print ON)."
+            )
+        else:
+            resp["ready_to_print"] = True
+            resp["safety_notice"] = (
+                "Model generated, sliced, and uploaded but NOT started. "
+                "AI-generated models are experimental — review the "
+                "dimensions and validation results above. Call "
+                "start_print to begin printing after review. "
+                "Set KILN_AUTO_PRINT_GENERATED=true to enable auto-print."
+            )
+            resp["message"] = (
+                f"Generated '{prompt[:80]}' via {gen.display_name}, "
+                f"sliced, and uploaded. Call start_print('{file_name}') "
+                f"to begin printing after review."
+            )
+
+        return resp
     except GenerationAuthError as exc:
         return _error_dict(str(exc), code="AUTH_ERROR")
     except GenerationError as exc:

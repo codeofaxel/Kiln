@@ -22,6 +22,7 @@ import ftplib
 import json
 import logging
 import os
+import socket
 import ssl
 import threading
 import time
@@ -66,6 +67,74 @@ _STATE_MAP: Dict[str, PrinterStatus] = {
     "offline": PrinterStatus.OFFLINE,
     "unknown": PrinterStatus.UNKNOWN,
 }
+
+# States that indicate a print job is active or starting.
+_PRINT_ACTIVE_STATES: frozenset[str] = frozenset({
+    "running", "prepare", "slicing", "init",
+})
+
+
+# ---------------------------------------------------------------------------
+# Implicit FTPS helper (Bambu printers use port-990 implicit TLS)
+# ---------------------------------------------------------------------------
+
+
+class _ImplicitFTP_TLS(ftplib.FTP_TLS):
+    """FTP_TLS subclass for implicit TLS (port 990).
+
+    Standard :class:`ftplib.FTP_TLS` only supports explicit STARTTLS.
+    Bambu Lab printers require the socket to be wrapped in TLS immediately
+    upon connection (implicit mode), and data channels must reuse the
+    control-channel TLS session to satisfy the printer's session-reuse
+    requirement.
+    """
+
+    def connect(
+        self,
+        host: str = "",
+        port: int = 0,
+        timeout: float = -999,
+        source_address: Any = None,
+    ) -> str:
+        """Connect and immediately wrap socket in TLS."""
+        if host:
+            self.host = host
+        if port:
+            self.port = port
+        if timeout != -999:
+            self.timeout = timeout
+        if source_address is not None:
+            self.source_address = source_address
+
+        self.sock = socket.create_connection(
+            (self.host, self.port),
+            self.timeout,
+            source_address=self.source_address,
+        )
+        self.af = self.sock.family
+        # Wrap in TLS immediately (implicit mode).
+        self.sock = self.context.wrap_socket(
+            self.sock,
+            server_hostname=self.host,
+        )
+        self.file = self.sock.makefile("r", encoding=self.encoding)
+        self.welcome = self.getresp()
+        return self.welcome
+
+    def ntransfercmd(self, cmd: str, rest: Any = None) -> Any:
+        """Override to reuse TLS session on data channels.
+
+        Bambu printers reject data connections whose TLS session does not
+        match the control channel's session.
+        """
+        conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
+        if self._prot_p:  # type: ignore[attr-defined]
+            conn = self.context.wrap_socket(
+                conn,
+                server_hostname=self.host,
+                session=self.sock.session,  # type: ignore[union-attr]
+            )
+        return conn, size
 
 
 # ---------------------------------------------------------------------------
@@ -261,10 +330,13 @@ class BambuAdapter(PrinterAdapter):
             return
 
         # Merge print status fields into our cache.
+        # A1/A1 mini may send command as "push_status" or "PUSH_STATUS".
         print_data = payload.get("print", {})
-        if isinstance(print_data, dict) and print_data.get("command") == "push_status":
-            with self._state_lock:
-                self._last_status.update(print_data)
+        if isinstance(print_data, dict):
+            cmd = str(print_data.get("command", "")).lower()
+            if cmd == "push_status":
+                with self._state_lock:
+                    self._last_status.update(print_data)
 
     def _publish_command(
         self,
@@ -353,7 +425,7 @@ class BambuAdapter(PrinterAdapter):
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
 
-            ftp = ftplib.FTP_TLS(context=ctx)
+            ftp = _ImplicitFTP_TLS(context=ctx)
             ftp.connect(self._host, _FTPS_PORT, timeout=self._timeout)
             ftp.login(_FTPS_USERNAME, self._access_code)
             ftp.prot_p()  # Enable data channel encryption.
@@ -387,6 +459,8 @@ class BambuAdapter(PrinterAdapter):
         gcode_state = status.get("gcode_state", "unknown")
         if not isinstance(gcode_state, str):
             gcode_state = "unknown"
+        # A1/A1 mini sends uppercase state values (e.g. "RUNNING", "IDLE").
+        gcode_state = gcode_state.lower()
 
         mapped = _STATE_MAP.get(gcode_state, PrinterStatus.UNKNOWN)
 
@@ -547,6 +621,25 @@ class BambuAdapter(PrinterAdapter):
     # PrinterAdapter -- print control
     # ------------------------------------------------------------------
 
+    def _wait_for_print_start(
+        self, timeout: float = 15.0, poll_interval: float = 1.0,
+    ) -> bool:
+        """Poll MQTT cache until printer enters a print-active state.
+
+        Returns ``True`` if the printer transitioned to an active state
+        within *timeout* seconds, ``False`` on timeout or error state.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._state_lock:
+                state = str(self._last_status.get("gcode_state", "")).lower()
+            if state in _PRINT_ACTIVE_STATES:
+                return True
+            if state == "failed":
+                return False
+            time.sleep(poll_interval)
+        return False
+
     def start_print(self, file_name: str) -> PrintResult:
         """Begin printing a file on the Bambu printer.
 
@@ -554,11 +647,20 @@ class BambuAdapter(PrinterAdapter):
         via ``upload_file``).  For 3MF files, this sends the
         ``project_file`` command; for raw G-code, ``gcode_file``.
 
+        After sending the command, polls MQTT for an actual state
+        transition to confirm the printer accepted the job.
+
         Args:
             file_name: Name or path of the file on the printer.
         """
         # Normalise: strip leading path components if user passes full path.
         basename = os.path.basename(file_name)
+
+        # Check if already in a print-active state (skip wait).
+        with self._state_lock:
+            already_active = str(
+                self._last_status.get("gcode_state", "")
+            ).lower() in _PRINT_ACTIVE_STATES
 
         if basename.lower().endswith(".3mf"):
             self._publish_command({
@@ -599,6 +701,18 @@ class BambuAdapter(PrinterAdapter):
                     "param": path,
                 }
             })
+
+        # Wait for MQTT confirmation unless already active.
+        if not already_active:
+            if not self._wait_for_print_start():
+                return PrintResult(
+                    success=False,
+                    message=(
+                        f"Print command sent for {basename} but printer did not "
+                        f"transition to an active state within timeout. "
+                        f"Check printer LCD for errors."
+                    ),
+                )
 
         return PrintResult(
             success=True,

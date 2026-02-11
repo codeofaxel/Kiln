@@ -51,3 +51,15 @@ Any function that accepts a file path from an agent/user and writes to disk is a
 
 ### Lock ordering prevents deadlocks
 Never emit events (which trigger callbacks) while holding a lock. Callbacks may try to acquire the same lock → deadlock. Pattern: collect event data inside the lock, release the lock, THEN publish events. Applied to `materials.py:deduct_usage()` where `_emit_spool_warnings()` was called inside `with self._lock`.
+
+### Bambu A-series sends UPPERCASE state values
+A1/A1 mini printers send `gcode_state` as "RUNNING", "IDLE", "PAUSE" (all caps), unlike X1C/P1S which send lowercase. Always `.lower()` normalize `gcode_state` before matching. Also applies to MQTT `command` field — use case-insensitive comparison for all Bambu string enums.
+
+### Bambu A-series uses implicit FTPS (port 990), not STARTTLS
+A1/A1 mini requires implicit TLS on port 990 — the socket must be wrapped in TLS immediately on connect, before the FTP greeting. Standard `ftplib.FTP_TLS` uses explicit STARTTLS (connect plain, then upgrade). Requires a custom `_ImplicitFTP_TLS` subclass that wraps the socket in `connect()` and reuses the TLS session on data channels via `ntransfercmd()`.
+
+### Never auto-print generated or unverified models
+3D printers are delicate hardware. Misconfigured or malformed models (especially AI-generated ones) can cause physical damage — jammed nozzles, broken beds, stripped gears. Default to uploading only, require explicit `start_print` call. Provide opt-in toggles (`KILN_AUTO_PRINT_MARKETPLACE`, `KILN_AUTO_PRINT_GENERATED`) rather than opt-out. Surface these settings early in setup so users make a conscious decision.
+
+### Print confirmation requires MQTT polling, not just command success
+Sending a print command to Bambu via MQTT succeeds even if the printer doesn't actually start (e.g., wrong file path, lid open). Must poll `gcode_state` via MQTT to confirm the printer transitions to an active state. Without this, `start_print()` returns success while the printer sits idle.
