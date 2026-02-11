@@ -189,8 +189,10 @@ class TestPrinterFiles:
 class TestUploadFile:
     """Tests for the upload_file MCP tool."""
 
+    @patch("kiln.server.os.path.getsize", return_value=1024)
+    @patch("kiln.server.os.path.isfile", return_value=True)
     @patch("kiln.server._get_adapter")
-    def test_success(self, mock_get_adapter):
+    def test_success(self, mock_get_adapter, mock_isfile, mock_getsize):
         adapter = MagicMock(spec=OctoPrintAdapter)
         adapter.upload_file.return_value = UploadResult(
             success=True, file_name="test.gcode", message="Uploaded test.gcode"
@@ -211,8 +213,10 @@ class TestUploadFile:
         assert result["success"] is False
         assert result["error"]["code"] == "FILE_NOT_FOUND"
 
+    @patch("kiln.server.os.path.getsize", return_value=1024)
+    @patch("kiln.server.os.path.isfile", return_value=True)
     @patch("kiln.server._get_adapter")
-    def test_printer_error(self, mock_get_adapter):
+    def test_printer_error(self, mock_get_adapter, mock_isfile, mock_getsize):
         adapter = MagicMock(spec=OctoPrintAdapter)
         adapter.upload_file.side_effect = PrinterError("upload failed")
         mock_get_adapter.return_value = adapter

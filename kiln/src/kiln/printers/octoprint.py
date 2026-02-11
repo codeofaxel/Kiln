@@ -508,6 +508,7 @@ class OctoPrintAdapter(PrinterAdapter):
         Raises:
             PrinterError: If the command fails.
         """
+        self._validate_temp(target, 300.0, "Hotend")
         self._post(
             "/api/printer/tool",
             json={"command": "target", "targets": {"tool0": int(target)}},
@@ -528,6 +529,7 @@ class OctoPrintAdapter(PrinterAdapter):
         Raises:
             PrinterError: If the command fails.
         """
+        self._validate_temp(target, 130.0, "Bed")
         self._post(
             "/api/printer/bed",
             json={"command": "target", "target": int(target)},

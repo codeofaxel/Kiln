@@ -617,6 +617,7 @@ class MoonrakerAdapter(PrinterAdapter):
         Raises:
             PrinterError: If the command fails.
         """
+        self._validate_temp(target, 300.0, "Hotend")
         self._send_gcode(f"M104 S{int(target)}")
         return True
 
@@ -635,6 +636,7 @@ class MoonrakerAdapter(PrinterAdapter):
         Raises:
             PrinterError: If the command fails.
         """
+        self._validate_temp(target, 130.0, "Bed")
         self._send_gcode(f"M140 S{int(target)}")
         return True
 

@@ -97,7 +97,7 @@ class WebhookManager:
         self._max_history = 500
         self._lock = threading.Lock()
 
-        self._delivery_queue: queue.Queue = queue.Queue()
+        self._delivery_queue: queue.Queue = queue.Queue(maxsize=10_000)
         self._running = False
         self._thread: Optional[threading.Thread] = None
 
@@ -203,7 +203,13 @@ class WebhookManager:
             # Empty events set = subscribe to all
             if endpoint.events and event_value not in endpoint.events:
                 continue
-            self._delivery_queue.put((endpoint, event))
+            try:
+                self._delivery_queue.put_nowait((endpoint, event))
+            except queue.Full:
+                logger.warning(
+                    "Webhook delivery queue full, dropping event %s for endpoint %s",
+                    event_value, endpoint.url,
+                )
 
     def _delivery_loop(self) -> None:
         """Background delivery worker."""

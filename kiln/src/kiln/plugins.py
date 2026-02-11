@@ -11,6 +11,7 @@ from __future__ import annotations
 import enum
 import importlib.metadata
 import logging
+import os
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
@@ -191,7 +192,19 @@ class PluginManager:
             logger.debug("No plugins found", exc_info=True)
             return []
 
+        # Only load plugins explicitly allowed in config
+        _allowed = os.environ.get("KILN_ALLOWED_PLUGINS", "").split(",")
+        _allowed = {p.strip() for p in _allowed if p.strip()}
+
         for ep in group_eps:
+            if _allowed and ep.name not in _allowed:
+                logger.warning(
+                    "Plugin %s not in KILN_ALLOWED_PLUGINS allow-list, skipping. "
+                    "Set KILN_ALLOWED_PLUGINS=%s to enable it.",
+                    ep.name, ep.name,
+                )
+                continue
+
             try:
                 plugin_cls = ep.load()
                 if not (isinstance(plugin_cls, type)
@@ -269,6 +282,10 @@ class PluginManager:
             return False
 
         try:
+            logger.info(
+                "Activating plugin %s -- plugin has full system access",
+                plugin.name,
+            )
             plugin.on_activate(ctx)
 
             # Register MCP tools

@@ -108,10 +108,11 @@ class JobScheduler:
             delay = self._retry_backoff_base * (2 ** count)
             self._retry_not_before[job_id] = time.time() + delay
             # Reset the job back to QUEUED so a future tick can redispatch it
-            job = self._queue.get_job(job_id)
-            job.status = JobStatus.QUEUED
-            job.started_at = None
-            job.error = None
+            with self._lock:
+                job = self._queue.get_job(job_id)
+                job.status = JobStatus.QUEUED
+                job.started_at = None
+                job.error = None
             self._event_bus.publish(
                 EventType.JOB_SUBMITTED,
                 {
@@ -175,8 +176,8 @@ class JobScheduler:
                     self._queue.mark_completed(job_id)
                     with self._lock:
                         self._active_jobs.pop(job_id, None)
-                    self._retry_counts.pop(job_id, None)
-                    self._retry_not_before.pop(job_id, None)
+                        self._retry_counts.pop(job_id, None)
+                        self._retry_not_before.pop(job_id, None)
                     self._event_bus.publish(
                         EventType.JOB_COMPLETED,
                         {"job_id": job_id, "printer_name": printer_name},

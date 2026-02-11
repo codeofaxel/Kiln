@@ -240,7 +240,14 @@ def slice_file(
     os.makedirs(out_dir, exist_ok=True)
 
     if output_name:
-        out_file = os.path.join(out_dir, output_name)
+        # Sanitise: only allow a simple filename, no directory traversal
+        safe_name = os.path.basename(output_name)
+        if not safe_name or safe_name != output_name:
+            raise ValueError(
+                f"output_name must be a plain filename without path separators "
+                f"or traversal sequences, got: {output_name!r}"
+            )
+        out_file = os.path.join(out_dir, safe_name)
     else:
         stem = Path(input_abs).stem
         out_file = os.path.join(out_dir, f"{stem}.gcode")

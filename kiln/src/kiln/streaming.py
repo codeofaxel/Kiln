@@ -22,6 +22,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+_MAX_FRAME_SIZE: int = 10 * 1024 * 1024  # 10MB max frame size
 _BOUNDARY = b"--kilnframe"
 _CONTENT_TYPE = f"multipart/x-mixed-replace; boundary={_BOUNDARY.decode()}"
 
@@ -266,6 +267,12 @@ class MJPEGProxy:
                         break
                     buf.extend(chunk)
 
+                    if len(buf) > _MAX_FRAME_SIZE:
+                        logger.warning("MJPEG frame buffer exceeded %d bytes, resetting", _MAX_FRAME_SIZE)
+                        buf = bytearray()
+                        in_frame = False
+                        continue
+
                     while True:
                         if not in_frame:
                             # Look for JPEG start marker
@@ -287,6 +294,10 @@ class MJPEGProxy:
                         frame = bytes(buf[: end + 2])
                         buf = buf[end + 2:]
                         in_frame = False
+
+                        if len(frame) > _MAX_FRAME_SIZE:
+                            logger.warning("Dropping oversized MJPEG frame (%d bytes)", len(frame))
+                            continue
 
                         with self._frame_lock:
                             self._latest_frame = frame

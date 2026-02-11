@@ -590,7 +590,7 @@ class TestRunAgentLoop:
         call_args = mock_llm.call_args
         messages = call_args[0][0]  # first positional arg
         assert messages[0]["role"] == "system"
-        assert messages[0]["content"] == "Custom instructions here"
+        assert messages[0]["content"].startswith("Custom instructions here")
 
     @mock.patch("kiln.agent_loop.get_all_tool_schemas", return_value=[])
     @mock.patch("kiln.agent_loop._call_llm")

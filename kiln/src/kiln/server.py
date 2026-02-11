@@ -186,9 +186,9 @@ def _get_adapter() -> PrinterAdapter:
 
     if not host:
         raise RuntimeError(
-            "KILN_PRINTER_HOST environment variable is not set.  "
-            "Set it to the base URL of your printer server "
-            "(e.g. http://octopi.local)."
+            "No printer configured. Set KILN_PRINTER_HOST environment variable "
+            "to the printer URL (e.g. http://octopi.local). Also set "
+            "KILN_PRINTER_API_KEY and optionally KILN_PRINTER_TYPE."
         )
     if printer_type == "octoprint":
         if not api_key:
@@ -611,6 +611,27 @@ def upload_file(file_path: str) -> dict:
         return err
     try:
         adapter = _get_adapter()
+
+        # Check file exists and size before uploading
+        if not os.path.isfile(file_path):
+            return _error_dict(
+                f"File not found: {file_path}",
+                code="FILE_NOT_FOUND",
+            )
+        _MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB
+        file_size = os.path.getsize(file_path)
+        if file_size > _MAX_UPLOAD_SIZE:
+            return _error_dict(
+                f"File too large ({file_size / 1024 / 1024:.1f}MB). "
+                f"Maximum upload size is {_MAX_UPLOAD_SIZE / 1024 / 1024:.0f}MB.",
+                code="VALIDATION_ERROR",
+            )
+        if file_size == 0:
+            return _error_dict(
+                "File is empty (0 bytes).",
+                code="VALIDATION_ERROR",
+            )
+
         result = adapter.upload_file(file_path)
         return result.to_dict()
     except FileNotFoundError as exc:
@@ -650,7 +671,7 @@ def delete_file(file_path: str) -> dict:
 
 
 @mcp.tool()
-def start_print(file_name: str, skip_preflight: bool = False) -> dict:
+def start_print(file_name: str) -> dict:
     """Start printing a file that already exists on the printer.
 
     Automatically runs pre-flight safety checks before starting.  If any
@@ -659,24 +680,21 @@ def start_print(file_name: str, skip_preflight: bool = False) -> dict:
 
     Args:
         file_name: Name or path of the file as shown by ``printer_files()``.
-        skip_preflight: Set to ``True`` to bypass the automatic pre-flight
-            checks (not recommended).
     """
     if err := _check_auth("print"):
         return err
     try:
         adapter = _get_adapter()
 
-        # -- Automatic pre-flight safety gate --------------------------------
-        if not skip_preflight:
-            pf = preflight_check()
-            if not pf.get("ready", False):
-                return {
-                    "success": False,
-                    "error": pf.get("summary", "Pre-flight checks failed"),
-                    "code": "PREFLIGHT_FAILED",
-                    "preflight": pf,
-                }
+        # -- Automatic pre-flight safety gate (mandatory, cannot be skipped) --
+        pf = preflight_check()
+        if not pf.get("ready", False):
+            return {
+                "success": False,
+                "error": pf.get("summary", "Pre-flight checks failed"),
+                "code": "PREFLIGHT_FAILED",
+                "preflight": pf,
+            }
 
         result = adapter.start_print(file_name)
         return result.to_dict()
@@ -776,6 +794,34 @@ def set_temperature(
             "At least one of tool_temp or bed_temp must be provided.",
             code="INVALID_ARGS",
         )
+
+    # -- Temperature safety validation ------------------------------------
+    _MAX_TOOL = 300.0
+    _MAX_BED = 130.0
+    if tool_temp is not None:
+        if tool_temp < 0:
+            return _error_dict(
+                f"Hotend temperature {tool_temp}°C is negative -- must be >= 0.",
+                code="VALIDATION_ERROR",
+            )
+        if tool_temp > _MAX_TOOL:
+            return _error_dict(
+                f"Hotend temperature {tool_temp}°C exceeds safety limit "
+                f"({_MAX_TOOL}°C).",
+                code="VALIDATION_ERROR",
+            )
+    if bed_temp is not None:
+        if bed_temp < 0:
+            return _error_dict(
+                f"Bed temperature {bed_temp}°C is negative -- must be >= 0.",
+                code="VALIDATION_ERROR",
+            )
+        if bed_temp > _MAX_BED:
+            return _error_dict(
+                f"Bed temperature {bed_temp}°C exceeds safety limit "
+                f"({_MAX_BED}°C).",
+                code="VALIDATION_ERROR",
+            )
 
     try:
         adapter = _get_adapter()
@@ -961,6 +1007,15 @@ def send_gcode(commands: str) -> dict:
 
         if not cmd_list:
             return _error_dict("No commands provided.", code="INVALID_ARGS")
+
+        # Limit batch size to prevent flooding the printer buffer
+        _MAX_GCODE_BATCH = 100
+        if len(cmd_list) > _MAX_GCODE_BATCH:
+            return _error_dict(
+                f"Too many commands ({len(cmd_list)}). Maximum {_MAX_GCODE_BATCH} "
+                f"per batch. Split into multiple calls.",
+                code="VALIDATION_ERROR",
+            )
 
         # -- Safety validation -------------------------------------------------
         validation = _validate_gcode_impl(cmd_list)
@@ -2014,11 +2069,21 @@ def printer_snapshot(
         }
 
         if save_path:
-            os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
-            with open(save_path, "wb") as f:
+            _safe = os.path.realpath(save_path)
+            _home = os.path.expanduser("~")
+            import tempfile as _tempfile
+            _tmpdir = os.path.realpath(_tempfile.gettempdir())
+            _allowed = (_home, "/tmp", "/private/tmp", _tmpdir)
+            if not any(_safe.startswith(p) for p in _allowed):
+                return _error_dict(
+                    "save_path must be under home directory or a temp directory.",
+                    code="VALIDATION_ERROR",
+                )
+            os.makedirs(os.path.dirname(_safe) or ".", exist_ok=True)
+            with open(_safe, "wb") as f:
                 f.write(image_data)
-            result["saved_to"] = save_path
-            result["message"] = f"Snapshot saved to {save_path}"
+            result["saved_to"] = _safe
+            result["message"] = f"Snapshot saved to {_safe}"
         else:
             import base64
             result["image_base64"] = base64.b64encode(image_data).decode("ascii")

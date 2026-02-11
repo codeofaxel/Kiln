@@ -204,6 +204,9 @@ class MaterialTracker:
         Emits SPOOL_LOW when remaining drops below 10% of spool weight,
         and SPOOL_EMPTY when remaining reaches zero.
         """
+        # Collect event data inside the lock, emit after release
+        _spool_warning_args = None
+
         with self._lock:
             if self._db is None:
                 return None
@@ -229,12 +232,16 @@ class MaterialTracker:
                         0.0, spool_row["remaining_grams"] - grams,
                     )
                     self._db.update_spool_remaining(spool_id, spool_remaining)
-                    self._emit_spool_warnings(
+                    _spool_warning_args = (
                         spool_id, spool_remaining,
                         spool_row["weight_grams"], printer_name,
                     )
 
-            return new_remaining
+        # Emit events outside the lock to prevent deadlocks
+        if _spool_warning_args is not None:
+            self._emit_spool_warnings(*_spool_warning_args)
+
+        return new_remaining
 
     def _emit_spool_warnings(
         self,

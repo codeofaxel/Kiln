@@ -584,7 +584,14 @@ class BambuAdapter(PrinterAdapter):
             })
         else:
             # Raw G-code file.
-            path = file_name if file_name.startswith("/") else f"/sdcard/{basename}"
+            if file_name.startswith("/"):
+                path = os.path.normpath(file_name)
+                if not (path.startswith("/sdcard/") or path.startswith("/cache/")):
+                    raise PrinterError(
+                        f"File path must be under /sdcard/ or /cache/, got: {file_name!r}"
+                    )
+            else:
+                path = f"/sdcard/{basename}"
             self._publish_command({
                 "print": {
                     "sequence_id": self._next_seq(),
@@ -619,11 +626,13 @@ class BambuAdapter(PrinterAdapter):
 
     def set_tool_temp(self, target: float) -> bool:
         """Set the hotend target temperature via G-code over MQTT."""
+        self._validate_temp(target, 300.0, "Hotend")
         self.send_gcode([f"M104 S{int(target)}"])
         return True
 
     def set_bed_temp(self, target: float) -> bool:
         """Set the heated-bed target temperature via G-code over MQTT."""
+        self._validate_temp(target, 130.0, "Bed")
         self.send_gcode([f"M140 S{int(target)}"])
         return True
 
@@ -677,8 +686,15 @@ class BambuAdapter(PrinterAdapter):
         except PrinterError:
             raise
 
+        # Sanitise path — only allow files under /sdcard/ or /cache/
+        safe_path = os.path.normpath(file_path)
+        if not safe_path.startswith("/sdcard/") and not safe_path.startswith("/cache/"):
+            raise PrinterError(
+                f"File path must be under /sdcard/ or /cache/, got: {file_path!r}"
+            )
+
         try:
-            ftp.delete(file_path)
+            ftp.delete(safe_path)
             return True
         except Exception as exc:
             raise PrinterError(

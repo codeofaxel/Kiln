@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from typing import Any, Dict, Optional
 
@@ -201,6 +202,31 @@ class CircleProvider(PaymentProvider):
         """
         chain = self._resolve_chain(request.rail)
 
+        # Validate destination address before constructing payload
+        dest_address = request.metadata.get("destination_address", "")
+        if not dest_address:
+            return PaymentResult(
+                success=False,
+                payment_id="",
+                status=PaymentStatus.FAILED,
+                amount=request.amount,
+                currency=request.currency,
+                rail=PaymentRail.CIRCLE,
+                error="destination_address is required in metadata.",
+            )
+        # Basic format validation — Ethereum addresses are 42 chars (0x + 40 hex),
+        # Solana addresses are 32-44 chars base58.
+        if not re.match(r"^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$", dest_address):
+            return PaymentResult(
+                success=False,
+                payment_id="",
+                status=PaymentStatus.FAILED,
+                amount=request.amount,
+                currency=request.currency,
+                rail=PaymentRail.CIRCLE,
+                error=f"Invalid destination address format: {dest_address[:20]}...",
+            )
+
         payload = {
             "source": {
                 "type": "wallet",
@@ -209,7 +235,7 @@ class CircleProvider(PaymentProvider):
             "destination": {
                 "type": "blockchain",
                 "chain": chain,
-                "address": request.metadata.get("destination_address", ""),
+                "address": dest_address,
             },
             "amount": {
                 "amount": f"{request.amount:.2f}",

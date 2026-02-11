@@ -257,13 +257,27 @@ class PaymentManager:
             error=result.error,
         )
 
-        # 7. Record billing charge
-        charge_id = self._ledger.record_charge(
-            job_id, fee_calc,
-            payment_id=result.payment_id,
-            payment_rail=provider.name,
-            payment_status=result.status.value,
-        )
+        # 7. Record billing charge — if this fails, update payment with error
+        try:
+            charge_id = self._ledger.record_charge(
+                job_id, fee_calc,
+                payment_id=result.payment_id,
+                payment_rail=provider.name,
+                payment_status=result.status.value,
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to record billing charge for payment %s: %s",
+                payment_id, exc,
+            )
+            # Update payment record to reflect the billing failure
+            self._db.save_payment({
+                "id": payment_id,
+                "error": f"Payment succeeded but billing record failed: {type(exc).__name__}",
+                "status": "billing_error",
+                "updated_at": time.time(),
+            })
+            raise
 
         # 8. Emit outcome event
         if result.success:

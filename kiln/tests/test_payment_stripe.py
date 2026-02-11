@@ -363,7 +363,7 @@ class TestCreatePayment:
 
         p = _make_provider()
         with patch.dict(sys.modules, {"stripe": mock_stripe}):
-            with pytest.raises(PaymentError, match="Stripe error creating payment"):
+            with pytest.raises(PaymentError, match="Payment processing error"):
                 p.create_payment(_payment_request())
 
     def test_no_customer_raises(self):
@@ -737,7 +737,7 @@ class TestAuthorizePayment:
         mock_stripe.PaymentIntent.create.side_effect = mock_stripe.error.StripeError("fail")
         provider = _make_provider()
         with patch.dict(sys.modules, {"stripe": mock_stripe}):
-            with pytest.raises(PaymentError, match="authorizing"):
+            with pytest.raises(PaymentError, match="Payment processing error"):
                 provider.authorize_payment(_payment_request())
 
     def test_no_payment_method_raises(self):

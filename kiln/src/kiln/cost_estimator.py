@@ -240,6 +240,9 @@ class CostEstimator:
             kwh = (printer_wattage / 1000.0) * hours
             electricity_cost = kwh * electricity_rate
 
+        # Round only at the final output — avoid rounding intermediate values
+        # to prevent accumulation errors.  Round total_cost from unrounded
+        # intermediates so the result is as accurate as possible.
         total_cost = filament_cost + electricity_cost
 
         return CostEstimate(
@@ -247,9 +250,9 @@ class CostEstimator:
             material=profile.name,
             filament_length_meters=round(filament_length_m, 3),
             filament_weight_grams=round(weight_g, 2),
-            filament_cost_usd=round(filament_cost, 2),
+            filament_cost_usd=round(filament_cost, 4),
             estimated_time_seconds=est_time,
-            electricity_cost_usd=round(electricity_cost, 2),
+            electricity_cost_usd=round(electricity_cost, 4),
             electricity_rate_kwh=electricity_rate,
             printer_wattage=printer_wattage,
             total_cost_usd=round(total_cost, 2),
