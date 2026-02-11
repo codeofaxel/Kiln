@@ -1,6 +1,6 @@
 # Kiln
 
-Agentic infrastructure for physical fabrication. Kiln enables AI agents to design, slice, queue, monitor, and fulfill 3D print jobs through a unified MCP (Model Context Protocol) server.
+Agentic infrastructure for physical fabrication. Kiln enables AI agents to design, slice, queue, monitor, and fulfill 3D print jobs through a unified MCP (Model Context Protocol) server and CLI.
 
 ## What Kiln Does
 
@@ -21,34 +21,42 @@ Agent: "Print this sensor mount"
 ### 1. Install
 
 ```bash
-cd kiln
 pip install -e ".[dev]"
 ```
 
 ### 2. Configure
 
 ```bash
+# Option A: Environment variables
 export KILN_PRINTER_TYPE=octoprint
 export KILN_PRINTER_HOST=http://octopi.local
 export KILN_PRINTER_API_KEY=your_api_key
+
+# Option B: CLI auth (saves to ~/.kiln/config.yaml)
+kiln auth --name my-printer --host http://octopi.local --type octoprint --api-key YOUR_KEY
 ```
 
-### 3. Run the MCP Server
+### 3. Run
 
 ```bash
-python -m kiln
+# CLI
+kiln status
+kiln print model.gcode
+
+# MCP Server
+kiln serve
 ```
 
 ### 4. Connect from Claude Desktop
 
-Add to your Claude Desktop MCP config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "kiln": {
-      "command": "python",
-      "args": ["-m", "kiln"],
+      "command": "kiln",
+      "args": ["serve"],
       "env": {
         "KILN_PRINTER_TYPE": "octoprint",
         "KILN_PRINTER_HOST": "http://octopi.local",
@@ -59,80 +67,52 @@ Add to your Claude Desktop MCP config (`~/Library/Application Support/Claude/cla
 }
 ```
 
-## MCP Tools
+## Supported Printers
 
-| Tool | Description |
-|------|-------------|
-| `printer_status` | Get printer state, temperatures, and job progress |
-| `printer_files` | List available G-code files |
-| `upload_file` | Upload a G-code file to the printer |
-| `start_print` | Start printing a file |
-| `cancel_print` | Cancel current print |
-| `pause_print` | Pause current print |
-| `resume_print` | Resume paused print |
-| `set_temperature` | Set hotend and/or bed temperature |
-| `preflight_check` | Run safety checks before printing |
-| `send_gcode` | Send raw G-code commands |
+| Backend | Status | Printers |
+|---------|--------|----------|
+| **OctoPrint** | Stable | Any OctoPrint-connected printer (Prusa, Ender, custom) |
+| **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
+| **Bambu Lab** | Stable | X1C, P1S, A1 (via LAN MQTT + FTPS) |
+| **Prusa Connect** | Stable | MK4, XL, Mini+ (via Prusa Link REST API) |
+
+## Features
+
+- **78+ MCP tools** for full printer control, fleet management, slicing, model generation, and fulfillment
+- **25+ CLI commands** with `--json` output for agent consumption
+- **Multi-printer fleet** management with job queue and background scheduler
+- **Model marketplaces** — search/download from Thingiverse, MyMiniFactory, Cults3D
+- **Slicer integration** — PrusaSlicer and OrcaSlicer with auto-detection
+- **Text-to-model generation** — Meshy AI and OpenSCAD providers
+- **Fulfillment services** — outsource to Craftcloud, Shapeways, or Sculpteo
+- **Safety first** — pre-flight checks, G-code validation, temperature limits, optional auth
+- **Webhooks** — HMAC-signed event notifications for job lifecycle
+- **OTA firmware updates** — check, update, and rollback printer firmware
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│           AI Agent (Claude, etc.)       │
-│              via MCP Protocol           │
-└─────────────────┬───────────────────────┘
-                  │
-┌─────────────────▼───────────────────────┐
-│            Kiln MCP Server              │
-│  ┌──────────────────────────────────┐   │
-│  │     Printer Abstraction Layer    │   │
-│  ├──────────┬───────────┬───────────┤   │
-│  │ OctoPrint│ Moonraker │  Bambu    │   │
-│  │ Adapter  │ (planned) │ (planned) │   │
-│  └──────────┴───────────┴───────────┘   │
-│  ┌──────────────────────────────────┐   │
-│  │     3DOS Gateway (planned)       │   │
-│  └──────────────────────────────────┘   │
-│  ┌──────────────────────────────────┐   │
-│  │   Payment Layer (planned)        │   │
-│  └──────────────────────────────────┘   │
-└─────────────────────────────────────────┘
+AI Agent (Claude, GPT, custom)
+    |
+    | CLI or MCP (Model Context Protocol)
+    v
++--------------------+
+|        Kiln        |
++--------------------+
+  |       |        |        |
+  v       v        v        v
+OctoPrint Moonraker Bambu  PrusaConnect
+  |       |        |        |
+  v       v        v        v
+Prusa   Voron    X1C/P1S  MK4/XL
 ```
 
-## Supported Printers
+## Development
 
-### Now
-- **OctoPrint** - Full support via REST API
-
-### Planned
-- Klipper / Moonraker
-- Bambu Lab (X1C, P1S, A1)
-- Prusa Connect
-- Duet / RepRap
-
-## Project Structure
-
+```bash
+pip install -e ".[dev]"
+cd kiln && python -m pytest tests/ -v  # 2093+ tests
 ```
-kiln/
-├── src/kiln/
-│   ├── server.py           # MCP server (main entry point)
-│   ├── printers/
-│   │   ├── base.py         # Abstract printer interface
-│   │   └── octoprint.py    # OctoPrint adapter
-│   └── __main__.py         # python -m kiln entry point
-├── pyproject.toml
-└── README.md
-```
-
-## Roadmap
-
-- [x] OctoPrint adapter
-- [x] MCP server with core printing tools
-- [ ] Klipper/Moonraker adapter
-- [ ] 3DOS distributed manufacturing gateway
-- [ ] Payment abstraction (fiat + crypto)
-- [ ] Job queue and fleet orchestration
-- [ ] Print profile marketplace
 
 ## License
 

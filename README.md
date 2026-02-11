@@ -422,8 +422,8 @@ Agents use `fulfillment_quote` and `fulfillment_order` MCP tools for the same wo
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (2317+ total)
-cd kiln && python3 -m pytest tests/ -v        # 2078 tests
+# Run tests (2332+ total)
+cd kiln && python3 -m pytest tests/ -v        # 2093 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
