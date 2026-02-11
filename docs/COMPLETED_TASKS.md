@@ -4,6 +4,31 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-10
 
+### Post-Print Quality Validation
+- `validate_print_quality` MCP tool — assesses print quality after completion
+- Captures webcam snapshot (if available) and returns base64 or saves to file
+- Analyses job events: retry count, progress consistency, timing anomalies
+- Quality grading: PASS / WARNING / REVIEW based on detected issues
+- Structured recommendations for agent follow-up
+- Works with or without a job_id (auto-finds most recent completed job)
+
+### CLI Test Coverage for Advanced Features
+- 72 new CLI tests in `test_cli_advanced.py`
+- Covers all 30+ untested commands: `snapshot`, `wait`, `history`, `cost`, `compare-cost`, `slice`
+- Material subcommands: `set`, `show`, `spools`, `add-spool`
+- Level, stream, sync (`status`/`now`/`configure`), plugins (`list`/`info`)
+- Order subcommands: `materials`, `quote`, `place`, `status`, `cancel`
+- Billing subcommands: `setup`, `status`, `history`
+- Parametrized `--help` tests for all 30 command/subcommand combinations
+- Total test count: 1,811+
+
+### End-to-End Integration Test
+- 13 integration tests in `test_integration.py`
+- Full pipeline: discover → auth → preflight → upload → print → wait → history
+- Slice → upload → print in one shot via `--print-after`
+- Error propagation: preflight failure, upload failure, adapter error, printer offline, no webcam
+- Tests compose real CLI commands with mock printer backend via `CliRunner`
+
 ### Bambu Webcam Support
 - `get_snapshot()` on BambuAdapter — tries HTTPS/HTTP snapshot endpoint on the printer
 - `get_stream_url()` on BambuAdapter — returns `rtsps://<host>:322/streaming/live/1` (Bambu LAN RTSP stream)

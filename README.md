@@ -224,6 +224,10 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `cloud_sync_configure` | Configure cloud sync settings |
 | `list_plugins` | List installed plugins |
 | `plugin_info` | Get details for a specific plugin |
+| `await_print_completion` | Poll until a print job finishes (completed/failed/cancelled/timeout) |
+| `compare_print_options` | Side-by-side local vs. fulfillment cost comparison |
+| `analyze_print_failure` | Diagnose a failed print job with causes and recommendations |
+| `validate_print_quality` | Post-print quality assessment with snapshot and event analysis |
 
 ## Supported Printers
 
@@ -391,8 +395,8 @@ Agents use `fulfillment_quote` and `fulfillment_order` MCP tools for the same wo
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (1813 total)
-cd kiln && python3 -m pytest tests/ -v        # 1574 tests
+# Run tests (2050+ total)
+cd kiln && python3 -m pytest tests/ -v        # 1811 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
