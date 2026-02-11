@@ -4,6 +4,17 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-10
 
+### OTA Firmware Updates
+- `FirmwareComponent`, `FirmwareStatus`, `FirmwareUpdateResult` dataclasses in `base.py`
+- `can_update_firmware` capability flag on `PrinterCapabilities`
+- **Moonraker adapter** — `get_firmware_status()` via `/machine/update/status`, `update_firmware()` via `/machine/update/upgrade`, `rollback_firmware()` via `/machine/update/rollback`
+- **OctoPrint adapter** — `get_firmware_status()` via Software Update plugin check API, `update_firmware()` via plugin update API with auto-discovery of updatable targets
+- Safety: both adapters refuse updates while printing
+- 3 new MCP tools: `firmware_status`, `update_firmware`, `rollback_firmware` (auth-gated)
+- 3 new CLI commands: `kiln firmware status`, `kiln firmware update`, `kiln firmware rollback`
+- 55 new tests across 4 test files (adapter, MCP tools, CLI)
+- Total test count: 2,078
+
 ### Additional Fulfillment Providers (Shapeways + Sculpteo)
 - `ShapewaysProvider` — Full implementation with OAuth2 client-credentials auth, model upload (base64), per-material pricing, order placement, status tracking, and cancellation
 - `SculpteoProvider` — Full implementation with Bearer token auth, file upload, UUID-based pricing, order placement via store API, status tracking, and cancellation

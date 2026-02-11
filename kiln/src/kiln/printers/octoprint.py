@@ -20,6 +20,9 @@ from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
 from kiln.printers.base import (
+    FirmwareComponent,
+    FirmwareStatus,
+    FirmwareUpdateResult,
     JobProgress,
     PrinterAdapter,
     PrinterCapabilities,
@@ -149,6 +152,7 @@ class OctoPrintAdapter(PrinterAdapter):
             can_pause=True,
             can_stream=True,
             can_probe_bed=True,
+            can_update_firmware=True,
             supported_extensions=(".gcode", ".gco", ".g"),
         )
 
@@ -628,6 +632,125 @@ class OctoPrintAdapter(PrinterAdapter):
         except Exception:
             logger.debug("Bed mesh query failed (plugin may not be installed)", exc_info=True)
             return None
+
+    # ------------------------------------------------------------------
+    # Firmware updates
+    # ------------------------------------------------------------------
+
+    def get_firmware_status(self) -> Optional[FirmwareStatus]:
+        """Check OctoPrint's Software Update plugin for available updates.
+
+        Calls ``GET /plugin/softwareupdate/check`` to get version info
+        for OctoPrint and its installed plugins.
+        """
+        try:
+            data = self._get_json("/plugin/softwareupdate/check")
+        except Exception:
+            logger.debug(
+                "Software update check failed (plugin may not be installed)",
+                exc_info=True,
+            )
+            return None
+
+        information = data.get("information", {})
+        busy = bool(data.get("busy", False))
+
+        components: list[FirmwareComponent] = []
+        updates_available = 0
+
+        for comp_name, info in information.items():
+            if not isinstance(info, dict):
+                continue
+
+            display = info.get("displayName", comp_name)
+            current = info.get("information", {}).get(
+                "local", {}).get("value", "")
+            remote = info.get("information", {}).get(
+                "remote", {}).get("value", "")
+            has_update = bool(info.get("updateAvailable", False))
+
+            if has_update:
+                updates_available += 1
+
+            components.append(FirmwareComponent(
+                name=display,
+                current_version=str(current),
+                remote_version=str(remote) if remote else None,
+                update_available=has_update,
+                component_type="octoprint_plugin",
+            ))
+
+        return FirmwareStatus(
+            busy=busy,
+            components=components,
+            updates_available=updates_available,
+        )
+
+    def update_firmware(
+        self,
+        component: Optional[str] = None,
+    ) -> FirmwareUpdateResult:
+        """Trigger an update via OctoPrint's Software Update plugin.
+
+        Calls ``POST /plugin/softwareupdate/update``.  OctoPrint will
+        refuse if a print is in progress.
+
+        Args:
+            component: Specific plugin/component to update.  If ``None``,
+                updates all components with available updates.
+        """
+        # Safety: refuse if printer is actively printing
+        try:
+            state = self.get_state()
+            if state.state == PrinterStatus.PRINTING:
+                raise PrinterError(
+                    "Cannot update firmware while printing. "
+                    "Wait for the current print to finish."
+                )
+        except PrinterError:
+            raise
+        except Exception:
+            pass
+
+        # Build the update targets
+        if component:
+            targets = [component]
+        else:
+            # Get all components with updates available
+            status = self.get_firmware_status()
+            if status is None:
+                raise PrinterError(
+                    "Software Update plugin not available on this OctoPrint instance."
+                )
+            targets = [
+                c.name for c in status.components if c.update_available
+            ]
+            if not targets:
+                return FirmwareUpdateResult(
+                    success=True,
+                    message="All components are already up to date.",
+                    component=None,
+                )
+
+        try:
+            self._post(
+                "/plugin/softwareupdate/update",
+                json={"targets": targets, "force": False},
+            )
+        except PrinterError:
+            raise
+        except Exception as exc:
+            raise PrinterError(
+                f"Firmware update failed: {exc}", cause=exc,
+            ) from exc
+
+        target_str = component or "all components"
+        return FirmwareUpdateResult(
+            success=True,
+            message=f"Update started for {target_str}. "
+                    "OctoPrint may restart.",
+            component=component,
+        )
 
     # ------------------------------------------------------------------
     # Dunder helpers

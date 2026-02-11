@@ -111,6 +111,9 @@ kiln plugins list|info                        # Plugin management
 kiln generate "a phone stand" --provider meshy --json   # Generate 3D model from text
 kiln generate-status <job_id> --json                    # Check generation status
 kiln generate-download <job_id> -o ./models --json      # Download generated model
+kiln firmware status --json                # Check for firmware updates
+kiln firmware update [--component klipper] # Apply firmware updates
+kiln firmware rollback <component>         # Roll back firmware
 kiln serve                                 # Start MCP server
 ```
 
@@ -237,6 +240,9 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `await_generation` | Wait for a generation job to complete (polling) |
 | `generate_and_print` | Full pipeline: generate -> validate -> slice -> upload -> print |
 | `validate_generated_mesh` | Validate an STL/OBJ mesh for printing readiness |
+| `firmware_status` | Check for available firmware updates on the printer |
+| `update_firmware` | Start a firmware update (all or specific component) |
+| `rollback_firmware` | Roll back a firmware component to its previous version |
 
 ## Supported Printers
 
@@ -416,8 +422,8 @@ Agents use `fulfillment_quote` and `fulfillment_order` MCP tools for the same wo
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (2231+ total)
-cd kiln && python3 -m pytest tests/ -v        # 1992 tests
+# Run tests (2317+ total)
+cd kiln && python3 -m pytest tests/ -v        # 2078 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
