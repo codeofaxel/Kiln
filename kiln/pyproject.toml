@@ -38,6 +38,7 @@ dependencies = [
 
 [project.optional-dependencies]
 bambu = ["paho-mqtt>=2.0"]
+rest = ["fastapi>=0.100", "uvicorn[standard]>=0.25"]
 stripe = ["stripe>=5.0"]
 payments = ["stripe>=5.0"]
 dev = [

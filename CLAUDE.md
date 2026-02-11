@@ -87,12 +87,17 @@ kiln/                           — MCP Server package
       thingiverse.py            — Thingiverse API client
       myminifactory.py          — MyMiniFactory API client
       cults3d.py                — Cults3D API client
+    tool_schema.py              — OpenAI function-calling schema converter
+    tool_tiers.py               — Tool tier definitions (essential/standard/full)
+    agent_loop.py               — Generic agent loop for OpenAI-compatible APIs
+    openrouter.py               — OpenRouter integration + model catalog
+    rest_api.py                 — FastAPI REST wrapper for MCP tools
     cli/
-      main.py                   — Click CLI (20+ commands)
+      main.py                   — Click CLI (50+ commands)
       config.py                 — Config management (YAML/env/flags)
       discovery.py              — mDNS printer scanning
       output.py                 — JSON/text output formatting
-  tests/                        — pytest tests (1165)
+  tests/                        — pytest tests (2400+)
   pyproject.toml
 
 octoprint-cli/                  — CLI Tool package

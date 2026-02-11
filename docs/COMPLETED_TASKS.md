@@ -4,6 +4,21 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-11
 
+### Multi-Model Support (OpenRouter / Any LLM)
+- **tool_schema.py**: OpenAI function-calling schema converter — introspects FastMCP tool definitions and generates OpenAI-compatible JSON schemas with parameter descriptions from docstrings
+- **tool_tiers.py**: Three-tier tool system — essential (15 tools for weak models), standard (43 for mid-range), full (101 for strong models) with auto-detection via `suggest_tier(model_name)`
+- **agent_loop.py**: Generic agent loop for any OpenAI-compatible API — handles tool calling, multi-turn conversations, error recovery, and configurable max turns
+- **openrouter.py**: OpenRouter-specific integration with curated 15-model catalog, auto-tier detection, convenience `run_openrouter()` function, and interactive REPL
+- **rest_api.py**: FastAPI REST wrapper — exposes all MCP tools as `POST /api/tools/{name}` endpoints with discovery (`GET /api/tools`), agent loop endpoint (`POST /api/agent`), and optional Bearer auth
+- New CLI commands: `kiln setup` (interactive wizard), `kiln rest` (REST API server), `kiln agent` (multi-model REPL)
+- `rest` optional dependency group: `pip install kiln3d[rest]`
+
+### Pre-Launch Infrastructure
+- CONTRIBUTING.md, CODE_OF_CONDUCT.md, GitHub issue/PR templates
+- Example configs: `kiln-config.yaml` (all 4 printer types), `claude-desktop-mcp.json`
+- Fixed README/whitepaper image paths for PyPI rendering
+- Version consistency pass (standardized to 0.1.0)
+
 ### Closed-Loop Vision Feedback
 - 2 MCP tools: `monitor_print_vision` (snapshot + state + phase hints), `watch_print` (polling loop with periodic snapshot batches)
 - Print phase detection: first_layers (< 10%), mid_print (10-90%), final_layers (> 90%) — each with curated failure hints
