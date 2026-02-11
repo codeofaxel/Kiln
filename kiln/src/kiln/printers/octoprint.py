@@ -318,6 +318,9 @@ class OctoPrintAdapter(PrinterAdapter):
 
         status = _map_flags_to_status(flags)
 
+        # Chamber (optional — requires OctoPrint plugin or firmware support).
+        chamber = temps.get("chamber", {}) if isinstance(temps, dict) else {}
+
         return PrinterState(
             connected=True,
             state=status,
@@ -325,6 +328,8 @@ class OctoPrintAdapter(PrinterAdapter):
             tool_temp_target=tool.get("target"),
             bed_temp_actual=bed.get("actual"),
             bed_temp_target=bed.get("target"),
+            chamber_temp_actual=chamber.get("actual") if isinstance(chamber, dict) else None,
+            chamber_temp_target=chamber.get("target") if isinstance(chamber, dict) else None,
         )
 
     def get_job(self) -> JobProgress:
@@ -467,6 +472,18 @@ class OctoPrintAdapter(PrinterAdapter):
         """
         self._post("/api/job", json={"command": "cancel"})
         return PrintResult(success=True, message="Print cancelled.")
+
+    def emergency_stop(self) -> PrintResult:
+        """Perform emergency stop via M112 firmware halt.
+
+        Calls ``POST /api/printer/command`` with the M112 command which
+        immediately kills heaters and stepper motors at the firmware level.
+        """
+        self._post("/api/printer/command", json={"commands": ["M112"]})
+        return PrintResult(
+            success=True,
+            message="Emergency stop triggered (M112 sent).",
+        )
 
     def pause_print(self) -> PrintResult:
         """Pause the currently running print job.

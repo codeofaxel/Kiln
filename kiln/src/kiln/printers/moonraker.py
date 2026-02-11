@@ -360,6 +360,7 @@ class MoonrakerAdapter(PrinterAdapter):
                     "heater_bed": "",
                     "extruder": "",
                     "print_stats": "",
+                    "temperature_sensor chamber": "",
                 },
             )
         except PrinterError:
@@ -388,6 +389,11 @@ class MoonrakerAdapter(PrinterAdapter):
 
         mapped_status = _map_moonraker_state(klippy_state, print_state)
 
+        # Chamber (optional — only present if Klipper has a
+        # [temperature_sensor chamber] section in printer.cfg).
+        chamber = _safe_get(status, "temperature_sensor chamber", default={})
+        chamber_actual = chamber.get("temperature") if isinstance(chamber, dict) else None
+
         return PrinterState(
             connected=True,
             state=mapped_status,
@@ -395,6 +401,7 @@ class MoonrakerAdapter(PrinterAdapter):
             tool_temp_target=tool_target,
             bed_temp_actual=bed_actual,
             bed_temp_target=bed_target,
+            chamber_temp_actual=chamber_actual,
         )
 
     def get_job(self) -> JobProgress:
@@ -579,6 +586,18 @@ class MoonrakerAdapter(PrinterAdapter):
         """
         self._post("/printer/print/cancel")
         return PrintResult(success=True, message="Print cancelled.")
+
+    def emergency_stop(self) -> PrintResult:
+        """Perform emergency stop via Moonraker's dedicated endpoint.
+
+        Calls ``POST /printer/emergency_stop`` which immediately halts
+        all motion and cuts power to heaters at the firmware level.
+        """
+        self._post("/printer/emergency_stop")
+        return PrintResult(
+            success=True,
+            message="Emergency stop triggered.",
+        )
 
     def pause_print(self) -> PrintResult:
         """Pause the currently running print job.

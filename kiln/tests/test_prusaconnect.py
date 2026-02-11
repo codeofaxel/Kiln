@@ -335,6 +335,18 @@ class TestPrintControl:
 
         assert result.success is True
 
+    def test_emergency_stop_delegates_to_cancel(self):
+        a = _adapter()
+        status_resp = _mock_response(json_data={
+            "printer": {"state": "PRINTING"},
+            "job": {"id": 42, "progress": 50.0},
+        })
+        cancel_resp = _mock_response(status_code=204)
+        with patch.object(a._session, "request", side_effect=[status_resp, cancel_resp]):
+            result = a.emergency_stop()
+
+        assert result.success is True
+
 
 # ---------------------------------------------------------------------------
 # Unsupported operations
