@@ -423,7 +423,7 @@ class TestDeductUsage:
         )
         bus.reset_mock()
         # Spool starts at 1000. Deduct 910 -> spool remaining = 90 = 9% -> SPOOL_LOW
-        tracker.deduct_usage("voron", 91.0)
+        tracker.deduct_usage("voron", 910.0)
         event_types = [c[0][0] for c in bus.publish.call_args_list]
         assert EventType.SPOOL_LOW in event_types
 

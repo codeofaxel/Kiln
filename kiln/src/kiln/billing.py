@@ -1,16 +1,17 @@
-"""Revenue / fee system -- Kiln's take rate on network-routed jobs.
+"""Revenue / fee system -- Kiln's platform fee on outsourced orders.
 
-Kiln charges a percentage-based fee on jobs routed through external
-manufacturing networks (e.g. 3DOS).  **All local printing is free.**
-Kiln only takes a cut when it brokers jobs across the distributed
-manufacturing network.
+Kiln charges a percentage-based platform fee on orders placed through
+external manufacturing services (Craftcloud, and future providers).
+**All local printing is free.**  Kiln only takes a cut when it brokers
+orders to external fulfillment providers via ``kiln order`` or the
+``fulfillment_*`` MCP tools.
 
 Fee schedule
 ~~~~~~~~~~~~
-- ``network_fee_percent`` (default 5 %) of the raw network job cost.
-- Subject to a per-job minimum (``min_fee_usd``) and cap (``max_fee_usd``).
-- First ``free_tier_jobs`` network jobs per calendar month are waived to
-  encourage adoption.
+- ``network_fee_percent`` (default 5 %) of the provider's quoted price.
+- Subject to a per-order minimum (``min_fee_usd``) and cap (``max_fee_usd``).
+- First ``free_tier_jobs`` outsourced orders per calendar month are
+  waived to encourage adoption.
 
 Free operations (no fee ever)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -20,11 +21,12 @@ Free operations (no fee ever)
 - Fleet management
 - G-code validation / sending
 - Event bus / webhooks
+- Slicing
+- Marketplace search / download
 
 Paid operations (fee applies)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-- 3DOS network job routing (``submit_network_job`` via ``threedos.py``)
-- Future: premium cloud sync, analytics API
+- Fulfillment orders via ``kiln order`` / ``fulfillment_order`` MCP tool
 
 Example::
 

@@ -102,6 +102,12 @@ kiln order quote <file> -m MAT [--json]   # Get manufacturing quote
 kiln order place <quote_id> [--json]      # Place a fulfillment order
 kiln order status <order_id> [--json]     # Track order status
 kiln order cancel <order_id> [--json]     # Cancel an order
+kiln cost <file> [--material PLA] [--json]    # Estimate print cost
+kiln material set|show|spools|add-spool       # Material tracking
+kiln level [--status] [--trigger] [--json]    # Bed leveling triggers
+kiln stream [--port 8081] [--stop] [--json]   # Webcam MJPEG proxy
+kiln sync status|now|configure                # Cloud sync
+kiln plugins list|info                        # Plugin management
 kiln serve                                 # Start MCP server
 ```
 
@@ -201,6 +207,23 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `fulfillment_order` | Place an order based on a quote |
 | `fulfillment_order_status` | Track a fulfillment order |
 | `fulfillment_cancel` | Cancel a fulfillment order |
+| `estimate_cost` | Estimate print cost from G-code file |
+| `list_materials` | List available material profiles |
+| `set_material` | Set loaded material on a printer |
+| `get_material` | Get loaded material for a printer |
+| `check_material_match` | Verify material matches expected |
+| `list_spools` | List spool inventory |
+| `add_spool` | Add a spool to inventory |
+| `remove_spool` | Remove a spool from inventory |
+| `bed_level_status` | Get bed leveling status for a printer |
+| `trigger_bed_level` | Trigger bed leveling on a printer |
+| `set_leveling_policy` | Configure auto-leveling policy |
+| `webcam_stream` | Start/stop/status MJPEG stream proxy |
+| `cloud_sync_status` | Get cloud sync status |
+| `cloud_sync_now` | Trigger immediate sync |
+| `cloud_sync_configure` | Configure cloud sync settings |
+| `list_plugins` | List installed plugins |
+| `plugin_info` | Get details for a specific plugin |
 
 ## Supported Printers
 
@@ -242,6 +265,12 @@ The server also exposes read-only resources that agents can use for context:
 | `billing.py` | Fee tracking for 3DOS network-routed jobs |
 | `discovery.py` | Network printer discovery (mDNS + HTTP probe) |
 | `fulfillment/` | External manufacturing service adapters (Craftcloud) |
+| `cost_estimator.py` | Print cost estimation from G-code analysis |
+| `materials.py` | Multi-material and spool tracking |
+| `bed_leveling.py` | Automated bed leveling trigger system |
+| `streaming.py` | MJPEG webcam streaming proxy |
+| `cloud_sync.py` | Cloud sync for printer configs and job history |
+| `plugins.py` | Plugin system with entry-point discovery |
 | `gcode.py` | G-code safety validator |
 | `cli/` | Click CLI with 25+ subcommands and JSON output |
 
@@ -362,17 +391,21 @@ Agents use `fulfillment_quote` and `fulfillment_order` MCP tools for the same wo
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (1577 total)
-cd kiln && python3 -m pytest tests/ -v        # 1338 tests
+# Run tests (1813 total)
+cd kiln && python3 -m pytest tests/ -v        # 1574 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
 ## Revenue Model
 
-All local printing is **free forever**. Kiln only charges a 5% fee on jobs routed through the 3DOS distributed manufacturing network, with:
+All local printing is **free forever** — status checks, file management, slicing, fleet control, and printing to your own printers costs nothing.
 
-- First 5 network jobs per month free
-- $0.25 minimum / $50 maximum per-job cap
+Kiln charges a **5% platform fee** on orders placed through external manufacturing services (`kiln order` / fulfillment MCP tools), with:
+
+- First 5 outsourced orders per month **free**
+- $0.25 minimum / $50 maximum per-order cap
+
+The fee is shown transparently in every quote before you commit.
 
 ## Safety
 

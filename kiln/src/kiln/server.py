@@ -1230,11 +1230,11 @@ def recent_events(limit: int = 20) -> dict:
 
 @mcp.tool()
 def billing_summary() -> dict:
-    """Get a summary of Kiln network job fees for the current month.
+    """Get a summary of Kiln platform fees for the current month.
 
-    Shows total fees collected, number of network jobs, free tier usage,
-    and the current fee policy.  Only network-routed jobs (e.g. 3DOS)
-    incur fees -- all local printing is free.
+    Shows total fees collected, number of outsourced orders, free tier
+    usage, and the current fee policy.  Only orders placed through
+    external fulfillment services incur fees -- all local printing is free.
     """
     try:
         revenue = _billing.monthly_revenue()
@@ -2286,7 +2286,8 @@ def fulfillment_quote(
 
     Uploads the model, returns pricing from Craftcloud's network of 150+
     print services, including unit price, total, lead time, and shipping
-    options.
+    options.  A Kiln platform fee is shown separately so the user sees
+    the full cost before committing.
 
     Use the returned ``quote_id`` with ``fulfillment_order`` to place the
     order.
@@ -2299,9 +2300,15 @@ def fulfillment_quote(
             quantity=quantity,
             shipping_country=shipping_country,
         ))
+        fee_calc = _billing.calculate_fee(
+            quote.total_price, currency=quote.currency,
+        )
+        quote_data = quote.to_dict()
+        quote_data["kiln_fee"] = fee_calc.to_dict()
+        quote_data["total_with_fee"] = fee_calc.total_cost
         return {
             "success": True,
-            "quote": quote.to_dict(),
+            "quote": quote_data,
         }
     except FileNotFoundError as exc:
         return _error_dict(str(exc), code="FILE_NOT_FOUND")
@@ -2324,8 +2331,8 @@ def fulfillment_order(
         shipping_option_id: Shipping option ID from the quote's
             ``shipping_options`` list.
 
-    Returns the order ID and status.  Use ``fulfillment_order_status``
-    to track the order.
+    Returns the order ID and status.  A Kiln platform fee is recorded
+    against the order.  Use ``fulfillment_order_status`` to track.
     """
     if err := _check_auth("print"):
         return err
@@ -2335,9 +2342,20 @@ def fulfillment_order(
             quote_id=quote_id,
             shipping_option_id=shipping_option_id,
         ))
+        # Record the platform fee against this order.
+        if result.total_price and result.total_price > 0:
+            fee_calc = _billing.calculate_fee(
+                result.total_price, currency=result.currency,
+            )
+            _billing.record_charge(result.order_id, fee_calc)
+            order_data = result.to_dict()
+            order_data["kiln_fee"] = fee_calc.to_dict()
+            order_data["total_with_fee"] = fee_calc.total_cost
+        else:
+            order_data = result.to_dict()
         return {
             "success": True,
-            "order": result.to_dict(),
+            "order": order_data,
         }
     except (FulfillmentError, RuntimeError) as exc:
         return _error_dict(str(exc))
