@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from typing import Any, Dict, List, Optional
 from unittest import mock
 
@@ -27,6 +28,8 @@ from kiln.printers.base import (
 )
 from kiln.printers.bambu import (
     BambuAdapter,
+    _ImplicitFTP_TLS,
+    _PRINT_ACTIVE_STATES,
     _STATE_MAP,
 )
 
@@ -68,12 +71,14 @@ def adapter_with_mqtt() -> BambuAdapter:
     publish_result = mock.MagicMock()
     publish_result.wait_for_publish = mock.MagicMock()
     adapter._mqtt_client.publish.return_value = publish_result
+    # Pre-set a running state so start_print skips confirmation wait.
+    adapter._last_status = {"gcode_state": "running"}
     return adapter
 
 
 @pytest.fixture
 def mock_ftp_class() -> mock.MagicMock:
-    """Create a mock FTP_TLS class that returns a configured mock instance."""
+    """Create a mock _ImplicitFTP_TLS class that returns a configured mock instance."""
     mock_ftp = mock.MagicMock()
     mock_ftp.connect = mock.MagicMock()
     mock_ftp.login = mock.MagicMock()
@@ -444,7 +449,7 @@ class TestBambuAdapterListFiles:
             ("print.gcode", {"type": "file", "size": "67890", "modify": "20241202150000"}),
         ]
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             files = adapter_with_mqtt.list_files()
 
         assert len(files) == 2
@@ -460,7 +465,7 @@ class TestBambuAdapterListFiles:
             ("..", {"type": "dir"}),
         ]
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             files = adapter_with_mqtt.list_files()
 
         assert files == []
@@ -473,14 +478,14 @@ class TestBambuAdapterListFiles:
             ("actual_file.3mf", {"type": "file", "size": "1000"}),
         ]
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             files = adapter_with_mqtt.list_files()
 
         assert len(files) == 1
         assert files[0].name == "actual_file.3mf"
 
     def test_ftp_connection_error(self, adapter_with_mqtt: BambuAdapter) -> None:
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS") as mock_ftp_cls:
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS") as mock_ftp_cls:
             mock_ftp_cls.return_value.connect.side_effect = Exception("Connection refused")
             with pytest.raises(PrinterError, match="FTPS connection"):
                 adapter_with_mqtt.list_files()
@@ -488,7 +493,7 @@ class TestBambuAdapterListFiles:
     def test_ftp_mlsd_error(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
         mock_ftp_class.mlsd.side_effect = Exception("MLSD failed")
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             with pytest.raises(PrinterError, match="Failed to list files"):
                 adapter_with_mqtt.list_files()
 
@@ -497,7 +502,7 @@ class TestBambuAdapterListFiles:
             ("nosize.3mf", {"type": "file", "modify": "20241201120000"}),
         ]
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             files = adapter_with_mqtt.list_files()
 
         assert len(files) == 1
@@ -508,7 +513,7 @@ class TestBambuAdapterListFiles:
             ("nodate.3mf", {"type": "file", "size": "1000"}),
         ]
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             files = adapter_with_mqtt.list_files()
 
         assert len(files) == 1
@@ -517,7 +522,7 @@ class TestBambuAdapterListFiles:
     def test_ftp_quit_called(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
         mock_ftp_class.mlsd.return_value = []
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             adapter_with_mqtt.list_files()
 
         mock_ftp_class.quit.assert_called_once()
@@ -534,7 +539,7 @@ class TestBambuAdapterUploadFile:
         test_file = tmp_path / "test.3mf"
         test_file.write_text("fake 3mf content")
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             result = adapter_with_mqtt.upload_file(str(test_file))
 
         assert isinstance(result, UploadResult)
@@ -551,7 +556,7 @@ class TestBambuAdapterUploadFile:
         test_file = tmp_path / "test.3mf"
         test_file.write_text("content")
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS") as mock_ftp_cls:
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS") as mock_ftp_cls:
             mock_ftp_cls.return_value.connect.side_effect = Exception("Connection refused")
             with pytest.raises(PrinterError, match="FTPS connection"):
                 adapter_with_mqtt.upload_file(str(test_file))
@@ -561,7 +566,7 @@ class TestBambuAdapterUploadFile:
         test_file.write_text("content")
         mock_ftp_class.storbinary.side_effect = Exception("Upload failed")
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             with pytest.raises(PrinterError, match="FTPS upload failed"):
                 adapter_with_mqtt.upload_file(str(test_file))
 
@@ -569,7 +574,7 @@ class TestBambuAdapterUploadFile:
         test_file = tmp_path / "locked.3mf"
         test_file.write_text("content")
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             with mock.patch("builtins.open", side_effect=PermissionError("no read")):
                 with pytest.raises(PrinterError, match="Permission denied"):
                     adapter_with_mqtt.upload_file(str(test_file))
@@ -578,7 +583,7 @@ class TestBambuAdapterUploadFile:
         test_file = tmp_path / "test.3mf"
         test_file.write_text("content")
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             adapter_with_mqtt.upload_file(str(test_file))
 
         mock_ftp_class.quit.assert_called_once()
@@ -777,14 +782,14 @@ class TestBambuAdapterDeleteFile:
     """Tests for the delete_file method."""
 
     def test_successful_delete(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             result = adapter_with_mqtt.delete_file("/sdcard/old_model.3mf")
 
         assert result is True
         mock_ftp_class.delete.assert_called_once_with("/sdcard/old_model.3mf")
 
     def test_ftp_connection_error(self, adapter_with_mqtt: BambuAdapter) -> None:
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS") as mock_ftp_cls:
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS") as mock_ftp_cls:
             mock_ftp_cls.return_value.connect.side_effect = Exception("Connection refused")
             with pytest.raises(PrinterError, match="FTPS connection"):
                 adapter_with_mqtt.delete_file("/sdcard/file.3mf")
@@ -792,12 +797,12 @@ class TestBambuAdapterDeleteFile:
     def test_ftp_delete_error(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
         mock_ftp_class.delete.side_effect = Exception("File not found")
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             with pytest.raises(PrinterError, match="Failed to delete"):
                 adapter_with_mqtt.delete_file("/sdcard/nonexistent.3mf")
 
     def test_ftp_quit_called(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             adapter_with_mqtt.delete_file("/sdcard/file.3mf")
 
         mock_ftp_class.quit.assert_called_once()
@@ -996,7 +1001,7 @@ class TestBambuAdapterFTPSInternals:
     def test_ftp_connect_calls_all_setup_methods(self, mock_ftp_class: mock.MagicMock) -> None:
         adapter = _adapter()
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS", return_value=mock_ftp_class):
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
             ftp = adapter._ftp_connect()
 
         mock_ftp_class.connect.assert_called_once_with(HOST, 990, timeout=2)
@@ -1007,7 +1012,7 @@ class TestBambuAdapterFTPSInternals:
     def test_ftp_connect_raises_on_failure(self) -> None:
         adapter = _adapter()
 
-        with mock.patch("kiln.printers.bambu.ftplib.FTP_TLS") as mock_ftp_cls:
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS") as mock_ftp_cls:
             mock_ftp_cls.return_value.connect.side_effect = Exception("Connection failed")
             with pytest.raises(PrinterError, match="FTPS connection"):
                 adapter._ftp_connect()
@@ -1077,3 +1082,123 @@ class TestPrinterStateSerialization:
         assert d["state"] == "printing"
         assert d["tool_temp_actual"] == 200.0
         assert d["bed_temp_target"] == 60.0
+
+
+# ---------------------------------------------------------------------------
+# A1/A1 mini: uppercase state parsing
+# ---------------------------------------------------------------------------
+
+
+class TestBambuAdapterUppercaseState:
+    """Tests for A1/A1 mini uppercase gcode_state values."""
+
+    @pytest.mark.parametrize("state_str,expected", [
+        ("IDLE", PrinterStatus.IDLE),
+        ("RUNNING", PrinterStatus.PRINTING),
+        ("PREPARE", PrinterStatus.BUSY),
+        ("PAUSE", PrinterStatus.PAUSED),
+        ("FAILED", PrinterStatus.ERROR),
+        ("Idle", PrinterStatus.IDLE),
+        ("Running", PrinterStatus.PRINTING),
+        ("idle", PrinterStatus.IDLE),
+        ("running", PrinterStatus.PRINTING),
+    ])
+    def test_case_insensitive_state_mapping(
+        self, adapter_with_mqtt: BambuAdapter, state_str: str, expected: PrinterStatus,
+    ) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": state_str}
+        state = adapter_with_mqtt.get_state()
+        assert state.state == expected
+
+    def test_on_message_uppercase_push_status(
+        self, adapter_with_mqtt: BambuAdapter,
+    ) -> None:
+        """push_status command matching should be case-insensitive."""
+        adapter_with_mqtt._last_status = {}
+        msg = mock.MagicMock()
+        msg.payload = json.dumps({
+            "print": {
+                "command": "PUSH_STATUS",
+                "gcode_state": "RUNNING",
+                "nozzle_temper": 210,
+            }
+        }).encode()
+        adapter_with_mqtt._on_message(None, None, msg)
+        assert adapter_with_mqtt._last_status.get("gcode_state") == "RUNNING"
+        # get_state() should still normalise to lowercase.
+        state = adapter_with_mqtt.get_state()
+        assert state.state == PrinterStatus.PRINTING
+
+
+# ---------------------------------------------------------------------------
+# Print start confirmation
+# ---------------------------------------------------------------------------
+
+
+class TestBambuAdapterPrintConfirmation:
+    """Tests for the print-start confirmation polling."""
+
+    def test_confirmed_on_running(self, adapter_with_mqtt: BambuAdapter) -> None:
+        # Pre-set idle so it enters the wait path.
+        adapter_with_mqtt._last_status = {"gcode_state": "idle"}
+        # Simulate state transition after a brief delay.
+        original_sleep = time.sleep
+
+        call_count = 0
+
+        def fake_sleep(secs: float) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                adapter_with_mqtt._last_status["gcode_state"] = "running"
+
+        with mock.patch("kiln.printers.bambu.time.sleep", side_effect=fake_sleep):
+            result = adapter_with_mqtt.start_print("test.3mf")
+        assert result.success is True
+
+    def test_timeout_returns_failure(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "idle"}
+        # Mock time.monotonic to simulate timeout.
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]):
+            with mock.patch("kiln.printers.bambu.time.sleep"):
+                result = adapter_with_mqtt.start_print("test.3mf")
+        assert result.success is False
+        assert "did not transition" in result.message
+
+    def test_skips_wait_when_already_active(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "running"}
+        result = adapter_with_mqtt.start_print("test.3mf")
+        assert result.success is True
+
+    def test_failure_on_error_state(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "idle"}
+
+        def fake_sleep(secs: float) -> None:
+            adapter_with_mqtt._last_status["gcode_state"] = "failed"
+
+        with mock.patch("kiln.printers.bambu.time.sleep", side_effect=fake_sleep):
+            result = adapter_with_mqtt.start_print("test.3mf")
+        assert result.success is False
+
+
+# ---------------------------------------------------------------------------
+# Implicit FTPS
+# ---------------------------------------------------------------------------
+
+
+class TestImplicitFTPTLS:
+    """Tests for the _ImplicitFTP_TLS subclass."""
+
+    def test_is_ftp_tls_subclass(self) -> None:
+        import ftplib
+        assert issubclass(_ImplicitFTP_TLS, ftplib.FTP_TLS)
+
+    def test_ftp_connect_uses_implicit_class(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            ftp = adapter_with_mqtt._ftp_connect()
+        assert ftp is mock_ftp_class
+        mock_ftp_class.connect.assert_called_once()
+        mock_ftp_class.login.assert_called_once()
+        mock_ftp_class.prot_p.assert_called_once()

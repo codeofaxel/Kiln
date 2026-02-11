@@ -2064,6 +2064,52 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             f"--type {printer_type} --api-key <key>"
         )
 
+    # -- Auto-print safety preferences -------------------------------------
+    click.echo()
+    click.echo(click.style("  Print Safety Preferences", bold=True))
+    click.echo()
+    click.echo(
+        "  By default, Kiln does NOT auto-start prints after downloading\n"
+        "  or generating models.  You must call start_print separately.\n"
+        "  This protects your printer from untested/malformed models.\n"
+    )
+    click.echo(
+        "  You can enable auto-print for each model source independently.\n"
+        "  These can be changed later via environment variables.\n"
+    )
+
+    auto_mkt = click.confirm(
+        "  Enable auto-print for MARKETPLACE downloads?\n"
+        "  (Community models — moderate risk)",
+        default=False,
+    )
+    auto_gen = click.confirm(
+        "  Enable auto-print for AI-GENERATED models?\n"
+        "  (Experimental geometry — higher risk)",
+        default=False,
+    )
+
+    auto_env_lines = []
+    if auto_mkt:
+        auto_env_lines.append("export KILN_AUTO_PRINT_MARKETPLACE=true")
+    if auto_gen:
+        auto_env_lines.append("export KILN_AUTO_PRINT_GENERATED=true")
+
+    if auto_env_lines:
+        click.echo()
+        click.echo(click.style("  Auto-print enabled. ", fg="yellow") + "Add to your shell profile:")
+        for line in auto_env_lines:
+            click.echo(f"    {line}")
+        click.echo()
+        click.echo("  To disable later, unset the variable or set to 'false'.")
+    else:
+        click.echo()
+        click.echo(
+            click.style("  Auto-print disabled (recommended).", fg="green")
+            + " Models will upload but not print\n"
+            "  until you explicitly call start_print."
+        )
+
     # -- Next steps --------------------------------------------------------
     click.echo()
     click.echo(click.style("  Setup complete!", bold=True))
@@ -2073,6 +2119,10 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     click.echo(f"    kiln files           List files on the printer")
     click.echo(f"    kiln print <file>    Start a print")
     click.echo(f"    kiln serve           Start the MCP server")
+    click.echo()
+    click.echo("  Auto-print toggles (change anytime via env vars):")
+    click.echo(f"    KILN_AUTO_PRINT_MARKETPLACE={'true' if auto_mkt else 'false (default)'}")
+    click.echo(f"    KILN_AUTO_PRINT_GENERATED={'true' if auto_gen else 'false (default)'}")
     click.echo()
 
 

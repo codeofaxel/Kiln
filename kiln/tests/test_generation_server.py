@@ -379,7 +379,6 @@ class TestGenerateAndPrint:
         adapter.upload_file.return_value = UploadResult(
             success=True, file_name="model.gcode", message="Uploaded",
         )
-        adapter.start_print.return_value = PrintResult(success=True, message="Printing")
         mock_adapter.return_value = adapter
 
         result = generate_and_print("a cube", provider="meshy")
@@ -387,12 +386,17 @@ class TestGenerateAndPrint:
         assert "generation" in result
         assert "slice" in result
         assert "upload" in result
-        assert "print" in result
+        assert result["experimental"] is True
+        assert result["ready_to_print"] is True
+        assert "safety_notice" in result
+        assert "start_print" in result["message"]
         provider.generate.assert_called_once()
-        mock_validate.assert_called_once()
+        # validate_mesh called twice: once in pipeline step 4, once for preview
+        assert mock_validate.call_count == 2
         mock_slice.assert_called_once()
         adapter.upload_file.assert_called_once()
-        adapter.start_print.assert_called_once()
+        # start_print should NOT be called — requires explicit user action
+        adapter.start_print.assert_not_called()
 
     @_AUTH_PATCH
     @patch("kiln.server.time")
