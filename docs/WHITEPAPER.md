@@ -198,13 +198,66 @@ Local printer control is free and unrestricted. Kiln charges a 5% platform fee o
 - **Credential storage.** API keys and access codes are stored in `~/.kiln/config.yaml` with permission warnings for world-readable files.
 - **Input validation.** All file paths, G-code commands, and temperature values are validated before reaching printer hardware.
 
-## 9. Future Work
+## 9. Closed-Loop Vision Monitoring
+
+### 9.1 Design Philosophy
+
+Rather than embedding a separate computer vision model, Kiln leverages the agent itself as the vision system. Modern multimodal agents (Claude, GPT-4V) can analyze images directly. Kiln's role is to provide structured context alongside each snapshot: printer state, job progress, print phase classification, and phase-specific failure hints.
+
+### 9.2 Phase Detection
+
+Prints are classified into three phases based on completion percentage:
+- **First layers** (< 10%) — Critical for adhesion. Failure hints focus on bed adhesion, first layer height, and elephant's foot.
+- **Mid print** (10–90%) — Bulk of the print. Failure hints focus on stringing, layer shifts, and temperature stability.
+- **Final layers** (> 90%) — Finishing. Failure hints focus on top surface quality, cooling, and overhangs.
+
+### 9.3 Monitoring Tools
+
+`monitor_print_vision` captures a single snapshot with full metadata: printer status, temperatures, job progress percentage, phase classification, and phase-specific failure hints. The agent receives everything needed to make an informed decision about print quality.
+
+`watch_print` creates a continuous monitoring loop. It polls printer state at a configurable interval and captures snapshots periodically (default every 60 seconds). After accumulating a batch of snapshots (default 5), it returns them to the agent for review. The agent analyzes the batch, decides whether to pause or continue, and calls `watch_print` again — closing the feedback loop.
+
+Both tools work gracefully without a webcam — metadata is still returned for state-based monitoring.
+
+## 10. Cross-Printer Learning
+
+### 10.1 Outcome Recording
+
+Agents record structured print outcomes after each job: success/failure/partial, quality grade, failure mode (from a validated set: spaghetti, warping, layer shift, etc.), print settings, and environmental conditions. All recorded data passes through safety validation — temperature values exceeding hardware-safe maximums (320°C hotend, 140°C bed, 500mm/s speed) are rejected with a `SAFETY_VIOLATION` error code.
+
+### 10.2 Insight Queries
+
+`get_printer_insights` aggregates outcome history for a specific printer: success rate, failure mode breakdown, material performance, and recent outcomes. Results include a confidence level based on sample size and carry a safety notice marking them as advisory only.
+
+`suggest_printer_for_job` ranks available printers by historical success rate for a given file hash and material type. Printers with few data points are penalized in scoring to prevent overconfidence from small samples. Results are cross-referenced with current printer availability from the fleet registry.
+
+### 10.3 Safety Posture
+
+All learning data is advisory — it informs agent decisions but never overrides safety limits. The system rejects outcome records with physically dangerous parameter values. Every insight response carries an explicit safety notice stating that data reflects past outcomes only and must not be used to bypass safety validation.
+
+## 11. Physical Fabrication Generalization
+
+### 11.1 Evolutionary Extension
+
+Kiln's adapter pattern was designed for 3D printers but the abstraction generalizes to any computer-controlled fabrication device. Rather than a breaking rename, Kiln introduces forward-compatible extension points:
+
+- **`DeviceType` enum** — Classifies devices: `FDM_PRINTER`, `SLA_PRINTER`, `CNC_ROUTER`, `LASER_CUTTER`, `GENERIC`.
+- **`DeviceAdapter` alias** — `DeviceAdapter = PrinterAdapter`. Existing code continues to reference `PrinterAdapter`; new integrations can use `DeviceAdapter`.
+- **Extended `PrinterCapabilities`** — Adds `device_type` and `can_snapshot` fields with backward-compatible defaults.
+- **Optional device methods** — `set_spindle_speed()`, `set_laser_power()`, `get_tool_position()` provide hooks for non-printer devices. Default implementations raise `PrinterError` or return `None`, so existing adapters are unaffected.
+
+### 11.2 Compatibility Guarantee
+
+All four existing adapters (OctoPrint, Moonraker, Bambu, Prusa Connect) continue to work without modification. The new fields default to `device_type="fdm_printer"` and `can_snapshot=False` (overridden to `True` for OctoPrint and Moonraker which support webcam capture). No existing tests break; the extensions are purely additive.
+
+## 12. Future Work
 - **Remote agent collaboration.** Enable multiple agents to coordinate across a shared printer fleet.
-- **Print quality monitoring.** Computer vision analysis of webcam streams for defect detection.
+- **CNC and laser adapter implementations.** Concrete adapters for Grbl, LinuxCNC, and LightBurn backends.
+- **Federated learning.** Aggregate anonymized print outcomes across Kiln instances (opt-in) for community-level printer insights.
 
-## 10. Conclusion
+## 13. Conclusion
 
-Kiln demonstrates that AI agents can safely operate physical manufacturing hardware given the right protocol abstractions. By normalizing heterogeneous printer APIs into a typed adapter interface, enforcing safety invariants at the protocol level, and exposing all operations through MCP, Kiln transforms any MCP-compatible agent into a manufacturing operator. The system is local-first, open-source, and extensible to new printer backends and manufacturing services.
+Kiln demonstrates that AI agents can safely operate physical manufacturing hardware given the right protocol abstractions. By normalizing heterogeneous printer APIs into a typed adapter interface, enforcing safety invariants at the protocol level, and exposing all operations through MCP, Kiln transforms any MCP-compatible agent into a manufacturing operator. Closed-loop vision monitoring lets agents observe and intervene during prints. Cross-printer learning enables data-driven printer selection with safety-first guardrails. The generalized device abstraction positions Kiln to expand beyond 3D printing to CNC, laser, and resin fabrication. The system is local-first, open-source, and extensible to new device backends and manufacturing services.
 
 ---
 

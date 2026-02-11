@@ -44,6 +44,12 @@ Kiln is agentic infrastructure for physical fabrication. It provides a unified i
 
 **Job Queue** — Priority queue backed by SQLite. Jobs are dispatched to idle printers by a background scheduler.
 
+**DeviceType** — Enum classifying physical devices: `FDM_PRINTER`, `SLA_PRINTER`, `CNC_ROUTER`, `LASER_CUTTER`, `GENERIC`. Enables future expansion beyond 3D printing.
+
+**DeviceAdapter** — Alias for `PrinterAdapter`. Forward-compatible name for non-printer device integrations.
+
+**Cross-Printer Learning** — Agent-curated outcome database (`print_outcomes` table) that records success/failure/quality per printer and file. Safety-validated: rejects physically dangerous parameter values.
+
 ---
 
 ## Getting Started
@@ -387,6 +393,21 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 | `update_firmware` | `component` | Update result |
 | `rollback_firmware` | `component` | Rollback result |
 
+#### Vision Monitoring
+
+| Tool | Input | Output |
+|---|---|---|
+| `monitor_print_vision` | `printer_name`, `include_snapshot`, `save_snapshot` | Snapshot + state + phase + failure hints |
+| `watch_print` | `printer_name`, `snapshot_interval`, `max_snapshots`, `timeout`, `poll_interval` | Batch of snapshots with state transitions |
+
+#### Cross-Printer Learning
+
+| Tool | Input | Output |
+|---|---|---|
+| `record_print_outcome` | `job_id`, `outcome`, `quality_grade`, `failure_mode`, `settings`, `notes` | Confirmation (safety-validated) |
+| `get_printer_insights` | `printer_name`, `limit` | Success rate, failure breakdown, material stats, confidence |
+| `suggest_printer_for_job` | `file_hash`, `material_type`, `file_name` | Ranked printers by success rate + availability |
+
 ### MCP Resources
 
 Read-only resources for agent context:
@@ -559,7 +580,7 @@ Register HTTP endpoints for real-time event notifications:
 register_webhook(url="https://example.com/hook", events=["job.completed", "print.failed"])
 ```
 
-**Event types:** `job.submitted`, `job.dispatched`, `job.completed`, `job.failed`, `job.cancelled`, `print.started`, `print.paused`, `print.resumed`, `print.failed`, `printer.online`, `printer.offline`, `printer.error`, `stream.started`, `stream.stopped`, `sync.completed`, `sync.failed`, `leveling.triggered`, `leveling.completed`, `leveling.failed`, `leveling.needed`, `material.loaded`, `material.mismatch`, `material.spool_low`, `material.spool_empty`, `plugin.loaded`, `plugin.error`.
+**Event types:** `job.submitted`, `job.dispatched`, `job.completed`, `job.failed`, `job.cancelled`, `print.started`, `print.paused`, `print.resumed`, `print.failed`, `printer.online`, `printer.offline`, `printer.error`, `stream.started`, `stream.stopped`, `sync.completed`, `sync.failed`, `leveling.triggered`, `leveling.completed`, `leveling.failed`, `leveling.needed`, `material.loaded`, `material.mismatch`, `material.spool_low`, `material.spool_empty`, `plugin.loaded`, `plugin.error`, `vision.check`, `vision.alert`.
 
 Payloads are signed with HMAC-SHA256 when a secret is provided.
 
@@ -630,7 +651,7 @@ pip install -e "./octoprint-cli[dev]"
 ### Running Tests
 
 ```bash
-cd kiln && python3 -m pytest tests/ -v    # 1574 tests
+cd kiln && python3 -m pytest tests/ -v    # 2413 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 

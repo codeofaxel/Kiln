@@ -4,6 +4,29 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-11
 
+### Closed-Loop Vision Feedback
+- 2 MCP tools: `monitor_print_vision` (snapshot + state + phase hints), `watch_print` (polling loop with periodic snapshot batches)
+- Print phase detection: first_layers (< 10%), mid_print (10-90%), final_layers (> 90%) — each with curated failure hints
+- `can_snapshot` capability flag on `PrinterCapabilities`, set `True` for OctoPrint and Moonraker adapters
+- 2 new event types: `VISION_CHECK`, `VISION_ALERT`
+- Works gracefully without webcam (metadata-only monitoring)
+- 27 tests covering phase detection, snapshot paths, failure hints
+
+### Cross-Printer Learning
+- `print_outcomes` SQLite table with indexes on printer_name, file_hash, and outcome
+- 7 new `KilnDB` methods: `save_print_outcome`, `get_print_outcome`, `list_print_outcomes`, `get_printer_learning_insights`, `get_file_outcomes`, `suggest_printer_for_outcome`, `_outcome_row_to_dict`
+- 3 MCP tools: `record_print_outcome` (safety-validated), `get_printer_insights` (aggregated analytics), `suggest_printer_for_job` (ranked recommendations)
+- **Safety guardrails**: Hard temperature limits (320C tool, 140C bed, 500mm/s speed), enum validation on outcomes/grades/failure modes, `SAFETY_VIOLATION` rejection for dangerous values, advisory-only disclaimers on all insight responses
+- 30 tests covering DB CRUD, aggregation, edge cases
+
+### Physical-World Platform Generalization
+- `DeviceType` enum: `FDM_PRINTER`, `SLA_PRINTER`, `CNC_ROUTER`, `LASER_CUTTER`, `GENERIC`
+- `DeviceAdapter = PrinterAdapter` alias for forward compatibility
+- Extended `PrinterCapabilities`: `device_type` (default "fdm_printer"), `can_snapshot` (default False)
+- Optional device methods: `set_spindle_speed()`, `set_laser_power()`, `get_tool_position()` — default implementations raise/return None
+- All 4 existing adapters continue to work without modification
+- 22 tests covering alias identity, enum values, capability defaults, backward compatibility
+
 ### Bundled Slicer Profiles Per Printer
 - **`data/slicer_profiles.json`** — Curated PrusaSlicer/OrcaSlicer settings for 14 printer models: Ender 3, Ender 3 S1, K1, Prusa MK3S/MK4/Mini, Bambu X1C/P1S/A1, Voron 2.4, Elegoo Neptune 4, Sovol SV06, QIDI X-Plus 3
 - Each profile: layer height, speeds, temps, retraction, fan, bed shape, G-code flavor — all optimized for the specific printer's kinematics and extruder type
