@@ -87,6 +87,7 @@ from kiln.materials import MaterialTracker
 from kiln.bed_leveling import BedLevelManager, LevelingPolicy
 from kiln.streaming import MJPEGProxy
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
+from kiln.heater_watchdog import HeaterWatchdog
 from kiln.plugins import PluginManager, PluginContext
 from kiln.fulfillment import (
     FulfillmentError,
@@ -197,6 +198,9 @@ _AUTO_PRINT_MARKETPLACE: bool = (
 _AUTO_PRINT_GENERATED: bool = (
     os.environ.get("KILN_AUTO_PRINT_GENERATED", "").lower() in ("1", "true", "yes")
 )
+
+# Heater watchdog: minutes of idle heater time before auto-cooldown (0=disabled).
+_HEATER_TIMEOUT_MIN: float = float(os.environ.get("KILN_HEATER_TIMEOUT", "30"))
 
 # Default snapshot directory — use ~/.kiln/snapshots/ instead of /tmp to
 # avoid macOS periodic /tmp cleanup deleting saved snapshots.
@@ -595,6 +599,16 @@ _bed_level_mgr = BedLevelManager(
 )
 _stream_proxy = MJPEGProxy()
 _cloud_sync: Optional[CloudSyncManager] = None
+_heater_watchdog = HeaterWatchdog(
+    get_adapter=lambda: _get_adapter(),
+    timeout_minutes=_HEATER_TIMEOUT_MIN,
+    event_bus=_event_bus,
+)
+# Subscribe watchdog to print lifecycle events from the scheduler/event bus.
+_event_bus.subscribe(EventType.PRINT_STARTED, lambda _e: _heater_watchdog.notify_print_started())
+_event_bus.subscribe(EventType.PRINT_COMPLETED, lambda _e: _heater_watchdog.notify_print_ended())
+_event_bus.subscribe(EventType.PRINT_FAILED, lambda _e: _heater_watchdog.notify_print_ended())
+_event_bus.subscribe(EventType.PRINT_CANCELLED, lambda _e: _heater_watchdog.notify_print_ended())
 _plugin_mgr = PluginManager()
 _start_time = time.time()
 
@@ -1171,6 +1185,7 @@ def start_print(file_name: str) -> dict:
             }
 
         result = adapter.start_print(file_name)
+        _heater_watchdog.notify_print_started()
         _audit("start_print", "executed", details={"file": file_name})
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
@@ -1199,6 +1214,7 @@ def cancel_print() -> dict:
     try:
         adapter = _get_adapter()
         result = adapter.cancel_print()
+        _heater_watchdog.notify_print_ended()
         _audit("cancel_print", "executed")
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
@@ -1396,6 +1412,12 @@ def set_temperature(
 
         if rate_warnings:
             results["warnings"] = rate_warnings
+
+        # Notify heater watchdog when heaters are turned on.
+        if (tool_temp is not None and tool_temp > 0) or (
+            bed_temp is not None and bed_temp > 0
+        ):
+            _heater_watchdog.notify_heater_set()
 
         _audit("set_temperature", "executed", details={
             "tool_temp": tool_temp, "bed_temp": bed_temp,
@@ -6931,7 +6953,8 @@ def main() -> None:
     # Start background services
     _scheduler.start()
     _webhook_mgr.start()
-    logger.info("Kiln scheduler and webhook delivery started")
+    _heater_watchdog.start()
+    logger.info("Kiln scheduler, webhook delivery, and heater watchdog started")
 
     # Graceful shutdown handler
     def _shutdown_handler(signum: int, frame: Any) -> None:
@@ -6942,6 +6965,7 @@ def main() -> None:
         logger.info("Received %s — shutting down gracefully...", sig_name)
         _scheduler.stop()
         _webhook_mgr.stop()
+        _heater_watchdog.stop()
         _stream_proxy.stop()
         if _cloud_sync is not None:
             _cloud_sync.stop()
@@ -6953,6 +6977,7 @@ def main() -> None:
     # Atexit as fallback
     atexit.register(_scheduler.stop)
     atexit.register(_webhook_mgr.stop)
+    atexit.register(_heater_watchdog.stop)
     atexit.register(_stream_proxy.stop)
     if _cloud_sync is not None:
         atexit.register(_cloud_sync.stop)
