@@ -127,7 +127,7 @@ class OpenSCADProvider(GenerationProvider):
             )
 
         job_id = f"openscad-{uuid.uuid4().hex[:12]}"
-        output_dir = kwargs.get("output_dir", "/tmp/kiln_generated")
+        output_dir = kwargs.get("output_dir", os.path.join(tempfile.gettempdir(), "kiln_generated"))
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{job_id}.stl")
 
@@ -254,7 +254,7 @@ class OpenSCADProvider(GenerationProvider):
     def download_result(
         self,
         job_id: str,
-        output_dir: str = "/tmp/kiln_generated",
+        output_dir: str = os.path.join(tempfile.gettempdir(), "kiln_generated"),
     ) -> GenerationResult:
         """Return the path to the already-generated STL.
 

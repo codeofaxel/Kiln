@@ -10,7 +10,9 @@ behaviour).
 
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 from typing import Any, Dict, Optional
 
 import click
@@ -784,7 +786,7 @@ def remove(name: str) -> None:
 
 @cli.command()
 @click.argument("input_file", type=click.Path(exists=True))
-@click.option("--output-dir", "-o", default=None, help="Output directory (default: /tmp/kiln_sliced).")
+@click.option("--output-dir", "-o", default=None, help="Output directory (default: system temp dir).")
 @click.option("--output-name", default=None, help="Override output file name.")
 @click.option("--profile", "-P", default=None, type=click.Path(), help="Slicer profile file (.ini/.json).")
 @click.option("--slicer", default=None, help="Explicit path to slicer binary.")
@@ -904,10 +906,8 @@ def snapshot(ctx: click.Context, output: Optional[str], json_mode: bool) -> None
             sys.exit(1)
 
         if output:
-            import os
             _safe = os.path.realpath(output)
             _home = os.path.expanduser("~")
-            import tempfile
             _tmpdir = os.path.realpath(tempfile.gettempdir())
             _allowed_prefixes = (_home, "/tmp", "/private/tmp", _tmpdir)
             if not any(_safe.startswith(p) for p in _allowed_prefixes):
@@ -935,7 +935,8 @@ def snapshot(ctx: click.Context, output: Optional[str], json_mode: bool) -> None
                 },
             }, indent=2))
         else:
-            default_path = "/tmp/kiln_snapshot.jpg"
+            default_path = os.path.join(os.path.expanduser("~"), ".kiln", "snapshots", "kiln_snapshot.jpg")
+            os.makedirs(os.path.dirname(default_path), exist_ok=True)
             with open(default_path, "wb") as f:
                 f.write(image_data)
             click.echo(f"Snapshot saved to {default_path} ({len(image_data)} bytes)")
@@ -2308,7 +2309,7 @@ def generate(
         if not wait_for or job.status == GenerationStatus.SUCCEEDED:
             if job.status == GenerationStatus.SUCCEEDED:
                 # Download the result for synchronous providers.
-                result = gen.download_result(job.id, output_dir=output_dir or "/tmp/kiln_generated")
+                result = gen.download_result(job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated"))
                 val = validate_mesh(result.local_path)
 
                 if json_mode:
@@ -2362,7 +2363,7 @@ def generate(
                 click.echo(f"\r  Progress: {job.progress}%  ", nl=False)
 
             if job.status == GenerationStatus.SUCCEEDED:
-                result = gen.download_result(job.id, output_dir=output_dir or "/tmp/kiln_generated")
+                result = gen.download_result(job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated"))
                 val = validate_mesh(result.local_path)
 
                 if json_mode:
@@ -2467,7 +2468,7 @@ def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
 @click.option("--provider", "-p", default="meshy",
               type=click.Choice(["meshy", "openscad"]),
               help="Generation provider.")
-@click.option("--output-dir", "-o", default="/tmp/kiln_generated",
+@click.option("--output-dir", "-o", default=os.path.join(tempfile.gettempdir(), "kiln_generated"),
               help="Output directory.")
 @click.option("--validate/--no-validate", default=True,
               help="Run mesh validation (default: on).")

@@ -7,6 +7,7 @@ can search, browse, and download models through a uniform interface.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -203,6 +204,43 @@ class MarketplaceAdapter(ABC):
 # ---------------------------------------------------------------------------
 
 
+
+def _verify_download(
+    path: Path,
+    expected_sha256: str | None,
+    expected_size: int | None,
+) -> None:
+    """Verify downloaded file integrity (size and SHA-256 hash).
+
+    Logs the computed SHA-256 hash and raises :class:`MarketplaceError`
+    if the file does not match the expected values.
+    """
+    actual_size = path.stat().st_size
+    _logger.info("Downloaded %s (%d bytes)", path, actual_size)
+
+    if expected_size is not None and actual_size != expected_size:
+        raise MarketplaceError(
+            f"Size mismatch for {path.name}: "
+            f"expected {expected_size} bytes, got {actual_size} bytes",
+        )
+
+    sha256 = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while True:
+            chunk = fh.read(65536)
+            if not chunk:
+                break
+            sha256.update(chunk)
+    digest = sha256.hexdigest()
+    _logger.info("SHA-256 of %s: %s", path.name, digest)
+
+    if expected_sha256 is not None and digest != expected_sha256.lower():
+        raise MarketplaceError(
+            f"SHA-256 mismatch for {path.name}: "
+            f"expected {expected_sha256.lower()}, got {digest}",
+        )
+
+
 def resumable_download(
     session: Any,
     url: str,
@@ -212,6 +250,8 @@ def resumable_download(
     timeout: int = 120,
     chunk_size: int = 65536,
     max_retries: int = 3,
+    expected_sha256: str | None = None,
+    expected_size: int | None = None,
 ) -> str:
     """Download a file with resume support via HTTP Range headers.
 
@@ -227,18 +267,26 @@ def resumable_download(
         timeout: Request timeout in seconds.
         chunk_size: Bytes per chunk (default 64 KB).
         max_retries: Number of resume attempts on failure.
+        expected_sha256: If provided, the downloaded file's SHA-256
+            hash is compared against this value and
+            :class:`MarketplaceError` is raised on mismatch.
+        expected_size: If provided, the downloaded file's size in
+            bytes is compared against this value and
+            :class:`MarketplaceError` is raised on mismatch.
 
     Returns:
         Absolute path to the downloaded file.
 
     Raises:
-        MarketplaceError: If the download fails after all retries.
+        MarketplaceError: If the download fails after all retries,
+            or if hash/size verification fails.
     """
     part_path = out_path.with_suffix(out_path.suffix + ".part")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # If final file already exists and has content, return it
+    # If final file already exists and has content, verify and return it
     if out_path.exists() and out_path.stat().st_size > 0:
+        _verify_download(out_path, expected_sha256, expected_size)
         return str(out_path.resolve())
 
     for attempt in range(max_retries):
@@ -274,6 +322,7 @@ def resumable_download(
                 # Range not satisfiable — file is already complete
                 if part_path.exists():
                     part_path.rename(out_path)
+                    _verify_download(out_path, expected_sha256, expected_size)
                     return str(out_path.resolve())
                 mode = "wb"
             else:
@@ -288,10 +337,10 @@ def resumable_download(
             if part_path.exists() and part_path.stat().st_size > 0:
                 actual_size = part_path.stat().st_size
                 # Check Content-Length if the server provided it
-                expected_size = resp.headers.get("Content-Length")
-                if expected_size is not None:
+                content_length = resp.headers.get("Content-Length")
+                if content_length is not None:
                     try:
-                        expected = int(expected_size) + existing_bytes
+                        expected = int(content_length) + existing_bytes
                         if actual_size < expected:
                             _logger.warning(
                                 "Incomplete download: got %d bytes, expected %d",
@@ -302,10 +351,7 @@ def resumable_download(
                     except (ValueError, TypeError):
                         pass  # Malformed Content-Length, skip check
                 part_path.rename(out_path)
-                _logger.info(
-                    "Downloaded %s (%d bytes)",
-                    out_path, out_path.stat().st_size,
-                )
+                _verify_download(out_path, expected_sha256, expected_size)
                 return str(out_path.resolve())
 
         except Exception as exc:

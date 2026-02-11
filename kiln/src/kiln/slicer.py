@@ -16,7 +16,7 @@ Example::
 
     slicer = find_slicer()                # auto-detect
     result = slice_file("model.stl")      # -> SliceResult
-    print(result.output_path)             # /tmp/kiln_sliced/model.gcode
+    print(result.output_path)             # <tempdir>/kiln_sliced/model.gcode
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import tempfile
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,7 +57,7 @@ _MACOS_PATHS: List[str] = [
 _INPUT_EXTENSIONS = {".stl", ".3mf", ".step", ".stp", ".obj", ".amf"}
 
 # Default output directory.
-_DEFAULT_OUTPUT_DIR = "/tmp/kiln_sliced"
+_DEFAULT_OUTPUT_DIR = os.path.join(tempfile.gettempdir(), "kiln_sliced")
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +205,7 @@ def slice_file(
     Args:
         input_path: Path to the input file (STL, 3MF, STEP, OBJ, AMF).
         output_dir: Directory for the output G-code file.  Defaults to
-            ``/tmp/kiln_sliced``.
+            the system temp directory.
         output_name: Override the output file name.  Defaults to the
             input file's stem with ``.gcode`` extension.
         profile: Path to a slicer profile/config file (.ini or .json).

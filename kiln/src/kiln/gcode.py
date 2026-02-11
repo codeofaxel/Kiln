@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import re
+from enum import Enum
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -64,6 +65,36 @@ class GCodeValidationResult:
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     blocked_commands: list[str] = field(default_factory=list)
+
+
+
+# ---------------------------------------------------------------------------
+# G-code dialect awareness
+# ---------------------------------------------------------------------------
+
+class GCodeDialect(Enum):
+    """Firmware dialect for dialect-specific command validation."""
+
+    GENERIC = "generic"
+    MARLIN = "marlin"
+    KLIPPER = "klipper"
+    BAMBU = "bambu"
+
+
+# Additional commands blocked per dialect.  GENERIC and MARLIN have no
+# extra blocks -- they use only the global ``_BLOCKED_COMMANDS`` table.
+_DIALECT_BLOCKED: Dict[GCodeDialect, Dict[str, str]] = {
+    GCodeDialect.GENERIC: {},
+    GCodeDialect.MARLIN: {},
+    GCodeDialect.KLIPPER: {
+        "M500": "M500 is not supported on Klipper -- use SAVE_CONFIG instead",
+        "M501": "M501 is not supported on Klipper -- use SAVE_CONFIG instead",
+        "M502": "M502 is not supported on Klipper -- use SAVE_CONFIG instead",
+    },
+    GCodeDialect.BAMBU: {
+        "M600": "M600 (filament change) is not supported on Bambu Lab printers during a print",
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +144,10 @@ _WARN_COMMANDS: Dict[str, str] = {
 }
 
 # Movement commands that can carry Z and F parameters.
-_MOVE_COMMANDS: Set[str] = {"G0", "G1"}
+_MOVE_COMMANDS: Set[str] = {"G0", "G1", "G2", "G3"}
+
+# Arc commands that require I/J or R parameters.
+_ARC_COMMANDS: Set[str] = {"G2", "G3"}
 
 
 # ---------------------------------------------------------------------------
@@ -209,12 +243,16 @@ def _validate_single(
     warnings: List[str],
     errors: List[str],
     blocked: List[str],
+    dialect: GCodeDialect = GCodeDialect.GENERIC,
 ) -> Optional[str]:
     """Validate a single G-code line.
 
     If the line is safe, returns the cleaned command string.  If the line
     is blocked, appends to *errors* and *blocked* and returns ``None``.
     Non-blocking issues are appended to *warnings*.
+
+    When *dialect* is not ``GENERIC``, dialect-specific blocked commands
+    are also checked.
     """
     cleaned = _strip_comment(raw_line)
     if not cleaned:
@@ -232,6 +270,13 @@ def _validate_single(
     # --- Blocked commands ------------------------------------------------
     if cmd in _BLOCKED_COMMANDS:
         errors.append(_BLOCKED_COMMANDS[cmd])
+        blocked.append(cleaned)
+        return None
+
+    # --- Dialect-specific blocked commands --------------------------------
+    dialect_blocks = _DIALECT_BLOCKED.get(dialect, {})
+    if cmd in dialect_blocks:
+        errors.append(dialect_blocks[cmd])
         blocked.append(cleaned)
         return None
 
@@ -314,6 +359,23 @@ def _validate_single(
                 f"({_MAX_SAFE_FEEDRATE:g} mm/min)"
             )
 
+    # --- Arc command validation (G2/G3) ----------------------------------
+    if cmd in _ARC_COMMANDS:
+        i_val = _extract_param(cleaned, "I")
+        j_val = _extract_param(cleaned, "J")
+        r_val = _extract_param(cleaned, "R")
+        has_ij = i_val is not None or j_val is not None
+        has_r = r_val is not None
+        if not has_ij and not has_r:
+            warnings.append(
+                f"{cmd} arc command missing I/J or R parameters "
+                f"\u2014 arc is undefined"
+            )
+        if has_r and r_val == 0:
+            warnings.append(
+                f"{cmd} has R=0 (zero-radius arc is degenerate)"
+            )
+
     return cleaned
 
 
@@ -321,7 +383,10 @@ def _validate_single(
 # Public API
 # ---------------------------------------------------------------------------
 
-def validate_gcode(commands: Union[str, List[str]]) -> GCodeValidationResult:
+def validate_gcode(
+    commands: Union[str, List[str]],
+    dialect: GCodeDialect = GCodeDialect.GENERIC,
+) -> GCodeValidationResult:
     """Parse and validate G-code commands for safety.
 
     Accepts either a single string (with commands separated by newlines)
@@ -332,6 +397,7 @@ def validate_gcode(commands: Union[str, List[str]]) -> GCodeValidationResult:
     Args:
         commands: One or more G-code commands.  A string is split on
             newlines; a list is processed element-by-element.
+        dialect: Firmware dialect for dialect-specific validation.
 
     Returns:
         A :class:`GCodeValidationResult` summarising which commands are
@@ -366,6 +432,7 @@ def validate_gcode(commands: Union[str, List[str]]) -> GCodeValidationResult:
             result.warnings,
             result.errors,
             result.blocked_commands,
+            dialect=dialect,
         )
         if cleaned is not None:
             result.commands.append(cleaned)
@@ -377,6 +444,7 @@ def validate_gcode(commands: Union[str, List[str]]) -> GCodeValidationResult:
 def validate_gcode_for_printer(
     commands: Union[str, List[str]],
     printer_id: str,
+    dialect: GCodeDialect = GCodeDialect.GENERIC,
 ) -> GCodeValidationResult:
     """Validate G-code using printer-specific safety limits.
 
@@ -388,6 +456,7 @@ def validate_gcode_for_printer(
         commands: One or more G-code commands.
         printer_id: Printer profile identifier (e.g. ``"ender3"``,
             ``"bambu_x1c"``).
+        dialect: Firmware dialect for dialect-specific validation.
 
     Returns:
         A :class:`GCodeValidationResult`.
@@ -399,7 +468,7 @@ def validate_gcode_for_printer(
     try:
         profile = get_profile(printer_id)
     except KeyError:
-        return validate_gcode(commands)
+        return validate_gcode(commands, dialect=dialect)
 
     if isinstance(commands, str):
         lines = commands.splitlines()
@@ -417,6 +486,7 @@ def validate_gcode_for_printer(
             result.errors,
             result.blocked_commands,
             profile,
+            dialect=dialect,
         )
         if cleaned is not None:
             result.commands.append(cleaned)
@@ -431,11 +501,15 @@ def _validate_single_with_profile(
     errors: List[str],
     blocked: List[str],
     profile: Any,
+    dialect: GCodeDialect = GCodeDialect.GENERIC,
 ) -> Optional[str]:
     """Validate a single G-code line against a printer safety profile.
 
     Works like ``_validate_single`` but uses limits from *profile*
     instead of module-level constants.
+
+    When *dialect* is not ``GENERIC``, dialect-specific blocked commands
+    are also checked.
     """
     cleaned = _strip_comment(raw_line)
     if not cleaned:
@@ -451,6 +525,13 @@ def _validate_single_with_profile(
     # --- Blocked commands (same regardless of printer) ---
     if cmd in _BLOCKED_COMMANDS:
         errors.append(_BLOCKED_COMMANDS[cmd])
+        blocked.append(cleaned)
+        return None
+
+    # --- Dialect-specific blocked commands ---
+    dialect_blocks = _DIALECT_BLOCKED.get(dialect, {})
+    if cmd in dialect_blocks:
+        errors.append(dialect_blocks[cmd])
         blocked.append(cleaned)
         return None
 
@@ -537,6 +618,23 @@ def _validate_single_with_profile(
                 f"recommended maximum ({profile.max_feedrate:g} mm/min)"
             )
 
+    # --- Arc command validation (G2/G3) ---
+    if cmd in _ARC_COMMANDS:
+        i_val = _extract_param(cleaned, "I")
+        j_val = _extract_param(cleaned, "J")
+        r_val = _extract_param(cleaned, "R")
+        has_ij = i_val is not None or j_val is not None
+        has_r = r_val is not None
+        if not has_ij and not has_r:
+            warnings.append(
+                f"{cmd} arc command missing I/J or R parameters "
+                f"\u2014 arc is undefined"
+            )
+        if has_r and r_val == 0:
+            warnings.append(
+                f"{cmd} has R=0 (zero-radius arc is degenerate)"
+            )
+
     return cleaned
 
 
@@ -552,6 +650,7 @@ def scan_gcode_file(
     file_path: str,
     *,
     printer_id: Optional[str] = None,
+    dialect: GCodeDialect = GCodeDialect.GENERIC,
 ) -> GCodeValidationResult:
     """Stream-validate an entire G-code file for safety.
 
@@ -564,9 +663,13 @@ def scan_gcode_file(
     for temperature and feedrate limits.  Otherwise the generic module-level
     limits apply.
 
+    When *dialect* is not ``GENERIC``, dialect-specific blocked commands
+    are also checked.
+
     Args:
         file_path: Path to a ``.gcode`` / ``.gco`` / ``.g`` file.
         printer_id: Optional printer profile id (e.g. ``"ender3"``).
+        dialect: Firmware dialect for dialect-specific validation.
 
     Returns:
         A :class:`GCodeValidationResult`.  ``valid`` is ``False`` if any
@@ -610,6 +713,7 @@ def scan_gcode_file(
                     result.errors,
                     result.blocked_commands,
                     profile,
+                    dialect=dialect,
                 )
             else:
                 cleaned = _validate_single(
@@ -617,6 +721,7 @@ def scan_gcode_file(
                     result.warnings,
                     result.errors,
                     result.blocked_commands,
+                    dialect=dialect,
                 )
 
             if cleaned is not None:
