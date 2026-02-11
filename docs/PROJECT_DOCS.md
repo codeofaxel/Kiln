@@ -167,6 +167,24 @@ Remove a saved printer from config.
 #### `kiln serve`
 Start the MCP server (for agent integration).
 
+#### `kiln cost <file> [--material MAT] [--electricity-rate N] [--printer-wattage N]`
+Estimate the cost of printing a G-code file. Analyzes extrusion, calculates filament weight and cost, and optionally includes electricity cost.
+
+#### `kiln material set|show|spools|add-spool`
+Material tracking commands. `set` records loaded material on a printer. `show` displays current material. `spools` lists spool inventory. `add-spool` registers a new spool.
+
+#### `kiln level [--status] [--trigger] [--set-prints N] [--set-hours N] [--enable/--disable]`
+Bed leveling management. Check status, manually trigger leveling, or configure auto-leveling policy.
+
+#### `kiln stream [--port 8081] [--stop]`
+Start or stop the MJPEG webcam streaming proxy. Proxies the upstream printer webcam stream to a local HTTP endpoint.
+
+#### `kiln sync status|now|configure`
+Cloud sync management. `status` shows sync state. `now` triggers immediate sync. `configure` sets cloud URL and API key.
+
+#### `kiln plugins list|info`
+Plugin management. `list` shows all discovered plugins. `info` shows details for a specific plugin.
+
 ---
 
 ## MCP Server Reference
@@ -271,6 +289,53 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 | `register_webhook` | `url`, `events`, `secret` | Webhook ID |
 | `list_webhooks` | — | Webhook list |
 | `delete_webhook` | `webhook_id` | Confirmation |
+
+#### Cost Estimation
+
+| Tool | Input | Output |
+|---|---|---|
+| `estimate_cost` | `file_path`, `material`, `electricity_rate`, `printer_wattage` | Cost breakdown |
+| `list_materials` | — | Material profiles |
+
+#### Material Tracking
+
+| Tool | Input | Output |
+|---|---|---|
+| `set_material` | `printer_name`, `material`, `color`, `spool_id`, `tool_index` | Confirmation |
+| `get_material` | `printer_name` | Loaded materials |
+| `check_material_match` | `printer_name`, `expected_material` | Match result or warning |
+| `list_spools` | — | Spool inventory |
+| `add_spool` | `material`, `color`, `brand`, `weight`, `cost` | Spool details |
+| `remove_spool` | `spool_id` | Confirmation |
+
+#### Bed Leveling
+
+| Tool | Input | Output |
+|---|---|---|
+| `bed_level_status` | `printer_name` | Leveling status and policy |
+| `trigger_bed_level` | `printer_name` | Leveling result |
+| `set_leveling_policy` | `printer_name`, policy params | Confirmation |
+
+#### Webcam Streaming
+
+| Tool | Input | Output |
+|---|---|---|
+| `webcam_stream` | `printer_name`, `action`, `port` | Stream status |
+
+#### Cloud Sync
+
+| Tool | Input | Output |
+|---|---|---|
+| `cloud_sync_status` | — | Sync state |
+| `cloud_sync_now` | — | Sync results |
+| `cloud_sync_configure` | `cloud_url`, `api_key`, `interval` | Confirmation |
+
+#### Plugins
+
+| Tool | Input | Output |
+|---|---|---|
+| `list_plugins` | — | Plugin list |
+| `plugin_info` | `name` | Plugin details |
 
 ### MCP Resources
 
@@ -429,7 +494,7 @@ Register HTTP endpoints for real-time event notifications:
 register_webhook(url="https://example.com/hook", events=["job.completed", "print.failed"])
 ```
 
-**Event types:** `job.submitted`, `job.dispatched`, `job.completed`, `job.failed`, `job.cancelled`, `print.started`, `print.paused`, `print.resumed`, `print.failed`, `printer.online`, `printer.offline`, `printer.error`.
+**Event types:** `job.submitted`, `job.dispatched`, `job.completed`, `job.failed`, `job.cancelled`, `print.started`, `print.paused`, `print.resumed`, `print.failed`, `printer.online`, `printer.offline`, `printer.error`, `stream.started`, `stream.stopped`, `sync.completed`, `sync.failed`, `leveling.triggered`, `leveling.completed`, `leveling.failed`, `leveling.needed`, `material.loaded`, `material.mismatch`, `material.spool_low`, `material.spool_empty`, `plugin.loaded`, `plugin.error`.
 
 Payloads are signed with HMAC-SHA256 when a secret is provided.
 
@@ -500,7 +565,7 @@ pip install -e "./octoprint-cli[dev]"
 ### Running Tests
 
 ```bash
-cd kiln && python3 -m pytest tests/ -v    # 1272 tests
+cd kiln && python3 -m pytest tests/ -v    # 1574 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
@@ -531,11 +596,21 @@ kiln/src/kiln/
     auth.py              # API key authentication
     billing.py           # Fee tracking
     gcode.py             # G-code safety validator
+    cost_estimator.py    # Print cost estimation
+    materials.py         # Multi-material tracking
+    bed_leveling.py      # Bed leveling trigger system
+    streaming.py         # MJPEG webcam proxy
+    cloud_sync.py        # Cloud sync manager
+    plugins.py           # Plugin system
     printers/
         base.py          # Abstract PrinterAdapter + dataclasses
         octoprint.py     # OctoPrint REST adapter
         moonraker.py     # Moonraker REST adapter
         bambu.py         # Bambu Lab MQTT adapter
+        prusaconnect.py  # Prusa Connect/Link adapter
+    fulfillment/
+        base.py          # Fulfillment adapter interface
+        craftcloud.py    # Craftcloud API client
     marketplaces/
         base.py          # Marketplace adapter interface
         thingiverse.py   # Thingiverse API client

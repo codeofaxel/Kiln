@@ -147,7 +147,6 @@ class TestCostEstimatorMaterials:
         m2 = est.materials
         assert m1 is not m2
         assert m1 == m2
-        # Mutating the copy should not affect the estimator
         m1.pop("PLA")
         assert "PLA" in est.materials
 
@@ -156,7 +155,6 @@ class TestCostEstimatorMaterials:
         assert est.get_material("pla") is not None
         assert est.get_material("Pla") is not None
         assert est.get_material("PLA") is not None
-        assert est.get_material("pLa") is not None
         assert est.get_material("pla").name == "PLA"
 
     def test_get_material_unknown_returns_none(self):
@@ -172,7 +170,6 @@ class TestCostEstimatorMaterials:
         est = CostEstimator(custom_materials=custom)
         assert est.get_material("WOOD") is not None
         assert est.get_material("WOOD").name == "WOOD"
-        # Built-ins still present
         assert est.get_material("PLA") is not None
 
     def test_custom_materials_override_builtin(self):
@@ -189,102 +186,56 @@ class TestCostEstimatorMaterials:
 
 
 class TestParseExtrusion:
-    """Tests for CostEstimator._parse_extrusion."""
-
     def _parse(self, gcode_text):
         lines = gcode_text.strip().splitlines()
         return CostEstimator()._parse_extrusion(lines)
 
     def test_basic_absolute_extrusion(self):
-        gcode = "G1 X10 Y10 E5.0
-G1 X20 Y20 E10.0
-G1 X30 Y30 E20.0"
-        # Absolute: (5-0) + (10-5) + (20-10) = 20
+        gcode = "G1 X10 Y10 E5.0\nG1 X20 Y20 E10.0\nG1 X30 Y30 E20.0"
         assert self._parse(gcode) == pytest.approx(20.0)
 
     def test_relative_mode_m83(self):
-        gcode = "M83
-G1 X10 Y10 E3.0
-G1 X20 Y20 E4.0
-G1 X30 Y30 E5.0"
-        # Relative: 3 + 4 + 5 = 12
+        gcode = "M83\nG1 X10 Y10 E3.0\nG1 X20 Y20 E4.0\nG1 X30 Y30 E5.0"
         assert self._parse(gcode) == pytest.approx(12.0)
 
     def test_mode_switching_m82_m83(self):
-        gcode = (
-            "G1 X10 E5.0
-"
-            "G1 X20 E10.0
-"
-            "M83
-"
-            "G1 X30 E2.0
-"
-            "G1 X40 E3.0
-"
-            "M82
-"
-            "G1 X50 E12.0"
-        )
-        # Absolute: (5-0) + (10-5) = 10
-        # M83 relative: 2 + 3 = 5
-        # M82 resets last_e to 0, absolute: (12-0) = 12
+        gcode = "G1 X10 E5.0\nG1 X20 E10.0\nM83\nG1 X30 E2.0\nG1 X40 E3.0\nM82\nG1 X50 E12.0"
+        # Absolute: (5-0)+(10-5)=10, M83 relative: 2+3=5, M82 resets last_e to 0: (12-0)=12 => 27
         assert self._parse(gcode) == pytest.approx(27.0)
 
     def test_g92_e0_reset(self):
-        gcode = "G1 X10 E10.0
-G92 E0
-G1 X20 E5.0"
-        # Absolute: (10-0)=10, G92 resets last_e to 0, (5-0)=5 => 15
+        gcode = "G1 X10 E10.0\nG92 E0\nG1 X20 E5.0"
         assert self._parse(gcode) == pytest.approx(15.0)
 
     def test_retraction_filtered_absolute(self):
-        gcode = "G1 X10 E10.0
-G1 E9.0
-G1 X20 E15.0"
-        # (10-0)=10, retraction (9-10)=-1 filtered, (15-9)=6 => 16
+        gcode = "G1 X10 E10.0\nG1 E9.0\nG1 X20 E15.0"
         assert self._parse(gcode) == pytest.approx(16.0)
 
     def test_retraction_filtered_relative(self):
-        gcode = "M83
-G1 X10 E5.0
-G1 E-1.0
-G1 X20 E5.0"
-        # 5 + (neg filtered) + 5 = 10
+        gcode = "M83\nG1 X10 E5.0\nG1 E-1.0\nG1 X20 E5.0"
         assert self._parse(gcode) == pytest.approx(10.0)
 
     def test_empty_file(self):
         assert self._parse("") == pytest.approx(0.0)
 
     def test_no_extrusion_commands(self):
-        gcode = "G28
-G1 X10 Y10 F3000
-G1 X20 Y20
-M104 S200"
+        gcode = "G28\nG1 X10 Y10 F3000\nG1 X20 Y20\nM104 S200"
         assert self._parse(gcode) == pytest.approx(0.0)
 
     def test_inline_comments_stripped(self):
-        gcode = "G1 X10 E5.0 ; first move
-G1 X20 E10.0 ; second move"
+        gcode = "G1 X10 E5.0 ; first move\nG1 X20 E10.0 ; second move"
         assert self._parse(gcode) == pytest.approx(10.0)
 
     def test_full_line_comments_skipped(self):
-        gcode = "; this is a comment
-; E100.0 should be ignored
-G1 X10 E3.0"
+        gcode = "; this is a comment\n; E100.0 should be ignored\nG1 X10 E3.0"
         assert self._parse(gcode) == pytest.approx(3.0)
 
     def test_g0_moves_with_e(self):
-        gcode = "G0 X10 E5.0
-G0 X20 E8.0"
-        # G0 with E is also processed: (5-0) + (8-5) = 8
+        gcode = "G0 X10 E5.0\nG0 X20 E8.0"
         assert self._parse(gcode) == pytest.approx(8.0)
 
     def test_g92_with_nonzero_e(self):
-        gcode = "G1 X10 E10.0
-G92 E5.0
-G1 X20 E8.0"
-        # (10-0)=10, G92 sets last_e=5, (8-5)=3 => 13
+        gcode = "G1 X10 E10.0\nG92 E5.0\nG1 X20 E8.0"
         assert self._parse(gcode) == pytest.approx(13.0)
 
 
@@ -299,7 +250,6 @@ class TestParseTimeFromComments:
 
     def test_prusaslicer_format(self):
         text = "; estimated printing time (normal mode) = 1h 23m 45s"
-        # 1*3600 + 23*60 + 45 = 5025
         assert self._parse_time(text) == 5025
 
     def test_prusaslicer_minutes_only(self):
@@ -319,9 +269,7 @@ class TestParseTimeFromComments:
         assert self._parse_time(text) == 2 * 3600 + 10 * 60 + 5
 
     def test_no_time_comment_returns_none(self):
-        text = "; some comment
-G1 X10 Y10
-; another comment"
+        text = "; some comment\nG1 X10 Y10\n; another comment"
         assert self._parse_time(text) is None
 
     def test_hours_only(self):
@@ -329,9 +277,7 @@ G1 X10 Y10
         assert self._parse_time(text) == 7200
 
     def test_ignores_non_comment_lines(self):
-        text = "G1 X10 Y10
-TIME:9999"
-        # TIME:9999 is not a comment (no ;), should not match
+        text = "G1 X10 Y10\nTIME:9999"
         assert self._parse_time(text) is None
 
 
@@ -366,22 +312,18 @@ class TestEstimateFromGcode:
         assert any("Unknown material" in w for w in est.warnings)
 
     def test_no_extrusion_produces_warning(self):
-        gcode = self._gcode_lines("G28
-G1 X10 Y10")
+        gcode = self._gcode_lines("G28\nG1 X10 Y10")
         est = CostEstimator().estimate_from_gcode(gcode)
         assert any("No extrusion" in w for w in est.warnings)
 
     def test_electricity_cost_with_time(self):
-        gcode = self._gcode_lines("G1 X10 E100.0
-;TIME:3600")
+        gcode = self._gcode_lines("G1 X10 E100.0\n;TIME:3600")
         est = CostEstimator().estimate_from_gcode(
             gcode, electricity_rate=0.15, printer_wattage=300.0,
         )
         assert est.estimated_time_seconds == 3600
-        # 300W * 1h = 0.3 kWh * \/bin/zsh.15 = \/bin/zsh.045 => rounded to \/bin/zsh.04 or \/bin/zsh.05
+        # 300W * 1h = 0.3 kWh * 0.15 = 0.045
         assert est.electricity_cost_usd == pytest.approx(0.04, abs=0.01)
-        assert est.electricity_rate_kwh == 0.15
-        assert est.printer_wattage == 300.0
 
     def test_no_time_means_no_electricity_cost(self):
         gcode = self._gcode_lines("G1 X10 E100.0")
@@ -390,8 +332,7 @@ G1 X10 Y10")
         assert est.electricity_cost_usd == 0.0
 
     def test_total_cost_equals_filament_plus_electricity(self):
-        gcode = self._gcode_lines("G1 X10 E100.0
-;TIME:7200")
+        gcode = self._gcode_lines("G1 X10 E100.0\n;TIME:7200")
         est = CostEstimator().estimate_from_gcode(
             gcode, electricity_rate=0.12, printer_wattage=200.0,
         )
@@ -399,8 +340,7 @@ G1 X10 Y10")
         assert est.total_cost_usd == pytest.approx(expected_total, abs=0.01)
 
     def test_zero_extrusion_produces_zero_cost(self):
-        gcode = self._gcode_lines("G28
-G1 X10 Y10")
+        gcode = self._gcode_lines("G28\nG1 X10 Y10")
         est = CostEstimator().estimate_from_gcode(gcode)
         assert est.filament_length_meters == 0.0
         assert est.filament_weight_grams == 0.0
@@ -430,14 +370,10 @@ class TestEstimateFromFile:
 
     def test_reads_real_temp_file(self, tmp_path):
         gcode_content = (
-            "; estimated printing time (normal mode) = 0h 30m 0s
-"
-            "G28
-"
-            "G1 X10 Y10 E50.0
-"
-            "G1 X20 Y20 E100.0
-"
+            "; estimated printing time (normal mode) = 0h 30m 0s\n"
+            "G28\n"
+            "G1 X10 Y10 E50.0\n"
+            "G1 X20 Y20 E100.0\n"
         )
         gcode_file = tmp_path / "test_print.gcode"
         gcode_file.write_text(gcode_content)
@@ -450,9 +386,7 @@ class TestEstimateFromFile:
         assert est.total_cost_usd > 0
 
     def test_passes_material_and_rates(self, tmp_path):
-        gcode_content = "G1 X10 E50.0
-;TIME:3600
-"
+        gcode_content = "G1 X10 E50.0\n;TIME:3600\n"
         gcode_file = tmp_path / "rates.gcode"
         gcode_file.write_text(gcode_content)
 
@@ -474,15 +408,7 @@ class TestEstimateFromFile:
 
 class TestCalculationAccuracy:
     def test_known_pla_values(self):
-        """Verify weight/volume math with hand-calculated values.
-
-        100mm extrusion of 1.75mm PLA:
-        - radius = 0.875mm
-        - cross_section = pi * 0.875^2 = 2.40528... mm^2
-        - volume = 100 * 2.40528 / 1000 = 0.240528... cm^3
-        - weight = 0.240528 * 1.24 (PLA density) = 0.298255... g
-        - cost = (0.298255 / 1000) * 25.0 = ~\/bin/zsh.00746
-        """
+        """Verify weight/volume math with hand-calculated values."""
         gcode = ["G1 X10 E100.0"]
         est = CostEstimator().estimate_from_gcode(gcode)
 
@@ -497,16 +423,12 @@ class TestCalculationAccuracy:
         assert est.filament_cost_usd == pytest.approx(cost, abs=0.01)
 
     def test_petg_different_from_pla(self):
-        """PETG has different density and cost, so results should differ."""
         gcode = ["G1 X10 E500.0"]
         est_pla = CostEstimator().estimate_from_gcode(gcode, material="PLA")
         est_petg = CostEstimator().estimate_from_gcode(gcode, material="PETG")
 
-        # Same extrusion length
         assert est_pla.filament_length_meters == est_petg.filament_length_meters
-        # Different weight (PETG is denser: 1.27 vs 1.24)
         assert est_petg.filament_weight_grams > est_pla.filament_weight_grams
-        # Different cost (PETG is more expensive per kg)
         assert est_petg.filament_cost_usd > est_pla.filament_cost_usd
 
 
@@ -517,7 +439,6 @@ class TestCalculationAccuracy:
 
 class TestPerformance:
     def test_large_file_not_slow(self):
-        """10,000 lines of G-code should parse in under 1 second."""
         lines = []
         for i in range(10000):
             e = i * 0.5

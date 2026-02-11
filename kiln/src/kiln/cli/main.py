@@ -1087,6 +1087,7 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
     and shipping options from Craftcloud's network of 150+ print services.
     """
     from kiln.fulfillment import QuoteRequest
+    from kiln.billing import BillingLedger
 
     try:
         provider = _get_fulfillment_provider()
@@ -1096,7 +1097,12 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
             quantity=quantity,
             shipping_country=country,
         ))
-        click.echo(format_quote(quote.to_dict(), json_mode=json_mode))
+        quote_data = quote.to_dict()
+        ledger = BillingLedger()
+        fee_calc = ledger.calculate_fee(quote.total_price, currency=quote.currency)
+        quote_data["kiln_fee"] = fee_calc.to_dict()
+        quote_data["total_with_fee"] = fee_calc.total_cost
+        click.echo(format_quote(quote_data, json_mode=json_mode))
     except click.ClickException:
         raise
     except FileNotFoundError as exc:
@@ -1117,6 +1123,7 @@ def order_place(quote_id: str, shipping_id: str, json_mode: bool) -> None:
     Requires a quote ID from 'kiln order quote'.
     """
     from kiln.fulfillment import OrderRequest
+    from kiln.billing import BillingLedger
 
     try:
         provider = _get_fulfillment_provider()
@@ -1124,7 +1131,16 @@ def order_place(quote_id: str, shipping_id: str, json_mode: bool) -> None:
             quote_id=quote_id,
             shipping_option_id=shipping_id,
         ))
-        click.echo(format_order(result.to_dict(), json_mode=json_mode))
+        order_data = result.to_dict()
+        if result.total_price and result.total_price > 0:
+            ledger = BillingLedger()
+            fee_calc = ledger.calculate_fee(
+                result.total_price, currency=result.currency,
+            )
+            ledger.record_charge(result.order_id, fee_calc)
+            order_data["kiln_fee"] = fee_calc.to_dict()
+            order_data["total_with_fee"] = fee_calc.total_cost
+        click.echo(format_order(order_data, json_mode=json_mode))
     except click.ClickException:
         raise
     except Exception as exc:
@@ -1166,6 +1182,455 @@ def order_cancel(order_id: str, json_mode: bool) -> None:
 
 # ---------------------------------------------------------------------------
 # serve (MCP server)
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# cost estimation
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.argument("file_path", type=click.Path(exists=True))
+@click.option("--material", "-m", default="PLA", help="Filament material (default PLA).")
+@click.option("--electricity-rate", default=0.12, type=float, help="USD per kWh.")
+@click.option("--printer-wattage", default=200.0, type=float, help="Printer watts.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def cost(
+    file_path: str,
+    material: str,
+    electricity_rate: float,
+    printer_wattage: float,
+    json_mode: bool,
+) -> None:
+    """Estimate print cost from a G-code file."""
+    import json as _json
+    from kiln.cost_estimator import CostEstimator
+
+    try:
+        estimator = CostEstimator()
+        estimate = estimator.estimate_from_file(
+            file_path, material=material,
+            electricity_rate=electricity_rate,
+            printer_wattage=printer_wattage,
+        )
+
+        if json_mode:
+            click.echo(_json.dumps({
+                "status": "success", "data": estimate.to_dict(),
+            }, indent=2))
+        else:
+            click.echo(f"File:       {estimate.file_name}")
+            click.echo(f"Material:   {estimate.material}")
+            click.echo(f"Filament:   {estimate.filament_length_meters:.2f} m "
+                       f"({estimate.filament_weight_grams:.1f} g)")
+            click.echo(f"Filament $: ${estimate.filament_cost_usd:.2f}")
+            if estimate.estimated_time_seconds:
+                hours = estimate.estimated_time_seconds / 3600
+                click.echo(f"Est. time:  {hours:.1f} hours")
+                click.echo(f"Elec. $:    ${estimate.electricity_cost_usd:.2f}")
+            click.echo(f"Total $:    ${estimate.total_cost_usd:.2f}")
+            for w in estimate.warnings:
+                click.echo(f"Warning:    {w}")
+    except FileNotFoundError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# material tracking
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def material() -> None:
+    """Manage loaded filament materials and spool inventory."""
+
+
+@material.command("set")
+@click.option("--type", "-t", "material_type", required=True, help="Material type (PLA, PETG, etc.).")
+@click.option("--color", "-c", default=None, help="Filament color.")
+@click.option("--spool", default=None, help="Spool ID to link.")
+@click.option("--tool", default=0, type=int, help="Tool/extruder index.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def material_set(
+    ctx: click.Context, material_type: str, color: Optional[str],
+    spool: Optional[str], tool: int, json_mode: bool,
+) -> None:
+    """Record which material is loaded in the printer."""
+    import json as _json
+    from kiln.materials import MaterialTracker
+    from kiln.persistence import get_db
+
+    try:
+        printer_name = ctx.obj.get("printer") or "default"
+        tracker = MaterialTracker(db=get_db())
+        mat = tracker.set_material(
+            printer_name=printer_name,
+            material_type=material_type,
+            color=color,
+            spool_id=spool,
+            tool_index=tool,
+        )
+        if json_mode:
+            click.echo(_json.dumps({
+                "status": "success", "data": mat.to_dict(),
+            }, indent=2))
+        else:
+            click.echo(f"Set {printer_name} tool {tool}: {mat.material_type}"
+                       + (f" ({color})" if color else ""))
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@material.command("show")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def material_show(ctx: click.Context, json_mode: bool) -> None:
+    """Show loaded materials for the active printer."""
+    import json as _json
+    from kiln.materials import MaterialTracker
+    from kiln.persistence import get_db
+
+    try:
+        printer_name = ctx.obj.get("printer") or "default"
+        tracker = MaterialTracker(db=get_db())
+        materials = tracker.get_all_materials(printer_name)
+        if json_mode:
+            click.echo(_json.dumps({
+                "status": "success",
+                "data": [m.to_dict() for m in materials],
+            }, indent=2))
+        else:
+            if not materials:
+                click.echo("No materials loaded.")
+            for m in materials:
+                line = f"Tool {m.tool_index}: {m.material_type}"
+                if m.color:
+                    line += f" ({m.color})"
+                if m.remaining_grams is not None:
+                    line += f" — {m.remaining_grams:.0f}g remaining"
+                click.echo(line)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@material.command("spools")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def material_spools(json_mode: bool) -> None:
+    """List all tracked filament spools."""
+    import json as _json
+    from kiln.materials import MaterialTracker
+    from kiln.persistence import get_db
+
+    try:
+        tracker = MaterialTracker(db=get_db())
+        spools = tracker.list_spools()
+        if json_mode:
+            click.echo(_json.dumps({
+                "status": "success",
+                "data": [s.to_dict() for s in spools],
+            }, indent=2))
+        else:
+            if not spools:
+                click.echo("No spools tracked.")
+            for s in spools:
+                line = f"{s.id[:8]}  {s.material_type}"
+                if s.color:
+                    line += f" ({s.color})"
+                if s.brand:
+                    line += f" — {s.brand}"
+                line += f" — {s.remaining_grams:.0f}/{s.weight_grams:.0f}g"
+                click.echo(line)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@material.command("add-spool")
+@click.option("--type", "-t", "material_type", required=True, help="Material type.")
+@click.option("--color", "-c", default=None, help="Color.")
+@click.option("--brand", "-b", default=None, help="Brand.")
+@click.option("--weight", default=1000.0, type=float, help="Total weight in grams.")
+@click.option("--cost", default=None, type=float, help="Cost in USD.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def material_add_spool(
+    material_type: str, color: Optional[str], brand: Optional[str],
+    weight: float, cost: Optional[float], json_mode: bool,
+) -> None:
+    """Add a new filament spool to inventory."""
+    import json as _json
+    from kiln.materials import MaterialTracker
+    from kiln.persistence import get_db
+
+    try:
+        tracker = MaterialTracker(db=get_db())
+        spool = tracker.add_spool(
+            material_type=material_type, color=color, brand=brand,
+            weight_grams=weight, cost_usd=cost,
+        )
+        if json_mode:
+            click.echo(_json.dumps({
+                "status": "success", "data": spool.to_dict(),
+            }, indent=2))
+        else:
+            click.echo(f"Added spool {spool.id}: {spool.material_type} {spool.weight_grams:.0f}g")
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# bed leveling
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--trigger", is_flag=True, help="Trigger bed leveling now.")
+@click.option("--status", "show_status", is_flag=True, default=True, help="Show leveling status.")
+@click.option("--set-prints", default=None, type=int, help="Set max prints between levels.")
+@click.option("--set-hours", default=None, type=float, help="Set max hours between levels.")
+@click.option("--enable/--disable", default=None, help="Enable/disable auto-leveling.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def level(
+    ctx: click.Context, trigger: bool, show_status: bool,
+    set_prints: Optional[int], set_hours: Optional[float],
+    enable: Optional[bool], json_mode: bool,
+) -> None:
+    """Manage bed leveling triggers and status."""
+    import json as _json
+    from kiln.bed_leveling import BedLevelManager, LevelingPolicy
+    from kiln.persistence import get_db
+
+    try:
+        printer_name = ctx.obj.get("printer") or "default"
+        mgr = BedLevelManager(db=get_db())
+
+        # Update policy if options given
+        if set_prints is not None or set_hours is not None or enable is not None:
+            policy = mgr.get_policy(printer_name)
+            if set_prints is not None:
+                policy.max_prints_between_levels = set_prints
+            if set_hours is not None:
+                policy.max_hours_between_levels = set_hours
+            if enable is not None:
+                policy.enabled = enable
+            mgr.set_policy(printer_name, policy)
+            click.echo(f"Updated leveling policy for {printer_name}")
+
+        if trigger:
+            adapter = _get_adapter_from_ctx(ctx)
+            result = mgr.trigger_level(printer_name, adapter)
+            if json_mode:
+                click.echo(_json.dumps({"status": "success", "data": result}, indent=2))
+            else:
+                click.echo(result["message"])
+            return
+
+        status = mgr.check_needed(printer_name)
+        if json_mode:
+            click.echo(_json.dumps({
+                "status": "success", "data": status.to_dict(),
+            }, indent=2))
+        else:
+            click.echo(f"Printer:        {status.printer_name}")
+            click.echo(f"Needs leveling: {'Yes' if status.needs_leveling else 'No'}")
+            if status.trigger_reason:
+                click.echo(f"Reason:         {status.trigger_reason}")
+            click.echo(f"Prints since:   {status.prints_since_level}")
+            if status.last_leveled_at:
+                import time
+                age = (time.time() - status.last_leveled_at) / 3600
+                click.echo(f"Last leveled:   {age:.1f} hours ago")
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# webcam streaming
+# ---------------------------------------------------------------------------
+
+
+@cli.command("stream")
+@click.option("--port", default=8081, type=int, help="Local port for stream server.")
+@click.option("--stop", "do_stop", is_flag=True, help="Stop active stream.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def stream(ctx: click.Context, port: int, do_stop: bool, json_mode: bool) -> None:
+    """Start or stop the MJPEG webcam streaming proxy."""
+    import json as _json
+    from kiln.streaming import MJPEGProxy
+
+    proxy = MJPEGProxy()
+
+    try:
+        if do_stop:
+            info = proxy.stop()
+            if json_mode:
+                click.echo(_json.dumps({"status": "success", "data": info.to_dict()}, indent=2))
+            else:
+                click.echo("Stream stopped.")
+            return
+
+        adapter = _get_adapter_from_ctx(ctx)
+        stream_url = adapter.get_stream_url()
+        if stream_url is None:
+            click.echo(format_error(
+                "Webcam streaming not available for this printer.",
+                code="NO_STREAM",
+                json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        printer_name = ctx.obj.get("printer") or "default"
+        info = proxy.start(source_url=stream_url, port=port, printer_name=printer_name)
+        if json_mode:
+            click.echo(_json.dumps({"status": "success", "data": info.to_dict()}, indent=2))
+        else:
+            click.echo(f"Stream started at {info.local_url}")
+            click.echo("Press Ctrl+C to stop.")
+            import time
+            try:
+                while proxy.active:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                proxy.stop()
+                click.echo("\nStream stopped.")
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# cloud sync
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def sync() -> None:
+    """Cloud sync management."""
+
+
+@sync.command("status")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def sync_status(json_mode: bool) -> None:
+    """Show cloud sync status."""
+    import json as _json
+    click.echo(_json.dumps({
+        "status": "success",
+        "data": {"message": "Cloud sync status — use MCP server for full status."},
+    }, indent=2) if json_mode else "Cloud sync status available via MCP server (kiln serve).")
+
+
+@sync.command("now")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def sync_now(json_mode: bool) -> None:
+    """Trigger an immediate sync cycle."""
+    click.echo("Sync trigger available via MCP server (kiln serve).")
+
+
+@sync.command("configure")
+@click.option("--url", required=True, help="Cloud sync endpoint URL.")
+@click.option("--api-key", required=True, help="API key.")
+@click.option("--interval", default=60.0, type=float, help="Sync interval in seconds.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def sync_configure(url: str, api_key: str, interval: float, json_mode: bool) -> None:
+    """Save cloud sync configuration."""
+    import json as _json
+    from kiln.cloud_sync import SyncConfig
+    from kiln.persistence import get_db
+
+    try:
+        config = SyncConfig(cloud_url=url, api_key=api_key, sync_interval_seconds=interval)
+        from dataclasses import asdict
+        get_db().set_setting("cloud_sync_config", _json.dumps(asdict(config)))
+        if json_mode:
+            click.echo(_json.dumps({"status": "success", "data": config.to_dict()}, indent=2))
+        else:
+            click.echo(f"Cloud sync configured: {url} (interval {interval}s)")
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# plugins
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def plugins() -> None:
+    """Plugin management."""
+
+
+@plugins.command("list")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def plugins_list(json_mode: bool) -> None:
+    """List all discovered plugins."""
+    import json as _json
+    from kiln.plugins import PluginManager
+
+    mgr = PluginManager()
+    discovered = mgr.discover()
+    if json_mode:
+        click.echo(_json.dumps({
+            "status": "success",
+            "data": [p.to_dict() for p in discovered],
+        }, indent=2))
+    else:
+        if not discovered:
+            click.echo("No plugins found.")
+        for p in discovered:
+            status = "active" if p.active else "inactive"
+            if p.error:
+                status = f"error: {p.error}"
+            click.echo(f"{p.name} v{p.version} [{status}]")
+            if p.description:
+                click.echo(f"  {p.description}")
+
+
+@plugins.command("info")
+@click.argument("name")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def plugins_info(name: str, json_mode: bool) -> None:
+    """Show details for a specific plugin."""
+    import json as _json
+    from kiln.plugins import PluginManager
+
+    mgr = PluginManager()
+    mgr.discover()
+    info = mgr.get_plugin_info(name)
+    if info is None:
+        click.echo(format_error(f"Plugin {name!r} not found.", json_mode=json_mode))
+        sys.exit(1)
+    if json_mode:
+        click.echo(_json.dumps({"status": "success", "data": info.to_dict()}, indent=2))
+    else:
+        click.echo(f"Name:    {info.name}")
+        click.echo(f"Version: {info.version}")
+        click.echo(f"Active:  {info.active}")
+        if info.description:
+            click.echo(f"Desc:    {info.description}")
+        if info.hooks:
+            click.echo(f"Hooks:   {', '.join(info.hooks)}")
+        if info.error:
+            click.echo(f"Error:   {info.error}")
+
+
+# ---------------------------------------------------------------------------
+# serve
 # ---------------------------------------------------------------------------
 
 

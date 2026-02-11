@@ -69,6 +69,8 @@ Every printer backend implements `PrinterAdapter`, an abstract base class defini
 | `set_temperature()` | Sets tool and/or bed targets |
 | `send_gcode()` | Executes raw G-code commands |
 | `get_snapshot()` | Captures a webcam image (optional) |
+| `get_stream_url()` | Returns the upstream MJPEG stream URL (optional) |
+| `get_bed_mesh()` | Returns bed mesh probing data (optional) |
 
 Each method returns typed dataclasses — never raw dicts or API-specific JSON. State is normalized to a `PrinterStatus` enum (`IDLE`, `PRINTING`, `PAUSED`, `ERROR`, `OFFLINE`). This normalization is critical: OctoPrint encodes state as a set of boolean flags, Moonraker uses string identifiers, Bambu uses numeric codes, and Prusa Connect uses nine string states. The adapter translates all of these into a single enum.
 
@@ -141,17 +143,39 @@ External systems can register HTTP webhook endpoints for specific event types. P
 
 ## 6. Monitoring
 
-### 6.1 Webcam Snapshots
+### 6.1 Webcam Snapshots and Live Streaming
 
 Agents can capture point-in-time webcam images via the `printer_snapshot` MCP tool or `kiln snapshot` CLI command. OctoPrint and Moonraker backends support snapshot capture. Images are returned as raw bytes or base64-encoded JSON.
+
+For continuous monitoring, Kiln includes an MJPEG proxy (`kiln.streaming`) that reads the upstream MJPEG stream from a printer and re-serves it over a local HTTP endpoint. Multiple clients can connect without adding load to the printer. The proxy tracks connected clients, frames served, and uptime.
 
 ### 6.2 Print Tracking
 
 The `kiln wait` command blocks until a print completes, with configurable polling interval and timeout. `kiln history` queries the SQLite database for past print records with status filtering.
 
+### 6.3 Print Cost Estimation
+
+Agents can estimate printing costs before committing to a job. The `cost_estimator` module parses G-code to compute filament length, weight, and cost based on material profiles (PLA, PETG, ABS, TPU, ASA, Nylon, PC). It also extracts estimated print time from slicer comments and calculates electricity costs. The `estimate_cost` MCP tool and `kiln cost` CLI command expose this analysis.
+
+### 6.4 Multi-Material Tracking
+
+The `materials` module tracks which filament is loaded in each printer extruder and maintains a spool inventory. Agents can set loaded materials, check for mismatches against expected materials in G-code, and track remaining filament. The system emits events when spools run low (< 10% remaining) or empty, enabling proactive filament management.
+
+### 6.5 Bed Leveling Automation
+
+Bed leveling can be triggered automatically based on configurable policies: maximum prints since last level, maximum hours elapsed, or before the first print. The `bed_leveling` module subscribes to job completion events and evaluates trigger conditions. Mesh probing data is persisted and analyzed for variance. Moonraker printers expose bed mesh data via the adapter interface.
+
+### 6.6 Cloud Sync
+
+The `cloud_sync` module synchronizes printer configurations, job history, and events to a remote REST API. A background daemon thread pushes local changes incrementally using cursor-based tracking. Payloads are HMAC-SHA256 signed for integrity verification.
+
+### 6.7 Plugin System
+
+Kiln supports third-party extensions through a plugin system based on Python entry points (`kiln.plugins` group). Plugins can register MCP tools, subscribe to events, add CLI commands, and hook into pre/post-print lifecycle events. The plugin manager handles discovery, activation, and fault isolation — exceptions in plugin hooks do not crash the host system.
+
 ## 7. Revenue Model
 
-Local printer control is free and unrestricted. Kiln charges a 5% fee only on jobs routed through the distributed manufacturing network (3DOS), with the first 5 network jobs per month free and a $0.25 minimum / $50 maximum per-job cap.
+Local printer control is free and unrestricted. Kiln charges a 5% platform fee on orders placed through external manufacturing services (Craftcloud, and future providers), with the first 5 outsourced orders per month free and a $0.25 minimum / $50 maximum per-order cap. The fee is surfaced transparently in every quote response before the user commits to an order.
 
 ## 8. Security Considerations
 
@@ -162,8 +186,8 @@ Local printer control is free and unrestricted. Kiln charges a 5% fee only on jo
 
 ## 9. Future Work
 - **OTA firmware updates.** Expose Moonraker's firmware update API through the adapter interface.
-- **Live video streaming.** MJPEG stream proxy for real-time monitoring beyond point-in-time snapshots.
-- **Multi-material tracking.** AMS/MMU filament slot management for Bambu and Prusa.
+- **Remote agent collaboration.** Enable multiple agents to coordinate across a shared printer fleet.
+- **Print quality monitoring.** Computer vision analysis of webcam streams for defect detection.
 
 ## 10. Conclusion
 

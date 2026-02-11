@@ -4,6 +4,60 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-10
 
+### Print Cost Estimation
+- `kiln.cost_estimator` module with G-code extrusion analysis
+- `MaterialProfile` and `CostEstimate` dataclasses
+- 7 built-in material profiles (PLA, PETG, ABS, TPU, ASA, Nylon, PC)
+- Parses absolute/relative E-axis extrusion, M82/M83 mode switching, G92 resets
+- Slicer time comment extraction (PrusaSlicer, Cura, OrcaSlicer formats)
+- `kiln cost` CLI command, `estimate_cost` and `list_materials` MCP tools
+- 50 tests
+
+### Multi-Material Tracking
+- `kiln.materials` module with spool inventory and per-printer material tracking
+- `LoadedMaterial`, `Spool`, `MaterialWarning` dataclasses
+- `MaterialTracker` class: set/get material, check mismatch, deduct usage
+- Spool CRUD operations with low/empty warnings via event bus
+- `printer_materials` and `spools` DB tables
+- `kiln material` CLI command group, 6 MCP tools
+- 68 tests
+
+### Bed Leveling Triggers
+- `kiln.bed_leveling` module with configurable auto-leveling policies
+- `LevelingPolicy` and `LevelingStatus` dataclasses
+- `BedLevelManager`: subscribes to job completion events, evaluates triggers
+- Policies: max prints between levels, max hours, auto-before-first-print
+- Mesh variance calculation from probed data
+- `leveling_history` DB table, `get_bed_mesh()` adapter method on Moonraker
+- `kiln level` CLI command, 3 MCP tools
+- 33 tests
+
+### Webcam Streaming (MJPEG Proxy)
+- `kiln.streaming` module with MJPEG proxy server
+- `MJPEGProxy` class: reads upstream MJPEG stream, re-serves to local clients
+- `StreamInfo` dataclass with client count, frames served, uptime tracking
+- `get_stream_url()` adapter method on OctoPrint and Moonraker
+- `kiln stream` CLI command, `webcam_stream` MCP tool
+- 20 tests
+
+### Cloud Sync
+- `kiln.cloud_sync` module for syncing printer configs, jobs, events to cloud
+- `SyncConfig` and `SyncStatus` dataclasses
+- `CloudSyncManager`: background daemon thread, HMAC-SHA256 signed payloads
+- Push unsynced jobs/events/printers, cursor-based incremental sync
+- `sync_log` DB table with sync tracking
+- `kiln sync` CLI command group, 3 MCP tools
+- 30 tests
+
+### Plugin System
+- `kiln.plugins` module with entry-point-based plugin discovery
+- `KilnPlugin` ABC: lifecycle hooks, MCP tools, event handlers, CLI commands
+- `PluginManager`: discover, activate/deactivate, pre/post-print hooks
+- `PluginHook` enum, `PluginInfo` and `PluginContext` dataclasses
+- Plugin isolation: exceptions in hooks don't crash the system
+- `kiln plugins` CLI command group, 2 MCP tools
+- 35 tests
+
 ### Fulfillment Service Integration (Craftcloud)
 - `kiln.fulfillment` module with `FulfillmentProvider` ABC and `CraftcloudProvider` implementation
 - `FulfillmentProvider` abstract base: `list_materials()`, `get_quote()`, `place_order()`, `get_order_status()`, `cancel_order()`

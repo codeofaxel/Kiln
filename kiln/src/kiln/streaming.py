@@ -68,7 +68,7 @@ class MJPEGProxy:
         self._printer_name: Optional[str] = None
         self._started_at: Optional[float] = None
         self._port: int = 8081
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
         # Shared state for the handler
         self._latest_frame: Optional[bytes] = None
@@ -77,6 +77,7 @@ class MJPEGProxy:
         self._connected_clients: int = 0
         self._frames_served: int = 0
         self._running = False
+        self._stop_event = threading.Event()
 
         # Upstream reader thread
         self._reader_thread: Optional[threading.Thread] = None
@@ -112,6 +113,7 @@ class MJPEGProxy:
             self._frames_served = 0
             self._connected_clients = 0
             self._running = True
+            self._stop_event.clear()
 
         proxy = self  # closure ref
 
@@ -170,7 +172,7 @@ class MJPEGProxy:
 
         self._server = HTTPServer(("0.0.0.0", port), Handler)
         self._thread = threading.Thread(
-            target=self._server.serve_forever,
+            target=lambda: self._server.serve_forever(poll_interval=0.1),
             daemon=True,
             name="kiln-mjpeg-server",
         )
@@ -196,6 +198,7 @@ class MJPEGProxy:
             self._running = False
 
         # Signal any waiting threads
+        self._stop_event.set()
         self._frame_event.set()
 
         if self._server is not None:
@@ -252,7 +255,7 @@ class MJPEGProxy:
                     logger.warning(
                         "Upstream stream returned %d", resp.status_code,
                     )
-                    time.sleep(2.0)
+                    self._stop_event.wait(2.0)
                     continue
 
                 buf = bytearray()
@@ -291,7 +294,7 @@ class MJPEGProxy:
 
             except requests.RequestException:
                 logger.debug("Upstream stream error, reconnecting...", exc_info=True)
-                time.sleep(2.0)
+                self._stop_event.wait(2.0)
             except Exception:
                 logger.exception("Unexpected error in MJPEG reader")
-                time.sleep(2.0)
+                self._stop_event.wait(2.0)

@@ -173,6 +173,25 @@ class BedLevelManager:
         needs = False
         reason = None
 
+        # Mesh stats if available
+        mesh_points = None
+        mesh_var = None
+        if last_record and last_record.get("mesh_data"):
+            mesh = last_record["mesh_data"]
+            if isinstance(mesh, dict):
+                points = mesh.get("probed_matrix") or mesh.get("points")
+                if isinstance(points, list):
+                    flat = []
+                    for row in points:
+                        if isinstance(row, list):
+                            flat.extend(row)
+                        else:
+                            flat.append(row)
+                    if flat:
+                        mesh_points = len(flat)
+                        mean = sum(flat) / len(flat)
+                        mesh_var = sum((x - mean) ** 2 for x in flat) / len(flat)
+
         if not policy.enabled:
             return LevelingStatus(
                 printer_name=printer_name,
@@ -180,6 +199,8 @@ class BedLevelManager:
                 prints_since_level=prints_since,
                 needs_leveling=False,
                 policy=policy,
+                mesh_point_count=mesh_points,
+                mesh_variance=round(mesh_var, 6) if mesh_var is not None else None,
             )
 
         # Check first-print condition
@@ -205,25 +226,6 @@ class BedLevelManager:
                     f"Hours since last level ({hours_since:.1f}) >= "
                     f"threshold ({policy.max_hours_between_levels})"
                 )
-
-        # Mesh stats if available
-        mesh_points = None
-        mesh_var = None
-        if last_record and last_record.get("mesh_data"):
-            mesh = last_record["mesh_data"]
-            if isinstance(mesh, dict):
-                points = mesh.get("probed_matrix") or mesh.get("points")
-                if isinstance(points, list):
-                    flat = []
-                    for row in points:
-                        if isinstance(row, list):
-                            flat.extend(row)
-                        else:
-                            flat.append(row)
-                    if flat:
-                        mesh_points = len(flat)
-                        mean = sum(flat) / len(flat)
-                        mesh_var = sum((x - mean) ** 2 for x in flat) / len(flat)
 
         return LevelingStatus(
             printer_name=printer_name,

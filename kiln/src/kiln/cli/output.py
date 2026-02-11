@@ -575,7 +575,20 @@ def format_quote(
         table.add_row("Provider", provider)
         table.add_row("Material", material)
         table.add_row("Quantity", str(qty))
-        table.add_row("Total", f"[bold green]{currency} {total:.2f}[/bold green]")
+        table.add_row("Subtotal", f"{currency} {total:.2f}")
+
+        fee_info = quote.get("kiln_fee")
+        if fee_info:
+            fee_amt = fee_info.get("fee_amount", 0)
+            if fee_info.get("waived"):
+                table.add_row("Kiln fee", f"[dim]{currency} 0.00 (waived — {fee_info.get('waiver_reason', 'free tier')})[/dim]")
+            else:
+                table.add_row("Kiln fee", f"{currency} {fee_amt:.2f}")
+            total_with_fee = quote.get("total_with_fee", total)
+            table.add_row("Total", f"[bold green]{currency} {total_with_fee:.2f}[/bold green]")
+        else:
+            table.add_row("Total", f"[bold green]{currency} {total:.2f}[/bold green]")
+
         if lead:
             table.add_row("Lead time", f"{lead} days")
 
@@ -594,8 +607,18 @@ def format_quote(
         f"Provider: {provider}",
         f"Material: {material}",
         f"Quantity: {qty}",
-        f"Total:    {currency} {total:.2f}",
+        f"Subtotal: {currency} {total:.2f}",
     ]
+    fee_info = quote.get("kiln_fee")
+    if fee_info:
+        fee_amt = fee_info.get("fee_amount", 0)
+        if fee_info.get("waived"):
+            lines.append(f"Kiln fee: {currency} 0.00 (waived)")
+        else:
+            lines.append(f"Kiln fee: {currency} {fee_amt:.2f}")
+        lines.append(f"Total:    {currency} {quote.get('total_with_fee', total):.2f}")
+    else:
+        lines.append(f"Total:    {currency} {total:.2f}")
     if lead:
         lines.append(f"Lead:     {lead} days")
     return "\n".join(lines)
@@ -633,7 +656,18 @@ def format_order(
         table.add_row("Provider", order.get("provider", ""))
 
         if order.get("total_price") is not None:
-            table.add_row("Total", f"{order.get('currency', 'USD')} {order['total_price']:.2f}")
+            cur = order.get("currency", "USD")
+            table.add_row("Subtotal", f"{cur} {order['total_price']:.2f}")
+            fee_info = order.get("kiln_fee")
+            if fee_info:
+                fee_amt = fee_info.get("fee_amount", 0)
+                if fee_info.get("waived"):
+                    table.add_row("Kiln fee", f"[dim]{cur} 0.00 (waived)[/dim]")
+                else:
+                    table.add_row("Kiln fee", f"{cur} {fee_amt:.2f}")
+                table.add_row("Total", f"[bold]{cur} {order.get('total_with_fee', order['total_price']):.2f}[/bold]")
+            else:
+                table.add_row("Total", f"[bold]{cur} {order['total_price']:.2f}[/bold]")
         if order.get("tracking_url"):
             table.add_row("Tracking", order["tracking_url"])
         if order.get("estimated_delivery"):
@@ -641,13 +675,24 @@ def format_order(
 
         return _render(Panel(table, title="Order", border_style="blue"))
 
+    cur = order.get("currency", "USD")
     lines = [
         f"Order:    {order.get('order_id', '')}",
         f"Status:   {status}",
         f"Provider: {order.get('provider', '')}",
     ]
     if order.get("total_price") is not None:
-        lines.append(f"Total:    {order.get('currency', 'USD')} {order['total_price']:.2f}")
+        lines.append(f"Subtotal: {cur} {order['total_price']:.2f}")
+        fee_info = order.get("kiln_fee")
+        if fee_info:
+            fee_amt = fee_info.get("fee_amount", 0)
+            if fee_info.get("waived"):
+                lines.append(f"Kiln fee: {cur} 0.00 (waived)")
+            else:
+                lines.append(f"Kiln fee: {cur} {fee_amt:.2f}")
+            lines.append(f"Total:    {cur} {order.get('total_with_fee', order['total_price']):.2f}")
+        else:
+            lines.append(f"Total:    {cur} {order['total_price']:.2f}")
     if order.get("tracking_url"):
         lines.append(f"Tracking: {order['tracking_url']}")
     return "\n".join(lines)
