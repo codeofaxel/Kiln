@@ -3163,6 +3163,180 @@ def analyze_print_failure(job_id: str) -> dict:
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
+@mcp.tool()
+def validate_print_quality(
+    job_id: str | None = None,
+    printer_name: str | None = None,
+    save_snapshot: str | None = None,
+) -> dict:
+    """Validate print quality after a completed print job.
+
+    Captures a webcam snapshot (if available), examines the job record and
+    events, and produces a quality assessment with recommendations.
+
+    Args:
+        job_id: The completed job's ID.  If omitted, uses the most recent
+            completed job.
+        printer_name: Target printer name (omit for default printer).
+        save_snapshot: Optional file path to save the post-print snapshot.
+
+    Returns a quality report with snapshot data, job metrics, and any
+    detected issues.
+    """
+    try:
+        import base64
+
+        # Resolve the job
+        target_job = None
+        if job_id:
+            try:
+                target_job = _queue.get_job(job_id)
+            except JobNotFoundError:
+                return _error_dict(f"Job {job_id!r} not found.", code="JOB_NOT_FOUND")
+        else:
+            # Find most recent completed job
+            recent = _queue.list_jobs(limit=20)
+            for j in recent:
+                if j.status == JobStatus.COMPLETED:
+                    target_job = j
+                    break
+            if target_job is None:
+                return _error_dict(
+                    "No completed jobs found. Provide a job_id explicitly.",
+                    code="NO_COMPLETED_JOB",
+                )
+
+        job_data = target_job.to_dict()
+
+        # Gather adapter for snapshot
+        if printer_name:
+            adapter = _registry.get(printer_name)
+        else:
+            try:
+                adapter = _get_adapter()
+            except RuntimeError:
+                adapter = None
+
+        # Capture snapshot
+        snapshot_info: Dict[str, Any] = {"available": False}
+        if adapter is not None:
+            try:
+                image_data = adapter.get_snapshot()
+                if image_data is not None:
+                    snapshot_info = {
+                        "available": True,
+                        "size_bytes": len(image_data),
+                    }
+                    if save_snapshot:
+                        os.makedirs(os.path.dirname(save_snapshot) or ".", exist_ok=True)
+                        with open(save_snapshot, "wb") as f:
+                            f.write(image_data)
+                        snapshot_info["saved_to"] = save_snapshot
+                    else:
+                        snapshot_info["image_base64"] = base64.b64encode(
+                            image_data
+                        ).decode("ascii")
+            except Exception as snap_exc:
+                snapshot_info = {"available": False, "error": str(snap_exc)}
+
+        # Gather related events
+        all_events = _event_bus.recent_events(limit=200)
+        job_events = [
+            e.to_dict() for e in all_events
+            if e.data.get("job_id") == target_job.id
+        ]
+
+        # Analyse quality indicators
+        issues: list[str] = []
+        metrics: Dict[str, Any] = {}
+        recommendations: list[str] = []
+
+        # Duration analysis
+        if target_job.elapsed_seconds is not None:
+            metrics["print_duration_seconds"] = target_job.elapsed_seconds
+            metrics["print_duration_hours"] = round(
+                target_job.elapsed_seconds / 3600, 2
+            )
+
+        # Check for retries (may indicate intermittent problems)
+        retry_events = [
+            e for e in job_events if e.get("data", {}).get("retry")
+        ]
+        if retry_events:
+            issues.append(
+                f"Job required {len(retry_events)} retry attempt(s) before completing"
+            )
+            recommendations.append(
+                "Retries during a print may indicate connectivity or mechanical issues. "
+                "Inspect the print closely for layer shifts or gaps."
+            )
+
+        # Check progress consistency
+        progress_events = [
+            e for e in job_events
+            if e.get("type") in ("print.progress", "job.progress")
+        ]
+        if progress_events:
+            completions = [
+                e.get("data", {}).get("completion", 0) for e in progress_events
+            ]
+            # Detect non-monotonic progress (resets may indicate issues)
+            for i in range(1, len(completions)):
+                if completions[i] < completions[i - 1] - 5:
+                    issues.append(
+                        f"Progress dropped from {completions[i-1]:.0f}% to "
+                        f"{completions[i]:.0f}% — possible restart or error recovery"
+                    )
+                    break
+
+        # Snapshot-based hints (we can't do actual vision analysis here,
+        # but we can note the snapshot is available for the agent to inspect)
+        if snapshot_info.get("available"):
+            recommendations.append(
+                "A post-print snapshot was captured. Visually inspect it for: "
+                "stringing, layer shifts, warping, incomplete layers, or "
+                "spaghetti-like extrusion failures."
+            )
+        else:
+            recommendations.append(
+                "No webcam available for visual inspection. Consider adding a "
+                "camera for automated quality checks."
+            )
+
+        # Overall quality grade
+        if not issues:
+            grade = "PASS"
+            summary = "Print completed successfully with no detected issues."
+        elif len(issues) <= 2:
+            grade = "WARNING"
+            summary = "Print completed but with potential quality concerns."
+        else:
+            grade = "REVIEW"
+            summary = "Print completed with multiple issues detected. Manual inspection recommended."
+
+        return {
+            "success": True,
+            "job": job_data,
+            "quality": {
+                "grade": grade,
+                "summary": summary,
+                "issues": issues,
+                "recommendations": recommendations,
+                "metrics": metrics,
+            },
+            "snapshot": snapshot_info,
+            "related_events": job_events[-10:],
+        }
+
+    except PrinterNotFoundError:
+        return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in validate_print_quality")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
 @mcp.resource("kiln://status")
 def resource_status() -> str:
     """Live snapshot of the entire Kiln system: printers, queue, and recent events."""

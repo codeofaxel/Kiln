@@ -245,6 +245,16 @@ class TestStartPrint:
         adapter.start_print.return_value = PrintResult(
             success=True, message="Started printing benchy.gcode."
         )
+        # Provide a proper PrinterState so the auto-preflight check passes
+        adapter.get_state.return_value = PrinterState(
+            state=PrinterStatus.IDLE,
+            connected=True,
+            tool_temp_actual=22.0,
+            tool_temp_target=0.0,
+            bed_temp_actual=21.0,
+            bed_temp_target=0.0,
+        )
+        adapter.get_job.return_value = MagicMock(file_name=None)
         mock_get_adapter.return_value = adapter
 
         result = server_start_print("benchy.gcode")
