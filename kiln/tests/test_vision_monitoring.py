@@ -18,6 +18,7 @@ from kiln.printers.base import (
     PrinterState,
     PrinterStatus,
 )
+from kiln.server import _detect_phase, _PHASE_HINTS
 
 
 class TestVisionEventTypes:
@@ -82,41 +83,9 @@ class TestSnapshotCapability:
 
 # -- Phase detection helpers (used by monitor_print_vision) ----------------
 
-def _detect_phase(completion: float | None) -> str:
-    """Replicate the phase detection logic that will be in server.py."""
-    if completion is None or completion < 0:
-        return "unknown"
-    if completion < 10:
-        return "first_layers"
-    if completion > 90:
-        return "final_layers"
-    return "mid_print"
-
-
 def _failure_hints(phase: str) -> list[str]:
-    """Replicate the failure hints logic that will be in server.py."""
-    hints = {
-        "first_layers": [
-            "Check bed adhesion — first layer should be firmly stuck",
-            "Look for warping at corners or edges lifting from bed",
-            "Verify extrusion is consistent (no gaps or blobs)",
-        ],
-        "mid_print": [
-            "Check for spaghetti — filament not adhering to previous layers",
-            "Look for layer shifting (misaligned layers)",
-            "Check for stringing between features",
-        ],
-        "final_layers": [
-            "Check for cooling artifacts on overhangs",
-            "Look for stringing or blobs on fine details",
-            "Verify top surface is smooth and complete",
-        ],
-        "unknown": [
-            "Verify print is progressing normally",
-            "Check for any visible defects",
-        ],
-    }
-    return hints.get(phase, hints["unknown"])
+    """Get failure hints from the actual server implementation."""
+    return _PHASE_HINTS.get(phase, _PHASE_HINTS["unknown"])
 
 
 class TestPhaseDetection:
@@ -219,3 +188,84 @@ class TestVisionMonitoringData:
     def test_error_printer_context(self) -> None:
         state = PrinterState(connected=True, state=PrinterStatus.ERROR)
         assert state.to_dict()["state"] == "error"
+
+
+class TestMonitorPrintVisionTool:
+    """Integration tests for the monitor_print_vision MCP tool."""
+
+    def test_idle_printer_includes_not_printing_flag(self) -> None:
+        """monitor_print_vision should flag when printer is not printing."""
+        from kiln.server import monitor_print_vision, _registry, _event_bus
+        from kiln.printers.base import PrinterAdapter, PrinterState, PrinterStatus, JobProgress, PrinterCapabilities
+
+        adapter = mock.MagicMock(spec=PrinterAdapter)
+        adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.IDLE)
+        adapter.get_job.return_value = JobProgress()
+        adapter.capabilities = PrinterCapabilities(can_snapshot=False)
+
+        with mock.patch.object(_registry, 'get', return_value=adapter):
+            result = monitor_print_vision(printer_name="test")
+        assert result["success"] is True
+        assert result["monitoring_context"]["is_printing"] is False
+
+    def test_printing_printer_has_is_printing_true(self) -> None:
+        from kiln.server import monitor_print_vision, _registry
+        from kiln.printers.base import PrinterAdapter, PrinterState, PrinterStatus, JobProgress, PrinterCapabilities
+
+        adapter = mock.MagicMock(spec=PrinterAdapter)
+        adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.PRINTING)
+        adapter.get_job.return_value = JobProgress(completion=45.0)
+        adapter.capabilities = PrinterCapabilities(can_snapshot=False)
+
+        with mock.patch.object(_registry, 'get', return_value=adapter):
+            result = monitor_print_vision(printer_name="test")
+        assert result["success"] is True
+        assert result["monitoring_context"]["is_printing"] is True
+
+    def test_snapshot_skipped_when_no_capability(self) -> None:
+        from kiln.server import monitor_print_vision, _registry
+        from kiln.printers.base import PrinterAdapter, PrinterState, PrinterStatus, JobProgress, PrinterCapabilities
+
+        adapter = mock.MagicMock(spec=PrinterAdapter)
+        adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.PRINTING)
+        adapter.get_job.return_value = JobProgress(completion=50.0)
+        adapter.capabilities = PrinterCapabilities(can_snapshot=False)
+
+        with mock.patch.object(_registry, 'get', return_value=adapter):
+            result = monitor_print_vision(printer_name="test", include_snapshot=True)
+        assert result["snapshot"]["available"] is False
+        assert result["snapshot"].get("reason") == "no_capability"
+        adapter.get_snapshot.assert_not_called()
+
+
+class TestWatchPrintTool:
+    """Integration tests for watch_print edge cases."""
+
+    def test_paused_printer_returns_paused_outcome(self) -> None:
+        from kiln.server import watch_print, _registry
+        from kiln.printers.base import PrinterAdapter, PrinterState, PrinterStatus, JobProgress, PrinterCapabilities
+
+        adapter = mock.MagicMock(spec=PrinterAdapter)
+        adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.PAUSED)
+        adapter.get_job.return_value = JobProgress(completion=50.0)
+        adapter.capabilities = PrinterCapabilities(can_snapshot=False)
+
+        with mock.patch.object(_registry, 'get', return_value=adapter):
+            with mock.patch('kiln.server.time') as mock_time:
+                mock_time.time.side_effect = [0, 40, 40]  # start, elapsed check, snapshot check
+                mock_time.sleep = mock.MagicMock()
+                result = watch_print(printer_name="test", poll_interval=1, timeout=60)
+        assert result["outcome"] == "paused"
+
+    def test_idle_with_no_active_job_returns_no_active_print(self) -> None:
+        from kiln.server import watch_print, _registry
+        from kiln.printers.base import PrinterAdapter, PrinterState, PrinterStatus, JobProgress, PrinterCapabilities
+
+        adapter = mock.MagicMock(spec=PrinterAdapter)
+        adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.IDLE)
+        adapter.get_job.return_value = JobProgress()  # No active job (completion is None)
+        adapter.capabilities = PrinterCapabilities(can_snapshot=False)
+
+        with mock.patch.object(_registry, 'get', return_value=adapter):
+            result = watch_print(printer_name="test")
+        assert result["outcome"] == "no_active_print"

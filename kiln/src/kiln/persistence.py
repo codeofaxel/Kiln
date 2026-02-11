@@ -249,6 +249,10 @@ class KilnDB:
                     ON print_outcomes(file_hash);
                 CREATE INDEX IF NOT EXISTS idx_print_outcomes_outcome
                     ON print_outcomes(outcome);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_print_outcomes_job_id
+                    ON print_outcomes(job_id);
+                CREATE INDEX IF NOT EXISTS idx_print_outcomes_material
+                    ON print_outcomes(material_type);
                 """
             )
             self._conn.commit()
@@ -1176,39 +1180,54 @@ class KilnDB:
 
     def save_print_outcome(self, outcome: Dict[str, Any]) -> int:
         """Save an agent-curated print outcome record.  Returns row id."""
+        VALID_OUTCOMES = {"success", "failed", "partial"}
+        outcome_val = outcome.get("outcome", "")
+        if outcome_val not in VALID_OUTCOMES:
+            raise ValueError(f"Invalid outcome {outcome_val!r}. Must be one of: {sorted(VALID_OUTCOMES)}")
+        if outcome.get("quality_grade") and outcome["quality_grade"] not in {"excellent", "good", "acceptable", "poor"}:
+            raise ValueError(f"Invalid quality_grade {outcome['quality_grade']!r}")
+        if outcome.get("failure_mode") and outcome["failure_mode"] not in {
+            "spaghetti", "layer_shift", "warping", "adhesion", "stringing",
+            "under_extrusion", "over_extrusion", "clog", "thermal_runaway",
+            "power_loss", "mechanical", "other",
+        }:
+            raise ValueError(f"Invalid failure_mode {outcome['failure_mode']!r}")
+
         with self._write_lock:
-            cur = self._conn.execute(
-                """INSERT INTO print_outcomes
-                   (job_id, printer_name, file_name, file_hash, material_type,
-                    outcome, quality_grade, failure_mode, settings, environment,
-                    notes, agent_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    outcome["job_id"],
-                    outcome["printer_name"],
-                    outcome.get("file_name"),
-                    outcome.get("file_hash"),
-                    outcome.get("material_type"),
-                    outcome["outcome"],
-                    outcome.get("quality_grade"),
-                    outcome.get("failure_mode"),
-                    json.dumps(outcome["settings"]) if outcome.get("settings") else None,
-                    json.dumps(outcome["environment"]) if outcome.get("environment") else None,
-                    outcome.get("notes"),
-                    outcome.get("agent_id"),
-                    outcome.get("created_at", time.time()),
-                ),
-            )
-            self._conn.commit()
-            return cur.lastrowid  # type: ignore[return-value]
+            try:
+                cur = self._conn.execute(
+                    """INSERT INTO print_outcomes
+                       (job_id, printer_name, file_name, file_hash, material_type,
+                        outcome, quality_grade, failure_mode, settings, environment,
+                        notes, agent_id, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        outcome["job_id"],
+                        outcome["printer_name"],
+                        outcome.get("file_name"),
+                        outcome.get("file_hash"),
+                        outcome.get("material_type"),
+                        outcome["outcome"],
+                        outcome.get("quality_grade"),
+                        outcome.get("failure_mode"),
+                        json.dumps(outcome["settings"]) if outcome.get("settings") else None,
+                        json.dumps(outcome["environment"]) if outcome.get("environment") else None,
+                        outcome.get("notes"),
+                        outcome.get("agent_id"),
+                        outcome.get("created_at", time.time()),
+                    ),
+                )
+                self._conn.commit()
+                return cur.lastrowid  # type: ignore[return-value]
+            except sqlite3.IntegrityError:
+                raise ValueError(f"Outcome for job_id {outcome['job_id']!r} already recorded")
 
     def get_print_outcome(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Return the outcome record for *job_id*, or ``None``."""
-        with self._write_lock:
-            row = self._conn.execute(
-                "SELECT * FROM print_outcomes WHERE job_id = ? ORDER BY created_at DESC LIMIT 1",
-                (job_id,),
-            ).fetchone()
+        row = self._conn.execute(
+            "SELECT * FROM print_outcomes WHERE job_id = ? ORDER BY created_at DESC LIMIT 1",
+            (job_id,),
+        ).fetchone()
         if row is None:
             return None
         return self._outcome_row_to_dict(row)
@@ -1234,56 +1253,54 @@ class KilnDB:
             params.append(outcome)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         params.append(limit)
-        with self._write_lock:
-            rows = self._conn.execute(
-                f"SELECT * FROM print_outcomes{where} ORDER BY created_at DESC LIMIT ?",
-                params,
-            ).fetchall()
+        rows = self._conn.execute(
+            f"SELECT * FROM print_outcomes{where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
         return [self._outcome_row_to_dict(r) for r in rows]
 
     def get_printer_learning_insights(self, printer_name: str) -> Dict[str, Any]:
         """Return aggregated outcome insights for a single printer."""
-        with self._write_lock:
-            total = self._conn.execute(
-                "SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ?",
-                (printer_name,),
-            ).fetchone()[0]
-            if total == 0:
-                return {
-                    "printer_name": printer_name,
-                    "total_outcomes": 0,
-                    "success_rate": 0.0,
-                    "failure_breakdown": {},
-                    "material_stats": {},
-                }
-            successes = self._conn.execute(
-                "SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ? AND outcome = 'success'",
-                (printer_name,),
-            ).fetchone()[0]
-            # Failure breakdown
-            failure_rows = self._conn.execute(
-                "SELECT failure_mode, COUNT(*) FROM print_outcomes "
-                "WHERE printer_name = ? AND outcome = 'failed' AND failure_mode IS NOT NULL "
-                "GROUP BY failure_mode ORDER BY COUNT(*) DESC",
-                (printer_name,),
-            ).fetchall()
-            failure_breakdown = {row[0]: row[1] for row in failure_rows}
-            # Material stats
-            material_rows = self._conn.execute(
-                "SELECT material_type, "
-                "  COUNT(*) as total, "
-                "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
-                "FROM print_outcomes "
-                "WHERE printer_name = ? AND material_type IS NOT NULL "
-                "GROUP BY material_type ORDER BY total DESC",
-                (printer_name,),
-            ).fetchall()
-            material_stats = {}
-            for row in material_rows:
-                material_stats[row[0]] = {
-                    "count": row[1],
-                    "success_rate": round(row[2] / row[1], 2) if row[1] else 0.0,
-                }
+        total = self._conn.execute(
+            "SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ?",
+            (printer_name,),
+        ).fetchone()[0]
+        if total == 0:
+            return {
+                "printer_name": printer_name,
+                "total_outcomes": 0,
+                "success_rate": 0.0,
+                "failure_breakdown": {},
+                "material_stats": {},
+            }
+        successes = self._conn.execute(
+            "SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ? AND outcome = 'success'",
+            (printer_name,),
+        ).fetchone()[0]
+        # Failure breakdown
+        failure_rows = self._conn.execute(
+            "SELECT failure_mode, COUNT(*) FROM print_outcomes "
+            "WHERE printer_name = ? AND outcome = 'failed' AND failure_mode IS NOT NULL "
+            "GROUP BY failure_mode ORDER BY COUNT(*) DESC",
+            (printer_name,),
+        ).fetchall()
+        failure_breakdown = {row[0]: row[1] for row in failure_rows}
+        # Material stats
+        material_rows = self._conn.execute(
+            "SELECT material_type, "
+            "  COUNT(*) as total, "
+            "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
+            "FROM print_outcomes "
+            "WHERE printer_name = ? AND material_type IS NOT NULL "
+            "GROUP BY material_type ORDER BY total DESC",
+            (printer_name,),
+        ).fetchall()
+        material_stats = {}
+        for row in material_rows:
+            material_stats[row[0]] = {
+                "count": row[1],
+                "success_rate": round(row[2] / row[1], 2) if row[1] else 0.0,
+            }
         return {
             "printer_name": printer_name,
             "total_outcomes": total,
@@ -1294,16 +1311,15 @@ class KilnDB:
 
     def get_file_outcomes(self, file_hash: str) -> Dict[str, Any]:
         """Return outcome data for a specific file across all printers."""
-        with self._write_lock:
-            rows = self._conn.execute(
-                "SELECT printer_name, "
-                "  COUNT(*) as total, "
-                "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
-                "FROM print_outcomes "
-                "WHERE file_hash = ? "
-                "GROUP BY printer_name ORDER BY wins DESC",
-                (file_hash,),
-            ).fetchall()
+        rows = self._conn.execute(
+            "SELECT printer_name, "
+            "  COUNT(*) as total, "
+            "  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
+            "FROM print_outcomes "
+            "WHERE file_hash = ? "
+            "GROUP BY printer_name ORDER BY (CAST(wins AS REAL) / total) DESC, total DESC",
+            (file_hash,),
+        ).fetchall()
         outcomes_by_printer = {}
         for row in rows:
             outcomes_by_printer[row[0]] = {
@@ -1335,16 +1351,15 @@ class KilnDB:
             clauses.append("material_type = ?")
             params.append(material_type)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        with self._write_lock:
-            rows = self._conn.execute(
-                f"SELECT printer_name, "
-                f"  COUNT(*) as total, "
-                f"  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
-                f"FROM print_outcomes{where} "
-                f"GROUP BY printer_name "
-                f"ORDER BY (CAST(wins AS REAL) / total) DESC, total DESC",
-                params,
-            ).fetchall()
+        rows = self._conn.execute(
+            f"SELECT printer_name, "
+            f"  COUNT(*) as total, "
+            f"  SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as wins "
+            f"FROM print_outcomes{where} "
+            f"GROUP BY printer_name "
+            f"ORDER BY (CAST(wins AS REAL) / total) DESC, total DESC",
+            params,
+        ).fetchall()
         results = []
         for row in rows:
             results.append({
