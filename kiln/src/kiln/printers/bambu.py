@@ -692,6 +692,48 @@ class BambuAdapter(PrinterAdapter):
                 pass
 
     # ------------------------------------------------------------------
+    # Webcam (optional)
+    # ------------------------------------------------------------------
+
+    def get_snapshot(self) -> Optional[bytes]:
+        """Capture a webcam snapshot from the Bambu printer.
+
+        Bambu printers with LAN mode enabled push JPEG frames over MQTT
+        on the ``ipcam`` field, or expose an RTSP stream.  This method
+        attempts to grab a single JPEG frame via the printer's built-in
+        HTTP snapshot endpoint (``/snapshot``), falling back to ``None``
+        if the camera is not available.
+        """
+        import urllib.request
+
+        # Bambu printers may expose a snapshot endpoint on port 80/443.
+        for scheme in ("https", "http"):
+            try:
+                url = f"{scheme}://{self._host}/snapshot"
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request(url, method="GET")
+                with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
+                    data = resp.read()
+                    if data and len(data) > 100:
+                        return data
+            except Exception:
+                continue
+
+        logger.debug("Bambu webcam snapshot not available")
+        return None
+
+    def get_stream_url(self) -> Optional[str]:
+        """Return the RTSP stream URL for the Bambu printer's camera.
+
+        Bambu printers expose a TLS-encrypted RTSP stream at
+        ``rtsps://<host>:322/streaming/live/1``.  Requires the LAN
+        Access Code for RTSP authentication.
+        """
+        return f"rtsps://{self._host}:322/streaming/live/1"
+
+    # ------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------
 

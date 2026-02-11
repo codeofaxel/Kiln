@@ -171,28 +171,24 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
 
         name = file_name or meta.get("filename", f"file_{file_id}")
         dest = Path(dest_dir)
-        dest.mkdir(parents=True, exist_ok=True)
         out_path = dest / name
 
+        from kiln.marketplaces.base import resumable_download
+
         try:
-            resp = self._session.get(
+            return resumable_download(
+                self._session,
                 download_url,
+                out_path,
                 params={"key": self._api_key},
                 timeout=_DOWNLOAD_TIMEOUT,
-                stream=True,
             )
-            resp.raise_for_status()
-        except requests.RequestException as exc:
+        except MarketplaceError:
+            raise
+        except Exception as exc:
             raise MarketplaceError(
                 f"Failed to download file {file_id}: {exc}",
             ) from exc
-
-        with open(out_path, "wb") as fh:
-            for chunk in resp.iter_content(chunk_size=65536):
-                fh.write(chunk)
-
-        logger.info("Downloaded %s (%d bytes)", out_path, out_path.stat().st_size)
-        return str(out_path.resolve())
 
     # -- parsing helpers ---------------------------------------------------
 
