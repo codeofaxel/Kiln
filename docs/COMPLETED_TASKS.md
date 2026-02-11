@@ -4,6 +4,13 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-10
 
+### Launch Readiness Fixes (Gap Analysis)
+- **Bambu env var bug fix**: `access_code` in `config.py` now reads from `KILN_PRINTER_ACCESS_CODE` (falls back to `KILN_PRINTER_API_KEY` for backward compat). Previously both `api_key` and `access_code` read from the same env var, breaking Bambu auth via env config.
+- **Automatic preflight in `start_print()`**: The MCP `start_print()` tool now runs `preflight_check()` automatically before starting a print. Returns `PREFLIGHT_FAILED` with full check details if the printer isn't ready. Agents no longer need to remember to call preflight first. Opt-out via `skip_preflight=True`.
+- **`can_download` on `ModelSummary`**: Search results now include a `can_download` field so agents know upfront which marketplace results can be downloaded programmatically vs. require manual browser download (Cults3D).
+- **TASKS.md backlog expansion**: Added 9 new tasks from gap analysis covering CLI test coverage, integration tests, Bambu webcam, await-completion tool, failure analysis, cost comparison, text-to-model generation, auto-retry, and post-print quality validation.
+- **CLAUDE.md rule**: Added mandatory completed-task tracking — shipped features must always be moved from TASKS.md to COMPLETED_TASKS.md.
+
 ### Print Cost Estimation
 - `kiln.cost_estimator` module with G-code extrusion analysis
 - `MaterialProfile` and `CostEstimate` dataclasses

@@ -205,7 +205,7 @@ Kiln maintains three living documents that must stay in sync with the codebase:
 - `docs/WHITEPAPER.md` — Technical whitepaper in academic style. Covers architecture, safety, protocol design.
 - `docs/PROJECT_DOCS.md` — Full project documentation (Gitbook-style). CLI reference, MCP tool catalog, adapter details, configuration.
 - `docs/COMPLETED_TASKS.md` — Record of shipped features. Append after each feature lands.
-- `docs/TASKS.md` — Open task backlog.
+- `docs/TASKS.md` — Open task backlog. **When completing a task from TASKS.md, always move it to COMPLETED_TASKS.md** (append a new entry at the top with today's date). Remove the completed item from TASKS.md. This is mandatory — never leave a shipped feature only in the backlog.
 - `docs/LESSONS_LEARNED.md` — Hard-won technical patterns and bug fixes. Consult when hitting unfamiliar issues. **Append to this file when you learn something new.**
 - `docs/roles/` — Slim role references (LOGIC.md, INTERFACE.md, QA.md, INTEGRATION.md) used for swarm teammate spawn prompts.
 - `docs/SWARM_GUIDE.md` — Full guide to the agent swarm system.

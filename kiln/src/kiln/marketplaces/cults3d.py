@@ -265,6 +265,7 @@ class Cults3DAdapter(MarketplaceAdapter):
             is_free=is_free,
             price_cents=price_cents,
             has_sliceable_files=has_files,
+            can_download=False,
         )
 
     @staticmethod

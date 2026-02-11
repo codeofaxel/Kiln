@@ -25,5 +25,11 @@ Hard-won technical patterns and bug fixes. Consulted when hitting unfamiliar iss
 ## Configuration & Environment
 <!-- Config precedence, environment variables, credential handling -->
 
+### Bambu access_code vs api_key env vars
+Bambu printers use an `access_code` (not the same as an API key). When building env-var config fast paths, don't reuse the same env var (`KILN_PRINTER_API_KEY`) for both `api_key` and `access_code` fields. Use `KILN_PRINTER_ACCESS_CODE` for Bambu access codes, with fallback to `KILN_PRINTER_API_KEY` for backward compat.
+
 ## Hardware / Safety
 <!-- Physical printer safety, G-code validation, temperature limits, destructive operations -->
+
+### Preflight checks must be enforced, not optional
+If `start_print()` doesn't call `preflight_check()` internally, agents WILL skip it. Safety-critical validation should be enforced by default with an explicit opt-out (`skip_preflight=True`), not left as a "remember to call this first" contract.

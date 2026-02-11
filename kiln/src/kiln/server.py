@@ -548,20 +548,34 @@ def delete_file(file_path: str) -> dict:
 
 
 @mcp.tool()
-def start_print(file_name: str) -> dict:
+def start_print(file_name: str, skip_preflight: bool = False) -> dict:
     """Start printing a file that already exists on the printer.
+
+    Automatically runs pre-flight safety checks before starting.  If any
+    check fails the print is blocked and the check results are returned
+    so the agent can diagnose and fix the issue.
 
     Args:
         file_name: Name or path of the file as shown by ``printer_files()``.
-
-    The printer must be idle and connected.  Use ``preflight_check()`` first
-    to verify the printer is ready.  This will select the file and
-    immediately begin printing.
+        skip_preflight: Set to ``True`` to bypass the automatic pre-flight
+            checks (not recommended).
     """
     if err := _check_auth("print"):
         return err
     try:
         adapter = _get_adapter()
+
+        # -- Automatic pre-flight safety gate --------------------------------
+        if not skip_preflight:
+            pf = preflight_check()
+            if not pf.get("ready", False):
+                return {
+                    "success": False,
+                    "error": pf.get("summary", "Pre-flight checks failed"),
+                    "code": "PREFLIGHT_FAILED",
+                    "preflight": pf,
+                }
+
         result = adapter.start_print(file_name)
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
