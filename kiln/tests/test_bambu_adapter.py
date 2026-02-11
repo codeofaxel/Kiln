@@ -1017,6 +1017,47 @@ class TestBambuAdapterFTPSInternals:
 # PrinterState serialization tests
 # ---------------------------------------------------------------------------
 
+class TestBambuAdapterSnapshot:
+    """Tests for get_snapshot and get_stream_url."""
+
+    def test_get_stream_url(self) -> None:
+        adapter = _adapter()
+        url = adapter.get_stream_url()
+        assert url == f"rtsps://{HOST}:322/streaming/live/1"
+
+    @mock.patch("urllib.request.urlopen")
+    def test_get_snapshot_https_success(self, mock_urlopen) -> None:
+        adapter = _adapter()
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = b"\x89PNG" + b"\x00" * 200
+        mock_resp.__enter__ = mock.MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = mock.MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+        result = adapter.get_snapshot()
+        assert result is not None
+        assert result[:4] == b"\x89PNG"
+
+    @mock.patch("urllib.request.urlopen")
+    def test_get_snapshot_falls_back_to_http(self, mock_urlopen) -> None:
+        adapter = _adapter()
+        # HTTPS fails, HTTP succeeds
+        good_resp = mock.MagicMock()
+        good_resp.read.return_value = b"\x89PNG" + b"\x00" * 200
+        good_resp.__enter__ = mock.MagicMock(return_value=good_resp)
+        good_resp.__exit__ = mock.MagicMock(return_value=False)
+        mock_urlopen.side_effect = [Exception("SSL error"), good_resp]
+        result = adapter.get_snapshot()
+        assert result is not None
+        assert mock_urlopen.call_count == 2
+
+    @mock.patch("urllib.request.urlopen")
+    def test_get_snapshot_returns_none_on_failure(self, mock_urlopen) -> None:
+        adapter = _adapter()
+        mock_urlopen.side_effect = Exception("connection refused")
+        result = adapter.get_snapshot()
+        assert result is None
+
+
 class TestPrinterStateSerialization:
     """Tests for PrinterState serialization."""
 
