@@ -94,7 +94,19 @@ def _get_adapter_from_ctx(ctx: click.Context):
 
     ok, err = validate_printer_config(cfg)
     if not ok:
-        raise click.ClickException(f"Invalid printer config: {err}")
+        ptype = cfg.get("type", "unknown")
+        pname = printer_name or "(active)"
+        hint = ""
+        if "api_key" in (err or ""):
+            hint = f"\n  Quick fix: kiln auth --name {pname} --host {cfg.get('host', 'HOST')} --type {ptype} --api-key YOUR_KEY"
+        elif "access_code" in (err or "") or "serial" in (err or ""):
+            hint = (
+                f"\n  Quick fix: kiln auth --name {pname} --host {cfg.get('host', 'HOST')} --type bambu"
+                " --access-code CODE --serial SERIAL"
+            )
+        elif "host" in (err or ""):
+            hint = "\n  Quick fix: kiln setup"
+        raise click.ClickException(f"Invalid printer config for {pname!r}: {err}{hint}")
 
     return _make_adapter(cfg)
 
@@ -228,7 +240,18 @@ def status(ctx: click.Context, json_mode: bool) -> None:
         adapter = _get_adapter_from_ctx(ctx)
         state = adapter.get_state()
         job = adapter.get_job()
-        click.echo(format_status(state.to_dict(), job.to_dict(), json_mode=json_mode))
+
+        # Enrich JSON output with printer context so agents get everything in one call
+        extra: dict = {}
+        if json_mode:
+            try:
+                cfg = load_printer_config(ctx.obj.get("printer"))
+                extra["printer_name"] = ctx.obj.get("printer") or "default"
+                extra["printer_type"] = cfg.get("type", "unknown")
+            except Exception:
+                pass  # Best-effort enrichment
+
+        click.echo(format_status(state.to_dict(), job.to_dict(), json_mode=json_mode, extra=extra))
     except click.ClickException:
         raise
     except Exception as exc:

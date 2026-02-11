@@ -280,7 +280,13 @@ class BambuAdapter(PrinterAdapter):
                 client.loop_stop()
                 raise PrinterError(
                     f"MQTT connection to {self._host}:{_MQTT_PORT} "
-                    f"timed out after {self._timeout}s"
+                    f"timed out after {self._timeout}s.\n"
+                    "  Check:\n"
+                    "  1) Printer is powered on and on the same network\n"
+                    "  2) LAN Access Code is correct (printer → Settings → Network)\n"
+                    "  3) LAN Mode is enabled on the printer\n"
+                    "  4) Port 8883 is not blocked by a firewall\n"
+                    "  Try: kiln verify"
                 )
 
             self._mqtt_client = client

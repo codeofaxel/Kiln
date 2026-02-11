@@ -134,7 +134,16 @@ def _read_config_file(path: Path) -> Dict[str, Any]:
             return {}
         _validate_config_schema(data, path)
         return data
-    except (yaml.YAMLError, OSError):
+    except yaml.YAMLError as exc:
+        logger.warning(
+            "Config file %s has invalid YAML: %s — "
+            "run 'kiln setup' to regenerate, or fix manually.",
+            path,
+            exc,
+        )
+        return {}
+    except OSError as exc:
+        logger.warning("Could not read config file %s: %s", path, exc)
         return {}
 
 

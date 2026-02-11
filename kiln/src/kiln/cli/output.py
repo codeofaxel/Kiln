@@ -156,14 +156,20 @@ def format_status(
     job: Dict[str, Any],
     *,
     json_mode: bool = False,
+    extra: Dict[str, Any] | None = None,
 ) -> str:
     """Format printer state + job progress.
 
     Expects dicts from ``PrinterState.to_dict()`` and ``JobProgress.to_dict()``.
+    *extra* fields (e.g. ``printer_name``, ``printer_type``) are merged into
+    the top-level ``data`` dict in JSON mode.
     """
     if json_mode:
+        data: Dict[str, Any] = {"printer": state, "job": job}
+        if extra:
+            data.update(extra)
         return json.dumps(
-            {"status": "success", "data": {"printer": state, "job": job}},
+            {"status": "success", "data": data},
             indent=2,
             sort_keys=False,
         )
