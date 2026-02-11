@@ -2115,6 +2115,167 @@ def generate_download(
 
 
 # ---------------------------------------------------------------------------
+# Firmware
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def firmware() -> None:
+    """Check and apply firmware updates.
+
+    Query available updates, apply upgrades, or roll back to a previous
+    version.  Supported for OctoPrint and Moonraker printers.
+    """
+
+
+@firmware.command("status")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def firmware_status_cmd(ctx: click.Context, json_mode: bool) -> None:
+    """Show firmware component versions and available updates."""
+    import json as _json
+
+    try:
+        adapter = _get_adapter_from_ctx(ctx)
+        if not adapter.capabilities.can_update_firmware:
+            click.echo(format_error(
+                "This printer does not support firmware updates.",
+                json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        status = adapter.get_firmware_status()
+        if status is None:
+            click.echo(format_error(
+                "Could not retrieve firmware status.",
+                json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        data = {
+            "busy": status.busy,
+            "updates_available": status.updates_available,
+            "components": [
+                {
+                    "name": c.name,
+                    "current_version": c.current_version,
+                    "remote_version": c.remote_version,
+                    "update_available": c.update_available,
+                    "component_type": c.component_type,
+                }
+                for c in status.components
+            ],
+        }
+
+        if json_mode:
+            click.echo(_json.dumps({"status": "success", "data": data}, indent=2))
+        else:
+            click.echo(f"Updates available: {status.updates_available}")
+            if status.busy:
+                click.echo("  (update in progress)")
+            for c in status.components:
+                marker = " *" if c.update_available else ""
+                ver = c.current_version
+                if c.remote_version and c.update_available:
+                    ver += f" -> {c.remote_version}"
+                click.echo(f"  {c.name}: {ver}{marker}")
+
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@firmware.command("update")
+@click.option("--component", "-c", default=None, help="Component to update (default: all).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def firmware_update_cmd(ctx: click.Context, component: Optional[str], json_mode: bool) -> None:
+    """Apply available firmware updates.
+
+    Optionally specify --component to update a single component,
+    otherwise all components with available updates are upgraded.
+    """
+    import json as _json
+
+    try:
+        adapter = _get_adapter_from_ctx(ctx)
+        if not adapter.capabilities.can_update_firmware:
+            click.echo(format_error(
+                "This printer does not support firmware updates.",
+                json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        result = adapter.update_firmware(component=component)
+
+        data = {
+            "success": result.success,
+            "message": result.message,
+            "component": result.component,
+        }
+
+        if json_mode:
+            click.echo(_json.dumps({"status": "success" if result.success else "error", "data": data}, indent=2))
+        else:
+            click.echo(result.message)
+
+        if not result.success:
+            sys.exit(1)
+
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@firmware.command("rollback")
+@click.argument("component")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def firmware_rollback_cmd(ctx: click.Context, component: str, json_mode: bool) -> None:
+    """Roll back a firmware component to its previous version.
+
+    COMPONENT is the name of the component to roll back (e.g. klipper).
+    Only supported on Moonraker printers.
+    """
+    import json as _json
+
+    try:
+        adapter = _get_adapter_from_ctx(ctx)
+        if not adapter.capabilities.can_update_firmware:
+            click.echo(format_error(
+                "This printer does not support firmware rollback.",
+                json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        result = adapter.rollback_firmware(component)
+
+        data = {
+            "success": result.success,
+            "message": result.message,
+            "component": result.component,
+        }
+
+        if json_mode:
+            click.echo(_json.dumps({"status": "success" if result.success else "error", "data": data}, indent=2))
+        else:
+            click.echo(result.message)
+
+        if not result.success:
+            sys.exit(1)
+
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

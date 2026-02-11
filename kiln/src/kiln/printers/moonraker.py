@@ -22,6 +22,9 @@ from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
 
 from kiln.printers.base import (
+    FirmwareComponent,
+    FirmwareStatus,
+    FirmwareUpdateResult,
     JobProgress,
     PrinterAdapter,
     PrinterCapabilities,
@@ -162,6 +165,7 @@ class MoonrakerAdapter(PrinterAdapter):
             can_pause=True,
             can_stream=True,
             can_probe_bed=True,
+            can_update_firmware=True,
             supported_extensions=(".gcode", ".gco", ".g"),
         )
 
@@ -770,6 +774,141 @@ class MoonrakerAdapter(PrinterAdapter):
         except Exception:
             logger.debug("Bed mesh query failed", exc_info=True)
             return None
+
+    # ------------------------------------------------------------------
+    # Firmware updates
+    # ------------------------------------------------------------------
+
+    def get_firmware_status(self) -> Optional[FirmwareStatus]:
+        """Check Moonraker update manager for available updates.
+
+        Calls ``GET /machine/update/status`` to get version info for all
+        managed components (Klipper, Moonraker, system packages, web
+        frontends, etc.).
+        """
+        try:
+            data = self._get_json("/machine/update/status")
+        except Exception:
+            logger.debug("Firmware status query failed", exc_info=True)
+            return None
+
+        result = data.get("result", data)
+        version_info = result.get("version_info", {})
+        busy = bool(result.get("busy", False))
+
+        components: list[FirmwareComponent] = []
+        updates_available = 0
+
+        for comp_name, info in version_info.items():
+            if not isinstance(info, dict):
+                continue
+
+            current = info.get("version", info.get("full_version_string", ""))
+            remote = info.get("remote_version", "")
+            rollback = info.get("rollback_version")
+            comp_type = info.get("configured_type", "")
+            channel = info.get("channel", "")
+
+            # Determine if an update is available
+            has_update = False
+            if comp_name == "system":
+                has_update = int(info.get("package_count", 0)) > 0
+            elif current and remote and current != remote:
+                has_update = True
+            elif int(info.get("commits_behind_count", 0)) > 0:
+                has_update = True
+
+            if has_update:
+                updates_available += 1
+
+            components.append(FirmwareComponent(
+                name=comp_name,
+                current_version=str(current),
+                remote_version=str(remote) if remote else None,
+                update_available=has_update,
+                rollback_version=str(rollback) if rollback else None,
+                component_type=comp_type,
+                channel=channel,
+            ))
+
+        return FirmwareStatus(
+            busy=busy,
+            components=components,
+            updates_available=updates_available,
+        )
+
+    def update_firmware(
+        self,
+        component: Optional[str] = None,
+    ) -> FirmwareUpdateResult:
+        """Trigger an update via Moonraker's update manager.
+
+        Calls ``POST /machine/update/upgrade``.  Moonraker will refuse
+        if a print is in progress or another update is already running.
+
+        Args:
+            component: Specific component to update (e.g. ``"klipper"``,
+                ``"moonraker"``, ``"system"``).  If ``None``, updates all.
+        """
+        # Safety: refuse if printer is actively printing
+        try:
+            state = self.get_state()
+            if state.state == PrinterStatus.PRINTING:
+                raise PrinterError(
+                    "Cannot update firmware while printing. "
+                    "Wait for the current print to finish."
+                )
+        except PrinterError:
+            raise
+        except Exception:
+            pass  # If we can't check state, let Moonraker decide
+
+        payload = {}
+        if component:
+            payload["name"] = component
+
+        try:
+            self._post("/machine/update/upgrade", json=payload)
+        except PrinterError:
+            raise
+        except Exception as exc:
+            raise PrinterError(
+                f"Firmware update failed: {exc}", cause=exc,
+            ) from exc
+
+        target = component or "all components"
+        return FirmwareUpdateResult(
+            success=True,
+            message=f"Update started for {target}. "
+                    "The printer services may restart.",
+            component=component,
+        )
+
+    def rollback_firmware(self, component: str) -> FirmwareUpdateResult:
+        """Roll back a component to its previous version.
+
+        Calls ``POST /machine/update/rollback`` with the component name.
+        """
+        if not component:
+            raise PrinterError("Component name is required for rollback.")
+
+        try:
+            self._post(
+                "/machine/update/rollback",
+                json={"name": component},
+            )
+        except PrinterError:
+            raise
+        except Exception as exc:
+            raise PrinterError(
+                f"Firmware rollback failed: {exc}", cause=exc,
+            ) from exc
+
+        return FirmwareUpdateResult(
+            success=True,
+            message=f"Rollback started for {component}.",
+            component=component,
+        )
 
     # ------------------------------------------------------------------
     # Dunder helpers

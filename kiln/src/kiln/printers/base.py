@@ -143,6 +143,7 @@ class PrinterCapabilities:
     can_pause: bool = True
     can_stream: bool = False
     can_probe_bed: bool = False
+    can_update_firmware: bool = False
     supported_extensions: Tuple[str, ...] = (".gcode", ".gco", ".g")
 
     def to_dict(self) -> Dict[str, Any]:
@@ -154,6 +155,48 @@ class PrinterCapabilities:
         data = asdict(self)
         data["supported_extensions"] = list(self.supported_extensions)
         return data
+
+
+@dataclass
+class FirmwareComponent:
+    """A single updatable software/firmware component."""
+
+    name: str
+    current_version: str
+    remote_version: Optional[str] = None
+    update_available: bool = False
+    rollback_version: Optional[str] = None
+    component_type: str = ""  # e.g. "git_repo", "system", "web"
+    channel: str = ""  # e.g. "stable", "dev"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class FirmwareStatus:
+    """Firmware/software update status for a printer."""
+
+    busy: bool = False
+    components: List[FirmwareComponent] = field(default_factory=list)
+    updates_available: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = asdict(self)
+        data["components"] = [c.to_dict() for c in self.components]
+        return data
+
+
+@dataclass
+class FirmwareUpdateResult:
+    """Outcome of a firmware update or rollback operation."""
+
+    success: bool
+    message: str
+    component: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +386,55 @@ class PrinterAdapter(ABC):
         default implementation returns ``None``.
         """
         return None
+
+    # -- firmware updates (optional) ------------------------------------
+
+    def get_firmware_status(self) -> Optional["FirmwareStatus"]:
+        """Check for available firmware/software updates.
+
+        Returns a :class:`FirmwareStatus` describing each updatable
+        component and whether updates are available, or ``None`` if
+        firmware updates are not supported by this adapter.
+        """
+        return None
+
+    def update_firmware(
+        self,
+        component: Optional[str] = None,
+    ) -> "FirmwareUpdateResult":
+        """Trigger a firmware or software update.
+
+        Args:
+            component: Specific component to update (e.g. ``"klipper"``,
+                ``"moonraker"``, ``"system"``).  If ``None``, updates all
+                available components.
+
+        Returns:
+            Result describing whether the update was accepted.
+
+        Raises:
+            PrinterError: If the printer is busy, printing, or the
+                update cannot be started.
+        """
+        raise PrinterError(
+            f"{self.name} adapter does not support firmware updates."
+        )
+
+    def rollback_firmware(self, component: str) -> "FirmwareUpdateResult":
+        """Roll back a component to its previous version.
+
+        Args:
+            component: Component to roll back (required).
+
+        Returns:
+            Result describing whether the rollback was accepted.
+
+        Raises:
+            PrinterError: If rollback is not available or cannot be started.
+        """
+        raise PrinterError(
+            f"{self.name} adapter does not support firmware rollback."
+        )
 
     # -- bed mesh (optional) --------------------------------------------
 
