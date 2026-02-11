@@ -84,6 +84,8 @@ TIER_STANDARD: List[str] = TIER_ESSENTIAL + [
     "delete_file",
     "job_history",
     "cancel_job",
+    # Onboarding
+    "get_started",
 ]
 
 TIER_FULL: List[str] = [
@@ -207,6 +209,7 @@ TIER_FULL: List[str] = [
     "safety_audit",
     "safety_status",
     "confirm_action",
+    "get_started",
     # --- Slicer profiles ---
     "list_slicer_profiles_tool",
     "get_slicer_profile_tool",

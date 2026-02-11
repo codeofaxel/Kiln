@@ -2559,6 +2559,59 @@ def safety_settings() -> dict:
 
 
 @mcp.tool()
+def get_started() -> dict:
+    """Quick-start guide for AI agents using Kiln.
+
+    Returns an onboarding summary: what Kiln is, core workflows,
+    and the most useful tools to call first.  Call this at the start
+    of a session if you're unfamiliar with the available capabilities.
+    """
+    from kiln.tool_tiers import TIERS, suggest_tier
+
+    # Build a concise tier summary
+    tier_summary = {
+        name: {"tool_count": len(tools), "examples": tools[:5]}
+        for name, tools in TIERS.items()
+    }
+
+    return {
+        "success": True,
+        "overview": (
+            "Kiln is agent infrastructure for 3D printing. It provides "
+            "MCP tools to monitor printers, manage files, slice models, "
+            "search marketplaces, queue print jobs, and more."
+        ),
+        "quick_start": [
+            "1. Call `printer_status` to check if a printer is connected and its current state.",
+            "2. Call `fleet_status` if managing multiple printers.",
+            "3. Call `preflight_check` before starting any print to validate readiness.",
+            "4. Use `search_all_models` to find 3D models across marketplaces.",
+            "5. Use `slice_model` or `slice_and_print` to prepare and print files.",
+            "6. Use `validate_gcode` before `send_gcode` for raw G-code commands.",
+        ],
+        "core_workflows": {
+            "print_a_file": "upload_file → preflight_check → start_print",
+            "marketplace_to_print": "search_all_models → download_and_upload → preflight_check → start_print",
+            "slice_and_print": "upload_file (STL) → slice_and_print",
+            "monitor": "printer_status, printer_snapshot, await_print_completion",
+            "queue_jobs": "submit_job → job_status → queue_summary",
+        },
+        "safety_tools": [
+            "preflight_check — validates printer readiness before printing",
+            "validate_gcode — checks G-code for dangerous commands before sending",
+            "safety_settings — shows current auto-print and confirmation settings",
+            "safety_audit — reviews recent safety-relevant actions",
+        ],
+        "tool_tiers": tier_summary,
+        "tip": (
+            "Start with `printer_status` to see what's connected, then "
+            "explore from there. Use `safety_settings` to understand what "
+            "safety protections are active."
+        ),
+    }
+
+
+@mcp.tool()
 def marketplace_info() -> dict:
     """Show which 3D model marketplaces are connected and available.
 

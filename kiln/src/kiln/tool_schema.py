@@ -344,26 +344,70 @@ def get_all_tool_schemas(tier: str = "full") -> List[dict]:
     return schemas
 
 
-def get_tool_function(name: str) -> Callable:
+def _find_tier_for_tool(name: str) -> str | None:
+    """Return the lowest tier that contains *name*, or ``None``."""
+    for tier_name in ("essential", "standard", "full"):
+        if name in TIERS.get(tier_name, []):
+            return tier_name
+    return None
+
+
+def _suggest_alternatives(name: str, current_tier: str) -> list[str]:
+    """Suggest tools in *current_tier* that are related to *name*.
+
+    Uses simple keyword overlap on tool names (split on ``_``) to find
+    tools in the agent's tier that serve a similar purpose.
+    """
+    keywords = set(name.split("_"))
+    tier_tools = TIERS.get(current_tier, [])
+    scored = []
+    for tool in tier_tools:
+        overlap = keywords & set(tool.split("_"))
+        if overlap and tool != name:
+            scored.append((len(overlap), tool))
+    scored.sort(key=lambda x: -x[0])
+    return [t for _, t in scored[:3]]
+
+
+def get_tool_function(name: str, *, tier: str | None = None) -> Callable:
     """Look up a tool function by name.
 
     Args:
         name: The tool function name (e.g. ``"printer_status"``).
+        tier: Optional current tier context.  When provided and *name*
+            is a valid tool but not in this tier, the error message
+            includes the required tier and suggests alternatives.
 
     Returns:
         The callable tool function.
 
     Raises:
-        KeyError: If *name* is not a registered tool.
+        KeyError: If *name* is not a registered tool or not in the
+            specified tier.
     """
     _ensure_loaded()
     try:
-        return _TOOL_REGISTRY[name]
+        fn = _TOOL_REGISTRY[name]
     except KeyError:
+        # Tool doesn't exist at all — give a tier-aware hint if possible.
+        if tier is not None:
+            required_tier = _find_tier_for_tool(name)
+            if required_tier is not None:
+                alternatives = _suggest_alternatives(name, tier)
+                alt_str = (
+                    f" Alternatives in your tier: {', '.join(alternatives)}"
+                    if alternatives
+                    else ""
+                )
+                raise KeyError(
+                    f"Tool {name!r} requires the {required_tier!r} tier "
+                    f"(you are on {tier!r}).{alt_str}"
+                ) from None
         raise KeyError(
             f"Unknown tool {name!r}. "
             f"Available tools: {len(_TOOL_REGISTRY)}"
         ) from None
+    return fn
 
 
 def get_tool_registry() -> Dict[str, Callable]:
