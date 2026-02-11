@@ -6,6 +6,13 @@
   <strong>Agentic infrastructure for physical fabrication via 3D printing.</strong>
 </p>
 
+<p align="center">
+  <a href="https://github.com/codeofaxel/Kiln/actions/workflows/ci.yml"><img src="https://github.com/codeofaxel/Kiln/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://pypi.org/project/kiln3d/"><img src="https://img.shields.io/pypi/v/kiln3d" alt="PyPI"></a>
+  <a href="https://pypi.org/project/kiln3d/"><img src="https://img.shields.io/pypi/pyversions/kiln3d" alt="Python"></a>
+  <a href="https://github.com/codeofaxel/Kiln/blob/main/LICENSE"><img src="https://img.shields.io/github/license/codeofaxel/Kiln" alt="License"></a>
+</p>
+
 ---
 
 Kiln lets AI agents design, queue, and execute physical manufacturing jobs on real 3D printers with zero human intervention. It exposes printer control through both a **CLI** and the **Model Context Protocol (MCP)**, making any MCP-compatible agent (Claude, GPT, custom) a first-class operator of your print farm.
@@ -537,8 +544,8 @@ Agents use `fulfillment_quote` and `fulfillment_order` MCP tools for the same wo
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (2650+ total)
-cd kiln && python3 -m pytest tests/ -v        # 2413 tests
+# Run tests (2,970+ total)
+cd kiln && python3 -m pytest tests/ -v        # 2,734 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 

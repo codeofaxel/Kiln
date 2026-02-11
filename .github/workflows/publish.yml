@@ -8,7 +8,69 @@ permissions:
   id-token: write  # Required for trusted publishing
 
 jobs:
+  # Run full test suite before publishing anything
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install kiln with dev deps
+        run: pip install -e "./kiln[dev,bambu]"
+
+      - name: Install octoprint-cli with dev deps
+        run: pip install -e "./octoprint-cli[dev]"
+
+      - name: Run kiln tests
+        run: cd kiln && python -m pytest tests/ -v
+
+      - name: Run octoprint-cli tests
+        run: cd octoprint-cli && python -m pytest tests/ -v
+
+  # Validate that the git tag matches pyproject.toml version
+  validate-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate kiln version matches tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          # Strip leading 'v' if present (e.g. v0.1.0 -> 0.1.0)
+          TAG="${TAG#v}"
+          KILN_VERSION=$(python -c "
+          import configparser, pathlib
+          p = pathlib.Path('kiln/pyproject.toml').read_text()
+          for line in p.splitlines():
+              if line.strip().startswith('version'):
+                  print(line.split('=')[1].strip().strip('\"'))
+                  break
+          ")
+          echo "Git tag: $TAG"
+          echo "kiln pyproject.toml version: $KILN_VERSION"
+          if [ "$TAG" != "$KILN_VERSION" ]; then
+            echo "::error::Version mismatch! Tag '$TAG' != pyproject.toml '$KILN_VERSION'"
+            exit 1
+          fi
+
   build-kiln:
+    needs: [test, validate-version]
     runs-on: ubuntu-latest
 
     steps:
@@ -49,31 +111,44 @@ jobs:
       - name: Publish kiln3d to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
-  # Uncomment when kiln3d-octoprint is registered on PyPI:
-  #
-  # build-octoprint-cli:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: actions/setup-python@v5
-  #       with:
-  #         python-version: "3.12"
-  #     - run: pip install build
-  #     - run: cd octoprint-cli && python -m build
-  #     - uses: actions/upload-artifact@v4
-  #       with:
-  #         name: dist-octoprint-cli
-  #         path: octoprint-cli/dist/
-  #
-  # publish-octoprint-cli:
-  #   needs: build-octoprint-cli
-  #   runs-on: ubuntu-latest
-  #   environment: pypi
-  #   permissions:
-  #     id-token: write
-  #   steps:
-  #     - uses: actions/download-artifact@v4
-  #       with:
-  #         name: dist-octoprint-cli
-  #         path: dist/
-  #     - uses: pypa/gh-action-pypi-publish@release/v1
+  build-octoprint-cli:
+    needs: [test, validate-version]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build octoprint-cli package
+        run: cd octoprint-cli && python -m build
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-octoprint-cli
+          path: octoprint-cli/dist/
+
+  publish-octoprint-cli:
+    needs: build-octoprint-cli
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download octoprint-cli artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-octoprint-cli
+          path: dist/
+
+      - name: Publish kiln3d-octoprint to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
