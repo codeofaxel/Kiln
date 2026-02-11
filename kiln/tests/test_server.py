@@ -41,6 +41,7 @@ from kiln.printers.octoprint import OctoPrintAdapter
 from kiln.printers.moonraker import MoonrakerAdapter
 from kiln.server import (
     _error_dict,
+    _tool_limiter,
     _validate_local_file,
     cancel_print as server_cancel_print,
     delete_file as server_delete_file,
@@ -54,6 +55,12 @@ from kiln.server import (
     start_print as server_start_print,
     upload_file as server_upload_file,
 )
+
+
+@pytest.fixture(autouse=True)
+def _disable_rate_limiter(monkeypatch):
+    """Disable rate limiting in tests to prevent timing-dependent failures."""
+    monkeypatch.setattr(_tool_limiter, "check", lambda *a, **kw: None)
 
 
 # ---------------------------------------------------------------------------

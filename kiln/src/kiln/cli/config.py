@@ -24,6 +24,9 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+# Valid top-level keys in the config file.  Used for schema validation.
+_KNOWN_KEYS: set[str] = {"printers", "active_printer", "settings", "billing"}
+
 
 def get_config_path() -> Path:
     """Return the default config file path (``~/.kiln/config.yaml``)."""
@@ -68,6 +71,30 @@ def _check_file_permissions(path: Path) -> None:
         pass
 
 
+def _validate_config_schema(data: Dict[str, Any], path: Path) -> None:
+    """Log warnings for unknown or missing keys in the config file."""
+    if not data:
+        return
+
+    # Warn on unknown top-level keys
+    unknown = set(data.keys()) - _KNOWN_KEYS
+    for key in sorted(unknown):
+        logger.warning(
+            "Config file %s contains unknown key %r (expected one of: %s)",
+            path,
+            key,
+            ", ".join(sorted(_KNOWN_KEYS)),
+        )
+
+    # Warn on missing recommended keys
+    if "printers" not in data:
+        logger.warning(
+            "Config file %s is missing 'printers' section -- "
+            "run 'kiln auth' to add a printer",
+            path,
+        )
+
+
 def _read_config_file(path: Path) -> Dict[str, Any]:
     """Read and parse the YAML config file; return ``{}`` on any failure."""
     if not path.is_file():
@@ -76,7 +103,10 @@ def _read_config_file(path: Path) -> Dict[str, Any]:
     try:
         with path.open("r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            return {}
+        _validate_config_schema(data, path)
+        return data
     except (yaml.YAMLError, OSError):
         return {}
 

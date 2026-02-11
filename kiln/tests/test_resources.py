@@ -67,6 +67,11 @@ def _clean_singletons():
     old_jobs = dict(_queue._jobs)
     old_history = list(_event_bus._history)
 
+    # Start each test with a clean slate
+    _registry._printers.clear()
+    _queue._jobs.clear()
+    _event_bus._history.clear()
+
     yield
 
     # Restore state
