@@ -607,12 +607,13 @@ class TestOpenSCADProvider:
             _find_openscad("/nonexistent/openscad")
 
     def test_find_openscad_macos_fallback(self):
-        with patch("kiln.generation.openscad.shutil.which", return_value=None):
-            with patch("kiln.generation.openscad.os.path.isfile") as mock_isfile:
-                with patch("kiln.generation.openscad.os.access", return_value=True):
-                    mock_isfile.return_value = True
-                    result = _find_openscad()
-        assert result == "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
+        macos_path = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
+        with patch("kiln.generation.openscad._MACOS_APP_PATH", macos_path):
+            with patch("kiln.generation.openscad.shutil.which", return_value=None):
+                with patch("kiln.generation.openscad.os.path.isfile", return_value=True):
+                    with patch("kiln.generation.openscad.os.access", return_value=True):
+                        result = _find_openscad()
+        assert result == macos_path
 
 
 # ---------------------------------------------------------------------------
