@@ -371,6 +371,9 @@ class TestPrinterAdapterABC:
             def delete_file(self, file_path):
                 return True
 
+            def emergency_stop(self):
+                return PrintResult(success=True, message="")
+
         instance = Complete()
         assert instance.name == "test"
         assert isinstance(instance.capabilities, PrinterCapabilities)
