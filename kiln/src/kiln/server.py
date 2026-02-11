@@ -3330,10 +3330,18 @@ def validate_print_quality(
                         "size_bytes": len(image_data),
                     }
                     if save_snapshot:
-                        os.makedirs(os.path.dirname(save_snapshot) or ".", exist_ok=True)
-                        with open(save_snapshot, "wb") as f:
+                        # Sanitise path — restrict to home dir or /tmp
+                        _safe = os.path.abspath(save_snapshot)
+                        _home = os.path.expanduser("~")
+                        if not (_safe.startswith(_home) or _safe.startswith("/tmp")):
+                            return _error_dict(
+                                "save_snapshot path must be under home directory or /tmp.",
+                                code="VALIDATION_ERROR",
+                            )
+                        os.makedirs(os.path.dirname(_safe) or ".", exist_ok=True)
+                        with open(_safe, "wb") as f:
                             f.write(image_data)
-                        snapshot_info["saved_to"] = save_snapshot
+                        snapshot_info["saved_to"] = _safe
                     else:
                         snapshot_info["image_base64"] = base64.b64encode(
                             image_data
