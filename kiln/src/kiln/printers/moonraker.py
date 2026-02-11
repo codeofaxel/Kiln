@@ -160,6 +160,8 @@ class MoonrakerAdapter(PrinterAdapter):
             can_set_temp=True,
             can_send_gcode=True,
             can_pause=True,
+            can_stream=True,
+            can_probe_bed=True,
             supported_extensions=(".gcode", ".gco", ".g"),
         )
 
@@ -716,6 +718,58 @@ class MoonrakerAdapter(PrinterAdapter):
         except Exception:
             logger.debug("Webcam snapshot failed", exc_info=True)
         return None
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- webcam streaming
+    # ------------------------------------------------------------------
+
+    def get_stream_url(self) -> Optional[str]:
+        """Discover and return the MJPEG stream URL from Moonraker.
+
+        Queries ``GET /server/webcams/list`` and returns the first
+        webcam's ``stream_url`` (or ``urlStream``).
+        """
+        try:
+            payload = self._get_json("/server/webcams/list")
+            webcams = _safe_get(payload, "result", "webcams", default=[])
+            if not isinstance(webcams, list) or not webcams:
+                return None
+
+            cam = webcams[0]
+            stream_url = cam.get("stream_url") or cam.get("urlStream")
+            if not stream_url:
+                return None
+
+            if stream_url.startswith("/"):
+                stream_url = f"{self._host}{stream_url}"
+
+            return stream_url
+        except Exception:
+            logger.debug("Webcam stream URL discovery failed", exc_info=True)
+            return None
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- bed mesh
+    # ------------------------------------------------------------------
+
+    def get_bed_mesh(self) -> Optional[Dict[str, Any]]:
+        """Query Moonraker for the current bed mesh data.
+
+        Uses ``GET /printer/objects/query?bed_mesh`` to retrieve the
+        probed mesh point data from Klipper.
+        """
+        try:
+            payload = self._get_json(
+                "/printer/objects/query",
+                params={"bed_mesh": ""},
+            )
+            mesh = _safe_get(payload, "result", "status", "bed_mesh", default=None)
+            if not mesh or not isinstance(mesh, dict):
+                return None
+            return mesh
+        except Exception:
+            logger.debug("Bed mesh query failed", exc_info=True)
+            return None
 
     # ------------------------------------------------------------------
     # Dunder helpers

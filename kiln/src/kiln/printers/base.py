@@ -141,6 +141,8 @@ class PrinterCapabilities:
     can_set_temp: bool = True
     can_send_gcode: bool = True
     can_pause: bool = True
+    can_stream: bool = False
+    can_probe_bed: bool = False
     supported_extensions: Tuple[str, ...] = (".gcode", ".gco", ".g")
 
     def to_dict(self) -> Dict[str, Any]:
@@ -327,6 +329,28 @@ class PrinterAdapter(ABC):
 
         Returns raw JPEG/PNG image bytes, or ``None`` if webcam is not
         available or not supported by this adapter.  This is an optional
+        method -- the default implementation returns ``None``.
+        """
+        return None
+
+    # -- webcam streaming (optional) -----------------------------------
+
+    def get_stream_url(self) -> Optional[str]:
+        """Return the MJPEG stream URL for the printer's webcam.
+
+        Returns the full URL to the live video stream, or ``None`` if
+        streaming is not available.  This is an optional method -- the
+        default implementation returns ``None``.
+        """
+        return None
+
+    # -- bed mesh (optional) --------------------------------------------
+
+    def get_bed_mesh(self) -> Optional[Dict[str, Any]]:
+        """Return the current bed mesh / probe data.
+
+        Returns a dict with mesh information (points, variance, etc.),
+        or ``None`` if bed mesh data is not available.  This is an optional
         method -- the default implementation returns ``None``.
         """
         return None

@@ -97,6 +97,11 @@ kiln slice <file> [--print-after] [--json] # Slice STL/3MF to G-code
 kiln snapshot [--save PATH] [--json]       # Capture webcam snapshot
 kiln wait [--timeout N] [--json]           # Wait for print to finish
 kiln history [--status S] [--json]         # View past prints
+kiln order materials [--json]              # List fulfillment materials
+kiln order quote <file> -m MAT [--json]   # Get manufacturing quote
+kiln order place <quote_id> [--json]      # Place a fulfillment order
+kiln order status <order_id> [--json]     # Track order status
+kiln order cancel <order_id> [--json]     # Cancel an order
 kiln serve                                 # Start MCP server
 ```
 
@@ -191,6 +196,11 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `find_slicer_tool` | Detect installed slicer (PrusaSlicer/OrcaSlicer) |
 | `slice_and_print` | Slice a model then upload and print in one step |
 | `printer_snapshot` | Capture a webcam snapshot from the printer |
+| `fulfillment_materials` | List materials from external print services (Craftcloud) |
+| `fulfillment_quote` | Get a manufacturing quote for a 3D model |
+| `fulfillment_order` | Place an order based on a quote |
+| `fulfillment_order_status` | Track a fulfillment order |
+| `fulfillment_cancel` | Cancel a fulfillment order |
 
 ## Supported Printers
 
@@ -199,7 +209,7 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | **OctoPrint** | Stable | Any OctoPrint-connected printer (Prusa, Ender, custom) |
 | **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
 | **Bambu** | Stable | Bambu Lab X1C, P1S, A1 (via LAN MQTT) |
-| **Prusa Connect** | Planned | Prusa MK4, XL, Mini |
+| **Prusa Connect** | Stable | Prusa MK4, XL, Mini+ (via Prusa Link REST API) |
 
 ## MCP Resources
 
@@ -219,7 +229,7 @@ The server also exposes read-only resources that agents can use for context:
 | Module | Description |
 |---|---|
 | `server.py` | MCP server with tools, resources, and subsystem wiring |
-| `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Bambu) |
+| `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Bambu, Prusa Connect) |
 | `marketplaces/` | Model marketplace adapters (Thingiverse, MyMiniFactory, Cults3D) |
 | `slicer.py` | Slicer integration (PrusaSlicer, OrcaSlicer) with auto-detection |
 | `registry.py` | Fleet registry for multi-printer management |
@@ -231,8 +241,9 @@ The server also exposes read-only resources that agents can use for context:
 | `auth.py` | Optional API key authentication with scope-based access |
 | `billing.py` | Fee tracking for 3DOS network-routed jobs |
 | `discovery.py` | Network printer discovery (mDNS + HTTP probe) |
+| `fulfillment/` | External manufacturing service adapters (Craftcloud) |
 | `gcode.py` | G-code safety validator |
-| `cli/` | Click CLI with 20+ subcommands and JSON output |
+| `cli/` | Click CLI with 25+ subcommands and JSON output |
 
 ## Authentication (Optional)
 
@@ -316,7 +327,33 @@ kiln snapshot --save photo.jpg
 kiln snapshot --json
 ```
 
-Supported on OctoPrint and Moonraker backends. Agents use the `printer_snapshot` MCP tool.
+Supported on OctoPrint, Moonraker, and Prusa Connect backends. Agents use the `printer_snapshot` MCP tool.
+
+## Fulfillment Services
+
+Outsource prints to external manufacturing services when local printers lack the material, capacity, or technology:
+
+```bash
+# List available materials (FDM, SLA, SLS, MJF, etc.)
+kiln order materials
+
+# Get a quote for a model
+kiln order quote model.stl --material pla-white --quantity 2
+
+# Place the order
+kiln order place q-abc123 --shipping std
+
+# Track order status
+kiln order status o-def456
+```
+
+Configure Craftcloud credentials:
+
+```bash
+export KILN_CRAFTCLOUD_API_KEY=your_key
+```
+
+Agents use `fulfillment_quote` and `fulfillment_order` MCP tools for the same workflow.
 
 ## Development
 
@@ -325,8 +362,8 @@ Supported on OctoPrint and Moonraker backends. Agents use the `printer_snapshot`
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (1511 total)
-cd kiln && python3 -m pytest tests/ -v        # 1272 tests
+# Run tests (1577 total)
+cd kiln && python3 -m pytest tests/ -v        # 1338 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 

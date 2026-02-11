@@ -29,7 +29,10 @@ from kiln.cli.output import (
     format_error,
     format_files,
     format_history,
+    format_materials,
+    format_order,
     format_printers,
+    format_quote,
     format_response,
     format_status,
 )
@@ -1023,6 +1026,139 @@ def history(limit: int, filter_status: Optional[str], json_mode: bool) -> None:
 
         click.echo(format_history(jobs, json_mode=json_mode))
 
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# order (fulfillment services)
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def order() -> None:
+    """Outsource prints to external manufacturing services.
+
+    Use subcommands to get quotes, place orders, and track shipments
+    through services like Craftcloud.
+    """
+
+
+def _get_fulfillment_provider():
+    """Create a CraftcloudProvider from env config."""
+    import os
+    from kiln.fulfillment import CraftcloudProvider
+
+    api_key = os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
+    if not api_key:
+        raise click.ClickException(
+            "KILN_CRAFTCLOUD_API_KEY not set. "
+            "Set it to your Craftcloud API key to use fulfillment services."
+        )
+    return CraftcloudProvider(api_key=api_key)
+
+
+@order.command("materials")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def order_materials(json_mode: bool) -> None:
+    """List available materials from fulfillment services."""
+    try:
+        provider = _get_fulfillment_provider()
+        materials = provider.list_materials()
+        click.echo(format_materials([m.to_dict() for m in materials], json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@order.command("quote")
+@click.argument("file_path", type=click.Path(exists=True))
+@click.option("--material", "-m", required=True, help="Material ID (from 'kiln order materials').")
+@click.option("--quantity", "-q", default=1, help="Number of copies (default 1).")
+@click.option("--country", default="US", help="Shipping country code (default US).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def order_quote(file_path: str, material: str, quantity: int, country: str, json_mode: bool) -> None:
+    """Get a manufacturing quote for a 3D model.
+
+    Upload a model file (STL, 3MF, OBJ) and receive pricing, lead time,
+    and shipping options from Craftcloud's network of 150+ print services.
+    """
+    from kiln.fulfillment import QuoteRequest
+
+    try:
+        provider = _get_fulfillment_provider()
+        quote = provider.get_quote(QuoteRequest(
+            file_path=file_path,
+            material_id=material,
+            quantity=quantity,
+            shipping_country=country,
+        ))
+        click.echo(format_quote(quote.to_dict(), json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except FileNotFoundError as exc:
+        click.echo(format_error(str(exc), code="FILE_NOT_FOUND", json_mode=json_mode))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@order.command("place")
+@click.argument("quote_id")
+@click.option("--shipping", "-s", "shipping_id", default="", help="Shipping option ID (from quote).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def order_place(quote_id: str, shipping_id: str, json_mode: bool) -> None:
+    """Place a manufacturing order from a quote.
+
+    Requires a quote ID from 'kiln order quote'.
+    """
+    from kiln.fulfillment import OrderRequest
+
+    try:
+        provider = _get_fulfillment_provider()
+        result = provider.place_order(OrderRequest(
+            quote_id=quote_id,
+            shipping_option_id=shipping_id,
+        ))
+        click.echo(format_order(result.to_dict(), json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@order.command("status")
+@click.argument("order_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def order_status(order_id: str, json_mode: bool) -> None:
+    """Check the status of a fulfillment order."""
+    try:
+        provider = _get_fulfillment_provider()
+        result = provider.get_order_status(order_id)
+        click.echo(format_order(result.to_dict(), json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@order.command("cancel")
+@click.argument("order_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def order_cancel(order_id: str, json_mode: bool) -> None:
+    """Cancel a fulfillment order (if still cancellable)."""
+    try:
+        provider = _get_fulfillment_provider()
+        result = provider.cancel_order(order_id)
+        click.echo(format_order(result.to_dict(), json_mode=json_mode))
+    except click.ClickException:
+        raise
     except Exception as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
         sys.exit(1)
