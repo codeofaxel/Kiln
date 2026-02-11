@@ -90,6 +90,7 @@ class ModelSummary:
     price_cents: int = 0  # in USD cents, 0 = free
     has_printable_files: bool = False  # has .gcode files
     has_sliceable_files: bool = True  # has .stl / .3mf files
+    can_download: bool = True  # False for metadata-only sources (e.g. Cults3D)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
