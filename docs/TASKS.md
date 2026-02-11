@@ -4,13 +4,8 @@ Prioritized backlog of features and improvements.
 
 ## High Priority
 
-### Prusa Connect Adapter
-Third printer backend. Fills out the "Planned" row in the README. Prusa Connect exposes a REST API for MK4, XL, Mini. Would follow the same PrinterAdapter pattern as OctoPrint/Moonraker/Bambu.
-
-### Craftcloud Integration
-Order fulfillment via Craftcloud (All3DP). Aggregates 100+ manufacturing partners. Use case: "I don't have the right printer/material for this — route to a service." Would add a `kiln order` CLI command and `order_print` MCP tool that submits STL + material + finish to Craftcloud's API and returns a quote/tracking link.
-
-### Other Fulfillment Services to Evaluate
+### Additional Fulfillment Providers
+Craftcloud is integrated. Evaluate and add more providers using the `FulfillmentProvider` ABC:
 - **Xometry** — Professional manufacturing, CNC + 3D printing. Enterprise-focused API.
 - **Sculpteo** — On-demand 3D printing with good material selection.
 - **Shapeways** — Consumer/prosumer 3D printing marketplace.

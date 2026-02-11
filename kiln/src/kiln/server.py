@@ -41,6 +41,7 @@ from kiln.printers import (
     PrinterAdapter,
     PrinterError,
     PrinterStatus,
+    PrusaConnectAdapter,
 )
 from kiln.gcode import validate_gcode as _validate_gcode_impl
 from kiln.registry import PrinterRegistry, PrinterNotFoundError
@@ -51,6 +52,19 @@ from kiln.persistence import get_db
 from kiln.webhooks import WebhookManager
 from kiln.auth import AuthManager
 from kiln.billing import BillingLedger, FeePolicy
+from kiln.cost_estimator import CostEstimator
+from kiln.materials import MaterialTracker
+from kiln.bed_leveling import BedLevelManager, LevelingPolicy
+from kiln.streaming import MJPEGProxy
+from kiln.cloud_sync import CloudSyncManager, SyncConfig
+from kiln.plugins import PluginManager, PluginContext
+from kiln.fulfillment import (
+    CraftcloudProvider,
+    FulfillmentError,
+    FulfillmentProvider,
+    OrderRequest,
+    QuoteRequest,
+)
 from kiln.thingiverse import (
     ThingiverseClient,
     ThingiverseError,
@@ -81,6 +95,7 @@ _THINGIVERSE_TOKEN: str = os.environ.get("KILN_THINGIVERSE_TOKEN", "")
 _MMF_API_KEY: str = os.environ.get("KILN_MMF_API_KEY", "")
 _CULTS3D_USERNAME: str = os.environ.get("KILN_CULTS3D_USERNAME", "")
 _CULTS3D_API_KEY: str = os.environ.get("KILN_CULTS3D_API_KEY", "")
+_CRAFTCLOUD_API_KEY: str = os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # MCP server instance
@@ -100,7 +115,10 @@ mcp = FastMCP(
         "Use `search_all_models` to search across Thingiverse, MyMiniFactory, "
         "and Cults3D simultaneously, or `search_models` for Thingiverse only. "
         "Use `download_model` to fetch files and `download_and_upload` to go "
-        "straight from marketplace to printer."
+        "straight from marketplace to printer. "
+        "Use `fulfillment_materials` and `fulfillment_quote` to outsource "
+        "prints to external services like Craftcloud when local printers "
+        "lack the material or capacity."
     ),
 )
 
@@ -169,10 +187,12 @@ def _get_adapter() -> PrinterAdapter:
                 "Set it to your Bambu printer's serial number."
             )
         _adapter = BambuAdapter(host=host, access_code=api_key, serial=serial)
+    elif printer_type == "prusaconnect":
+        _adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
     else:
         raise RuntimeError(
             f"Unsupported printer type: {printer_type!r}.  "
-            f"Supported types are 'octoprint', 'moonraker', and 'bambu'."
+            f"Supported types are 'octoprint', 'moonraker', 'bambu', and 'prusaconnect'."
         )
 
     logger.info(
@@ -194,6 +214,14 @@ _scheduler = JobScheduler(_queue, _registry, _event_bus)
 _webhook_mgr = WebhookManager(_event_bus)
 _auth = AuthManager()
 _billing = BillingLedger()
+_cost_estimator = CostEstimator()
+_material_tracker = MaterialTracker(db=get_db(), event_bus=_event_bus)
+_bed_level_mgr = BedLevelManager(
+    db=get_db(), event_bus=_event_bus, registry=_registry,
+)
+_stream_proxy = MJPEGProxy()
+_cloud_sync: Optional[CloudSyncManager] = None
+_plugin_mgr = PluginManager()
 _start_time = time.time()
 
 # Thingiverse client (lazy -- created on first use so the module can be
@@ -243,6 +271,25 @@ def _init_marketplace_registry() -> None:
             )
         except Exception:
             logger.debug("Could not register Cults3D adapter", exc_info=True)
+
+
+_fulfillment: Optional[FulfillmentProvider] = None
+
+
+def _get_fulfillment() -> FulfillmentProvider:
+    """Return the lazily-initialised fulfillment provider."""
+    global _fulfillment  # noqa: PLW0603
+
+    if _fulfillment is not None:
+        return _fulfillment
+
+    if not _CRAFTCLOUD_API_KEY:
+        raise RuntimeError(
+            "KILN_CRAFTCLOUD_API_KEY environment variable is not set.  "
+            "Set it to your Craftcloud API key to use fulfillment services."
+        )
+    _fulfillment = CraftcloudProvider(api_key=_CRAFTCLOUD_API_KEY)
+    return _fulfillment
 
 
 def _error_dict(message: str, code: str = "ERROR") -> Dict[str, Any]:
@@ -934,10 +981,12 @@ def register_printer(
                     code="INVALID_ARGS",
                 )
             adapter = BambuAdapter(host=host, access_code=api_key, serial=serial)
+        elif printer_type == "prusaconnect":
+            adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
         else:
             return _error_dict(
                 f"Unsupported printer_type: {printer_type!r}. "
-                "Supported: 'octoprint', 'moonraker', 'bambu'.",
+                "Supported: 'octoprint', 'moonraker', 'bambu', 'prusaconnect'.",
                 code="INVALID_ARGS",
             )
 
@@ -1771,6 +1820,581 @@ def printer_snapshot(
 
 
 # ---------------------------------------------------------------------------
+# Cost estimation tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def estimate_cost(
+    file_path: str,
+    material: str = "PLA",
+    electricity_rate: float = 0.12,
+    printer_wattage: float = 200.0,
+) -> dict:
+    """Estimate the cost of a print job from a G-code file.
+
+    Analyses G-code extrusion commands to calculate filament usage,
+    material weight, filament cost, electricity cost, and total.
+
+    Args:
+        file_path: Path to the G-code file.
+        material: Filament material (PLA, PETG, ABS, TPU, ASA, NYLON, PC).
+        electricity_rate: Cost per kWh in USD (default 0.12).
+        printer_wattage: Printer power consumption in watts (default 200).
+    """
+    try:
+        estimate = _cost_estimator.estimate_from_file(
+            file_path, material=material,
+            electricity_rate=electricity_rate,
+            printer_wattage=printer_wattage,
+        )
+        return {"success": True, "estimate": estimate.to_dict()}
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except Exception as exc:
+        logger.exception("Unexpected error in estimate_cost")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def list_materials() -> dict:
+    """List available filament material profiles.
+
+    Returns built-in profiles for common materials including density,
+    cost per kg, and recommended temperatures.
+    """
+    materials = _cost_estimator.materials
+    return {
+        "success": True,
+        "materials": [m.to_dict() for m in materials.values()],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Material tracking tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def set_material(
+    printer_name: str,
+    material: str,
+    color: str | None = None,
+    spool_id: str | None = None,
+    tool_index: int = 0,
+) -> dict:
+    """Record which filament material is loaded in a printer.
+
+    Args:
+        printer_name: Target printer name.
+        material: Material type (PLA, PETG, ABS, etc.).
+        color: Optional filament color.
+        spool_id: Optional ID of a tracked spool.
+        tool_index: Extruder index for multi-tool printers (default 0).
+    """
+    try:
+        mat = _material_tracker.set_material(
+            printer_name=printer_name,
+            material_type=material,
+            color=color,
+            spool_id=spool_id,
+            tool_index=tool_index,
+        )
+        return {"success": True, "material": mat.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in set_material")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def get_material(printer_name: str | None = None) -> dict:
+    """Get the material loaded in a printer.
+
+    Args:
+        printer_name: Target printer.  Omit for the default printer.
+    """
+    try:
+        name = printer_name or "default"
+        materials = _material_tracker.get_all_materials(name)
+        return {
+            "success": True,
+            "materials": [m.to_dict() for m in materials],
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in get_material")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def check_material_match(
+    expected_material: str,
+    printer_name: str | None = None,
+) -> dict:
+    """Check if the loaded material matches what a print expects.
+
+    Args:
+        expected_material: The material the print file requires.
+        printer_name: Target printer.  Omit for the default printer.
+    """
+    try:
+        name = printer_name or "default"
+        warning = _material_tracker.check_match(name, expected_material)
+        if warning:
+            return {
+                "success": True,
+                "match": False,
+                "warning": warning.to_dict(),
+            }
+        return {"success": True, "match": True}
+    except Exception as exc:
+        logger.exception("Unexpected error in check_material_match")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def list_spools() -> dict:
+    """List all tracked filament spools in inventory."""
+    try:
+        spools = _material_tracker.list_spools()
+        return {
+            "success": True,
+            "spools": [s.to_dict() for s in spools],
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in list_spools")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def add_spool(
+    material: str,
+    color: str | None = None,
+    brand: str | None = None,
+    weight_grams: float = 1000.0,
+    cost_usd: float | None = None,
+) -> dict:
+    """Add a new filament spool to inventory.
+
+    Args:
+        material: Material type (PLA, PETG, ABS, etc.).
+        color: Filament color.
+        brand: Manufacturer brand.
+        weight_grams: Total spool weight in grams (default 1000).
+        cost_usd: Cost of the spool in USD.
+    """
+    try:
+        spool = _material_tracker.add_spool(
+            material_type=material, color=color, brand=brand,
+            weight_grams=weight_grams, cost_usd=cost_usd,
+        )
+        return {"success": True, "spool": spool.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in add_spool")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def remove_spool(spool_id: str) -> dict:
+    """Remove a filament spool from inventory.
+
+    Args:
+        spool_id: The spool's unique identifier.
+    """
+    try:
+        removed = _material_tracker.remove_spool(spool_id)
+        if removed:
+            return {"success": True, "message": f"Spool {spool_id} removed."}
+        return _error_dict(f"Spool {spool_id!r} not found.", code="NOT_FOUND")
+    except Exception as exc:
+        logger.exception("Unexpected error in remove_spool")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Bed leveling tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def bed_level_status(printer_name: str | None = None) -> dict:
+    """Check bed leveling status and whether leveling is needed.
+
+    Args:
+        printer_name: Target printer.  Omit for the default printer.
+    """
+    try:
+        name = printer_name or "default"
+        status = _bed_level_mgr.check_needed(name)
+        return {"success": True, "status": status.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in bed_level_status")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def trigger_bed_level(printer_name: str | None = None) -> dict:
+    """Trigger a bed leveling / mesh probe on the printer.
+
+    Sends the configured G-code command (G29 or BED_MESH_CALIBRATE)
+    to the printer.
+
+    Args:
+        printer_name: Target printer.  Omit for the default printer.
+    """
+    try:
+        if printer_name:
+            adapter = _registry.get(printer_name)
+            name = printer_name
+        else:
+            adapter = _get_adapter()
+            name = "default"
+
+        result = _bed_level_mgr.trigger_level(name, adapter, triggered_by="manual")
+        return {"success": result["success"], **result}
+    except PrinterNotFoundError:
+        return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in trigger_bed_level")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def set_leveling_policy(
+    enabled: bool = True,
+    max_prints: int = 10,
+    max_hours: float = 48.0,
+    gcode_command: str = "G29",
+    printer_name: str | None = None,
+) -> dict:
+    """Configure automatic bed leveling policy for a printer.
+
+    Args:
+        enabled: Enable/disable auto-leveling checks.
+        max_prints: Trigger leveling after this many prints.
+        max_hours: Trigger leveling after this many hours.
+        gcode_command: G-code command to send (G29 or BED_MESH_CALIBRATE).
+        printer_name: Target printer.  Omit for the default printer.
+    """
+    try:
+        name = printer_name or "default"
+        policy = LevelingPolicy(
+            enabled=enabled,
+            max_prints_between_levels=max_prints,
+            max_hours_between_levels=max_hours,
+            gcode_command=gcode_command,
+        )
+        _bed_level_mgr.set_policy(name, policy)
+        return {"success": True, "policy": policy.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in set_leveling_policy")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Webcam streaming tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def webcam_stream(
+    printer_name: str | None = None,
+    action: str = "status",
+    port: int = 8081,
+) -> dict:
+    """Control the MJPEG webcam streaming proxy.
+
+    Args:
+        printer_name: Target printer.  Omit for the default printer.
+        action: One of ``"start"``, ``"stop"``, or ``"status"``.
+        port: Local port for the stream server (default 8081).
+    """
+    try:
+        if action == "status":
+            return {"success": True, "stream": _stream_proxy.status().to_dict()}
+
+        if action == "stop":
+            info = _stream_proxy.stop()
+            return {"success": True, "stream": info.to_dict()}
+
+        if action == "start":
+            if printer_name:
+                adapter = _registry.get(printer_name)
+            else:
+                adapter = _get_adapter()
+
+            stream_url = adapter.get_stream_url()
+            if stream_url is None:
+                return _error_dict(
+                    "Webcam streaming not available for this printer.",
+                    code="NO_STREAM",
+                )
+
+            info = _stream_proxy.start(
+                source_url=stream_url,
+                port=port,
+                printer_name=printer_name or "default",
+            )
+            return {"success": True, "stream": info.to_dict()}
+
+        return _error_dict(
+            f"Unknown action {action!r}. Use 'start', 'stop', or 'status'.",
+            code="BAD_REQUEST",
+        )
+    except PrinterNotFoundError:
+        return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in webcam_stream")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Cloud sync tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def cloud_sync_status() -> dict:
+    """Get the current cloud sync status."""
+    global _cloud_sync
+    if _cloud_sync is None:
+        return {"success": True, "status": {"enabled": False, "last_sync_status": "not_configured"}}
+    return {"success": True, "status": _cloud_sync.status().to_dict()}
+
+
+@mcp.tool()
+def cloud_sync_now() -> dict:
+    """Trigger an immediate cloud sync cycle."""
+    global _cloud_sync
+    if _cloud_sync is None:
+        return _error_dict("Cloud sync not configured.", code="NOT_CONFIGURED")
+    try:
+        result = _cloud_sync.sync_now()
+        return {"success": True, **result}
+    except Exception as exc:
+        logger.exception("Unexpected error in cloud_sync_now")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def cloud_sync_configure(
+    cloud_url: str,
+    api_key: str,
+    interval: float = 60.0,
+) -> dict:
+    """Configure and start cloud sync.
+
+    Args:
+        cloud_url: Base URL of the cloud sync endpoint.
+        api_key: API key for authentication.
+        interval: Sync interval in seconds (default 60).
+    """
+    global _cloud_sync
+    try:
+        config = SyncConfig(
+            cloud_url=cloud_url, api_key=api_key,
+            sync_interval_seconds=interval,
+        )
+        if _cloud_sync is not None:
+            _cloud_sync.stop()
+        _cloud_sync = CloudSyncManager(
+            db=get_db(), event_bus=_event_bus, config=config,
+        )
+        _cloud_sync.start()
+        return {"success": True, "config": config.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in cloud_sync_configure")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Plugin tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def list_plugins() -> dict:
+    """List all discovered plugins and their status."""
+    plugins = _plugin_mgr.list_plugins()
+    return {
+        "success": True,
+        "plugins": [p.to_dict() for p in plugins],
+    }
+
+
+@mcp.tool()
+def plugin_info(name: str) -> dict:
+    """Get detailed information about a specific plugin.
+
+    Args:
+        name: Plugin name.
+    """
+    info = _plugin_mgr.get_plugin_info(name)
+    if info is None:
+        return _error_dict(f"Plugin {name!r} not found.", code="NOT_FOUND")
+    return {"success": True, "plugin": info.to_dict()}
+
+
+# ---------------------------------------------------------------------------
+# Fulfillment tools — outsource prints to external services
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def fulfillment_materials() -> dict:
+    """List available materials from external manufacturing services.
+
+    Returns materials with technology (FDM, SLA, SLS, etc.), color,
+    finish, and pricing.  Use the material ``id`` when requesting a quote
+    with ``fulfillment_quote``.
+
+    Requires ``KILN_CRAFTCLOUD_API_KEY`` to be set.
+    """
+    try:
+        provider = _get_fulfillment()
+        materials = provider.list_materials()
+        return {
+            "success": True,
+            "provider": provider.name,
+            "materials": [m.to_dict() for m in materials],
+            "count": len(materials),
+        }
+    except (FulfillmentError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in fulfillment_materials")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def fulfillment_quote(
+    file_path: str,
+    material_id: str,
+    quantity: int = 1,
+    shipping_country: str = "US",
+) -> dict:
+    """Get a manufacturing quote for a 3D model from Craftcloud.
+
+    Args:
+        file_path: Absolute path to the model file (STL, 3MF, OBJ).
+        material_id: Material ID from ``fulfillment_materials``.
+        quantity: Number of copies to print (default 1).
+        shipping_country: ISO country code for shipping (default "US").
+
+    Uploads the model, returns pricing from Craftcloud's network of 150+
+    print services, including unit price, total, lead time, and shipping
+    options.
+
+    Use the returned ``quote_id`` with ``fulfillment_order`` to place the
+    order.
+    """
+    try:
+        provider = _get_fulfillment()
+        quote = provider.get_quote(QuoteRequest(
+            file_path=file_path,
+            material_id=material_id,
+            quantity=quantity,
+            shipping_country=shipping_country,
+        ))
+        return {
+            "success": True,
+            "quote": quote.to_dict(),
+        }
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except (FulfillmentError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in fulfillment_quote")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def fulfillment_order(
+    quote_id: str,
+    shipping_option_id: str = "",
+) -> dict:
+    """Place a manufacturing order based on a previous quote.
+
+    Args:
+        quote_id: Quote ID from ``fulfillment_quote``.
+        shipping_option_id: Shipping option ID from the quote's
+            ``shipping_options`` list.
+
+    Returns the order ID and status.  Use ``fulfillment_order_status``
+    to track the order.
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        provider = _get_fulfillment()
+        result = provider.place_order(OrderRequest(
+            quote_id=quote_id,
+            shipping_option_id=shipping_option_id,
+        ))
+        return {
+            "success": True,
+            "order": result.to_dict(),
+        }
+    except (FulfillmentError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in fulfillment_order")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def fulfillment_order_status(order_id: str) -> dict:
+    """Check the status of a fulfillment order.
+
+    Args:
+        order_id: Order ID from ``fulfillment_order``.
+
+    Returns current order state, tracking info, and estimated delivery.
+    """
+    try:
+        provider = _get_fulfillment()
+        result = provider.get_order_status(order_id)
+        return {
+            "success": True,
+            "order": result.to_dict(),
+        }
+    except (FulfillmentError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in fulfillment_order_status")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def fulfillment_cancel(order_id: str) -> dict:
+    """Cancel a fulfillment order (if still cancellable).
+
+    Args:
+        order_id: Order ID to cancel.
+
+    Only orders that have not yet shipped can be cancelled.
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        provider = _get_fulfillment()
+        result = provider.cancel_order(order_id)
+        return {
+            "success": True,
+            "order": result.to_dict(),
+        }
+    except (FulfillmentError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in fulfillment_cancel")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
@@ -2192,6 +2816,33 @@ def main() -> None:
             "Marketplace sources: %s", ", ".join(_marketplace_registry.connected)
         )
 
+    # Subscribe bed level manager to job events
+    _bed_level_mgr.subscribe_events()
+
+    # Discover and activate plugins
+    _plugin_mgr.discover()
+    _plugin_mgr.activate_all(PluginContext(
+        event_bus=_event_bus,
+        registry=_registry,
+        queue=_queue,
+        mcp=mcp,
+        db=get_db(),
+    ))
+
+    # Initialise cloud sync from saved config
+    global _cloud_sync
+    _saved_sync = get_db().get_setting("cloud_sync_config")
+    if _saved_sync:
+        import json as _json
+        try:
+            _cloud_sync = CloudSyncManager(
+                db=get_db(), event_bus=_event_bus,
+                config=SyncConfig.from_dict(_json.loads(_saved_sync)),
+            )
+            _cloud_sync.start()
+        except Exception:
+            logger.debug("Could not restore cloud sync config", exc_info=True)
+
     # Start background services
     _scheduler.start()
     _webhook_mgr.start()
@@ -2200,6 +2851,9 @@ def main() -> None:
     # Graceful shutdown on exit
     atexit.register(_scheduler.stop)
     atexit.register(_webhook_mgr.stop)
+    atexit.register(_stream_proxy.stop)
+    if _cloud_sync is not None:
+        atexit.register(_cloud_sync.stop)
 
     mcp.run()
 

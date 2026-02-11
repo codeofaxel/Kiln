@@ -63,6 +63,30 @@ class EventType(enum.Enum):
     # File
     FILE_UPLOADED = "file.uploaded"
 
+    # Streaming
+    STREAM_STARTED = "stream.started"
+    STREAM_STOPPED = "stream.stopped"
+
+    # Cloud sync
+    SYNC_COMPLETED = "sync.completed"
+    SYNC_FAILED = "sync.failed"
+
+    # Bed leveling
+    LEVELING_TRIGGERED = "leveling.triggered"
+    LEVELING_COMPLETED = "leveling.completed"
+    LEVELING_FAILED = "leveling.failed"
+    LEVELING_NEEDED = "leveling.needed"
+
+    # Material tracking
+    MATERIAL_LOADED = "material.loaded"
+    MATERIAL_MISMATCH = "material.mismatch"
+    SPOOL_LOW = "material.spool_low"
+    SPOOL_EMPTY = "material.spool_empty"
+
+    # Plugins
+    PLUGIN_LOADED = "plugin.loaded"
+    PLUGIN_ERROR = "plugin.error"
+
 
 @dataclass
 class Event:

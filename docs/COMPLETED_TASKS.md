@@ -4,6 +4,34 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-10
 
+### Fulfillment Service Integration (Craftcloud)
+- `kiln.fulfillment` module with `FulfillmentProvider` ABC and `CraftcloudProvider` implementation
+- `FulfillmentProvider` abstract base: `list_materials()`, `get_quote()`, `place_order()`, `get_order_status()`, `cancel_order()`
+- Craftcloud adapter: upload → quote → order workflow via REST API with Bearer token auth
+- Dataclasses: `Material`, `Quote`, `QuoteRequest`, `OrderRequest`, `OrderResult`, `ShippingOption`
+- `OrderStatus` enum with 9 states (pending, confirmed, in_production, shipped, delivered, cancelled, failed, refunded, unknown)
+- `kiln order` CLI command group: `materials`, `quote`, `place`, `status`, `cancel`
+- 5 MCP tools: `fulfillment_materials`, `fulfillment_quote`, `fulfillment_order`, `fulfillment_order_status`, `fulfillment_cancel`
+- Rich CLI output formatters for quotes, orders, and material listings
+- 32 tests
+
+### Prusa Connect Adapter
+- 4th printer backend via Prusa Link local REST API
+- Supports Prusa MK4, XL, Mini+ with `X-Api-Key` authentication
+- Maps all 9 Prusa Link states to `PrinterStatus` enum
+- Read-only adapter: status, files, upload, print control (no temp set or raw G-code — Prusa Link limitation)
+- `can_set_temp=False`, `can_send_gcode=False` in capabilities
+- Wired into CLI config, discovery (HTTP probe on port 80), and MCP server
+- 28 tests
+
+### Multi-Marketplace Search
+- `MarketplaceAdapter` ABC with `search()`, `get_details()`, `get_files()`, `download_file()`
+- Concrete adapters: Thingiverse (REST), MyMiniFactory (REST v2), Cults3D (GraphQL, metadata-only)
+- `MarketplaceRegistry` with `search_all()` fan-out, round-robin interleaving, per-adapter fault isolation
+- `search_all_models`, `marketplace_info`, `download_and_upload` MCP tools
+- `download_and_upload` combines marketplace download + printer upload in one step
+- Cults3D adapter signals `supports_download = False` (API limitation)
+
 ### Slicer Integration
 - `kiln.slicer` module wrapping PrusaSlicer / OrcaSlicer CLI
 - Auto-detects slicer on PATH, macOS app bundles, and `KILN_SLICER_PATH` env var

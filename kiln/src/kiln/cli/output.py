@@ -537,3 +537,171 @@ def format_discovered(
             f"{_api_badge(p):<5} {p.get('discovery_method', '')}"
         )
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Fulfillment order formatting
+# ---------------------------------------------------------------------------
+
+
+def format_quote(
+    quote: Dict[str, Any],
+    *,
+    json_mode: bool = False,
+) -> str:
+    """Format a fulfillment quote.
+
+    Expects dict from ``Quote.to_dict()``.
+    """
+    if json_mode:
+        return json.dumps(
+            {"status": "success", "data": {"quote": quote}},
+            indent=2,
+            sort_keys=False,
+        )
+
+    provider = quote.get("provider", "")
+    material = quote.get("material", "")
+    qty = quote.get("quantity", 1)
+    total = quote.get("total_price", 0)
+    currency = quote.get("currency", "USD")
+    lead = quote.get("lead_time_days")
+
+    if RICH_AVAILABLE:
+        table = Table(show_header=False, box=None, padding=(0, 2))
+        table.add_column("Key", style="bold cyan", no_wrap=True)
+        table.add_column("Value")
+
+        table.add_row("Provider", provider)
+        table.add_row("Material", material)
+        table.add_row("Quantity", str(qty))
+        table.add_row("Total", f"[bold green]{currency} {total:.2f}[/bold green]")
+        if lead:
+            table.add_row("Lead time", f"{lead} days")
+
+        shipping = quote.get("shipping_options", [])
+        if shipping:
+            ship_lines = []
+            for s in shipping:
+                days = f" ({s.get('estimated_days')}d)" if s.get("estimated_days") else ""
+                ship_lines.append(f"  {s.get('name', '')}: {currency} {s.get('price', 0):.2f}{days}")
+            table.add_row("Shipping", "\n".join(ship_lines))
+
+        return _render(Panel(table, title=f"Quote {quote.get('quote_id', '')}", border_style="green"))
+
+    lines = [
+        f"Quote:    {quote.get('quote_id', '')}",
+        f"Provider: {provider}",
+        f"Material: {material}",
+        f"Quantity: {qty}",
+        f"Total:    {currency} {total:.2f}",
+    ]
+    if lead:
+        lines.append(f"Lead:     {lead} days")
+    return "\n".join(lines)
+
+
+def format_order(
+    order: Dict[str, Any],
+    *,
+    json_mode: bool = False,
+) -> str:
+    """Format an order result.
+
+    Expects dict from ``OrderResult.to_dict()``.
+    """
+    if json_mode:
+        return json.dumps(
+            {"status": "success", "data": {"order": order}},
+            indent=2,
+            sort_keys=False,
+        )
+
+    status = order.get("status", "unknown")
+    color = {
+        "submitted": "yellow", "processing": "yellow", "printing": "blue",
+        "shipping": "cyan", "delivered": "green", "cancelled": "red", "failed": "red",
+    }.get(status, "white")
+
+    if RICH_AVAILABLE:
+        table = Table(show_header=False, box=None, padding=(0, 2))
+        table.add_column("Key", style="bold cyan", no_wrap=True)
+        table.add_column("Value")
+
+        table.add_row("Order", order.get("order_id", ""))
+        table.add_row("Status", f"[{color}]{status}[/{color}]")
+        table.add_row("Provider", order.get("provider", ""))
+
+        if order.get("total_price") is not None:
+            table.add_row("Total", f"{order.get('currency', 'USD')} {order['total_price']:.2f}")
+        if order.get("tracking_url"):
+            table.add_row("Tracking", order["tracking_url"])
+        if order.get("estimated_delivery"):
+            table.add_row("Delivery", order["estimated_delivery"])
+
+        return _render(Panel(table, title="Order", border_style="blue"))
+
+    lines = [
+        f"Order:    {order.get('order_id', '')}",
+        f"Status:   {status}",
+        f"Provider: {order.get('provider', '')}",
+    ]
+    if order.get("total_price") is not None:
+        lines.append(f"Total:    {order.get('currency', 'USD')} {order['total_price']:.2f}")
+    if order.get("tracking_url"):
+        lines.append(f"Tracking: {order['tracking_url']}")
+    return "\n".join(lines)
+
+
+def format_materials(
+    materials: List[Dict[str, Any]],
+    *,
+    json_mode: bool = False,
+) -> str:
+    """Format a list of fulfillment materials.
+
+    Expects dicts from ``Material.to_dict()``.
+    """
+    if json_mode:
+        return json.dumps(
+            {"status": "success", "data": {"materials": materials, "count": len(materials)}},
+            indent=2,
+            sort_keys=False,
+        )
+
+    if not materials:
+        msg = "No materials available."
+        if RICH_AVAILABLE:
+            return _render(Panel(msg, border_style="yellow"))
+        return msg
+
+    if RICH_AVAILABLE:
+        table = Table(title="Available Materials", border_style="blue")
+        table.add_column("ID", style="bold")
+        table.add_column("Name")
+        table.add_column("Technology")
+        table.add_column("Color")
+        table.add_column("Price/cm\u00b3", justify="right")
+
+        for m in materials:
+            price = m.get("price_per_cm3")
+            price_str = f"{m.get('currency', 'USD')} {price:.3f}" if price else ""
+            table.add_row(
+                m.get("id", ""),
+                m.get("name", ""),
+                m.get("technology", ""),
+                m.get("color", ""),
+                price_str,
+            )
+        return _render(table)
+
+    lines = [f"{'ID':<20} {'Name':<25} {'Tech':<8} {'Color':<10} {'Price'}"]
+    lines.append("-" * 75)
+    for m in materials:
+        price = m.get("price_per_cm3")
+        price_str = f"{m.get('currency', 'USD')} {price:.3f}" if price else ""
+        lines.append(
+            f"{m.get('id', ''):<20} {m.get('name', ''):<25} "
+            f"{m.get('technology', ''):<8} {m.get('color', ''):<10} {price_str}"
+        )
+    return "\n".join(lines)

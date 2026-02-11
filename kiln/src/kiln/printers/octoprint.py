@@ -147,6 +147,8 @@ class OctoPrintAdapter(PrinterAdapter):
             can_set_temp=True,
             can_send_gcode=True,
             can_pause=True,
+            can_stream=True,
+            can_probe_bed=True,
             supported_extensions=(".gcode", ".gco", ".g"),
         )
 
@@ -596,6 +598,18 @@ class OctoPrintAdapter(PrinterAdapter):
         except Exception:
             logger.debug("Webcam snapshot failed", exc_info=True)
         return None
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- webcam streaming
+    # ------------------------------------------------------------------
+
+    def get_stream_url(self) -> Optional[str]:
+        """Return the MJPEG stream URL for OctoPrint's webcam.
+
+        The standard mjpg-streamer endpoint is
+        ``/webcam/?action=stream``.
+        """
+        return f"{self._host}/webcam/?action=stream"
 
     # ------------------------------------------------------------------
     # Dunder helpers
