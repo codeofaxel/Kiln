@@ -37,8 +37,8 @@ class TestTierSizes:
         assert len(TIER_STANDARD) >= 40
         assert len(TIER_STANDARD) <= 50
 
-    def test_full_has_101_items(self):
-        assert len(TIER_FULL) == 101
+    def test_full_has_104_items(self):
+        assert len(TIER_FULL) == 104
 
     def test_full_includes_all_standard(self):
         for tool in TIER_STANDARD:

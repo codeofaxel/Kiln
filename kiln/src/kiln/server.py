@@ -177,6 +177,9 @@ _PRINTER_MODEL: str = os.environ.get("KILN_PRINTER_MODEL", "")
 _CONFIRM_UPLOAD: bool = (
     os.environ.get("KILN_CONFIRM_UPLOAD", "").lower() in ("1", "true", "yes")
 )
+_CONFIRM_MODE: bool = (
+    os.environ.get("KILN_CONFIRM_MODE", "").lower() in ("1", "true", "yes")
+)
 _THINGIVERSE_TOKEN: str = os.environ.get("KILN_THINGIVERSE_TOKEN", "")
 _MMF_API_KEY: str = os.environ.get("KILN_MMF_API_KEY", "")
 _CULTS3D_USERNAME: str = os.environ.get("KILN_CULTS3D_USERNAME", "")
@@ -346,17 +349,60 @@ class _ToolRateLimiter:
 
     Prevents agents from spamming physically-dangerous commands in tight
     retry loops.  Uses a simple minimum-interval + max-per-minute model.
+
+    **Circuit breaker:** When the same tool is blocked 3+ times within 60
+    seconds, the tool enters a 5-minute emergency cooldown.  This catches
+    runaway agents that repeatedly retry forbidden operations.
     """
+
+    # Circuit breaker thresholds
+    _BLOCK_THRESHOLD: int = 3      # blocks within the window to trigger
+    _BLOCK_WINDOW: float = 60.0    # seconds
+    _COOLDOWN_DURATION: float = 300.0  # 5 minutes
 
     def __init__(self) -> None:
         self._last_call: dict[str, float] = {}
         self._call_history: dict[str, list[float]] = {}
+        self._block_history: dict[str, list[float]] = {}
+        self._cooldown_until: dict[str, float] = {}
+
+    def record_block(self, tool_name: str) -> Optional[str]:
+        """Record a blocked attempt for the circuit breaker.
+
+        Returns an escalation message if the threshold is hit, else ``None``.
+        """
+        now = time.monotonic()
+        history = self._block_history.get(tool_name, [])
+        cutoff = now - self._BLOCK_WINDOW
+        history = [t for t in history if t > cutoff]
+        history.append(now)
+        self._block_history[tool_name] = history
+
+        if len(history) >= self._BLOCK_THRESHOLD:
+            self._cooldown_until[tool_name] = now + self._COOLDOWN_DURATION
+            self._block_history[tool_name] = []  # Reset after escalation
+            return (
+                f"SAFETY ESCALATED: {tool_name} has been blocked "
+                f"{len(history)} times in {self._BLOCK_WINDOW:.0f}s. "
+                f"Tool is suspended for {self._COOLDOWN_DURATION / 60:.0f} "
+                f"minutes. Please review your approach."
+            )
+        return None
 
     def check(
         self, tool_name: str, min_interval_ms: int = 0, max_per_minute: int = 0
     ) -> Optional[str]:
         """Return ``None`` if allowed, or an error message if rate-limited."""
         now = time.monotonic()
+
+        # Check circuit breaker cooldown first.
+        cooldown_end = self._cooldown_until.get(tool_name, 0.0)
+        if now < cooldown_end:
+            remaining = cooldown_end - now
+            return (
+                f"Tool {tool_name} is in emergency cooldown due to repeated "
+                f"blocked attempts. Cooldown expires in {remaining:.0f}s."
+            )
 
         # Minimum interval between consecutive calls.
         if min_interval_ms > 0:
@@ -401,6 +447,8 @@ _TOOL_RATE_LIMITS: dict[str, tuple[int, int]] = {
     "cancel_print":    (5000, 3),
     "start_print":     (5000, 3),
     "upload_file":     (2000, 10),
+    "pause_print":     (5000, 6),
+    "resume_print":    (5000, 6),
 }
 
 
@@ -411,8 +459,121 @@ def _check_rate_limit(tool_name: str) -> Optional[dict]:
         return None
     msg = _tool_limiter.check(tool_name, limits[0], limits[1])
     if msg:
+        _audit(tool_name, "rate_limited", details={"message": msg})
         return _error_dict(msg, code="RATE_LIMITED")
     return None
+
+
+def _record_tool_block(tool_name: str) -> Optional[dict]:
+    """Record a blocked attempt for the circuit breaker.
+
+    Returns an escalation error dict if the threshold is hit, else ``None``.
+    """
+    escalation_msg = _tool_limiter.record_block(tool_name)
+    if escalation_msg:
+        _audit(tool_name, "escalated", details={"message": escalation_msg})
+        _event_bus.publish(
+            EventType.SAFETY_ESCALATED,
+            data={"tool": tool_name, "message": escalation_msg},
+            source="rate_limiter",
+        )
+        return _error_dict(escalation_msg, code="SAFETY_ESCALATED")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Safety audit logging
+# ---------------------------------------------------------------------------
+
+# Load tool safety classifications for audit metadata.
+_TOOL_SAFETY: Dict[str, Dict[str, Any]] = {}
+try:
+    import json as _json
+    _safety_data_path = Path(__file__).resolve().parent / "data" / "tool_safety.json"
+    _raw_safety = _json.loads(_safety_data_path.read_text(encoding="utf-8"))
+    _TOOL_SAFETY = _raw_safety.get("classifications", {})
+except (FileNotFoundError, ValueError):
+    pass
+
+
+def _get_safety_level(tool_name: str) -> str:
+    """Return the safety classification for a tool (default ``"safe"``)."""
+    entry = _TOOL_SAFETY.get(tool_name, {})
+    return entry.get("level", "safe")
+
+
+def _audit(
+    tool_name: str,
+    action: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Record a safety audit event (fire-and-forget).
+
+    This is non-blocking and will not raise if the DB write fails.
+    """
+    try:
+        db = get_db()
+        db.log_audit(
+            tool_name=tool_name,
+            safety_level=_get_safety_level(tool_name),
+            action=action,
+            printer_name=_PRINTER_MODEL or None,
+            details=details,
+        )
+    except Exception:
+        logger.debug("Failed to write audit log for %s/%s", tool_name, action)
+
+
+# ---------------------------------------------------------------------------
+# Confirmation gate for destructive tools (KILN_CONFIRM_MODE)
+# ---------------------------------------------------------------------------
+
+# Pending confirmations: {token: {tool, args, created_at}}.
+_pending_confirmations: dict[str, Dict[str, Any]] = {}
+_CONFIRM_TOKEN_TTL: float = 300.0  # 5 minutes
+
+
+def _check_confirmation(tool_name: str, args: Dict[str, Any]) -> Optional[dict]:
+    """If confirm mode is active and the tool is confirm/emergency level, return
+    a confirmation-required response.  Otherwise return ``None`` to proceed.
+    """
+    if not _CONFIRM_MODE:
+        return None
+    level = _get_safety_level(tool_name)
+    if level not in ("confirm", "emergency"):
+        return None
+
+    import hashlib
+    token = hashlib.sha256(
+        f"{tool_name}:{time.time()}:{id(args)}".encode()
+    ).hexdigest()[:16]
+
+    _pending_confirmations[token] = {
+        "tool": tool_name,
+        "args": args,
+        "created_at": time.time(),
+    }
+
+    # Prune expired tokens
+    now = time.time()
+    expired = [t for t, v in _pending_confirmations.items()
+               if now - v["created_at"] > _CONFIRM_TOKEN_TTL]
+    for t in expired:
+        del _pending_confirmations[t]
+
+    _audit(tool_name, "confirmation_required", details={"args": args})
+    return {
+        "confirmation_required": True,
+        "token": token,
+        "tool": tool_name,
+        "args": args,
+        "expires_in_seconds": int(_CONFIRM_TOKEN_TTL),
+        "message": (
+            f"{tool_name} requires confirmation (safety level: {level}). "
+            f"Call confirm_action(token='{token}') to proceed. "
+            f"Token expires in {int(_CONFIRM_TOKEN_TTL / 60)} minutes."
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -991,12 +1152,17 @@ def start_print(file_name: str) -> dict:
         return err
     if err := _check_rate_limit("start_print"):
         return err
+    if conf := _check_confirmation("start_print", {"file_name": file_name}):
+        return conf
     try:
         adapter = _get_adapter()
 
         # -- Automatic pre-flight safety gate (mandatory, cannot be skipped) --
         pf = preflight_check()
         if not pf.get("ready", False):
+            _audit("start_print", "preflight_failed", details={
+                "file": file_name, "summary": pf.get("summary", ""),
+            })
             return {
                 "success": False,
                 "error": pf.get("summary", "Pre-flight checks failed"),
@@ -1005,6 +1171,7 @@ def start_print(file_name: str) -> dict:
             }
 
         result = adapter.start_print(file_name)
+        _audit("start_print", "executed", details={"file": file_name})
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(str(exc))
@@ -1027,9 +1194,12 @@ def cancel_print() -> dict:
         return err
     if err := _check_rate_limit("cancel_print"):
         return err
+    if conf := _check_confirmation("cancel_print", {}):
+        return conf
     try:
         adapter = _get_adapter()
         result = adapter.cancel_print()
+        _audit("cancel_print", "executed")
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(str(exc))
@@ -1057,9 +1227,12 @@ def emergency_stop() -> dict:
         return err
     if err := _check_rate_limit("emergency_stop"):
         return err
+    if conf := _check_confirmation("emergency_stop", {}):
+        return conf
     try:
         adapter = _get_adapter()
         result = adapter.emergency_stop()
+        _audit("emergency_stop", "executed")
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(str(exc))
@@ -1076,6 +1249,8 @@ def pause_print() -> dict:
     Use ``resume_print()`` to continue from where the print left off.
     """
     if err := _check_auth("print"):
+        return err
+    if err := _check_rate_limit("pause_print"):
         return err
     try:
         adapter = _get_adapter()
@@ -1096,6 +1271,8 @@ def resume_print() -> dict:
     the nozzle to its previous position and continue extruding.
     """
     if err := _check_auth("print"):
+        return err
+    if err := _check_rate_limit("resume_print"):
         return err
     try:
         adapter = _get_adapter()
@@ -1131,6 +1308,8 @@ def set_temperature(
         return err
     if err := _check_rate_limit("set_temperature"):
         return err
+    if conf := _check_confirmation("set_temperature", {"tool_temp": tool_temp, "bed_temp": bed_temp}):
+        return conf
     if tool_temp is None and bed_temp is None:
         return _error_dict(
             "At least one of tool_temp or bed_temp must be provided.",
@@ -1218,6 +1397,9 @@ def set_temperature(
         if rate_warnings:
             results["warnings"] = rate_warnings
 
+        _audit("set_temperature", "executed", details={
+            "tool_temp": tool_temp, "bed_temp": bed_temp,
+        })
         return results
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(str(exc))
@@ -1291,8 +1473,7 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
 
         # -- Temperature checks --------------------------------------------
         temp_warnings: List[str] = []
-        MAX_TOOL = 260.0
-        MAX_BED = 110.0
+        MAX_TOOL, MAX_BED = _get_temp_limits()
 
         if state.tool_temp_actual is not None and state.tool_temp_actual > MAX_TOOL:
             temp_warnings.append(
@@ -1451,16 +1632,19 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
 
 
 @mcp.tool()
-def send_gcode(commands: str) -> dict:
+def send_gcode(commands: str, dry_run: bool = False) -> dict:
     """Send raw G-code commands directly to the printer.
 
     Args:
         commands: One or more G-code commands separated by newlines or spaces.
             Examples: ``"G28"`` (home all axes), ``"G28\\nG1 Z10 F300"``
             (home then move Z up 10mm), ``"M104 S200"`` (set hotend to 200C).
+        dry_run: When ``True``, run the full validation pipeline (auth,
+            rate-limit, G-code safety) but do **not** actually send commands
+            to the printer.  Returns what *would* have been sent.
 
     The commands are sent sequentially in order.  The printer must be
-    connected.
+    connected (unless ``dry_run`` is ``True``).
 
     G-code is validated before sending.  Commands that exceed temperature
     limits or modify firmware settings are blocked.  Use ``validate_gcode``
@@ -1470,6 +1654,9 @@ def send_gcode(commands: str) -> dict:
         return err
     if err := _check_rate_limit("send_gcode"):
         return err
+    if not dry_run:
+        if conf := _check_confirmation("send_gcode", {"commands": commands}):
+            return conf
     try:
         adapter = _get_adapter()
 
@@ -1495,8 +1682,16 @@ def send_gcode(commands: str) -> dict:
             )
 
         # -- Safety validation -------------------------------------------------
-        validation = _validate_gcode_impl(cmd_list)
+        if _PRINTER_MODEL:
+            validation = validate_gcode_for_printer(cmd_list, _PRINTER_MODEL)
+        else:
+            validation = _validate_gcode_impl(cmd_list)
         if not validation.valid:
+            _audit("send_gcode", "blocked", details={
+                "blocked_commands": validation.blocked_commands[:5],
+                "errors": validation.errors[:5],
+            })
+            _record_tool_block("send_gcode")  # Track for circuit breaker
             return {
                 "success": False,
                 "error": {
@@ -1508,6 +1703,25 @@ def send_gcode(commands: str) -> dict:
                 "warnings": validation.warnings,
             }
 
+        # -- Dry-run mode: return validated commands without sending ----------
+        if dry_run:
+            _audit("send_gcode", "dry_run", details={
+                "count": len(cmd_list),
+            })
+            result: Dict[str, Any] = {
+                "success": True,
+                "dry_run": True,
+                "commands_validated": cmd_list,
+                "count": len(cmd_list),
+                "message": (
+                    f"{len(cmd_list)} command(s) validated successfully. "
+                    f"No commands were sent (dry-run mode)."
+                ),
+            }
+            if validation.warnings:
+                result["warnings"] = validation.warnings
+            return result
+
         if not adapter.capabilities.can_send_gcode:
             return _error_dict(
                 f"send_gcode is not supported by the {adapter.name} adapter.",
@@ -1515,8 +1729,9 @@ def send_gcode(commands: str) -> dict:
             )
 
         adapter.send_gcode(cmd_list)
+        _audit("send_gcode", "executed", details={"count": len(cmd_list)})
 
-        result: Dict[str, Any] = {
+        result = {
             "success": True,
             "commands_sent": cmd_list,
             "count": len(cmd_list),
@@ -1569,6 +1784,187 @@ def validate_gcode(commands: str) -> dict:
         "warnings": result.warnings,
         "blocked_commands": result.blocked_commands,
     }
+
+
+# ---------------------------------------------------------------------------
+# Safety audit tool
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def safety_audit(
+    action: str | None = None,
+    tool_name: str | None = None,
+    limit: int = 25,
+) -> dict:
+    """Query the safety audit log.
+
+    Returns a record of all safety-relevant operations: tool executions,
+    blocked attempts, rate-limit violations, and preflight failures.
+
+    Args:
+        action: Filter by action type.  Options: ``"executed"``,
+            ``"blocked"``, ``"rate_limited"``, ``"auth_denied"``,
+            ``"preflight_failed"``, ``"dry_run"``.  Omit for all.
+        tool_name: Filter by MCP tool name (e.g. ``"send_gcode"``).
+        limit: Maximum number of records to return (default 25, max 100).
+    """
+    limit = min(max(1, limit), 100)
+    try:
+        db = get_db()
+        entries = db.query_audit(action=action, tool_name=tool_name, limit=limit)
+        summary = db.audit_summary()
+        return {
+            "success": True,
+            "entries": entries,
+            "summary": summary,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in safety_audit")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Confirmation action tool
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def confirm_action(token: str) -> dict:
+    """Execute a previously requested action that requires confirmation.
+
+    When ``KILN_CONFIRM_MODE`` is enabled, destructive tools (safety level
+    ``"confirm"`` or ``"emergency"``) return a confirmation token instead of
+    executing immediately.  Pass that token here to proceed.
+
+    Args:
+        token: The confirmation token returned by the original tool call.
+    """
+    pending = _pending_confirmations.pop(token, None)
+    if pending is None:
+        return _error_dict(
+            "Invalid or expired confirmation token. "
+            "Tokens expire after 5 minutes.",
+            code="INVALID_TOKEN",
+        )
+
+    # Check expiry
+    age = time.time() - pending["created_at"]
+    if age > _CONFIRM_TOKEN_TTL:
+        return _error_dict(
+            f"Confirmation token expired ({age:.0f}s old, limit is "
+            f"{_CONFIRM_TOKEN_TTL:.0f}s). Re-issue the original command.",
+            code="TOKEN_EXPIRED",
+        )
+
+    tool = pending["tool"]
+    args = pending["args"]
+    _audit(tool, "confirmed", details={"token": token, "args": args})
+
+    # Temporarily disable confirm mode to avoid recursive confirmation
+    global _CONFIRM_MODE
+    saved = _CONFIRM_MODE
+    _CONFIRM_MODE = False
+    try:
+        # Dispatch to the actual tool function
+        tool_fn = mcp._tool_manager._tools.get(tool)
+        if tool_fn is None:
+            return _error_dict(f"Unknown tool: {tool}", code="INTERNAL_ERROR")
+        result = tool_fn.fn(**args)
+        return result
+    except Exception as exc:
+        logger.exception("Error executing confirmed action %s", tool)
+        return _error_dict(f"Error executing {tool}: {exc}", code="INTERNAL_ERROR")
+    finally:
+        _CONFIRM_MODE = saved
+
+
+# ---------------------------------------------------------------------------
+# Safety dashboard tool
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def safety_status() -> dict:
+    """Get a comprehensive snapshot of all active safety measures.
+
+    Returns a single summary showing: the active safety profile, temperature
+    limits, rate-limit configuration, recent blocked actions, authentication
+    status, and confirmation-mode status.  Use this to answer "is my printer
+    safe right now?" in a single call.
+    """
+    try:
+        # Active safety profile
+        profile_info: Dict[str, Any] = {"printer_model": _PRINTER_MODEL or "not configured"}
+        max_tool, max_bed = _get_temp_limits()
+        profile_info["max_hotend_temp"] = max_tool
+        profile_info["max_bed_temp"] = max_bed
+        if _PRINTER_MODEL:
+            try:
+                profile = get_profile(_PRINTER_MODEL)
+                profile_info["profile_id"] = profile.id
+                profile_info["display_name"] = profile.display_name
+                profile_info["max_feedrate"] = profile.max_feedrate
+                if profile.build_volume:
+                    profile_info["build_volume"] = profile.build_volume
+            except KeyError:
+                profile_info["profile_id"] = "default (no specific profile found)"
+
+        # Rate limit configuration
+        rate_limits = {}
+        for tool_name, (interval_ms, per_min) in _TOOL_RATE_LIMITS.items():
+            rate_limits[tool_name] = f"{interval_ms}ms cooldown, {per_min}/min"
+
+        # Confirm-level tools (from tool_safety.json)
+        confirm_tools = sorted(
+            name for name, meta in _TOOL_SAFETY.items()
+            if meta.get("level") in ("confirm", "emergency")
+        )
+
+        # Auth status
+        auth_info = {
+            "enabled": _auth.enabled if hasattr(_auth, "enabled") else False,
+        }
+
+        # Confirm mode
+        confirm_mode = os.environ.get("KILN_CONFIRM_MODE", "false").lower() in (
+            "1", "true", "yes",
+        )
+
+        # Recent blocked actions (from audit log)
+        recent_blocked: List[Dict[str, Any]] = []
+        try:
+            db = get_db()
+            summary = db.audit_summary(window_seconds=3600.0)
+            recent_blocked = summary.get("recent_blocked", [])
+        except Exception:
+            pass
+
+        # G-code blocked command list
+        from kiln.gcode import _BLOCKED_COMMANDS  # noqa: E402
+        blocked_gcode_commands = sorted(_BLOCKED_COMMANDS.keys())
+
+        return {
+            "success": True,
+            "safety_profile": profile_info,
+            "temperature_limits": {"max_hotend": max_tool, "max_bed": max_bed},
+            "rate_limits": rate_limits,
+            "confirm_level_tools": confirm_tools,
+            "auth": auth_info,
+            "confirm_mode_enabled": confirm_mode,
+            "blocked_gcode_commands": blocked_gcode_commands,
+            "recent_blocked_actions": recent_blocked,
+            "summary": (
+                f"Safety profile: {profile_info.get('display_name', _PRINTER_MODEL or 'default')}. "
+                f"Temp limits: {max_tool}°C hotend / {max_bed}°C bed. "
+                f"{len(rate_limits)} rate-limited tools. "
+                f"{len(confirm_tools)} confirm-level tools. "
+                f"{len(recent_blocked)} blocked action(s) in last hour."
+            ),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in safety_status")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------

@@ -155,6 +155,56 @@ def get_all_profiles() -> Dict[str, SafetyProfile]:
     return dict(_cache)
 
 
+def match_display_name(name: str) -> Optional[str]:
+    """Fuzzy-match a human-readable printer name to a profile ID.
+
+    Tries normalised matching (lowercase, strip separators) and substring
+    matching against all loaded profiles' ``display_name`` fields.
+
+    Returns the profile ID if found, or ``None``.
+    """
+    _load()
+    normalised = name.lower().replace("-", "_").replace(" ", "_").strip("_")
+
+    # Check display_name fields
+    for key, profile in _cache.items():
+        if key == "default":
+            continue
+        dn = profile.display_name.lower().replace("-", "_").replace(" ", "_").strip("_")
+        if normalised == dn or normalised in dn or dn in normalised:
+            return key
+
+    # Fallback: try key matching
+    for key in _cache:
+        if key == "default":
+            continue
+        if normalised.startswith(key) or key.startswith(normalised):
+            return key
+
+    return None
+
+
+def resolve_limits(printer_id: Optional[str] = None) -> tuple:
+    """Return ``(max_hotend, max_bed)`` for a printer, with fallback.
+
+    When *printer_id* is provided, loads the matching profile.  Falls back
+    to the default profile, and finally to conservative generic limits
+    (300/130) if no profile data is available at all.
+    """
+    if printer_id:
+        try:
+            profile = get_profile(printer_id)
+            return profile.max_hotend_temp, profile.max_bed_temp
+        except KeyError:
+            pass
+    # Try the default profile
+    try:
+        default = get_profile("default")
+        return default.max_hotend_temp, default.max_bed_temp
+    except KeyError:
+        return 300.0, 130.0
+
+
 def profile_to_dict(profile: SafetyProfile) -> Dict[str, Any]:
     """Serialise a :class:`SafetyProfile` to a plain dict for MCP responses."""
     return {

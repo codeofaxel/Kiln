@@ -644,6 +644,94 @@ def _validate_single_with_profile(
 
 _MAX_SCAN_BYTES: int = 500 * 1024 * 1024  # 500 MB text cap
 _MAX_WARNINGS: int = 50
+_MAX_HEADER_LINES: int = 100  # Lines to scan for printer model detection
+
+
+# Regex patterns for slicer-embedded printer model comments.
+# Each pattern captures the printer name/model string.
+_PRINTER_HEADER_PATTERNS: list[re.Pattern] = [
+    # PrusaSlicer / OrcaSlicer / BambuStudio
+    re.compile(r";\s*printer_model\s*=\s*(.+)", re.IGNORECASE),
+    re.compile(r";\s*printer_settings_id\s*[:=]\s*(.+)", re.IGNORECASE),
+    re.compile(r";\s*machine_name\s*=\s*(.+)", re.IGNORECASE),
+    # Cura
+    re.compile(r";\s*MACHINE_TYPE\s*[:=]\s*(.+)", re.IGNORECASE),
+    # Generic
+    re.compile(r";\s*Target\s*[:=]\s*(.+)", re.IGNORECASE),
+    re.compile(r";\s*printer\s*[:=]\s*(.+)", re.IGNORECASE),
+]
+
+
+def detect_printer_from_header(file_path: str) -> Optional[str]:
+    """Try to detect the printer model from G-code file header comments.
+
+    Reads the first :data:`_MAX_HEADER_LINES` lines of the file looking for
+    slicer-embedded printer model comments (PrusaSlicer, Cura, OrcaSlicer,
+    BambuStudio all embed this information in G-code file comments).
+
+    Returns a matched safety profile ID if found, or ``None`` if no match.
+    """
+    try:
+        with open(file_path, "r", errors="replace") as fh:
+            for i, line in enumerate(fh):
+                if i >= _MAX_HEADER_LINES:
+                    break
+                for pattern in _PRINTER_HEADER_PATTERNS:
+                    m = pattern.match(line.strip())
+                    if m:
+                        raw_name = m.group(1).strip()
+                        if raw_name:
+                            matched = _match_printer_name(raw_name)
+                            if matched:
+                                return matched
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+    return None
+
+
+def _match_printer_name(raw_name: str) -> Optional[str]:
+    """Fuzzy-match a slicer-embedded printer name to a safety profile ID.
+
+    Normalises the name (lowercase, strip common prefixes and separators)
+    and attempts to match against the bundled safety profiles.
+    """
+    try:
+        from kiln.safety_profiles import get_profile, list_profiles  # noqa: E402
+
+        # Direct match attempt via get_profile (which does its own normalisation)
+        try:
+            profile = get_profile(raw_name)
+            if profile.id != "default":
+                return profile.id
+        except KeyError:
+            pass
+
+        # Normalise: lowercase, strip common prefixes, replace separators
+        normalised = raw_name.lower()
+        for prefix in ("prusa ", "creality ", "bambu lab ", "bambulab ", "anycubic "):
+            if normalised.startswith(prefix):
+                normalised = normalised[len(prefix):]
+        normalised = normalised.replace("-", "_").replace(" ", "_").strip("_")
+
+        # Try again after normalisation
+        try:
+            profile = get_profile(normalised)
+            if profile.id != "default":
+                return profile.id
+        except KeyError:
+            pass
+
+        # Substring matching: check if any profile ID appears in the name or vice versa
+        all_ids = list_profiles()
+        for pid in all_ids:
+            if pid == "default":
+                continue
+            if pid in normalised or normalised in pid:
+                return pid
+
+    except ImportError:
+        pass
+    return None
 
 
 def scan_gcode_file(
@@ -693,12 +781,17 @@ def scan_gcode_file(
         return result
 
     # Resolve validation function based on printer profile.
+    # Auto-detect from file header if no explicit printer_id was provided.
+    effective_id = printer_id
+    if not effective_id:
+        effective_id = detect_printer_from_header(abs_path)
+
     profile = None
-    if printer_id:
+    if effective_id:
         try:
             from kiln.safety_profiles import get_profile  # noqa: E402
 
-            profile = get_profile(printer_id)
+            profile = get_profile(effective_id)
         except KeyError:
             pass  # fall back to generic validation
 
