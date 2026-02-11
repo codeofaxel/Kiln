@@ -3045,6 +3045,124 @@ def compare_print_options(
     return result
 
 
+@mcp.tool()
+def analyze_print_failure(job_id: str) -> dict:
+    """Analyze a failed print job and suggest possible causes and fixes.
+
+    Examines the job record, related events (retries, errors, progress),
+    and printer state at the time of failure to produce a diagnosis.
+
+    Args:
+        job_id: The failed job's ID from ``job_history`` or ``job_status``.
+
+    Returns a structured analysis with likely causes, observed symptoms,
+    and recommended next steps.
+    """
+    try:
+        try:
+            job = _queue.get_job(job_id)
+        except JobNotFoundError:
+            return _error_dict(f"Job {job_id!r} not found.", code="JOB_NOT_FOUND")
+
+        job_data = job.to_dict()
+
+        if job.status not in (JobStatus.FAILED, JobStatus.CANCELLED):
+            return _error_dict(
+                f"Job {job_id} is not in a failed state (status: {job.status.value}). "
+                "Only failed or cancelled jobs can be analyzed.",
+                code="NOT_FAILED",
+            )
+
+        # Gather related events for this job
+        all_events = _event_bus.recent_events(limit=200)
+        job_events = [
+            e.to_dict() for e in all_events
+            if e.data.get("job_id") == job_id
+        ]
+
+        # Analyze symptoms
+        symptoms: list[str] = []
+        causes: list[str] = []
+        recommendations: list[str] = []
+
+        # Check for retries
+        retry_events = [e for e in job_events if e.get("data", {}).get("retry")]
+        if retry_events:
+            max_retry = max(e["data"]["retry"] for e in retry_events)
+            symptoms.append(f"Job was retried {max_retry} time(s) before final failure")
+            causes.append("Persistent printer or communication error across multiple attempts")
+            recommendations.append("Check printer connectivity and physical state before resubmitting")
+
+        # Check error message
+        error = job.error or ""
+        if "error state" in error.lower():
+            symptoms.append("Printer entered error state during print")
+            causes.append("Hardware error (thermal runaway, endstop triggered, motor stall)")
+            recommendations.append("Check printer display for specific error code")
+            recommendations.append("Inspect nozzle for clogs or filament issues")
+        elif "not registered" in error.lower() or "not found" in error.lower():
+            symptoms.append("Printer was removed or became unreachable mid-print")
+            causes.append("Network connectivity loss or printer power cycle")
+            recommendations.append("Verify printer is powered on and network-accessible")
+        elif "start_print" in error.lower():
+            symptoms.append("Failed to start the print")
+            causes.append("File may not exist on printer, or printer was not in an idle state")
+            recommendations.append("Verify the file exists with printer_files() before retrying")
+            recommendations.append("Check printer_status() to confirm idle state")
+        elif error:
+            symptoms.append(f"Error message: {error}")
+
+        # Check timing
+        if job.elapsed_seconds is not None and job.elapsed_seconds < 30:
+            symptoms.append(f"Print failed very quickly ({job.elapsed_seconds:.0f}s)")
+            causes.append("Likely a setup issue rather than a mid-print failure")
+            recommendations.append("Run preflight_check() to validate printer readiness")
+
+        if job.elapsed_seconds is not None and job.elapsed_seconds > 3600:
+            symptoms.append(f"Print ran for {job.elapsed_seconds / 3600:.1f}h before failing")
+            causes.append("May be a mid-print adhesion, filament, or thermal issue")
+            recommendations.append("Check bed adhesion and first-layer settings")
+            recommendations.append("Inspect filament spool for tangles or moisture")
+
+        # Check progress events
+        progress_events = [
+            e for e in job_events
+            if e.get("type") == EventType.PRINT_PROGRESS.value
+        ]
+        if progress_events:
+            max_pct = max(
+                e.get("data", {}).get("completion", 0)
+                for e in progress_events
+            )
+            symptoms.append(f"Reached {max_pct:.0f}% completion before failure")
+            if max_pct < 5:
+                causes.append("First-layer adhesion failure or nozzle clog")
+                recommendations.append("Clean the bed surface and re-level")
+            elif max_pct > 80:
+                causes.append("Late-print failure — possibly cooling or overhang issue")
+                recommendations.append("Review slicer support settings for the model")
+
+        # Default if no specific analysis
+        if not symptoms:
+            symptoms.append("No detailed event data available for this job")
+            recommendations.append("Re-run the print with monitoring via printer_status()")
+
+        return {
+            "success": True,
+            "job": job_data,
+            "analysis": {
+                "symptoms": symptoms,
+                "likely_causes": causes,
+                "recommendations": recommendations,
+                "retry_count": len(retry_events),
+                "related_events": job_events[-20:],
+            },
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in analyze_print_failure")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
 @mcp.resource("kiln://status")
 def resource_status() -> str:
     """Live snapshot of the entire Kiln system: printers, queue, and recent events."""
