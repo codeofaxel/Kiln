@@ -28,7 +28,12 @@ from kiln.generation.openscad import OpenSCADProvider, _find_openscad
 from kiln.generation.validation import (
     _MAX_DIMENSION_MM,
     _MIN_DIMENSION_MM,
+    _STL_HEADER_SIZE,
+    _STL_COUNT_SIZE,
+    _STL_TRIANGLE_SIZE,
     _WARN_TRIANGLES,
+    _write_binary_stl,
+    convert_to_stl,
     validate_mesh,
 )
 
@@ -877,3 +882,307 @@ f 1 2 3 4 5
         result = validate_mesh(str(f))
         assert result.valid is True
         assert result.triangle_count == 3  # pentagon -> 3 triangles
+
+
+# ---------------------------------------------------------------------------
+# _write_binary_stl tests
+# ---------------------------------------------------------------------------
+
+
+class TestWriteBinaryStl:
+    def test_writes_valid_binary_stl(self, tmp_path):
+        """Written file should be readable by validate_mesh."""
+        tris = cube_triangles()
+        out = str(tmp_path / "output.stl")
+        _write_binary_stl(tris, out)
+
+        result = validate_mesh(out)
+        assert result.valid is True
+        assert result.triangle_count == 12
+        assert result.vertex_count == 8
+
+    def test_file_structure_matches_binary_stl_spec(self, tmp_path):
+        """Verify the raw binary layout: 80-byte header, 4-byte count, 50 bytes per triangle."""
+        tris = [((0, 0, 0), (1, 0, 0), (0, 1, 0))]
+        out = str(tmp_path / "one_tri.stl")
+        _write_binary_stl(tris, out)
+
+        expected_size = _STL_HEADER_SIZE + _STL_COUNT_SIZE + _STL_TRIANGLE_SIZE * 1
+        assert os.path.getsize(out) == expected_size
+
+        with open(out, "rb") as fh:
+            header = fh.read(_STL_HEADER_SIZE)
+            assert header == b"\x00" * 80
+            count = struct.unpack("<I", fh.read(4))[0]
+            assert count == 1
+
+    def test_empty_triangle_list(self, tmp_path):
+        """Zero triangles should produce a valid but empty STL."""
+        out = str(tmp_path / "empty.stl")
+        _write_binary_stl([], out)
+
+        expected_size = _STL_HEADER_SIZE + _STL_COUNT_SIZE
+        assert os.path.getsize(out) == expected_size
+
+    def test_roundtrip_preserves_geometry(self, tmp_path):
+        """Write then validate: bounding box should match original vertices."""
+        tris = cube_triangles()
+        out = str(tmp_path / "roundtrip.stl")
+        _write_binary_stl(tris, out)
+
+        result = validate_mesh(out)
+        bbox = result.bounding_box
+        assert bbox["x_min"] == 0.0
+        assert bbox["x_max"] == 10.0
+        assert bbox["y_min"] == 0.0
+        assert bbox["y_max"] == 10.0
+        assert bbox["z_min"] == 0.0
+        assert bbox["z_max"] == 10.0
+
+
+# ---------------------------------------------------------------------------
+# convert_to_stl tests
+# ---------------------------------------------------------------------------
+
+
+class TestConvertToStl:
+    def test_converts_obj_to_stl(self, tmp_path):
+        """Basic OBJ with triangles converts to a valid STL."""
+        obj = tmp_path / "model.obj"
+        obj.write_text("v 0 0 0\nv 10 0 0\nv 10 10 0\nv 0 10 0\nf 1 2 3\nf 1 3 4\n")
+        stl_path = convert_to_stl(str(obj))
+
+        assert stl_path.endswith(".stl")
+        assert os.path.isfile(stl_path)
+
+        result = validate_mesh(stl_path)
+        assert result.valid is True
+        assert result.triangle_count == 2
+
+    def test_default_output_path_replaces_extension(self, tmp_path):
+        """Without explicit output_path, .obj becomes .stl."""
+        obj = tmp_path / "cube.obj"
+        obj.write_text("v 0 0 0\nv 1 0 0\nv 1 1 0\nf 1 2 3\n")
+        stl_path = convert_to_stl(str(obj))
+        assert stl_path == str(tmp_path / "cube.stl")
+
+    def test_explicit_output_path(self, tmp_path):
+        """Explicit output_path is respected."""
+        obj = tmp_path / "input.obj"
+        obj.write_text("v 0 0 0\nv 1 0 0\nv 1 1 0\nf 1 2 3\n")
+        out = str(tmp_path / "custom_name.stl")
+        result_path = convert_to_stl(str(obj), out)
+        assert result_path == out
+        assert os.path.isfile(out)
+
+    def test_rejects_non_obj_file(self, tmp_path):
+        """Raises ValueError for non-.obj input."""
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(make_binary_stl(cube_triangles()))
+        with pytest.raises(ValueError, match="expects .obj"):
+            convert_to_stl(str(stl))
+
+    def test_rejects_empty_geometry(self, tmp_path):
+        """OBJ with vertices but no faces raises ValueError."""
+        obj = tmp_path / "empty.obj"
+        obj.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\n")
+        with pytest.raises(ValueError, match="no geometry"):
+            convert_to_stl(str(obj))
+
+    def test_triangulates_quads(self, tmp_path):
+        """Quad faces in OBJ are triangulated during conversion."""
+        obj = tmp_path / "quad.obj"
+        obj.write_text("v 0 0 0\nv 10 0 0\nv 10 10 0\nv 0 10 0\nf 1 2 3 4\n")
+        stl_path = convert_to_stl(str(obj))
+
+        result = validate_mesh(stl_path)
+        assert result.valid is True
+        assert result.triangle_count == 2
+
+    def test_preserves_bounding_box(self, tmp_path):
+        """Converted STL should have the same bounding box as the source OBJ."""
+        obj = tmp_path / "box.obj"
+        obj.write_text(
+            "v 0 0 0\nv 10 0 0\nv 10 10 0\nv 0 10 0\n"
+            "v 0 0 5\nv 10 0 5\nv 10 10 5\nv 0 10 5\n"
+            "f 1 2 3\nf 1 3 4\nf 5 6 7\nf 5 7 8\n"
+        )
+        stl_path = convert_to_stl(str(obj))
+        result = validate_mesh(stl_path)
+        bbox = result.bounding_box
+        assert bbox["x_min"] == 0.0
+        assert bbox["x_max"] == 10.0
+        assert bbox["z_min"] == 0.0
+        assert bbox["z_max"] == 5.0
+
+    def test_handles_vt_vn_indices(self, tmp_path):
+        """OBJ with v/vt/vn face format is parsed correctly."""
+        obj = tmp_path / "textured.obj"
+        obj.write_text(
+            "v 0 0 0\nv 5 0 0\nv 5 5 0\n"
+            "vt 0 0\nvt 1 0\nvt 1 1\n"
+            "vn 0 0 1\n"
+            "f 1/1/1 2/2/1 3/3/1\n"
+        )
+        stl_path = convert_to_stl(str(obj))
+        result = validate_mesh(stl_path)
+        assert result.valid is True
+        assert result.triangle_count == 1
+
+
+# ---------------------------------------------------------------------------
+# MeshyProvider retry / backoff tests
+# ---------------------------------------------------------------------------
+
+
+class TestMeshyRetry:
+    @responses.activate
+    def test_retries_on_429_then_succeeds(self):
+        """429 triggers retry; second attempt succeeds."""
+        responses.add(
+            responses.POST,
+            f"{_BASE_URL}/text-to-3d",
+            json={"message": "rate limited"},
+            status=429,
+        )
+        responses.add(
+            responses.POST,
+            f"{_BASE_URL}/text-to-3d",
+            json={"result": "task-retry-ok"},
+            status=200,
+        )
+
+        p = MeshyProvider(api_key="test-key")
+        with patch("kiln.generation.meshy.time.sleep") as mock_sleep:
+            job = p.generate("a vase")
+
+        assert job.id == "task-retry-ok"
+        assert mock_sleep.call_count == 1
+        # First retry wait: 2^0 * 2 = 2 seconds
+        mock_sleep.assert_called_with(2.0)
+
+    @responses.activate
+    def test_retries_on_502_then_succeeds(self):
+        """502 triggers retry; second attempt succeeds."""
+        responses.add(
+            responses.POST,
+            f"{_BASE_URL}/text-to-3d",
+            body="Bad Gateway",
+            status=502,
+        )
+        responses.add(
+            responses.POST,
+            f"{_BASE_URL}/text-to-3d",
+            json={"result": "task-502-ok"},
+            status=200,
+        )
+
+        p = MeshyProvider(api_key="test-key")
+        with patch("kiln.generation.meshy.time.sleep"):
+            job = p.generate("a vase")
+
+        assert job.id == "task-502-ok"
+
+    @responses.activate
+    def test_retries_on_503_and_504(self):
+        """503 and 504 both trigger retries."""
+        responses.add(
+            responses.GET,
+            f"{_BASE_URL}/text-to-3d/task-x",
+            body="Service Unavailable",
+            status=503,
+        )
+        responses.add(
+            responses.GET,
+            f"{_BASE_URL}/text-to-3d/task-x",
+            body="Gateway Timeout",
+            status=504,
+        )
+        responses.add(
+            responses.GET,
+            f"{_BASE_URL}/text-to-3d/task-x",
+            json={"status": "SUCCEEDED", "progress": 100},
+            status=200,
+        )
+
+        p = MeshyProvider(api_key="test-key")
+        with patch("kiln.generation.meshy.time.sleep") as mock_sleep:
+            job = p.get_job_status("task-x")
+
+        assert job.status == GenerationStatus.SUCCEEDED
+        assert mock_sleep.call_count == 2
+
+    @responses.activate
+    def test_exponential_backoff_timing(self):
+        """Backoff doubles each attempt: 2s, 4s, 8s."""
+        # 4 responses: 3 x 429, then 200
+        for _ in range(3):
+            responses.add(
+                responses.POST,
+                f"{_BASE_URL}/text-to-3d",
+                json={"message": "rate limited"},
+                status=429,
+            )
+        responses.add(
+            responses.POST,
+            f"{_BASE_URL}/text-to-3d",
+            json={"result": "task-backoff"},
+            status=200,
+        )
+
+        p = MeshyProvider(api_key="test-key")
+        with patch("kiln.generation.meshy.time.sleep") as mock_sleep:
+            job = p.generate("a vase")
+
+        assert job.id == "task-backoff"
+        assert mock_sleep.call_count == 3
+        calls = [c.args[0] for c in mock_sleep.call_args_list]
+        assert calls == [2.0, 4.0, 8.0]
+
+    @responses.activate
+    def test_exhausted_retries_raises_rate_limited(self):
+        """After _MAX_RETRIES retries of 429, the final 429 is treated as an error."""
+        # _MAX_RETRIES is 3, so we need 4 responses (attempt 0, 1, 2, 3)
+        for _ in range(4):
+            responses.add(
+                responses.POST,
+                f"{_BASE_URL}/text-to-3d",
+                json={"message": "rate limited"},
+                status=429,
+            )
+
+        p = MeshyProvider(api_key="test-key")
+        with patch("kiln.generation.meshy.time.sleep"):
+            with pytest.raises(GenerationError, match="rate limit"):
+                p.generate("a vase")
+
+    @responses.activate
+    def test_non_retryable_status_not_retried(self):
+        """A 400 error is not retried."""
+        responses.add(
+            responses.POST,
+            f"{_BASE_URL}/text-to-3d",
+            json={"message": "Bad request"},
+            status=400,
+        )
+
+        p = MeshyProvider(api_key="test-key")
+        with pytest.raises(GenerationError, match="HTTP 400"):
+            p.generate("a vase")
+        # Only one request was made (no retries).
+        assert len(responses.calls) == 1
+
+    @responses.activate
+    def test_timeout_exception_not_retried(self):
+        """requests.Timeout is raised immediately, not retried."""
+        responses.add(
+            responses.POST,
+            f"{_BASE_URL}/text-to-3d",
+            body=requests_lib.Timeout("timed out"),
+        )
+
+        p = MeshyProvider(api_key="test-key")
+        with pytest.raises(GenerationError, match="timed out") as exc_info:
+            p.generate("a vase")
+        assert exc_info.value.code == "TIMEOUT"
+        assert len(responses.calls) == 1

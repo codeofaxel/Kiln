@@ -417,3 +417,33 @@ def _check_manifold(
         return False
 
     return True
+
+
+# ---------------------------------------------------------------------------
+# STL writing
+# ---------------------------------------------------------------------------
+
+
+def _write_binary_stl(
+    triangles: List[Tuple[Tuple[float, ...], ...]],
+    output_path: str,
+) -> None:
+    """Write triangles to a binary STL file.
+
+    Each triangle is a tuple of three ``(x, y, z)`` vertex tuples.
+    A zero normal is written for every facet (slicers recompute normals).
+    """
+    with open(output_path, "wb") as fh:
+        # 80-byte header (blank).
+        fh.write(b"\x00" * _STL_HEADER_SIZE)
+        # Triangle count as uint32 LE.
+        fh.write(struct.pack("<I", len(triangles)))
+
+        for tri in triangles:
+            # Normal (0, 0, 0) — slicers will recompute.
+            fh.write(struct.pack("<3f", 0.0, 0.0, 0.0))
+            # Three vertices.
+            for v in tri:
+                fh.write(struct.pack("<3f", v[0], v[1], v[2]))
+            # Attribute byte count (unused, must be 0).
+            fh.write(struct.pack("<H", 0))

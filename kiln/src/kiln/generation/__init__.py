@@ -25,7 +25,7 @@ from kiln.generation.base import (
 )
 from kiln.generation.meshy import MeshyProvider
 from kiln.generation.openscad import OpenSCADProvider
-from kiln.generation.validation import validate_mesh
+from kiln.generation.validation import convert_to_stl, validate_mesh
 
 __all__ = [
     "GenerationAuthError",
@@ -37,6 +37,7 @@ __all__ = [
     "GenerationTimeoutError",
     "GenerationValidationError",
     "MeshValidationResult",
+    "convert_to_stl",
     "MeshyProvider",
     "OpenSCADProvider",
     "validate_mesh",

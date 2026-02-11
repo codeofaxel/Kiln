@@ -92,6 +92,7 @@ from kiln.generation import (
     GenerationStatus,
     MeshyProvider,
     OpenSCADProvider,
+    convert_to_stl,
     validate_mesh,
 )
 
@@ -3547,17 +3548,73 @@ def troubleshooting() -> str:
 # ---------------------------------------------------------------------------
 
 
+_generation_providers: dict[str, GenerationProvider] = {}
+
+
 def _get_generation_provider(provider: str = "meshy") -> GenerationProvider:
-    """Instantiate a generation provider by name."""
+    """Get or create a generation provider by name.
+
+    Providers are cached so that state (model URLs, prompts) persists
+    across MCP tool calls within the same server session.
+    """
+    if provider in _generation_providers:
+        return _generation_providers[provider]
+
     if provider == "meshy":
-        return MeshyProvider(api_key=_MESHY_API_KEY)
-    if provider == "openscad":
-        return OpenSCADProvider()
-    raise GenerationError(
-        f"Unknown generation provider: {provider!r}.  "
-        f"Supported: meshy, openscad.",
-        code="UNKNOWN_PROVIDER",
-    )
+        inst = MeshyProvider(api_key=_MESHY_API_KEY)
+    elif provider == "openscad":
+        inst = OpenSCADProvider()
+    else:
+        raise GenerationError(
+            f"Unknown generation provider: {provider!r}.  "
+            f"Supported: meshy, openscad.",
+            code="UNKNOWN_PROVIDER",
+        )
+
+    _generation_providers[provider] = inst
+    return inst
+
+
+@mcp.tool()
+def list_generation_providers() -> dict:
+    """List available text-to-3D generation providers.
+
+    Returns details about each provider: name, description,
+    available styles, and whether it requires an API key.
+    Use this to discover providers before calling ``generate_model``.
+    """
+    providers = [
+        {
+            "name": "meshy",
+            "display_name": "Meshy",
+            "description": (
+                "Cloud AI text-to-3D.  Generates 3D models from natural "
+                "language descriptions.  Requires KILN_MESHY_API_KEY."
+            ),
+            "requires_api_key": True,
+            "api_key_env": "KILN_MESHY_API_KEY",
+            "api_key_set": bool(_MESHY_API_KEY),
+            "styles": ["realistic", "sculpture"],
+            "async": True,
+            "typical_time_seconds": 60,
+        },
+        {
+            "name": "openscad",
+            "display_name": "OpenSCAD",
+            "description": (
+                "Local parametric generation.  Prompt must be valid "
+                "OpenSCAD code.  Completes synchronously, no API key needed."
+            ),
+            "requires_api_key": False,
+            "styles": [],
+            "async": False,
+            "typical_time_seconds": 5,
+        },
+    ]
+    return {
+        "success": True,
+        "providers": providers,
+    }
 
 
 @mcp.tool()
@@ -3573,7 +3630,16 @@ def generate_model(
     job ID for status tracking.  Use ``generation_status`` to poll for
     completion, then ``download_generated_model`` to retrieve the file.
 
-    For OpenSCAD, the prompt should be valid OpenSCAD code.  The job
+    **Prompt tips for Meshy (text-to-3D AI):**
+    - Describe the physical object clearly: shape, size, purpose.
+    - Include material cues: "wooden", "metallic", "smooth plastic".
+    - Specify printability: "solid base", "no overhangs", "flat bottom".
+    - Keep prompts under 200 words for best results (max 600 chars).
+    - Good example: "A phone stand with a curved cradle, flat rectangular
+      base, and angled back support. Smooth plastic surface."
+    - Bad example: "make me something cool" (too vague).
+
+    **For OpenSCAD**, the prompt must be valid OpenSCAD code.  The job
     completes synchronously and the result is immediately available.
 
     Args:
@@ -3653,16 +3719,45 @@ def download_generated_model(
         output_dir = output_path or "/tmp/kiln_generated"
         result = gen.download_result(job_id, output_dir=output_dir)
 
+        # Auto-convert OBJ to STL for maximum slicer compatibility.
+        if result.format == "obj":
+            try:
+                stl_path = convert_to_stl(result.local_path)
+                result = GenerationResult(
+                    job_id=result.job_id,
+                    provider=result.provider,
+                    local_path=stl_path,
+                    format="stl",
+                    file_size_bytes=os.path.getsize(stl_path),
+                    prompt=result.prompt,
+                )
+                logger.info("Auto-converted OBJ to STL: %s", stl_path)
+            except Exception as exc:
+                logger.warning("OBJ→STL conversion failed, keeping OBJ: %s", exc)
+
         # Validate the mesh if it's an STL or OBJ.
         validation = None
+        dimensions = None
         if result.format in ("stl", "obj"):
             val = validate_mesh(result.local_path)
             validation = val.to_dict()
+            if val.bounding_box:
+                bb = val.bounding_box
+                w = bb.get("x_max", 0) - bb.get("x_min", 0)
+                d = bb.get("y_max", 0) - bb.get("y_min", 0)
+                h = bb.get("z_max", 0) - bb.get("z_min", 0)
+                dimensions = {
+                    "width_mm": round(w, 2),
+                    "depth_mm": round(d, 2),
+                    "height_mm": round(h, 2),
+                    "summary": f"{w:.1f} x {d:.1f} x {h:.1f} mm",
+                }
 
         return {
             "success": True,
             "result": result.to_dict(),
             "validation": validation,
+            "dimensions": dimensions,
             "message": f"Model downloaded to {result.local_path}.",
         }
     except GenerationAuthError as exc:
@@ -3810,6 +3905,21 @@ def generate_and_print(
         # Step 3: Download
         result = gen.download_result(job.id)
 
+        # Step 3.5: Auto-convert OBJ → STL
+        if result.format == "obj":
+            try:
+                stl_path = convert_to_stl(result.local_path)
+                result = GenerationResult(
+                    job_id=result.job_id,
+                    provider=result.provider,
+                    local_path=stl_path,
+                    format="stl",
+                    file_size_bytes=os.path.getsize(stl_path),
+                    prompt=result.prompt,
+                )
+            except Exception as exc:
+                logger.warning("OBJ→STL conversion failed, keeping OBJ: %s", exc)
+
         # Step 4: Validate
         if result.format in ("stl", "obj"):
             val = validate_mesh(result.local_path)
@@ -3881,6 +3991,127 @@ def validate_generated_mesh(file_path: str) -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in validate_generated_mesh")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Firmware update tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def firmware_status() -> dict:
+    """Check for available firmware updates on the printer.
+
+    Returns a list of firmware components (e.g. Klipper, Moonraker,
+    OctoPrint) with their current and available versions, plus whether
+    an update is available.
+
+    Not all printer backends support firmware updates.  Bambu and
+    PrusaConnect printers will return an ``UNSUPPORTED`` error.
+    """
+    try:
+        adapter = _get_adapter()
+        if not adapter.capabilities.can_update_firmware:
+            return _error_dict(
+                "This printer backend does not support firmware updates.",
+                code="UNSUPPORTED",
+            )
+        status = adapter.get_firmware_status()
+        if status is None:
+            return _error_dict(
+                "Could not retrieve firmware status.", code="UNAVAILABLE"
+            )
+        return {
+            "success": True,
+            "busy": status.busy,
+            "updates_available": status.updates_available,
+            "components": [
+                {
+                    "name": c.name,
+                    "current_version": c.current_version,
+                    "remote_version": c.remote_version,
+                    "update_available": c.update_available,
+                    "rollback_version": c.rollback_version,
+                    "component_type": c.component_type,
+                    "channel": c.channel,
+                }
+                for c in status.components
+            ],
+        }
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in firmware_status")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def update_firmware(component: str | None = None) -> dict:
+    """Start a firmware update on the printer.
+
+    For Moonraker printers, this triggers the Klipper update manager.
+    For OctoPrint printers, this uses the Software Update plugin.
+
+    Args:
+        component: Optional component name to update (e.g. ``"klipper"``,
+            ``"moonraker"``).  If omitted, all components with available
+            updates will be upgraded.
+
+    The printer must not be actively printing.  Check ``firmware_status``
+    first to see which updates are available.
+    """
+    if err := _check_auth("firmware"):
+        return err
+    try:
+        adapter = _get_adapter()
+        if not adapter.capabilities.can_update_firmware:
+            return _error_dict(
+                "This printer backend does not support firmware updates.",
+                code="UNSUPPORTED",
+            )
+        result = adapter.update_firmware(component=component)
+        return {
+            "success": result.success,
+            "message": result.message,
+            "component": result.component,
+        }
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in update_firmware")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def rollback_firmware(component: str) -> dict:
+    """Roll back a firmware component to its previous version.
+
+    Only supported on Moonraker printers.  The component must have a
+    known rollback version (check ``firmware_status``).
+
+    Args:
+        component: Name of the component to roll back (e.g. ``"klipper"``).
+    """
+    if err := _check_auth("firmware"):
+        return err
+    try:
+        adapter = _get_adapter()
+        if not adapter.capabilities.can_update_firmware:
+            return _error_dict(
+                "This printer backend does not support firmware rollback.",
+                code="UNSUPPORTED",
+            )
+        result = adapter.rollback_firmware(component)
+        return {
+            "success": result.success,
+            "message": result.message,
+            "component": result.component,
+        }
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in rollback_firmware")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
