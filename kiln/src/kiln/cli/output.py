@@ -750,3 +750,187 @@ def format_materials(
             f"{m.get('technology', ''):<8} {m.get('color', ''):<10} {price_str}"
         )
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Billing formatters
+# ---------------------------------------------------------------------------
+
+
+def format_billing_status(
+    data: Dict[str, Any],
+    *,
+    json_mode: bool = False,
+) -> str:
+    """Format billing status (payment method, spend, limits).
+
+    Expects the dict from ``PaymentManager.get_billing_status()``.
+    """
+    if json_mode:
+        return json.dumps(
+            {"status": "success", "data": data},
+            indent=2,
+            sort_keys=False,
+        )
+
+    revenue = data.get("month_revenue", {})
+    policy = data.get("fee_policy", {})
+    limits = data.get("spend_limits", {})
+    methods = data.get("payment_methods", [])
+    default = data.get("default_payment_method")
+
+    if RICH_AVAILABLE:
+        parts: list = []
+
+        # Payment method
+        if default:
+            parts.append(
+                f"[bold]Payment method:[/bold] {default.get('label', default.get('rail', 'unknown'))}"
+            )
+        elif methods:
+            parts.append(f"[bold]Payment methods:[/bold] {len(methods)} linked")
+        else:
+            parts.append("[yellow]No payment method linked.[/yellow] Run [bold]kiln billing setup[/bold] to add one.")
+
+        # Monthly spend
+        total = revenue.get("total_fees", 0.0)
+        jobs = revenue.get("job_count", 0)
+        waived = revenue.get("waived_count", 0)
+        cap = limits.get("monthly_cap_usd", 2000.0)
+        parts.append(
+            f"[bold]Monthly spend:[/bold] ${total:.2f} / ${cap:.2f} cap  "
+            f"({jobs} orders, {waived} waived)"
+        )
+
+        # Fee policy
+        parts.append(
+            f"[bold]Fee:[/bold] {policy.get('network_fee_percent', 5)}% "
+            f"(min ${policy.get('min_fee_usd', 0.25):.2f}, "
+            f"max ${policy.get('max_fee_usd', 50):.2f})"
+        )
+
+        free_left = max(0, policy.get("free_tier_jobs", 5) - data.get("network_jobs_this_month", 0))
+        parts.append(f"[bold]Free tier:[/bold] {free_left} free orders remaining this month")
+
+        # Available rails
+        rails = data.get("available_rails", [])
+        if rails:
+            parts.append(f"[bold]Available rails:[/bold] {', '.join(rails)}")
+
+        content = "\n".join(parts)
+        return _render(Panel(content, title="Billing Status", border_style="blue"))
+
+    # Plain text fallback
+    lines = ["Billing Status", "=" * 40]
+    if default:
+        lines.append(f"Payment method: {default.get('label', default.get('rail', 'unknown'))}")
+    else:
+        lines.append("No payment method linked. Run 'kiln billing setup' to add one.")
+    total = revenue.get("total_fees", 0.0)
+    cap = limits.get("monthly_cap_usd", 2000.0)
+    lines.append(f"Monthly spend: ${total:.2f} / ${cap:.2f}")
+    lines.append(f"Fee: {policy.get('network_fee_percent', 5)}%")
+    return "\n".join(lines)
+
+
+def format_billing_history(
+    charges: List[Dict[str, Any]],
+    *,
+    json_mode: bool = False,
+) -> str:
+    """Format billing charge history.
+
+    Expects a list of charge dicts from ``BillingLedger.list_charges()``.
+    """
+    if json_mode:
+        return json.dumps(
+            {"status": "success", "data": {"charges": charges, "count": len(charges)}},
+            indent=2,
+            sort_keys=False,
+        )
+
+    if not charges:
+        msg = "No billing charges found."
+        if RICH_AVAILABLE:
+            return _render(Panel(msg, border_style="yellow"))
+        return msg
+
+    if RICH_AVAILABLE:
+        table = Table(title="Billing History", border_style="blue")
+        table.add_column("Date", style="dim")
+        table.add_column("Job ID")
+        table.add_column("Order Cost", justify="right")
+        table.add_column("Fee", justify="right")
+        table.add_column("Waived")
+        table.add_column("Payment", style="dim")
+        table.add_column("Status")
+
+        for c in charges:
+            ts = c.get("created_at", 0)
+            date_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else ""
+            waived_str = "Yes" if c.get("waived") else ""
+            status = c.get("payment_status", "")
+            status_style = "green" if status == "completed" else "yellow" if status == "pending" else "red"
+            table.add_row(
+                date_str,
+                str(c.get("job_id", ""))[:16],
+                f"${c.get('job_cost', 0):.2f}",
+                f"${c.get('fee_amount', 0):.2f}",
+                waived_str,
+                str(c.get("payment_rail", ""))[:10],
+                f"[{status_style}]{status}[/{status_style}]",
+            )
+        return _render(table)
+
+    # Plain text
+    lines = [f"{'Date':<17} {'Job ID':<16} {'Cost':>8} {'Fee':>8} {'Status':<10}"]
+    lines.append("-" * 65)
+    for c in charges:
+        ts = c.get("created_at", 0)
+        date_str = datetime.fromtimestamp(ts).strftime("%m/%d %H:%M") if ts else ""
+        lines.append(
+            f"{date_str:<17} {str(c.get('job_id', ''))[:16]:<16} "
+            f"${c.get('job_cost', 0):>7.2f} ${c.get('fee_amount', 0):>7.2f} "
+            f"{c.get('payment_status', ''):<10}"
+        )
+    return "\n".join(lines)
+
+
+def format_billing_setup(
+    url: str,
+    rail: str,
+    *,
+    json_mode: bool = False,
+) -> str:
+    """Format the billing setup URL and instructions.
+
+    Args:
+        url: Setup URL from the payment provider.
+        rail: Rail name (e.g. ``"stripe"``).
+    """
+    if json_mode:
+        return json.dumps(
+            {"status": "success", "data": {"setup_url": url, "rail": rail}},
+            indent=2,
+            sort_keys=False,
+        )
+
+    if RICH_AVAILABLE:
+        if rail == "stripe":
+            content = (
+                f"Open the link below to add a credit card:\n\n"
+                f"  [bold blue]{url}[/bold blue]\n\n"
+                f"After setup, Kiln will charge the platform fee automatically\n"
+                f"on each outsourced manufacturing order."
+            )
+        else:
+            content = (
+                f"Setup URL for [bold]{rail}[/bold]:\n\n"
+                f"  [bold blue]{url}[/bold blue]"
+            )
+        return _render(Panel(content, title="Billing Setup", border_style="green"))
+
+    lines = [f"Billing Setup ({rail})", "=" * 40, "", url, ""]
+    if rail == "stripe":
+        lines.append("Open the link to add a credit card.")
+    return "\n".join(lines)

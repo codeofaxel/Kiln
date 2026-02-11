@@ -87,6 +87,14 @@ class EventType(enum.Enum):
     PLUGIN_LOADED = "plugin.loaded"
     PLUGIN_ERROR = "plugin.error"
 
+    # Billing / Payments
+    PAYMENT_INITIATED = "payment.initiated"
+    PAYMENT_COMPLETED = "payment.completed"
+    PAYMENT_FAILED = "payment.failed"
+    PAYMENT_REFUNDED = "payment.refunded"
+    BILLING_SETUP_COMPLETED = "billing.setup_completed"
+    SPEND_LIMIT_REACHED = "billing.spend_limit_reached"
+
 
 @dataclass
 class Event:

@@ -51,7 +51,9 @@ from kiln.scheduler import JobScheduler
 from kiln.persistence import get_db
 from kiln.webhooks import WebhookManager
 from kiln.auth import AuthManager
-from kiln.billing import BillingLedger, FeePolicy
+from kiln.billing import BillingLedger, FeeCalculation, FeePolicy
+from kiln.payments.manager import PaymentManager
+from kiln.payments.base import PaymentError
 from kiln.cost_estimator import CostEstimator
 from kiln.materials import MaterialTracker
 from kiln.bed_leveling import BedLevelManager, LevelingPolicy
@@ -213,7 +215,8 @@ _event_bus = EventBus()
 _scheduler = JobScheduler(_queue, _registry, _event_bus)
 _webhook_mgr = WebhookManager(_event_bus)
 _auth = AuthManager()
-_billing = BillingLedger()
+_billing = BillingLedger(db=get_db())
+_payment_mgr: Optional[PaymentManager] = None
 _cost_estimator = CostEstimator()
 _material_tracker = MaterialTracker(db=get_db(), event_bus=_event_bus)
 _bed_level_mgr = BedLevelManager(
@@ -290,6 +293,42 @@ def _get_fulfillment() -> FulfillmentProvider:
         )
     _fulfillment = CraftcloudProvider(api_key=_CRAFTCLOUD_API_KEY)
     return _fulfillment
+
+
+def _get_payment_mgr() -> PaymentManager:
+    """Return the lazily-initialised payment manager."""
+    global _payment_mgr  # noqa: PLW0603
+
+    if _payment_mgr is not None:
+        return _payment_mgr
+
+    from kiln.cli.config import get_billing_config
+    config = get_billing_config()
+    _payment_mgr = PaymentManager(
+        db=get_db(), config=config, event_bus=_event_bus, ledger=_billing,
+    )
+
+    # Auto-register providers from env vars.
+    stripe_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
+    if stripe_key:
+        try:
+            from kiln.payments.stripe_provider import StripeProvider
+            customer_id = config.get("stripe_customer_id")
+            _payment_mgr.register_provider(
+                StripeProvider(secret_key=stripe_key, customer_id=customer_id),
+            )
+        except Exception:
+            logger.debug("Could not register Stripe provider")
+
+    circle_key = os.environ.get("KILN_CIRCLE_API_KEY", "")
+    if circle_key:
+        try:
+            from kiln.payments.circle_provider import CircleProvider
+            _payment_mgr.register_provider(CircleProvider(api_key=circle_key))
+        except Exception:
+            logger.debug("Could not register Circle provider")
+
+    return _payment_mgr
 
 
 def _error_dict(message: str, code: str = "ERROR") -> Dict[str, Any]:
@@ -1253,6 +1292,67 @@ def billing_summary() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in billing_summary")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def billing_setup_url(rail: str = "stripe") -> dict:
+    """Get a URL to link a payment method for Kiln platform fees.
+
+    Args:
+        rail: Payment rail — ``"stripe"`` for credit card, ``"crypto"``
+            for USDC on Solana/Base.
+
+    Returns the setup URL.  Open it in a browser to complete payment
+    method setup.  After setup, Kiln automatically charges the platform
+    fee on each outsourced manufacturing order.
+    """
+    try:
+        mgr = _get_payment_mgr()
+        url = mgr.get_setup_url(rail=rail)
+        return {"success": True, "setup_url": url, "rail": rail}
+    except PaymentError as exc:
+        return _error_dict(str(exc), code=getattr(exc, "code", "PAYMENT_ERROR"))
+    except Exception as exc:
+        logger.exception("Unexpected error in billing_setup_url")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def billing_status() -> dict:
+    """Get enriched billing status including payment method info.
+
+    Returns payment method details, monthly spend, spend limits,
+    available payment rails, and fee policy.  More detailed than
+    ``billing_summary`` — includes payment infrastructure state.
+    """
+    try:
+        from kiln.cli.config import get_or_create_user_id
+        user_id = get_or_create_user_id()
+        mgr = _get_payment_mgr()
+        data = mgr.get_billing_status(user_id)
+        return {"success": True, **data}
+    except Exception as exc:
+        logger.exception("Unexpected error in billing_status")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def billing_history(limit: int = 20) -> dict:
+    """Get recent billing charge history with payment outcomes.
+
+    Args:
+        limit: Maximum number of records to return (default 20).
+
+    Returns charge records including order cost, fee amount, payment
+    rail, payment status, and timestamps.
+    """
+    try:
+        mgr = _get_payment_mgr()
+        charges = mgr.get_billing_history(limit=limit)
+        return {"success": True, "charges": charges, "count": len(charges)}
+    except Exception as exc:
+        logger.exception("Unexpected error in billing_history")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
@@ -2331,8 +2431,10 @@ def fulfillment_order(
         shipping_option_id: Shipping option ID from the quote's
             ``shipping_options`` list.
 
-    Returns the order ID and status.  A Kiln platform fee is recorded
-    against the order.  Use ``fulfillment_order_status`` to track.
+    Calculates the platform fee, collects payment (if a payment method
+    is linked), places the order, and records the charge.  If no
+    payment method is configured, the fee is still recorded but payment
+    is deferred.  Use ``fulfillment_order_status`` to track.
     """
     if err := _check_auth("print"):
         return err
@@ -2342,17 +2444,36 @@ def fulfillment_order(
             quote_id=quote_id,
             shipping_option_id=shipping_option_id,
         ))
-        # Record the platform fee against this order.
+        order_data = result.to_dict()
+
+        # Calculate and collect the platform fee.
         if result.total_price and result.total_price > 0:
             fee_calc = _billing.calculate_fee(
                 result.total_price, currency=result.currency,
             )
-            _billing.record_charge(result.order_id, fee_calc)
-            order_data = result.to_dict()
             order_data["kiln_fee"] = fee_calc.to_dict()
             order_data["total_with_fee"] = fee_calc.total_cost
-        else:
-            order_data = result.to_dict()
+
+            # Try to collect payment via the PaymentManager.
+            try:
+                mgr = _get_payment_mgr()
+                if mgr.available_rails:
+                    pay_result = mgr.charge_fee(result.order_id, fee_calc)
+                    order_data["payment"] = pay_result.to_dict()
+                else:
+                    # No providers — record the charge without payment.
+                    _billing.record_charge(result.order_id, fee_calc)
+                    order_data["payment"] = {"status": "no_payment_method"}
+            except PaymentError as pe:
+                # Payment failed but we still placed the order.
+                _billing.record_charge(
+                    result.order_id, fee_calc,
+                    payment_status="failed",
+                )
+                order_data["payment"] = {
+                    "status": "failed",
+                    "error": str(pe),
+                }
         return {
             "success": True,
             "order": order_data,

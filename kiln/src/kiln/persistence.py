@@ -143,6 +143,54 @@ class KilnDB:
                 );
                 CREATE INDEX IF NOT EXISTS idx_sync_log_entity
                     ON sync_log(entity_type, entity_id);
+
+                CREATE TABLE IF NOT EXISTS billing_charges (
+                    id              TEXT PRIMARY KEY,
+                    job_id          TEXT NOT NULL,
+                    order_id        TEXT,
+                    fee_amount      REAL NOT NULL,
+                    fee_percent     REAL NOT NULL,
+                    job_cost        REAL NOT NULL,
+                    total_cost      REAL NOT NULL,
+                    currency        TEXT NOT NULL DEFAULT 'USD',
+                    waived          INTEGER NOT NULL DEFAULT 0,
+                    waiver_reason   TEXT,
+                    payment_id      TEXT,
+                    payment_rail    TEXT,
+                    payment_status  TEXT NOT NULL DEFAULT 'pending',
+                    created_at      REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_billing_charges_job
+                    ON billing_charges(job_id);
+                CREATE INDEX IF NOT EXISTS idx_billing_charges_created
+                    ON billing_charges(created_at);
+
+                CREATE TABLE IF NOT EXISTS payment_methods (
+                    id              TEXT PRIMARY KEY,
+                    user_id         TEXT NOT NULL,
+                    rail            TEXT NOT NULL,
+                    provider_ref    TEXT NOT NULL,
+                    method_ref      TEXT,
+                    label           TEXT,
+                    is_default      INTEGER NOT NULL DEFAULT 0,
+                    created_at      REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS payments (
+                    id              TEXT PRIMARY KEY,
+                    charge_id       TEXT NOT NULL,
+                    provider_id     TEXT NOT NULL,
+                    rail            TEXT NOT NULL,
+                    amount          REAL NOT NULL,
+                    currency        TEXT NOT NULL,
+                    status          TEXT NOT NULL DEFAULT 'pending',
+                    tx_hash         TEXT,
+                    error           TEXT,
+                    created_at      REAL NOT NULL,
+                    updated_at      REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_payments_charge
+                    ON payments(charge_id);
                 """
             )
             self._conn.commit()
@@ -576,6 +624,261 @@ class KilnDB:
                     VALUES (?, ?, ?, 'push', 'success')
                     """,
                     (entity_type, eid, now),
+                )
+            self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Billing charges
+    # ------------------------------------------------------------------
+
+    def save_billing_charge(self, charge: Dict[str, Any]) -> None:
+        """Insert or replace a billing charge record."""
+        with self._write_lock:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO billing_charges
+                    (id, job_id, order_id, fee_amount, fee_percent,
+                     job_cost, total_cost, currency, waived, waiver_reason,
+                     payment_id, payment_rail, payment_status, created_at)
+                VALUES (:id, :job_id, :order_id, :fee_amount, :fee_percent,
+                        :job_cost, :total_cost, :currency, :waived,
+                        :waiver_reason, :payment_id, :payment_rail,
+                        :payment_status, :created_at)
+                """,
+                {
+                    "id": charge["id"],
+                    "job_id": charge["job_id"],
+                    "order_id": charge.get("order_id"),
+                    "fee_amount": charge["fee_amount"],
+                    "fee_percent": charge["fee_percent"],
+                    "job_cost": charge["job_cost"],
+                    "total_cost": charge["total_cost"],
+                    "currency": charge.get("currency", "USD"),
+                    "waived": 1 if charge.get("waived") else 0,
+                    "waiver_reason": charge.get("waiver_reason"),
+                    "payment_id": charge.get("payment_id"),
+                    "payment_rail": charge.get("payment_rail"),
+                    "payment_status": charge.get("payment_status", "pending"),
+                    "created_at": charge.get("created_at", time.time()),
+                },
+            )
+            self._conn.commit()
+
+    def get_billing_charge(self, charge_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a billing charge by ID."""
+        row = self._conn.execute(
+            "SELECT * FROM billing_charges WHERE id = ?", (charge_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["waived"] = bool(d["waived"])
+        return d
+
+    def list_billing_charges(
+        self,
+        limit: int = 50,
+        month: Optional[int] = None,
+        year: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return billing charges, newest first.
+
+        Optionally filter by calendar month.
+        """
+        if month is not None and year is not None:
+            from datetime import datetime, timezone
+            start = datetime(year, month, 1, tzinfo=timezone.utc).timestamp()
+            if month == 12:
+                end = datetime(year + 1, 1, 1, tzinfo=timezone.utc).timestamp()
+            else:
+                end = datetime(year, month + 1, 1, tzinfo=timezone.utc).timestamp()
+            rows = self._conn.execute(
+                "SELECT * FROM billing_charges "
+                "WHERE created_at >= ? AND created_at < ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (start, end, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM billing_charges "
+                "ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        results = []
+        for row in rows:
+            d = dict(row)
+            d["waived"] = bool(d["waived"])
+            results.append(d)
+        return results
+
+    def monthly_billing_summary(
+        self,
+        year: Optional[int] = None,
+        month: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Aggregate billing data for a calendar month.
+
+        Returns dict with ``total_fees``, ``job_count``, ``waived_count``.
+        """
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        target_year = year if year is not None else now.year
+        target_month = month if month is not None else now.month
+        start = datetime(target_year, target_month, 1, tzinfo=timezone.utc).timestamp()
+        if target_month == 12:
+            end = datetime(target_year + 1, 1, 1, tzinfo=timezone.utc).timestamp()
+        else:
+            end = datetime(target_year, target_month + 1, 1, tzinfo=timezone.utc).timestamp()
+
+        row = self._conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(fee_amount), 0.0) AS total_fees,
+                COUNT(*) AS job_count,
+                SUM(CASE WHEN waived = 1 THEN 1 ELSE 0 END) AS waived_count
+            FROM billing_charges
+            WHERE created_at >= ? AND created_at < ?
+            """,
+            (start, end),
+        ).fetchone()
+        return {
+            "total_fees": round(row["total_fees"], 2),
+            "job_count": row["job_count"],
+            "waived_count": row["waived_count"],
+        }
+
+    def billing_charges_this_month(self) -> int:
+        """Count billing charges in the current calendar month."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        start = datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp()
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS cnt FROM billing_charges WHERE created_at >= ?",
+            (start,),
+        ).fetchone()
+        return row["cnt"] if row else 0
+
+    def monthly_fee_total(self) -> float:
+        """Sum of fee_amount for billing charges in the current month."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        start = datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp()
+        row = self._conn.execute(
+            "SELECT COALESCE(SUM(fee_amount), 0.0) AS total "
+            "FROM billing_charges WHERE created_at >= ?",
+            (start,),
+        ).fetchone()
+        return round(row["total"], 2) if row else 0.0
+
+    # ------------------------------------------------------------------
+    # Payment methods
+    # ------------------------------------------------------------------
+
+    def save_payment_method(self, method: Dict[str, Any]) -> None:
+        """Insert or replace a saved payment method."""
+        with self._write_lock:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO payment_methods
+                    (id, user_id, rail, provider_ref, method_ref,
+                     label, is_default, created_at)
+                VALUES (:id, :user_id, :rail, :provider_ref, :method_ref,
+                        :label, :is_default, :created_at)
+                """,
+                {
+                    "id": method["id"],
+                    "user_id": method["user_id"],
+                    "rail": method["rail"],
+                    "provider_ref": method["provider_ref"],
+                    "method_ref": method.get("method_ref"),
+                    "label": method.get("label"),
+                    "is_default": 1 if method.get("is_default") else 0,
+                    "created_at": method.get("created_at", time.time()),
+                },
+            )
+            self._conn.commit()
+
+    def get_default_payment_method(
+        self, user_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Return the default payment method for a user, or ``None``."""
+        row = self._conn.execute(
+            "SELECT * FROM payment_methods "
+            "WHERE user_id = ? AND is_default = 1 LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["is_default"] = bool(d["is_default"])
+        return d
+
+    def list_payment_methods(
+        self, user_id: str,
+    ) -> List[Dict[str, Any]]:
+        """Return all payment methods for a user."""
+        rows = self._conn.execute(
+            "SELECT * FROM payment_methods WHERE user_id = ? ORDER BY created_at",
+            (user_id,),
+        ).fetchall()
+        results = []
+        for row in rows:
+            d = dict(row)
+            d["is_default"] = bool(d["is_default"])
+            results.append(d)
+        return results
+
+    # ------------------------------------------------------------------
+    # Payments
+    # ------------------------------------------------------------------
+
+    def save_payment(self, payment: Dict[str, Any]) -> None:
+        """Insert a payment transaction record."""
+        now = time.time()
+        with self._write_lock:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO payments
+                    (id, charge_id, provider_id, rail, amount, currency,
+                     status, tx_hash, error, created_at, updated_at)
+                VALUES (:id, :charge_id, :provider_id, :rail, :amount,
+                        :currency, :status, :tx_hash, :error,
+                        :created_at, :updated_at)
+                """,
+                {
+                    "id": payment["id"],
+                    "charge_id": payment["charge_id"],
+                    "provider_id": payment["provider_id"],
+                    "rail": payment["rail"],
+                    "amount": payment["amount"],
+                    "currency": payment.get("currency", "USD"),
+                    "status": payment.get("status", "pending"),
+                    "tx_hash": payment.get("tx_hash"),
+                    "error": payment.get("error"),
+                    "created_at": payment.get("created_at", now),
+                    "updated_at": payment.get("updated_at", now),
+                },
+            )
+            self._conn.commit()
+
+    def update_payment_status(
+        self,
+        payment_id: str,
+        status: str,
+        tx_hash: Optional[str] = None,
+    ) -> None:
+        """Update the status (and optionally tx_hash) of a payment."""
+        with self._write_lock:
+            if tx_hash is not None:
+                self._conn.execute(
+                    "UPDATE payments SET status = ?, tx_hash = ?, "
+                    "updated_at = ? WHERE id = ?",
+                    (status, tx_hash, time.time(), payment_id),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE payments SET status = ?, updated_at = ? WHERE id = ?",
+                    (status, time.time(), payment_id),
                 )
             self._conn.commit()
 
