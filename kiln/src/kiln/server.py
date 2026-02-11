@@ -2799,6 +2799,252 @@ def delete_webhook(endpoint_id: str) -> dict:
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
+@mcp.tool()
+def await_print_completion(
+    job_id: str | None = None,
+    timeout: int = 7200,
+    poll_interval: int = 15,
+) -> dict:
+    """Wait for the current print to finish and return the final status.
+
+    Polls the printer (or a specific queued job) until it reaches a
+    terminal state: completed, failed, cancelled, or the timeout is
+    exceeded.  This lets agents fire-and-forget a print and pick up the
+    result later without managing their own polling loop.
+
+    Args:
+        job_id: Optional job ID from ``submit_job()``.  When provided,
+            tracks that specific job through the queue/scheduler.  When
+            omitted, monitors the printer directly for idle/error state.
+        timeout: Maximum seconds to wait (default 7200 = 2 hours).
+        poll_interval: Seconds between status checks (default 15).
+
+    Returns a dict with ``outcome`` (completed / failed / cancelled /
+    timeout), final printer state, elapsed time, and completion
+    percentage history.
+    """
+    start = time.time()
+    progress_log: list[dict] = []
+    last_pct: float | None = None
+
+    while True:
+        elapsed = time.time() - start
+        if elapsed >= timeout:
+            return {
+                "success": True,
+                "outcome": "timeout",
+                "elapsed_seconds": round(elapsed, 1),
+                "message": f"Timed out after {timeout}s waiting for print to finish.",
+                "progress_log": progress_log[-20:],
+            }
+
+        try:
+            # --- Job-based tracking (via queue) ---
+            if job_id is not None:
+                try:
+                    job = _queue.get_job(job_id)
+                except JobNotFoundError:
+                    return _error_dict(
+                        f"Job {job_id!r} not found.", code="JOB_NOT_FOUND"
+                    )
+
+                if job.status == JobStatus.COMPLETED:
+                    return {
+                        "success": True,
+                        "outcome": "completed",
+                        "job": job.to_dict(),
+                        "elapsed_seconds": round(elapsed, 1),
+                        "progress_log": progress_log[-20:],
+                    }
+                if job.status == JobStatus.FAILED:
+                    return {
+                        "success": True,
+                        "outcome": "failed",
+                        "job": job.to_dict(),
+                        "error": job.error,
+                        "elapsed_seconds": round(elapsed, 1),
+                        "progress_log": progress_log[-20:],
+                    }
+                if job.status == JobStatus.CANCELLED:
+                    return {
+                        "success": True,
+                        "outcome": "cancelled",
+                        "job": job.to_dict(),
+                        "elapsed_seconds": round(elapsed, 1),
+                        "progress_log": progress_log[-20:],
+                    }
+
+                # Still running — log progress
+                time.sleep(poll_interval)
+                continue
+
+            # --- Direct printer tracking (no job_id) ---
+            adapter = _get_adapter()
+            state = adapter.get_state()
+            job_progress = adapter.get_job()
+
+            pct = job_progress.completion
+            if pct is not None and pct != last_pct:
+                progress_log.append({
+                    "time": round(elapsed, 1),
+                    "completion": pct,
+                })
+                last_pct = pct
+
+            if state.state == PrinterStatus.IDLE:
+                return {
+                    "success": True,
+                    "outcome": "completed",
+                    "state": state.state.value,
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                }
+            if state.state == PrinterStatus.ERROR:
+                return {
+                    "success": True,
+                    "outcome": "failed",
+                    "state": state.state.value,
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                }
+            if state.state == PrinterStatus.OFFLINE:
+                return {
+                    "success": True,
+                    "outcome": "failed",
+                    "state": state.state.value,
+                    "error": "Printer went offline during print.",
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                }
+
+        except (PrinterError, RuntimeError) as exc:
+            return _error_dict(str(exc))
+        except Exception as exc:
+            logger.exception("Unexpected error in await_print_completion")
+            return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+        time.sleep(poll_interval)
+
+
+@mcp.tool()
+def compare_print_options(
+    file_path: str,
+    material: str = "PLA",
+    fulfillment_material_id: str | None = None,
+    quantity: int = 1,
+    electricity_rate: float = 0.12,
+    printer_wattage: float = 200.0,
+    shipping_country: str = "US",
+) -> dict:
+    """Compare local printing cost vs. outsourced manufacturing.
+
+    Runs a local cost estimate and (if Craftcloud is configured) fetches
+    a fulfillment quote, then returns a side-by-side comparison to help
+    agents recommend the best option.
+
+    Args:
+        file_path: Path to the G-code file (for local) or model file
+            (STL/3MF for fulfillment).  If a G-code file is provided,
+            only local estimate is returned.
+        material: Filament material for local estimate (PLA, PETG, etc.).
+        fulfillment_material_id: Material ID from ``fulfillment_materials``
+            for the outsourced quote.  If omitted, the fulfillment quote
+            is skipped.
+        quantity: Number of copies for fulfillment (default 1).
+        electricity_rate: Cost per kWh in USD (default 0.12).
+        printer_wattage: Printer power consumption in watts (default 200).
+        shipping_country: ISO country code for fulfillment shipping.
+    """
+    result: Dict[str, Any] = {"success": True}
+
+    # --- Local estimate ---------------------------------------------------
+    local_estimate = None
+    local_error = None
+    try:
+        estimate = _cost_estimator.estimate_from_file(
+            file_path,
+            material=material,
+            electricity_rate=electricity_rate,
+            printer_wattage=printer_wattage,
+        )
+        local_estimate = estimate.to_dict()
+    except FileNotFoundError:
+        local_error = "G-code file not found"
+    except Exception as exc:
+        local_error = str(exc)
+
+    result["local"] = {
+        "available": local_estimate is not None,
+        "estimate": local_estimate,
+        "error": local_error,
+    }
+
+    # --- Fulfillment quote ------------------------------------------------
+    fulfillment_quote_data = None
+    fulfillment_error = None
+    if fulfillment_material_id:
+        try:
+            provider = _get_fulfillment()
+            quote = provider.get_quote(QuoteRequest(
+                file_path=file_path,
+                material_id=fulfillment_material_id,
+                quantity=quantity,
+                shipping_country=shipping_country,
+            ))
+            fee_calc = _billing.calculate_fee(
+                quote.total_price, currency=quote.currency,
+            )
+            fulfillment_quote_data = quote.to_dict()
+            fulfillment_quote_data["kiln_fee"] = fee_calc.to_dict()
+            fulfillment_quote_data["total_with_fee"] = fee_calc.total_cost
+        except (FulfillmentError, RuntimeError) as exc:
+            fulfillment_error = str(exc)
+        except Exception as exc:
+            fulfillment_error = str(exc)
+
+    result["fulfillment"] = {
+        "available": fulfillment_quote_data is not None,
+        "quote": fulfillment_quote_data,
+        "error": fulfillment_error,
+    }
+
+    # --- Comparison summary -----------------------------------------------
+    if local_estimate and fulfillment_quote_data:
+        local_cost = local_estimate.get("total_cost_usd", 0)
+        fulfillment_cost = fulfillment_quote_data.get("total_with_fee", fulfillment_quote_data.get("total_price", 0))
+        cheapest_shipping = None
+        if fulfillment_quote_data.get("shipping_options"):
+            cheapest_shipping = min(
+                fulfillment_quote_data["shipping_options"],
+                key=lambda s: s.get("price", float("inf")),
+            )
+        fulfillment_total = fulfillment_cost + (cheapest_shipping.get("price", 0) if cheapest_shipping else 0)
+
+        local_time_h = None
+        if local_estimate.get("estimated_time_seconds"):
+            local_time_h = round(local_estimate["estimated_time_seconds"] / 3600, 1)
+
+        fulfillment_days = fulfillment_quote_data.get("lead_time_days")
+        if cheapest_shipping and cheapest_shipping.get("estimated_days"):
+            fulfillment_days = (fulfillment_days or 0) + cheapest_shipping["estimated_days"]
+
+        result["comparison"] = {
+            "local_cost_usd": round(local_cost, 2),
+            "fulfillment_cost_usd": round(fulfillment_total, 2),
+            "savings_usd": round(fulfillment_total - local_cost, 2),
+            "cheaper": "local" if local_cost < fulfillment_total else "fulfillment",
+            "local_time_hours": local_time_h,
+            "fulfillment_time_days": fulfillment_days,
+            "recommendation": (
+                "Local printing is cheaper and faster."
+                if local_cost < fulfillment_total
+                else "Outsourced manufacturing may offer better quality or materials."
+            ),
+        }
+
+    return result
+
+
 @mcp.resource("kiln://status")
 def resource_status() -> str:
     """Live snapshot of the entire Kiln system: printers, queue, and recent events."""

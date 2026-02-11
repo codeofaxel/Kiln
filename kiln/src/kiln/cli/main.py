@@ -1243,6 +1243,93 @@ def cost(
         sys.exit(1)
 
 
+@cli.command("compare-cost")
+@click.argument("file_path", type=click.Path(exists=True))
+@click.option("--material", "-m", default="PLA", help="Filament material for local estimate.")
+@click.option("--fulfillment-material", default=None, help="Material ID for fulfillment quote.")
+@click.option("--quantity", "-q", default=1, type=int, help="Quantity for fulfillment.")
+@click.option("--electricity-rate", default=0.12, type=float, help="USD per kWh.")
+@click.option("--printer-wattage", default=200.0, type=float, help="Printer watts.")
+@click.option("--country", default="US", help="Shipping country code.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def compare_cost(
+    file_path: str,
+    material: str,
+    fulfillment_material: Optional[str],
+    quantity: int,
+    electricity_rate: float,
+    printer_wattage: float,
+    country: str,
+    json_mode: bool,
+) -> None:
+    """Compare local printing cost vs. outsourced manufacturing."""
+    import json as _json
+    from kiln.cost_estimator import CostEstimator
+
+    result: dict = {}
+
+    # Local estimate
+    try:
+        estimator = CostEstimator()
+        estimate = estimator.estimate_from_file(
+            file_path, material=material,
+            electricity_rate=electricity_rate,
+            printer_wattage=printer_wattage,
+        )
+        result["local"] = {"available": True, "estimate": estimate.to_dict()}
+    except Exception as exc:
+        result["local"] = {"available": False, "error": str(exc)}
+
+    # Fulfillment quote (optional)
+    if fulfillment_material:
+        try:
+            from kiln.fulfillment import CraftcloudProvider, QuoteRequest as QR
+            import os
+            api_key = os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
+            if not api_key:
+                raise RuntimeError("KILN_CRAFTCLOUD_API_KEY not set")
+            provider = CraftcloudProvider(api_key=api_key)
+            quote = provider.get_quote(QR(
+                file_path=file_path,
+                material_id=fulfillment_material,
+                quantity=quantity,
+                shipping_country=country,
+            ))
+            result["fulfillment"] = {"available": True, "quote": quote.to_dict()}
+        except Exception as exc:
+            result["fulfillment"] = {"available": False, "error": str(exc)}
+    else:
+        result["fulfillment"] = {"available": False, "error": "No --fulfillment-material specified"}
+
+    if json_mode:
+        click.echo(_json.dumps({"status": "success", "data": result}, indent=2))
+    else:
+        click.echo("=== Local Printing ===")
+        if result["local"]["available"]:
+            est = result["local"]["estimate"]
+            click.echo(f"  Material:   {est['material']}")
+            click.echo(f"  Filament:   {est['filament_weight_grams']:.1f} g")
+            click.echo(f"  Total:      ${est['total_cost_usd']:.2f}")
+            if est.get("estimated_time_seconds"):
+                click.echo(f"  Time:       {est['estimated_time_seconds'] / 3600:.1f} hours")
+        else:
+            click.echo(f"  Error: {result['local'].get('error', 'unavailable')}")
+
+        click.echo()
+        click.echo("=== Outsourced Manufacturing ===")
+        if result["fulfillment"]["available"]:
+            q = result["fulfillment"]["quote"]
+            click.echo(f"  Material:   {q['material']}")
+            click.echo(f"  Unit price: ${q['unit_price']:.2f}")
+            click.echo(f"  Total:      ${q['total_price']:.2f}")
+            if q.get("lead_time_days"):
+                click.echo(f"  Lead time:  {q['lead_time_days']} days")
+            for so in q.get("shipping_options", []):
+                click.echo(f"  Shipping:   {so['name']} — ${so['price']:.2f} ({so.get('estimated_days', '?')} days)")
+        else:
+            click.echo(f"  {result['fulfillment'].get('error', 'unavailable')}")
+
+
 # ---------------------------------------------------------------------------
 # material tracking
 # ---------------------------------------------------------------------------

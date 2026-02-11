@@ -43,16 +43,19 @@ class JobScheduler:
         event_bus: EventBus,
         poll_interval: float = 5.0,
         max_retries: int = 2,
+        retry_backoff_base: float = 30.0,
     ) -> None:
         self._queue = queue
         self._registry = registry
         self._event_bus = event_bus
         self._poll_interval = poll_interval
         self._max_retries = max_retries
+        self._retry_backoff_base = retry_backoff_base
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._active_jobs: Dict[str, str] = {}  # job_id -> printer_name
         self._retry_counts: Dict[str, int] = {}  # job_id -> attempts so far
+        self._retry_not_before: Dict[str, float] = {}  # job_id -> earliest retry timestamp
         self._lock = threading.Lock()
 
     @property
@@ -101,7 +104,10 @@ class JobScheduler:
         count = self._retry_counts.get(job_id, 0)
         if count < self._max_retries:
             self._retry_counts[job_id] = count + 1
-            # Reset the job back to QUEUED so the next tick can redispatch it
+            # Exponential backoff: 30s, 60s, 120s, ...
+            delay = self._retry_backoff_base * (2 ** count)
+            self._retry_not_before[job_id] = time.time() + delay
+            # Reset the job back to QUEUED so a future tick can redispatch it
             job = self._queue.get_job(job_id)
             job.status = JobStatus.QUEUED
             job.started_at = None
@@ -113,20 +119,23 @@ class JobScheduler:
                     "retry": count + 1,
                     "max_retries": self._max_retries,
                     "reason": error_msg,
+                    "retry_delay_seconds": delay,
                 },
                 source="scheduler",
             )
             logger.info(
-                "Re-queued job %s (retry %d/%d): %s",
+                "Re-queued job %s (retry %d/%d, backoff %.0fs): %s",
                 job_id,
                 count + 1,
                 self._max_retries,
+                delay,
                 error_msg,
             )
             return True
 
         # Retries exhausted — mark permanently failed
         self._retry_counts.pop(job_id, None)
+        self._retry_not_before.pop(job_id, None)
         self._queue.mark_failed(job_id, error_msg)
         self._event_bus.publish(
             EventType.JOB_FAILED,
@@ -167,6 +176,7 @@ class JobScheduler:
                     with self._lock:
                         self._active_jobs.pop(job_id, None)
                     self._retry_counts.pop(job_id, None)
+                    self._retry_not_before.pop(job_id, None)
                     self._event_bus.publish(
                         EventType.JOB_COMPLETED,
                         {"job_id": job_id, "printer_name": printer_name},
@@ -224,6 +234,14 @@ class JobScheduler:
             next_job = self._queue.next_job(printer_name=printer_name)
             if next_job is None:
                 continue
+
+            # Respect exponential backoff for retried jobs
+            not_before = self._retry_not_before.get(next_job.id)
+            if not_before is not None and time.time() < not_before:
+                continue
+
+            # Clear the backoff gate once we're past it
+            self._retry_not_before.pop(next_job.id, None)
 
             # Try to dispatch
             try:
