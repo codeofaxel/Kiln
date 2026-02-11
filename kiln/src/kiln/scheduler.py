@@ -24,6 +24,10 @@ from kiln.registry import PrinterNotFoundError, PrinterRegistry
 logger = logging.getLogger(__name__)
 
 
+# Jobs in PRINTING state longer than this are considered stuck.
+_STUCK_JOB_TIMEOUT_SECONDS: float = 7200.0  # 2 hours
+
+
 class JobScheduler:
     """Background scheduler that dispatches print jobs to printers.
 
@@ -34,6 +38,7 @@ class JobScheduler:
         scheduler.stop()    # graceful shutdown
 
     The scheduler polls every ``poll_interval`` seconds (default 5).
+    Jobs stuck in PRINTING state for over 2 hours are auto-failed.
     """
 
     def __init__(
@@ -200,6 +205,30 @@ class JobScheduler:
                     except Exception:
                         pass
 
+                    # Stuck job detection: fail jobs in PRINTING too long
+                    try:
+                        job = self._queue.get_job(job_id)
+                        if (
+                            job.started_at is not None
+                            and (time.time() - job.started_at) > _STUCK_JOB_TIMEOUT_SECONDS
+                        ):
+                            error_msg = (
+                                f"Job timed out after "
+                                f"{_STUCK_JOB_TIMEOUT_SECONDS / 3600:.0f}h "
+                                f"— printer may be disconnected or hung"
+                            )
+                            logger.warning(
+                                "Stuck job detected: %s on %s (%.0f min)",
+                                job_id, printer_name,
+                                (time.time() - job.started_at) / 60,
+                            )
+                            with self._lock:
+                                self._active_jobs.pop(job_id, None)
+                            self._requeue_or_fail(job_id, error_msg, failed)
+                            continue
+                    except Exception:
+                        pass
+
                     # Publish progress event
                     if job_progress.completion is not None:
                         self._event_bus.publish(
@@ -244,7 +273,14 @@ class JobScheduler:
             # Clear the backoff gate once we're past it
             self._retry_not_before.pop(next_job.id, None)
 
-            # Try to dispatch
+            # Try to dispatch (acquire per-printer lock to prevent concurrent ops)
+            printer_mutex = self._registry.printer_lock(printer_name)
+            if not printer_mutex.acquire(blocking=False):
+                logger.debug(
+                    "Printer %s locked by another operation, skipping dispatch",
+                    printer_name,
+                )
+                continue
             try:
                 adapter = self._registry.get(printer_name)
                 self._queue.mark_starting(next_job.id)
@@ -280,6 +316,8 @@ class JobScheduler:
             except Exception as exc:
                 logger.exception("Unexpected error dispatching job %s", next_job.id)
                 self._requeue_or_fail(next_job.id, str(exc), failed)
+            finally:
+                printer_mutex.release()
 
         return {
             "dispatched": dispatched,

@@ -243,6 +243,16 @@ class BambuAdapter(PrinterAdapter):
         if self._mqtt_client is not None and self._mqtt_connected.is_set():
             return self._mqtt_client
 
+        # Tear down stale client that lost its connection.
+        if self._mqtt_client is not None:
+            logger.debug("MQTT client exists but disconnected; tearing down stale client")
+            try:
+                self._mqtt_client.loop_stop()
+                self._mqtt_client.disconnect()
+            except Exception:
+                pass
+            self._mqtt_client = None
+
         try:
             client = mqtt.Client(
                 callback_api_version=mqtt.CallbackAPIVersion.VERSION2,

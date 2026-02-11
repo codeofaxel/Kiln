@@ -169,46 +169,73 @@ class ThingiverseClient:
         *,
         params: Dict[str, Any] | None = None,
         timeout: int = _REQUEST_TIMEOUT,
+        _rate_limit_retries: int = 3,
     ) -> Any:
-        """Make an authenticated API request and return parsed JSON."""
+        """Make an authenticated API request and return parsed JSON.
+
+        Automatically retries with exponential backoff on HTTP 429
+        (rate limit) responses, respecting the ``Retry-After`` header
+        when present.
+        """
         url = f"{self._base_url}{path}"
         params = dict(params) if params else {}
         params["access_token"] = self._token
 
-        try:
-            resp = self._session.request(
-                method, url, params=params, timeout=timeout,
-            )
-        except requests.ConnectionError as exc:
-            raise ThingiverseError(
-                f"Connection to Thingiverse failed: {exc}", status_code=None,
-            ) from exc
-        except requests.Timeout as exc:
-            raise ThingiverseError(
-                f"Thingiverse request timed out: {exc}", status_code=None,
-            ) from exc
+        for attempt in range(_rate_limit_retries + 1):
+            try:
+                resp = self._session.request(
+                    method, url, params=params, timeout=timeout,
+                )
+            except requests.ConnectionError as exc:
+                raise ThingiverseError(
+                    f"Connection to Thingiverse failed: {exc}", status_code=None,
+                ) from exc
+            except requests.Timeout as exc:
+                raise ThingiverseError(
+                    f"Thingiverse request timed out: {exc}", status_code=None,
+                ) from exc
 
-        if resp.status_code == 401:
-            raise ThingiverseAuthError(
-                "Invalid or expired Thingiverse API token.",
-                status_code=401,
-            )
-        if resp.status_code == 404:
-            raise ThingiverseNotFoundError(
-                f"Resource not found: {path}", status_code=404,
-            )
-        if resp.status_code == 429:
-            raise ThingiverseRateLimitError(
-                "Thingiverse API rate limit exceeded.  Try again later.",
-                status_code=429,
-            )
-        if resp.status_code >= 400:
-            raise ThingiverseError(
-                f"Thingiverse API error {resp.status_code}: {resp.text[:200]}",
-                status_code=resp.status_code,
-            )
+            if resp.status_code == 401:
+                raise ThingiverseAuthError(
+                    "Invalid or expired Thingiverse API token.",
+                    status_code=401,
+                )
+            if resp.status_code == 404:
+                raise ThingiverseNotFoundError(
+                    f"Resource not found: {path}", status_code=404,
+                )
+            if resp.status_code == 429:
+                if attempt < _rate_limit_retries:
+                    # Parse Retry-After header, fall back to exponential backoff
+                    retry_after = resp.headers.get("Retry-After")
+                    if retry_after is not None:
+                        try:
+                            delay = float(retry_after)
+                        except (ValueError, TypeError):
+                            delay = 2.0 ** attempt
+                    else:
+                        delay = 2.0 ** attempt  # 1s, 2s, 4s
+                    delay = min(delay, 60.0)  # cap at 60s
+                    logger.info(
+                        "Thingiverse rate limited (429), retrying in %.1fs (attempt %d/%d)",
+                        delay, attempt + 1, _rate_limit_retries,
+                    )
+                    time.sleep(delay)
+                    continue
+                raise ThingiverseRateLimitError(
+                    "Thingiverse API rate limit exceeded after retries.  Try again later.",
+                    status_code=429,
+                )
+            if resp.status_code >= 400:
+                raise ThingiverseError(
+                    f"Thingiverse API error {resp.status_code}: {resp.text[:200]}",
+                    status_code=resp.status_code,
+                )
 
-        return resp.json()
+            return resp.json()
+
+        # Should not reach here, but just in case
+        raise ThingiverseError("Request failed after retries.", status_code=None)
 
     # -- search ------------------------------------------------------------
 

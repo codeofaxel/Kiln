@@ -121,6 +121,7 @@ class OctoPrintAdapter(PrinterAdapter):
         api_key: str,
         timeout: int = 30,
         retries: int = 3,
+        verify_ssl: bool = True,
     ) -> None:
         if not host:
             raise ValueError("host must not be empty")
@@ -134,6 +135,11 @@ class OctoPrintAdapter(PrinterAdapter):
 
         self._session: requests.Session = requests.Session()
         self._session.headers.update({"X-Api-Key": self._api_key})
+        self._session.verify = verify_ssl
+        if not verify_ssl:
+            # Suppress noisy InsecureRequestWarning for self-signed certs
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     # -- PrinterAdapter identity properties ---------------------------------
 

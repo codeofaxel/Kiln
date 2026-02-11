@@ -1,4 +1,4 @@
-"""Print job queue — ordered, persistent-ready job management.
+"""Print job queue — ordered, persistent job management.
 
 Agents submit print jobs to the queue rather than directly calling
 ``start_print()``.  The queue ensures:
@@ -7,13 +7,14 @@ Agents submit print jobs to the queue rather than directly calling
 - Only one job runs per printer at a time.
 - Failed jobs are tracked and can be retried.
 - The full history of submitted, running, and completed jobs is queryable.
-
-This is an in-memory implementation.  A future version will persist to
-SQLite or Supabase for crash recovery.
+- Jobs are persisted to SQLite for crash recovery.  On startup, jobs that
+  were in QUEUED or STARTING/PRINTING state are reloaded (active jobs are
+  reset to QUEUED since the printer state is unknown after a crash).
 
 Example::
 
-    queue = PrintQueue()
+    queue = PrintQueue()          # in-memory only
+    queue = PrintQueue(db_path="~/.kiln/queue.db")  # persistent
     job_id = queue.submit(
         file_name="benchy.gcode",
         printer_name="voron-350",
@@ -25,11 +26,17 @@ Example::
 from __future__ import annotations
 
 import enum
+import json
+import logging
+import os
+import sqlite3
 import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class JobStatus(enum.Enum):
@@ -89,15 +96,44 @@ class JobNotFoundError(KeyError):
 
 
 class PrintQueue:
-    """Thread-safe in-memory print job queue.
+    """Thread-safe print job queue with optional SQLite persistence.
 
     Jobs are stored in insertion order.  :meth:`next_job` returns the
     highest-priority queued job, breaking ties by submission time (FIFO).
+
+    If *db_path* is provided, jobs are persisted to SQLite so they survive
+    server crashes.  On init, in-flight jobs (STARTING/PRINTING) are reset
+    to QUEUED since the printer state is unknown after a restart.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, db_path: Optional[str] = None) -> None:
         self._jobs: Dict[str, PrintJob] = {}
         self._lock = threading.Lock()
+        self._db: Optional[sqlite3.Connection] = None
+
+        if db_path:
+            resolved = os.path.expanduser(db_path)
+            os.makedirs(os.path.dirname(resolved), exist_ok=True)
+            self._db = sqlite3.connect(resolved, check_same_thread=False)
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA busy_timeout=5000")
+            self._db.execute(
+                """CREATE TABLE IF NOT EXISTS jobs (
+                    id TEXT PRIMARY KEY,
+                    file_name TEXT NOT NULL,
+                    printer_name TEXT,
+                    status TEXT NOT NULL,
+                    submitted_by TEXT NOT NULL,
+                    priority INTEGER DEFAULT 0,
+                    created_at REAL NOT NULL,
+                    started_at REAL,
+                    completed_at REAL,
+                    error TEXT,
+                    metadata TEXT DEFAULT '{}'
+                )"""
+            )
+            self._db.commit()
+            self._reload_from_db()
 
     # ------------------------------------------------------------------
     # Submit / cancel
@@ -137,6 +173,7 @@ class PrintQueue:
         )
         with self._lock:
             self._jobs[job_id] = job
+        self._persist_job(job)
         return job_id
 
     def cancel(self, job_id: str) -> PrintJob:
@@ -162,7 +199,8 @@ class PrintQueue:
                 )
             job.status = JobStatus.CANCELLED
             job.completed_at = time.time()
-            return job
+        self._update_job_db(job)
+        return job
 
     # ------------------------------------------------------------------
     # Status transitions
@@ -174,7 +212,8 @@ class PrintQueue:
             job = self._get(job_id)
             job.status = JobStatus.STARTING
             job.started_at = time.time()
-            return job
+        self._update_job_db(job)
+        return job
 
     def mark_printing(self, job_id: str) -> PrintJob:
         """Mark a job as actively printing."""
@@ -183,7 +222,8 @@ class PrintQueue:
             job.status = JobStatus.PRINTING
             if job.started_at is None:
                 job.started_at = time.time()
-            return job
+        self._update_job_db(job)
+        return job
 
     def mark_completed(self, job_id: str) -> PrintJob:
         """Mark a job as successfully completed."""
@@ -191,7 +231,8 @@ class PrintQueue:
             job = self._get(job_id)
             job.status = JobStatus.COMPLETED
             job.completed_at = time.time()
-            return job
+        self._update_job_db(job)
+        return job
 
     def mark_failed(self, job_id: str, error: str) -> PrintJob:
         """Mark a job as failed with an error message."""
@@ -200,7 +241,8 @@ class PrintQueue:
             job.status = JobStatus.FAILED
             job.completed_at = time.time()
             job.error = error
-            return job
+        self._update_job_db(job)
+        return job
 
     # ------------------------------------------------------------------
     # Queries
@@ -309,3 +351,81 @@ class PrintQueue:
         if job_id not in self._jobs:
             raise JobNotFoundError(job_id)
         return self._jobs[job_id]
+
+    # ------------------------------------------------------------------
+    # SQLite persistence helpers
+    # ------------------------------------------------------------------
+
+    def _persist_job(self, job: PrintJob) -> None:
+        """Write a job to SQLite (INSERT)."""
+        if self._db is None:
+            return
+        try:
+            self._db.execute(
+                """INSERT OR REPLACE INTO jobs
+                   (id, file_name, printer_name, status, submitted_by,
+                    priority, created_at, started_at, completed_at, error, metadata)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    job.id, job.file_name, job.printer_name,
+                    job.status.value, job.submitted_by, job.priority,
+                    job.created_at, job.started_at, job.completed_at,
+                    job.error, json.dumps(job.metadata),
+                ),
+            )
+            self._db.commit()
+        except Exception:
+            logger.exception("Failed to persist job %s to SQLite", job.id)
+
+    def _update_job_db(self, job: PrintJob) -> None:
+        """Update an existing job row in SQLite."""
+        if self._db is None:
+            return
+        try:
+            self._db.execute(
+                """UPDATE jobs SET status=?, started_at=?, completed_at=?,
+                   error=? WHERE id=?""",
+                (
+                    job.status.value, job.started_at, job.completed_at,
+                    job.error, job.id,
+                ),
+            )
+            self._db.commit()
+        except Exception:
+            logger.exception("Failed to update job %s in SQLite", job.id)
+
+    def _reload_from_db(self) -> None:
+        """Reload non-terminal jobs from SQLite on startup."""
+        if self._db is None:
+            return
+        cursor = self._db.execute(
+            """SELECT id, file_name, printer_name, status, submitted_by,
+                      priority, created_at, started_at, completed_at, error, metadata
+               FROM jobs
+               WHERE status IN ('queued', 'starting', 'printing')"""
+        )
+        recovered = 0
+        for row in cursor.fetchall():
+            status_str = row[3]
+            # Reset in-flight jobs to QUEUED — printer state unknown after crash
+            if status_str in ("starting", "printing"):
+                status_str = "queued"
+            job = PrintJob(
+                id=row[0],
+                file_name=row[1],
+                printer_name=row[2],
+                status=JobStatus(status_str),
+                submitted_by=row[4],
+                priority=row[5],
+                created_at=row[6],
+                started_at=None,  # reset since we're requeuing
+                completed_at=row[8],
+                error=row[9],
+                metadata=json.loads(row[10]) if row[10] else {},
+            )
+            self._jobs[job.id] = job
+            # Update DB to reflect the reset
+            self._update_job_db(job)
+            recovered += 1
+        if recovered:
+            logger.info("Recovered %d job(s) from SQLite after restart", recovered)
