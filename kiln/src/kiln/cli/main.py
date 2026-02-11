@@ -2071,6 +2071,110 @@ def serve() -> None:
 
 
 # ---------------------------------------------------------------------------
+# rest
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--host", default="0.0.0.0", help="Bind address.")
+@click.option("--port", default=8420, type=int, help="Port number.")
+@click.option(
+    "--auth-token", default=None,
+    help="Bearer token for authentication (optional).",
+)
+@click.option(
+    "--tier", default="full",
+    type=click.Choice(["essential", "standard", "full"]),
+    help="Which tool tier to expose (default: full).",
+)
+def rest(host: str, port: int, auth_token: Optional[str], tier: str) -> None:
+    """Start the Kiln REST API server.
+
+    Wraps all MCP tools as REST endpoints so any HTTP client can control
+    printers.  Tools are available at POST /api/tools/{tool_name} and a
+    discovery endpoint at GET /api/tools lists available tools with schemas.
+    """
+    from kiln.rest_api import run_rest_server, RestApiConfig
+
+    config = RestApiConfig(
+        host=host, port=port, auth_token=auth_token, tool_tier=tier,
+    )
+    click.echo(f"Starting Kiln REST API on {host}:{port} (tier: {tier})")
+    run_rest_server(config)
+
+
+# ---------------------------------------------------------------------------
+# agent
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option(
+    "--model", "-m", default="openai/gpt-4o",
+    help="Model ID (default: openai/gpt-4o).",
+)
+@click.option("--tier", default=None, help="Tool tier (auto-detect if not set).")
+@click.option(
+    "--base-url", default="https://openrouter.ai/api/v1",
+    help="LLM provider base URL.",
+)
+def agent(model: str, tier: Optional[str], base_url: str) -> None:
+    """Interactive agent REPL -- chat with any LLM to control your printer.
+
+    Requires KILN_OPENROUTER_KEY or OPENROUTER_API_KEY environment variable.
+    """
+    import os
+
+    api_key = os.environ.get("KILN_OPENROUTER_KEY") or os.environ.get(
+        "OPENROUTER_API_KEY"
+    )
+    if not api_key:
+        click.echo(
+            "Set KILN_OPENROUTER_KEY or OPENROUTER_API_KEY environment variable."
+        )
+        sys.exit(1)
+
+    try:
+        from kiln.agent_loop import run_agent_loop, AgentConfig
+    except ImportError:
+        click.echo(
+            "Agent loop module not available. Ensure kiln.agent_loop is installed."
+        )
+        sys.exit(1)
+
+    agent_config = AgentConfig(
+        api_key=api_key,
+        model=model,
+        tool_tier=tier or "full",
+        base_url=base_url,
+    )
+
+    click.echo(f"Kiln Agent -- model: {model}, tier: {agent_config.tool_tier}")
+    click.echo("Type 'quit' to exit.\n")
+
+    conversation = None
+    while True:
+        try:
+            prompt = click.prompt("You", prompt_suffix="> ")
+        except (EOFError, KeyboardInterrupt):
+            click.echo()
+            break
+        if prompt.lower() in ("quit", "exit", "q"):
+            break
+        try:
+            result = run_agent_loop(
+                prompt, agent_config, conversation=conversation,
+            )
+            conversation = result.messages
+            click.echo(f"\nAgent> {result.response}\n")
+            click.echo(
+                f"  ({result.tool_calls_made} tool calls, {result.turns} turns)\n"
+            )
+        except Exception as exc:
+            click.echo(f"\nAgent error: {exc}\n")
+
+
+# ---------------------------------------------------------------------------
 # Model Generation
 # ---------------------------------------------------------------------------
 

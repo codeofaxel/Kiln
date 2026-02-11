@@ -123,7 +123,10 @@ kiln generate-download <job_id> -o ./models --json      # Download generated mod
 kiln firmware status --json                # Check for firmware updates
 kiln firmware update [--component klipper] # Apply firmware updates
 kiln firmware rollback <component>         # Roll back firmware
+kiln setup                                 # Interactive printer setup wizard
 kiln serve                                 # Start MCP server
+kiln rest [--port 8420] [--tier full]      # Start REST API server
+kiln agent [--model openai/gpt-4o]         # Interactive agent REPL (any LLM)
 ```
 
 Global option: `--printer <name>` to target a specific printer per-command.
@@ -160,6 +163,28 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
   }
 }
 ```
+
+### Multi-Model Support (OpenRouter / Any LLM)
+
+Kiln works with **any** LLM that supports OpenAI-compatible function calling — not just Claude.
+
+```bash
+# Interactive agent REPL with any model via OpenRouter
+export KILN_OPENROUTER_KEY=sk-or-...
+kiln agent --model openai/gpt-4o
+kiln agent --model anthropic/claude-sonnet-4
+kiln agent --model meta-llama/llama-3.1-70b-instruct --tier essential
+
+# REST API mode — any HTTP client can call Kiln tools
+kiln rest --port 8420 --tier full
+# POST http://localhost:8420/api/tools/printer_status
+# GET  http://localhost:8420/api/tools
+
+# Install with REST API support
+pip install kiln3d[rest]
+```
+
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (43 tools) for mid-range, **full** (101 tools) for Claude/GPT-4/Gemini.
 
 ### OctoPrint CLI
 
@@ -328,8 +353,13 @@ The server also exposes read-only resources that agents can use for context:
 | `slicer_profiles.py` | Bundled slicer profiles (auto-generates .ini files per printer) |
 | `printer_intelligence.py` | Printer knowledge base (firmware quirks, materials, failure modes) |
 | `pipelines.py` | Pre-validated print pipelines (quick_print, calibrate, benchmark) |
+| `tool_schema.py` | OpenAI function-calling schema converter (MCP → OpenAI format) |
+| `tool_tiers.py` | Tool tier definitions (essential/standard/full) for model capability matching |
+| `agent_loop.py` | Generic agent loop for any OpenAI-compatible API (OpenRouter, direct, etc.) |
+| `openrouter.py` | OpenRouter integration with model catalog and auto-tier detection |
+| `rest_api.py` | REST API wrapper (FastAPI) exposing all MCP tools as HTTP endpoints |
 | `data/` | Bundled JSON databases (safety profiles, slicer profiles, printer intelligence) |
-| `cli/` | Click CLI with 25+ subcommands and JSON output |
+| `cli/` | Click CLI with 50+ subcommands and JSON output |
 
 ## Beyond 3D Printing
 
