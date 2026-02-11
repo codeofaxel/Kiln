@@ -9,7 +9,7 @@ Prioritized backlog of features and improvements.
 - **Landing page / docs site** — Single-page site with: what Kiln is, demo GIF, install command, whitepaper link, project docs link, GitHub link. GitHub Pages or similar. Host on `kiln3d.com`.
 - **Demo video / GIF** — 60-second screen recording: install → discover printer → slice → print. Embed on landing page and README.
 - **Claim `kiln3d` across registries** — Front-run the name on platforms we'll eventually publish to: Docker Hub (`kiln3d`), Homebrew tap (`kiln3d`), npm (`kiln3d` — for future JS client), crates.io (`kiln3d` — if Rust components ever happen). Free or near-free, painful to fix later.
-- **Claim PyPI names** — Register `kiln-print`, `kiln-mcp`, and `kiln3d-octoprint` as pending publishers or publish placeholder packages.
+
 
 ## Pre-Launch (Ship Day)
 

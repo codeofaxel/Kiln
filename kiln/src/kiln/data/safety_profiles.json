@@ -14,7 +14,6 @@
     "max_volumetric_flow": null,
     "notes": "Conservative defaults suitable for most FDM printers."
   },
-
   "ender3": {
     "display_name": "Creality Ender 3 / Ender 3 Pro / Ender 3 V2",
     "max_hotend_temp": 260.0,
@@ -23,8 +22,12 @@
     "max_feedrate": 7500.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 12.0,
-    "build_volume": [220, 220, 250],
-    "notes": "PTFE-lined hotend by default — exceeding 240C risks toxic fumes. All-metal upgrade raises safe limit to 300C."
+    "build_volume": [
+      220,
+      220,
+      250
+    ],
+    "notes": "PTFE-lined hotend by default \u2014 exceeding 240C risks toxic fumes. All-metal upgrade raises safe limit to 300C."
   },
   "ender3_s1": {
     "display_name": "Creality Ender 3 S1 / S1 Pro",
@@ -34,7 +37,11 @@
     "max_feedrate": 8000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 14.0,
-    "build_volume": [220, 220, 270],
+    "build_volume": [
+      220,
+      220,
+      270
+    ],
     "notes": "Sprite direct-drive extruder with all-metal hotend."
   },
   "ender5": {
@@ -45,8 +52,12 @@
     "max_feedrate": 8000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 12.0,
-    "build_volume": [350, 350, 400],
-    "notes": "CoreXY-style with PTFE hotend — same hotend caution as Ender 3."
+    "build_volume": [
+      350,
+      350,
+      400
+    ],
+    "notes": "CoreXY-style with PTFE hotend \u2014 same hotend caution as Ender 3."
   },
   "cr10": {
     "display_name": "Creality CR-10 / CR-10S",
@@ -56,7 +67,11 @@
     "max_feedrate": 8000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 12.0,
-    "build_volume": [300, 300, 400],
+    "build_volume": [
+      300,
+      300,
+      400
+    ],
     "notes": "PTFE hotend. Large build volume."
   },
   "k1": {
@@ -67,10 +82,13 @@
     "max_feedrate": 30000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 32.0,
-    "build_volume": [300, 300, 300],
+    "build_volume": [
+      300,
+      300,
+      300
+    ],
     "notes": "High-speed CoreXY. Enclosed chamber. All-metal hotend."
   },
-
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",
     "max_hotend_temp": 300.0,
@@ -79,7 +97,11 @@
     "max_feedrate": 12000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 15.0,
-    "build_volume": [250, 210, 210],
+    "build_volume": [
+      250,
+      210,
+      210
+    ],
     "notes": "E3D V6 all-metal hotend. Bontech gears."
   },
   "prusa_mk4": {
@@ -90,7 +112,11 @@
     "max_feedrate": 15000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 20.0,
-    "build_volume": [250, 210, 220],
+    "build_volume": [
+      250,
+      210,
+      220
+    ],
     "notes": "Nextruder with all-metal hotend. Input shaping."
   },
   "prusa_xl": {
@@ -101,7 +127,11 @@
     "max_feedrate": 15000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 20.0,
-    "build_volume": [360, 360, 360],
+    "build_volume": [
+      360,
+      360,
+      360
+    ],
     "notes": "CoreXY, segmented heatbed, up to 5 tool heads."
   },
   "prusa_mini": {
@@ -112,10 +142,13 @@
     "max_feedrate": 12000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 11.0,
-    "build_volume": [180, 180, 180],
-    "notes": "PTFE-lined hotend — reduced max temp. Bowden setup."
+    "build_volume": [
+      180,
+      180,
+      180
+    ],
+    "notes": "PTFE-lined hotend \u2014 reduced max temp. Bowden setup."
   },
-
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
     "max_hotend_temp": 300.0,
@@ -124,7 +157,11 @@
     "max_feedrate": 30000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 32.0,
-    "build_volume": [256, 256, 256],
+    "build_volume": [
+      256,
+      256,
+      256
+    ],
     "notes": "Enclosed CoreXY. Hardened nozzle. AMS multi-material. LiDAR first-layer inspection."
   },
   "bambu_p1s": {
@@ -135,7 +172,11 @@
     "max_feedrate": 30000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 32.0,
-    "build_volume": [256, 256, 256],
+    "build_volume": [
+      256,
+      256,
+      256
+    ],
     "notes": "Enclosed CoreXY. Same hotend as X1C without LiDAR."
   },
   "bambu_p1p": {
@@ -146,7 +187,11 @@
     "max_feedrate": 30000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 28.0,
-    "build_volume": [256, 256, 256],
+    "build_volume": [
+      256,
+      256,
+      256
+    ],
     "notes": "Open-frame CoreXY. All-metal hotend."
   },
   "bambu_a1_mini": {
@@ -157,7 +202,11 @@
     "max_feedrate": 20000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 24.0,
-    "build_volume": [180, 180, 180],
+    "build_volume": [
+      180,
+      180,
+      180
+    ],
     "notes": "Compact bed-slinger. All-metal hotend. AMS Lite compatible."
   },
   "bambu_a1": {
@@ -168,10 +217,13 @@
     "max_feedrate": 20000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 28.0,
-    "build_volume": [256, 256, 256],
+    "build_volume": [
+      256,
+      256,
+      256
+    ],
     "notes": "Open-frame bed-slinger. All-metal hotend. AMS Lite compatible."
   },
-
   "voron_0": {
     "display_name": "Voron 0 / 0.2",
     "max_hotend_temp": 300.0,
@@ -180,7 +232,11 @@
     "max_feedrate": 30000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 24.0,
-    "build_volume": [120, 120, 120],
+    "build_volume": [
+      120,
+      120,
+      120
+    ],
     "notes": "Compact enclosed CoreXY kit. Limits depend on hotend choice."
   },
   "voron_2": {
@@ -191,10 +247,13 @@
     "max_feedrate": 30000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 30.0,
-    "build_volume": [350, 350, 350],
+    "build_volume": [
+      350,
+      350,
+      350
+    ],
     "notes": "Full-size enclosed CoreXY kit. Typical configs use Dragon/Rapido hotend."
   },
-
   "ratrig_vcore3": {
     "display_name": "Rat Rig V-Core 3 / V-Core 3.1",
     "max_hotend_temp": 300.0,
@@ -203,10 +262,13 @@
     "max_feedrate": 25000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 25.0,
-    "build_volume": [300, 300, 300],
+    "build_volume": [
+      300,
+      300,
+      300
+    ],
     "notes": "CoreXY kit. Limits depend on hotend choice. Usually EVA toolhead."
   },
-
   "elegoo_neptune3": {
     "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus",
     "max_hotend_temp": 260.0,
@@ -215,7 +277,11 @@
     "max_feedrate": 8000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 12.0,
-    "build_volume": [220, 220, 280],
+    "build_volume": [
+      220,
+      220,
+      280
+    ],
     "notes": "PTFE-lined hotend. Direct drive. Same temp caution as Ender 3."
   },
   "elegoo_neptune4": {
@@ -226,10 +292,13 @@
     "max_feedrate": 20000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 25.0,
-    "build_volume": [235, 235, 265],
+    "build_volume": [
+      235,
+      235,
+      265
+    ],
     "notes": "Klipper-based. All-metal hotend. High-speed capable."
   },
-
   "anker_m5": {
     "display_name": "AnkerMake M5 / M5C",
     "max_hotend_temp": 300.0,
@@ -238,10 +307,13 @@
     "max_feedrate": 30000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 24.0,
-    "build_volume": [235, 235, 250],
+    "build_volume": [
+      235,
+      235,
+      250
+    ],
     "notes": "High-speed. All-metal hotend. PowerBoost mode."
   },
-
   "artillery_sw_x3": {
     "display_name": "Artillery Sidewinder X3 Plus / X3 Pro",
     "max_hotend_temp": 300.0,
@@ -250,10 +322,13 @@
     "max_feedrate": 20000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 22.0,
-    "build_volume": [300, 300, 400],
+    "build_volume": [
+      300,
+      300,
+      400
+    ],
     "notes": "Klipper-based. All-metal hotend. Direct drive."
   },
-
   "sovol_sv06": {
     "display_name": "Sovol SV06 / SV06 Plus",
     "max_hotend_temp": 300.0,
@@ -262,7 +337,11 @@
     "max_feedrate": 8000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 12.0,
-    "build_volume": [220, 220, 250],
+    "build_volume": [
+      220,
+      220,
+      250
+    ],
     "notes": "Prusa MK3S clone. All-metal hotend. Planetary gear extruder."
   },
   "sovol_sv07": {
@@ -273,10 +352,13 @@
     "max_feedrate": 20000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 22.0,
-    "build_volume": [220, 220, 250],
+    "build_volume": [
+      220,
+      220,
+      250
+    ],
     "notes": "Klipper-based. All-metal hotend. High-speed."
   },
-
   "flashforge_adventurer5m": {
     "display_name": "FlashForge Adventurer 5M / 5M Pro",
     "max_hotend_temp": 280.0,
@@ -285,10 +367,13 @@
     "max_feedrate": 30000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 25.0,
-    "build_volume": [220, 220, 220],
+    "build_volume": [
+      220,
+      220,
+      220
+    ],
     "notes": "Enclosed. Klipper-based. Quick-swap nozzle."
   },
-
   "qidi_x_plus3": {
     "display_name": "QIDI X-Plus 3 / X-Max 3",
     "max_hotend_temp": 350.0,
@@ -297,7 +382,26 @@
     "max_feedrate": 30000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": 30.0,
-    "build_volume": [280, 280, 270],
+    "build_volume": [
+      280,
+      280,
+      270
+    ],
     "notes": "Enclosed CoreXY. High-temp hotend for engineering filaments. Klipper firmware."
+  },
+  "klipper_generic": {
+    "display_name": "Generic Klipper Printer (Moonraker)",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 120.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 15000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 20.0,
+    "build_volume": [
+      235,
+      235,
+      250
+    ],
+    "notes": "Generic Klipper/Moonraker printer with all-metal hotend. No enclosure assumed. Adjust limits to match your hardware."
   }
 }

@@ -142,6 +142,14 @@ Every tool has a safety level. Follow the expected behavior exactly.
 3. IF warnings: relay to human
 4. start_print(file)              [confirm — "Ready to print {file}. Proceed?"]
 5. printer_status() periodically  [safe — monitor progress]
+
+After starting a print:
+6. Wait 2-3 minutes for the first layer to complete
+7. Call monitor_print_vision() or printer_snapshot() to check first layer
+8. If vision detects issues (spaghetti, adhesion failure, warping):
+   - Confidence >= 0.8: pause_print() and alert the human
+   - Confidence < 0.8: continue monitoring, check again in 2 minutes
+9. If first layer looks good, continue to periodic monitoring
 ```
 
 ### Temperature Adjustment
@@ -163,6 +171,32 @@ Every tool has a safety level. Follow the expected behavior exactly.
    → Ask human: "Detected potential failure. Cancel print?"
    → cancel_print() only after confirmation
 ```
+
+### Print Monitoring Loop
+
+Recommended monitoring pattern after print starts:
+
+```
+1. After start_print, wait 2-3 minutes for first layer
+2. Call printer_snapshot() to visually check first layer adhesion
+3. If using vision: monitor_print_vision() for automated failure detection
+4. During print, check printer_status() every 5-10 minutes for:
+   - Temperature anomalies (sudden drops = heater failure, spikes = thermal runaway)
+   - Progress stalls (same percentage for >10 minutes = possible jam)
+   - Error states (OFFLINE, ERROR)
+5. On completion: log to print_history, turn off heaters
+```
+
+#### When to Escalate vs Auto-Handle
+
+| Situation | Action | Tool |
+|-----------|--------|------|
+| First layer failure (high confidence) | Pause + alert human | pause_print() |
+| Temperature out of range | Alert human | printer_status() |
+| Filament runout detected | Pause + alert human | pause_print() |
+| Print progress stalled | Alert human (do NOT cancel) | printer_status() |
+| Spaghetti / complete detach | emergency_stop() | emergency_stop() |
+| Normal completion | Log + cool down | set_tool_temp(0), set_bed_temp(0) |
 
 ## Operational Policies
 

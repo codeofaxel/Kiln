@@ -4,6 +4,13 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-11
 
+### Claimed PyPI Package Names
+Reserved four PyPI package names as v0.0.1 placeholders:
+- `kiln3d` — https://pypi.org/project/kiln3d/
+- `kiln-print` — https://pypi.org/project/kiln-print/
+- `kiln-mcp` — https://pypi.org/project/kiln-mcp/
+- `kiln3d-octoprint` — https://pypi.org/project/kiln3d-octoprint/
+
 ### Model Safety Guardrails — Auto-Print Toggles
 Added safety guardrails for AI-generated and marketplace-downloaded 3D models:
 

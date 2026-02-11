@@ -1313,9 +1313,13 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
             errors.extend(temp_warnings)
 
         # -- Material mismatch check (optional) ----------------------------
+        _strict_material = os.environ.get(
+            "KILN_STRICT_MATERIAL_CHECK", "true"
+        ).lower() in ("1", "true", "yes")
+
         if expected_material is not None:
+            # 1) Check against loaded material (if material tracking is configured)
             try:
-                # Use the default printer name for material check
                 printer_name = "default"
                 if _registry.count > 0:
                     names = _registry.list_names()
@@ -1339,6 +1343,37 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
             except Exception:
                 # Material tracking not configured — skip silently
                 pass
+
+            # 2) Check against printer intelligence DB (material compatibility)
+            if _PRINTER_MODEL:
+                try:
+                    mat_settings = get_material_settings(_PRINTER_MODEL, expected_material)
+                    if mat_settings is None:
+                        msg = (
+                            f"Material {expected_material.upper()} is not validated "
+                            f"for printer model '{_PRINTER_MODEL}'. "
+                            f"This material may damage the printer."
+                        )
+                        # Strict mode = blocking; non-strict = warning only
+                        checks.append({
+                            "name": "material_compatible",
+                            "passed": not _strict_material,
+                            "message": msg,
+                        })
+                        if _strict_material:
+                            errors.append(msg)
+                    else:
+                        checks.append({
+                            "name": "material_compatible",
+                            "passed": True,
+                            "message": (
+                                f"{expected_material.upper()} is validated for "
+                                f"'{_PRINTER_MODEL}' "
+                                f"(hotend {mat_settings.hotend_temp}C, bed {mat_settings.bed_temp}C)"
+                            ),
+                        })
+                except Exception:
+                    pass
 
         # -- File validation (optional) ------------------------------------
         file_result: Optional[Dict[str, Any]] = None
@@ -6276,7 +6311,6 @@ def run_quick_print(
     printer_name: str | None = None,
     printer_id: str | None = None,
     profile_path: str | None = None,
-    skip_preflight: bool = False,
 ) -> dict:
     """Slice → validate → upload → print in one shot.
 
@@ -6285,16 +6319,15 @@ def run_quick_print(
     2. Slice the model to G-code
     3. Safety-validate the G-code against printer limits
     4. Upload G-code to the printer
-    5. Run preflight checks
+    5. Run preflight checks (always — cannot be skipped)
     6. Start printing
 
     Args:
         model_path: Path to input model (STL, 3MF, STEP, OBJ).
         printer_name: Registered printer name in fleet.
         printer_id: Printer model ID for auto-profile selection
-            (e.g. ``"ender3"``, ``"bambu_x1c"``).
+            (e.g. ``"ender3"``, ``"bambu_x1c"``, ``"klipper_generic"``).
         profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
-        skip_preflight: Skip preflight checks (not recommended).
     """
     if err := _check_auth("print"):
         return err
@@ -6304,7 +6337,6 @@ def run_quick_print(
             printer_name=printer_name,
             printer_id=printer_id,
             profile_path=profile_path,
-            skip_preflight=skip_preflight,
         )
         return {"success": result.success, **result.to_dict()}
     except Exception as exc:
