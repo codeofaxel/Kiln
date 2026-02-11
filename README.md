@@ -53,8 +53,9 @@ This monorepo contains two packages:
 ### Kiln CLI
 
 ```bash
-# Install from PyPI
-pip install kiln3d
+# Install from PyPI (use pipx on modern Linux/WSL)
+pipx install kiln3d        # Recommended — auto-creates isolated env
+# OR: pip install kiln3d   # Works on macOS / inside a virtualenv
 
 # Or install from source
 pip install -e ./kiln
@@ -95,8 +96,18 @@ kiln status --json
 
 Kiln runs natively on Linux and Ubuntu under WSL 2.
 
+> **"Externally managed environment" error?** Modern Ubuntu/Debian (23.04+)
+> blocks `pip install` system-wide to protect OS packages.  Use **pipx**
+> (installs into its own virtualenv automatically) or create a venv manually.
+
 ```bash
-# Install Kiln
+# Option A: pipx (recommended — one command, no venv to manage)
+sudo apt install pipx && pipx ensurepath   # one-time setup
+pipx install kiln3d
+
+# Option B: virtualenv (if you prefer manual control)
+python3 -m venv ~/.kiln-venv
+source ~/.kiln-venv/bin/activate
 pip install kiln3d
 
 # System dependencies (optional but recommended)
@@ -540,6 +551,9 @@ Agents use `fulfillment_quote` and `fulfillment_order` MCP tools for the same wo
 ## Development
 
 ```bash
+# Create a virtualenv first (required on modern Ubuntu/Debian/WSL)
+python3 -m venv .venv && source .venv/bin/activate
+
 # Install both packages in dev mode
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
