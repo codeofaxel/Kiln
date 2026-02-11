@@ -109,9 +109,6 @@ git clone https://github.com/codeofaxel/Kiln.git
 cd Kiln
 pipx install ./kiln
 
-# Optional: Bambu Lab support
-pipx inject kiln3d paho-mqtt
-
 # System dependencies (optional but recommended)
 sudo apt install prusa-slicer   # Required for slicing STL → G-code
 sudo apt install openscad        # Required only for text-to-3D generation
@@ -130,8 +127,7 @@ source ~/.kiln-venv/bin/activate
 
 git clone https://github.com/codeofaxel/Kiln.git
 cd Kiln
-pip install -e ./kiln            # core
-pip install -e "./kiln[bambu]"   # add Bambu Lab support (if needed)
+pip install -e ./kiln            # includes all printer backends (OctoPrint, Moonraker, Bambu, Prusa Connect)
 
 kiln verify
 ```
