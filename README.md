@@ -84,6 +84,44 @@ kiln history --status completed
 kiln status --json
 ```
 
+### Linux / WSL 2
+
+Kiln runs natively on Linux and Ubuntu under WSL 2.
+
+```bash
+# Install Kiln
+pip install kiln3d
+
+# System dependencies (optional but recommended)
+sudo apt install prusa-slicer   # Required for slicing STL → G-code
+sudo apt install openscad        # Required only for text-to-3D generation
+
+# Verify your install
+kiln verify
+```
+
+**WSL 2 networking note:** WSL 2 uses a virtual network (NAT), so mDNS printer
+discovery (`kiln discover`) will not find printers on your home network. Instead,
+connect directly by IP:
+
+```bash
+# 1. Find your printer's IP (check your router or Moonraker/OctoPrint web UI)
+# 2. Verify connectivity from WSL
+curl http://192.168.1.100:7125/server/info   # Moonraker (Klipper)
+curl http://192.168.1.100/api/version        # OctoPrint
+
+# 3. Register the printer with Kiln
+kiln auth --name my-printer --host http://192.168.1.100:7125 --type moonraker
+
+# 4. Check printer status
+kiln status
+```
+
+If PrusaSlicer is not in your PATH, set it explicitly:
+```bash
+export KILN_SLICER_PATH=/path/to/prusa-slicer
+```
+
 ### CLI Commands
 
 ```

@@ -4,7 +4,6 @@
     "description": "Printer intelligence database: firmware quirks, material compatibility, calibration guidance, and known failure modes. Keyed by the same printer_id as safety_profiles.json.",
     "updated": "2025-02-11"
   },
-
   "default": {
     "display_name": "Generic FDM Printer",
     "firmware": "marlin",
@@ -13,10 +12,30 @@
     "has_enclosure": false,
     "has_abl": false,
     "materials": {
-      "PLA": {"hotend": 210, "bed": 60, "fan": 100, "notes": "Standard settings."},
-      "PETG": {"hotend": 235, "bed": 80, "fan": 50, "notes": "Reduce fan to avoid layer delamination."},
-      "ABS": {"hotend": 240, "bed": 100, "fan": 0, "notes": "Requires enclosure to prevent warping."},
-      "TPU": {"hotend": 225, "bed": 50, "fan": 50, "notes": "Print slowly (20-30mm/s). Disable retraction if bowden."}
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Standard settings."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50,
+        "notes": "Reduce fan to avoid layer delamination."
+      },
+      "ABS": {
+        "hotend": 240,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Requires enclosure to prevent warping."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Print slowly (20-30mm/s). Disable retraction if bowden."
+      }
     },
     "quirks": [],
     "calibration": {
@@ -26,7 +45,6 @@
     },
     "failure_modes": []
   },
-
   "ender3": {
     "display_name": "Creality Ender 3 / Ender 3 Pro / Ender 3 V2",
     "firmware": "marlin",
@@ -35,16 +53,31 @@
     "has_enclosure": false,
     "has_abl": false,
     "materials": {
-      "PLA": {"hotend": 200, "bed": 60, "fan": 100, "notes": "Sweet spot for stock PTFE hotend."},
-      "PETG": {"hotend": 230, "bed": 80, "fan": 50, "notes": "Keep below 240C to protect PTFE tube."},
-      "TPU": {"hotend": 220, "bed": 50, "fan": 50, "notes": "Very difficult with bowden setup — print at 15-20mm/s, disable retraction."}
+      "PLA": {
+        "hotend": 200,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Sweet spot for stock PTFE hotend."
+      },
+      "PETG": {
+        "hotend": 230,
+        "bed": 80,
+        "fan": 50,
+        "notes": "Keep below 240C to protect PTFE tube."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Very difficult with bowden setup \u2014 print at 15-20mm/s, disable retraction."
+      }
     },
     "quirks": [
-      "PTFE tube degrades above 240°C — produces toxic fumes. Upgrade to all-metal hotend for higher temps.",
-      "Bowden tube couplers loosen over time — check and replace couplers every 6 months.",
-      "Stock bed springs are weak — upgrade to yellow springs or silicone spacers for stable leveling.",
-      "V2 uses a 32-bit board (4.2.2/4.2.7) — flash Marlin firmware for thermal runaway protection if not updated.",
-      "Extruder arm is plastic and cracks — inspect regularly, replace with aluminum extruder kit."
+      "PTFE tube degrades above 240\u00b0C \u2014 produces toxic fumes. Upgrade to all-metal hotend for higher temps.",
+      "Bowden tube couplers loosen over time \u2014 check and replace couplers every 6 months.",
+      "Stock bed springs are weak \u2014 upgrade to yellow springs or silicone spacers for stable leveling.",
+      "V2 uses a 32-bit board (4.2.2/4.2.7) \u2014 flash Marlin firmware for thermal runaway protection if not updated.",
+      "Extruder arm is plastic and cracks \u2014 inspect regularly, replace with aluminum extruder kit."
     ],
     "calibration": {
       "first_steps": "Manual mesh bed leveling with paper method. Set Z-offset. Print bed level test pattern.",
@@ -53,13 +86,28 @@
       "esteps": "Stock e-steps often off by 5-10%. Measure 100mm extrusion, calibrate via M92 E<value> + M500."
     },
     "failure_modes": [
-      {"symptom": "Under-extrusion after 50+ hours", "cause": "PTFE tube degradation or extruder arm crack", "fix": "Replace PTFE tube, inspect extruder arm for cracks"},
-      {"symptom": "Layer shifting on Y axis", "cause": "Belt tension too loose or eccentric nuts too tight", "fix": "Tighten Y belt — should twang like guitar string. Adjust eccentric nuts until bed slides freely with no wobble"},
-      {"symptom": "First layer not sticking", "cause": "Bed not level or Z-offset too high", "fix": "Re-level with paper method, lower Z-offset by 0.05mm increments"},
-      {"symptom": "Stringing between parts", "cause": "Retraction too short for bowden setup", "fix": "Increase retraction to 5-6mm at 45mm/s"}
+      {
+        "symptom": "Under-extrusion after 50+ hours",
+        "cause": "PTFE tube degradation or extruder arm crack",
+        "fix": "Replace PTFE tube, inspect extruder arm for cracks"
+      },
+      {
+        "symptom": "Layer shifting on Y axis",
+        "cause": "Belt tension too loose or eccentric nuts too tight",
+        "fix": "Tighten Y belt \u2014 should twang like guitar string. Adjust eccentric nuts until bed slides freely with no wobble"
+      },
+      {
+        "symptom": "First layer not sticking",
+        "cause": "Bed not level or Z-offset too high",
+        "fix": "Re-level with paper method, lower Z-offset by 0.05mm increments"
+      },
+      {
+        "symptom": "Stringing between parts",
+        "cause": "Retraction too short for bowden setup",
+        "fix": "Increase retraction to 5-6mm at 45mm/s"
+      }
     ]
   },
-
   "ender3_s1": {
     "display_name": "Creality Ender 3 S1 / S1 Pro",
     "firmware": "marlin",
@@ -68,15 +116,35 @@
     "has_enclosure": false,
     "has_abl": true,
     "materials": {
-      "PLA": {"hotend": 205, "bed": 60, "fan": 100, "notes": "Direct drive allows lower temps."},
-      "PETG": {"hotend": 235, "bed": 80, "fan": 50, "notes": "All-metal hotend safe at these temps."},
-      "ABS": {"hotend": 245, "bed": 100, "fan": 0, "notes": "Print in enclosure or draft-free room."},
-      "TPU": {"hotend": 220, "bed": 50, "fan": 50, "notes": "Direct drive handles TPU well — 30mm/s, 0.5mm retraction."}
+      "PLA": {
+        "hotend": 205,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Direct drive allows lower temps."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50,
+        "notes": "All-metal hotend safe at these temps."
+      },
+      "ABS": {
+        "hotend": 245,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Print in enclosure or draft-free room."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive handles TPU well \u2014 30mm/s, 0.5mm retraction."
+      }
     },
     "quirks": [
-      "CR-Touch probe occasionally gives false readings — clean probe tip regularly.",
-      "Sprite extruder gear tension spring can be too tight for TPU — loosen one turn.",
-      "S1 Pro has a higher temp hotend (300C) than S1 (260C) — check your model before printing high-temp materials."
+      "CR-Touch probe occasionally gives false readings \u2014 clean probe tip regularly.",
+      "Sprite extruder gear tension spring can be too tight for TPU \u2014 loosen one turn.",
+      "S1 Pro has a higher temp hotend (300C) than S1 (260C) \u2014 check your model before printing high-temp materials."
     ],
     "calibration": {
       "first_steps": "Run CR-Touch auto-level. Fine-tune Z-offset with live babystep during first layer.",
@@ -84,11 +152,18 @@
       "retraction_test": "Start at 0.8mm retraction, 40mm/s. Sprite extruder rarely needs more than 1mm."
     },
     "failure_modes": [
-      {"symptom": "Inconsistent extrusion", "cause": "Sprite extruder gear tension too loose or filament grinding", "fix": "Adjust gear tension screw. Clean extruder gears with brass brush."},
-      {"symptom": "Nozzle clogs with PETG", "cause": "Heat creep in all-metal hotend", "fix": "Ensure heatsink fan runs at 100%. Print PETG at 230-235C, not higher."}
+      {
+        "symptom": "Inconsistent extrusion",
+        "cause": "Sprite extruder gear tension too loose or filament grinding",
+        "fix": "Adjust gear tension screw. Clean extruder gears with brass brush."
+      },
+      {
+        "symptom": "Nozzle clogs with PETG",
+        "cause": "Heat creep in all-metal hotend",
+        "fix": "Ensure heatsink fan runs at 100%. Print PETG at 230-235C, not higher."
+      }
     ]
   },
-
   "k1": {
     "display_name": "Creality K1 / K1 Max",
     "firmware": "klipper",
@@ -97,16 +172,36 @@
     "has_enclosure": true,
     "has_abl": true,
     "materials": {
-      "PLA": {"hotend": 220, "bed": 55, "fan": 100, "notes": "Higher temp than usual due to speed. Open door for PLA to avoid heat creep."},
-      "PETG": {"hotend": 240, "bed": 80, "fan": 40, "notes": "Keep door closed. Reduce speed to 150mm/s for quality."},
-      "ABS": {"hotend": 250, "bed": 100, "fan": 0, "notes": "Enclosed chamber ideal for ABS. Full speed OK."},
-      "TPU": {"hotend": 225, "bed": 50, "fan": 50, "notes": "Reduce speed to 50-80mm/s for TPU."}
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Higher temp than usual due to speed. Open door for PLA to avoid heat creep."
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40,
+        "notes": "Keep door closed. Reduce speed to 150mm/s for quality."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Enclosed chamber ideal for ABS. Full speed OK."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Reduce speed to 50-80mm/s for TPU."
+      }
     },
     "quirks": [
-      "Input shaping must be tuned per-machine — run ADXL345 calibration after any hardware changes.",
-      "Stock Klipper firmware is customized — community firmware (Guilouz) unlocks more features.",
-      "Print PLA with door open — enclosed chamber causes heat creep and jams at high speeds.",
-      "LIDAR on K1 Max sometimes miscalibrates — verify Z offset manually if first layer issues."
+      "Input shaping must be tuned per-machine \u2014 run ADXL345 calibration after any hardware changes.",
+      "Stock Klipper firmware is customized \u2014 community firmware (Guilouz) unlocks more features.",
+      "Print PLA with door open \u2014 enclosed chamber causes heat creep and jams at high speeds.",
+      "LIDAR on K1 Max sometimes miscalibrates \u2014 verify Z offset manually if first layer issues."
     ],
     "calibration": {
       "first_steps": "Run built-in self-test. Input shaping auto-tune. Verify Z offset with first layer print.",
@@ -114,11 +209,18 @@
       "retraction_test": "0.5mm retraction at 40mm/s is usually optimal. Don't exceed 1mm."
     },
     "failure_modes": [
-      {"symptom": "Filament jams during fast PLA printing", "cause": "Heat creep in enclosed chamber", "fix": "Open enclosure door for PLA. Ensure hotend fan is at 100%."},
-      {"symptom": "Ringing/ghosting artifacts", "cause": "Input shaping not tuned or belt tension off", "fix": "Re-run input shaper calibration. Check belt tension on both X and Y."}
+      {
+        "symptom": "Filament jams during fast PLA printing",
+        "cause": "Heat creep in enclosed chamber",
+        "fix": "Open enclosure door for PLA. Ensure hotend fan is at 100%."
+      },
+      {
+        "symptom": "Ringing/ghosting artifacts",
+        "cause": "Input shaping not tuned or belt tension off",
+        "fix": "Re-run input shaper calibration. Check belt tension on both X and Y."
+      }
     ]
   },
-
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",
     "firmware": "marlin",
@@ -127,29 +229,61 @@
     "has_enclosure": false,
     "has_abl": true,
     "materials": {
-      "PLA": {"hotend": 215, "bed": 60, "fan": 100, "notes": "Prusa's own PLA profiles are excellent."},
-      "PETG": {"hotend": 235, "bed": 85, "fan": 50, "notes": "Prusament PETG at 240C/90C bed works perfectly."},
-      "ABS": {"hotend": 255, "bed": 100, "fan": 0, "notes": "Enclosure strongly recommended. Prusa sells one."},
-      "ASA": {"hotend": 260, "bed": 105, "fan": 20, "notes": "Similar to ABS. Better UV resistance for outdoor parts."},
-      "TPU": {"hotend": 220, "bed": 50, "fan": 50, "notes": "Direct drive handles TPU well at 25-35mm/s."}
+      "PLA": {
+        "hotend": 215,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Prusa's own PLA profiles are excellent."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 85,
+        "fan": 50,
+        "notes": "Prusament PETG at 240C/90C bed works perfectly."
+      },
+      "ABS": {
+        "hotend": 255,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Enclosure strongly recommended. Prusa sells one."
+      },
+      "ASA": {
+        "hotend": 260,
+        "bed": 105,
+        "fan": 20,
+        "notes": "Similar to ABS. Better UV resistance for outdoor parts."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive handles TPU well at 25-35mm/s."
+      }
     },
     "quirks": [
-      "PINDA probe is temperature-sensitive — first layer calibration varies with ambient temp. MK3S+ SuperPINDA is better.",
-      "Bondtech gears need cleaning every ~500h of printing — use brass brush.",
-      "Filament sensor (IR) can false-trigger with translucent filaments — can be disabled in firmware menu.",
-      "Stock textured PEI sheet works great for PETG but PLA sometimes sticks too well — use smooth sheet for PLA."
+      "PINDA probe is temperature-sensitive \u2014 first layer calibration varies with ambient temp. MK3S+ SuperPINDA is better.",
+      "Bondtech gears need cleaning every ~500h of printing \u2014 use brass brush.",
+      "Filament sensor (IR) can false-trigger with translucent filaments \u2014 can be disabled in firmware menu.",
+      "Stock textured PEI sheet works great for PETG but PLA sometimes sticks too well \u2014 use smooth sheet for PLA."
     ],
     "calibration": {
       "first_steps": "Run first layer calibration (from LCD menu). This is the single most important calibration step.",
-      "flow_rate_test": "PrusaSlicer bundles excellent calibration models — use built-in flow tower.",
+      "flow_rate_test": "PrusaSlicer bundles excellent calibration models \u2014 use built-in flow tower.",
       "retraction_test": "0.8mm at 35mm/s is the factory default and rarely needs adjustment."
     },
     "failure_modes": [
-      {"symptom": "First layer height varies across bed", "cause": "PINDA probe thermal drift", "fix": "Upgrade to SuperPINDA. Or let printer warm up 10 min before printing."},
-      {"symptom": "Clicking sound from extruder, under-extrusion", "cause": "Partially clogged nozzle or cold pull needed", "fix": "Do cold pull with nylon at 285C → pull at 90C. Replace nozzle if persists."}
+      {
+        "symptom": "First layer height varies across bed",
+        "cause": "PINDA probe thermal drift",
+        "fix": "Upgrade to SuperPINDA. Or let printer warm up 10 min before printing."
+      },
+      {
+        "symptom": "Clicking sound from extruder, under-extrusion",
+        "cause": "Partially clogged nozzle or cold pull needed",
+        "fix": "Do cold pull with nylon at 285C \u2192 pull at 90C. Replace nozzle if persists."
+      }
     ]
   },
-
   "prusa_mk4": {
     "display_name": "Prusa MK4 / MK4S",
     "firmware": "marlin",
@@ -158,28 +292,55 @@
     "has_enclosure": false,
     "has_abl": true,
     "materials": {
-      "PLA": {"hotend": 215, "bed": 60, "fan": 100, "notes": "PrusaSlicer has native MK4 profiles. Use them."},
-      "PETG": {"hotend": 240, "bed": 85, "fan": 50, "notes": "Nextruder handles PETG well at these temps."},
-      "ABS": {"hotend": 255, "bed": 100, "fan": 0, "notes": "Enclosure recommended. MK4S improved part cooling."},
-      "TPU": {"hotend": 220, "bed": 50, "fan": 50, "notes": "Nextruder is excellent for flexibles — 30-40mm/s."}
+      "PLA": {
+        "hotend": 215,
+        "bed": 60,
+        "fan": 100,
+        "notes": "PrusaSlicer has native MK4 profiles. Use them."
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 85,
+        "fan": 50,
+        "notes": "Nextruder handles PETG well at these temps."
+      },
+      "ABS": {
+        "hotend": 255,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Enclosure recommended. MK4S improved part cooling."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Nextruder is excellent for flexibles \u2014 30-40mm/s."
+      }
     },
     "quirks": [
-      "Nextruder has extremely short retraction (0.4mm) — don't increase it, you'll cause jams.",
-      "Load cell bed probe is very accurate but sensitive to nozzle cleanliness — wipe nozzle before probing.",
-      "Input shaping enabled by default — don't add resonance compensation in slicer, it's firmware-level.",
-      "MK4S adds high-flow Nextruder — higher volumetric flow limits than MK4."
+      "Nextruder has extremely short retraction (0.4mm) \u2014 don't increase it, you'll cause jams.",
+      "Load cell bed probe is very accurate but sensitive to nozzle cleanliness \u2014 wipe nozzle before probing.",
+      "Input shaping enabled by default \u2014 don't add resonance compensation in slicer, it's firmware-level.",
+      "MK4S adds high-flow Nextruder \u2014 higher volumetric flow limits than MK4."
     ],
     "calibration": {
       "first_steps": "Run first layer calibration from LCD. Then print calibration cube and measure dimensions.",
-      "flow_rate_test": "Stock profiles are well-calibrated — adjust only if measuring wall width deviation > 0.02mm.",
+      "flow_rate_test": "Stock profiles are well-calibrated \u2014 adjust only if measuring wall width deviation > 0.02mm.",
       "retraction_test": "Do NOT change retraction from 0.4mm unless you have specific stringing issues. Nextruder is designed for this value."
     },
     "failure_modes": [
-      {"symptom": "False crash detection triggers", "cause": "Load cell too sensitive or nozzle dirty", "fix": "Clean nozzle with brass brush before prints. Recalibrate load cell via Service menu."},
-      {"symptom": "Grinding/clicking during retraction", "cause": "Retraction set too high (above 1mm)", "fix": "Reset retraction to 0.4mm in slicer profile. Nextruder requires very short retraction."}
+      {
+        "symptom": "False crash detection triggers",
+        "cause": "Load cell too sensitive or nozzle dirty",
+        "fix": "Clean nozzle with brass brush before prints. Recalibrate load cell via Service menu."
+      },
+      {
+        "symptom": "Grinding/clicking during retraction",
+        "cause": "Retraction set too high (above 1mm)",
+        "fix": "Reset retraction to 0.4mm in slicer profile. Nextruder requires very short retraction."
+      }
     ]
   },
-
   "prusa_mini": {
     "display_name": "Prusa Mini / Mini+",
     "firmware": "marlin",
@@ -188,24 +349,37 @@
     "has_enclosure": false,
     "has_abl": true,
     "materials": {
-      "PLA": {"hotend": 215, "bed": 60, "fan": 100, "notes": "Excellent PLA printer out of the box."},
-      "PETG": {"hotend": 235, "bed": 85, "fan": 50, "notes": "Keep below 240C for PTFE safety. Works well otherwise."}
+      "PLA": {
+        "hotend": 215,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Excellent PLA printer out of the box."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 85,
+        "fan": 50,
+        "notes": "Keep below 240C for PTFE safety. Works well otherwise."
+      }
     },
     "quirks": [
-      "PTFE-lined hotend — same 240C limit as Ender 3. Upgrade to all-metal for higher temps.",
-      "SuperPINDA probe included on Mini+ — much better than original Mini's MINDA.",
-      "Small build volume (180x180x180) — plan part orientation carefully.",
+      "PTFE-lined hotend \u2014 same 240C limit as Ender 3. Upgrade to all-metal for higher temps.",
+      "SuperPINDA probe included on Mini+ \u2014 much better than original Mini's MINDA.",
+      "Small build volume (180x180x180) \u2014 plan part orientation carefully.",
       "Bowden tube needs replacement every ~500h or if retraction quality drops."
     ],
     "calibration": {
       "first_steps": "Run first layer calibration from LCD. Mini's auto-level is reliable.",
-      "retraction_test": "Bowden needs 3.2mm retraction at 70mm/s — these are good defaults."
+      "retraction_test": "Bowden needs 3.2mm retraction at 70mm/s \u2014 these are good defaults."
     },
     "failure_modes": [
-      {"symptom": "Stringing after many hours of use", "cause": "Bowden tube gap at hotend develops", "fix": "Re-seat bowden tube. Cut clean end. Push flush against nozzle."}
+      {
+        "symptom": "Stringing after many hours of use",
+        "cause": "Bowden tube gap at hotend develops",
+        "fix": "Re-seat bowden tube. Cut clean end. Push flush against nozzle."
+      }
     ]
   },
-
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
     "firmware": "bambu",
@@ -214,20 +388,55 @@
     "has_enclosure": true,
     "has_abl": true,
     "materials": {
-      "PLA": {"hotend": 220, "bed": 55, "fan": 100, "notes": "Open door for PLA on long prints to prevent heat creep."},
-      "PETG": {"hotend": 245, "bed": 80, "fan": 40, "notes": "Enclosed chamber helps with PETG bed adhesion."},
-      "ABS": {"hotend": 260, "bed": 100, "fan": 30, "notes": "Excellent enclosed ABS printing. Chamber pre-heat recommended."},
-      "ASA": {"hotend": 260, "bed": 100, "fan": 30, "notes": "Same as ABS profile. Great outdoor part material."},
-      "TPU": {"hotend": 230, "bed": 50, "fan": 50, "notes": "Reduce speed to 60-80mm/s for TPU. Direct drive handles it well."},
-      "PA-CF": {"hotend": 280, "bed": 100, "fan": 30, "notes": "Carbon fiber nylon — requires hardened nozzle (included). Chamber heated."},
-      "PC": {"hotend": 270, "bed": 110, "fan": 0, "notes": "Polycarbonate needs full enclosure and dry filament."}
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Open door for PLA on long prints to prevent heat creep."
+      },
+      "PETG": {
+        "hotend": 245,
+        "bed": 80,
+        "fan": 40,
+        "notes": "Enclosed chamber helps with PETG bed adhesion."
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 30,
+        "notes": "Excellent enclosed ABS printing. Chamber pre-heat recommended."
+      },
+      "ASA": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 30,
+        "notes": "Same as ABS profile. Great outdoor part material."
+      },
+      "TPU": {
+        "hotend": 230,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Reduce speed to 60-80mm/s for TPU. Direct drive handles it well."
+      },
+      "PA-CF": {
+        "hotend": 280,
+        "bed": 100,
+        "fan": 30,
+        "notes": "Carbon fiber nylon \u2014 requires hardened nozzle (included). Chamber heated."
+      },
+      "PC": {
+        "hotend": 270,
+        "bed": 110,
+        "fan": 0,
+        "notes": "Polycarbonate needs full enclosure and dry filament."
+      }
     },
     "quirks": [
-      "LiDAR first-layer detection can reject prints with textured top surfaces — disable 'first layer inspection' for affected models.",
-      "AMS (auto material system) has trouble with flexible filaments — feed TPU manually through the direct path.",
-      "Hardened steel nozzle included — lower thermal conductivity means slightly higher temps needed vs brass.",
-      "Firmware updates can change behavior — check Bambu wiki after updates.",
-      "MQTT protocol for control — Kiln's Bambu adapter handles this natively."
+      "LiDAR first-layer detection can reject prints with textured top surfaces \u2014 disable 'first layer inspection' for affected models.",
+      "AMS (auto material system) has trouble with flexible filaments \u2014 feed TPU manually through the direct path.",
+      "Hardened steel nozzle included \u2014 lower thermal conductivity means slightly higher temps needed vs brass.",
+      "Firmware updates can change behavior \u2014 check Bambu wiki after updates.",
+      "MQTT protocol for control \u2014 Kiln's Bambu adapter handles this natively."
     ],
     "calibration": {
       "first_steps": "Run built-in calibration sequence (vibration, flow, first layer). It's very thorough.",
@@ -235,11 +444,18 @@
       "retraction_test": "0.5mm at 30mm/s is factory-optimal. Don't change unless experiencing specific issues."
     },
     "failure_modes": [
-      {"symptom": "AMS filament loading failures", "cause": "AMS buffer tangled or spool resistance too high", "fix": "Check AMS buffer tube for kinks. Ensure spool rotates freely. Use AMS-friendly spool holders."},
-      {"symptom": "First layer adhesion failure with engineering materials", "cause": "Build plate not clean or chamber not pre-heated", "fix": "Clean with IPA. Pre-heat chamber by running bed at 100C for 10 min before print."}
+      {
+        "symptom": "AMS filament loading failures",
+        "cause": "AMS buffer tangled or spool resistance too high",
+        "fix": "Check AMS buffer tube for kinks. Ensure spool rotates freely. Use AMS-friendly spool holders."
+      },
+      {
+        "symptom": "First layer adhesion failure with engineering materials",
+        "cause": "Build plate not clean or chamber not pre-heated",
+        "fix": "Clean with IPA. Pre-heat chamber by running bed at 100C for 10 min before print."
+      }
     ]
   },
-
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
     "firmware": "bambu",
@@ -248,21 +464,35 @@
     "has_enclosure": true,
     "has_abl": true,
     "materials": {
-      "PLA": {"hotend": 220, "bed": 55, "fan": 100, "notes": "Same as X1C. Open door for PLA."},
-      "PETG": {"hotend": 245, "bed": 80, "fan": 40, "notes": "Enclosed printing works well."},
-      "ABS": {"hotend": 260, "bed": 100, "fan": 30, "notes": "Enclosed chamber for ABS. Pre-heat recommended."}
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Same as X1C. Open door for PLA."
+      },
+      "PETG": {
+        "hotend": 245,
+        "bed": 80,
+        "fan": 40,
+        "notes": "Enclosed printing works well."
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 30,
+        "notes": "Enclosed chamber for ABS. Pre-heat recommended."
+      }
     },
     "quirks": [
-      "No LiDAR — can't do first layer inspection. Manually verify first layer quality.",
-      "Same mechanical platform as X1C — reliability and print quality are identical.",
-      "AMS compatible — same considerations as X1C for flexible filaments."
+      "No LiDAR \u2014 can't do first layer inspection. Manually verify first layer quality.",
+      "Same mechanical platform as X1C \u2014 reliability and print quality are identical.",
+      "AMS compatible \u2014 same considerations as X1C for flexible filaments."
     ],
     "calibration": {
       "first_steps": "Run built-in calibration. No LiDAR auto-detection, so manual first layer check is important."
     },
     "failure_modes": []
   },
-
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
     "firmware": "bambu",
@@ -271,24 +501,42 @@
     "has_enclosure": false,
     "has_abl": true,
     "materials": {
-      "PLA": {"hotend": 220, "bed": 55, "fan": 100, "notes": "Great PLA printer out of the box."},
-      "PETG": {"hotend": 240, "bed": 80, "fan": 40, "notes": "Open frame — draft-free room recommended for PETG."},
-      "TPU": {"hotend": 225, "bed": 50, "fan": 50, "notes": "Direct drive handles TPU. Reduce speed to 50mm/s."}
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Great PLA printer out of the box."
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40,
+        "notes": "Open frame \u2014 draft-free room recommended for PETG."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive handles TPU. Reduce speed to 50mm/s."
+      }
     },
     "quirks": [
-      "Open frame — no ABS printing without aftermarket enclosure.",
-      "AMS Lite compatible (4-slot) — different from X1C full AMS.",
-      "Bed-slinger design — heavier parts may shift at very high accelerations.",
+      "Open frame \u2014 no ABS printing without aftermarket enclosure.",
+      "AMS Lite compatible (4-slot) \u2014 different from X1C full AMS.",
+      "Bed-slinger design \u2014 heavier parts may shift at very high accelerations.",
       "Slightly lower max speeds than X1C/P1S due to bed-slinger kinematics."
     ],
     "calibration": {
       "first_steps": "Run built-in calibration from touchscreen. Simple and effective."
     },
     "failure_modes": [
-      {"symptom": "Parts detaching at high speed", "cause": "Bed-slinger Y acceleration too high for heavy parts", "fix": "Reduce Y acceleration in slicer for prints taller than 100mm or with heavy infill."}
+      {
+        "symptom": "Parts detaching at high speed",
+        "cause": "Bed-slinger Y acceleration too high for heavy parts",
+        "fix": "Reduce Y acceleration in slicer for prints taller than 100mm or with heavy infill."
+      }
     ]
   },
-
   "voron_2": {
     "display_name": "Voron 2.4 / Trident",
     "firmware": "klipper",
@@ -297,30 +545,67 @@
     "has_enclosure": true,
     "has_abl": true,
     "materials": {
-      "PLA": {"hotend": 210, "bed": 60, "fan": 100, "notes": "Open panels or remove top hat for PLA to prevent heat creep."},
-      "PETG": {"hotend": 235, "bed": 80, "fan": 50, "notes": "Enclosed chamber benefits PETG adhesion."},
-      "ABS": {"hotend": 250, "bed": 110, "fan": 0, "notes": "This is what Vorons are built for. Chamber target 50-60C."},
-      "ASA": {"hotend": 250, "bed": 105, "fan": 20, "notes": "Same as ABS approach. Excellent results."},
-      "PA-CF": {"hotend": 275, "bed": 100, "fan": 30, "notes": "Requires hardened nozzle. Chamber heated. Dry filament critical."},
-      "PC": {"hotend": 270, "bed": 115, "fan": 0, "notes": "Full enclosure, chamber 60C+. Dry filament."}
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Open panels or remove top hat for PLA to prevent heat creep."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50,
+        "notes": "Enclosed chamber benefits PETG adhesion."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 110,
+        "fan": 0,
+        "notes": "This is what Vorons are built for. Chamber target 50-60C."
+      },
+      "ASA": {
+        "hotend": 250,
+        "bed": 105,
+        "fan": 20,
+        "notes": "Same as ABS approach. Excellent results."
+      },
+      "PA-CF": {
+        "hotend": 275,
+        "bed": 100,
+        "fan": 30,
+        "notes": "Requires hardened nozzle. Chamber heated. Dry filament critical."
+      },
+      "PC": {
+        "hotend": 270,
+        "bed": 115,
+        "fan": 0,
+        "notes": "Full enclosure, chamber 60C+. Dry filament."
+      }
     },
     "quirks": [
-      "Kit printer — quality depends heavily on build quality. Follow the manual precisely.",
-      "Input shaping MUST be tuned with accelerometer (ADXL345) — pre-built configurations don't transfer between machines.",
-      "Z offset varies with chamber temperature — set it after chamber has reached target temp.",
+      "Kit printer \u2014 quality depends heavily on build quality. Follow the manual precisely.",
+      "Input shaping MUST be tuned with accelerometer (ADXL345) \u2014 pre-built configurations don't transfer between machines.",
+      "Z offset varies with chamber temperature \u2014 set it after chamber has reached target temp.",
       "Afterburner/Stealthburner toolhead choice significantly affects max flow rate and cooling performance."
     ],
     "calibration": {
       "first_steps": "Input shaping calibration with ADXL345. Pressure advance tuning. Z offset with warm chamber.",
-      "flow_rate_test": "Critical for Vorons — volumetric flow varies hugely by hotend choice (Dragon vs Rapido vs Mosquito).",
-      "retraction_test": "Direct drive: 0.3-0.6mm retraction. Heavily depends on hotend — tune empirically."
+      "flow_rate_test": "Critical for Vorons \u2014 volumetric flow varies hugely by hotend choice (Dragon vs Rapido vs Mosquito).",
+      "retraction_test": "Direct drive: 0.3-0.6mm retraction. Heavily depends on hotend \u2014 tune empirically."
     },
     "failure_modes": [
-      {"symptom": "Z banding/inconsistent layers", "cause": "Gantry not square, belt tension uneven, or Z motors not synced", "fix": "Re-square gantry per Voron docs. Check belt tension. Run Z tilt adjust (QGL for 2.4, Z_TILT for Trident)."},
-      {"symptom": "Thermal runaway during ABS", "cause": "Chamber too hot, heater PID not tuned for chamber temps", "fix": "Re-tune PID with chamber at target temp. Ensure thermistor readings are accurate."}
+      {
+        "symptom": "Z banding/inconsistent layers",
+        "cause": "Gantry not square, belt tension uneven, or Z motors not synced",
+        "fix": "Re-square gantry per Voron docs. Check belt tension. Run Z tilt adjust (QGL for 2.4, Z_TILT for Trident)."
+      },
+      {
+        "symptom": "Thermal runaway during ABS",
+        "cause": "Chamber too hot, heater PID not tuned for chamber temps",
+        "fix": "Re-tune PID with chamber at target temp. Ensure thermistor readings are accurate."
+      }
     ]
   },
-
   "elegoo_neptune4": {
     "display_name": "Elegoo Neptune 4 / 4 Pro",
     "firmware": "klipper",
@@ -329,21 +614,35 @@
     "has_enclosure": false,
     "has_abl": true,
     "materials": {
-      "PLA": {"hotend": 210, "bed": 60, "fan": 100, "notes": "Good PLA performance at high speeds."},
-      "PETG": {"hotend": 235, "bed": 80, "fan": 50, "notes": "All-metal hotend handles PETG well."},
-      "TPU": {"hotend": 220, "bed": 50, "fan": 50, "notes": "Direct drive. Print at 30-40mm/s."}
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Good PLA performance at high speeds."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50,
+        "notes": "All-metal hotend handles PETG well."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive. Print at 30-40mm/s."
+      }
     },
     "quirks": [
-      "Klipper firmware — access Mainsail/Fluidd interface via printer's IP address.",
+      "Klipper firmware \u2014 access Mainsail/Fluidd interface via printer's IP address.",
       "Input shaping pre-configured but may need re-tuning if you modify the printer.",
       "PEI build plate works great but needs IPA cleaning between prints."
     ],
     "calibration": {
-      "first_steps": "Run auto-level from screen. Input shaping usually pre-configured — verify with test print."
+      "first_steps": "Run auto-level from screen. Input shaping usually pre-configured \u2014 verify with test print."
     },
     "failure_modes": []
   },
-
   "qidi_x_plus3": {
     "display_name": "QIDI X-Plus 3 / X-Max 3",
     "firmware": "klipper",
@@ -352,20 +651,125 @@
     "has_enclosure": true,
     "has_abl": true,
     "materials": {
-      "PLA": {"hotend": 215, "bed": 55, "fan": 100, "notes": "Open door for PLA to manage chamber temp."},
-      "PETG": {"hotend": 240, "bed": 80, "fan": 40, "notes": "Enclosed environment good for PETG."},
-      "ABS": {"hotend": 260, "bed": 100, "fan": 0, "notes": "Enclosed chamber excellent for ABS."},
-      "PA-CF": {"hotend": 300, "bed": 100, "fan": 30, "notes": "High-temp hotend (350C rated) handles PA-CF. Use hardened nozzle."},
-      "PC": {"hotend": 280, "bed": 110, "fan": 0, "notes": "Full enclosure. Dry filament critical."}
+      "PLA": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Open door for PLA to manage chamber temp."
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40,
+        "notes": "Enclosed environment good for PETG."
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Enclosed chamber excellent for ABS."
+      },
+      "PA-CF": {
+        "hotend": 300,
+        "bed": 100,
+        "fan": 30,
+        "notes": "High-temp hotend (350C rated) handles PA-CF. Use hardened nozzle."
+      },
+      "PC": {
+        "hotend": 280,
+        "bed": 110,
+        "fan": 0,
+        "notes": "Full enclosure. Dry filament critical."
+      }
     },
     "quirks": [
-      "Custom Klipper firmware — some community macros may not work.",
-      "350C-rated hotend is one of the highest on the market — great for engineering materials.",
-      "Chamber heater available — reaches 60C+ for ABS/PC."
+      "Custom Klipper firmware \u2014 some community macros may not work.",
+      "350C-rated hotend is one of the highest on the market \u2014 great for engineering materials.",
+      "Chamber heater available \u2014 reaches 60C+ for ABS/PC."
     ],
     "calibration": {
       "first_steps": "Run QIDI's built-in calibration suite. Input shaping and pressure advance auto-tune available."
     },
     "failure_modes": []
+  },
+  "klipper_generic": {
+    "display_name": "Generic Klipper Printer (Moonraker)",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Standard PLA settings. Works well on most Klipper setups."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50,
+        "notes": "Reduce fan for better layer adhesion."
+      },
+      "ABS": {
+        "hotend": 245,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Enclosure strongly recommended for ABS. Use draft shield in slicer if open-frame."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive recommended. Print at 25-40mm/s."
+      },
+      "ASA": {
+        "hotend": 250,
+        "bed": 100,
+        "fan": 20,
+        "notes": "Similar to ABS. Enclosure recommended for best results."
+      }
+    },
+    "quirks": [
+      "Use RESTART instead of M999 to restart firmware \u2014 Klipper does not support M999.",
+      "Pressure advance replaces linear advance \u2014 set via SET_PRESSURE_ADVANCE ADVANCE=<value>.",
+      "Use SET_HEATER_TEMPERATURE for async heating \u2014 does not block like M109/M190.",
+      "Bed mesh calibration via BED_MESH_CALIBRATE macro \u2014 run after bed reaches target temperature.",
+      "Input shaper tuning recommended for high-speed printing \u2014 requires ADXL345 accelerometer for best results."
+    ],
+    "calibration": {
+      "first_steps": "Home all axes. Run BED_MESH_CALIBRATE. Set Z offset with PROBE_CALIBRATE. Save with SAVE_CONFIG.",
+      "flow_rate_test": "Print single-wall cube. Measure wall thickness. Adjust flow multiplier in slicer.",
+      "retraction_test": "Direct drive: start at 0.4-0.8mm retraction. Tune with retraction tower.",
+      "pressure_advance": "Print pressure advance tuning tower. Set via SET_PRESSURE_ADVANCE ADVANCE=<value>. Save with SAVE_CONFIG."
+    },
+    "failure_modes": [
+      {
+        "symptom": "MCU 'Timer too close' or 'Shutdown' errors",
+        "cause": "MCU cannot keep up with step rate \u2014 speed or acceleration too high for the board",
+        "fix": "Lower max velocity/acceleration in printer.cfg. Upgrade to a faster MCU board if persistent."
+      },
+      {
+        "symptom": "ADC out of range error on startup",
+        "cause": "Thermistor wiring issue or thermistor disconnected",
+        "fix": "Check thermistor wiring connections. Verify thermistor type matches printer.cfg sensor_type setting."
+      },
+      {
+        "symptom": "Stepper motor buzzing but not moving",
+        "cause": "Stepper driver current too low or wiring issue",
+        "fix": "Check run_current in printer.cfg TMC section. Verify stepper wiring \u2014 swap two middle wires if motor vibrates in place."
+      },
+      {
+        "symptom": "Communication timeout with MCU",
+        "cause": "USB connection unstable or MCU overloaded",
+        "fix": "Use a high-quality USB cable. Avoid USB hubs. Check dmesg for USB disconnect events. Consider UART/CAN connection."
+      },
+      {
+        "symptom": "Probe inconsistency or failed probing",
+        "cause": "Probe wiring loose or probe triggered during travel",
+        "fix": "Check probe wiring. Increase probe travel height (probe_hop). Ensure probe is not triggering from bed vibration."
+      }
+    ]
   }
 }

@@ -4,7 +4,6 @@
     "description": "Bundled PrusaSlicer/OrcaSlicer settings keyed by printer_id. Each profile contains INI-style key-value pairs that can be written to a temporary .ini file and passed to the slicer via --load.",
     "updated": "2025-02-11"
   },
-
   "default": {
     "display_name": "Generic FDM Defaults",
     "slicer": "prusaslicer",
@@ -43,7 +42,6 @@
       "gcode_flavor": "marlin"
     }
   },
-
   "ender3": {
     "display_name": "Creality Ender 3 / Ender 3 Pro / Ender 3 V2",
     "slicer": "prusaslicer",
@@ -85,11 +83,10 @@
       "gcode_flavor": "marlin"
     }
   },
-
   "ender3_s1": {
     "display_name": "Creality Ender 3 S1 / S1 Pro",
     "slicer": "prusaslicer",
-    "notes": "Sprite direct drive extruder — short retraction. All-metal hotend safe to 300C.",
+    "notes": "Sprite direct drive extruder \u2014 short retraction. All-metal hotend safe to 300C.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.25",
@@ -121,7 +118,6 @@
       "gcode_flavor": "marlin"
     }
   },
-
   "k1": {
     "display_name": "Creality K1 / K1 Max",
     "slicer": "orcaslicer",
@@ -157,7 +153,6 @@
       "gcode_flavor": "klipper"
     }
   },
-
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",
     "slicer": "prusaslicer",
@@ -194,11 +189,10 @@
       "gcode_flavor": "marlin"
     }
   },
-
   "prusa_mk4": {
     "display_name": "Prusa MK4 / MK4S",
     "slicer": "prusaslicer",
-    "notes": "Nextruder — low retraction distance. Input shaping enabled. PrusaSlicer 2.7+ recommended.",
+    "notes": "Nextruder \u2014 low retraction distance. Input shaping enabled. PrusaSlicer 2.7+ recommended.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -230,7 +224,6 @@
       "gcode_flavor": "marlin"
     }
   },
-
   "prusa_mini": {
     "display_name": "Prusa Mini / Mini+",
     "slicer": "prusaslicer",
@@ -266,7 +259,6 @@
       "gcode_flavor": "marlin"
     }
   },
-
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
     "slicer": "orcaslicer",
@@ -302,7 +294,6 @@
       "gcode_flavor": "marlin"
     }
   },
-
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
     "slicer": "orcaslicer",
@@ -338,7 +329,6 @@
       "gcode_flavor": "marlin"
     }
   },
-
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
     "slicer": "orcaslicer",
@@ -374,7 +364,6 @@
       "gcode_flavor": "marlin"
     }
   },
-
   "voron_2": {
     "display_name": "Voron 2.4 / Trident",
     "slicer": "orcaslicer",
@@ -410,7 +399,6 @@
       "gcode_flavor": "klipper"
     }
   },
-
   "elegoo_neptune4": {
     "display_name": "Elegoo Neptune 4 / 4 Pro",
     "slicer": "orcaslicer",
@@ -446,7 +434,6 @@
       "gcode_flavor": "klipper"
     }
   },
-
   "sovol_sv06": {
     "display_name": "Sovol SV06 / SV06 Plus",
     "slicer": "prusaslicer",
@@ -482,7 +469,6 @@
       "gcode_flavor": "marlin"
     }
   },
-
   "qidi_x_plus3": {
     "display_name": "QIDI X-Plus 3 / X-Max 3",
     "slicer": "orcaslicer",
@@ -515,6 +501,43 @@
       "retract_lift": "0.3",
       "bed_shape": "0x0,280x0,280x280,0x280",
       "max_print_height": "270",
+      "gcode_flavor": "klipper"
+    }
+  },
+  "klipper_generic": {
+    "display_name": "Generic Klipper Printer (Moonraker)",
+    "slicer": "orcaslicer",
+    "notes": "Generic Klipper/Moonraker printer. Uses standard START_PRINT/END_PRINT macros. Adjust speeds and temps to match your hardware.",
+    "settings": {
+      "layer_height": "0.2",
+      "first_layer_height": "0.2",
+      "perimeters": "3",
+      "top_solid_layers": "4",
+      "bottom_solid_layers": "4",
+      "fill_density": "20%",
+      "fill_pattern": "gyroid",
+      "infill_speed": "100",
+      "perimeter_speed": "80",
+      "external_perimeter_speed": "60",
+      "first_layer_speed": "25",
+      "travel_speed": "200",
+      "nozzle_diameter": "0.4",
+      "filament_diameter": "1.75",
+      "temperature": "210",
+      "first_layer_temperature": "215",
+      "bed_temperature": "60",
+      "first_layer_bed_temperature": "65",
+      "fan_always_on": "1",
+      "min_fan_speed": "100",
+      "max_fan_speed": "100",
+      "disable_fan_first_layers": "2",
+      "retract_length": "0.6",
+      "retract_speed": "40",
+      "retract_lift": "0.2",
+      "bed_shape": "0x0,235x0,235x235,0x235",
+      "max_print_height": "250",
+      "start_gcode": "START_PRINT EXTRUDER_TEMP={temperature} BED_TEMP={bed_temperature}",
+      "end_gcode": "END_PRINT",
       "gcode_flavor": "klipper"
     }
   }

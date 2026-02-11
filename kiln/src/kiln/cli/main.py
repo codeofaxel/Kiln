@@ -2696,6 +2696,147 @@ def firmware_rollback_cmd(ctx: click.Context, component: str, json_mode: bool) -
 
 
 # ---------------------------------------------------------------------------
+# verify
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def verify(ctx: click.Context, json_mode: bool) -> None:
+    """Run pre-flight system checks to verify Kiln is ready to use."""
+    import json as _json
+    import platform
+    import sqlite3
+    import urllib.request
+
+    checks: list[dict] = []
+
+    # 1. Python version
+    vi = sys.version_info
+    ok = vi >= (3, 10)
+    checks.append({
+        "name": "python",
+        "ok": ok,
+        "detail": f"{vi.major}.{vi.minor}.{vi.micro}",
+    })
+
+    # 2. Kiln importable
+    try:
+        import kiln as _kiln
+        ver = getattr(_kiln, "__version__", "unknown")
+        checks.append({"name": "kiln", "ok": True, "detail": f"v{ver}"})
+    except Exception as exc:
+        checks.append({"name": "kiln", "ok": False, "detail": str(exc)})
+
+    # 3. Slicer available
+    try:
+        from kiln.slicer import SlicerNotFoundError, find_slicer
+        info = find_slicer()
+        label = info.name
+        if info.version:
+            label += f" {info.version}"
+        checks.append({"name": "slicer", "ok": True, "detail": label})
+    except SlicerNotFoundError:
+        checks.append({
+            "name": "slicer",
+            "ok": False,
+            "detail": "not found (install prusa-slicer or set KILN_SLICER_PATH)",
+        })
+    except Exception as exc:
+        checks.append({"name": "slicer", "ok": False, "detail": str(exc)})
+
+    # 4. Config / printers configured
+    printer_cfg = None
+    try:
+        printer_name = ctx.obj.get("printer")
+        printer_cfg = load_printer_config(printer_name)
+        name_label = printer_name or printer_cfg.get("name", "default")
+        checks.append({
+            "name": "config",
+            "ok": True,
+            "detail": f"printer '{name_label}' configured",
+        })
+    except ValueError as exc:
+        checks.append({"name": "config", "ok": False, "detail": str(exc)})
+    except Exception as exc:
+        checks.append({"name": "config", "ok": False, "detail": str(exc)})
+
+    # 5. Printer reachable
+    if printer_cfg:
+        host = printer_cfg.get("host", "")
+        if host:
+            try:
+                url = host.rstrip("/") + "/"
+                req = urllib.request.Request(url, method="GET")
+                urllib.request.urlopen(req, timeout=5)
+                checks.append({"name": "printer_reachable", "ok": True, "detail": host})
+            except Exception:
+                checks.append({
+                    "name": "printer_reachable",
+                    "ok": False,
+                    "detail": f"cannot reach {host}",
+                })
+    else:
+        checks.append({
+            "name": "printer_reachable",
+            "ok": False,
+            "detail": "skipped (no printer configured)",
+        })
+
+    # 6. SQLite writable
+    db_dir = os.path.join(os.path.expanduser("~"), ".kiln")
+    db_path = os.path.join(db_dir, "kiln.db")
+    try:
+        os.makedirs(db_dir, exist_ok=True)
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE IF NOT EXISTS _verify_check (id INTEGER)")
+        conn.execute("DROP TABLE IF EXISTS _verify_check")
+        conn.close()
+        checks.append({"name": "database", "ok": True, "detail": "writable"})
+    except Exception as exc:
+        checks.append({"name": "database", "ok": False, "detail": str(exc)})
+
+    # 7. WSL 2 detection
+    wsl = False
+    if sys.platform == "linux":
+        try:
+            release = platform.uname().release.lower()
+            if "microsoft" in release or "wsl" in release:
+                wsl = True
+        except Exception:
+            pass
+    if wsl:
+        checks.append({
+            "name": "wsl",
+            "ok": True,
+            "warn": True,
+            "detail": "WSL 2 detected — mDNS discovery will not work, use explicit IPs",
+        })
+
+    # --- Output ---
+    if json_mode:
+        click.echo(_json.dumps({"status": "ok", "checks": checks}, indent=2))
+    else:
+        for c in checks:
+            if c.get("warn"):
+                click.echo(f"  ⚠ {c['detail']}")
+            elif c["ok"]:
+                label = c["name"].replace("_", " ").title()
+                click.echo(f"  ✓ {label}: {c['detail']}")
+            else:
+                label = c["name"].replace("_", " ").title()
+                click.echo(f"  ✗ {label}: {c['detail']}")
+
+        passed = sum(1 for c in checks if c["ok"])
+        total = len(checks)
+        click.echo(f"\n  {passed}/{total} checks passed.")
+
+        if any(not c["ok"] for c in checks):
+            sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
