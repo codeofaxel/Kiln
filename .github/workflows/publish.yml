@@ -8,11 +8,8 @@ permissions:
   id-token: write  # Required for trusted publishing
 
 jobs:
-  build:
+  build-kiln:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        package: [kiln, octoprint-cli]
 
     steps:
       - name: Checkout code
@@ -26,17 +23,17 @@ jobs:
       - name: Install build tools
         run: pip install build
 
-      - name: Build package
-        run: cd ${{ matrix.package }} && python -m build
+      - name: Build kiln package
+        run: cd kiln && python -m build
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.package }}
-          path: ${{ matrix.package }}/dist/
+          name: dist-kiln
+          path: kiln/dist/
 
   publish-kiln:
-    needs: build
+    needs: build-kiln
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -49,22 +46,34 @@ jobs:
           name: dist-kiln
           path: dist/
 
-      - name: Publish kiln to PyPI
+      - name: Publish kiln3d to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
-  publish-octoprint-cli:
-    needs: build
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-
-    steps:
-      - name: Download octoprint-cli artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-octoprint-cli
-          path: dist/
-
-      - name: Publish octoprint-cli to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+  # Uncomment when kiln3d-octoprint is registered on PyPI:
+  #
+  # build-octoprint-cli:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.12"
+  #     - run: pip install build
+  #     - run: cd octoprint-cli && python -m build
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         name: dist-octoprint-cli
+  #         path: octoprint-cli/dist/
+  #
+  # publish-octoprint-cli:
+  #   needs: build-octoprint-cli
+  #   runs-on: ubuntu-latest
+  #   environment: pypi
+  #   permissions:
+  #     id-token: write
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: dist-octoprint-cli
+  #         path: dist/
+  #     - uses: pypa/gh-action-pypi-publish@release/v1

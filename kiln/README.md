@@ -21,6 +21,10 @@ Agent: "Print this sensor mount"
 ### 1. Install
 
 ```bash
+# From PyPI
+pip install kiln3d
+
+# From source (development)
 pip install -e ".[dev]"
 ```
 
@@ -78,7 +82,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ## Features
 
-- **78+ MCP tools** for full printer control, fleet management, slicing, model generation, and fulfillment
+- **79+ MCP tools** for full printer control, fleet management, slicing, model generation, and fulfillment
 - **25+ CLI commands** with `--json` output for agent consumption
 - **Multi-printer fleet** management with job queue and background scheduler
 - **Model marketplaces** — search/download from Thingiverse, MyMiniFactory, Cults3D
