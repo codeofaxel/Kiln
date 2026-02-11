@@ -515,7 +515,9 @@ class BambuAdapter(PrinterAdapter):
     def list_files(self) -> List[PrinterFile]:
         """Return a list of files stored on the printer's SD card.
 
-        Uses FTPS to list the ``/sdcard/`` directory.
+        Uses FTPS to list the ``/sdcard/`` directory.  Tries MLSD first
+        for rich metadata, falling back to NLST then LIST if the printer's
+        FTP server returns a 502 (command not implemented).
         """
         try:
             ftp = self._ftp_connect()
@@ -523,36 +525,22 @@ class BambuAdapter(PrinterAdapter):
             raise
 
         try:
-            entries: List[PrinterFile] = []
-            # Use MLSD for detailed listing (name, size, modify time).
-            for name, facts in ftp.mlsd("/sdcard/"):
-                if name in (".", ".."):
-                    continue
-                # Skip directories unless they're useful.
-                if facts.get("type") == "dir":
-                    continue
+            # Try MLSD first (rich metadata: name, size, modify time).
+            try:
+                return self._list_via_mlsd(ftp)
+            except ftplib.error_perm as exc:
+                if not str(exc).startswith("502"):
+                    raise
+                logger.info("MLSD not supported (502), falling back to NLST")
 
-                size_str = facts.get("size")
-                size = int(size_str) if size_str else None
+            # Fallback: NLST (filenames only).
+            try:
+                return self._list_via_nlst(ftp)
+            except Exception:
+                logger.info("NLST failed, falling back to LIST")
 
-                # Parse modify time (YYYYMMDDHHmmSS format).
-                modify = facts.get("modify")
-                date_ts: Optional[int] = None
-                if modify:
-                    try:
-                        import datetime
-                        dt = datetime.datetime.strptime(modify, "%Y%m%d%H%M%S")
-                        date_ts = int(dt.timestamp())
-                    except (ValueError, OSError):
-                        pass
-
-                entries.append(PrinterFile(
-                    name=name,
-                    path=f"/sdcard/{name}",
-                    size_bytes=size,
-                    date=date_ts,
-                ))
-            return entries
+            # Last resort: LIST (raw text parsing).
+            return self._list_via_list(ftp)
         except PrinterError:
             raise
         except Exception as exc:
@@ -565,6 +553,82 @@ class BambuAdapter(PrinterAdapter):
                 ftp.quit()
             except Exception:
                 pass
+
+    def _list_via_mlsd(self, ftp: ftplib.FTP_TLS) -> List[PrinterFile]:
+        """List files using MLSD (rich metadata: name, size, modify time)."""
+        entries: List[PrinterFile] = []
+        for name, facts in ftp.mlsd("/sdcard/"):
+            if name in (".", ".."):
+                continue
+            if facts.get("type") == "dir":
+                continue
+
+            size_str = facts.get("size")
+            size = int(size_str) if size_str else None
+
+            modify = facts.get("modify")
+            date_ts: Optional[int] = None
+            if modify:
+                try:
+                    import datetime
+
+                    dt = datetime.datetime.strptime(modify, "%Y%m%d%H%M%S")
+                    date_ts = int(dt.timestamp())
+                except (ValueError, OSError):
+                    pass
+
+            entries.append(PrinterFile(
+                name=name,
+                path=f"/sdcard/{name}",
+                size_bytes=size,
+                date=date_ts,
+            ))
+        return entries
+
+    def _list_via_nlst(self, ftp: ftplib.FTP_TLS) -> List[PrinterFile]:
+        """List files using NLST (filenames only, no metadata)."""
+        names = ftp.nlst("/sdcard/")
+        entries: List[PrinterFile] = []
+        for raw_name in names:
+            name = raw_name.rsplit("/", 1)[-1] if "/" in raw_name else raw_name
+            if name in (".", ".."):
+                continue
+            entries.append(PrinterFile(
+                name=name,
+                path=f"/sdcard/{name}",
+                size_bytes=None,
+                date=None,
+            ))
+        return entries
+
+    def _list_via_list(self, ftp: ftplib.FTP_TLS) -> List[PrinterFile]:
+        """List files using LIST (raw text, parse filenames from output)."""
+        lines: List[str] = []
+        ftp.retrlines("LIST /sdcard/", lines.append)
+        entries: List[PrinterFile] = []
+        for line in lines:
+            parts = line.split()
+            if not parts:
+                continue
+            name = parts[-1]
+            if name in (".", ".."):
+                continue
+            # Skip directories (Unix-style listing: first char is 'd').
+            if line.startswith("d"):
+                continue
+            size: Optional[int] = None
+            if len(parts) >= 5:
+                try:
+                    size = int(parts[4])
+                except ValueError:
+                    pass
+            entries.append(PrinterFile(
+                name=name,
+                path=f"/sdcard/{name}",
+                size_bytes=size,
+                date=None,
+            ))
+        return entries
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- file management
