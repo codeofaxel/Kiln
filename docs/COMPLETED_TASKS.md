@@ -4,6 +4,21 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-11
 
+### Agent Memory & Print History Logging
+- **Print history table** (`print_history`) in SQLite persistence — tracks every completed/failed job with printer_name, duration, material_type, file_hash, slicer_profile, notes, agent_id, and JSON metadata
+- **Agent memory table** (`agent_memory`) — persistent key-value store scoped by agent_id and namespace (global, fleet, per-printer). Survives across sessions
+- **Auto-logging event subscriber** — `_log_print_completion` hooked to `JOB_COMPLETED` and `JOB_FAILED` events, writes history records automatically
+- 6 new MCP tools: `print_history`, `printer_stats`, `annotate_print`, `save_agent_note`, `get_agent_context`, `delete_agent_note`
+- All DB methods use `_write_lock` for thread safety, JSON serialization for complex data, `time.time()` timestamps
+
+### Bundled Safety Profiles Database
+- **`data/safety_profiles.json`** — Curated per-printer safety database with 26 printer models: Creality (Ender 3/5, CR-10, K1), Prusa (Mini, MK3S, MK4, XL), Bambu Lab (X1C, P1S, P1P, A1, A1 Mini), Voron (0, 2.4), Rat Rig, Elegoo, Sovol, FlashForge, QIDI, AnkerMake, Artillery
+- Each profile: max hotend/bed/chamber temps, max feedrate, volumetric flow, build volume, safety notes (e.g. PTFE hotend warnings)
+- **`safety_profiles.py`** — Loader with `get_profile()` (fuzzy matching + fallback to default), `list_profiles()`, `get_all_profiles()`, `profile_to_dict()`
+- **`validate_gcode_for_printer()`** — New function in `gcode.py` that validates commands against a specific printer's limits instead of generic defaults
+- 3 new MCP tools: `list_safety_profiles`, `get_safety_profile`, `validate_gcode_safe`
+- Error messages include printer display name for clarity (e.g. "exceeds Creality Ender 3 max hotend temperature (260°C)")
+
 ### Webcam Streaming / Live View
 - `MJPEGProxy` class in `streaming.py` — full MJPEG stream proxy with start/stop lifecycle
 - `webcam_stream` MCP tool for agents to start/stop/check stream status

@@ -43,7 +43,8 @@ from kiln.printers import (
     PrinterStatus,
     PrusaConnectAdapter,
 )
-from kiln.gcode import validate_gcode as _validate_gcode_impl
+from kiln.gcode import validate_gcode as _validate_gcode_impl, validate_gcode_for_printer
+from kiln.safety_profiles import get_profile, list_profiles, profile_to_dict
 from kiln.registry import PrinterRegistry, PrinterNotFoundError
 from kiln.queue import PrintQueue, JobStatus, JobNotFoundError
 from kiln.events import Event, EventBus, EventType
@@ -478,9 +479,42 @@ def _billing_hook(event: Event) -> None:
         logger.debug("Failed to record billing for job %s", event.data.get("job_id"), exc_info=True)
 
 
+def _log_print_completion(event: Event) -> None:
+    """EventBus subscriber that logs completed/failed jobs to print_history."""
+    try:
+        job = _queue.get_job(event.data["job_id"])
+        duration = None
+        if job.started_at and job.completed_at:
+            duration = job.completed_at - job.started_at
+
+        record = {
+            "job_id": job.id,
+            "printer_name": job.printer_name or "unknown",
+            "file_name": job.file_name,
+            "status": "completed" if event.type == EventType.JOB_COMPLETED else "failed",
+            "duration_seconds": duration,
+            "material_type": event.data.get("material_type"),
+            "file_hash": event.data.get("file_hash"),
+            "slicer_profile": event.data.get("slicer_profile"),
+            "agent_id": event.data.get("agent_id") or os.environ.get("KILN_AGENT_ID", "default"),
+            "metadata": {
+                k: v for k, v in event.data.items()
+                if k not in ("job_id", "material_type", "file_hash", "slicer_profile", "agent_id")
+            } or None,
+            "started_at": job.started_at,
+            "completed_at": job.completed_at,
+            "created_at": time.time(),
+        }
+        get_db().save_print_record(record)
+    except Exception:
+        logger.debug("Failed to log print completion for job %s", event.data.get("job_id"), exc_info=True)
+
+
 # Wire subscribers (runs automatically on import)
 _event_bus.subscribe(None, _persist_event)
 _event_bus.subscribe(EventType.JOB_COMPLETED, _billing_hook)
+_event_bus.subscribe(EventType.JOB_COMPLETED, _log_print_completion)
+_event_bus.subscribe(EventType.JOB_FAILED, _log_print_completion)
 
 
 # ---------------------------------------------------------------------------
@@ -4142,6 +4176,283 @@ def rollback_firmware(component: str) -> dict:
         return _error_dict(str(exc))
     except Exception as exc:
         logger.exception("Unexpected error in rollback_firmware")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Print History & Agent Memory
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def print_history(
+    printer_name: str | None = None,
+    status: str | None = None,
+    limit: int = 20,
+) -> dict:
+    """Get recent print history with success/failure tracking.
+
+    Args:
+        printer_name: Filter by printer name, or all printers if omitted.
+        status: Filter by status (``"completed"`` or ``"failed"``).
+        limit: Maximum records to return (default 20).
+    """
+    if err := _check_auth("history"):
+        return err
+    try:
+        capped = min(max(limit, 1), 200)
+        records = get_db().list_print_history(
+            printer_name=printer_name,
+            status=status,
+            limit=capped,
+        )
+        return {"success": True, "records": records, "count": len(records)}
+    except Exception as exc:
+        logger.exception("Unexpected error in print_history")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def printer_stats(printer_name: str) -> dict:
+    """Get aggregate statistics for a printer: total prints, success rate, average duration.
+
+    Args:
+        printer_name: Name of the printer to get stats for.
+    """
+    if err := _check_auth("history"):
+        return err
+    try:
+        stats = get_db().get_printer_stats(printer_name)
+        return {"success": True, **stats}
+    except Exception as exc:
+        logger.exception("Unexpected error in printer_stats")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def annotate_print(job_id: str, notes: str) -> dict:
+    """Add notes to a completed print record (e.g., quality observations, issues).
+
+    Args:
+        job_id: The job ID of the print to annotate.
+        notes: The annotation text to attach.
+    """
+    if err := _check_auth("history"):
+        return err
+    try:
+        record = get_db().get_print_record(job_id)
+        if record is None:
+            return _error_dict(
+                f"No print history record found for job '{job_id}'.",
+                code="NOT_FOUND",
+            )
+        updated = get_db().update_print_notes(job_id, notes)
+        if not updated:
+            return _error_dict(
+                f"Failed to update notes for job '{job_id}'.",
+                code="ERROR",
+            )
+        return {"success": True, "job_id": job_id, "notes": notes}
+    except Exception as exc:
+        logger.exception("Unexpected error in annotate_print")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def save_agent_note(
+    key: str,
+    value: str,
+    scope: str = "global",
+    printer_name: str | None = None,
+) -> dict:
+    """Save a persistent note or preference that survives across sessions.
+
+    Use this to remember printer quirks, calibration findings, material
+    preferences, or any operational knowledge worth preserving.
+
+    Args:
+        key: Name for this memory (e.g., ``"z_offset_adjustment"``, ``"pla_temp_notes"``).
+        value: The information to store.
+        scope: Namespace — ``"global"``, ``"fleet"``, or use *printer_name* for printer-specific.
+        printer_name: If provided, scope is automatically set to ``"printer:<name>"``.
+    """
+    if err := _check_auth("memory"):
+        return err
+    try:
+        agent_id = os.environ.get("KILN_AGENT_ID", "default")
+        effective_scope = f"printer:{printer_name}" if printer_name else scope
+        get_db().save_memory(agent_id, effective_scope, key, value)
+        return {
+            "success": True,
+            "agent_id": agent_id,
+            "scope": effective_scope,
+            "key": key,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in save_agent_note")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def get_agent_context(
+    printer_name: str | None = None,
+    scope: str | None = None,
+) -> dict:
+    """Retrieve all stored agent memory for context.
+
+    Call this at the start of a session to recall what you've learned
+    about printers, materials, and past print outcomes.
+
+    Args:
+        printer_name: If provided, retrieves printer-specific memory.
+        scope: Filter by scope (e.g., ``"global"``, ``"fleet"``).
+    """
+    if err := _check_auth("memory"):
+        return err
+    try:
+        agent_id = os.environ.get("KILN_AGENT_ID", "default")
+        effective_scope = f"printer:{printer_name}" if printer_name else scope
+        entries = get_db().list_memory(agent_id, scope=effective_scope)
+        return {"success": True, "agent_id": agent_id, "entries": entries, "count": len(entries)}
+    except Exception as exc:
+        logger.exception("Unexpected error in get_agent_context")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def delete_agent_note(
+    key: str,
+    scope: str = "global",
+    printer_name: str | None = None,
+) -> dict:
+    """Remove a stored note or preference.
+
+    Args:
+        key: The key of the note to delete.
+        scope: The scope namespace (default ``"global"``).
+        printer_name: If provided, targets ``"printer:<name>"`` scope.
+    """
+    if err := _check_auth("memory"):
+        return err
+    try:
+        agent_id = os.environ.get("KILN_AGENT_ID", "default")
+        effective_scope = f"printer:{printer_name}" if printer_name else scope
+        deleted = get_db().delete_memory(agent_id, effective_scope, key)
+        if not deleted:
+            return _error_dict(
+                f"No memory entry found for key '{key}' in scope '{effective_scope}'.",
+                code="NOT_FOUND",
+            )
+        return {"success": True, "key": key, "scope": effective_scope}
+    except Exception as exc:
+        logger.exception("Unexpected error in delete_agent_note")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Safety profile tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def list_safety_profiles() -> dict:
+    """List all available printer safety profiles.
+
+    Returns a list of profile IDs and display names from the bundled
+    safety database.  Use with ``get_safety_profile`` to inspect limits
+    for a specific printer, or ``validate_gcode_safe`` to validate
+    commands against a printer's limits.
+    """
+    if err := _check_auth("safety"):
+        return err
+    try:
+        ids = list_profiles()
+        profiles = []
+        for pid in ids:
+            try:
+                p = get_profile(pid)
+                profiles.append({
+                    "id": p.id,
+                    "display_name": p.display_name,
+                    "max_hotend_temp": p.max_hotend_temp,
+                    "max_bed_temp": p.max_bed_temp,
+                })
+            except KeyError:
+                continue
+        return {"success": True, "count": len(profiles), "profiles": profiles}
+    except Exception as exc:
+        logger.exception("Unexpected error in list_safety_profiles")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def get_safety_profile(printer_id: str) -> dict:
+    """Get the full safety profile for a specific printer model.
+
+    Returns temperature limits, feedrate limits, volumetric flow,
+    build volume, and safety notes.  Falls back to the default
+    profile if the printer_id is not found.
+
+    Args:
+        printer_id: Printer model identifier (e.g. ``"ender3"``,
+            ``"bambu_x1c"``, ``"prusa_mk4"``).
+    """
+    if err := _check_auth("safety"):
+        return err
+    try:
+        profile = get_profile(printer_id)
+        return {"success": True, "profile": profile_to_dict(profile)}
+    except KeyError:
+        return _error_dict(
+            f"No safety profile for '{printer_id}' and no default available.",
+            code="NOT_FOUND",
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error in get_safety_profile")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def validate_gcode_safe(
+    commands: str,
+    printer_id: str = "",
+) -> dict:
+    """Validate G-code commands with optional printer-specific safety limits.
+
+    When *printer_id* is provided, uses that printer's safety profile
+    (tighter limits for PTFE hotends, higher limits for high-speed
+    printers, etc.).  Without a printer_id, uses conservative defaults.
+
+    Args:
+        commands: G-code commands separated by newlines.
+        printer_id: Optional printer model ID for profile-aware validation.
+    """
+    if err := _check_auth("gcode"):
+        return err
+    try:
+        if printer_id:
+            result = validate_gcode_for_printer(commands, printer_id)
+            profile = get_profile(printer_id)
+            profile_info = {
+                "id": profile.id,
+                "display_name": profile.display_name,
+            }
+        else:
+            result = _validate_gcode_impl(commands)
+            profile_info = {"id": "default", "display_name": "Generic defaults"}
+
+        return {
+            "success": True,
+            "valid": result.valid,
+            "profile": profile_info,
+            "commands_accepted": len(result.commands),
+            "commands_blocked": len(result.blocked_commands),
+            "warnings": result.warnings,
+            "errors": result.errors,
+            "blocked_commands": result.blocked_commands,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in validate_gcode_safe")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 

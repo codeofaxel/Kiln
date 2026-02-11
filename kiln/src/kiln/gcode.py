@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 
 # ---------------------------------------------------------------------------
@@ -312,3 +312,138 @@ def validate_gcode(commands: Union[str, List[str]]) -> GCodeValidationResult:
 
     result.valid = len(result.errors) == 0
     return result
+
+
+def validate_gcode_for_printer(
+    commands: Union[str, List[str]],
+    printer_id: str,
+) -> GCodeValidationResult:
+    """Validate G-code using printer-specific safety limits.
+
+    Loads the safety profile for *printer_id* from the bundled database
+    and applies its temperature/feedrate limits instead of the generic
+    defaults.  Falls back to ``validate_gcode()`` if no profile is found.
+
+    Args:
+        commands: One or more G-code commands.
+        printer_id: Printer profile identifier (e.g. ``"ender3"``,
+            ``"bambu_x1c"``).
+
+    Returns:
+        A :class:`GCodeValidationResult`.
+    """
+    # Lazy import to avoid circular dependency and keep base validator
+    # independent of the data layer.
+    from kiln.safety_profiles import get_profile  # noqa: E402
+
+    try:
+        profile = get_profile(printer_id)
+    except KeyError:
+        return validate_gcode(commands)
+
+    if isinstance(commands, str):
+        lines = commands.splitlines()
+    else:
+        lines = []
+        for item in commands:
+            lines.extend(item.splitlines())
+
+    result = GCodeValidationResult()
+
+    for raw_line in lines:
+        cleaned = _validate_single_with_profile(
+            raw_line,
+            result.warnings,
+            result.errors,
+            result.blocked_commands,
+            profile,
+        )
+        if cleaned is not None:
+            result.commands.append(cleaned)
+
+    result.valid = len(result.errors) == 0
+    return result
+
+
+def _validate_single_with_profile(
+    raw_line: str,
+    warnings: List[str],
+    errors: List[str],
+    blocked: List[str],
+    profile: Any,
+) -> Optional[str]:
+    """Validate a single G-code line against a printer safety profile.
+
+    Works like ``_validate_single`` but uses limits from *profile*
+    instead of module-level constants.
+    """
+    cleaned = _strip_comment(raw_line)
+    if not cleaned:
+        return None
+
+    cmd = _parse_command_word(cleaned)
+    if cmd is None:
+        warnings.append(f"Unrecognised command format: {cleaned!r}")
+        return cleaned
+
+    # --- Blocked commands (same regardless of printer) ---
+    if cmd in _BLOCKED_COMMANDS:
+        errors.append(_BLOCKED_COMMANDS[cmd])
+        blocked.append(cleaned)
+        return None
+
+    # --- Warning-level commands ---
+    if cmd in _WARN_COMMANDS:
+        warnings.append(_WARN_COMMANDS[cmd])
+
+    # --- Temperature limits from profile (BLOCKING) ---
+    if cmd in _HOTEND_TEMP_COMMANDS:
+        temp = _extract_param(cleaned, "S")
+        limit = profile.max_hotend_temp
+        if temp is not None and temp > limit:
+            errors.append(
+                f"{cmd} S{temp:g} exceeds {profile.display_name} max hotend "
+                f"temperature ({limit:g}°C)"
+            )
+            blocked.append(cleaned)
+            return None
+
+    if cmd in _BED_TEMP_COMMANDS:
+        temp = _extract_param(cleaned, "S")
+        limit = profile.max_bed_temp
+        if temp is not None and temp > limit:
+            errors.append(
+                f"{cmd} S{temp:g} exceeds {profile.display_name} max bed "
+                f"temperature ({limit:g}°C)"
+            )
+            blocked.append(cleaned)
+            return None
+
+    if cmd in _CHAMBER_TEMP_COMMANDS:
+        temp = _extract_param(cleaned, "S")
+        limit = profile.max_chamber_temp
+        if temp is not None and limit is not None and temp > limit:
+            errors.append(
+                f"{cmd} S{temp:g} exceeds {profile.display_name} max chamber "
+                f"temperature ({limit:g}°C)"
+            )
+            blocked.append(cleaned)
+            return None
+
+    # --- Movement safety from profile (WARNING) ---
+    if cmd in _MOVE_COMMANDS:
+        z_val = _extract_param(cleaned, "Z")
+        if z_val is not None and z_val < profile.min_safe_z:
+            warnings.append(
+                f"{cmd} moves Z to {z_val:g} which is below the bed plane "
+                f"(Z < {profile.min_safe_z:g})"
+            )
+
+        f_val = _extract_param(cleaned, "F")
+        if f_val is not None and f_val > profile.max_feedrate:
+            warnings.append(
+                f"{cmd} feedrate F{f_val:g} exceeds {profile.display_name} "
+                f"recommended maximum ({profile.max_feedrate:g} mm/min)"
+            )
+
+    return cleaned
