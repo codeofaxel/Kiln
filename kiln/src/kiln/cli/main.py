@@ -1044,22 +1044,25 @@ def order() -> None:
     """Outsource prints to external manufacturing services.
 
     Use subcommands to get quotes, place orders, and track shipments
-    through services like Craftcloud.
+    through services like Craftcloud, Shapeways, and Sculpteo.
     """
 
 
 def _get_fulfillment_provider():
-    """Create a CraftcloudProvider from env config."""
-    import os
-    from kiln.fulfillment import CraftcloudProvider
+    """Create a fulfillment provider from env config.
 
-    api_key = os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
-    if not api_key:
+    Uses the provider registry to select the right provider based on
+    ``KILN_FULFILLMENT_PROVIDER`` or auto-detect from API key env vars.
+    """
+    from kiln.fulfillment import get_provider
+
+    try:
+        return get_provider()
+    except (KeyError, RuntimeError, ValueError) as exc:
         raise click.ClickException(
-            "KILN_CRAFTCLOUD_API_KEY not set. "
-            "Set it to your Craftcloud API key to use fulfillment services."
-        )
-    return CraftcloudProvider(api_key=api_key)
+            f"Fulfillment provider not configured: {exc}. "
+            "Set KILN_FULFILLMENT_PROVIDER and the matching API key env var."
+        ) from exc
 
 
 @order.command("materials")
@@ -1283,12 +1286,8 @@ def compare_cost(
     # Fulfillment quote (optional)
     if fulfillment_material:
         try:
-            from kiln.fulfillment import CraftcloudProvider, QuoteRequest as QR
-            import os
-            api_key = os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
-            if not api_key:
-                raise RuntimeError("KILN_CRAFTCLOUD_API_KEY not set")
-            provider = CraftcloudProvider(api_key=api_key)
+            from kiln.fulfillment import get_provider, QuoteRequest as QR
+            provider = get_provider()
             quote = provider.get_quote(QR(
                 file_path=file_path,
                 material_id=fulfillment_material,
@@ -1828,6 +1827,291 @@ def serve() -> None:
     """
     from kiln.server import main as _server_main
     _server_main()
+
+
+# ---------------------------------------------------------------------------
+# Model Generation
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.argument("prompt")
+@click.option("--provider", "-p", default="meshy",
+              type=click.Choice(["meshy", "openscad"]),
+              help="Generation provider (default: meshy).")
+@click.option("--style", "-s", default=None, help="Style hint (e.g. realistic, sculpture).")
+@click.option("--output-dir", "-o", default=None, help="Output directory for generated model.")
+@click.option("--wait/--no-wait", "wait_for", default=False,
+              help="Wait for generation to complete (default: return immediately).")
+@click.option("--timeout", "-t", default=600, type=int, help="Max wait time in seconds (default 600).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def generate(
+    prompt: str,
+    provider: str,
+    style: Optional[str],
+    output_dir: Optional[str],
+    wait_for: bool,
+    timeout: int,
+    json_mode: bool,
+) -> None:
+    """Generate a 3D model from a text description.
+
+    PROMPT is the text description (for Meshy) or OpenSCAD code (for openscad).
+
+    \b
+    Examples:
+        kiln generate "a phone stand with cable slot" --provider meshy
+        kiln generate "cube([20,20,10]);" --provider openscad
+        kiln generate "a gear with 24 teeth" --wait --json
+    """
+    import time as _time
+    from kiln.generation import (
+        GenerationAuthError,
+        GenerationError,
+        GenerationStatus,
+        MeshyProvider,
+        OpenSCADProvider,
+        validate_mesh,
+    )
+
+    try:
+        if provider == "meshy":
+            gen = MeshyProvider()
+        elif provider == "openscad":
+            gen = OpenSCADProvider()
+        else:
+            click.echo(format_error(f"Unknown provider: {provider!r}", json_mode=json_mode))
+            sys.exit(1)
+
+        job = gen.generate(prompt, format="stl", style=style)
+
+        # If not waiting or already done (OpenSCAD), return job info.
+        if not wait_for or job.status == GenerationStatus.SUCCEEDED:
+            if job.status == GenerationStatus.SUCCEEDED:
+                # Download the result for synchronous providers.
+                result = gen.download_result(job.id, output_dir=output_dir or "/tmp/kiln_generated")
+                val = validate_mesh(result.local_path)
+
+                if json_mode:
+                    import json
+                    click.echo(json.dumps({
+                        "status": "success",
+                        "data": {
+                            "job": job.to_dict(),
+                            "result": result.to_dict(),
+                            "validation": val.to_dict(),
+                        },
+                    }, indent=2))
+                else:
+                    click.echo(f"Generated: {result.local_path}")
+                    click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
+                    click.echo(f"  Triangles: {val.triangle_count:,}  Manifold: {val.is_manifold}")
+                    if val.warnings:
+                        for w in val.warnings:
+                            click.echo(f"  Warning: {w}")
+                return
+
+            # Async job submitted, not waiting.
+            if json_mode:
+                import json
+                click.echo(json.dumps({
+                    "status": "success",
+                    "data": {"job": job.to_dict()},
+                }, indent=2))
+            else:
+                click.echo(f"Job submitted: {job.id}")
+                click.echo(f"  Provider: {gen.display_name}  Status: {job.status.value}")
+                click.echo(f"  Track with: kiln generate-status {job.id}")
+            return
+
+        # Wait for async completion.
+        if not json_mode:
+            click.echo(f"Job {job.id} submitted to {gen.display_name}. Waiting...")
+
+        start = _time.time()
+        while True:
+            elapsed = _time.time() - start
+            if elapsed >= timeout:
+                click.echo(format_error(
+                    f"Timed out after {timeout}s", code="TIMEOUT", json_mode=json_mode
+                ))
+                sys.exit(1)
+
+            job = gen.get_job_status(job.id)
+
+            if not json_mode and job.progress > 0:
+                click.echo(f"\r  Progress: {job.progress}%  ", nl=False)
+
+            if job.status == GenerationStatus.SUCCEEDED:
+                result = gen.download_result(job.id, output_dir=output_dir or "/tmp/kiln_generated")
+                val = validate_mesh(result.local_path)
+
+                if json_mode:
+                    import json
+                    click.echo(json.dumps({
+                        "status": "success",
+                        "data": {
+                            "job": job.to_dict(),
+                            "result": result.to_dict(),
+                            "validation": val.to_dict(),
+                            "elapsed_seconds": round(elapsed, 1),
+                        },
+                    }, indent=2))
+                else:
+                    click.echo(f"\nGenerated: {result.local_path}")
+                    click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
+                    click.echo(f"  Triangles: {val.triangle_count:,}  Manifold: {val.is_manifold}")
+                    click.echo(f"  Completed in {elapsed:.0f}s")
+                return
+
+            if job.status in (GenerationStatus.FAILED, GenerationStatus.CANCELLED):
+                click.echo(format_error(
+                    f"Generation {job.status.value}: {job.error or 'unknown'}",
+                    code="GENERATION_FAILED",
+                    json_mode=json_mode,
+                ))
+                sys.exit(1)
+
+            _time.sleep(10)
+
+    except GenerationAuthError as exc:
+        click.echo(format_error(str(exc), code="AUTH_ERROR", json_mode=json_mode))
+        sys.exit(1)
+    except GenerationError as exc:
+        click.echo(format_error(str(exc), code=exc.code or "GENERATION_ERROR", json_mode=json_mode))
+        sys.exit(1)
+    except KeyboardInterrupt:
+        if not json_mode:
+            click.echo("\nInterrupted.")
+        sys.exit(130)
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.command("generate-status")
+@click.argument("job_id")
+@click.option("--provider", "-p", default="meshy",
+              type=click.Choice(["meshy", "openscad"]),
+              help="Generation provider.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
+    """Check the status of a generation job.
+
+    JOB_ID is the ID returned by 'kiln generate'.
+    """
+    from kiln.generation import (
+        GenerationAuthError,
+        GenerationError,
+        MeshyProvider,
+        OpenSCADProvider,
+    )
+
+    try:
+        if provider == "meshy":
+            gen = MeshyProvider()
+        else:
+            gen = OpenSCADProvider()
+
+        job = gen.get_job_status(job_id)
+
+        if json_mode:
+            import json
+            click.echo(json.dumps({
+                "status": "success",
+                "data": {"job": job.to_dict()},
+            }, indent=2))
+        else:
+            click.echo(f"Job: {job.id}")
+            click.echo(f"  Provider: {job.provider}  Status: {job.status.value}")
+            click.echo(f"  Progress: {job.progress}%")
+            if job.error:
+                click.echo(f"  Error: {job.error}")
+
+    except GenerationAuthError as exc:
+        click.echo(format_error(str(exc), code="AUTH_ERROR", json_mode=json_mode))
+        sys.exit(1)
+    except GenerationError as exc:
+        click.echo(format_error(str(exc), code=exc.code or "GENERATION_ERROR", json_mode=json_mode))
+        sys.exit(1)
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.command("generate-download")
+@click.argument("job_id")
+@click.option("--provider", "-p", default="meshy",
+              type=click.Choice(["meshy", "openscad"]),
+              help="Generation provider.")
+@click.option("--output-dir", "-o", default="/tmp/kiln_generated",
+              help="Output directory.")
+@click.option("--validate/--no-validate", default=True,
+              help="Run mesh validation (default: on).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def generate_download(
+    job_id: str,
+    provider: str,
+    output_dir: str,
+    validate: bool,
+    json_mode: bool,
+) -> None:
+    """Download a completed generated model.
+
+    JOB_ID is the ID returned by 'kiln generate'.
+    """
+    from kiln.generation import (
+        GenerationAuthError,
+        GenerationError,
+        MeshyProvider,
+        OpenSCADProvider,
+        validate_mesh,
+    )
+
+    try:
+        if provider == "meshy":
+            gen = MeshyProvider()
+        else:
+            gen = OpenSCADProvider()
+
+        result = gen.download_result(job_id, output_dir=output_dir)
+
+        validation = None
+        if validate and result.format in ("stl", "obj"):
+            validation = validate_mesh(result.local_path)
+
+        if json_mode:
+            import json
+            data: Dict[str, Any] = {"result": result.to_dict()}
+            if validation:
+                data["validation"] = validation.to_dict()
+            click.echo(json.dumps({"status": "success", "data": data}, indent=2))
+        else:
+            click.echo(f"Downloaded: {result.local_path}")
+            click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
+            if validation:
+                click.echo(f"  Triangles: {validation.triangle_count:,}  Manifold: {validation.is_manifold}")
+                if not validation.valid:
+                    for e in validation.errors:
+                        click.echo(f"  Error: {e}")
+                for w in validation.warnings:
+                    click.echo(f"  Warning: {w}")
+
+    except GenerationAuthError as exc:
+        click.echo(format_error(str(exc), code="AUTH_ERROR", json_mode=json_mode))
+        sys.exit(1)
+    except GenerationError as exc:
+        click.echo(format_error(str(exc), code=exc.code or "GENERATION_ERROR", json_mode=json_mode))
+        sys.exit(1)
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------

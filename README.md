@@ -108,6 +108,9 @@ kiln level [--status] [--trigger] [--json]    # Bed leveling triggers
 kiln stream [--port 8081] [--stop] [--json]   # Webcam MJPEG proxy
 kiln sync status|now|configure                # Cloud sync
 kiln plugins list|info                        # Plugin management
+kiln generate "a phone stand" --provider meshy --json   # Generate 3D model from text
+kiln generate-status <job_id> --json                    # Check generation status
+kiln generate-download <job_id> -o ./models --json      # Download generated model
 kiln serve                                 # Start MCP server
 ```
 
@@ -202,7 +205,7 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `find_slicer_tool` | Detect installed slicer (PrusaSlicer/OrcaSlicer) |
 | `slice_and_print` | Slice a model then upload and print in one step |
 | `printer_snapshot` | Capture a webcam snapshot from the printer |
-| `fulfillment_materials` | List materials from external print services (Craftcloud) |
+| `fulfillment_materials` | List materials from external print services (Craftcloud, Shapeways, Sculpteo) |
 | `fulfillment_quote` | Get a manufacturing quote for a 3D model |
 | `fulfillment_order` | Place an order based on a quote |
 | `fulfillment_order_status` | Track a fulfillment order |
@@ -228,6 +231,12 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `compare_print_options` | Side-by-side local vs. fulfillment cost comparison |
 | `analyze_print_failure` | Diagnose a failed print job with causes and recommendations |
 | `validate_print_quality` | Post-print quality assessment with snapshot and event analysis |
+| `generate_model` | Generate a 3D model from a text description (Meshy AI or OpenSCAD) |
+| `generation_status` | Check the status of a model generation job |
+| `download_generated_model` | Download a completed generated model with mesh validation |
+| `await_generation` | Wait for a generation job to complete (polling) |
+| `generate_and_print` | Full pipeline: generate -> validate -> slice -> upload -> print |
+| `validate_generated_mesh` | Validate an STL/OBJ mesh for printing readiness |
 
 ## Supported Printers
 
@@ -268,7 +277,8 @@ The server also exposes read-only resources that agents can use for context:
 | `auth.py` | Optional API key authentication with scope-based access |
 | `billing.py` | Fee tracking for 3DOS network-routed jobs |
 | `discovery.py` | Network printer discovery (mDNS + HTTP probe) |
-| `fulfillment/` | External manufacturing service adapters (Craftcloud) |
+| `generation/` | Text-to-model generation providers (Meshy AI, OpenSCAD) with mesh validation |
+| `fulfillment/` | External manufacturing service adapters (Craftcloud, Shapeways, Sculpteo) |
 | `cost_estimator.py` | Print cost estimation from G-code analysis |
 | `materials.py` | Multi-material and spool tracking |
 | `bed_leveling.py` | Automated bed leveling trigger system |
@@ -380,10 +390,21 @@ kiln order place q-abc123 --shipping std
 kiln order status o-def456
 ```
 
-Configure Craftcloud credentials:
+Configure your fulfillment provider:
 
 ```bash
+# Option 1: Auto-detect from API key (Craftcloud is default)
 export KILN_CRAFTCLOUD_API_KEY=your_key
+
+# Option 2: Shapeways (OAuth2)
+export KILN_SHAPEWAYS_CLIENT_ID=your_id
+export KILN_SHAPEWAYS_CLIENT_SECRET=your_secret
+
+# Option 3: Sculpteo
+export KILN_SCULPTEO_API_KEY=your_key
+
+# Optional: explicitly select a provider
+export KILN_FULFILLMENT_PROVIDER=shapeways  # or craftcloud, sculpteo
 ```
 
 Agents use `fulfillment_quote` and `fulfillment_order` MCP tools for the same workflow.
@@ -395,8 +416,8 @@ Agents use `fulfillment_quote` and `fulfillment_order` MCP tools for the same wo
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (2050+ total)
-cd kiln && python3 -m pytest tests/ -v        # 1811 tests
+# Run tests (2231+ total)
+cd kiln && python3 -m pytest tests/ -v        # 1992 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 

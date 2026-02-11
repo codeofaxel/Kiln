@@ -106,16 +106,26 @@ Raw STL/3MF geometry must be sliced into G-code before printing. Kiln wraps Prus
 
 The `slice_and_print` operation combines slicing, upload, and print start into a single atomic action — the primary workflow for agents converting a design idea into a physical object.
 
-### 3.3 End-to-End Workflow
+### 3.3 Model Generation
 
-The complete agent workflow becomes:
+Kiln extends beyond model discovery with text-to-3D generation. A `GenerationProvider` abstract base class mirrors the marketplace adapter pattern, defining `generate()`, `get_job_status()`, and `download_result()` methods. Two concrete providers ship:
+
+**Meshy (cloud).** Integrates with the Meshy API for AI-powered text-to-3D generation. The provider submits preview tasks via REST, polls for completion, and downloads the resulting mesh. Jobs are asynchronous (typically 30s–5min). The `await_generation` MCP tool handles polling with configurable timeouts, matching the pattern established by `await_print_completion`.
+
+**OpenSCAD (local).** For parametric and geometric models, agents can write OpenSCAD code directly. The provider compiles `.scad` scripts to STL using the local OpenSCAD binary, auto-detected from PATH or macOS application bundles. Jobs are synchronous — the result is available immediately. This path has zero API cost and produces deterministic, parametric geometry ideal for mechanical parts.
+
+A mesh validation pipeline runs after generation, checking structural integrity without external dependencies. It parses binary and ASCII STL files using Python's `struct` module, validates triangle counts, computes bounding boxes, and performs manifold (watertight) analysis via edge counting. Validation issues are categorized as fatal errors (unparseable, zero triangles) or warnings (non-manifold, extreme dimensions) — allowing agents to make informed decisions about print readiness.
+
+### 3.4 End-to-End Workflows
+
+The complete agent workflows are:
 
 ```
-Idea → Search marketplace → Download STL → Slice to G-code →
-Pre-flight check → Upload → Print → Monitor → Complete
+Discovery path: Idea → Search marketplace → Download STL → Slice → Print
+Generation path: Idea → Generate model → Validate mesh → Slice → Print
 ```
 
-Each step is a single MCP tool call. An agent can execute this entire pipeline in under 10 tool calls.
+The `generate_and_print` MCP tool collapses the generation path into a single tool call: text prompt in, physical object out. Each step is also available individually for agents that need finer control.
 
 ## 4. Fleet Management and Job Scheduling
 

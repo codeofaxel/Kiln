@@ -61,11 +61,12 @@ from kiln.streaming import MJPEGProxy
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
 from kiln.plugins import PluginManager, PluginContext
 from kiln.fulfillment import (
-    CraftcloudProvider,
     FulfillmentError,
     FulfillmentProvider,
     OrderRequest,
     QuoteRequest,
+    get_provider as get_fulfillment_provider,
+    list_providers as list_fulfillment_providers,
 )
 from kiln.thingiverse import (
     ThingiverseClient,
@@ -81,6 +82,17 @@ from kiln.marketplaces import (
     ThingiverseAdapter,
     MyMiniFactoryAdapter,
     Cults3DAdapter,
+)
+from kiln.generation import (
+    GenerationError,
+    GenerationAuthError,
+    GenerationProvider,
+    GenerationJob,
+    GenerationResult,
+    GenerationStatus,
+    MeshyProvider,
+    OpenSCADProvider,
+    validate_mesh,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,6 +110,8 @@ _MMF_API_KEY: str = os.environ.get("KILN_MMF_API_KEY", "")
 _CULTS3D_USERNAME: str = os.environ.get("KILN_CULTS3D_USERNAME", "")
 _CULTS3D_API_KEY: str = os.environ.get("KILN_CULTS3D_API_KEY", "")
 _CRAFTCLOUD_API_KEY: str = os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
+_FULFILLMENT_PROVIDER: str = os.environ.get("KILN_FULFILLMENT_PROVIDER", "")
+_MESHY_API_KEY: str = os.environ.get("KILN_MESHY_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # MCP server instance
@@ -280,18 +294,27 @@ _fulfillment: Optional[FulfillmentProvider] = None
 
 
 def _get_fulfillment() -> FulfillmentProvider:
-    """Return the lazily-initialised fulfillment provider."""
+    """Return the lazily-initialised fulfillment provider.
+
+    Provider selection order:
+    1. ``KILN_FULFILLMENT_PROVIDER`` env var (explicit choice)
+    2. Auto-detect from provider-specific API key env vars
+    3. Fall back to Craftcloud if ``KILN_CRAFTCLOUD_API_KEY`` is set
+    """
     global _fulfillment  # noqa: PLW0603
 
     if _fulfillment is not None:
         return _fulfillment
 
-    if not _CRAFTCLOUD_API_KEY:
+    try:
+        _fulfillment = get_fulfillment_provider()
+    except (KeyError, RuntimeError, ValueError) as exc:
         raise RuntimeError(
-            "KILN_CRAFTCLOUD_API_KEY environment variable is not set.  "
-            "Set it to your Craftcloud API key to use fulfillment services."
-        )
-    _fulfillment = CraftcloudProvider(api_key=_CRAFTCLOUD_API_KEY)
+            "No fulfillment provider configured.  "
+            "Set KILN_FULFILLMENT_PROVIDER and the matching API key env var "
+            "(e.g. KILN_CRAFTCLOUD_API_KEY, KILN_SHAPEWAYS_CLIENT_ID + "
+            "KILN_SHAPEWAYS_CLIENT_SECRET, or KILN_SCULPTEO_API_KEY)."
+        ) from exc
     return _fulfillment
 
 
@@ -3517,6 +3540,348 @@ def troubleshooting() -> str:
         "- PETG: hotend 230-250C, bed 80-85C\n"
         "- ABS: hotend 240-260C, bed 100-110C"
     )
+
+
+# ---------------------------------------------------------------------------
+# Model Generation
+# ---------------------------------------------------------------------------
+
+
+def _get_generation_provider(provider: str = "meshy") -> GenerationProvider:
+    """Instantiate a generation provider by name."""
+    if provider == "meshy":
+        return MeshyProvider(api_key=_MESHY_API_KEY)
+    if provider == "openscad":
+        return OpenSCADProvider()
+    raise GenerationError(
+        f"Unknown generation provider: {provider!r}.  "
+        f"Supported: meshy, openscad.",
+        code="UNKNOWN_PROVIDER",
+    )
+
+
+@mcp.tool()
+def generate_model(
+    prompt: str,
+    provider: str = "meshy",
+    format: str = "stl",
+    style: str | None = None,
+) -> dict:
+    """Generate a 3D model from a text description.
+
+    Submits a generation job to the specified provider and returns a
+    job ID for status tracking.  Use ``generation_status`` to poll for
+    completion, then ``download_generated_model`` to retrieve the file.
+
+    For OpenSCAD, the prompt should be valid OpenSCAD code.  The job
+    completes synchronously and the result is immediately available.
+
+    Args:
+        prompt: Text description (or OpenSCAD code for ``openscad``).
+        provider: Generation backend — ``"meshy"`` (cloud AI) or
+            ``"openscad"`` (local parametric).  Default: ``"meshy"``.
+        format: Desired output format (``"stl"``).  Default: ``"stl"``.
+        style: Optional style hint (``"realistic"`` or ``"sculpture"``
+            for Meshy).  Ignored by OpenSCAD.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        gen = _get_generation_provider(provider)
+        job = gen.generate(prompt, format=format, style=style)
+        return {
+            "success": True,
+            "job": job.to_dict(),
+            "message": f"Generation job submitted to {gen.display_name}.",
+        }
+    except GenerationAuthError as exc:
+        return _error_dict(str(exc), code="AUTH_ERROR")
+    except GenerationError as exc:
+        return _error_dict(str(exc), code=exc.code or "GENERATION_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in generate_model")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def generation_status(
+    job_id: str,
+    provider: str = "meshy",
+) -> dict:
+    """Check the status of a model generation job.
+
+    Args:
+        job_id: Job ID returned by ``generate_model``.
+        provider: Provider that owns the job (``"meshy"`` or ``"openscad"``).
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        gen = _get_generation_provider(provider)
+        job = gen.get_job_status(job_id)
+        return {
+            "success": True,
+            "job": job.to_dict(),
+        }
+    except GenerationAuthError as exc:
+        return _error_dict(str(exc), code="AUTH_ERROR")
+    except GenerationError as exc:
+        return _error_dict(str(exc), code=exc.code or "GENERATION_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in generation_status")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def download_generated_model(
+    job_id: str,
+    provider: str = "meshy",
+    output_path: str | None = None,
+) -> dict:
+    """Download a completed generated model and optionally validate it.
+
+    Args:
+        job_id: Job ID of a completed generation job.
+        provider: Provider that owns the job (``"meshy"`` or ``"openscad"``).
+        output_path: Directory to save the file.  Defaults to
+            ``/tmp/kiln_generated``.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        gen = _get_generation_provider(provider)
+        output_dir = output_path or "/tmp/kiln_generated"
+        result = gen.download_result(job_id, output_dir=output_dir)
+
+        # Validate the mesh if it's an STL or OBJ.
+        validation = None
+        if result.format in ("stl", "obj"):
+            val = validate_mesh(result.local_path)
+            validation = val.to_dict()
+
+        return {
+            "success": True,
+            "result": result.to_dict(),
+            "validation": validation,
+            "message": f"Model downloaded to {result.local_path}.",
+        }
+    except GenerationAuthError as exc:
+        return _error_dict(str(exc), code="AUTH_ERROR")
+    except GenerationError as exc:
+        return _error_dict(str(exc), code=exc.code or "GENERATION_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in download_generated_model")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def await_generation(
+    job_id: str,
+    provider: str = "meshy",
+    timeout: int = 600,
+    poll_interval: int = 10,
+) -> dict:
+    """Wait for a generation job to complete and return the final status.
+
+    Polls the provider until the job reaches a terminal state or the
+    timeout is exceeded.  Useful for agents that want to block until
+    a model is ready.
+
+    Args:
+        job_id: Job ID from ``generate_model``.
+        provider: Provider that owns the job.
+        timeout: Max seconds to wait for generation (default 600 = 10 min).
+        poll_interval: Seconds between polls (default 10).
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        gen = _get_generation_provider(provider)
+        start = time.time()
+        progress_log: list[dict] = []
+
+        while True:
+            elapsed = time.time() - start
+            if elapsed >= timeout:
+                return {
+                    "success": True,
+                    "outcome": "timeout",
+                    "elapsed_seconds": round(elapsed, 1),
+                    "message": f"Timed out after {timeout}s waiting for generation.",
+                    "progress_log": progress_log[-20:],
+                }
+
+            job = gen.get_job_status(job_id)
+
+            progress_log.append({
+                "time": round(elapsed, 1),
+                "status": job.status.value,
+                "progress": job.progress,
+            })
+
+            if job.status == GenerationStatus.SUCCEEDED:
+                return {
+                    "success": True,
+                    "outcome": "completed",
+                    "job": job.to_dict(),
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                }
+            if job.status == GenerationStatus.FAILED:
+                return {
+                    "success": True,
+                    "outcome": "failed",
+                    "job": job.to_dict(),
+                    "error": job.error,
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                }
+            if job.status == GenerationStatus.CANCELLED:
+                return {
+                    "success": True,
+                    "outcome": "cancelled",
+                    "job": job.to_dict(),
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                }
+
+            time.sleep(poll_interval)
+
+    except GenerationAuthError as exc:
+        return _error_dict(str(exc), code="AUTH_ERROR")
+    except GenerationError as exc:
+        return _error_dict(str(exc), code=exc.code or "GENERATION_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in await_generation")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def generate_and_print(
+    prompt: str,
+    provider: str = "meshy",
+    style: str | None = None,
+    printer_name: str | None = None,
+    profile: str | None = None,
+    timeout: int = 600,
+) -> dict:
+    """Full pipeline: generate a model, validate, slice, upload, and print.
+
+    This is the end-to-end workflow from text description to physical
+    object.  Combines generate -> validate -> slice -> upload -> print.
+
+    Args:
+        prompt: Text description of the 3D model to generate.
+        provider: Generation provider (``"meshy"`` or ``"openscad"``).
+        style: Optional style hint for cloud providers.
+        printer_name: Target printer.  Omit for the default printer.
+        profile: Slicer profile path.
+        timeout: Max seconds to wait for generation (default 600).
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        gen = _get_generation_provider(provider)
+
+        # Step 1: Generate
+        job = gen.generate(prompt, format="stl", style=style)
+        logger.info("Generation job %s submitted to %s", job.id, gen.display_name)
+
+        # Step 2: Wait for completion (skip polling for synchronous providers)
+        if job.status != GenerationStatus.SUCCEEDED:
+            start = time.time()
+            while True:
+                elapsed = time.time() - start
+                if elapsed >= timeout:
+                    return _error_dict(
+                        f"Generation timed out after {timeout}s.",
+                        code="GENERATION_TIMEOUT",
+                    )
+                job = gen.get_job_status(job.id)
+                if job.status == GenerationStatus.SUCCEEDED:
+                    break
+                if job.status in (GenerationStatus.FAILED, GenerationStatus.CANCELLED):
+                    return _error_dict(
+                        f"Generation {job.status.value}: {job.error or 'unknown error'}",
+                        code="GENERATION_FAILED",
+                    )
+                time.sleep(10)
+
+        # Step 3: Download
+        result = gen.download_result(job.id)
+
+        # Step 4: Validate
+        if result.format in ("stl", "obj"):
+            val = validate_mesh(result.local_path)
+            if not val.valid:
+                return _error_dict(
+                    f"Generated mesh failed validation: {'; '.join(val.errors)}",
+                    code="VALIDATION_FAILED",
+                )
+
+        # Step 5: Slice
+        from kiln.slicer import slice_file
+
+        slice_result = slice_file(result.local_path, profile=profile)
+
+        # Step 6: Upload + Print
+        if printer_name:
+            adapter = _registry.get(printer_name)
+        else:
+            adapter = _get_adapter()
+
+        upload = adapter.upload_file(slice_result.output_path)
+        file_name = upload.file_name or os.path.basename(slice_result.output_path)
+        print_result = adapter.start_print(file_name)
+
+        return {
+            "success": True,
+            "generation": result.to_dict(),
+            "slice": slice_result.to_dict(),
+            "upload": upload.to_dict(),
+            "print": print_result.to_dict(),
+            "message": (
+                f"Generated '{prompt[:80]}' via {gen.display_name}, "
+                f"sliced, and started printing."
+            ),
+        }
+    except GenerationAuthError as exc:
+        return _error_dict(str(exc), code="AUTH_ERROR")
+    except GenerationError as exc:
+        return _error_dict(str(exc), code=exc.code or "GENERATION_ERROR")
+    except PrinterNotFoundError:
+        return _error_dict(
+            f"Printer {printer_name!r} not found.", code="NOT_FOUND"
+        )
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in generate_and_print")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def validate_generated_mesh(file_path: str) -> dict:
+    """Validate a 3D mesh file for printing readiness.
+
+    Checks that the file is a valid STL or OBJ, has reasonable
+    dimensions, an acceptable polygon count, and is manifold
+    (watertight).
+
+    Args:
+        file_path: Path to an STL or OBJ file.
+    """
+    try:
+        result = validate_mesh(file_path)
+        return {
+            "success": True,
+            "validation": result.to_dict(),
+            "message": "Mesh is valid." if result.valid else
+                       f"Mesh has issues: {'; '.join(result.errors)}",
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in validate_generated_mesh")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
