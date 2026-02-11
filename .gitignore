@@ -25,3 +25,4 @@ htmlcov/
 
 # Development tooling
 tools/
+.DS_Store
