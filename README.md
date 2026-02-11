@@ -53,12 +53,11 @@ This monorepo contains two packages:
 ### Kiln CLI
 
 ```bash
-# Install from PyPI (use pipx on modern Linux/WSL)
-pipx install kiln3d        # Recommended — auto-creates isolated env
-# OR: pip install kiln3d   # Works on macOS / inside a virtualenv
-
-# Or install from source
+# Install from source (recommended until PyPI release)
 pip install -e ./kiln
+
+# On modern Linux/WSL, use a virtualenv first (see Linux section below)
+# Or when published: pip install kiln3d
 
 # Discover printers on your network
 kiln discover
@@ -97,26 +96,30 @@ kiln status --json
 Kiln runs natively on Linux and Ubuntu under WSL 2.
 
 > **"Externally managed environment" error?** Modern Ubuntu/Debian (23.04+)
-> blocks `pip install` system-wide to protect OS packages.  Use **pipx**
-> (installs into its own virtualenv automatically) or create a venv manually.
+> blocks `pip install` system-wide to protect OS packages.  Create a
+> virtualenv first — it takes one extra line.
 
 ```bash
-# Option A: pipx (recommended — one command, no venv to manage)
-sudo apt install pipx && pipx ensurepath   # one-time setup
-pipx install kiln3d
-
-# Option B: virtualenv (if you prefer manual control)
+# 1. Create a virtualenv (one-time setup)
 python3 -m venv ~/.kiln-venv
 source ~/.kiln-venv/bin/activate
-pip install kiln3d
 
-# System dependencies (optional but recommended)
+# 2. Clone and install from source
+git clone https://github.com/codeofaxel/Kiln.git
+cd Kiln
+pip install -e ./kiln            # core
+pip install -e "./kiln[bambu]"   # add Bambu Lab support (if needed)
+
+# 3. System dependencies (optional but recommended)
 sudo apt install prusa-slicer   # Required for slicing STL → G-code
 sudo apt install openscad        # Required only for text-to-3D generation
 
-# Verify your install
+# 4. Verify your install
 kiln verify
 ```
+
+> **Tip:** Add `source ~/.kiln-venv/bin/activate` to your `~/.bashrc` so
+> the `kiln` command is always available when you open a terminal.
 
 **WSL 2 networking note:** WSL 2 uses a virtual network (NAT), so mDNS printer
 discovery (`kiln discover`) will not find printers on your home network. Instead,
