@@ -463,6 +463,7 @@ class TestAdapterSnapshot:
             def set_bed_temp(self, t): pass
             def send_gcode(self, cmds): pass
             def delete_file(self, path): pass
+            def emergency_stop(self): pass
 
         adapter = TestAdapter()
         assert adapter.get_snapshot() is None

@@ -49,6 +49,7 @@ class TestDeviceAdapterAlias:
             def set_bed_temp(self, t): return True
             def send_gcode(self, c): return True
             def delete_file(self, p): return True
+            def emergency_stop(self): return PrintResult(success=True, message="ok")
 
         cnc = FakeCNC()
         assert isinstance(cnc, PrinterAdapter)
@@ -133,6 +134,7 @@ class TestOptionalDeviceMethods:
             def set_bed_temp(self, t): return True
             def send_gcode(self, c): return True
             def delete_file(self, p): return True
+            def emergency_stop(self): return PrintResult(success=True, message="ok")
         return Stub()
 
     def test_set_spindle_speed_raises(self):
