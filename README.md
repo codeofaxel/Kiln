@@ -252,6 +252,24 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `firmware_status` | Check for available firmware updates on the printer |
 | `update_firmware` | Start a firmware update (all or specific component) |
 | `rollback_firmware` | Roll back a firmware component to its previous version |
+| `print_history` | Get recent print history with success/failure tracking |
+| `printer_stats` | Aggregate stats for a printer (total prints, success rate, avg duration) |
+| `annotate_print` | Add notes to a completed print record |
+| `save_agent_note` | Save a persistent note/preference that survives across sessions |
+| `get_agent_context` | Retrieve all stored agent memory for context |
+| `delete_agent_note` | Remove a stored note or preference |
+| `list_safety_profiles` | List all bundled printer safety profiles (26 models) |
+| `get_safety_profile` | Get temperature/feedrate/flow limits for a specific printer |
+| `validate_gcode_safe` | Validate G-code against printer-specific safety limits |
+| `list_slicer_profiles_tool` | List all bundled slicer profiles with recommended settings |
+| `get_slicer_profile_tool` | Get full slicer settings (speeds, retraction, temps) for a printer |
+| `get_printer_intelligence` | Firmware quirks, material compatibility, calibration guidance |
+| `get_material_recommendation` | Recommended hotend/bed/fan settings for a material on a printer |
+| `troubleshoot_printer` | Diagnose printer issues from known failure modes database |
+| `list_print_pipelines` | List available pre-validated pipelines (quick_print, calibrate, benchmark) |
+| `run_quick_print` | Full pipeline: slice → validate → upload → print in one shot |
+| `run_calibrate` | Home → bed level → calibration guidance pipeline |
+| `run_benchmark` | Slice → upload → stats report (manual start) |
 
 ## Supported Printers
 
@@ -300,7 +318,12 @@ The server also exposes read-only resources that agents can use for context:
 | `streaming.py` | MJPEG webcam streaming proxy |
 | `cloud_sync.py` | Cloud sync for printer configs and job history |
 | `plugins.py` | Plugin system with entry-point discovery |
-| `gcode.py` | G-code safety validator |
+| `gcode.py` | G-code safety validator with per-printer limits |
+| `safety_profiles.py` | Bundled safety database (26 printer models, temps/feedrates/flow) |
+| `slicer_profiles.py` | Bundled slicer profiles (auto-generates .ini files per printer) |
+| `printer_intelligence.py` | Printer knowledge base (firmware quirks, materials, failure modes) |
+| `pipelines.py` | Pre-validated print pipelines (quick_print, calibrate, benchmark) |
+| `data/` | Bundled JSON databases (safety profiles, slicer profiles, printer intelligence) |
 | `cli/` | Click CLI with 25+ subcommands and JSON output |
 
 ## Authentication (Optional)

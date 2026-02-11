@@ -49,6 +49,15 @@ class PrinterStatus(enum.Enum):
     UNKNOWN = "unknown"
 
 
+class DeviceType(enum.Enum):
+    """Classification of physical fabrication devices."""
+    FDM_PRINTER = "fdm_printer"
+    SLA_PRINTER = "sla_printer"
+    CNC_ROUTER = "cnc_router"
+    LASER_CUTTER = "laser_cutter"
+    GENERIC = "generic"
+
+
 # ---------------------------------------------------------------------------
 # Dataclasses -- structured return types
 # ---------------------------------------------------------------------------
@@ -144,6 +153,8 @@ class PrinterCapabilities:
     can_stream: bool = False
     can_probe_bed: bool = False
     can_update_firmware: bool = False
+    can_snapshot: bool = False
+    device_type: str = "fdm_printer"
     supported_extensions: Tuple[str, ...] = (".gcode", ".gco", ".g")
 
     def to_dict(self) -> Dict[str, Any]:
@@ -447,6 +458,20 @@ class PrinterAdapter(ABC):
         """
         return None
 
+    # -- CNC / laser operations (optional) --------------------------------
+
+    def set_spindle_speed(self, rpm: float) -> bool:
+        """Set CNC spindle speed.  Only for CNC-type devices."""
+        raise PrinterError(f"{self.name} does not support spindle control")
+
+    def set_laser_power(self, power_percent: float) -> bool:
+        """Set laser power (0--100 %).  Only for laser-type devices."""
+        raise PrinterError(f"{self.name} does not support laser control")
+
+    def get_tool_position(self) -> Optional[Dict[str, float]]:
+        """Return current tool position ``{x, y, z, ...}``.  Optional."""
+        return None
+
     # -- file deletion --------------------------------------------------
 
     @abstractmethod
@@ -467,3 +492,8 @@ class PrinterAdapter(ABC):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<{type(self).__name__} name={self.name!r}>"
+
+
+# Forward-compatible alias for non-printing fabrication devices.
+# PrinterAdapter remains the canonical name for backward compatibility.
+DeviceAdapter = PrinterAdapter

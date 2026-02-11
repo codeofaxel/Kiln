@@ -660,13 +660,21 @@ kiln/src/kiln/
     webhooks.py          # Webhook delivery
     auth.py              # API key authentication
     billing.py           # Fee tracking
-    gcode.py             # G-code safety validator
+    gcode.py             # G-code safety validator (per-printer limits)
+    safety_profiles.py   # Bundled safety database (26 printer models)
+    slicer_profiles.py   # Bundled slicer profiles (auto .ini generation)
+    printer_intelligence.py  # Printer knowledge base (quirks, materials, fixes)
+    pipelines.py         # Pre-validated print pipelines (quick_print, calibrate, benchmark)
     cost_estimator.py    # Print cost estimation
     materials.py         # Multi-material tracking
     bed_leveling.py      # Bed leveling trigger system
     streaming.py         # MJPEG webcam proxy
     cloud_sync.py        # Cloud sync manager
     plugins.py           # Plugin system
+    data/
+        safety_profiles.json     # Per-printer safety limits (temps, feedrates, flow)
+        slicer_profiles.json     # Per-printer slicer settings (INI key-values)
+        printer_intelligence.json  # Firmware quirks, materials, failure modes
     printers/
         base.py          # Abstract PrinterAdapter + dataclasses
         octoprint.py     # OctoPrint REST adapter

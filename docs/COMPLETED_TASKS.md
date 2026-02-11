@@ -4,6 +4,31 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-11
 
+### Bundled Slicer Profiles Per Printer
+- **`data/slicer_profiles.json`** — Curated PrusaSlicer/OrcaSlicer settings for 14 printer models: Ender 3, Ender 3 S1, K1, Prusa MK3S/MK4/Mini, Bambu X1C/P1S/A1, Voron 2.4, Elegoo Neptune 4, Sovol SV06, QIDI X-Plus 3
+- Each profile: layer height, speeds, temps, retraction, fan, bed shape, G-code flavor — all optimized for the specific printer's kinematics and extruder type
+- **`slicer_profiles.py`** — Loader with `resolve_slicer_profile()` that auto-generates temp `.ini` files for the slicer CLI, cached per printer+overrides
+- 2 MCP tools: `list_slicer_profiles_tool`, `get_slicer_profile_tool`
+- Agents auto-select the right profile by passing `printer_id` — no manual slicer config needed
+
+### Printer Profile Intelligence (Firmware Quirks DB)
+- **`data/printer_intelligence.json`** — Full operational knowledge base for 13 printer models: firmware type, extruder/hotend info, enclosure status, ABL capability
+- **Material compatibility matrix** per printer: PLA/PETG/ABS/TPU/PA-CF/PC with exact hotend/bed/fan temps and material-specific tips
+- **Firmware quirks** — printer-specific gotchas (e.g. "PTFE tube degrades above 240°C", "Nextruder requires 0.4mm retraction — don't increase")
+- **Calibration guidance** — step-by-step procedures (first_steps, flow_rate_test, retraction_test, esteps)
+- **Known failure modes** — symptom → cause → fix database for common issues
+- **`printer_intelligence.py`** — Loader with `get_material_settings()`, `diagnose_issue()` (fuzzy symptom search)
+- 3 MCP tools: `get_printer_intelligence`, `get_material_recommendation`, `troubleshoot_printer`
+
+### Pre-Validated Print Pipelines
+- **`pipelines.py`** — Named command sequences that chain multiple MCP operations:
+  - **`quick_print`** — resolve profile → slice → G-code safety validation → upload → preflight → start print (6 steps with error handling at each stage)
+  - **`calibrate`** — connect → home axes → auto bed level → return calibration guidance from intelligence DB
+  - **`benchmark`** — resolve profile → slice → upload → report printer stats from history
+- Each pipeline returns `PipelineResult` with per-step timing, success/failure, and diagnostic data
+- Pipeline registry with `list_pipelines()` for discoverability
+- 4 MCP tools: `list_print_pipelines`, `run_quick_print`, `run_calibrate`, `run_benchmark`
+
 ### Agent Memory & Print History Logging
 - **Print history table** (`print_history`) in SQLite persistence — tracks every completed/failed job with printer_name, duration, material_type, file_hash, slicer_profile, notes, agent_id, and JSON metadata
 - **Agent memory table** (`agent_memory`) — persistent key-value store scoped by agent_id and namespace (global, fleet, per-printer). Survives across sessions

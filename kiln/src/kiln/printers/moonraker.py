@@ -166,6 +166,7 @@ class MoonrakerAdapter(PrinterAdapter):
             can_stream=True,
             can_probe_bed=True,
             can_update_firmware=True,
+            can_snapshot=True,
             supported_extensions=(".gcode", ".gco", ".g"),
         )
 

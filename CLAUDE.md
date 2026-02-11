@@ -58,17 +58,25 @@ kiln/                           — MCP Server package
   src/kiln/
     __init__.py
     __main__.py                 — Entry point (python -m kiln)
-    server.py                   — FastMCP server, 30+ MCP tools
+    server.py                   — FastMCP server, 50+ MCP tools
     slicer.py                   — PrusaSlicer/OrcaSlicer integration
+    slicer_profiles.py          — Bundled slicer profiles per printer
+    safety_profiles.py          — Per-printer safety limits (26 models)
+    printer_intelligence.py     — Printer knowledge base (quirks, materials, fixes)
+    pipelines.py                — Pre-validated print pipelines (quick_print, calibrate, benchmark)
     registry.py                 — Fleet printer registry
     queue.py                    — Priority job queue
     scheduler.py                — Background job dispatcher
     events.py                   — Pub/sub event bus
-    persistence.py              — SQLite storage
+    persistence.py              — SQLite storage (jobs, events, print history, agent memory)
     webhooks.py                 — Webhook delivery with HMAC
     auth.py                     — API key authentication
     billing.py                  — Fee tracking
-    gcode.py                    — G-code safety validator
+    gcode.py                    — G-code safety validator (per-printer limits)
+    data/
+      safety_profiles.json      — Per-printer safety limits database
+      slicer_profiles.json      — Per-printer slicer settings
+      printer_intelligence.json — Firmware quirks, materials, failure modes
     printers/
       base.py                   — Abstract PrinterAdapter, enums, dataclasses
       octoprint.py              — OctoPrint REST adapter

@@ -8,6 +8,8 @@ Re-exports the public API from the base module so consumers can write::
 from __future__ import annotations
 
 from kiln.printers.base import (
+    DeviceAdapter,
+    DeviceType,
     FirmwareComponent,
     FirmwareStatus,
     FirmwareUpdateResult,
@@ -32,6 +34,8 @@ from kiln.printers.prusaconnect import PrusaConnectAdapter
 
 __all__ = [
     "BambuAdapter",
+    "DeviceAdapter",
+    "DeviceType",
     "FirmwareComponent",
     "FirmwareStatus",
     "FirmwareUpdateResult",
