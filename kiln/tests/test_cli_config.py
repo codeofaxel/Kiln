@@ -41,6 +41,22 @@ class TestNormalizeHost:
     def test_empty_string(self):
         assert _normalize_host("") == ""
 
+    # Bambu-specific: raw IP, no http:// prefix
+    def test_bambu_no_scheme_added(self):
+        assert _normalize_host("192.168.1.100", "bambu") == "192.168.1.100"
+
+    def test_bambu_strips_accidental_http(self):
+        assert _normalize_host("http://192.168.1.100", "bambu") == "192.168.1.100"
+
+    def test_bambu_strips_accidental_https(self):
+        assert _normalize_host("https://192.168.1.100", "bambu") == "192.168.1.100"
+
+    def test_bambu_strips_whitespace(self):
+        assert _normalize_host("  192.168.1.100  ", "bambu") == "192.168.1.100"
+
+    def test_bambu_strips_trailing_slash(self):
+        assert _normalize_host("192.168.1.100/", "bambu") == "192.168.1.100"
+
 
 # ---------------------------------------------------------------------------
 # get_config_path
@@ -97,8 +113,18 @@ class TestSaveAndLoad:
         )
         cfg = load_printer_config("x1c", config_path=cfg_path)
         assert cfg["type"] == "bambu"
+        assert cfg["host"] == "192.168.1.100"  # Raw IP, no http:// prefix
         assert cfg["access_code"] == "12345678"
         assert cfg["serial"] == "01P00A000000001"
+
+    def test_bambu_env_var_no_http_prefix(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KILN_PRINTER_HOST", "192.168.1.100")
+        monkeypatch.setenv("KILN_PRINTER_TYPE", "bambu")
+        monkeypatch.setenv("KILN_PRINTER_API_KEY", "12345678")
+        monkeypatch.setenv("KILN_PRINTER_SERIAL", "01P00A000000001")
+        cfg = load_printer_config(config_path=tmp_path / "config.yaml")
+        assert cfg["host"] == "192.168.1.100"  # No http:// prefix
+        assert cfg["type"] == "bambu"
 
     def test_sets_active_by_default(self, tmp_path):
         cfg_path = tmp_path / "config.yaml"

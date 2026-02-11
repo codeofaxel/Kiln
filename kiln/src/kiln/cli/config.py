@@ -30,9 +30,18 @@ def get_config_path() -> Path:
     return Path.home() / ".kiln" / "config.yaml"
 
 
-def _normalize_host(host: str) -> str:
-    """Ensure *host* has an HTTP(S) scheme and no trailing slash."""
+def _normalize_host(host: str, printer_type: str = "octoprint") -> str:
+    """Normalize *host* for the given printer type.
+
+    HTTP-based backends (OctoPrint, Moonraker, Prusa Connect) get an
+    ``http://`` scheme prefix if missing.  MQTT/FTPS backends (Bambu)
+    need a raw hostname/IP — no scheme is prepended.
+    """
     host = host.strip()
+    if printer_type == "bambu":
+        # Strip any accidental scheme — MQTT/FTPS need raw host.
+        host = re.sub(r"^https?://", "", host, flags=re.IGNORECASE)
+        return host.rstrip("/")
     if host and not re.match(r"^https?://", host, re.IGNORECASE):
         host = "http://" + host
     return host.rstrip("/")
@@ -107,9 +116,10 @@ def load_printer_config(
     # --- Env var fast path ------------------------------------------------
     env_host = os.environ.get("KILN_PRINTER_HOST", "")
     if env_host:
+        ptype = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
         return {
-            "type": os.environ.get("KILN_PRINTER_TYPE", "octoprint"),
-            "host": _normalize_host(env_host),
+            "type": ptype,
+            "host": _normalize_host(env_host, ptype),
             "api_key": os.environ.get("KILN_PRINTER_API_KEY", ""),
             "access_code": os.environ.get("KILN_PRINTER_ACCESS_CODE", os.environ.get("KILN_PRINTER_API_KEY", "")),
             "serial": os.environ.get("KILN_PRINTER_SERIAL", ""),
@@ -150,7 +160,7 @@ def load_printer_config(
     cfg = dict(printers[name])
     cfg.setdefault("timeout", settings.get("timeout", 30))
     cfg.setdefault("retries", settings.get("retries", 3))
-    cfg["host"] = _normalize_host(str(cfg.get("host", "")))
+    cfg["host"] = _normalize_host(str(cfg.get("host", "")), str(cfg.get("type", "octoprint")))
     return cfg
 
 
@@ -182,7 +192,7 @@ def save_printer(
 
     entry: Dict[str, Any] = {
         "type": printer_type,
-        "host": _normalize_host(host),
+        "host": _normalize_host(host, printer_type),
     }
     if printer_type == "octoprint":
         if api_key:
