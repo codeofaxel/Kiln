@@ -187,6 +187,8 @@ class BedLevelManager:
                             flat.extend(row)
                         else:
                             flat.append(row)
+                    # Filter to only numeric values to prevent type errors
+                    flat = [v for v in flat if isinstance(v, (int, float))]
                     if flat:
                         mesh_points = len(flat)
                         mean = sum(flat) / len(flat)

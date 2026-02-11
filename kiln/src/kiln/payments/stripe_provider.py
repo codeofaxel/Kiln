@@ -238,12 +238,12 @@ class StripeProvider(PaymentProvider):
                 amount=request.amount,
                 currency=request.currency,
                 rail=PaymentRail.STRIPE,
-                error=str(exc),
+                error="Card was declined.",
             )
 
         except stripe.error.StripeError as exc:
             raise PaymentError(
-                f"Stripe error creating payment: {exc}",
+                "Payment processing error. Please try again.",
                 code="STRIPE_ERROR",
             ) from exc
 
@@ -400,12 +400,12 @@ class StripeProvider(PaymentProvider):
                 amount=request.amount,
                 currency=request.currency,
                 rail=PaymentRail.STRIPE,
-                error=str(exc),
+                error="Card was declined.",
             )
 
         except stripe.error.StripeError as exc:
             raise PaymentError(
-                f"Stripe error authorizing payment: {exc}",
+                "Payment processing error. Please try again.",
                 code="STRIPE_AUTH_ERROR",
             ) from exc
 

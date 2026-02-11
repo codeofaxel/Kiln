@@ -55,7 +55,7 @@ def _payment_request(**kwargs) -> PaymentRequest:
         "rail": PaymentRail.SOLANA,
         "job_id": "job-001",
         "description": "Print job payment",
-        "metadata": {"destination_address": "So1anaAddr3ss..."},
+        "metadata": {"destination_address": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"},
     }
     defaults.update(kwargs)
     return PaymentRequest(**defaults)

@@ -4,6 +4,63 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-11
 
+### Comprehensive Security Hardening
+Full-project security audit and fix pass — 70+ vulnerabilities identified and fixed across 25+ files.
+
+**Temperature Safety (P0 — hardware protection)**
+- G-code validator now blocks negative temperatures and warns on cold extrusion risk (<150°C)
+- Unrecognized G-code commands blocked instead of passed through with warning
+- `set_temperature()` MCP tool validates bounds (0-300°C hotend, 0-130°C bed) before reaching adapters
+- All 4 printer adapters (OctoPrint, Moonraker, Bambu, PrusaConnect) enforce temperature limits via shared `_validate_temp()` in base class
+- CLI `temp` command validates temperature ranges before sending
+
+**Path Traversal Fixes**
+- `printer_snapshot()` restricts save_path to home/tmp directories
+- Slicer `output_name` stripped to basename only — rejects directory traversal
+- Bambu `start_print()` and `delete_file()` restrict paths to `/sdcard/` and `/cache/`
+- CLI `snapshot --output` validates path boundaries
+
+**Agent Security**
+- Tool results sanitized before feeding to LLM in `agent_loop.py` — strips injection patterns, truncates to 50K chars
+- System prompt includes explicit warning to ignore instructions in tool results
+- `skip_preflight` parameter removed from `start_print()` — pre-flight checks are now mandatory
+
+**REST API Hardening**
+- Parameter pollution fixed: `**body` replaced with `inspect.signature()` filtering, rejects unknown params
+- Rate limiting added (60 req/min per IP)
+- CORS default changed from `["*"]` to `[]`
+- Request body size limited to 1MB
+- Error messages sanitized to prevent information leakage
+
+**Payment Security**
+- Circle USDC: destination address validated (Ethereum 0x format or Solana base58)
+- Stripe: error messages sanitized — no raw exception details returned to clients
+- Payment manager: billing charge failure handled gracefully with status tracking
+
+**Infrastructure Fixes**
+- MJPEG proxy: frame buffer capped at 10MB to prevent OOM
+- Cloud sync: error messages sanitized to prevent credential leakage
+- Scheduler: job status mutations wrapped in locks to prevent race conditions
+- Materials tracker: spool warnings emitted outside lock to prevent deadlocks
+- Webhook delivery queue bounded to 10K entries with overflow logging
+- Event bus: duplicate subscription prevention
+- Bed leveling: division-by-zero guard on empty mesh data
+- Cost estimator: intermediate rounding removed to prevent accumulation errors
+
+**Plugin & Subprocess Safety**
+- Plugin loading gated by `KILN_ALLOWED_PLUGINS` allow-list
+- OpenSCAD input validated: size limit (100KB), dangerous functions blocked (`import()`, `surface()`, `include`, `use`)
+- OpenSCAD subprocess runs in isolated temp directory
+- CLI config: removed credential type confusion fallback (access_code no longer falls back to API key)
+
+**Defensive Measures**
+- G-code batch limited to 100 commands per send
+- File upload validates existence and size (max 500MB, rejects empty files)
+- Pipeline G-code sample increased from 500 to 2000 lines
+- Pipeline safety check failure now aborts (was silently continuing)
+
+All 2891 tests passing (2652 kiln + 239 octoprint-cli).
+
 ### Multi-Model Support (OpenRouter / Any LLM)
 - **tool_schema.py**: OpenAI function-calling schema converter — introspects FastMCP tool definitions and generates OpenAI-compatible JSON schemas with parameter descriptions from docstrings
 - **tool_tiers.py**: Three-tier tool system — essential (15 tools for weak models), standard (43 for mid-range), full (101 for strong models) with auto-detection via `suggest_tier(model_name)`

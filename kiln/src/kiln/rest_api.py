@@ -31,11 +31,43 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json as _json
 import logging
+import time as _time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Rate limiter
+# ---------------------------------------------------------------------------
+
+
+class _RateLimiter:
+    """Simple in-memory token-bucket rate limiter."""
+
+    def __init__(self, max_requests: int = 60, window_seconds: float = 60.0):
+        self._max = max_requests
+        self._window = window_seconds
+        self._hits: dict[str, list[float]] = defaultdict(list)
+
+    def check(self, key: str) -> bool:
+        """Return True if the request is allowed, False if rate-limited."""
+        now = _time.monotonic()
+        hits = self._hits[key]
+        # Purge expired entries
+        cutoff = now - self._window
+        self._hits[key] = [t for t in hits if t > cutoff]
+        if len(self._hits[key]) >= self._max:
+            return False
+        self._hits[key].append(now)
+        return True
+
+
+_rate_limiter = _RateLimiter()
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +82,7 @@ class RestApiConfig:
     host: str = "0.0.0.0"
     port: int = 8420
     auth_token: str | None = None  # If set, require Bearer token
-    cors_origins: list[str] = field(default_factory=lambda: ["*"])
+    cors_origins: list[str] = field(default_factory=list)
     tool_tier: str = "full"  # Which tools to expose
 
 
@@ -186,6 +218,14 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
         _=Depends(verify_auth),
     ):
         """Execute an MCP tool by name with JSON parameters."""
+        # Rate limiting
+        client_ip = request.client.host if request.client else "unknown"
+        if not _rate_limiter.check(client_ip):
+            return JSONResponse(
+                {"success": False, "error": "Rate limit exceeded. Try again later."},
+                status_code=429,
+            )
+
         mcp_instance = _get_mcp_instance()
         func = _get_tool_function(mcp_instance, tool_name)
         if func is None:
@@ -194,10 +234,23 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
                 detail=f"Unknown tool: {tool_name}",
             )
 
-        # Parse body (may be empty for no-param tools)
-        try:
-            body = await request.json()
-        except Exception:
+        # Parse body with size limit (may be empty for no-param tools)
+        raw = await request.body()
+        if len(raw) > 1_048_576:  # 1 MB
+            return JSONResponse(
+                {"success": False, "error": "Request body too large (max 1MB)."},
+                status_code=413,
+            )
+
+        if raw:
+            try:
+                body = _json.loads(raw)
+            except Exception:
+                return JSONResponse(
+                    {"success": False, "error": "Invalid JSON."},
+                    status_code=400,
+                )
+        else:
             body = {}
 
         if not isinstance(body, dict):
@@ -206,9 +259,20 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
                 detail="Request body must be a JSON object",
             )
 
+        # Filter body to only include parameters the tool actually accepts
+        sig = inspect.signature(func)
+        valid_params = set(sig.parameters.keys())
+        filtered = {k: v for k, v in body.items() if k in valid_params}
+        unknown = set(body.keys()) - valid_params
+        if unknown:
+            return JSONResponse(
+                {"success": False, "error": f"Unknown parameters: {', '.join(sorted(unknown))}"},
+                status_code=400,
+            )
+
         # Execute the tool function
         try:
-            result = func(**body)
+            result = func(**filtered)
             # Handle async tool functions
             if inspect.isawaitable(result):
                 result = await result
@@ -218,15 +282,12 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
                 status_code=400,
                 detail=f"Invalid parameters: {exc}",
             )
-        except Exception as exc:
-            logger.exception("Error executing tool %s", tool_name)
-            return {
-                "success": False,
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": str(exc),
-                },
-            }
+        except Exception:
+            logger.exception("Tool execution failed: %s", tool_name)
+            return JSONResponse(
+                {"success": False, "error": "Internal tool execution error."},
+                status_code=500,
+            )
 
     # ----- Agent loop endpoint --------------------------------------------
 
@@ -237,6 +298,14 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
         Requires an API key for the LLM provider (OpenRouter, OpenAI, etc.)
         in the request body.
         """
+        # Rate limiting
+        client_ip = request.client.host if request.client else "unknown"
+        if not _rate_limiter.check(client_ip):
+            return JSONResponse(
+                {"success": False, "error": "Rate limit exceeded. Try again later."},
+                status_code=429,
+            )
+
         try:
             body = await request.json()
         except Exception:
@@ -285,15 +354,12 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
                 None, lambda: run_agent_loop(prompt, agent_config)
             )
             return result.to_dict()
-        except Exception as exc:
+        except Exception:
             logger.exception("Agent loop error")
-            return {
-                "success": False,
-                "error": {
-                    "code": "AGENT_ERROR",
-                    "message": str(exc),
-                },
-            }
+            return JSONResponse(
+                {"success": False, "error": "Internal agent execution error."},
+                status_code=500,
+            )
 
     return app
 

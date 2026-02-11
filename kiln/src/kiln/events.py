@@ -152,10 +152,20 @@ class EventBus:
         """
         with self._lock:
             if event_type is None:
+                # Prevent duplicate subscriptions
+                for existing in self._wildcard_handlers:
+                    if existing is handler:
+                        logger.debug("Duplicate subscription for wildcard, skipping")
+                        return
                 self._wildcard_handlers.append(handler)
             else:
                 if event_type not in self._handlers:
                     self._handlers[event_type] = []
+                # Prevent duplicate subscriptions
+                for existing in self._handlers[event_type]:
+                    if existing is handler:
+                        logger.debug("Duplicate subscription for %s, skipping", event_type)
+                        return
                 self._handlers[event_type].append(handler)
 
     def unsubscribe(

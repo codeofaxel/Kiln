@@ -74,6 +74,10 @@ _MAX_HOTEND_TEMP: float = 300.0
 _MAX_BED_TEMP: float = 130.0
 _MAX_CHAMBER_TEMP: float = 80.0
 
+# Minimum temperature for cold-extrusion protection.  Setting a hotend
+# below this value while extruding can jam the nozzle.
+_MIN_EXTRUDE_TEMP: float = 150.0
+
 # Movement safety thresholds.
 _MIN_SAFE_Z: float = 0.0
 _MAX_SAFE_FEEDRATE: float = 10_000.0
@@ -194,9 +198,11 @@ def _validate_single(
 
     cmd = _parse_command_word(cleaned)
     if cmd is None:
-        # Not a recognisable G-code command -- pass through with a warning.
-        warnings.append(f"Unrecognised command format: {cleaned!r}")
-        return cleaned
+        # Not a recognisable G-code command -- block to prevent sending
+        # arbitrary text to the printer firmware.
+        errors.append(f"Unrecognised command format blocked: {cleaned!r}")
+        blocked.append(cleaned)
+        return None
 
     # --- Blocked commands ------------------------------------------------
     if cmd in _BLOCKED_COMMANDS:
@@ -211,33 +217,62 @@ def _validate_single(
     # --- Temperature limits (BLOCKING) -----------------------------------
     if cmd in _HOTEND_TEMP_COMMANDS:
         temp = _extract_param(cleaned, "S")
-        if temp is not None and temp > _MAX_HOTEND_TEMP:
-            errors.append(
-                f"{cmd} S{temp:g} exceeds maximum hotend temperature "
-                f"({_MAX_HOTEND_TEMP:g}C)"
-            )
-            blocked.append(cleaned)
-            return None
+        if temp is not None:
+            if temp < 0:
+                errors.append(
+                    f"{cmd} S{temp:g} has negative temperature -- "
+                    f"temperatures must be >= 0"
+                )
+                blocked.append(cleaned)
+                return None
+            if temp > _MAX_HOTEND_TEMP:
+                errors.append(
+                    f"{cmd} S{temp:g} exceeds maximum hotend temperature "
+                    f"({_MAX_HOTEND_TEMP:g}C)"
+                )
+                blocked.append(cleaned)
+                return None
+            if 0 < temp < _MIN_EXTRUDE_TEMP:
+                warnings.append(
+                    f"{cmd} S{temp:g} is below minimum extrusion temperature "
+                    f"({_MIN_EXTRUDE_TEMP:g}C) -- risk of cold extrusion jam"
+                )
 
     if cmd in _BED_TEMP_COMMANDS:
         temp = _extract_param(cleaned, "S")
-        if temp is not None and temp > _MAX_BED_TEMP:
-            errors.append(
-                f"{cmd} S{temp:g} exceeds maximum bed temperature "
-                f"({_MAX_BED_TEMP:g}C)"
-            )
-            blocked.append(cleaned)
-            return None
+        if temp is not None:
+            if temp < 0:
+                errors.append(
+                    f"{cmd} S{temp:g} has negative temperature -- "
+                    f"temperatures must be >= 0"
+                )
+                blocked.append(cleaned)
+                return None
+            if temp > _MAX_BED_TEMP:
+                errors.append(
+                    f"{cmd} S{temp:g} exceeds maximum bed temperature "
+                    f"({_MAX_BED_TEMP:g}C)"
+                )
+                blocked.append(cleaned)
+                return None
 
     if cmd in _CHAMBER_TEMP_COMMANDS:
         temp = _extract_param(cleaned, "S")
-        if temp is not None and temp > _MAX_CHAMBER_TEMP:
-            errors.append(
-                f"{cmd} S{temp:g} exceeds maximum chamber temperature "
-                f"({_MAX_CHAMBER_TEMP:g}C)"
-            )
-            blocked.append(cleaned)
-            return None
+        if temp is not None:
+            if temp < 0:
+                errors.append(
+                    f"{cmd} S{temp:g} has negative temperature -- "
+                    f"temperatures must be >= 0"
+                )
+                blocked.append(cleaned)
+                return None
+            if temp > _MAX_CHAMBER_TEMP:
+                errors.append(
+                    f"{cmd} S{temp:g} exceeds maximum chamber temperature "
+                    f"({_MAX_CHAMBER_TEMP:g}C)"
+                )
+                blocked.append(cleaned)
+                return None
 
     # --- Movement safety (WARNING) ---------------------------------------
     if cmd in _MOVE_COMMANDS:
@@ -383,8 +418,9 @@ def _validate_single_with_profile(
 
     cmd = _parse_command_word(cleaned)
     if cmd is None:
-        warnings.append(f"Unrecognised command format: {cleaned!r}")
-        return cleaned
+        errors.append(f"Unrecognised command format blocked: {cleaned!r}")
+        blocked.append(cleaned)
+        return None
 
     # --- Blocked commands (same regardless of printer) ---
     if cmd in _BLOCKED_COMMANDS:
@@ -400,35 +436,64 @@ def _validate_single_with_profile(
     if cmd in _HOTEND_TEMP_COMMANDS:
         temp = _extract_param(cleaned, "S")
         limit = profile.max_hotend_temp
-        if temp is not None and temp > limit:
-            errors.append(
-                f"{cmd} S{temp:g} exceeds {profile.display_name} max hotend "
-                f"temperature ({limit:g}°C)"
-            )
-            blocked.append(cleaned)
-            return None
+        if temp is not None:
+            if temp < 0:
+                errors.append(
+                    f"{cmd} S{temp:g} has negative temperature -- "
+                    f"temperatures must be >= 0"
+                )
+                blocked.append(cleaned)
+                return None
+            if temp > limit:
+                errors.append(
+                    f"{cmd} S{temp:g} exceeds {profile.display_name} max hotend "
+                    f"temperature ({limit:g}°C)"
+                )
+                blocked.append(cleaned)
+                return None
+            if 0 < temp < _MIN_EXTRUDE_TEMP:
+                warnings.append(
+                    f"{cmd} S{temp:g} is below minimum extrusion temperature "
+                    f"({_MIN_EXTRUDE_TEMP:g}C) -- risk of cold extrusion jam"
+                )
 
     if cmd in _BED_TEMP_COMMANDS:
         temp = _extract_param(cleaned, "S")
         limit = profile.max_bed_temp
-        if temp is not None and temp > limit:
-            errors.append(
-                f"{cmd} S{temp:g} exceeds {profile.display_name} max bed "
-                f"temperature ({limit:g}°C)"
-            )
-            blocked.append(cleaned)
-            return None
+        if temp is not None:
+            if temp < 0:
+                errors.append(
+                    f"{cmd} S{temp:g} has negative temperature -- "
+                    f"temperatures must be >= 0"
+                )
+                blocked.append(cleaned)
+                return None
+            if temp > limit:
+                errors.append(
+                    f"{cmd} S{temp:g} exceeds {profile.display_name} max bed "
+                    f"temperature ({limit:g}°C)"
+                )
+                blocked.append(cleaned)
+                return None
 
     if cmd in _CHAMBER_TEMP_COMMANDS:
         temp = _extract_param(cleaned, "S")
         limit = profile.max_chamber_temp
-        if temp is not None and limit is not None and temp > limit:
-            errors.append(
-                f"{cmd} S{temp:g} exceeds {profile.display_name} max chamber "
-                f"temperature ({limit:g}°C)"
-            )
-            blocked.append(cleaned)
-            return None
+        if temp is not None:
+            if temp < 0:
+                errors.append(
+                    f"{cmd} S{temp:g} has negative temperature -- "
+                    f"temperatures must be >= 0"
+                )
+                blocked.append(cleaned)
+                return None
+            if limit is not None and temp > limit:
+                errors.append(
+                    f"{cmd} S{temp:g} exceeds {profile.display_name} max chamber "
+                    f"temperature ({limit:g}°C)"
+                )
+                blocked.append(cleaned)
+                return None
 
     # --- Movement safety from profile (WARNING) ---
     if cmd in _MOVE_COMMANDS:

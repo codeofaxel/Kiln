@@ -121,7 +121,7 @@ def load_printer_config(
             "type": ptype,
             "host": _normalize_host(env_host, ptype),
             "api_key": os.environ.get("KILN_PRINTER_API_KEY", ""),
-            "access_code": os.environ.get("KILN_PRINTER_ACCESS_CODE", os.environ.get("KILN_PRINTER_API_KEY", "")),
+            "access_code": os.environ.get("KILN_PRINTER_ACCESS_CODE", ""),
             "serial": os.environ.get("KILN_PRINTER_SERIAL", ""),
         }
 

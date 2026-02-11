@@ -331,6 +331,26 @@ class PrinterAdapter(ABC):
 
     # -- temperature control --------------------------------------------
 
+    def _validate_temp(self, target: float, max_temp: float, heater: str) -> None:
+        """Validate a temperature value before sending to the printer.
+
+        Args:
+            target: Desired temperature in Celsius.
+            max_temp: Maximum safe temperature for this heater.
+            heater: Human-readable heater name for error messages.
+
+        Raises:
+            PrinterError: If the temperature is out of safe range.
+        """
+        if target < 0:
+            raise PrinterError(
+                f"{heater} temperature {target}°C is negative -- must be >= 0."
+            )
+        if target > max_temp:
+            raise PrinterError(
+                f"{heater} temperature {target}°C exceeds safety limit ({max_temp}°C)."
+            )
+
     @abstractmethod
     def set_tool_temp(self, target: float) -> bool:
         """Set the hot-end (tool) target temperature in degrees Celsius.

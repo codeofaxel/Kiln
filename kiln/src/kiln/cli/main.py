@@ -664,9 +664,21 @@ def temp(ctx: click.Context, tool_temp: Optional[float], bed_temp: Optional[floa
 
         results: Dict[str, Any] = {}
         if tool_temp is not None:
+            if tool_temp < 0 or tool_temp > 300:
+                click.echo(format_error(
+                    f"Hotend temperature {tool_temp}°C out of safe range (0-300°C).",
+                    json_mode=json_mode,
+                ))
+                sys.exit(1)
             adapter.set_tool_temp(tool_temp)
             results["tool_target"] = tool_temp
         if bed_temp is not None:
+            if bed_temp < 0 or bed_temp > 130:
+                click.echo(format_error(
+                    f"Bed temperature {bed_temp}°C out of safe range (0-130°C).",
+                    json_mode=json_mode,
+                ))
+                sys.exit(1)
             adapter.set_bed_temp(bed_temp)
             results["bed_target"] = bed_temp
 
@@ -893,8 +905,20 @@ def snapshot(ctx: click.Context, output: Optional[str], json_mode: bool) -> None
 
         if output:
             import os
-            os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
-            with open(output, "wb") as f:
+            _safe = os.path.realpath(output)
+            _home = os.path.expanduser("~")
+            import tempfile
+            _tmpdir = os.path.realpath(tempfile.gettempdir())
+            _allowed_prefixes = (_home, "/tmp", "/private/tmp", _tmpdir)
+            if not any(_safe.startswith(p) for p in _allowed_prefixes):
+                click.echo(format_error(
+                    "Output path must be under home directory or a temp directory.",
+                    code="VALIDATION_ERROR",
+                    json_mode=json_mode,
+                ))
+                sys.exit(1)
+            os.makedirs(os.path.dirname(_safe) or ".", exist_ok=True)
+            with open(_safe, "wb") as f:
                 f.write(image_data)
             data = {
                 "file": output,

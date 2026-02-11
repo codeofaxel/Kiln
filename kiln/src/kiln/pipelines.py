@@ -92,7 +92,6 @@ def quick_print(
     printer_id: Optional[str] = None,
     profile_path: Optional[str] = None,
     slicer_path: Optional[str] = None,
-    skip_preflight: bool = False,
 ) -> PipelineResult:
     """Slice → preflight → upload → start print in one call.
 
@@ -105,7 +104,6 @@ def quick_print(
         profile_path: Explicit slicer profile path. If omitted and
             ``printer_id`` is given, the bundled profile is used.
         slicer_path: Explicit slicer binary path.
-        skip_preflight: Skip preflight checks (not recommended).
 
     Returns:
         :class:`PipelineResult` with step-by-step outcomes.
@@ -174,8 +172,8 @@ def quick_print(
         try:
             from kiln.gcode import validate_gcode_for_printer
             with open(gcode_path, "r") as fh:
-                # Read first 500 lines for spot-check (full files too large).
-                sample = "".join(fh.readline() for _ in range(500))
+                # Read first 2000 lines for spot-check (full files too large).
+                sample = "".join(fh.readline() for _ in range(2000))
             vr = validate_gcode_for_printer(sample, printer_id)
             steps.append(PipelineStep(
                 name="safety_check",
@@ -199,12 +197,20 @@ def quick_print(
                     total_duration_seconds=time.time() - start,
                 )
         except Exception as exc:
+            logger.exception("G-code safety validation failed")
             steps.append(PipelineStep(
                 name="safety_check",
-                success=True,  # Non-blocking — validation failure shouldn't stop print.
-                message=f"Safety check skipped: {exc}",
+                success=False,
+                message=f"G-code safety validation error: {exc}",
                 duration_seconds=time.time() - step_start,
             ))
+            return PipelineResult(
+                pipeline="quick_print",
+                success=False,
+                message="Pipeline aborted: G-code safety validation failed.",
+                steps=steps,
+                total_duration_seconds=time.time() - start,
+            )
 
     # Step 4: Upload
     step_start = time.time()
@@ -236,41 +242,40 @@ def quick_print(
             total_duration_seconds=time.time() - start,
         )
 
-    # Step 5: Preflight check
-    if not skip_preflight:
-        step_start = time.time()
-        try:
-            state = adapter.get_state()
-            checks_passed = state.connected and state.status.value == "idle"
-            steps.append(PipelineStep(
-                name="preflight",
-                success=checks_passed,
-                message="Printer ready" if checks_passed else f"Printer not ready: {state.status.value}",
-                data={"connected": state.connected, "status": state.status.value},
-                duration_seconds=time.time() - step_start,
-            ))
-            if not checks_passed:
-                return PipelineResult(
-                    pipeline="quick_print",
-                    success=False,
-                    message=f"Preflight failed: printer status is {state.status.value}",
-                    steps=steps,
-                    total_duration_seconds=time.time() - start,
-                )
-        except Exception as exc:
-            steps.append(PipelineStep(
-                name="preflight",
-                success=False,
-                message=f"Preflight check failed: {exc}",
-                duration_seconds=time.time() - step_start,
-            ))
+    # Step 5: Preflight check (always runs — never skip safety checks)
+    step_start = time.time()
+    try:
+        state = adapter.get_state()
+        checks_passed = state.connected and state.status.value == "idle"
+        steps.append(PipelineStep(
+            name="preflight",
+            success=checks_passed,
+            message="Printer ready" if checks_passed else f"Printer not ready: {state.status.value}",
+            data={"connected": state.connected, "status": state.status.value},
+            duration_seconds=time.time() - step_start,
+        ))
+        if not checks_passed:
             return PipelineResult(
                 pipeline="quick_print",
                 success=False,
-                message=f"Pipeline failed at preflight: {exc}",
+                message=f"Preflight failed: printer status is {state.status.value}",
                 steps=steps,
                 total_duration_seconds=time.time() - start,
             )
+    except Exception as exc:
+        steps.append(PipelineStep(
+            name="preflight",
+            success=False,
+            message=f"Preflight check failed: {exc}",
+            duration_seconds=time.time() - step_start,
+        ))
+        return PipelineResult(
+            pipeline="quick_print",
+            success=False,
+            message=f"Pipeline failed at preflight: {exc}",
+            steps=steps,
+            total_duration_seconds=time.time() - start,
+        )
 
     # Step 6: Start print
     step_start = time.time()
@@ -600,7 +605,7 @@ PIPELINES = {
     "quick_print": {
         "function": quick_print,
         "description": "Slice → validate → upload → print in one shot.",
-        "params": ["model_path", "printer_name", "printer_id", "profile_path", "skip_preflight"],
+        "params": ["model_path", "printer_name", "printer_id", "profile_path"],
     },
     "calibrate": {
         "function": calibrate,

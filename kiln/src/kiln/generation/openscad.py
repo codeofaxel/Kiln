@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -130,6 +131,24 @@ class OpenSCADProvider(GenerationProvider):
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{job_id}.stl")
 
+        # Basic safety checks on OpenSCAD input
+        if len(prompt) > 100_000:
+            raise ValueError("OpenSCAD code too large (max 100KB).")
+
+        # Block dangerous OpenSCAD functions that could access the filesystem
+        _DANGEROUS_PATTERNS = [
+            r'\bimport\s*\(',      # import() can read arbitrary files
+            r'\bsurface\s*\(',     # surface() reads files from disk
+            r'\binclude\s*<',      # include <file> reads files
+            r'\buse\s*<',          # use <file> reads files
+        ]
+        for pattern in _DANGEROUS_PATTERNS:
+            if re.search(pattern, prompt, re.IGNORECASE):
+                raise ValueError(
+                    f"OpenSCAD code contains blocked operation matching {pattern}. "
+                    f"File I/O operations are not allowed for security."
+                )
+
         # Write .scad source to a temp file.
         scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_")
         try:
@@ -139,31 +158,36 @@ class OpenSCADProvider(GenerationProvider):
             cmd = [self._binary, "-o", out_path, scad_path]
             logger.info("OpenSCAD: %s", " ".join(cmd))
 
+            work_dir = tempfile.mkdtemp(prefix="kiln_scad_")
             try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=self._timeout,
-                )
-            except subprocess.TimeoutExpired:
-                job = GenerationJob(
-                    id=job_id,
-                    provider=self.name,
-                    prompt=prompt[:200],
-                    status=GenerationStatus.FAILED,
-                    progress=0,
-                    created_at=time.time(),
-                    format=format,
-                    error=f"OpenSCAD compilation timed out after {self._timeout}s.",
-                )
-                self._jobs[job_id] = job
-                return job
-            except OSError as exc:
-                raise GenerationError(
-                    f"Failed to run OpenSCAD: {exc}",
-                    code="OPENSCAD_EXEC_ERROR",
-                )
+                try:
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=self._timeout,
+                        cwd=work_dir,
+                    )
+                except subprocess.TimeoutExpired:
+                    job = GenerationJob(
+                        id=job_id,
+                        provider=self.name,
+                        prompt=prompt[:200],
+                        status=GenerationStatus.FAILED,
+                        progress=0,
+                        created_at=time.time(),
+                        format=format,
+                        error=f"OpenSCAD compilation timed out after {self._timeout}s.",
+                    )
+                    self._jobs[job_id] = job
+                    return job
+                except OSError as exc:
+                    raise GenerationError(
+                        f"Failed to run OpenSCAD: {exc}",
+                        code="OPENSCAD_EXEC_ERROR",
+                    )
+            finally:
+                shutil.rmtree(work_dir, ignore_errors=True)
 
             if result.returncode != 0:
                 stderr = (result.stderr or "").strip()[:500]

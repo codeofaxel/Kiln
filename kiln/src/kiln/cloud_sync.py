@@ -231,10 +231,16 @@ class CloudSyncManager:
                 )
 
         except Exception as exc:
-            error_msg = str(exc)
+            error_type = type(exc).__name__
+            # Truncate and sanitize - don't expose full exception details
+            raw_msg = str(exc)[:300]
+            # Redact anything that looks like a URL with credentials
+            import re
+            safe_msg = re.sub(r'https?://[^@\s]*@', 'https://[CREDENTIALS]@', raw_msg)
+            safe_msg = f"{error_type}: {safe_msg}"
             with self._lock:
-                self._last_status = f"error: {error_msg}"
-                self._errors.append(error_msg)
+                self._last_status = f"error: {safe_msg}"
+                self._errors.append(safe_msg)
                 if len(self._errors) > 50:
                     self._errors = self._errors[-50:]
 
@@ -242,7 +248,7 @@ class CloudSyncManager:
                 from kiln.events import EventType
                 self._bus.publish(
                     EventType.SYNC_FAILED,
-                    data={"error": error_msg},
+                    data={"error": safe_msg},
                     source="cloud_sync",
                 )
 

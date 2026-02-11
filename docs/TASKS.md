@@ -11,6 +11,11 @@ Prioritized backlog of features and improvements.
 - **Claim `kiln3d` across registries** — Front-run the name on platforms we'll eventually publish to: Docker Hub (`kiln3d`), Homebrew tap (`kiln3d`), npm (`kiln3d` — for future JS client), crates.io (`kiln3d` — if Rust components ever happen). Free or near-free, painful to fix later.
 - **Claim PyPI names** — Register `kiln-print`, `kiln-mcp`, and `kiln3d-octoprint` as pending publishers or publish placeholder packages.
 
+## Pre-Launch (Ship Day)
+
+- **Configure production crypto wallet addresses** — Replace placeholder/test destination addresses in Circle USDC payment flow with real receiving wallets (Solana and/or Ethereum/Base). Update `KILN_CIRCLE_WALLET_*` env vars in production config. Verify with a small test transfer before going live.
+- **Stripe production setup** — Complete Stripe onboarding: (1) Switch from test API keys to live keys, (2) Set up webhook endpoint in Stripe dashboard pointing to production URL, (3) Configure webhook signing secret (`KILN_STRIPE_WEBHOOK_SECRET`), (4) Add customer + payment method for off-session payments, (5) Verify PCI compliance settings, (6) Test end-to-end payment with a real card in live mode. Do NOT go live until webhook signature verification is confirmed working.
+
 ## Medium Priority
 
 _(No medium-priority tasks remaining.)_

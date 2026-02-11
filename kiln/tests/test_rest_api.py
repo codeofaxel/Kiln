@@ -32,7 +32,7 @@ class TestRestApiConfig:
 
     def test_default_cors_origins(self):
         cfg = RestApiConfig()
-        assert cfg.cors_origins == ["*"]
+        assert cfg.cors_origins == []
 
     def test_default_tool_tier(self):
         cfg = RestApiConfig()
