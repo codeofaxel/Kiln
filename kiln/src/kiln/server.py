@@ -4336,6 +4336,7 @@ def monitor_print_vision(
         adapter = _registry.get(printer_name) if printer_name else _get_adapter()
         state = adapter.get_state()
         job = adapter.get_job()
+        is_printing = state.state == PrinterStatus.PRINTING
         phase = _detect_phase(job.completion)
         hints = _PHASE_HINTS.get(phase, _PHASE_HINTS["unknown"])
 
@@ -4344,6 +4345,7 @@ def monitor_print_vision(
             "printer_state": state.to_dict(),
             "job_progress": job.to_dict(),
             "monitoring_context": {
+                "is_printing": is_printing,
                 "print_phase": phase,
                 "completion_percent": job.completion,
                 "failure_hints": hints,
@@ -4355,8 +4357,10 @@ def monitor_print_vision(
             },
         }
 
-        # Snapshot capture
-        if include_snapshot:
+        # Snapshot capture — respect can_snapshot capability
+        if include_snapshot and not getattr(adapter.capabilities, "can_snapshot", False):
+            result["snapshot"] = {"available": False, "reason": "no_capability"}
+        elif include_snapshot:
             try:
                 image_data = adapter.get_snapshot()
                 if image_data and len(image_data) > 100:
@@ -4368,10 +4372,18 @@ def monitor_print_vision(
                         "captured_at": time.time(),
                     }
                     if save_snapshot:
-                        os.makedirs(os.path.dirname(save_snapshot) or ".", exist_ok=True)
-                        with open(save_snapshot, "wb") as f:
+                        # Sanitise path — restrict to home dir or /tmp
+                        _safe = os.path.abspath(save_snapshot)
+                        _home = os.path.expanduser("~")
+                        if not (_safe.startswith(_home) or _safe.startswith("/tmp")):
+                            return _error_dict(
+                                "save_snapshot path must be under home directory or /tmp.",
+                                code="VALIDATION_ERROR",
+                            )
+                        os.makedirs(os.path.dirname(_safe) or ".", exist_ok=True)
+                        with open(_safe, "wb") as f:
                             f.write(image_data)
-                        snap["saved_to"] = save_snapshot
+                        snap["saved_to"] = _safe
                     else:
                         snap["image_base64"] = base64.b64encode(image_data).decode("ascii")
                     result["snapshot"] = snap
@@ -4441,10 +4453,27 @@ def watch_print(
         return err
     try:
         adapter = _registry.get(printer_name) if printer_name else _get_adapter()
+        can_snap = getattr(adapter.capabilities, "can_snapshot", False)
+
+        # Early exit: if printer is idle with no active job, don't block
+        initial_state = adapter.get_state()
+        initial_job = adapter.get_job()
+        if initial_state.state == PrinterStatus.IDLE and initial_job.completion is None:
+            return {
+                "success": True,
+                "outcome": "no_active_print",
+                "elapsed_seconds": 0,
+                "progress_log": [],
+                "snapshots": [],
+                "final_state": initial_state.to_dict(),
+                "message": "Printer is idle with no active print job.",
+            }
+
         start_time = time.time()
         last_snapshot_time = 0.0
         snapshots: list[dict] = []
         progress_log: list[dict] = []
+        snapshot_failures = 0
 
         while True:
             elapsed = time.time() - start_time
@@ -4455,6 +4484,7 @@ def watch_print(
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
                     "snapshots": snapshots,
+                    "snapshot_failures": snapshot_failures,
                     "final_state": adapter.get_state().to_dict(),
                 }
 
@@ -4476,22 +4506,59 @@ def watch_print(
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
                     "snapshots": snapshots,
+                    "snapshot_failures": snapshot_failures,
                     "final_state": state.to_dict(),
                 }
             if state.state in (PrinterStatus.ERROR, PrinterStatus.OFFLINE):
+                _event_bus.publish(
+                    EventType.VISION_ALERT,
+                    {
+                        "printer_name": printer_name or "default",
+                        "alert_type": "printer_state",
+                        "state": state.state.value,
+                        "completion": job.completion,
+                        "elapsed_seconds": round(elapsed, 1),
+                    },
+                    source="vision",
+                )
                 return {
                     "success": True,
                     "outcome": "failed",
                     "elapsed_seconds": round(elapsed, 1),
                     "progress_log": progress_log[-20:],
                     "snapshots": snapshots,
+                    "snapshot_failures": snapshot_failures,
                     "final_state": state.to_dict(),
                     "error": f"Printer entered {state.state.value} state",
                 }
+            if state.state == PrinterStatus.PAUSED:
+                return {
+                    "success": True,
+                    "outcome": "paused",
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                    "snapshots": snapshots,
+                    "snapshot_failures": snapshot_failures,
+                    "final_state": state.to_dict(),
+                    "message": (
+                        "Print is paused. Call resume_print to continue, "
+                        "or cancel_print to abort."
+                    ),
+                }
+            if state.state == PrinterStatus.CANCELLING:
+                return {
+                    "success": True,
+                    "outcome": "cancelling",
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                    "snapshots": snapshots,
+                    "snapshot_failures": snapshot_failures,
+                    "final_state": state.to_dict(),
+                }
 
-            # Snapshot capture
+            # Snapshot capture — only if adapter supports it
             now = time.time()
-            if (now - last_snapshot_time) >= snapshot_interval:
+            if can_snap and (now - last_snapshot_time) >= snapshot_interval:
                 try:
                     image_data = adapter.get_snapshot()
                     if image_data and len(image_data) > 100:
@@ -4514,8 +4581,10 @@ def watch_print(
                             },
                             source="vision",
                         )
+                    else:
+                        snapshot_failures += 1
                 except Exception:
-                    pass  # Snapshot failure is non-fatal
+                    snapshot_failures += 1
                 last_snapshot_time = now
 
             # Return batch when enough snapshots accumulated
@@ -4526,6 +4595,7 @@ def watch_print(
                     "elapsed_seconds": round(time.time() - start_time, 1),
                     "progress_log": progress_log[-20:],
                     "snapshots": snapshots,
+                    "snapshot_failures": snapshot_failures,
                     "final_state": state.to_dict(),
                     "message": (
                         f"Captured {len(snapshots)} snapshots. "
@@ -4634,27 +4704,28 @@ def record_print_outcome(
 
     # --- Safety: validate settings against hard limits ---
     if settings:
-        tool_temp = settings.get("temp_tool")
-        if tool_temp is not None and float(tool_temp) > _MAX_SAFE_TOOL_TEMP:
-            return _error_dict(
-                f"Recorded tool temperature {tool_temp}°C exceeds safety limit "
-                f"({_MAX_SAFE_TOOL_TEMP}°C). Outcome rejected to protect hardware.",
-                code="SAFETY_VIOLATION",
-            )
-        bed_temp = settings.get("temp_bed")
-        if bed_temp is not None and float(bed_temp) > _MAX_SAFE_BED_TEMP:
-            return _error_dict(
-                f"Recorded bed temperature {bed_temp}°C exceeds safety limit "
-                f"({_MAX_SAFE_BED_TEMP}°C). Outcome rejected to protect hardware.",
-                code="SAFETY_VIOLATION",
-            )
-        speed = settings.get("speed")
-        if speed is not None and float(speed) > _MAX_SAFE_SPEED:
-            return _error_dict(
-                f"Recorded speed {speed} mm/s exceeds safety limit "
-                f"({_MAX_SAFE_SPEED} mm/s). Outcome rejected to protect hardware.",
-                code="SAFETY_VIOLATION",
-            )
+        _SETTING_LIMITS = {
+            "temp_tool": (0.0, _MAX_SAFE_TOOL_TEMP, "°C"),
+            "temp_bed": (0.0, _MAX_SAFE_BED_TEMP, "°C"),
+            "speed": (0.0, _MAX_SAFE_SPEED, "mm/s"),
+        }
+        for key, (lo, hi, unit) in _SETTING_LIMITS.items():
+            raw = settings.get(key)
+            if raw is None:
+                continue
+            try:
+                val = float(raw)
+            except (ValueError, TypeError):
+                return _error_dict(
+                    f"Setting {key!r} value {raw!r} is not a valid number.",
+                    code="VALIDATION_ERROR",
+                )
+            if val < lo or val > hi:
+                return _error_dict(
+                    f"Recorded {key} {val}{unit} is outside safe range "
+                    f"({lo}–{hi}{unit}). Outcome rejected to protect hardware.",
+                    code="SAFETY_VIOLATION",
+                )
 
     # --- Resolve printer/file from job if not provided ---
     try:
@@ -4786,7 +4857,7 @@ def suggest_printer_for_job(
                 "printer_name": pname,
                 "success_rate": rate,
                 "total_prints": total,
-                "score": round(rate * min(total / 10.0, 1.0), 2),  # Penalise low sample size
+                "score": round(rate * (1 - 1 / (1 + total)), 2),  # Confidence scales with log-ish sample size
                 "reason": f"{int(rate * 100)}% success rate ({total} prints)",
                 "currently_available": pname in idle,
             })

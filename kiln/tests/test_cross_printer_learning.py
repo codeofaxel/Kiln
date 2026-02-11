@@ -253,3 +253,93 @@ class TestSuggestPrinter:
         results = db.suggest_printer_for_outcome()
         assert results[0]["printer_name"] == "voron"
         assert results[0]["total_prints"] == 5
+
+
+class TestDuplicateJobId:
+    """Verify duplicate job_id is rejected at the DB level."""
+
+    def test_duplicate_job_id_raises(self, db: KilnDB) -> None:
+        db.save_print_outcome(_outcome(job_id="j1"))
+        with pytest.raises(ValueError, match="already recorded"):
+            db.save_print_outcome(_outcome(job_id="j1", outcome="failed"))
+
+    def test_different_job_ids_accepted(self, db: KilnDB) -> None:
+        db.save_print_outcome(_outcome(job_id="j1"))
+        db.save_print_outcome(_outcome(job_id="j2"))
+        assert len(db.list_print_outcomes()) == 2
+
+
+class TestPersistenceValidation:
+    """Verify defense-in-depth validation in the persistence layer."""
+
+    def test_invalid_outcome_rejected(self, db: KilnDB) -> None:
+        with pytest.raises(ValueError, match="Invalid outcome"):
+            db.save_print_outcome(_outcome(outcome="banana"))
+
+    def test_invalid_quality_grade_rejected(self, db: KilnDB) -> None:
+        with pytest.raises(ValueError, match="Invalid quality_grade"):
+            db.save_print_outcome(_outcome(quality_grade="terrible"))
+
+    def test_invalid_failure_mode_rejected(self, db: KilnDB) -> None:
+        with pytest.raises(ValueError, match="Invalid failure_mode"):
+            db.save_print_outcome(_outcome(failure_mode="exploded"))
+
+    def test_partial_outcome_accepted(self, db: KilnDB) -> None:
+        row_id = db.save_print_outcome(_outcome(outcome="partial"))
+        assert row_id >= 1
+
+
+class TestSafetyValidationInServerLayer:
+    """Test MCP tool safety enforcement for record_print_outcome."""
+
+    def test_negative_temp_rejected(self) -> None:
+        from kiln.server import record_print_outcome
+        from unittest.mock import patch
+
+        with patch("kiln.server.get_db") as mock_db, \
+             patch("kiln.server._check_auth", return_value=None):
+            result = record_print_outcome(
+                job_id="j1", outcome="success",
+                settings={"temp_tool": -50},
+            )
+        assert result.get("error", {}).get("code") == "SAFETY_VIOLATION"
+
+    def test_zero_temp_accepted(self) -> None:
+        from kiln.server import record_print_outcome
+        from unittest.mock import patch, MagicMock
+
+        mock_db_instance = MagicMock()
+        mock_db_instance.get_print_record.return_value = None
+        mock_db_instance.save_print_outcome.return_value = 1
+
+        with patch("kiln.server.get_db", return_value=mock_db_instance), \
+             patch("kiln.server._check_auth", return_value=None):
+            result = record_print_outcome(
+                job_id="j1", outcome="success",
+                settings={"temp_tool": 0}, printer_name="test",
+            )
+        assert result.get("success") is True
+
+    def test_non_numeric_temp_returns_validation_error(self) -> None:
+        from kiln.server import record_print_outcome
+        from unittest.mock import patch
+
+        with patch("kiln.server.get_db"), \
+             patch("kiln.server._check_auth", return_value=None):
+            result = record_print_outcome(
+                job_id="j1", outcome="success",
+                settings={"temp_tool": "not_a_number"},
+            )
+        assert result.get("error", {}).get("code") == "VALIDATION_ERROR"
+
+    def test_negative_speed_rejected(self) -> None:
+        from kiln.server import record_print_outcome
+        from unittest.mock import patch
+
+        with patch("kiln.server.get_db"), \
+             patch("kiln.server._check_auth", return_value=None):
+            result = record_print_outcome(
+                job_id="j1", outcome="success",
+                settings={"speed": -10},
+            )
+        assert result.get("error", {}).get("code") == "SAFETY_VIOLATION"
