@@ -497,6 +497,64 @@ class TestBambuAdapterListFiles:
             with pytest.raises(PrinterError, match="Failed to list files"):
                 adapter_with_mqtt.list_files()
 
+    def test_mlsd_502_falls_back_to_nlst(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
+        import ftplib
+
+        mock_ftp_class.mlsd.side_effect = ftplib.error_perm("502 Command not implemented")
+        mock_ftp_class.nlst.return_value = ["/sdcard/test.3mf", "/sdcard/print.gcode"]
+
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            files = adapter_with_mqtt.list_files()
+
+        assert len(files) == 2
+        assert files[0].name == "test.3mf"
+        assert files[0].path == "/sdcard/test.3mf"
+        assert files[0].size_bytes is None
+        assert files[0].date is None
+        assert files[1].name == "print.gcode"
+
+    def test_mlsd_502_nlst_fails_falls_back_to_list(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
+        import ftplib
+
+        mock_ftp_class.mlsd.side_effect = ftplib.error_perm("502 Command not implemented")
+        mock_ftp_class.nlst.side_effect = ftplib.error_perm("502 Command not implemented")
+
+        def fake_retrlines(cmd: str, callback: Any) -> str:
+            callback("-rw-r--r-- 1 user group 12345 Jan  1 12:00 model.3mf")
+            callback("drw-r--r-- 1 user group  4096 Jan  1 12:00 subdir")
+            return "226 Transfer complete"
+
+        mock_ftp_class.retrlines = fake_retrlines
+
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            files = adapter_with_mqtt.list_files()
+
+        assert len(files) == 1
+        assert files[0].name == "model.3mf"
+        assert files[0].path == "/sdcard/model.3mf"
+        assert files[0].size_bytes == 12345
+
+    def test_mlsd_non_502_error_still_raises(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
+        import ftplib
+
+        mock_ftp_class.mlsd.side_effect = ftplib.error_perm("550 Permission denied")
+
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            with pytest.raises(PrinterError, match="Failed to list files"):
+                adapter_with_mqtt.list_files()
+
+    def test_nlst_skips_dot_entries(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
+        import ftplib
+
+        mock_ftp_class.mlsd.side_effect = ftplib.error_perm("502 Command not implemented")
+        mock_ftp_class.nlst.return_value = [".", "..", "/sdcard/file.3mf"]
+
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            files = adapter_with_mqtt.list_files()
+
+        assert len(files) == 1
+        assert files[0].name == "file.3mf"
+
     def test_file_without_size(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
         mock_ftp_class.mlsd.return_value = [
             ("nosize.3mf", {"type": "file", "modify": "20241201120000"}),
