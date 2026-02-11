@@ -35,9 +35,10 @@ logger = logging.getLogger(__name__)
 _STATUS_MAP: Dict[str, PaymentStatus] = {
     "succeeded": PaymentStatus.COMPLETED,
     "processing": PaymentStatus.PROCESSING,
+    "requires_capture": PaymentStatus.AUTHORIZED,
     "requires_payment_method": PaymentStatus.FAILED,
     "requires_action": PaymentStatus.FAILED,
-    "canceled": PaymentStatus.FAILED,
+    "canceled": PaymentStatus.CANCELLED,
 }
 
 
@@ -329,6 +330,158 @@ class StripeProvider(PaymentProvider):
             raise PaymentError(
                 f"Failed to refund payment {payment_id}: {exc}",
                 code="STRIPE_REFUND_ERROR",
+            ) from exc
+
+    # -- Auth-and-capture methods -----------------------------------------------
+
+    def authorize_payment(self, request: PaymentRequest) -> PaymentResult:
+        """Create a PaymentIntent with ``capture_method: manual``.
+
+        Places a hold on the card for the fee amount.  The hold expires
+        after 7 days if not captured.  Use :meth:`capture_payment` to
+        collect or :meth:`cancel_payment` to release.
+
+        Args:
+            request: Payment parameters including amount and currency.
+
+        Returns:
+            Result with ``AUTHORIZED`` status and the PaymentIntent ID.
+
+        Raises:
+            PaymentError: On Stripe API errors.
+        """
+        stripe = self._import_stripe()
+
+        if not self._customer_id or not self._payment_method_id:
+            raise PaymentError(
+                "Customer and payment method must be set before authorizing. "
+                "Call create_setup_url() first.",
+                code="NO_PAYMENT_METHOD",
+            )
+
+        amount_cents = int(round(request.amount * 100))
+        metadata = dict(request.metadata) if request.metadata else {}
+        metadata["job_id"] = request.job_id
+
+        try:
+            intent = stripe.PaymentIntent.create(
+                amount=amount_cents,
+                currency=request.currency.value.lower(),
+                customer=self._customer_id,
+                payment_method=self._payment_method_id,
+                off_session=True,
+                confirm=True,
+                capture_method="manual",
+                description=request.description or f"Kiln fee hold for {request.job_id}",
+                metadata=metadata,
+            )
+
+            status = _STATUS_MAP.get(intent.status, PaymentStatus.PENDING)
+            logger.info(
+                "Authorized PaymentIntent %s status=%s for job %s",
+                intent.id, intent.status, request.job_id,
+            )
+
+            return PaymentResult(
+                success=status == PaymentStatus.AUTHORIZED,
+                payment_id=intent.id,
+                status=status,
+                amount=request.amount,
+                currency=request.currency,
+                rail=PaymentRail.STRIPE,
+            )
+
+        except stripe.error.CardError as exc:
+            logger.warning("Card declined during auth for job %s: %s", request.job_id, exc)
+            return PaymentResult(
+                success=False,
+                payment_id="",
+                status=PaymentStatus.FAILED,
+                amount=request.amount,
+                currency=request.currency,
+                rail=PaymentRail.STRIPE,
+                error=str(exc),
+            )
+
+        except stripe.error.StripeError as exc:
+            raise PaymentError(
+                f"Stripe error authorizing payment: {exc}",
+                code="STRIPE_AUTH_ERROR",
+            ) from exc
+
+    def capture_payment(self, payment_id: str) -> PaymentResult:
+        """Capture a previously authorized PaymentIntent.
+
+        Args:
+            payment_id: Stripe PaymentIntent ID (``pi_...``) from
+                :meth:`authorize_payment`.
+
+        Returns:
+            Result with ``COMPLETED`` status on success.
+
+        Raises:
+            PaymentError: If the intent cannot be captured (e.g. already
+                captured, expired, or cancelled).
+        """
+        stripe = self._import_stripe()
+
+        try:
+            intent = stripe.PaymentIntent.capture(payment_id)
+            status = _STATUS_MAP.get(intent.status, PaymentStatus.PENDING)
+            logger.info(
+                "Captured PaymentIntent %s status=%s",
+                intent.id, intent.status,
+            )
+
+            return PaymentResult(
+                success=status == PaymentStatus.COMPLETED,
+                payment_id=intent.id,
+                status=status,
+                amount=intent.amount / 100.0,
+                currency=Currency(intent.currency.upper()),
+                rail=PaymentRail.STRIPE,
+            )
+
+        except stripe.error.StripeError as exc:
+            raise PaymentError(
+                f"Failed to capture payment {payment_id}: {exc}",
+                code="STRIPE_CAPTURE_ERROR",
+            ) from exc
+
+    def cancel_payment(self, payment_id: str) -> PaymentResult:
+        """Cancel a previously authorized PaymentIntent (release hold).
+
+        Args:
+            payment_id: Stripe PaymentIntent ID to cancel.
+
+        Returns:
+            Result with ``CANCELLED`` status.
+
+        Raises:
+            PaymentError: If the intent cannot be cancelled.
+        """
+        stripe = self._import_stripe()
+
+        try:
+            intent = stripe.PaymentIntent.cancel(payment_id)
+            logger.info(
+                "Cancelled PaymentIntent %s status=%s",
+                intent.id, intent.status,
+            )
+
+            return PaymentResult(
+                success=True,
+                payment_id=intent.id,
+                status=PaymentStatus.CANCELLED,
+                amount=intent.amount / 100.0,
+                currency=Currency(intent.currency.upper()),
+                rail=PaymentRail.STRIPE,
+            )
+
+        except stripe.error.StripeError as exc:
+            raise PaymentError(
+                f"Failed to cancel payment {payment_id}: {exc}",
+                code="STRIPE_CANCEL_ERROR",
             ) from exc
 
     def __repr__(self) -> str:

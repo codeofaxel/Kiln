@@ -285,6 +285,215 @@ class PaymentManager:
         return result
 
     # ------------------------------------------------------------------
+    # Auth-and-capture flow
+    # ------------------------------------------------------------------
+
+    def authorize_fee(
+        self,
+        job_id: str,
+        fee_calc: FeeCalculation,
+        *,
+        rail: Optional[str] = None,
+    ) -> PaymentResult:
+        """Place a hold for the platform fee (quote-time).
+
+        Use this at quote acceptance to hold the fee on the user's card.
+        If the provider doesn't support holds, falls back to a no-op
+        (the fee will be collected at order time via :meth:`charge_fee`).
+
+        Args:
+            job_id: Quote or job identifier.
+            fee_calc: Pre-calculated fee.
+            rail: Provider name override.
+
+        Returns:
+            :class:`PaymentResult` with ``AUTHORIZED`` status on success.
+        """
+        if fee_calc.waived or fee_calc.fee_amount <= 0:
+            return PaymentResult(
+                success=True,
+                payment_id="",
+                status=PaymentStatus.COMPLETED,
+                amount=0.0,
+                currency=Currency.USD,
+                rail=PaymentRail.STRIPE,
+            )
+
+        ok, reason = self.check_spend_limits(fee_calc.fee_amount)
+        if not ok:
+            self._emit("SPEND_LIMIT_REACHED", {
+                "job_id": job_id,
+                "fee_amount": fee_calc.fee_amount,
+                "reason": reason,
+            })
+            raise PaymentError(
+                f"Spend limit exceeded: {reason}",
+                code="SPEND_LIMIT",
+            )
+
+        provider_name = rail or self.get_active_rail()
+        provider = self._providers.get(provider_name)
+        if provider is None:
+            raise PaymentError(
+                f"Payment provider {provider_name!r} not registered.",
+                code="NO_PROVIDER",
+            )
+
+        request = PaymentRequest(
+            amount=fee_calc.fee_amount,
+            currency=_fee_currency(fee_calc, provider),
+            rail=provider.rail,
+            job_id=job_id,
+            description=f"Kiln fee hold for quote {job_id}",
+        )
+
+        try:
+            result = provider.authorize_payment(request)
+        except NotImplementedError:
+            # Provider doesn't support holds — return a synthetic
+            # "authorized" result; charge_fee will do the real work later.
+            return PaymentResult(
+                success=True,
+                payment_id="",
+                status=PaymentStatus.AUTHORIZED,
+                amount=fee_calc.fee_amount,
+                currency=_fee_currency(fee_calc, provider),
+                rail=provider.rail,
+            )
+
+        # Persist the authorization
+        payment_id = secrets.token_hex(8)
+        self._persist_payment(
+            payment_id, result.payment_id, provider.name,
+            result.rail.value, result.amount, result.currency.value,
+            result.status.value,
+        )
+
+        self._emit("PAYMENT_INITIATED", {
+            "job_id": job_id,
+            "amount": fee_calc.fee_amount,
+            "rail": provider.name,
+            "type": "authorization",
+        })
+
+        return result
+
+    def capture_fee(
+        self,
+        payment_id: str,
+        job_id: str,
+        fee_calc: FeeCalculation,
+        *,
+        rail: Optional[str] = None,
+    ) -> PaymentResult:
+        """Capture a previously authorized hold (order-time).
+
+        If the hold was a no-op (provider doesn't support auth), this
+        falls back to :meth:`charge_fee` for a one-shot payment.
+
+        Args:
+            payment_id: PaymentIntent ID from :meth:`authorize_fee`.
+            job_id: The fulfillment order ID.
+            fee_calc: Fee calculation (same as at auth time).
+            rail: Provider name override.
+
+        Returns:
+            :class:`PaymentResult` with ``COMPLETED`` status.
+        """
+        # No real hold was placed — do a normal charge.
+        if not payment_id:
+            return self.charge_fee(job_id, fee_calc, rail=rail)
+
+        provider_name = rail or self.get_active_rail()
+        provider = self._providers.get(provider_name)
+        if provider is None:
+            raise PaymentError(
+                f"Payment provider {provider_name!r} not registered.",
+                code="NO_PROVIDER",
+            )
+
+        try:
+            result = provider.capture_payment(payment_id)
+        except NotImplementedError:
+            # Shouldn't happen if authorize succeeded, but fallback.
+            return self.charge_fee(job_id, fee_calc, rail=rail)
+
+        # Record billing charge with the captured payment.
+        charge_id = self._ledger.record_charge(
+            job_id, fee_calc,
+            payment_id=result.payment_id,
+            payment_rail=provider.name,
+            payment_status=result.status.value,
+        )
+
+        # Update persisted payment status.
+        self._db.update_payment_status(
+            payment_id, result.status.value,
+        )
+
+        if result.success:
+            self._emit("PAYMENT_COMPLETED", {
+                "job_id": job_id,
+                "charge_id": charge_id,
+                "payment_id": result.payment_id,
+                "amount": result.amount,
+                "rail": provider.name,
+            })
+
+        return result
+
+    def cancel_fee(
+        self,
+        payment_id: str,
+        *,
+        rail: Optional[str] = None,
+    ) -> PaymentResult:
+        """Release a hold without charging (cancellation).
+
+        Args:
+            payment_id: PaymentIntent ID from :meth:`authorize_fee`.
+            rail: Provider name override.
+
+        Returns:
+            :class:`PaymentResult` with ``CANCELLED`` status.
+        """
+        if not payment_id:
+            return PaymentResult(
+                success=True,
+                payment_id="",
+                status=PaymentStatus.CANCELLED,
+                amount=0.0,
+                currency=Currency.USD,
+                rail=PaymentRail.STRIPE,
+            )
+
+        provider_name = rail or self.get_active_rail()
+        provider = self._providers.get(provider_name)
+        if provider is None:
+            raise PaymentError(
+                f"Payment provider {provider_name!r} not registered.",
+                code="NO_PROVIDER",
+            )
+
+        try:
+            result = provider.cancel_payment(payment_id)
+        except NotImplementedError:
+            return PaymentResult(
+                success=True,
+                payment_id=payment_id,
+                status=PaymentStatus.CANCELLED,
+                amount=0.0,
+                currency=Currency.USD,
+                rail=provider.rail,
+            )
+
+        self._db.update_payment_status(
+            payment_id, result.status.value,
+        )
+
+        return result
+
+    # ------------------------------------------------------------------
     # Setup URLs
     # ------------------------------------------------------------------
 
