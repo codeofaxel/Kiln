@@ -59,6 +59,9 @@ class EventType(enum.Enum):
     # Safety
     TEMPERATURE_WARNING = "safety.temperature_warning"
     PREFLIGHT_FAILED = "safety.preflight_failed"
+    SAFETY_BLOCKED = "safety.blocked"
+    SAFETY_ESCALATED = "safety.escalated"
+    TOOL_EXECUTED = "safety.tool_executed"
 
     # File
     FILE_UPLOADED = "file.uploaded"

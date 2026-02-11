@@ -114,6 +114,9 @@
     "webcam_stream": {"level": "safe"},
     "monitor_print_vision": {"level": "guarded"},
     "watch_print": {"level": "guarded"},
-    "await_print_completion": {"level": "guarded"}
+    "await_print_completion": {"level": "guarded"},
+    "safety_audit": {"level": "safe"},
+    "safety_status": {"level": "safe"},
+    "confirm_action": {"level": "guarded"}
   }
 }

@@ -503,7 +503,7 @@ class TestPreflightCheck:
         state = PrinterState(
             connected=True,
             state=PrinterStatus.IDLE,
-            tool_temp_actual=270.0,
+            tool_temp_actual=310.0,
             tool_temp_target=0.0,
             bed_temp_actual=23.0,
             bed_temp_target=0.0,
@@ -525,7 +525,7 @@ class TestPreflightCheck:
             state=PrinterStatus.IDLE,
             tool_temp_actual=24.0,
             tool_temp_target=0.0,
-            bed_temp_actual=120.0,
+            bed_temp_actual=140.0,
             bed_temp_target=0.0,
         )
         adapter = MagicMock(spec=OctoPrintAdapter)

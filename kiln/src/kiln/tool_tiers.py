@@ -74,6 +74,9 @@ TIER_STANDARD: List[str] = TIER_ESSENTIAL + [
     # Safety profiles
     "list_safety_profiles",
     "get_safety_profile",
+    # Safety audit
+    "safety_audit",
+    "safety_status",
     # History & stats
     "print_history",
     "printer_stats",
@@ -200,6 +203,10 @@ TIER_FULL: List[str] = [
     "list_safety_profiles",
     "get_safety_profile",
     "validate_gcode_safe",
+    # --- Safety audit & dashboard ---
+    "safety_audit",
+    "safety_status",
+    "confirm_action",
     # --- Slicer profiles ---
     "list_slicer_profiles_tool",
     "get_slicer_profile_tool",

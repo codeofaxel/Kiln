@@ -255,6 +255,24 @@ class KilnDB:
                     ON print_outcomes(job_id);
                 CREATE INDEX IF NOT EXISTS idx_print_outcomes_material
                     ON print_outcomes(material_type);
+
+                CREATE TABLE IF NOT EXISTS safety_audit_log (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp       REAL NOT NULL,
+                    tool_name       TEXT NOT NULL,
+                    safety_level    TEXT NOT NULL,
+                    action          TEXT NOT NULL,
+                    agent_id        TEXT,
+                    printer_name    TEXT,
+                    details         TEXT,
+                    created_at      REAL DEFAULT (strftime('%s', 'now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_audit_tool
+                    ON safety_audit_log(tool_name);
+                CREATE INDEX IF NOT EXISTS idx_audit_action
+                    ON safety_audit_log(action);
+                CREATE INDEX IF NOT EXISTS idx_audit_time
+                    ON safety_audit_log(timestamp);
                 """
             )
             self._conn.commit()
@@ -1427,6 +1445,131 @@ class KilnDB:
 
     # ------------------------------------------------------------------
     # Lifecycle
+    # ------------------------------------------------------------------
+    # Safety audit log
+    # ------------------------------------------------------------------
+
+    def log_audit(
+        self,
+        tool_name: str,
+        safety_level: str,
+        action: str,
+        agent_id: Optional[str] = None,
+        printer_name: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Record a safety audit event and return the row id.
+
+        Args:
+            tool_name: MCP tool name (e.g. ``"start_print"``).
+            safety_level: Safety classification (``"safe"``, ``"guarded"``,
+                ``"confirm"``, ``"emergency"``).
+            action: What happened — ``"executed"``, ``"blocked"``,
+                ``"rate_limited"``, ``"auth_denied"``, ``"preflight_failed"``,
+                or ``"dry_run"``.
+            agent_id: Optional identifier for the calling agent.
+            printer_name: Optional printer name involved.
+            details: Optional dict of extra context (args, error messages).
+        """
+        ts = time.time()
+        with self._write_lock:
+            cur = self._conn.execute(
+                """
+                INSERT INTO safety_audit_log
+                    (timestamp, tool_name, safety_level, action,
+                     agent_id, printer_name, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ts,
+                    tool_name,
+                    safety_level,
+                    action,
+                    agent_id,
+                    printer_name,
+                    json.dumps(details) if details else None,
+                ),
+            )
+            self._conn.commit()
+            return cur.lastrowid  # type: ignore[return-value]
+
+    def query_audit(
+        self,
+        action: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Query the safety audit log, newest first.
+
+        Args:
+            action: Filter by action type (e.g. ``"blocked"``).
+            tool_name: Filter by tool name.
+            limit: Maximum rows to return.
+        """
+        clauses: List[str] = []
+        params: List[Any] = []
+        if action is not None:
+            clauses.append("action = ?")
+            params.append(action)
+        if tool_name is not None:
+            clauses.append("tool_name = ?")
+            params.append(tool_name)
+
+        where = ""
+        if clauses:
+            where = "WHERE " + " AND ".join(clauses)
+
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM safety_audit_log {where} ORDER BY id DESC LIMIT ?",
+            params,
+        ).fetchall()
+
+        results: List[Dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            if d.get("details"):
+                d["details"] = json.loads(d["details"])
+            results.append(d)
+        return results
+
+    def audit_summary(self, window_seconds: float = 3600.0) -> Dict[str, Any]:
+        """Return a summary of audit activity within a time window.
+
+        Args:
+            window_seconds: Look-back window in seconds (default 1 hour).
+        """
+        cutoff = time.time() - window_seconds
+        rows = self._conn.execute(
+            "SELECT action, COUNT(*) as cnt FROM safety_audit_log "
+            "WHERE timestamp > ? GROUP BY action",
+            (cutoff,),
+        ).fetchall()
+        counts = {row["action"]: row["cnt"] for row in rows}
+
+        recent_blocked = self._conn.execute(
+            "SELECT tool_name, details, timestamp FROM safety_audit_log "
+            "WHERE action IN ('blocked', 'rate_limited', 'auth_denied') "
+            "AND timestamp > ? ORDER BY id DESC LIMIT 10",
+            (cutoff,),
+        ).fetchall()
+        blocked_list = []
+        for row in recent_blocked:
+            entry = {
+                "tool": row["tool_name"],
+                "timestamp": row["timestamp"],
+            }
+            if row["details"]:
+                entry["details"] = json.loads(row["details"])
+            blocked_list.append(entry)
+
+        return {
+            "window_seconds": window_seconds,
+            "counts": counts,
+            "recent_blocked": blocked_list,
+            "total": sum(counts.values()),
+        }
+
     # ------------------------------------------------------------------
 
     def close(self) -> None:
