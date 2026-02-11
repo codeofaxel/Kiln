@@ -19,11 +19,9 @@ Moonraker supports firmware updates natively via its API. Could expose as `kiln 
 ### Webcam Streaming / Live View
 Beyond snapshots (now implemented), full MJPEG stream proxy for real-time monitoring dashboards. Lower priority than snapshots since agents primarily need point-in-time checks.
 
-## Medium Priority
-
 ### CLI Test Coverage for Advanced Features
 Only core commands have CLI-layer tests (~3.7% coverage). Add Click CLI tests for:
-- `slice`, `snapshot`, `wait`, `history`, `cost`
+- `slice`, `snapshot`, `wait`, `history`, `cost`, `compare-cost`
 - `material` subcommands: `set`, `show`, `spools`, `add-spool`
 - `level` subcommands: `trigger`, `status`, `set-prints`, `set-hours`
 - `stream`, `sync` (status/now/configure), `plugins` (list/info)
@@ -37,20 +35,11 @@ No test covers the full agent workflow: discover → configure → slice → upl
 ### Bambu Webcam Support
 `get_snapshot()` and `get_stream_url()` are not implemented for the Bambu adapter (returns None). Bambu printers do have RTSP streams — investigate adding support via the MQTT push or direct RTSP URL extraction.
 
-### Await Print Completion MCP Tool
-Add `await_print_completion(job_id, timeout)` — an MCP tool that polls printer status and returns when the print finishes, fails, or times out. Currently agents must loop on `printer_status()` themselves, which is fragile if the session times out or context window fills up.
-
 ### Print Failure Analysis Tool
 Add `analyze_print_failure(job_id)` — examine job history, printer logs, and temperature data to suggest root causes and parameter changes for failed prints.
 
-### Cost Comparison: Local vs. Fulfillment
-Both local cost estimation and fulfillment quoting exist as separate tools. Add a unified `compare_print_options(file_path, material)` tool that returns a side-by-side comparison of local printing cost/time vs. outsourced manufacturing cost/shipping, helping agents recommend the best option.
-
 ### Text-to-Model Generation
 Integrate with AI-powered CAD/3D model generation services (e.g. OpenSCAD scripting, Meshy, Tripo3D, or similar APIs) to let agents generate 3D models from text descriptions. This would close the gap between "idea" and "model file" in the agent workflow — currently agents must find existing models on marketplaces. High-value feature for monetization (generation credits, premium models) but significant lift: requires evaluating generation APIs, handling async generation jobs, mesh quality validation, and printability checks.
-
-### Auto-Retry on Print Failure
-No built-in exponential backoff for failed prints. Add configurable retry logic to the scheduler — if a print fails due to a transient issue (e.g. filament tangle detected early, thermal runaway recovery), optionally re-queue with backoff instead of requiring manual agent intervention.
 
 ### Post-Print Quality Validation
 Integrate webcam snapshot analysis (or external dimensional measurement) to validate print quality after completion. Could use vision models to detect obvious defects (spaghetti, layer shift, warping) and flag for human review.

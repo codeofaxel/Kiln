@@ -4,6 +4,29 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-10
 
+### Await Print Completion MCP Tool
+- `await_print_completion(job_id, timeout, poll_interval)` MCP tool
+- Supports both job-based tracking (via queue/scheduler) and direct printer monitoring
+- Returns `outcome` field: completed, failed, cancelled, or timeout
+- Includes progress log with completion % snapshots at each poll interval
+- Configurable timeout (default 2h) and poll interval (default 15s)
+- Lets agents fire-and-forget a print and pick up the result later
+
+### Cost Comparison: Local vs. Fulfillment
+- `compare_print_options` MCP tool — side-by-side local vs. outsourced cost comparison
+- Runs local cost estimate (filament + electricity) and Craftcloud fulfillment quote in one call
+- Returns unified comparison with `cheaper` recommendation, cost delta, time estimates
+- `kiln compare-cost` CLI command with human-readable and JSON output
+- Falls back gracefully if either source is unavailable
+
+### Auto-Retry with Exponential Backoff
+- Added `retry_backoff_base` parameter to `JobScheduler` (default 30s)
+- Retry delays: 30s → 60s → 120s (exponential backoff on failure)
+- `_retry_not_before` dict tracks per-job backoff timestamps
+- Dispatch phase skips jobs still in backoff window
+- Backoff state cleaned up on completion, permanent failure, or successful retry
+- JOB_SUBMITTED event now includes `retry_delay_seconds` field
+
 ### Launch Readiness Fixes (Gap Analysis)
 - **Bambu env var bug fix**: `access_code` in `config.py` now reads from `KILN_PRINTER_ACCESS_CODE` (falls back to `KILN_PRINTER_API_KEY` for backward compat). Previously both `api_key` and `access_code` read from the same env var, breaking Bambu auth via env config.
 - **Automatic preflight in `start_print()`**: The MCP `start_print()` tool now runs `preflight_check()` automatically before starting a print. Returns `PREFLIGHT_FAILED` with full check details if the printer isn't ready. Agents no longer need to remember to call preflight first. Opt-out via `skip_preflight=True`.
