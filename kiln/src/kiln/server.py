@@ -4272,6 +4272,551 @@ def annotate_print(job_id: str, notes: str) -> dict:
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
+# ---------------------------------------------------------------------------
+# Vision monitoring tools
+# ---------------------------------------------------------------------------
+
+_PHASE_HINTS = {
+    "first_layers": [
+        "Check bed adhesion — first layer should be firmly stuck",
+        "Look for warping at corners or edges lifting from bed",
+        "Verify extrusion is consistent (no gaps or blobs)",
+    ],
+    "mid_print": [
+        "Check for spaghetti — filament not adhering to previous layers",
+        "Look for layer shifting (misaligned layers)",
+        "Check for stringing between features",
+    ],
+    "final_layers": [
+        "Check for cooling artifacts on overhangs",
+        "Look for stringing or blobs on fine details",
+        "Verify top surface is smooth and complete",
+    ],
+    "unknown": [
+        "Verify print is progressing normally",
+        "Check for any visible defects",
+    ],
+}
+
+
+def _detect_phase(completion: float | None) -> str:
+    """Classify print phase from completion percentage."""
+    if completion is None or completion < 0:
+        return "unknown"
+    if completion < 10:
+        return "first_layers"
+    if completion > 90:
+        return "final_layers"
+    return "mid_print"
+
+
+@mcp.tool()
+def monitor_print_vision(
+    printer_name: str | None = None,
+    include_snapshot: bool = True,
+    save_snapshot: str | None = None,
+) -> dict:
+    """Capture a snapshot and printer state for visual inspection of an in-progress print.
+
+    Returns the webcam image alongside structured metadata (temperatures,
+    progress, print phase, failure hints) so the agent can visually assess
+    print quality and decide whether to intervene.
+
+    This is the *during-print* counterpart to ``validate_print_quality``
+    (which runs after a print finishes).
+
+    Args:
+        printer_name: Target printer.  Omit for the default printer.
+        include_snapshot: Whether to capture a webcam snapshot (default True).
+        save_snapshot: Optional path to save the snapshot image.
+    """
+    if err := _check_auth("monitoring"):
+        return err
+    try:
+        adapter = _registry.get(printer_name) if printer_name else _get_adapter()
+        state = adapter.get_state()
+        job = adapter.get_job()
+        phase = _detect_phase(job.completion)
+        hints = _PHASE_HINTS.get(phase, _PHASE_HINTS["unknown"])
+
+        result: Dict[str, Any] = {
+            "success": True,
+            "printer_state": state.to_dict(),
+            "job_progress": job.to_dict(),
+            "monitoring_context": {
+                "print_phase": phase,
+                "completion_percent": job.completion,
+                "failure_hints": hints,
+            },
+            "actions_available": {
+                "pause": "pause_print",
+                "cancel": "cancel_print",
+                "annotate": "annotate_print",
+            },
+        }
+
+        # Snapshot capture
+        if include_snapshot:
+            try:
+                image_data = adapter.get_snapshot()
+                if image_data and len(image_data) > 100:
+                    import base64
+
+                    snap: Dict[str, Any] = {
+                        "available": True,
+                        "size_bytes": len(image_data),
+                        "captured_at": time.time(),
+                    }
+                    if save_snapshot:
+                        os.makedirs(os.path.dirname(save_snapshot) or ".", exist_ok=True)
+                        with open(save_snapshot, "wb") as f:
+                            f.write(image_data)
+                        snap["saved_to"] = save_snapshot
+                    else:
+                        snap["image_base64"] = base64.b64encode(image_data).decode("ascii")
+                    result["snapshot"] = snap
+                else:
+                    result["snapshot"] = {"available": False}
+            except Exception:
+                result["snapshot"] = {"available": False}
+        else:
+            result["snapshot"] = {"available": False, "reason": "not_requested"}
+
+        # Publish vision check event
+        _event_bus.publish(
+            EventType.VISION_CHECK,
+            {
+                "printer_name": printer_name or "default",
+                "completion": job.completion,
+                "phase": phase,
+                "snapshot_captured": result["snapshot"].get("available", False),
+            },
+            source="vision",
+        )
+
+        return result
+
+    except PrinterNotFoundError:
+        return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in monitor_print_vision")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def watch_print(
+    printer_name: str | None = None,
+    snapshot_interval: int = 60,
+    max_snapshots: int = 5,
+    timeout: int = 7200,
+    poll_interval: int = 15,
+) -> dict:
+    """Monitor an in-progress print with periodic snapshot capture.
+
+    Polls the printer state every *poll_interval* seconds.  Every
+    *snapshot_interval* seconds a webcam snapshot is captured and
+    accumulated.  The tool returns in one of three cases:
+
+    1. **Print terminal state** — completed, failed, cancelled, or offline.
+    2. **Snapshot batch ready** — *max_snapshots* images have been collected
+       (outcome ``"snapshot_check"``).  The agent should review them and
+       call ``pause_print`` / ``cancel_print`` if issues are detected,
+       then call ``watch_print`` again to continue monitoring.
+    3. **Timeout** — the print has not finished within *timeout* seconds.
+
+    This creates a closed-loop workflow::
+
+        watch_print → agent reviews snapshots → pause if bad → watch_print again
+
+    Args:
+        printer_name: Target printer.  Omit for the default printer.
+        snapshot_interval: Seconds between snapshot captures (default 60).
+        max_snapshots: Return after this many snapshots (default 5).
+        timeout: Maximum seconds to monitor (default 7200 = 2 hours).
+        poll_interval: Seconds between state polls (default 15).
+    """
+    if err := _check_auth("monitoring"):
+        return err
+    try:
+        adapter = _registry.get(printer_name) if printer_name else _get_adapter()
+        start_time = time.time()
+        last_snapshot_time = 0.0
+        snapshots: list[dict] = []
+        progress_log: list[dict] = []
+
+        while True:
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                return {
+                    "success": True,
+                    "outcome": "timeout",
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                    "snapshots": snapshots,
+                    "final_state": adapter.get_state().to_dict(),
+                }
+
+            state = adapter.get_state()
+            job = adapter.get_job()
+
+            # Record progress
+            if job.completion is not None:
+                progress_log.append({
+                    "time": round(elapsed, 1),
+                    "completion": job.completion,
+                })
+
+            # Check terminal states
+            if state.state == PrinterStatus.IDLE and elapsed > 30:
+                return {
+                    "success": True,
+                    "outcome": "completed",
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                    "snapshots": snapshots,
+                    "final_state": state.to_dict(),
+                }
+            if state.state in (PrinterStatus.ERROR, PrinterStatus.OFFLINE):
+                return {
+                    "success": True,
+                    "outcome": "failed",
+                    "elapsed_seconds": round(elapsed, 1),
+                    "progress_log": progress_log[-20:],
+                    "snapshots": snapshots,
+                    "final_state": state.to_dict(),
+                    "error": f"Printer entered {state.state.value} state",
+                }
+
+            # Snapshot capture
+            now = time.time()
+            if (now - last_snapshot_time) >= snapshot_interval:
+                try:
+                    image_data = adapter.get_snapshot()
+                    if image_data and len(image_data) > 100:
+                        import base64
+
+                        phase = _detect_phase(job.completion)
+                        snapshots.append({
+                            "captured_at": now,
+                            "completion_percent": job.completion,
+                            "print_phase": phase,
+                            "image_base64": base64.b64encode(image_data).decode("ascii"),
+                        })
+                        _event_bus.publish(
+                            EventType.VISION_CHECK,
+                            {
+                                "printer_name": printer_name or "default",
+                                "completion": job.completion,
+                                "phase": phase,
+                                "snapshot_index": len(snapshots),
+                            },
+                            source="vision",
+                        )
+                except Exception:
+                    pass  # Snapshot failure is non-fatal
+                last_snapshot_time = now
+
+            # Return batch when enough snapshots accumulated
+            if len(snapshots) >= max_snapshots:
+                return {
+                    "success": True,
+                    "outcome": "snapshot_check",
+                    "elapsed_seconds": round(time.time() - start_time, 1),
+                    "progress_log": progress_log[-20:],
+                    "snapshots": snapshots,
+                    "final_state": state.to_dict(),
+                    "message": (
+                        f"Captured {len(snapshots)} snapshots. "
+                        "Review them for print quality issues. "
+                        "Call pause_print or cancel_print if problems are detected, "
+                        "then call watch_print again to continue monitoring."
+                    ),
+                }
+
+            time.sleep(poll_interval)
+
+    except PrinterNotFoundError:
+        return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in watch_print")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Cross-printer learning tools
+# ---------------------------------------------------------------------------
+
+# Allowed values for outcome recording — prevents garbage data.
+_VALID_OUTCOMES = frozenset({"success", "failed", "partial"})
+_VALID_QUALITY_GRADES = frozenset({"excellent", "good", "acceptable", "poor"})
+_VALID_FAILURE_MODES = frozenset({
+    "spaghetti", "layer_shift", "warping", "adhesion", "stringing",
+    "under_extrusion", "over_extrusion", "clog", "thermal_runaway",
+    "power_loss", "mechanical", "other",
+})
+
+# Hard safety limits — recorded settings cannot exceed these.
+# Prevents malicious agents from poisoning the learning database
+# with dangerous temperature data that could damage printers.
+_MAX_SAFE_TOOL_TEMP: float = 320.0   # Above this, even high-temp materials are dangerous
+_MAX_SAFE_BED_TEMP: float = 140.0
+_MAX_SAFE_SPEED: float = 500.0       # mm/s — beyond any consumer printer
+
+_LEARNING_SAFETY_NOTICE = (
+    "These insights are advisory only. They do NOT override safety limits. "
+    "Always run preflight checks before starting a print. Temperature and "
+    "G-code safety enforcement applies regardless of learning data."
+)
+
+
+@mcp.tool()
+def record_print_outcome(
+    job_id: str,
+    outcome: str,
+    quality_grade: str | None = None,
+    failure_mode: str | None = None,
+    settings: dict | None = None,
+    environment: dict | None = None,
+    notes: str | None = None,
+    printer_name: str | None = None,
+    file_name: str | None = None,
+    file_hash: str | None = None,
+    material_type: str | None = None,
+) -> dict:
+    """Record the outcome of a print for cross-printer learning.
+
+    The learning database helps agents make better decisions about which
+    printer to use for a given job and material.  Outcomes are agent-curated
+    quality data — separate from the auto-populated print history.
+
+    **Safety**: Settings are validated against hard safety limits.  Outcomes
+    with temperatures exceeding safe maximums are rejected to prevent
+    poisoning the learning database with dangerous data.
+
+    Args:
+        job_id: The job ID from the print queue.
+        outcome: One of ``"success"``, ``"failed"``, or ``"partial"``.
+        quality_grade: Optional — ``"excellent"``, ``"good"``, ``"acceptable"``, ``"poor"``.
+        failure_mode: Optional — e.g. ``"spaghetti"``, ``"layer_shift"``, ``"warping"``.
+        settings: Optional dict of print settings used (temp_tool, temp_bed, speed, etc.).
+        environment: Optional dict of environment conditions (ambient_temp, humidity).
+        notes: Optional free-text notes about the print.
+        printer_name: Printer used.  Auto-resolved from job if omitted.
+        file_name: File printed.  Auto-resolved from job if omitted.
+        file_hash: Optional hash of the file for cross-printer comparison.
+        material_type: Material used (e.g. ``"PLA"``, ``"PETG"``).
+    """
+    if err := _check_auth("learning"):
+        return err
+
+    # --- Validate enums ---
+    if outcome not in _VALID_OUTCOMES:
+        return _error_dict(
+            f"Invalid outcome {outcome!r}. Must be one of: {', '.join(sorted(_VALID_OUTCOMES))}",
+            code="VALIDATION_ERROR",
+        )
+    if quality_grade and quality_grade not in _VALID_QUALITY_GRADES:
+        return _error_dict(
+            f"Invalid quality_grade {quality_grade!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_QUALITY_GRADES))}",
+            code="VALIDATION_ERROR",
+        )
+    if failure_mode and failure_mode not in _VALID_FAILURE_MODES:
+        return _error_dict(
+            f"Invalid failure_mode {failure_mode!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_FAILURE_MODES))}",
+            code="VALIDATION_ERROR",
+        )
+
+    # --- Safety: validate settings against hard limits ---
+    if settings:
+        tool_temp = settings.get("temp_tool")
+        if tool_temp is not None and float(tool_temp) > _MAX_SAFE_TOOL_TEMP:
+            return _error_dict(
+                f"Recorded tool temperature {tool_temp}°C exceeds safety limit "
+                f"({_MAX_SAFE_TOOL_TEMP}°C). Outcome rejected to protect hardware.",
+                code="SAFETY_VIOLATION",
+            )
+        bed_temp = settings.get("temp_bed")
+        if bed_temp is not None and float(bed_temp) > _MAX_SAFE_BED_TEMP:
+            return _error_dict(
+                f"Recorded bed temperature {bed_temp}°C exceeds safety limit "
+                f"({_MAX_SAFE_BED_TEMP}°C). Outcome rejected to protect hardware.",
+                code="SAFETY_VIOLATION",
+            )
+        speed = settings.get("speed")
+        if speed is not None and float(speed) > _MAX_SAFE_SPEED:
+            return _error_dict(
+                f"Recorded speed {speed} mm/s exceeds safety limit "
+                f"({_MAX_SAFE_SPEED} mm/s). Outcome rejected to protect hardware.",
+                code="SAFETY_VIOLATION",
+            )
+
+    # --- Resolve printer/file from job if not provided ---
+    try:
+        job_record = get_db().get_print_record(job_id)
+        if job_record and not printer_name:
+            printer_name = job_record.get("printer_name", "unknown")
+        if job_record and not file_name:
+            file_name = job_record.get("file_name")
+    except Exception:
+        pass  # Best-effort resolution
+
+    if not printer_name:
+        printer_name = "unknown"
+
+    try:
+        row_id = get_db().save_print_outcome({
+            "job_id": job_id,
+            "printer_name": printer_name,
+            "file_name": file_name,
+            "file_hash": file_hash,
+            "material_type": material_type,
+            "outcome": outcome,
+            "quality_grade": quality_grade,
+            "failure_mode": failure_mode,
+            "settings": settings,
+            "environment": environment,
+            "notes": notes,
+            "agent_id": "mcp",
+            "created_at": time.time(),
+        })
+        return {
+            "success": True,
+            "outcome_id": row_id,
+            "job_id": job_id,
+            "printer_name": printer_name,
+            "outcome": outcome,
+            "quality_grade": quality_grade,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in record_print_outcome")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def get_printer_insights(
+    printer_name: str,
+    limit: int = 20,
+) -> dict:
+    """Query cross-printer learning insights for a specific printer.
+
+    Returns success rates, failure mode breakdown, and per-material
+    statistics based on previously recorded outcomes.
+
+    **Note**: Insights are advisory.  They do NOT override safety limits
+    or preflight checks.
+
+    Args:
+        printer_name: The printer to get insights for.
+        limit: Maximum recent outcomes to include (default 20).
+    """
+    if err := _check_auth("learning"):
+        return err
+    try:
+        insights = get_db().get_printer_learning_insights(printer_name)
+        recent = get_db().list_print_outcomes(printer_name=printer_name, limit=limit)
+
+        # Confidence level based on sample size
+        total = insights.get("total_outcomes", 0)
+        if total < 5:
+            confidence = "low"
+        elif total < 20:
+            confidence = "medium"
+        else:
+            confidence = "high"
+
+        return {
+            "success": True,
+            "printer_name": printer_name,
+            "insights": insights,
+            "recent_outcomes": recent,
+            "confidence": confidence,
+            "safety_notice": _LEARNING_SAFETY_NOTICE,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in get_printer_insights")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def suggest_printer_for_job(
+    file_hash: str | None = None,
+    material_type: str | None = None,
+    file_name: str | None = None,
+) -> dict:
+    """Suggest the best printer for a job based on historical outcomes.
+
+    Rankings are based on success rates from previously recorded outcomes,
+    optionally filtered by file hash or material type.  Cross-references
+    the printer registry for current availability.
+
+    **Note**: Suggestions are advisory.  They do NOT override safety limits
+    or preflight checks.  Always run preflight validation before starting
+    a print regardless of learning data.
+
+    Args:
+        file_hash: Optional hash of the file to match previous prints.
+        material_type: Optional material type to filter by (e.g. ``"PLA"``).
+        file_name: Optional file name (informational, not used for matching).
+    """
+    if err := _check_auth("learning"):
+        return err
+    try:
+        ranked = get_db().suggest_printer_for_outcome(
+            file_hash=file_hash, material_type=material_type,
+        )
+
+        # Cross-reference availability from registry
+        try:
+            idle = set(_registry.get_idle_printers())
+        except Exception:
+            idle = set()
+
+        suggestions = []
+        for entry in ranked:
+            pname = entry["printer_name"]
+            rate = entry["success_rate"]
+            total = entry["total_prints"]
+            suggestions.append({
+                "printer_name": pname,
+                "success_rate": rate,
+                "total_prints": total,
+                "score": round(rate * min(total / 10.0, 1.0), 2),  # Penalise low sample size
+                "reason": f"{int(rate * 100)}% success rate ({total} prints)",
+                "currently_available": pname in idle,
+            })
+
+        # Sort by score descending
+        suggestions.sort(key=lambda s: s["score"], reverse=True)
+
+        total_outcomes = sum(e["total_prints"] for e in ranked)
+        confidence = "low" if total_outcomes < 5 else ("medium" if total_outcomes < 20 else "high")
+
+        return {
+            "success": True,
+            "suggestions": suggestions,
+            "query": {
+                "file_hash": file_hash,
+                "material_type": material_type,
+                "file_name": file_name,
+            },
+            "data_quality": {
+                "total_outcomes": total_outcomes,
+                "printers_with_data": len(ranked),
+                "confidence": confidence,
+            },
+            "safety_notice": _LEARNING_SAFETY_NOTICE,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in suggest_printer_for_job")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
 @mcp.tool()
 def save_agent_note(
     key: str,

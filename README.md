@@ -270,6 +270,11 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `run_quick_print` | Full pipeline: slice → validate → upload → print in one shot |
 | `run_calibrate` | Home → bed level → calibration guidance pipeline |
 | `run_benchmark` | Slice → upload → stats report (manual start) |
+| `monitor_print_vision` | Capture snapshot + printer state + print phase hints for agent vision analysis |
+| `watch_print` | Poll printer with periodic snapshots; returns batch for agent review |
+| `record_print_outcome` | Record print quality outcome with safety-validated settings |
+| `get_printer_insights` | Query cross-printer learning: success rates, failure breakdown, material stats |
+| `suggest_printer_for_job` | Rank printers by historical success for a file/material combination |
 
 ## Supported Printers
 
@@ -325,6 +330,16 @@ The server also exposes read-only resources that agents can use for context:
 | `pipelines.py` | Pre-validated print pipelines (quick_print, calibrate, benchmark) |
 | `data/` | Bundled JSON databases (safety profiles, slicer profiles, printer intelligence) |
 | `cli/` | Click CLI with 25+ subcommands and JSON output |
+
+## Beyond 3D Printing
+
+Kiln's adapter pattern is designed to generalize beyond FDM printers. The `DeviceType` enum and `DeviceAdapter` alias provide forward-compatible extension points for:
+
+- **SLA/Resin** — Exposure-based printers with different state models
+- **CNC Routers** — Spindle control, tool changes, work coordinate systems
+- **Laser Cutters** — Power control, raster/vector modes, material focus
+
+Existing printer adapters continue to work unchanged. New device types implement the same base interface with optional device-specific methods (`set_spindle_speed()`, `set_laser_power()`, `get_tool_position()`). Agents interact with all device types through the same MCP tools — the adapter pattern abstracts the hardware differences.
 
 ## Authentication (Optional)
 
@@ -454,8 +469,8 @@ Agents use `fulfillment_quote` and `fulfillment_order` MCP tools for the same wo
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (2332+ total)
-cd kiln && python3 -m pytest tests/ -v        # 2093 tests
+# Run tests (2650+ total)
+cd kiln && python3 -m pytest tests/ -v        # 2413 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
