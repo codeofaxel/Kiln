@@ -12,13 +12,17 @@ Precedence (highest first):
 
 from __future__ import annotations
 
+import logging
 import os
 import re
+import stat
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 def get_config_path() -> Path:
@@ -39,10 +43,27 @@ def _normalize_host(host: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _check_file_permissions(path: Path) -> None:
+    """Warn if *path* is readable by group or others."""
+    try:
+        mode = path.stat().st_mode
+        if mode & (stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH):
+            logger.warning(
+                "Config file %s has overly permissive permissions "
+                "(mode %04o). Recommended: chmod 600 %s",
+                path,
+                stat.S_IMODE(mode),
+                path,
+            )
+    except OSError:
+        pass
+
+
 def _read_config_file(path: Path) -> Dict[str, Any]:
     """Read and parse the YAML config file; return ``{}`` on any failure."""
     if not path.is_file():
         return {}
+    _check_file_permissions(path)
     try:
         with path.open("r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
@@ -52,10 +73,18 @@ def _read_config_file(path: Path) -> Dict[str, Any]:
 
 
 def _write_config_file(path: Path, data: Dict[str, Any]) -> None:
-    """Write *data* to the YAML config file, creating dirs as needed."""
+    """Write *data* to the YAML config file, creating dirs as needed.
+
+    Sets file permissions to ``0600`` (owner read/write only) since the
+    config may contain API keys and access codes.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fh:
         yaml.safe_dump(data, fh, default_flow_style=False, sort_keys=False)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
 
 
 def load_printer_config(
