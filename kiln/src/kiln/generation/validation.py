@@ -36,6 +36,43 @@ _STL_TRIANGLE_SIZE = 50  # 12 floats (normal + 3 vertices) + 2 byte attr
 # ---------------------------------------------------------------------------
 
 
+def convert_to_stl(input_path: str, output_path: str | None = None) -> str:
+    """Convert an OBJ file to binary STL.
+
+    Parses the OBJ geometry and writes a binary STL with the same
+    triangles.  Quads and higher polygons are triangulated.  Only
+    geometry is preserved — textures, normals, and materials are
+    discarded (not needed for 3D printing).
+
+    Args:
+        input_path: Path to the input OBJ file.
+        output_path: Path for the output STL file.  Defaults to
+            replacing the ``.obj`` extension with ``.stl``.
+
+    Returns:
+        The path to the written STL file.
+
+    Raises:
+        ValueError: If the input is not an OBJ file or has no geometry.
+    """
+    path = Path(input_path)
+    if path.suffix.lower() != ".obj":
+        raise ValueError(f"convert_to_stl expects .obj input, got {path.suffix!r}")
+
+    errors: List[str] = []
+    triangles, vertices = _parse_obj(path, errors)
+    if errors:
+        raise ValueError(f"Failed to parse OBJ: {'; '.join(errors)}")
+    if not triangles:
+        raise ValueError("OBJ file contains no geometry to convert.")
+
+    if output_path is None:
+        output_path = str(path.with_suffix(".stl"))
+
+    _write_binary_stl(triangles, output_path)
+    return output_path
+
+
 def validate_mesh(file_path: str) -> MeshValidationResult:
     """Validate an STL or OBJ file for 3D printing readiness.
 
