@@ -56,8 +56,7 @@ This monorepo contains two packages:
 # Install from source (recommended until PyPI release)
 pip install -e ./kiln
 
-# On modern Linux/WSL, use a virtualenv first (see Linux section below)
-# Or when published: pip install kiln3d
+# On modern Linux/WSL, use pipx (see Linux section below)
 
 # Discover printers on your network
 kiln discover
@@ -95,26 +94,45 @@ kiln status --json
 
 Kiln runs natively on Linux and Ubuntu under WSL 2.
 
-> **"Externally managed environment" error?** Modern Ubuntu/Debian (23.04+)
-> blocks `pip install` system-wide to protect OS packages.  Create a
-> virtualenv first — it takes one extra line.
+#### Option 1: pipx (recommended)
+
+`pipx` installs Kiln into its own isolated environment and puts the `kiln`
+command on your PATH — works from any directory, no virtualenv to manage.
 
 ```bash
-# 1. Create a virtualenv (one-time setup)
+# One-time: install pipx
+sudo apt install pipx
+pipx ensurepath   # adds ~/.local/bin to PATH (restart your shell after)
+
+# Clone and install
+git clone https://github.com/codeofaxel/Kiln.git
+cd Kiln
+pipx install ./kiln
+
+# Optional: Bambu Lab support
+pipx inject kiln3d paho-mqtt
+
+# System dependencies (optional but recommended)
+sudo apt install prusa-slicer   # Required for slicing STL → G-code
+sudo apt install openscad        # Required only for text-to-3D generation
+
+# Verify
+kiln verify
+```
+
+#### Option 2: virtualenv
+
+If you prefer a manual virtualenv:
+
+```bash
 python3 -m venv ~/.kiln-venv
 source ~/.kiln-venv/bin/activate
 
-# 2. Clone and install from source
 git clone https://github.com/codeofaxel/Kiln.git
 cd Kiln
 pip install -e ./kiln            # core
 pip install -e "./kiln[bambu]"   # add Bambu Lab support (if needed)
 
-# 3. System dependencies (optional but recommended)
-sudo apt install prusa-slicer   # Required for slicing STL → G-code
-sudo apt install openscad        # Required only for text-to-3D generation
-
-# 4. Verify your install
 kiln verify
 ```
 
