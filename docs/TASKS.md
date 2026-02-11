@@ -32,9 +32,6 @@ The underlying library code IS tested (1,726+ tests), but regressions in Click a
 ### End-to-End Integration Test
 No test covers the full agent workflow: discover → configure → slice → upload → print → wait → history. Each piece works in isolation but the chain is untested. Add at least one integration test with a mock printer that exercises the complete pipeline.
 
-### Bambu Webcam Support
-`get_snapshot()` and `get_stream_url()` are not implemented for the Bambu adapter (returns None). Bambu printers do have RTSP streams — investigate adding support via the MQTT push or direct RTSP URL extraction.
-
 ### Text-to-Model Generation
 Integrate with AI-powered CAD/3D model generation services (e.g. OpenSCAD scripting, Meshy, Tripo3D, or similar APIs) to let agents generate 3D models from text descriptions. This would close the gap between "idea" and "model file" in the agent workflow — currently agents must find existing models on marketplaces. High-value feature for monetization (generation credits, premium models) but significant lift: requires evaluating generation APIs, handling async generation jobs, mesh quality validation, and printability checks.
 
@@ -42,5 +39,3 @@ Integrate with AI-powered CAD/3D model generation services (e.g. OpenSCAD script
 Integrate webcam snapshot analysis (or external dimensional measurement) to validate print quality after completion. Could use vision models to detect obvious defects (spaghetti, layer shift, warping) and flag for human review.
 
 ## Low Priority / Future Ideas
-
-- **Resumable downloads** — Large STL downloads don't checkpoint; add resume support for interrupted transfers

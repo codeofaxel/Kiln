@@ -4,6 +4,20 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-10
 
+### Bambu Webcam Support
+- `get_snapshot()` on BambuAdapter — tries HTTPS/HTTP snapshot endpoint on the printer
+- `get_stream_url()` on BambuAdapter — returns `rtsps://<host>:322/streaming/live/1` (Bambu LAN RTSP stream)
+- Falls back gracefully to `None` if camera not accessible
+
+### Resumable Downloads
+- `resumable_download()` shared helper in `marketplaces/base.py`
+- Uses HTTP `Range` headers to resume interrupted downloads from `.part` temp files
+- Automatic retry with up to 3 attempts on failure
+- Handles servers that don't support Range (restarts cleanly)
+- Handles 416 Range Not Satisfiable (file already complete)
+- Thingiverse and MyMiniFactory adapters now both use `resumable_download()`
+- Atomic rename from `.part` → final file on completion
+
 ### Print Failure Analysis Tool
 - `analyze_print_failure(job_id)` MCP tool
 - Examines job record, related events (retries, errors, progress), and timing

@@ -7,9 +7,14 @@ can search, browse, and download models through a uniform interface.
 
 from __future__ import annotations
 
+import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+_logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -191,3 +196,110 @@ class MarketplaceAdapter(ABC):
         raise MarketplaceError(
             f"{self.display_name} does not support direct file downloads.",
         )
+
+
+# ---------------------------------------------------------------------------
+# Resumable download helper
+# ---------------------------------------------------------------------------
+
+
+def resumable_download(
+    session: Any,
+    url: str,
+    out_path: Path,
+    *,
+    params: Dict[str, str] | None = None,
+    timeout: int = 120,
+    chunk_size: int = 65536,
+    max_retries: int = 3,
+) -> str:
+    """Download a file with resume support via HTTP Range headers.
+
+    Writes to a ``.part`` temp file and renames on completion.  If a
+    partial ``.part`` file exists from a previous interrupted download,
+    resumes from where it left off.
+
+    Args:
+        session: A ``requests.Session`` to use for the download.
+        url: The download URL.
+        out_path: Final destination path.
+        params: Optional query params to attach to the request.
+        timeout: Request timeout in seconds.
+        chunk_size: Bytes per chunk (default 64 KB).
+        max_retries: Number of resume attempts on failure.
+
+    Returns:
+        Absolute path to the downloaded file.
+
+    Raises:
+        MarketplaceError: If the download fails after all retries.
+    """
+    part_path = out_path.with_suffix(out_path.suffix + ".part")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # If final file already exists and has content, return it
+    if out_path.exists() and out_path.stat().st_size > 0:
+        return str(out_path.resolve())
+
+    for attempt in range(max_retries):
+        headers: Dict[str, str] = {}
+        existing_bytes = 0
+
+        if part_path.exists():
+            existing_bytes = part_path.stat().st_size
+            if existing_bytes > 0:
+                headers["Range"] = f"bytes={existing_bytes}-"
+                _logger.info(
+                    "Resuming download at byte %d (attempt %d/%d)",
+                    existing_bytes, attempt + 1, max_retries,
+                )
+
+        try:
+            resp = session.get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=timeout,
+                stream=True,
+            )
+
+            # If server doesn't support Range, start fresh
+            if resp.status_code == 200 and existing_bytes > 0:
+                _logger.debug("Server returned 200 (no range support), restarting")
+                existing_bytes = 0
+                mode = "wb"
+            elif resp.status_code == 206:
+                mode = "ab"
+            elif resp.status_code == 416:
+                # Range not satisfiable — file is already complete
+                if part_path.exists():
+                    part_path.rename(out_path)
+                    return str(out_path.resolve())
+                mode = "wb"
+            else:
+                resp.raise_for_status()
+                mode = "wb"
+
+            with open(part_path, mode) as fh:
+                for chunk in resp.iter_content(chunk_size=chunk_size):
+                    fh.write(chunk)
+
+            # Verify we got content
+            if part_path.exists() and part_path.stat().st_size > 0:
+                part_path.rename(out_path)
+                _logger.info(
+                    "Downloaded %s (%d bytes)",
+                    out_path, out_path.stat().st_size,
+                )
+                return str(out_path.resolve())
+
+        except Exception as exc:
+            _logger.warning(
+                "Download attempt %d/%d failed: %s", attempt + 1, max_retries, exc,
+            )
+            if attempt == max_retries - 1:
+                raise MarketplaceError(
+                    f"Download failed after {max_retries} attempts: {exc}",
+                ) from exc
+
+    raise MarketplaceError("Download failed: no data received.")
