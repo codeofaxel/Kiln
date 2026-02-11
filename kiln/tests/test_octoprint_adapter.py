@@ -588,6 +588,35 @@ class TestCancelPrint:
             adapter.cancel_print()
 
 
+class TestEmergencyStop:
+    """Tests for OctoPrintAdapter.emergency_stop()."""
+
+    @responses.activate
+    def test_success(self, adapter):
+        responses.add(
+            responses.POST,
+            f"{OCTOPRINT_HOST}/api/printer/command",
+            status=204,
+        )
+        result = adapter.emergency_stop()
+        assert result.success is True
+        assert "m112" in result.message.lower() or "emergency" in result.message.lower()
+
+        body = json.loads(responses.calls[0].request.body)
+        assert body["commands"] == ["M112"]
+
+    @responses.activate
+    def test_server_error(self, adapter):
+        responses.add(
+            responses.POST,
+            f"{OCTOPRINT_HOST}/api/printer/command",
+            json={"error": "Internal error"},
+            status=500,
+        )
+        with pytest.raises(PrinterError):
+            adapter.emergency_stop()
+
+
 class TestPausePrint:
     """Tests for OctoPrintAdapter.pause_print()."""
 

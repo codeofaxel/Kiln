@@ -259,6 +259,8 @@ class PrusaConnectAdapter(PrinterAdapter):
         tool_target = printer.get("target_nozzle") if isinstance(printer, dict) else None
         bed_actual = printer.get("temp_bed") if isinstance(printer, dict) else None
         bed_target = printer.get("target_bed") if isinstance(printer, dict) else None
+        chamber_actual = printer.get("temp_chamber") if isinstance(printer, dict) else None
+        chamber_target = printer.get("target_chamber") if isinstance(printer, dict) else None
 
         return PrinterState(
             connected=True,
@@ -267,6 +269,8 @@ class PrusaConnectAdapter(PrinterAdapter):
             tool_temp_target=tool_target,
             bed_temp_actual=bed_actual,
             bed_temp_target=bed_target,
+            chamber_temp_actual=chamber_actual,
+            chamber_temp_target=chamber_target,
         )
 
     def get_job(self) -> JobProgress:
@@ -426,6 +430,20 @@ class PrusaConnectAdapter(PrinterAdapter):
 
         self._request("DELETE", f"/api/v1/job/{job_id}")
         return PrintResult(success=True, message="Print cancelled.")
+
+    def emergency_stop(self) -> PrintResult:
+        """Perform emergency stop by cancelling the active job.
+
+        Prusa Link does not expose a raw G-code or M112 endpoint.
+        The closest available action is a job cancellation.
+        """
+        try:
+            return self.cancel_print()
+        except PrinterError:
+            raise PrinterError(
+                "Emergency stop failed — Prusa Link does not support "
+                "raw G-code commands.  Power off the printer manually."
+            )
 
     def pause_print(self) -> PrintResult:
         """Pause the currently running print job.

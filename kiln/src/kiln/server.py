@@ -756,6 +756,34 @@ def cancel_print() -> dict:
 
 
 @mcp.tool()
+def emergency_stop() -> dict:
+    """Perform an immediate emergency stop on the printer.
+
+    Sends a firmware-level halt (M112 or equivalent) that immediately
+    cuts power to heaters and stepper motors.  Unlike ``cancel_print``,
+    this does **not** allow a graceful cooldown — all motion ceases
+    instantly.
+
+    Use only in genuine safety emergencies (thermal runaway, collision,
+    spaghetti failure threatening the hotend, etc.).
+
+    WARNING: After an emergency stop the printer typically requires a
+    power cycle or firmware restart before it can print again.
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        adapter = _get_adapter()
+        result = adapter.emergency_stop()
+        return result.to_dict()
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in emergency_stop")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
 def pause_print() -> dict:
     """Pause the currently running print job.
 
