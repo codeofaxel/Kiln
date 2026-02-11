@@ -89,7 +89,7 @@ jobs:
         run: cd kiln && python -m build
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dist-kiln
           path: kiln/dist/
@@ -131,7 +131,7 @@ jobs:
         run: cd octoprint-cli && python -m build
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dist-octoprint-cli
           path: octoprint-cli/dist/
