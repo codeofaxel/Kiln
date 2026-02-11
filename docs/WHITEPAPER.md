@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/codeofaxel/Kiln/main/docs/assets/kiln-logo-dark.svg" alt="Kiln" width="200">
+  <img src="assets/kiln-logo-dark.svg" alt="Kiln" width="200">
 </p>
 
 # Kiln: A Protocol for Agent-Operated Physical Manufacturing
