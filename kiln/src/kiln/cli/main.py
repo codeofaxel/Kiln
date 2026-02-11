@@ -25,6 +25,9 @@ from kiln.cli.config import (
 )
 from kiln.cli.output import (
     format_action,
+    format_billing_history,
+    format_billing_setup,
+    format_billing_status,
     format_discovered,
     format_error,
     format_files,
@@ -1627,6 +1630,99 @@ def plugins_info(name: str, json_mode: bool) -> None:
             click.echo(f"Hooks:   {', '.join(info.hooks)}")
         if info.error:
             click.echo(f"Error:   {info.error}")
+
+
+# ---------------------------------------------------------------------------
+# billing
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def billing() -> None:
+    """Manage payment methods and view billing history.
+
+    Use subcommands to link a payment method (credit card or crypto),
+    view monthly spend, and see charge history.
+    """
+
+
+@billing.command("setup")
+@click.option("--rail", default="stripe", type=click.Choice(["stripe", "crypto"]),
+              help="Payment rail (default stripe).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def billing_setup(rail: str, json_mode: bool) -> None:
+    """Link a payment method for platform fees.
+
+    Generates a setup URL to add a credit card (Stripe) or configure
+    crypto payments (USDC on Solana/Base).
+    """
+    from kiln.cli.config import get_billing_config, get_or_create_user_id
+    from kiln.persistence import get_db
+    from kiln.payments.manager import PaymentManager
+
+    try:
+        config = get_billing_config()
+        user_id = get_or_create_user_id()
+        mgr = PaymentManager(db=get_db(), config=config)
+
+        if rail == "stripe":
+            from kiln.payments.stripe_provider import StripeProvider
+            provider = StripeProvider()
+            mgr.register_provider(provider)
+        else:
+            click.echo(format_error(
+                "Crypto setup: set KILN_CIRCLE_API_KEY and configure your "
+                "wallet via the Circle dashboard. Then run 'kiln billing status' "
+                "to verify.",
+                json_mode=json_mode,
+            ))
+            return
+
+        url = mgr.get_setup_url(rail=rail)
+        click.echo(format_billing_setup(url, rail, json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@billing.command("status")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def billing_status(json_mode: bool) -> None:
+    """Show current payment method, monthly spend, and limits."""
+    from kiln.cli.config import get_billing_config, get_or_create_user_id
+    from kiln.persistence import get_db
+    from kiln.payments.manager import PaymentManager
+
+    try:
+        config = get_billing_config()
+        user_id = get_or_create_user_id()
+        mgr = PaymentManager(db=get_db(), config=config)
+        data = mgr.get_billing_status(user_id)
+        click.echo(format_billing_status(data, json_mode=json_mode))
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@billing.command("history")
+@click.option("--limit", "-n", default=20, help="Max records to show (default 20).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def billing_history(limit: int, json_mode: bool) -> None:
+    """Show recent billing charges and payment outcomes."""
+    from kiln.cli.config import get_billing_config
+    from kiln.persistence import get_db
+    from kiln.payments.manager import PaymentManager
+
+    try:
+        config = get_billing_config()
+        mgr = PaymentManager(db=get_db(), config=config)
+        charges = mgr.get_billing_history(limit=limit)
+        click.echo(format_billing_history(charges, json_mode=json_mode))
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------

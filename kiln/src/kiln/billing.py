@@ -39,11 +39,15 @@ Example::
 from __future__ import annotations
 
 import logging
+import secrets
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from kiln.persistence import KilnDB
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +58,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class FeePolicy:
-    """Configurable fee schedule for Kiln network services.
+    """Configurable fee schedule for Kiln platform services.
 
     Attributes:
-        network_fee_percent: Kiln's percentage cut on network jobs.
-        min_fee_usd: Minimum fee charged per network job.
-        max_fee_usd: Maximum fee cap per network job.
-        free_tier_jobs: Number of network jobs per calendar month that
+        network_fee_percent: Kiln's percentage cut on outsourced orders.
+        min_fee_usd: Minimum fee charged per order.
+        max_fee_usd: Maximum fee cap per order.
+        free_tier_jobs: Number of orders per calendar month that
             are waived (free) to encourage adoption.
         currency: Default currency for fees.
     """
@@ -74,10 +78,10 @@ class FeePolicy:
 
 @dataclass
 class FeeCalculation:
-    """Result of a fee calculation for a single network job.
+    """Result of a fee calculation for a single order.
 
     Attributes:
-        job_cost: Raw cost from the manufacturing network.
+        job_cost: Raw cost from the manufacturing provider.
         fee_amount: Kiln's calculated fee (may be 0 if waived).
         fee_percent: Effective fee percentage applied.
         total_cost: ``job_cost + fee_amount``.
@@ -107,20 +111,39 @@ class FeeCalculation:
         }
 
 
+@dataclass
+class SpendLimits:
+    """User-configurable spending limits for automated ordering.
+
+    Attributes:
+        max_per_order_usd: Reject single orders with fees above this.
+        monthly_cap_usd: Reject when monthly fee total would exceed this.
+    """
+
+    max_per_order_usd: float = 500.0
+    monthly_cap_usd: float = 2000.0
+
+
 # ---------------------------------------------------------------------------
 # Billing ledger
 # ---------------------------------------------------------------------------
 
 class BillingLedger:
-    """Thread-safe in-memory billing ledger.
+    """Thread-safe billing ledger with optional SQLite persistence.
 
-    Tracks fee calculations and charges for network jobs.  This is an
-    in-memory implementation; a future version will persist to SQLite or
-    Supabase for crash recovery.
+    When a :class:`~kiln.persistence.KilnDB` instance is provided, charges
+    are persisted to the ``billing_charges`` table and survive restarts.
+    Without a ``db``, the ledger operates in-memory (useful for tests).
     """
 
-    def __init__(self, fee_policy: Optional[FeePolicy] = None) -> None:
+    def __init__(
+        self,
+        fee_policy: Optional[FeePolicy] = None,
+        db: Optional[KilnDB] = None,
+    ) -> None:
         self._policy: FeePolicy = fee_policy or FeePolicy()
+        self._db = db
+        # In-memory fallback when no db is provided.
         self._charges: List[Dict[str, Any]] = []
         self._lock = threading.Lock()
 
@@ -133,10 +156,10 @@ class BillingLedger:
         job_cost: float,
         currency: str = "USD",
     ) -> FeeCalculation:
-        """Calculate the Kiln fee for a network job.
+        """Calculate the Kiln fee for an outsourced order.
 
         Args:
-            job_cost: Raw cost from the manufacturing network.
+            job_cost: Raw cost from the manufacturing provider.
             currency: Currency of the job cost.
 
         Returns:
@@ -188,6 +211,60 @@ class BillingLedger:
         )
 
     # ------------------------------------------------------------------
+    # Spend limits
+    # ------------------------------------------------------------------
+
+    def check_spend_limits(
+        self,
+        fee_amount: float,
+        limits: Optional[SpendLimits] = None,
+    ) -> tuple:
+        """Check whether a fee amount is within spend limits.
+
+        Args:
+            fee_amount: The fee about to be charged.
+            limits: Spend limits to enforce.  Uses generous defaults
+                if not provided.
+
+        Returns:
+            ``(True, None)`` if within limits, or
+            ``(False, reason_string)`` if a limit would be exceeded.
+        """
+        lim = limits or SpendLimits()
+
+        if fee_amount > lim.max_per_order_usd:
+            return (
+                False,
+                f"Fee ${fee_amount:.2f} exceeds per-order limit "
+                f"${lim.max_per_order_usd:.2f}",
+            )
+
+        month_total = self._get_monthly_fee_total()
+        if month_total + fee_amount > lim.monthly_cap_usd:
+            return (
+                False,
+                f"Monthly cap ${lim.monthly_cap_usd:.2f} would be exceeded "
+                f"(current: ${month_total:.2f})",
+            )
+
+        return (True, None)
+
+    def _get_monthly_fee_total(self) -> float:
+        """Sum of fees charged this month."""
+        if self._db is not None:
+            return self._db.monthly_fee_total()
+        # In-memory fallback.
+        now = datetime.now(timezone.utc)
+        total = 0.0
+        with self._lock:
+            for entry in self._charges:
+                ts = datetime.fromtimestamp(entry["timestamp"], tz=timezone.utc)
+                if ts.year == now.year and ts.month == now.month:
+                    fc: FeeCalculation = entry["fee_calc"]
+                    total += fc.fee_amount
+        return round(total, 2)
+
+    # ------------------------------------------------------------------
     # Recording
     # ------------------------------------------------------------------
 
@@ -195,27 +272,67 @@ class BillingLedger:
         self,
         job_id: str,
         fee_calc: FeeCalculation,
-    ) -> None:
+        *,
+        payment_id: Optional[str] = None,
+        payment_rail: Optional[str] = None,
+        payment_status: str = "pending",
+    ) -> str:
         """Record a fee calculation against a job in the ledger.
 
         Args:
-            job_id: Unique identifier of the network job.
+            job_id: Unique identifier of the order.
             fee_calc: The :class:`FeeCalculation` to record.
+            payment_id: Provider-specific payment ID (Stripe PI, Circle transfer).
+            payment_rail: Payment rail used (``"stripe"``, ``"solana"``, etc.).
+            payment_status: Status of the payment (``"completed"``, ``"failed"``, etc.).
+
+        Returns:
+            The generated charge ID.
         """
-        entry: Dict[str, Any] = {
-            "job_id": job_id,
-            "fee_calc": fee_calc,
-            "timestamp": time.time(),
-        }
-        with self._lock:
-            self._charges.append(entry)
+        charge_id = secrets.token_hex(8)
+        now = time.time()
+
+        if self._db is not None:
+            self._db.save_billing_charge({
+                "id": charge_id,
+                "job_id": job_id,
+                "order_id": job_id,
+                "fee_amount": fee_calc.fee_amount,
+                "fee_percent": fee_calc.fee_percent,
+                "job_cost": fee_calc.job_cost,
+                "total_cost": fee_calc.total_cost,
+                "currency": fee_calc.currency,
+                "waived": fee_calc.waived,
+                "waiver_reason": fee_calc.waiver_reason,
+                "payment_id": payment_id,
+                "payment_rail": payment_rail,
+                "payment_status": payment_status,
+                "created_at": now,
+            })
+        else:
+            # In-memory fallback.
+            entry: Dict[str, Any] = {
+                "id": charge_id,
+                "job_id": job_id,
+                "fee_calc": fee_calc,
+                "timestamp": now,
+                "payment_id": payment_id,
+                "payment_rail": payment_rail,
+                "payment_status": payment_status,
+            }
+            with self._lock:
+                self._charges.append(entry)
+
         logger.info(
-            "Recorded charge for job %s: fee=%.2f %s (waived=%s)",
+            "Recorded charge %s for job %s: fee=%.2f %s (waived=%s, payment=%s)",
+            charge_id,
             job_id,
             fee_calc.fee_amount,
             fee_calc.currency,
             fee_calc.waived,
+            payment_status,
         )
+        return charge_id
 
     # ------------------------------------------------------------------
     # Queries
@@ -236,6 +353,10 @@ class BillingLedger:
             Dictionary with ``total_fees``, ``job_count``, and
             ``waived_count``.
         """
+        if self._db is not None:
+            return self._db.monthly_billing_summary(year=year, month=month)
+
+        # In-memory fallback.
         now = datetime.now(timezone.utc)
         target_year = year if year is not None else now.year
         target_month = month if month is not None else now.month
@@ -261,7 +382,11 @@ class BillingLedger:
         }
 
     def network_jobs_this_month(self) -> int:
-        """Count network jobs recorded in the current calendar month."""
+        """Count orders recorded in the current calendar month."""
+        if self._db is not None:
+            return self._db.billing_charges_this_month()
+
+        # In-memory fallback.
         now = datetime.now(timezone.utc)
         count = 0
         with self._lock:
@@ -280,8 +405,75 @@ class BillingLedger:
         Returns:
             The :class:`FeeCalculation` if found, otherwise ``None``.
         """
+        if self._db is not None:
+            charge = self._db.get_billing_charge(job_id)
+            if charge is None:
+                # Try by job_id column.
+                charges = self._db.list_billing_charges(limit=1)
+                for c in self._db.list_billing_charges(limit=500):
+                    if c["job_id"] == job_id:
+                        charge = c
+                        break
+            if charge is None:
+                return None
+            return FeeCalculation(
+                job_cost=charge["job_cost"],
+                fee_amount=charge["fee_amount"],
+                fee_percent=charge["fee_percent"],
+                total_cost=charge["total_cost"],
+                currency=charge["currency"],
+                waived=charge["waived"],
+                waiver_reason=charge.get("waiver_reason"),
+            )
+
+        # In-memory fallback.
         with self._lock:
             for entry in self._charges:
                 if entry["job_id"] == job_id:
                     return entry["fee_calc"]
         return None
+
+    def list_charges(
+        self,
+        limit: int = 50,
+        month: Optional[int] = None,
+        year: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return recent billing charges as dicts.
+
+        Args:
+            limit: Maximum records to return.
+            month: Filter by calendar month (requires year).
+            year: Filter by calendar year (requires month).
+
+        Returns:
+            List of charge dicts, newest first.
+        """
+        if self._db is not None:
+            return self._db.list_billing_charges(
+                limit=limit, month=month, year=year,
+            )
+
+        # In-memory fallback.
+        results: List[Dict[str, Any]] = []
+        with self._lock:
+            for entry in reversed(self._charges):
+                fc: FeeCalculation = entry["fee_calc"]
+                results.append({
+                    "id": entry.get("id", ""),
+                    "job_id": entry["job_id"],
+                    "fee_amount": fc.fee_amount,
+                    "fee_percent": fc.fee_percent,
+                    "job_cost": fc.job_cost,
+                    "total_cost": fc.total_cost,
+                    "currency": fc.currency,
+                    "waived": fc.waived,
+                    "waiver_reason": fc.waiver_reason,
+                    "payment_id": entry.get("payment_id"),
+                    "payment_rail": entry.get("payment_rail"),
+                    "payment_status": entry.get("payment_status", "pending"),
+                    "created_at": entry["timestamp"],
+                })
+                if len(results) >= limit:
+                    break
+        return results

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -278,3 +279,79 @@ def validate_printer_config(cfg: Dict[str, Any]) -> Tuple[bool, str | None]:
             return False, "serial is required for Bambu printers"
 
     return True, None
+
+
+# ---------------------------------------------------------------------------
+# Billing configuration
+# ---------------------------------------------------------------------------
+
+
+def get_billing_config(
+    *,
+    config_path: Path | None = None,
+) -> Dict[str, Any]:
+    """Return the ``billing`` section of the config file.
+
+    Returns an empty dict if the section doesn't exist.  Environment
+    variable overrides:
+
+    - ``KILN_BILLING_MAX_PER_ORDER`` → ``spend_limits.max_per_order_usd``
+    - ``KILN_BILLING_MONTHLY_CAP``  → ``spend_limits.monthly_cap_usd``
+    """
+    path = config_path or get_config_path()
+    raw = _read_config_file(path)
+    billing = raw.get("billing", {})
+    if not isinstance(billing, dict):
+        billing = {}
+
+    # Ensure user_id exists.
+    if "user_id" not in billing:
+        billing["user_id"] = str(uuid.uuid4())
+        raw["billing"] = billing
+        _write_config_file(path, raw)
+
+    # Env var overrides for spend limits.
+    limits = billing.setdefault("spend_limits", {})
+    env_max = os.environ.get("KILN_BILLING_MAX_PER_ORDER")
+    if env_max:
+        try:
+            limits["max_per_order_usd"] = float(env_max)
+        except ValueError:
+            pass
+    env_cap = os.environ.get("KILN_BILLING_MONTHLY_CAP")
+    if env_cap:
+        try:
+            limits["monthly_cap_usd"] = float(env_cap)
+        except ValueError:
+            pass
+
+    return billing
+
+
+def save_billing_config(
+    data: Dict[str, Any],
+    *,
+    config_path: Path | None = None,
+) -> None:
+    """Write the ``billing`` section to the config file.
+
+    Merges *data* into the existing billing section (does not clobber
+    other config sections).
+    """
+    path = config_path or get_config_path()
+    raw = _read_config_file(path)
+    existing = raw.get("billing", {})
+    if not isinstance(existing, dict):
+        existing = {}
+    existing.update(data)
+    raw["billing"] = existing
+    _write_config_file(path, raw)
+
+
+def get_or_create_user_id(
+    *,
+    config_path: Path | None = None,
+) -> str:
+    """Return the user ID from billing config, creating one if needed."""
+    billing = get_billing_config(config_path=config_path)
+    return billing["user_id"]

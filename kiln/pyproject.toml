@@ -38,6 +38,8 @@ dependencies = [
 
 [project.optional-dependencies]
 bambu = ["paho-mqtt>=2.0"]
+stripe = ["stripe>=5.0"]
+payments = ["stripe>=5.0"]
 dev = [
     "pytest>=7.0",
     "pytest-mock>=3.6",
