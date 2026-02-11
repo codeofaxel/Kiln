@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.so
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment / secrets
+.env
+
+# Testing / linting
+.tox/
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# Development tooling
+tools/

@@ -195,7 +195,6 @@ Local printer control is free and unrestricted. Kiln charges a 5% platform fee o
 - **Input validation.** All file paths, G-code commands, and temperature values are validated before reaching printer hardware.
 
 ## 9. Future Work
-- **OTA firmware updates.** Expose Moonraker's firmware update API through the adapter interface.
 - **Remote agent collaboration.** Enable multiple agents to coordinate across a shared printer fleet.
 - **Print quality monitoring.** Computer vision analysis of webcam streams for defect detection.
 

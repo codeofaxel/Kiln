@@ -20,7 +20,7 @@ Kiln is agentic infrastructure for physical fabrication. It provides a unified i
 | OctoPrint | HTTP REST | Any OctoPrint-connected printer | Stable |
 | Moonraker | HTTP REST | Klipper-based (Voron, RatRig, etc.) | Stable |
 | Bambu Lab | MQTT/LAN | X1C, P1S, A1 | Stable |
-| Prusa Connect | HTTP REST | MK4, XL, Mini | Planned |
+| Prusa Connect | HTTP REST | MK4, XL, Mini+ | Stable |
 
 ### Key Concepts
 
@@ -341,6 +341,44 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 | `list_plugins` | — | Plugin list |
 | `plugin_info` | `name` | Plugin details |
 
+#### Fulfillment Services
+
+| Tool | Input | Output |
+|---|---|---|
+| `fulfillment_materials` | `provider` | Available materials from external print services |
+| `fulfillment_quote` | `file_path`, `material_id`, `quantity`, `provider` | Manufacturing quote with shipping options |
+| `fulfillment_order` | `quote_id`, `shipping_option_id`, `payment_hold_id` | Order confirmation with billing |
+| `fulfillment_order_status` | `order_id` | Order tracking details |
+| `fulfillment_cancel` | `order_id` | Cancellation confirmation |
+| `compare_print_options` | `file_path`, `material` | Local vs. fulfillment cost comparison |
+
+#### Model Generation
+
+| Tool | Input | Output |
+|---|---|---|
+| `generate_model` | `prompt`, `provider`, `format`, `style` | Generation job ID |
+| `generation_status` | `job_id` | Job status and progress |
+| `download_generated_model` | `job_id`, `output_dir` | Local file path with mesh validation |
+| `await_generation` | `job_id`, `timeout`, `poll_interval` | Completed job result |
+| `generate_and_print` | `prompt`, `provider`, `printer_name`, `profile` | Full pipeline: generate → validate → slice → print |
+| `validate_generated_mesh` | `file_path` | Mesh validation report |
+
+#### Print Analysis
+
+| Tool | Input | Output |
+|---|---|---|
+| `await_print_completion` | `timeout_minutes`, `poll_interval` | Final print status |
+| `analyze_print_failure` | `job_id` | Failure diagnosis with causes and recommendations |
+| `validate_print_quality` | `job_id` | Quality assessment with snapshot and event analysis |
+
+#### Firmware Updates
+
+| Tool | Input | Output |
+|---|---|---|
+| `firmware_status` | — | Component versions and update availability |
+| `update_firmware` | `component` | Update result |
+| `rollback_firmware` | `component` | Rollback result |
+
 ### MCP Resources
 
 Read-only resources for agent context:
@@ -400,6 +438,21 @@ serial: "01P00A000000001"
 ```
 
 **Note:** Requires `paho-mqtt` package. Kiln gracefully handles its absence.
+
+### Prusa Connect
+
+Communicates via Prusa Link REST API (`/api/v1/`). Requires a Prusa Link API key.
+
+**Configuration:**
+```yaml
+type: prusaconnect
+host: http://prusa-mk4.local
+api_key: YOUR_KEY
+```
+
+**State Mapping:** Prusa Link returns state as a string (`IDLE`, `PRINTING`, `PAUSED`, `FINISHED`, `ERROR`, etc.). Direct mapping to `PrinterStatus`.
+
+**Limitations:** No raw G-code or direct temperature control — these are managed through print files.
 
 ---
 
