@@ -2795,7 +2795,7 @@ def kiln_health() -> dict:
     return {
         "success": True,
         "version": kiln.__version__,
-        "uptime_seconds": round(uptime_secs, 1),
+        "uptime_seconds": int(uptime_secs),
         "uptime_human": f"{hours}h {mins}m {secs}s",
         "printers_registered": _registry.count,
         "queue_depth": _queue.total_count,

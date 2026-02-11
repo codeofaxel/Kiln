@@ -93,7 +93,7 @@ class TestPythonTypeToJsonSchema:
 
     def test_str_none_pipe_syntax(self):
         """Test str | None (Python 3.10+ union syntax)."""
-        annotation = types.UnionType.__class_getitem__((str, type(None)))  # type: ignore
+        annotation = str | None
         # The actual pipe syntax creates types.UnionType; let's test via eval
         # if available (Python 3.10+).
         try:
