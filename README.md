@@ -32,8 +32,8 @@ This monorepo contains two packages:
 
 | Package | Description | Entry Point |
 |---------|-------------|-------------|
-| **kiln** | CLI + MCP server for multi-printer control | `kiln` or `python -m kiln` |
-| **octoprint-cli** | Standalone CLI for OctoPrint printer management | `octoprint-cli` |
+| **kiln** | CLI + MCP server for multi-printer control (OctoPrint, Moonraker, Bambu, Prusa Connect) | `kiln` or `python -m kiln` |
+| **octoprint-cli** | Lightweight standalone CLI for OctoPrint-only setups | `octoprint-cli` |
 
 ## Quick Start
 
