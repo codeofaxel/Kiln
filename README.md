@@ -1,6 +1,12 @@
-# Kiln
+<p align="center">
+  <img src="docs/assets/kiln-banner-1280x640.svg" alt="Kiln" width="640">
+</p>
 
-Agentic infrastructure for physical fabrication via 3D printing.
+<p align="center">
+  <strong>Agentic infrastructure for physical fabrication via 3D printing.</strong>
+</p>
+
+---
 
 Kiln lets AI agents design, queue, and execute physical manufacturing jobs on real 3D printers with zero human intervention. It exposes printer control through both a **CLI** and the **Model Context Protocol (MCP)**, making any MCP-compatible agent (Claude, GPT, custom) a first-class operator of your print farm.
 
@@ -451,6 +457,24 @@ Kiln is safety-first infrastructure for controlling physical machines:
 - **Confirmation required** for destructive operations (cancel, raw G-code)
 - **Optional authentication** with scope-based API keys for multi-user setups
 - **Structured errors** ensure agents always know when something fails
+
+## Brand Assets
+
+Logo files live in [`docs/assets/`](docs/assets/):
+
+| File | Use |
+|------|-----|
+| `kiln-banner-1280x640.svg` | GitHub / social media banner |
+| `kiln-logo-dark.svg` | Primary mark + wordmark (dark bg) |
+| `kiln-logo-light.svg` | Mark + wordmark (light bg) |
+| `kiln-horizontal-dark.svg` | Horizontal lockup (dark bg) |
+| `kiln-horizontal-light.svg` | Horizontal lockup (light bg) |
+| `kiln-logo-dark-notext.svg` | Mark only (dark bg) |
+| `kiln-favicon-256.svg` | Favicon / app icon |
+| `kiln-logo-transparent.svg` | Transparent bg (for dark UIs) |
+| `kiln-logo-transparent-dark.svg` | Transparent bg (for light UIs) |
+
+All files are vector SVG — scale to any size.
 
 ## License
 
