@@ -4,6 +4,26 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-10
 
+### Additional Fulfillment Providers (Shapeways + Sculpteo)
+- `ShapewaysProvider` — Full implementation with OAuth2 client-credentials auth, model upload (base64), per-material pricing, order placement, status tracking, and cancellation
+- `SculpteoProvider` — Full implementation with Bearer token auth, file upload, UUID-based pricing, order placement via store API, status tracking, and cancellation
+- `FulfillmentProviderRegistry` — Pluggable registry with auto-detection from env vars (`KILN_FULFILLMENT_PROVIDER`, or auto-detect from `KILN_CRAFTCLOUD_API_KEY` / `KILN_SHAPEWAYS_CLIENT_ID` / `KILN_SCULPTEO_API_KEY`)
+- Updated `server.py` and `cli/main.py` to use registry instead of hardcoded Craftcloud
+- 87 new tests: 45 Shapeways (including OAuth2 token lifecycle), 33 Sculpteo, 9 registry
+- Total fulfillment providers: 3 (Craftcloud, Shapeways, Sculpteo)
+- Total test count: 1,898+
+
+### Text-to-Model Generation
+- New `kiln/src/kiln/generation/` module with `GenerationProvider` ABC and shared dataclasses
+- **Meshy adapter** (`MeshyProvider`) — cloud text-to-3D via Meshy API (preview mode, async job model)
+- **OpenSCAD adapter** (`OpenSCADProvider`) — local parametric generation, agent writes .scad code, Kiln compiles to STL
+- **Mesh validation pipeline** (`validate_mesh()`) — binary/ASCII STL and OBJ parsing, manifold check, bounding box, dimension limits, polygon count limits. Zero external dependencies (pure `struct` parsing).
+- 7 new MCP tools: `generate_model`, `generation_status`, `download_generated_model`, `await_generation`, `generate_and_print`, `validate_generated_mesh`
+- 3 new CLI commands: `kiln generate`, `kiln generate-status`, `kiln generate-download`
+- `generate_and_print` — full pipeline tool: text → generate → validate → slice → upload → print
+- `await_generation` — polling tool for async cloud providers (like `await_print_completion`)
+- Comprehensive test suite: unit tests for adapters (mock HTTP), validation pipeline, MCP tools, and CLI commands
+
 ### Post-Print Quality Validation
 - `validate_print_quality` MCP tool — assesses print quality after completion
 - Captures webcam snapshot (if available) and returns base64 or saves to file

@@ -34,6 +34,10 @@ Kiln is agentic infrastructure for physical fabrication. It provides a unified i
 
 **MarketplaceRegistry** — Manages connected marketplace adapters. Provides `search_all()` for parallel fan-out search across all sources with round-robin result interleaving.
 
+**GenerationProvider** — Abstract base class for text-to-3D model generation backends. Implements: generate, get_job_status, download_result. Concrete providers for Meshy (cloud AI) and OpenSCAD (local parametric).
+
+**Mesh Validation** — Pipeline that checks generated STL/OBJ files for 3D-printing readiness: geometry parsing, manifold checks, dimension limits, polygon count validation. Uses pure Python (no external mesh libraries).
+
 **Job Queue** — Priority queue backed by SQLite. Jobs are dispatched to idle printers by a background scheduler.
 
 ---
@@ -610,7 +614,10 @@ kiln/src/kiln/
         prusaconnect.py  # Prusa Connect/Link adapter
     fulfillment/
         base.py          # Fulfillment adapter interface
+        registry.py      # Provider registry and factory
         craftcloud.py    # Craftcloud API client
+        shapeways.py     # Shapeways OAuth2 API client
+        sculpteo.py      # Sculpteo partner API client
     marketplaces/
         base.py          # Marketplace adapter interface
         thingiverse.py   # Thingiverse API client
