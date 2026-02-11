@@ -740,6 +740,17 @@ class TestBambuAdapterPrintControl:
         payload = json.loads(call_args[0][1])
         assert payload["print"]["command"] == "resume"
 
+    def test_emergency_stop(self, adapter_with_mqtt: BambuAdapter) -> None:
+        result = adapter_with_mqtt.emergency_stop()
+
+        assert isinstance(result, PrintResult)
+        assert result.success is True
+        assert "emergency" in result.message.lower() or "m112" in result.message.lower()
+
+        call_args = adapter_with_mqtt._mqtt_client.publish.call_args
+        payload = json.loads(call_args[0][1])
+        assert "gcode_line" in str(payload) or "M112" in str(payload)
+
 
 # ---------------------------------------------------------------------------
 # Temperature tests

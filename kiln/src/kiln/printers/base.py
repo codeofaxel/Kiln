@@ -72,6 +72,8 @@ class PrinterState:
     tool_temp_target: Optional[float] = None
     bed_temp_actual: Optional[float] = None
     bed_temp_target: Optional[float] = None
+    chamber_temp_actual: Optional[float] = None
+    chamber_temp_target: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Return a JSON-serialisable dictionary.
@@ -327,6 +329,18 @@ class PrinterAdapter(ABC):
 
         Raises:
             PrinterError: If the printer cannot resume.
+        """
+
+    @abstractmethod
+    def emergency_stop(self) -> PrintResult:
+        """Perform an immediate emergency stop on the printer.
+
+        Sends a firmware-level halt (M112 or equivalent) that immediately
+        cuts power to heaters and stepper motors.  Unlike
+        :meth:`cancel_print`, this does **not** allow a graceful cooldown.
+
+        Raises:
+            PrinterError: If the e-stop command cannot be delivered.
         """
 
     # -- temperature control --------------------------------------------

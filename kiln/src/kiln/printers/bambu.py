@@ -471,6 +471,7 @@ class BambuAdapter(PrinterAdapter):
             tool_temp_target=status.get("nozzle_target_temper"),
             bed_temp_actual=status.get("bed_temper"),
             bed_temp_target=status.get("bed_target_temper"),
+            chamber_temp_actual=status.get("chamber_temper"),
         )
 
     def get_job(self) -> JobProgress:
@@ -787,6 +788,14 @@ class BambuAdapter(PrinterAdapter):
         """Cancel the currently running print job."""
         self._send_print_command("stop")
         return PrintResult(success=True, message="Print cancelled.")
+
+    def emergency_stop(self) -> PrintResult:
+        """Perform emergency stop via M112 G-code over MQTT."""
+        self.send_gcode(["M112"])
+        return PrintResult(
+            success=True,
+            message="Emergency stop triggered (M112 sent).",
+        )
 
     def pause_print(self) -> PrintResult:
         """Pause the currently running print job."""

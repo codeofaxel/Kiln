@@ -770,6 +770,34 @@ class TestCancelPrint:
 
 
 # ---------------------------------------------------------------------------
+# emergency_stop tests
+# ---------------------------------------------------------------------------
+
+
+class TestEmergencyStop:
+
+    def test_emergency_stop(self) -> None:
+        adapter = _adapter()
+        resp = _mock_response(json_data={"result": {}})
+
+        with mock.patch.object(adapter._session, "request", return_value=resp) as m:
+            result = adapter.emergency_stop()
+
+        assert result.success is True
+        assert "emergency" in result.message.lower()
+        call_args = m.call_args
+        assert "/printer/emergency_stop" in call_args[1].get("url", call_args[0][1] if len(call_args[0]) > 1 else "")
+
+    def test_emergency_stop_connection_error(self) -> None:
+        adapter = _adapter()
+        resp = _mock_response(status_code=500, text="Error", ok=False)
+
+        with mock.patch.object(adapter._session, "request", return_value=resp):
+            with pytest.raises(PrinterError):
+                adapter.emergency_stop()
+
+
+# ---------------------------------------------------------------------------
 # pause_print tests
 # ---------------------------------------------------------------------------
 
