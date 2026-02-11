@@ -588,9 +588,11 @@ def delete_file(file_path: str) -> dict:
     try:
         adapter = _get_adapter()
         ok = adapter.delete_file(file_path)
+        if not ok:
+            return _error_dict(f"Failed to delete {file_path}.")
         return {
-            "success": ok,
-            "message": f"Deleted {file_path}." if ok else f"Failed to delete {file_path}.",
+            "success": True,
+            "message": f"Deleted {file_path}.",
         }
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(str(exc))

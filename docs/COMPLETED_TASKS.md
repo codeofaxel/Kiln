@@ -2,6 +2,15 @@
 
 Record of finished features and milestones, newest first.
 
+## 2026-02-11
+
+### Webcam Streaming / Live View
+- `MJPEGProxy` class in `streaming.py` — full MJPEG stream proxy with start/stop lifecycle
+- `webcam_stream` MCP tool for agents to start/stop/check stream status
+- `kiln stream` CLI command with `--port` and `--stop` options
+- 20 tests in `test_streaming.py`
+- Previously listed in TASKS.md as medium priority; already shipped
+
 ## 2026-02-10
 
 ### OTA Firmware Updates

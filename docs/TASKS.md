@@ -8,7 +8,6 @@ _(No high-priority tasks remaining.)_
 
 ## Medium Priority
 
-### Webcam Streaming / Live View
-Beyond snapshots (now implemented), full MJPEG stream proxy for real-time monitoring dashboards. Lower priority than snapshots since agents primarily need point-in-time checks.
+_(No medium-priority tasks remaining.)_
 
 ## Low Priority / Future Ideas
