@@ -40,7 +40,10 @@ This monorepo contains two packages:
 ### Kiln CLI
 
 ```bash
-# Install
+# Install from PyPI
+pip install kiln3d
+
+# Or install from source
 pip install -e ./kiln
 
 # Discover printers on your network

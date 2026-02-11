@@ -47,6 +47,10 @@ Kiln is agentic infrastructure for physical fabrication. It provides a unified i
 ### Installation
 
 ```bash
+# From PyPI
+pip install kiln3d
+
+# From source (development)
 pip install -e ./kiln
 ```
 

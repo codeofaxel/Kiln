@@ -3,7 +3,7 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kiln"
+name = "kiln3d"
 version = "0.1.0"
 description = "Agentic infrastructure for physical fabrication via 3D printing"
 readme = "README.md"

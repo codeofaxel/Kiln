@@ -46,5 +46,5 @@ Initial release.
 - Config file permission validation
 
 ### Testing
-- 2,078 tests (kiln) + 239 tests (octoprint-cli)
+- 2,093 tests (kiln) + 239 tests (octoprint-cli)
 - Adapter, MCP tool, CLI, and integration test coverage
