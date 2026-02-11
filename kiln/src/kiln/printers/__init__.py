@@ -25,6 +25,7 @@ except ImportError:
 
 from kiln.printers.moonraker import MoonrakerAdapter
 from kiln.printers.octoprint import OctoPrintAdapter
+from kiln.printers.prusaconnect import PrusaConnectAdapter
 
 __all__ = [
     "BambuAdapter",
@@ -38,5 +39,6 @@ __all__ = [
     "PrinterState",
     "PrinterStatus",
     "PrintResult",
+    "PrusaConnectAdapter",
     "UploadResult",
 ]

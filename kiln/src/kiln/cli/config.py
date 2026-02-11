@@ -165,6 +165,9 @@ def save_printer(
             entry["access_code"] = access_code
         if serial:
             entry["serial"] = serial
+    elif printer_type == "prusaconnect":
+        if api_key:
+            entry["api_key"] = api_key
 
     printers[name] = entry
 
@@ -257,7 +260,7 @@ def validate_printer_config(cfg: Dict[str, Any]) -> Tuple[bool, str | None]:
     Returns ``(True, None)`` or ``(False, error_message)``.
     """
     ptype = cfg.get("type", "")
-    if ptype not in ("octoprint", "moonraker", "bambu"):
+    if ptype not in ("octoprint", "moonraker", "bambu", "prusaconnect"):
         return False, f"Unknown printer type: {ptype!r}"
 
     host = cfg.get("host", "")
