@@ -1,0 +1,61 @@
+# Kiln configuration — place at ~/.kiln/config.yaml
+# Kiln will auto-create this file when you run `kiln setup`.
+# Permissions are locked to 0600 (owner read/write only).
+
+# Which printer to use when --printer is not specified.
+active_printer: voron
+
+# ──────────────────────────────────────────────────────────────
+# Printers — add one block per printer.
+# ──────────────────────────────────────────────────────────────
+
+printers:
+
+  # OctoPrint ─────────────────────────────────────────────────
+  # Get your API key from OctoPrint → Settings → API.
+  ender3:
+    type: octoprint
+    host: http://192.168.1.50:5000
+    api_key: ABCDEF0123456789ABCDEF0123456789
+
+  # Moonraker (Klipper) ──────────────────────────────────────
+  # Moonraker usually runs on port 7125 with no key required.
+  # If you've enabled API key auth, add api_key here.
+  voron:
+    type: moonraker
+    host: http://192.168.1.60:7125
+    # api_key: optional-if-you-enabled-auth
+
+  # Bambu Lab ────────────────────────────────────────────────
+  # Access code: printed on the screen or in Bambu Handy app.
+  # Serial: found on the printer label or in Bambu Studio.
+  bambu_x1c:
+    type: bambu
+    host: 192.168.1.70
+    access_code: 12345678
+    serial: 01S00C000000000
+
+  # Prusa Connect ────────────────────────────────────────────
+  # API key: Prusa Connect → Printer → Settings → API Key.
+  prusa_mk4:
+    type: prusaconnect
+    host: http://192.168.1.80
+    api_key: your-prusa-connect-api-key
+
+# ──────────────────────────────────────────────────────────────
+# Global settings (all optional — these are the defaults).
+# ──────────────────────────────────────────────────────────────
+
+settings:
+  timeout: 30          # HTTP request timeout in seconds
+  retries: 3           # Auto-retry on 502/503/504
+
+# ──────────────────────────────────────────────────────────────
+# Environment variable overrides (not in this file):
+#
+#   KILN_PRINTER_HOST     — Printer URL
+#   KILN_PRINTER_TYPE     — octoprint / moonraker / bambu / prusaconnect
+#   KILN_PRINTER_API_KEY  — API key or access code
+#
+# CLI flags (--host, --printer) take precedence over everything.
+# ──────────────────────────────────────────────────────────────

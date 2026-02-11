@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/kiln-banner-1280x640.svg" alt="Kiln" width="640">
+  <img src="https://raw.githubusercontent.com/codeofaxel/Kiln/main/docs/assets/kiln-banner-1280x640.svg" alt="Kiln" width="640">
 </p>
 
 <p align="center">
