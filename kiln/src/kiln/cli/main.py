@@ -1827,6 +1827,232 @@ def billing_history(limit: int, json_mode: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# setup (interactive onboarding wizard)
+# ---------------------------------------------------------------------------
+
+
+_PRINTER_TYPE_LABELS = {
+    "octoprint": "OctoPrint",
+    "moonraker": "Moonraker (Klipper)",
+    "bambu": "Bambu Lab",
+    "prusaconnect": "Prusa Connect",
+}
+
+
+@cli.command()
+@click.option(
+    "--skip-discovery", is_flag=True,
+    help="Skip network scan and go straight to manual entry.",
+)
+@click.option(
+    "--timeout", "-t", "discovery_timeout", default=5.0,
+    help="Discovery scan timeout in seconds (default 5).",
+)
+def setup(skip_discovery: bool, discovery_timeout: float) -> None:
+    """Interactive guided setup for your first printer.
+
+    Scans the local network for printers, lets you pick one (or enter
+    details manually), saves credentials, and verifies the connection.
+    """
+    from kiln.cli.config import get_config_path
+
+    # -- Welcome banner ----------------------------------------------------
+    click.echo()
+    click.echo(click.style("  Kiln Setup", bold=True))
+    click.echo(click.style("  ----------", bold=True))
+    click.echo("  Configure a 3D printer for Kiln to control.\n")
+
+    # -- Check existing config ---------------------------------------------
+    config_path = get_config_path()
+    existing = _list_printers()
+    if existing:
+        click.echo(f"  Found {len(existing)} printer(s) already configured:")
+        for p in existing:
+            marker = " (active)" if p.get("active") else ""
+            click.echo(f"    - {p['name']} [{p['type']}] {p['host']}{marker}")
+        click.echo()
+        action = click.prompt(
+            "  Add another printer or start fresh?",
+            type=click.Choice(["add", "fresh", "quit"]),
+            default="add",
+        )
+        if action == "quit":
+            click.echo("  Setup cancelled.")
+            return
+        if action == "fresh":
+            if not click.confirm("  This will remove all saved printers. Continue?"):
+                click.echo("  Setup cancelled.")
+                return
+            # Wipe printers section
+            from kiln.cli.config import _read_config_file, _write_config_file
+            raw = _read_config_file(config_path)
+            raw["printers"] = {}
+            raw.pop("active_printer", None)
+            _write_config_file(config_path, raw)
+            click.echo("  Cleared existing printer config.\n")
+
+    # -- Discovery ---------------------------------------------------------
+    discovered = []
+    if not skip_discovery:
+        click.echo("  Scanning network for printers...")
+        try:
+            from kiln.cli.discovery import discover_printers
+            discovered = discover_printers(timeout=discovery_timeout)
+        except Exception as exc:
+            click.echo(click.style(f"  Discovery failed: {exc}", fg="yellow"))
+            click.echo("  Continuing with manual entry.\n")
+
+        if discovered:
+            click.echo(f"\n  Found {len(discovered)} printer(s):\n")
+            click.echo(f"    {'#':<4} {'Name':<25} {'Host':<22} {'Type':<14} {'Method'}")
+            click.echo(f"    {'─'*4} {'─'*25} {'─'*22} {'─'*14} {'─'*10}")
+            for i, p in enumerate(discovered, 1):
+                label = _PRINTER_TYPE_LABELS.get(p.printer_type, p.printer_type)
+                display_name = p.name or "(unnamed)"
+                click.echo(
+                    f"    {i:<4} {display_name:<25} {p.host:<22} {label:<14} {p.discovery_method}"
+                )
+            click.echo()
+        else:
+            click.echo("  No printers found on the network.\n")
+            click.echo(
+                "  Tip: Bambu printers don't advertise via mDNS.\n"
+                "       Enter the IP address manually.\n"
+            )
+
+    # -- Selection ---------------------------------------------------------
+    selected = None
+    if discovered:
+        choice = click.prompt(
+            "  Enter printer number, or 'm' for manual entry",
+            default="1",
+        )
+        if choice.lower() == "m":
+            pass  # fall through to manual
+        else:
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(discovered):
+                    selected = discovered[idx]
+                else:
+                    click.echo(click.style("  Invalid number. Switching to manual entry.", fg="yellow"))
+            except ValueError:
+                click.echo(click.style("  Invalid input. Switching to manual entry.", fg="yellow"))
+
+    # -- Manual entry (or refine selected) ---------------------------------
+    if selected is not None:
+        host = selected.host
+        printer_type = selected.printer_type
+        if printer_type == "unknown":
+            printer_type = click.prompt(
+                "  Printer type could not be auto-detected. Select type",
+                type=click.Choice(["octoprint", "moonraker", "bambu", "prusaconnect"]),
+            )
+        suggested_name = (selected.name or printer_type).lower().replace(" ", "-").replace(".", "-")
+    else:
+        # Full manual entry
+        host = click.prompt("  Printer host (IP or hostname)")
+        click.echo("  Probing host...")
+        try:
+            from kiln.cli.discovery import probe_host
+            probed = probe_host(host)
+            if probed:
+                p = probed[0]
+                printer_type = p.printer_type
+                click.echo(
+                    f"  Detected: {_PRINTER_TYPE_LABELS.get(printer_type, printer_type)}"
+                    + (f" ({p.name})" if p.name else "")
+                )
+                suggested_name = (p.name or printer_type).lower().replace(" ", "-").replace(".", "-")
+            else:
+                click.echo("  Could not auto-detect printer type.")
+                printer_type = click.prompt(
+                    "  Select printer type",
+                    type=click.Choice(["octoprint", "moonraker", "bambu", "prusaconnect"]),
+                )
+                suggested_name = printer_type
+        except Exception:
+            click.echo("  Probe failed. Enter type manually.")
+            printer_type = click.prompt(
+                "  Select printer type",
+                type=click.Choice(["octoprint", "moonraker", "bambu", "prusaconnect"]),
+            )
+            suggested_name = printer_type
+
+    # -- Friendly name -----------------------------------------------------
+    name = click.prompt("  Friendly name for this printer", default=suggested_name)
+    # Sanitize: lowercase, no spaces
+    name = name.strip().lower().replace(" ", "-")
+
+    # -- Credentials -------------------------------------------------------
+    api_key = None
+    access_code = None
+    serial = None
+
+    if printer_type in ("octoprint", "moonraker", "prusaconnect"):
+        api_key = click.prompt(
+            f"  API key for {_PRINTER_TYPE_LABELS.get(printer_type, printer_type)}",
+            default="",
+            show_default=False,
+        )
+        if not api_key:
+            api_key = None
+    elif printer_type == "bambu":
+        access_code = click.prompt("  LAN access code (from printer screen)")
+        serial = click.prompt("  Printer serial number")
+
+    # -- Save --------------------------------------------------------------
+    click.echo()
+    try:
+        path = save_printer(
+            name,
+            printer_type,
+            host,
+            api_key=api_key,
+            access_code=access_code,
+            serial=serial,
+            set_active=True,
+        )
+        click.echo(f"  Saved printer '{name}' to {path}")
+    except Exception as exc:
+        click.echo(click.style(f"  Failed to save config: {exc}", fg="red"))
+        sys.exit(1)
+
+    # -- Test connection ---------------------------------------------------
+    click.echo("  Testing connection...")
+    try:
+        cfg = load_printer_config(name)
+        adapter = _make_adapter(cfg)
+        state = adapter.get_state()
+        click.echo(
+            click.style("  Connected!", fg="green")
+            + f" Printer state: {state.state.value}"
+        )
+        if state.tool_temp_actual is not None:
+            click.echo(f"  Hotend: {state.tool_temp_actual:.0f}C")
+        if state.bed_temp_actual is not None:
+            click.echo(f"  Bed:    {state.bed_temp_actual:.0f}C")
+    except Exception as exc:
+        click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
+        click.echo(
+            "  The printer was saved but may need correct credentials.\n"
+            "  Update with: kiln auth --name {name} --host {host} "
+            f"--type {printer_type} --api-key <key>"
+        )
+
+    # -- Next steps --------------------------------------------------------
+    click.echo()
+    click.echo(click.style("  Setup complete!", bold=True))
+    click.echo()
+    click.echo("  Next steps:")
+    click.echo(f"    kiln status          Check printer state")
+    click.echo(f"    kiln files           List files on the printer")
+    click.echo(f"    kiln print <file>    Start a print")
+    click.echo(f"    kiln serve           Start the MCP server")
+    click.echo()
+
+
+# ---------------------------------------------------------------------------
 # serve
 # ---------------------------------------------------------------------------
 

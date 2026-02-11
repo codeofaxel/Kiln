@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "kiln": {
+      "command": "kiln",
+      "args": ["serve"],
+      "env": {
+        "KILN_AUTH_TOKEN": "your-auth-token-here"
+      }
+    }
+  }
+}
