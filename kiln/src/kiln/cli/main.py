@@ -46,6 +46,7 @@ def _make_adapter(cfg: Dict[str, Any]):
         BambuAdapter,
         MoonrakerAdapter,
         OctoPrintAdapter,
+        PrusaConnectAdapter,
     )
 
     ptype = cfg.get("type", "octoprint")
@@ -65,6 +66,11 @@ def _make_adapter(cfg: Dict[str, Any]):
             host=host,
             access_code=cfg.get("access_code", ""),
             serial=cfg.get("serial", ""),
+        )
+    elif ptype == "prusaconnect":
+        return PrusaConnectAdapter(
+            host=host,
+            api_key=cfg.get("api_key") or None,
         )
     else:
         raise click.ClickException(f"Unknown printer type: {ptype!r}")
