@@ -191,6 +191,41 @@ class KilnDB:
                 );
                 CREATE INDEX IF NOT EXISTS idx_payments_charge
                     ON payments(charge_id);
+
+                CREATE TABLE IF NOT EXISTS print_history (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id          TEXT NOT NULL,
+                    printer_name    TEXT NOT NULL,
+                    file_name       TEXT,
+                    status          TEXT NOT NULL,
+                    duration_seconds REAL,
+                    material_type   TEXT,
+                    file_hash       TEXT,
+                    slicer_profile  TEXT,
+                    notes           TEXT,
+                    agent_id        TEXT,
+                    metadata        TEXT,
+                    started_at      REAL,
+                    completed_at    REAL,
+                    created_at      REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_print_history_printer
+                    ON print_history(printer_name);
+                CREATE INDEX IF NOT EXISTS idx_print_history_status
+                    ON print_history(status);
+
+                CREATE TABLE IF NOT EXISTS agent_memory (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id        TEXT NOT NULL,
+                    scope           TEXT NOT NULL,
+                    key             TEXT NOT NULL,
+                    value           TEXT NOT NULL,
+                    created_at      REAL NOT NULL,
+                    updated_at      REAL NOT NULL,
+                    UNIQUE(agent_id, scope, key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_agent_memory_agent
+                    ON agent_memory(agent_id, scope);
                 """
             )
             self._conn.commit()
@@ -881,6 +916,236 @@ class KilnDB:
                     (status, time.time(), payment_id),
                 )
             self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Print history
+    # ------------------------------------------------------------------
+
+    def save_print_record(self, record: Dict[str, Any]) -> int:
+        """Insert a print history record and return the row id."""
+        with self._write_lock:
+            cur = self._conn.execute(
+                """
+                INSERT INTO print_history
+                    (job_id, printer_name, file_name, status,
+                     duration_seconds, material_type, file_hash,
+                     slicer_profile, notes, agent_id, metadata,
+                     started_at, completed_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record["job_id"],
+                    record["printer_name"],
+                    record.get("file_name"),
+                    record["status"],
+                    record.get("duration_seconds"),
+                    record.get("material_type"),
+                    record.get("file_hash"),
+                    record.get("slicer_profile"),
+                    record.get("notes"),
+                    record.get("agent_id"),
+                    json.dumps(record["metadata"]) if record.get("metadata") else None,
+                    record.get("started_at"),
+                    record.get("completed_at"),
+                    record.get("created_at", time.time()),
+                ),
+            )
+            self._conn.commit()
+            return cur.lastrowid  # type: ignore[return-value]
+
+    def get_print_record(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a print history record by job_id, or ``None`` if not found."""
+        row = self._conn.execute(
+            "SELECT * FROM print_history WHERE job_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        if d.get("metadata"):
+            d["metadata"] = json.loads(d["metadata"])
+        return d
+
+    def list_print_history(
+        self,
+        printer_name: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Return print history records, newest first.
+
+        Args:
+            printer_name: Filter by printer name, or ``None`` for all.
+            status: Filter by status string, or ``None`` for all.
+            limit: Maximum rows to return.
+        """
+        clauses: List[str] = []
+        params: List[Any] = []
+        if printer_name is not None:
+            clauses.append("printer_name = ?")
+            params.append(printer_name)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+
+        where = ""
+        if clauses:
+            where = "WHERE " + " AND ".join(clauses)
+
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM print_history {where} "
+            "ORDER BY completed_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+
+        results: List[Dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            if d.get("metadata"):
+                d["metadata"] = json.loads(d["metadata"])
+            results.append(d)
+        return results
+
+    def get_printer_stats(self, printer_name: str) -> Dict[str, Any]:
+        """Aggregate statistics for a printer.
+
+        Returns dict with ``total_prints``, ``success_rate``,
+        ``avg_duration_seconds``, and ``total_print_hours``.
+        """
+        row = self._conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total_prints,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS successes,
+                AVG(CASE WHEN duration_seconds IS NOT NULL THEN duration_seconds END) AS avg_duration,
+                COALESCE(SUM(duration_seconds), 0.0) AS total_seconds
+            FROM print_history
+            WHERE printer_name = ?
+            """,
+            (printer_name,),
+        ).fetchone()
+        total = row["total_prints"] if row else 0
+        successes = row["successes"] if row else 0
+        avg_dur = row["avg_duration"] if row else None
+        total_secs = row["total_seconds"] if row else 0.0
+        return {
+            "printer_name": printer_name,
+            "total_prints": total,
+            "success_rate": round(successes / total, 4) if total > 0 else 0.0,
+            "avg_duration_seconds": round(avg_dur, 1) if avg_dur is not None else None,
+            "total_print_hours": round(total_secs / 3600.0, 2),
+        }
+
+    def update_print_notes(self, job_id: str, notes: str) -> bool:
+        """Update the notes field on a print history record.
+
+        Returns ``True`` if a row was updated.
+        """
+        with self._write_lock:
+            cur = self._conn.execute(
+                "UPDATE print_history SET notes = ? WHERE job_id = ?",
+                (notes, job_id),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # Agent memory
+    # ------------------------------------------------------------------
+
+    def save_memory(
+        self,
+        agent_id: str,
+        scope: str,
+        key: str,
+        value: Any,
+    ) -> None:
+        """Insert or replace an agent memory entry.
+
+        The *value* is JSON-encoded before storage.
+        """
+        now = time.time()
+        with self._write_lock:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO agent_memory
+                    (agent_id, scope, key, value, created_at, updated_at)
+                VALUES (?, ?, ?, ?, COALESCE(
+                    (SELECT created_at FROM agent_memory
+                     WHERE agent_id = ? AND scope = ? AND key = ?), ?
+                ), ?)
+                """,
+                (agent_id, scope, key, json.dumps(value),
+                 agent_id, scope, key, now, now),
+            )
+            self._conn.commit()
+
+    def get_memory(
+        self,
+        agent_id: str,
+        scope: str,
+        key: str,
+    ) -> Optional[Any]:
+        """Fetch a single agent memory value, or ``None`` if not found."""
+        row = self._conn.execute(
+            "SELECT value FROM agent_memory "
+            "WHERE agent_id = ? AND scope = ? AND key = ?",
+            (agent_id, scope, key),
+        ).fetchone()
+        if row is None:
+            return None
+        return json.loads(row["value"])
+
+    def list_memory(
+        self,
+        agent_id: str,
+        scope: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return all memory entries for an agent.
+
+        Args:
+            agent_id: The agent whose memory to retrieve.
+            scope: Optional scope filter.
+        """
+        if scope is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM agent_memory "
+                "WHERE agent_id = ? AND scope = ? ORDER BY updated_at DESC",
+                (agent_id, scope),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM agent_memory "
+                "WHERE agent_id = ? ORDER BY updated_at DESC",
+                (agent_id,),
+            ).fetchall()
+        results: List[Dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            d["value"] = json.loads(d["value"])
+            results.append(d)
+        return results
+
+    def delete_memory(
+        self,
+        agent_id: str,
+        scope: str,
+        key: str,
+    ) -> bool:
+        """Delete a single agent memory entry.
+
+        Returns ``True`` if a row was deleted.
+        """
+        with self._write_lock:
+            cur = self._conn.execute(
+                "DELETE FROM agent_memory "
+                "WHERE agent_id = ? AND scope = ? AND key = ?",
+                (agent_id, scope, key),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
 
     # ------------------------------------------------------------------
     # Lifecycle
