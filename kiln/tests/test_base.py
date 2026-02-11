@@ -102,6 +102,8 @@ class TestPrinterState:
         assert state.tool_temp_target is None
         assert state.bed_temp_actual is None
         assert state.bed_temp_target is None
+        assert state.chamber_temp_actual is None
+        assert state.chamber_temp_target is None
 
     def test_full_construction(self):
         state = PrinterState(
@@ -132,8 +134,22 @@ class TestPrinterState:
         )
         d = state.to_dict()
         expected_keys = {"connected", "state", "tool_temp_actual", "tool_temp_target",
-                         "bed_temp_actual", "bed_temp_target"}
+                         "bed_temp_actual", "bed_temp_target",
+                         "chamber_temp_actual", "chamber_temp_target"}
         assert set(d.keys()) == expected_keys
+
+    def test_chamber_temp_fields(self):
+        state = PrinterState(
+            connected=True,
+            state=PrinterStatus.PRINTING,
+            chamber_temp_actual=35.0,
+            chamber_temp_target=40.0,
+        )
+        assert state.chamber_temp_actual == 35.0
+        assert state.chamber_temp_target == 40.0
+        d = state.to_dict()
+        assert d["chamber_temp_actual"] == 35.0
+        assert d["chamber_temp_target"] == 40.0
 
     def test_to_dict_none_temps(self):
         state = PrinterState(connected=True, state=PrinterStatus.IDLE)
