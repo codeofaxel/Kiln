@@ -618,6 +618,55 @@ def _validate_single_with_profile(
                 f"recommended maximum ({profile.max_feedrate:g} mm/min)"
             )
 
+        # --- Volumetric flow estimation (WARNING) ---
+        # For extrusion moves (G1 with E parameter), estimate volumetric flow
+        # from feedrate and extrusion ratio.  Flow = (E / distance) * feedrate
+        # as a rough proxy for mm³/s.  Only warn when a profile limit exists.
+        if cmd == "G1" and profile.max_volumetric_flow is not None:
+            e_val = _extract_param(cleaned, "E")
+            if e_val is not None and e_val > 0 and f_val is not None and f_val > 0:
+                # Estimate distance from XY movement (fall back to feedrate-based)
+                x_val = _extract_param(cleaned, "X")
+                y_val = _extract_param(cleaned, "Y")
+                dist = 0.0
+                if x_val is not None or y_val is not None:
+                    dx = x_val if x_val is not None else 0.0
+                    dy = y_val if y_val is not None else 0.0
+                    dist = (dx ** 2 + dy ** 2) ** 0.5
+                if dist > 0:
+                    # Filament cross-section: 1.75mm diameter -> area ~2.405 mm²
+                    filament_area = 2.405
+                    # Volumetric flow = filament_area * (E/dist) * (feedrate / 60)
+                    flow = filament_area * (e_val / dist) * (f_val / 60.0)
+                    if flow > profile.max_volumetric_flow:
+                        warnings.append(
+                            f"{cmd} estimated volumetric flow {flow:.1f} mm³/s exceeds "
+                            f"{profile.display_name} maximum ({profile.max_volumetric_flow:g} mm³/s)"
+                        )
+
+        # --- Build volume validation (WARNING) ---
+        # Check XY/Z coordinates against the printer's build volume when known.
+        if profile.build_volume is not None and len(profile.build_volume) >= 3:
+            bv_x, bv_y, bv_z = profile.build_volume[0], profile.build_volume[1], profile.build_volume[2]
+            x_val = _extract_param(cleaned, "X")
+            y_val = _extract_param(cleaned, "Y")
+            if x_val is not None and (x_val < 0 or x_val > bv_x):
+                warnings.append(
+                    f"{cmd} X{x_val:g} is outside {profile.display_name} "
+                    f"build volume (X: 0–{bv_x} mm)"
+                )
+            if y_val is not None and (y_val < 0 or y_val > bv_y):
+                warnings.append(
+                    f"{cmd} Y{y_val:g} is outside {profile.display_name} "
+                    f"build volume (Y: 0–{bv_y} mm)"
+                )
+            if z_val is not None and z_val > bv_z:
+                warnings.append(
+                    f"{cmd} Z{z_val:g} is outside {profile.display_name} "
+                    f"build volume (Z: 0–{bv_z} mm)"
+                )
+
+
     # --- Arc command validation (G2/G3) ---
     if cmd in _ARC_COMMANDS:
         i_val = _extract_param(cleaned, "I")

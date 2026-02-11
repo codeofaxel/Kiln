@@ -29,12 +29,22 @@ from unittest.mock import MagicMock
 import pytest
 
 from kiln.events import Event, EventBus, EventType
-from kiln.webhooks import DeliveryRecord, WebhookEndpoint, WebhookManager
+from kiln.webhooks import DeliveryRecord, WebhookEndpoint, WebhookManager, _mask_secret, _validate_webhook_url
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _bypass_url_validation(monkeypatch):
+    """Bypass SSRF URL validation in tests that use mock URLs."""
+    monkeypatch.setattr(
+        "kiln.webhooks._validate_webhook_url",
+        lambda url: (True, ""),
+    )
+
 
 def _make_manager(
     event_bus: EventBus | None = None,
@@ -1013,3 +1023,168 @@ class TestDirectDeliver:
 
             assert record.success is True, f"Expected success for HTTP {code}"
             assert record.status_code == code
+
+
+# ---------------------------------------------------------------------------
+# _validate_webhook_url (SSRF prevention)
+# ---------------------------------------------------------------------------
+
+class TestValidateWebhookUrl:
+    """Tests for the _validate_webhook_url SSRF validation function.
+
+    These tests intentionally do NOT use the autouse _bypass_url_validation
+    fixture, so they exercise the real validation logic.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _restore_real_validation(self, monkeypatch):
+        """Undo the module-level bypass so we test the real function."""
+        # Import the real function before the monkeypatch restores it
+        from kiln.webhooks import _validate_webhook_url as real_fn
+        monkeypatch.setattr("kiln.webhooks._validate_webhook_url", real_fn)
+
+    def test_valid_https_url(self):
+        valid, reason = _validate_webhook_url("https://example.com/hook")
+        assert valid is True
+        assert reason == ""
+
+    def test_valid_http_url(self):
+        valid, reason = _validate_webhook_url("http://example.com/hook")
+        assert valid is True
+        assert reason == ""
+
+    def test_rejects_ftp_scheme(self):
+        valid, reason = _validate_webhook_url("ftp://example.com/file")
+        assert valid is False
+        assert "scheme" in reason.lower()
+
+    def test_rejects_file_scheme(self):
+        valid, reason = _validate_webhook_url("file:///etc/passwd")
+        assert valid is False
+        assert "scheme" in reason.lower()
+
+    def test_rejects_empty_scheme(self):
+        valid, reason = _validate_webhook_url("://example.com")
+        assert valid is False
+
+    def test_rejects_localhost(self):
+        valid, reason = _validate_webhook_url("https://localhost/hook")
+        assert valid is False
+        assert "localhost" in reason.lower()
+
+    def test_rejects_localhost_case_insensitive(self):
+        valid, reason = _validate_webhook_url("https://LOCALHOST/hook")
+        assert valid is False
+        assert "localhost" in reason.lower()
+
+    def test_rejects_loopback_ip(self):
+        valid, reason = _validate_webhook_url("https://127.0.0.1/hook")
+        assert valid is False
+        assert "private" in reason.lower() or "reserved" in reason.lower()
+
+    def test_rejects_loopback_ip_variant(self):
+        valid, reason = _validate_webhook_url("https://127.0.0.2/hook")
+        assert valid is False
+        assert "private" in reason.lower() or "reserved" in reason.lower()
+
+    def test_rejects_private_10_network(self):
+        valid, reason = _validate_webhook_url("https://10.0.0.1/hook")
+        assert valid is False
+        assert "private" in reason.lower() or "reserved" in reason.lower()
+
+    def test_rejects_private_172_network(self):
+        valid, reason = _validate_webhook_url("https://172.16.0.1/hook")
+        assert valid is False
+        assert "private" in reason.lower() or "reserved" in reason.lower()
+
+    def test_rejects_private_192_network(self):
+        valid, reason = _validate_webhook_url("https://192.168.1.1/hook")
+        assert valid is False
+        assert "private" in reason.lower() or "reserved" in reason.lower()
+
+    def test_rejects_link_local(self):
+        valid, reason = _validate_webhook_url("https://169.254.1.1/hook")
+        assert valid is False
+        assert "private" in reason.lower() or "reserved" in reason.lower()
+
+    def test_rejects_ipv6_loopback(self):
+        valid, reason = _validate_webhook_url("https://[::1]/hook")
+        assert valid is False
+        assert "private" in reason.lower() or "reserved" in reason.lower()
+
+    def test_rejects_no_hostname(self):
+        valid, reason = _validate_webhook_url("https:///path")
+        assert valid is False
+        assert "hostname" in reason.lower()
+
+    def test_rejects_unresolvable_hostname(self):
+        valid, reason = _validate_webhook_url("https://this-domain-does-not-exist-9999.example/hook")
+        assert valid is False
+        assert "dns" in reason.lower() or "resolution" in reason.lower()
+
+    def test_returns_tuple(self):
+        result = _validate_webhook_url("https://example.com")
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+
+
+# ---------------------------------------------------------------------------
+# _mask_secret
+# ---------------------------------------------------------------------------
+
+class TestMaskSecret:
+    """Tests for the _mask_secret helper."""
+
+    def test_none_returns_none(self):
+        assert _mask_secret(None) is None
+
+    def test_short_secret_fully_masked(self):
+        assert _mask_secret("abc") == "****"
+
+    def test_exactly_four_chars_fully_masked(self):
+        assert _mask_secret("abcd") == "****"
+
+    def test_longer_secret_shows_last_four(self):
+        assert _mask_secret("my-signing-secret") == "****cret"
+
+    def test_five_char_secret(self):
+        assert _mask_secret("12345") == "****2345"
+
+    def test_empty_string(self):
+        assert _mask_secret("") == "****"
+
+
+# ---------------------------------------------------------------------------
+# Secret masking in list_endpoints / get_endpoint
+# ---------------------------------------------------------------------------
+
+class TestSecretMasking:
+    """Verify that list_endpoints and get_endpoint mask secrets."""
+
+    def test_list_endpoints_masks_secret(self):
+        mgr = _make_manager()
+        ep = mgr.register(url="https://example.com/hook", secret="super-secret-key")
+        listed = mgr.list_endpoints()
+        assert len(listed) == 1
+        assert listed[0].secret == "****-key"
+        # Verify the internal copy still has the real secret
+        assert mgr._endpoints[ep.id].secret == "super-secret-key"
+
+    def test_list_endpoints_none_secret_stays_none(self):
+        mgr = _make_manager()
+        mgr.register(url="https://example.com/hook")
+        listed = mgr.list_endpoints()
+        assert listed[0].secret is None
+
+    def test_get_endpoint_masks_secret(self):
+        mgr = _make_manager()
+        ep = mgr.register(url="https://example.com/hook", secret="another-secret")
+        fetched = mgr.get_endpoint(ep.id)
+        assert fetched is not None
+        assert fetched.secret == "****cret"
+        # Internal copy preserved
+        assert mgr._endpoints[ep.id].secret == "another-secret"
+
+    def test_get_endpoint_nonexistent(self):
+        mgr = _make_manager()
+        assert mgr.get_endpoint("nope") is None

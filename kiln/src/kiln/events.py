@@ -238,18 +238,26 @@ class EventBus:
         self,
         event_type: Optional[EventType] = None,
         limit: int = 50,
+        event_type_prefix: Optional[str] = None,
     ) -> List[Event]:
         """Return recent events, newest first.
 
         Args:
-            event_type: Filter by type, or ``None`` for all.
+            event_type: Filter by exact type, or ``None`` for all.
             limit: Maximum number of events to return.
+            event_type_prefix: Filter by event type value prefix
+                (e.g. ``"print"`` matches ``print.started``,
+                ``print.completed``, etc.).  Ignored if *event_type*
+                is also provided (exact match takes precedence).
         """
         with self._lock:
             events = list(self._history)
 
         if event_type is not None:
             events = [e for e in events if e.type == event_type]
+        elif event_type_prefix is not None:
+            prefix = event_type_prefix if "." in event_type_prefix else event_type_prefix + "."
+            events = [e for e in events if e.type.value.startswith(prefix)]
 
         events.reverse()
         return events[:limit]

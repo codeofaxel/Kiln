@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import stat
+import sys
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -56,7 +57,12 @@ def _normalize_host(host: str, printer_type: str = "octoprint") -> str:
 
 
 def _check_file_permissions(path: Path) -> None:
-    """Warn if *path* is readable by group or others."""
+    """Warn if *path* is readable by group or others.
+
+    Skipped on Windows where POSIX permission semantics do not apply.
+    """
+    if sys.platform == "win32":
+        return
     try:
         mode = path.stat().st_mode
         if mode & (stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH):
@@ -67,6 +73,26 @@ def _check_file_permissions(path: Path) -> None:
                 stat.S_IMODE(mode),
                 path,
             )
+    except OSError:
+        pass
+
+
+def _check_dir_permissions(dir_path: Path) -> None:
+    """Warn and fix if the config directory is accessible by others.
+
+    Skipped on Windows where POSIX permission semantics do not apply.
+    """
+    if sys.platform == "win32":
+        return
+    try:
+        dir_mode = stat.S_IMODE(dir_path.stat().st_mode)
+        if dir_mode & 0o077:
+            logger.warning(
+                "~/.kiln/ directory has overly permissive permissions "
+                "(mode %04o). Run 'chmod 700 ~/.kiln/' to fix.",
+                dir_mode,
+            )
+        dir_path.chmod(0o700)
     except OSError:
         pass
 
@@ -100,6 +126,7 @@ def _read_config_file(path: Path) -> Dict[str, Any]:
     if not path.is_file():
         return {}
     _check_file_permissions(path)
+    _check_dir_permissions(path.parent)
     try:
         with path.open("r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
@@ -115,15 +142,18 @@ def _write_config_file(path: Path, data: Dict[str, Any]) -> None:
     """Write *data* to the YAML config file, creating dirs as needed.
 
     Sets file permissions to ``0600`` (owner read/write only) since the
-    config may contain API keys and access codes.
+    config may contain API keys and access codes.  Also enforces ``0700``
+    on the parent directory.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    _check_dir_permissions(path.parent)
     with path.open("w", encoding="utf-8") as fh:
         yaml.safe_dump(data, fh, default_flow_style=False, sort_keys=False)
-    try:
-        path.chmod(0o600)
-    except OSError:
-        pass
+    if sys.platform != "win32":
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
 
 
 def load_printer_config(

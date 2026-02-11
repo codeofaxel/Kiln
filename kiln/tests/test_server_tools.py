@@ -64,6 +64,18 @@ def _clean_singletons():
     _webhook_mgr._endpoints.update(old_endpoints)
 
 
+@pytest.fixture(autouse=True)
+def _bypass_url_validation_and_auth(monkeypatch):
+    """Bypass SSRF URL validation and auth so tests with fake hostnames work."""
+    monkeypatch.setattr(
+        "kiln.webhooks._validate_webhook_url",
+        lambda url: (True, ""),
+    )
+    # Disable auth so tool calls succeed without a valid token
+    from kiln.server import _auth
+    monkeypatch.setattr(_auth, "_enabled", False)
+
+
 # ---------------------------------------------------------------------------
 # TestKilnHealth
 # ---------------------------------------------------------------------------

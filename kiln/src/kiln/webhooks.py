@@ -20,20 +20,103 @@ Example::
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import queue
+import socket
 import threading
 import time
+import urllib.parse
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from kiln.events import Event, EventBus, EventType
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# SSRF prevention: private/reserved IP networks that webhooks must not target
+# ---------------------------------------------------------------------------
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _validate_webhook_url(url: str) -> Tuple[bool, str]:
+    """Validate a webhook URL to prevent SSRF attacks.
+
+    Checks:
+    - Scheme must be http or https.
+    - Hostname must not be ``localhost``.
+    - Resolved IP addresses must not fall within private/reserved ranges.
+
+    Returns:
+        A ``(valid, reason)`` tuple.  When *valid* is ``False``, *reason*
+        contains a human-readable explanation.
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return False, "Malformed URL"
+
+    # -- Scheme check --
+    if parsed.scheme not in ("http", "https"):
+        return False, f"Unsupported URL scheme '{parsed.scheme}'; only http and https are allowed"
+
+    # -- Hostname presence --
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "URL has no hostname"
+
+    # -- Explicit localhost block --
+    if hostname.lower() in ("localhost",):
+        return False, "Webhook URLs must not target localhost"
+
+    # -- Resolve and check IP ranges --
+    try:
+        addrinfos = socket.getaddrinfo(hostname, parsed.port or 443, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        return False, f"DNS resolution failed for '{hostname}': {exc}"
+
+    for family, _type, _proto, _canonname, sockaddr in addrinfos:
+        ip_str = sockaddr[0]
+        try:
+            addr = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        for network in _BLOCKED_NETWORKS:
+            if addr in network:
+                return False, (
+                    f"Webhook URL resolves to private/reserved address {ip_str} "
+                    f"(in {network}); this is not allowed"
+                )
+
+    return True, ""
+
+
+def _mask_secret(secret: Optional[str]) -> Optional[str]:
+    """Return a masked version of a webhook secret for display.
+
+    Shows only the last 4 characters, prefixed with asterisks.
+    Returns ``None`` if the input is ``None``.
+    """
+    if secret is None:
+        return None
+    if len(secret) <= 4:
+        return "****"
+    return "****" + secret[-4:]
 
 
 @dataclass
@@ -132,7 +215,19 @@ class WebhookManager:
 
         Returns:
             The created WebhookEndpoint.
+
+        Raises:
+            ValueError: If the URL fails SSRF validation (private IP,
+                bad scheme, unresolvable hostname, etc.).
         """
+        valid, reason = _validate_webhook_url(url)
+        if not valid:
+            raise ValueError(f"Invalid webhook URL: {reason}")
+
+        valid, reason = _validate_webhook_url(url)
+        if not valid:
+            raise ValueError(f"Invalid webhook URL: {reason}")
+
         endpoint_id = uuid.uuid4().hex[:12]
         event_set = set(events) if events else set()
 
@@ -160,14 +255,29 @@ class WebhookManager:
             return False
 
     def list_endpoints(self) -> List[WebhookEndpoint]:
-        """Return all registered endpoints."""
+        """Return all registered endpoints with secrets masked.
+
+        The returned copies have their ``secret`` field replaced with
+        a masked version (e.g. ``"****abcd"``).  The real secrets are
+        preserved internally for HMAC signing.
+        """
         with self._lock:
-            return list(self._endpoints.values())
+            results: List[WebhookEndpoint] = []
+            for ep in self._endpoints.values():
+                masked = copy.copy(ep)
+                masked.secret = _mask_secret(ep.secret)
+                results.append(masked)
+            return results
 
     def get_endpoint(self, endpoint_id: str) -> Optional[WebhookEndpoint]:
-        """Return a specific endpoint by ID."""
+        """Return a specific endpoint by ID, with the secret masked."""
         with self._lock:
-            return self._endpoints.get(endpoint_id)
+            ep = self._endpoints.get(endpoint_id)
+            if ep is None:
+                return None
+            masked = copy.copy(ep)
+            masked.secret = _mask_secret(ep.secret)
+            return masked
 
     # -- Delivery ----------------------------------------------------------
 

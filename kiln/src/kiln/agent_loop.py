@@ -33,6 +33,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import re
 import time
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional
@@ -64,7 +66,6 @@ def _sanitize_tool_output(output: str, max_length: int = 50_000) -> str:
 
     # Strip common injection patterns — anything that looks like it's
     # trying to impersonate a system message or override instructions.
-    import re
     _INJECTION_PATTERNS = [
         r"(?i)\bignore\s+(all\s+)?previous\s+instructions?\b",
         r"(?i)\byou\s+are\s+now\b",
@@ -77,6 +78,89 @@ def _sanitize_tool_output(output: str, max_length: int = 50_000) -> str:
         output = re.sub(pattern, "[FILTERED]", output)
 
     return output
+
+
+
+def _is_privacy_mode_enabled() -> bool:
+    """Check whether LLM privacy mode is enabled.
+
+    Controlled by the KILN_LLM_PRIVACY_MODE environment variable.
+    Enabled by default (returns True when the variable is unset).
+    Set to 0, false, or no to disable.
+    """
+    val = os.environ.get('KILN_LLM_PRIVACY_MODE', '1').strip().lower()
+    return val not in ('0', 'false', 'no')
+
+
+# Pre-compiled patterns for sensitive data redaction
+_PRIVATE_IP_RE = re.compile(
+    r'\b(?:'
+    r'192\.168\.\d{1,3}\.\d{1,3}'
+    r'|10\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+    r'|172\.(?:1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3}'
+    r')\b'
+)
+
+_BEARER_RE = re.compile(r'(Bearer\s+)\S+', re.IGNORECASE)
+_AUTH_HEADER_RE = re.compile(
+    r'(Authorization\s*:\s*)\S+', re.IGNORECASE
+)
+_API_KEY_KV_RE = re.compile(
+    r'((?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token|auth[_-]?token)'
+    r'\s*[:=]\s*)\S+',
+    re.IGNORECASE,
+)
+_KILN_SECRET_RE = re.compile(
+    r'(KILN_\w*(?:KEY|SECRET)\s*=\s*)\S+', re.IGNORECASE
+)
+_HEX_TOKEN_RE = re.compile(
+    r'((?:key|token|secret|password|credential|api_key|apikey)'
+    r"\s*[:=]\s*[\"']?)([0-9a-fA-F]{32,})([\"']?)",
+    re.IGNORECASE,
+)
+_BASE64_TOKEN_RE = re.compile(
+    r'((?:key|token|secret|password|credential|api_key|apikey)'
+    r"\s*[:=]\s*[\"']?)([A-Za-z0-9+/=]{20,})([\"']?)",
+    re.IGNORECASE,
+)
+
+
+def _redact_sensitive_data(text: str) -> str:
+    """Redact sensitive data from text before sending to external LLM APIs.
+
+    Strips API keys, private IP addresses, and secret environment variable
+    values.  Controlled by the KILN_LLM_PRIVACY_MODE env var (enabled
+    by default).
+
+    Args:
+        text: The text to redact.
+
+    Returns:
+        Text with sensitive patterns replaced by [REDACTED].
+    """
+    if not text or not _is_privacy_mode_enabled():
+        return text
+
+    # Bearer tokens and Authorization headers
+    text = _BEARER_RE.sub(r'\1[REDACTED]', text)
+    text = _AUTH_HEADER_RE.sub(r'\1[REDACTED]', text)
+
+    # Generic api_key / secret_key / access_token key-value pairs
+    text = _API_KEY_KV_RE.sub(r'\1[REDACTED]', text)
+
+    # KILN_*_KEY= and KILN_*_SECRET= env var values
+    text = _KILN_SECRET_RE.sub(r'\1[REDACTED]', text)
+
+    # Long hex tokens preceded by key-like labels (32+ hex chars)
+    text = _HEX_TOKEN_RE.sub(r'\1[REDACTED]\3', text)
+
+    # Base64 tokens preceded by key-like labels (20+ base64 chars)
+    text = _BASE64_TOKEN_RE.sub(r'\1[REDACTED]\3', text)
+
+    # Private IP addresses (RFC 1918)
+    text = _PRIVATE_IP_RE.sub('[REDACTED]', text)
+
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -664,11 +748,11 @@ def run_agent_loop(
 
             result_str = _execute_tool_call(tc)
 
-            # Add tool result message (sanitized to prevent prompt injection)
+            # Add tool result message (sanitized then redacted for privacy)
             tool_msg: Dict[str, Any] = {
                 "role": "tool",
                 "tool_call_id": tc_id,
-                "content": _sanitize_tool_output(result_str),
+                "content": _redact_sensitive_data(_sanitize_tool_output(result_str)),
             }
             messages.append(tool_msg)
 

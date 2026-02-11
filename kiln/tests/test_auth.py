@@ -23,6 +23,28 @@ class TestAuthManagerDefaults:
             mgr = AuthManager()
             assert mgr.enabled is False
 
+    def test_auto_generated_key_when_enabled_no_env_key(self):
+        """When auth is enabled with no KILN_AUTH_KEY, a session key is auto-generated."""
+        with mock.patch.dict(os.environ, {"KILN_AUTH_ENABLED": "1"}, clear=True):
+            mgr = AuthManager()
+            assert mgr.generated_key is not None
+            assert len(mgr.generated_key) > 0
+            # The auto-generated key should be verifiable
+            result = mgr.verify(mgr.generated_key)
+            assert result.id == "env"
+
+    def test_no_auto_generated_key_when_env_key_set(self):
+        """When KILN_AUTH_KEY is set, no key is auto-generated."""
+        with mock.patch.dict(os.environ, {"KILN_AUTH_ENABLED": "1", "KILN_AUTH_KEY": "my-secret-key"}, clear=True):
+            mgr = AuthManager()
+            assert mgr.generated_key is None
+
+    def test_no_auto_generated_key_when_disabled(self):
+        """When auth is disabled, no key is auto-generated."""
+        with mock.patch.dict(os.environ, {}, clear=True):
+            mgr = AuthManager()
+            assert mgr.generated_key is None
+
     # 2. Enabled via constructor parameter
     def test_enabled_via_constructor(self):
         mgr = AuthManager(enabled=True)
@@ -48,7 +70,8 @@ class TestAuthManagerDefaults:
             mgr = AuthManager()
             assert mgr.enabled is True
 
-    def test_not_enabled_via_env_var_random(self):
+    def test_disabled_via_env_var_random_string(self):
+        """Unrecognized values default to disabled (not in the enable list)."""
         with mock.patch.dict(os.environ, {"KILN_AUTH_ENABLED": "nope"}, clear=True):
             mgr = AuthManager()
             assert mgr.enabled is False
@@ -433,10 +456,19 @@ class TestEdgeCases:
             expected_hash = hashlib.sha256(b"init-key").hexdigest()
             assert mgr._env_key_hash == expected_hash
 
-    def test_no_env_key_hash_when_unset(self):
+    def test_auto_generated_env_key_hash_when_unset(self):
+        """When auth is enabled but no KILN_AUTH_KEY, auto-generated key populates _env_key_hash."""
         with mock.patch.dict(os.environ, {}, clear=True):
             mgr = AuthManager(enabled=True)
+            assert mgr._env_key_hash is not None
+            assert mgr.generated_key is not None
+
+    def test_no_env_key_hash_when_disabled(self):
+        """When auth is disabled and no KILN_AUTH_KEY, _env_key_hash stays None."""
+        with mock.patch.dict(os.environ, {}, clear=True):
+            mgr = AuthManager(enabled=False)
             assert mgr._env_key_hash is None
+            assert mgr.generated_key is None
 
     def test_constructor_enabled_overrides_env(self):
         """Constructor `enabled` parameter takes precedence over env var."""

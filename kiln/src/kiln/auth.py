@@ -5,7 +5,8 @@ must provide a valid API key to use MCP tools. Keys are stored locally
 in the SQLite database.
 
 Authentication is disabled by default. Set KILN_AUTH_ENABLED=1 and
-KILN_AUTH_KEY=<your-key> to enable.
+KILN_AUTH_KEY=<your-key> to enable. When enabled without an explicit
+key, a random session key is auto-generated and logged at startup.
 
 Keys can also be managed programmatically:
 
@@ -86,19 +87,35 @@ class AuthManager:
 
     def __init__(self, enabled: Optional[bool] = None) -> None:
         self._enabled = enabled if enabled is not None else (
-            os.environ.get("KILN_AUTH_ENABLED", "").lower() in ("1", "true", "yes")
+            os.environ.get("KILN_AUTH_ENABLED", "").lower()
+            in ("1", "true", "yes")
         )
         self._keys: Dict[str, ApiKey] = {}  # key_hash -> ApiKey
         self._env_key_hash: Optional[str] = None
+        self._generated_key: Optional[str] = None
 
-        # Load env key if set
+        # Load env key if set, otherwise auto-generate when auth is enabled
         env_key = os.environ.get("KILN_AUTH_KEY", "")
         if env_key:
             self._env_key_hash = self._hash_key(env_key)
+        elif self._enabled:
+            # Auto-generate a session key so auth works out of the box
+            self._generated_key = secrets.token_urlsafe(32)
+            self._env_key_hash = self._hash_key(self._generated_key)
+            logger.warning(
+                "Auth enabled but no KILN_AUTH_KEY set. "
+                "Auto-generated session key: %s",
+                self._generated_key,
+            )
 
     @property
     def enabled(self) -> bool:
         return self._enabled
+
+    @property
+    def generated_key(self) -> Optional[str]:
+        """Return the auto-generated session key, if one was created."""
+        return self._generated_key
 
     def enable(self) -> None:
         self._enabled = True

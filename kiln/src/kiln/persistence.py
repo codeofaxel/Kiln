@@ -17,13 +17,18 @@ Example::
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
+import stat
+import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Default DB location
@@ -54,6 +59,55 @@ class KilnDB:
         self._write_lock = threading.Lock()
 
         self._ensure_schema()
+        self._enforce_permissions()
+
+    # ------------------------------------------------------------------
+    # File permissions
+    # ------------------------------------------------------------------
+
+    def _enforce_permissions(self) -> None:
+        """Enforce restrictive file permissions on the data directory and DB.
+
+        Sets the parent directory to mode ``0700`` and the database file to
+        mode ``0600`` so that other users on a shared system cannot read
+        printer credentials or job history.  Skipped on Windows where POSIX
+        chmod semantics do not apply.
+        """
+        if sys.platform == "win32":
+            return
+
+        db_dir = os.path.dirname(self._db_path)
+
+        # --- Directory permissions ---
+        try:
+            dir_stat = os.stat(db_dir)
+            dir_mode = stat.S_IMODE(dir_stat.st_mode)
+            if dir_mode & 0o077:
+                logger.warning(
+                    "~/.kiln/ directory has overly permissive permissions "
+                    "(mode %04o). Run 'chmod 700 ~/.kiln/' to fix.",
+                    dir_mode,
+                )
+            os.chmod(db_dir, 0o700)
+        except OSError as exc:
+            logger.warning("Unable to set permissions on %s: %s", db_dir, exc)
+
+        # --- Database file permissions ---
+        try:
+            file_stat = os.stat(self._db_path)
+            file_mode = stat.S_IMODE(file_stat.st_mode)
+            if file_mode & 0o077:
+                logger.warning(
+                    "Database file %s has overly permissive permissions "
+                    "(mode %04o). Fixing to 0600.",
+                    self._db_path,
+                    file_mode,
+                )
+            os.chmod(self._db_path, 0o600)
+        except OSError as exc:
+            logger.warning(
+                "Unable to set permissions on %s: %s", self._db_path, exc
+            )
 
     # ------------------------------------------------------------------
     # Schema

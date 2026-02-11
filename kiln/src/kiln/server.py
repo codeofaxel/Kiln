@@ -1927,7 +1927,7 @@ def safety_status() -> dict:
         }
 
         # Confirm mode
-        confirm_mode = os.environ.get("KILN_CONFIRM_MODE", "false").lower() in (
+        confirm_mode = os.environ.get("KILN_CONFIRM_MODE", "").lower() in (
             "1", "true", "yes",
         )
 
