@@ -1,11 +1,13 @@
 """Fulfillment service adapters for outsourced 3D printing.
 
 Routes print jobs to external manufacturing services (Craftcloud, Shapeways,
-etc.) when local printers lack the required material, capacity, or capability.
+Sculpteo, etc.) when local printers lack the required material, capacity, or
+capability.
 
 Re-exports the public API so consumers can write::
 
     from kiln.fulfillment import FulfillmentProvider, CraftcloudProvider, ...
+    from kiln.fulfillment import get_provider, list_providers
 """
 
 from __future__ import annotations
@@ -22,6 +24,14 @@ from kiln.fulfillment.base import (
     ShippingOption,
 )
 from kiln.fulfillment.craftcloud import CraftcloudProvider
+from kiln.fulfillment.registry import (
+    get_provider,
+    get_provider_class,
+    list_providers,
+    register,
+)
+from kiln.fulfillment.sculpteo import SculpteoProvider
+from kiln.fulfillment.shapeways import ShapewaysProvider
 
 __all__ = [
     "CraftcloudProvider",
@@ -33,5 +43,11 @@ __all__ = [
     "OrderStatus",
     "Quote",
     "QuoteRequest",
+    "SculpteoProvider",
+    "ShapewaysProvider",
     "ShippingOption",
+    "get_provider",
+    "get_provider_class",
+    "list_providers",
+    "register",
 ]
