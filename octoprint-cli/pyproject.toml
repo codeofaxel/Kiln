@@ -50,5 +50,16 @@ octoprint-cli = "octoprint_cli.cli:cli"
 Homepage = "https://github.com/codeofaxel/Kiln"
 Issues = "https://github.com/codeofaxel/Kiln/issues"
 
+[tool.ruff]
+target-version = "py38"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "SIM108", # ternary — readability preference
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -57,6 +57,20 @@ Issues = "https://github.com/codeofaxel/Kiln/issues"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "live: requires a real OctoPrint instance (deselect with '-m \"not live\"')",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "SIM108", # ternary — readability preference
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

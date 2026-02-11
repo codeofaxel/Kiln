@@ -4,6 +4,32 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-11
 
+### PyPI Publishing Pipeline
+Upgraded `.github/workflows/publish.yml` to production-ready release workflow:
+- **Test gate**: Full test suite (Python 3.10 + 3.12) must pass before any publish
+- **Version validation**: Git tag is checked against `kiln/pyproject.toml` version — mismatches fail the build
+- **Both packages enabled**: `kiln3d` and `kiln3d-octoprint` now both build and publish (octoprint-cli was previously commented out)
+- **Trusted publishing**: OIDC `id-token` auth (no API tokens stored in secrets)
+- **Version mismatch fix**: `octoprint-cli/__init__.py` was `1.0.0` vs `pyproject.toml` `0.1.0` — corrected to `0.1.0`
+
+### README Polish Pass
+- Added CI, PyPI version, Python version, and license badges to README header
+- Updated test counts: `2,970+` total (was incorrectly showing `2650+` / `2413`)
+- All feature references verified against current codebase
+
+### Pre-Commit Hooks & Linting
+- Created `.pre-commit-config.yaml` with Ruff (lint + format), trailing whitespace, EOF fixer, YAML check, large file guard, merge conflict check
+- Added `[tool.ruff]` config to both `kiln/pyproject.toml` (target py310) and `octoprint-cli/pyproject.toml` (target py38)
+- Ruff rules: E, F, W, I (imports), UP (pyupgrade), B (bugbear), SIM (simplify)
+- Updated `CONTRIBUTING.md` with pre-commit setup instructions, monorepo guidance, and safety-critical code warnings
+
+### Live OctoPrint Integration Smoke Test
+- Created `kiln/tests/test_live_octoprint.py` with `@pytest.mark.live` marker
+- Tests: connectivity, capabilities, job query, file list, upload + verify + delete round-trip, temperature sanity checks
+- Skipped by default — activated via `pytest -m live` with `KILN_LIVE_OCTOPRINT_HOST` and `KILN_LIVE_OCTOPRINT_KEY` env vars
+- Added `live` marker to `kiln/pyproject.toml` pytest config
+- Includes instructions for running OctoPrint via Docker for CI
+
 ### Claimed PyPI Package Names
 Reserved four PyPI package names as v0.0.1 placeholders:
 - `kiln3d` — https://pypi.org/project/kiln3d/
