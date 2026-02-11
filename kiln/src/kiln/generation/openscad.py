@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -31,7 +32,11 @@ from kiln.generation.base import (
 
 logger = logging.getLogger(__name__)
 
-_MACOS_APP_PATH = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
+_MACOS_APP_PATH = (
+    "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
+    if sys.platform == "darwin"
+    else ""
+)
 
 
 def _find_openscad(explicit_path: str | None = None) -> str:
@@ -60,12 +65,15 @@ def _find_openscad(explicit_path: str | None = None) -> str:
         return which
 
     # Check macOS application bundle.
-    if os.path.isfile(_MACOS_APP_PATH) and os.access(_MACOS_APP_PATH, os.X_OK):
+    if _MACOS_APP_PATH and os.path.isfile(_MACOS_APP_PATH) and os.access(_MACOS_APP_PATH, os.X_OK):
         return _MACOS_APP_PATH
 
     raise GenerationError(
-        "OpenSCAD not found.  Install it from https://openscad.org or set "
-        "the binary path explicitly.",
+        "OpenSCAD not found. Install it:\n"
+        "  Linux/WSL: apt install openscad\n"
+        "  macOS: brew install openscad\n"
+        "  Or download from https://openscad.org\n"
+        "Or set the binary path explicitly.",
         code="OPENSCAD_NOT_FOUND",
     )
 

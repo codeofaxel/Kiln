@@ -6449,7 +6449,10 @@ def main() -> None:
 
     # Graceful shutdown handler
     def _shutdown_handler(signum: int, frame: Any) -> None:
-        sig_name = signal.Signals(signum).name
+        try:
+            sig_name = signal.Signals(signum).name
+        except (ValueError, AttributeError):
+            sig_name = f"signal {signum}"
         logger.info("Received %s — shutting down gracefully...", sig_name)
         _scheduler.stop()
         _webhook_mgr.stop()

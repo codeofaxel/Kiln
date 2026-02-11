@@ -24,8 +24,9 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-import tempfile
 import subprocess
+import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -47,11 +48,16 @@ _SLICER_NAMES: List[str] = [
 ]
 
 # Common install locations on macOS (app bundles).
-_MACOS_PATHS: List[str] = [
-    "/Applications/PrusaSlicer.app/Contents/MacOS/PrusaSlicer",
-    "/Applications/Original Prusa Drivers/PrusaSlicer.app/Contents/MacOS/PrusaSlicer",
-    "/Applications/OrcaSlicer.app/Contents/MacOS/OrcaSlicer",
-]
+# Only populated on macOS to avoid useless stat() calls on Linux/WSL.
+_MACOS_PATHS: List[str] = (
+    [
+        "/Applications/PrusaSlicer.app/Contents/MacOS/PrusaSlicer",
+        "/Applications/Original Prusa Drivers/PrusaSlicer.app/Contents/MacOS/PrusaSlicer",
+        "/Applications/OrcaSlicer.app/Contents/MacOS/OrcaSlicer",
+    ]
+    if sys.platform == "darwin"
+    else []
+)
 
 # Extensions the slicer can accept as input.
 _INPUT_EXTENSIONS = {".stl", ".3mf", ".step", ".stp", ".obj", ".amf"}
@@ -162,8 +168,10 @@ def find_slicer(slicer_path: Optional[str] = None) -> SlicerInfo:
         return SlicerInfo(path=env_path, name=name, version=version)
 
     raise SlicerNotFoundError(
-        "No slicer found. Install PrusaSlicer or OrcaSlicer, "
-        "or set KILN_SLICER_PATH to the binary location."
+        "No slicer found. Install PrusaSlicer or OrcaSlicer:\n"
+        "  Linux/WSL: apt install prusa-slicer  (or download from prusaslicer.org)\n"
+        "  macOS: brew install --cask prusaslicer\n"
+        "Or set KILN_SLICER_PATH to the binary location."
     )
 
 
@@ -180,7 +188,7 @@ def _get_version(slicer_path: str) -> Optional[str]:
         # PrusaSlicer outputs "PrusaSlicer-2.7.1+linux-..."
         # OrcaSlicer outputs "OrcaSlicer 2.0.0"
         if output:
-            return output.split("\n")[0][:100]
+            return output.split("\n")[0].rstrip("\r")[:100]
     except Exception:
         pass
     return None

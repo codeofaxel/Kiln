@@ -909,7 +909,7 @@ def snapshot(ctx: click.Context, output: Optional[str], json_mode: bool) -> None
             _safe = os.path.realpath(output)
             _home = os.path.expanduser("~")
             _tmpdir = os.path.realpath(tempfile.gettempdir())
-            _allowed_prefixes = (_home, "/tmp", "/private/tmp", _tmpdir)
+            _allowed_prefixes = (_home, _tmpdir)
             if not any(_safe.startswith(p) for p in _allowed_prefixes):
                 click.echo(format_error(
                     "Output path must be under home directory or a temp directory.",

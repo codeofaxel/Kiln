@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import platform
 import socket
 import time
 from dataclasses import asdict, dataclass, field
@@ -21,6 +22,15 @@ from typing import Any, Dict, List, Optional
 import requests  # already a kiln dependency
 
 logger = logging.getLogger(__name__)
+
+
+def _is_wsl() -> bool:
+    """Return True if running inside WSL 2 (or 1)."""
+    try:
+        release = platform.release().lower()
+        return "microsoft" in release or "wsl" in release
+    except Exception:
+        return False
 
 
 @dataclass
@@ -77,6 +87,20 @@ def discover_printers(
     """
     if methods is None:
         methods = ["mdns", "http_probe"]
+
+    if _is_wsl():
+        if subnet is None:
+            logger.warning(
+                "Running on WSL 2. Auto-detected subnet will be the WSL "
+                "virtual network, not your home network. For best results, "
+                "provide the home network subnet explicitly, e.g. "
+                "discover_printers(subnet='192.168.1')"
+            )
+        if "mdns" in methods:
+            logger.info(
+                "mDNS discovery is unreliable on WSL 2 due to NAT. "
+                "Consider using explicit printer IPs or providing a subnet."
+            )
 
     all_printers: List[DiscoveredPrinter] = []
     deadline = time.monotonic() + timeout
@@ -303,6 +327,11 @@ def _detect_subnet() -> str | None:
 
     Returns the first three octets of the host's IP (e.g. "192.168.1"),
     or None if detection fails.
+
+    On WSL 2, the default interface returns the virtual network
+    (172.x.x.x). This function attempts to detect the Windows host
+    gateway and use its subnet instead, since printers are typically
+    on the same network as the Windows host.
     """
     try:
         hostname = socket.gethostname()
@@ -317,12 +346,53 @@ def _detect_subnet() -> str | None:
                 s.connect(("10.255.255.255", 1))
                 ip = s.getsockname()[0]
 
+        # On WSL 2, the detected IP is on the virtual NAT network
+        # (typically 172.x.x.x). Try to find the Windows host gateway
+        # which is usually on the home network.
+        if _is_wsl() and ip.startswith("172."):
+            wsl_subnet = _detect_wsl_host_subnet()
+            if wsl_subnet:
+                logger.info(
+                    "WSL 2 detected. Using Windows host subnet %s "
+                    "instead of virtual network %s",
+                    wsl_subnet, ip,
+                )
+                return wsl_subnet
+
         parts = ip.split(".")
         if len(parts) == 4:
             return ".".join(parts[:3])
     except OSError:
         logger.debug("Failed to detect local subnet", exc_info=True)
 
+    return None
+
+
+def _detect_wsl_host_subnet() -> str | None:
+    """Try to detect the Windows host's home network subnet from WSL 2.
+
+    Reads /etc/resolv.conf which WSL 2 populates with the Windows host
+    IP as the nameserver. This IP is on the host's network and can be
+    used to derive the subnet for printer discovery.
+    """
+    try:
+        with open("/etc/resolv.conf", "r") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("nameserver"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        ns_ip = parts[1]
+                        octets = ns_ip.split(".")
+                        if len(octets) == 4:
+                            # The nameserver in WSL 2 is typically the
+                            # Windows host IP on the virtual network.
+                            # If it's 172.x.x.x it's the vEthernet
+                            # adapter, not the home network.
+                            if not ns_ip.startswith("172."):
+                                return ".".join(octets[:3])
+    except (OSError, IOError):
+        pass
     return None
 
 
