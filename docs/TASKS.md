@@ -35,9 +35,6 @@ No test covers the full agent workflow: discover → configure → slice → upl
 ### Bambu Webcam Support
 `get_snapshot()` and `get_stream_url()` are not implemented for the Bambu adapter (returns None). Bambu printers do have RTSP streams — investigate adding support via the MQTT push or direct RTSP URL extraction.
 
-### Print Failure Analysis Tool
-Add `analyze_print_failure(job_id)` — examine job history, printer logs, and temperature data to suggest root causes and parameter changes for failed prints.
-
 ### Text-to-Model Generation
 Integrate with AI-powered CAD/3D model generation services (e.g. OpenSCAD scripting, Meshy, Tripo3D, or similar APIs) to let agents generate 3D models from text descriptions. This would close the gap between "idea" and "model file" in the agent workflow — currently agents must find existing models on marketplaces. High-value feature for monetization (generation credits, premium models) but significant lift: requires evaluating generation APIs, handling async generation jobs, mesh quality validation, and printability checks.
 
@@ -47,5 +44,3 @@ Integrate webcam snapshot analysis (or external dimensional measurement) to vali
 ## Low Priority / Future Ideas
 
 - **Resumable downloads** — Large STL downloads don't checkpoint; add resume support for interrupted transfers
-- **OctoPrint bed mesh** — `get_bed_mesh()` not implemented for OctoPrint adapter (Moonraker has it)
-- **Bambu "cancelling" state** — No explicit mapping for the cancelling state in the Bambu adapter state map

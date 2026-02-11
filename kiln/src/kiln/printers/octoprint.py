@@ -611,6 +611,24 @@ class OctoPrintAdapter(PrinterAdapter):
         """
         return f"{self._host}/webcam/?action=stream"
 
+    # -- bed mesh (optional) -----------------------------------------------
+
+    def get_bed_mesh(self) -> Optional[Dict[str, Any]]:
+        """Query OctoPrint for bed mesh data via the Bed Level Visualizer plugin.
+
+        Uses ``GET /api/plugin/bedlevelvisualizer`` to retrieve probe data.
+        Returns ``None`` if the plugin is not installed or no mesh is available.
+        """
+        try:
+            payload = self._get_json("/api/plugin/bedlevelvisualizer")
+            mesh_data = payload.get("mesh", payload.get("bed_level_visualizer"))
+            if not mesh_data:
+                return None
+            return payload
+        except Exception:
+            logger.debug("Bed mesh query failed (plugin may not be installed)", exc_info=True)
+            return None
+
     # ------------------------------------------------------------------
     # Dunder helpers
     # ------------------------------------------------------------------

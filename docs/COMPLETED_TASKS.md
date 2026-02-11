@@ -4,6 +4,18 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-10
 
+### Print Failure Analysis Tool
+- `analyze_print_failure(job_id)` MCP tool
+- Examines job record, related events (retries, errors, progress), and timing
+- Produces structured diagnosis: symptoms, likely causes, recommendations
+- Detects patterns: quick failures (setup issues), late failures (adhesion/cooling), retry exhaustion
+- Correlates progress % at failure to suggest specific fixes (first-layer, supports, etc.)
+
+### Bambu "cancelling" State + OctoPrint Bed Mesh
+- Added `"cancelling"` → `PrinterStatus.BUSY` to Bambu adapter state map (was unmapped → UNKNOWN)
+- Added `get_bed_mesh()` to OctoPrint adapter via Bed Level Visualizer plugin API (`/api/plugin/bedlevelvisualizer`)
+- Returns `None` gracefully if plugin not installed
+
 ### Await Print Completion MCP Tool
 - `await_print_completion(job_id, timeout, poll_interval)` MCP tool
 - Supports both job-based tracking (via queue/scheduler) and direct printer monitoring
