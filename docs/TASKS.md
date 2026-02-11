@@ -23,4 +23,3 @@ _(No medium-priority tasks remaining.)_
 ## Low Priority / Future Ideas
 
 - **Local model cache/library** — Agents save generated or downloaded models locally with tagged metadata (source, prompt, dimensions, print history) so they can reuse them across jobs without re-downloading or re-generating.
-- **Dependabot config** — `.github/dependabot.yml` for automated dependency updates.

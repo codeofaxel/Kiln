@@ -4,6 +4,9 @@ Record of finished features and milestones, newest first.
 
 ## 2026-02-11
 
+### Dependabot Config
+Added `.github/dependabot.yml` with weekly update checks for pip dependencies (both `kiln/` and `octoprint-cli/`) and GitHub Actions versions. Open PR limit set to 5 per ecosystem.
+
 ### PyPI Publishing Pipeline
 Upgraded `.github/workflows/publish.yml` to production-ready release workflow:
 - **Test gate**: Full test suite (Python 3.10 + 3.12) must pass before any publish
