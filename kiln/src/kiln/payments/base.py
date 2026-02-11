@@ -18,8 +18,10 @@ class PaymentStatus(enum.Enum):
 
     PENDING = "pending"
     PROCESSING = "processing"
+    AUTHORIZED = "authorized"  # funds held, not yet captured
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
     REFUNDED = "refunded"
 
 
@@ -159,3 +161,65 @@ class PaymentProvider(ABC):
         Raises:
             PaymentError: If the refund cannot be processed.
         """
+
+    # -- Optional auth-and-capture methods ---------------------------------
+    # These allow a two-phase flow: authorize (hold funds) at quote time,
+    # capture (collect) at order time, or cancel if the user backs out.
+    # Default implementations raise NotImplementedError so providers that
+    # don't support holds still work with the one-shot create_payment flow.
+
+    def authorize_payment(self, request: PaymentRequest) -> PaymentResult:
+        """Place a hold on funds without capturing.
+
+        Providers that support this (e.g. Stripe with ``capture_method:
+        manual``) return a result with ``AUTHORIZED`` status.  The hold
+        must be captured via :meth:`capture_payment` or released via
+        :meth:`cancel_payment`.
+
+        Args:
+            request: Payment parameters.
+
+        Returns:
+            Result with ``AUTHORIZED`` status on success.
+
+        Raises:
+            PaymentError: If the hold cannot be placed.
+            NotImplementedError: If the provider doesn't support holds.
+        """
+        raise NotImplementedError(
+            f"{self.name} does not support auth-and-capture."
+        )
+
+    def capture_payment(self, payment_id: str) -> PaymentResult:
+        """Capture a previously authorized payment.
+
+        Args:
+            payment_id: ID from :meth:`authorize_payment`.
+
+        Returns:
+            Result with ``COMPLETED`` status on success.
+
+        Raises:
+            PaymentError: If capture fails.
+            NotImplementedError: If the provider doesn't support holds.
+        """
+        raise NotImplementedError(
+            f"{self.name} does not support auth-and-capture."
+        )
+
+    def cancel_payment(self, payment_id: str) -> PaymentResult:
+        """Release a previously authorized hold without charging.
+
+        Args:
+            payment_id: ID from :meth:`authorize_payment`.
+
+        Returns:
+            Result with ``CANCELLED`` status.
+
+        Raises:
+            PaymentError: If cancellation fails.
+            NotImplementedError: If the provider doesn't support holds.
+        """
+        raise NotImplementedError(
+            f"{self.name} does not support auth-and-capture."
+        )

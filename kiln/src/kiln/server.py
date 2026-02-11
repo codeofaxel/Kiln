@@ -2389,6 +2389,11 @@ def fulfillment_quote(
     options.  A Kiln platform fee is shown separately so the user sees
     the full cost before committing.
 
+    If a payment method is linked, a hold is placed on the fee amount
+    at quote time (Stripe auth-and-capture).  The hold is captured
+    when the order is placed via ``fulfillment_order``, or released
+    if the user doesn't proceed.
+
     Use the returned ``quote_id`` with ``fulfillment_order`` to place the
     order.
     """
@@ -2406,6 +2411,23 @@ def fulfillment_quote(
         quote_data = quote.to_dict()
         quote_data["kiln_fee"] = fee_calc.to_dict()
         quote_data["total_with_fee"] = fee_calc.total_cost
+
+        # Try to authorize (hold) the fee at quote time.
+        try:
+            mgr = _get_payment_mgr()
+            if mgr.available_rails:
+                auth_result = mgr.authorize_fee(
+                    quote.quote_id, fee_calc,
+                )
+                if auth_result.payment_id:
+                    quote_data["payment_hold"] = {
+                        "payment_id": auth_result.payment_id,
+                        "status": auth_result.status.value,
+                    }
+        except (PaymentError, Exception):
+            # Hold failed — fee will be collected at order time.
+            pass
+
         return {
             "success": True,
             "quote": quote_data,
@@ -2423,6 +2445,7 @@ def fulfillment_quote(
 def fulfillment_order(
     quote_id: str,
     shipping_option_id: str = "",
+    payment_hold_id: str = "",
 ) -> dict:
     """Place a manufacturing order based on a previous quote.
 
@@ -2430,11 +2453,15 @@ def fulfillment_order(
         quote_id: Quote ID from ``fulfillment_quote``.
         shipping_option_id: Shipping option ID from the quote's
             ``shipping_options`` list.
+        payment_hold_id: PaymentIntent ID from the quote's
+            ``payment_hold`` field (optional).  If provided, captures
+            the previously authorized hold instead of creating a new
+            charge.
 
-    Calculates the platform fee, collects payment (if a payment method
-    is linked), places the order, and records the charge.  If no
-    payment method is configured, the fee is still recorded but payment
-    is deferred.  Use ``fulfillment_order_status`` to track.
+    Places the order, then captures the fee hold (or creates a new
+    charge if no hold exists).  If the order fails after the hold is
+    captured, a refund is issued automatically.
+    Use ``fulfillment_order_status`` to track.
     """
     if err := _check_auth("print"):
         return err
@@ -2454,18 +2481,22 @@ def fulfillment_order(
             order_data["kiln_fee"] = fee_calc.to_dict()
             order_data["total_with_fee"] = fee_calc.total_cost
 
-            # Try to collect payment via the PaymentManager.
             try:
                 mgr = _get_payment_mgr()
                 if mgr.available_rails:
-                    pay_result = mgr.charge_fee(result.order_id, fee_calc)
+                    if payment_hold_id:
+                        # Capture the hold placed at quote time.
+                        pay_result = mgr.capture_fee(
+                            payment_hold_id, result.order_id, fee_calc,
+                        )
+                    else:
+                        # No hold — one-shot charge.
+                        pay_result = mgr.charge_fee(result.order_id, fee_calc)
                     order_data["payment"] = pay_result.to_dict()
                 else:
-                    # No providers — record the charge without payment.
                     _billing.record_charge(result.order_id, fee_calc)
                     order_data["payment"] = {"status": "no_payment_method"}
             except PaymentError as pe:
-                # Payment failed but we still placed the order.
                 _billing.record_charge(
                     result.order_id, fee_calc,
                     payment_status="failed",
@@ -2479,6 +2510,13 @@ def fulfillment_order(
             "order": order_data,
         }
     except (FulfillmentError, RuntimeError) as exc:
+        # If we had a hold and the order failed, release it.
+        if payment_hold_id:
+            try:
+                mgr = _get_payment_mgr()
+                mgr.cancel_fee(payment_hold_id)
+            except Exception:
+                logger.debug("Could not cancel hold %s", payment_hold_id)
         return _error_dict(str(exc))
     except Exception as exc:
         logger.exception("Unexpected error in fulfillment_order")

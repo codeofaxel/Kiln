@@ -484,7 +484,7 @@ class TestGetPaymentStatus:
         with patch.dict(sys.modules, {"stripe": mock_stripe}):
             result = p.get_payment_status("pi_test")
 
-        assert result.status == PaymentStatus.FAILED
+        assert result.status == PaymentStatus.CANCELLED
 
     def test_unknown_status_defaults_to_pending(self):
         mock_stripe = _build_mock_stripe()
@@ -628,10 +628,15 @@ class TestStatusMapping:
 
         assert _STATUS_MAP["requires_action"] == PaymentStatus.FAILED
 
-    def test_canceled_maps_to_failed(self):
+    def test_canceled_maps_to_cancelled(self):
         from kiln.payments.stripe_provider import _STATUS_MAP
 
-        assert _STATUS_MAP["canceled"] == PaymentStatus.FAILED
+        assert _STATUS_MAP["canceled"] == PaymentStatus.CANCELLED
+
+    def test_requires_capture_maps_to_authorized(self):
+        from kiln.payments.stripe_provider import _STATUS_MAP
+
+        assert _STATUS_MAP["requires_capture"] == PaymentStatus.AUTHORIZED
 
     def test_unknown_status_defaults_to_pending(self):
         from kiln.payments.stripe_provider import _STATUS_MAP
@@ -690,3 +695,108 @@ class TestAbstractBase:
     def test_payment_error_code_defaults_to_none(self):
         e = PaymentError("simple error")
         assert e.code is None
+
+
+# ---------------------------------------------------------------------------
+# Auth-and-capture
+# ---------------------------------------------------------------------------
+
+
+class TestAuthorizePayment:
+    """Test authorize_payment (hold with capture_method: manual)."""
+
+    def test_successful_authorization(self):
+        mock_stripe = _build_mock_stripe()
+        mock_stripe.PaymentIntent.create.return_value = MagicMock(
+            id="pi_auth_001",
+            status="requires_capture",
+            amount=225,
+            currency="usd",
+        )
+        provider = _make_provider()
+        with patch.dict(sys.modules, {"stripe": mock_stripe}):
+            result = provider.authorize_payment(_payment_request(amount=2.25))
+        assert result.success is True
+        assert result.status == PaymentStatus.AUTHORIZED
+        assert result.payment_id == "pi_auth_001"
+        call_kwargs = mock_stripe.PaymentIntent.create.call_args[1]
+        assert call_kwargs["capture_method"] == "manual"
+        assert call_kwargs["confirm"] is True
+
+    def test_card_declined_on_auth(self):
+        mock_stripe = _build_mock_stripe()
+        mock_stripe.PaymentIntent.create.side_effect = mock_stripe.error.CardError("declined")
+        provider = _make_provider()
+        with patch.dict(sys.modules, {"stripe": mock_stripe}):
+            result = provider.authorize_payment(_payment_request())
+        assert result.success is False
+        assert result.status == PaymentStatus.FAILED
+
+    def test_stripe_error_on_auth(self):
+        mock_stripe = _build_mock_stripe()
+        mock_stripe.PaymentIntent.create.side_effect = mock_stripe.error.StripeError("fail")
+        provider = _make_provider()
+        with patch.dict(sys.modules, {"stripe": mock_stripe}):
+            with pytest.raises(PaymentError, match="authorizing"):
+                provider.authorize_payment(_payment_request())
+
+    def test_no_payment_method_raises(self):
+        provider = _make_provider(customer_id=None, payment_method_id=None)
+        mock_stripe = _build_mock_stripe()
+        with patch.dict(sys.modules, {"stripe": mock_stripe}):
+            with pytest.raises(PaymentError, match="must be set"):
+                provider.authorize_payment(_payment_request())
+
+
+class TestCapturePayment:
+    """Test capture_payment (capture a manual-capture PaymentIntent)."""
+
+    def test_successful_capture(self):
+        mock_stripe = _build_mock_stripe()
+        mock_stripe.PaymentIntent.capture.return_value = MagicMock(
+            id="pi_auth_001",
+            status="succeeded",
+            amount=225,
+            currency="usd",
+        )
+        provider = _make_provider()
+        with patch.dict(sys.modules, {"stripe": mock_stripe}):
+            result = provider.capture_payment("pi_auth_001")
+        assert result.success is True
+        assert result.status == PaymentStatus.COMPLETED
+        mock_stripe.PaymentIntent.capture.assert_called_once_with("pi_auth_001")
+
+    def test_capture_fails(self):
+        mock_stripe = _build_mock_stripe()
+        mock_stripe.PaymentIntent.capture.side_effect = mock_stripe.error.StripeError("expired")
+        provider = _make_provider()
+        with patch.dict(sys.modules, {"stripe": mock_stripe}):
+            with pytest.raises(PaymentError, match="capture"):
+                provider.capture_payment("pi_expired")
+
+
+class TestCancelPayment:
+    """Test cancel_payment (release a manual-capture hold)."""
+
+    def test_successful_cancel(self):
+        mock_stripe = _build_mock_stripe()
+        mock_stripe.PaymentIntent.cancel.return_value = MagicMock(
+            id="pi_auth_001",
+            status="canceled",
+            amount=225,
+            currency="usd",
+        )
+        provider = _make_provider()
+        with patch.dict(sys.modules, {"stripe": mock_stripe}):
+            result = provider.cancel_payment("pi_auth_001")
+        assert result.success is True
+        assert result.status == PaymentStatus.CANCELLED
+        mock_stripe.PaymentIntent.cancel.assert_called_once_with("pi_auth_001")
+
+    def test_cancel_fails(self):
+        mock_stripe = _build_mock_stripe()
+        mock_stripe.PaymentIntent.cancel.side_effect = mock_stripe.error.StripeError("already captured")
+        provider = _make_provider()
+        with patch.dict(sys.modules, {"stripe": mock_stripe}):
+            with pytest.raises(PaymentError, match="cancel"):
+                provider.cancel_payment("pi_already_captured")

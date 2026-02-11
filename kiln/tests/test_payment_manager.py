@@ -449,3 +449,136 @@ class TestBillingHistory:
         # With empty DB should return empty list
         charges = mgr.get_billing_history(limit=5)
         assert len(charges) <= 5
+
+
+# ---------------------------------------------------------------------------
+# Auth-and-capture flow
+# ---------------------------------------------------------------------------
+
+
+class AuthCaptureProvider(FakeProvider):
+    """Provider that supports authorize/capture/cancel."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.auth_calls: List[PaymentRequest] = []
+        self.capture_calls: List[str] = []
+        self.cancel_calls: List[str] = []
+
+    def authorize_payment(self, request: PaymentRequest) -> PaymentResult:
+        self.auth_calls.append(request)
+        return PaymentResult(
+            success=True,
+            payment_id="pi_hold_123",
+            status=PaymentStatus.AUTHORIZED,
+            amount=request.amount,
+            currency=request.currency,
+            rail=self._rail,
+        )
+
+    def capture_payment(self, payment_id: str) -> PaymentResult:
+        self.capture_calls.append(payment_id)
+        return PaymentResult(
+            success=True,
+            payment_id=payment_id,
+            status=PaymentStatus.COMPLETED,
+            amount=5.0,
+            currency=Currency.USD,
+            rail=self._rail,
+        )
+
+    def cancel_payment(self, payment_id: str) -> PaymentResult:
+        self.cancel_calls.append(payment_id)
+        return PaymentResult(
+            success=True,
+            payment_id=payment_id,
+            status=PaymentStatus.CANCELLED,
+            amount=5.0,
+            currency=Currency.USD,
+            rail=self._rail,
+        )
+
+
+class TestAuthorizeFee:
+    def test_authorize_places_hold(self, db):
+        p = AuthCaptureProvider(name="auth")
+        mgr = PaymentManager(db=db, config={"default_rail": "auth"})
+        mgr.register_provider(p)
+        result = mgr.authorize_fee("quote-1", _fee())
+        assert result.status == PaymentStatus.AUTHORIZED
+        assert result.payment_id == "pi_hold_123"
+        assert len(p.auth_calls) == 1
+
+    def test_authorize_waived_skips_hold(self, db):
+        p = AuthCaptureProvider(name="auth")
+        mgr = PaymentManager(db=db, config={"default_rail": "auth"})
+        mgr.register_provider(p)
+        result = mgr.authorize_fee("quote-2", _waived_fee())
+        assert result.success is True
+        assert len(p.auth_calls) == 0
+
+    def test_authorize_fallback_for_unsupported(self, db, provider):
+        """FakeProvider doesn't have authorize_payment — should not raise."""
+        mgr = PaymentManager(db=db, config={"default_rail": "fake"})
+        mgr.register_provider(provider)
+        result = mgr.authorize_fee("quote-3", _fee())
+        assert result.status == PaymentStatus.AUTHORIZED
+        assert result.payment_id == ""  # synthetic, no real hold
+
+    def test_authorize_spend_limit(self, db):
+        p = AuthCaptureProvider(name="auth")
+        mgr = PaymentManager(
+            db=db,
+            config={"default_rail": "auth", "spend_limits": {"max_per_order_usd": 1.0}},
+        )
+        mgr.register_provider(p)
+        with pytest.raises(PaymentError, match="Spend limit"):
+            mgr.authorize_fee("quote-limit", _fee())
+
+
+class TestCaptureFee:
+    def test_capture_existing_hold(self, db):
+        p = AuthCaptureProvider(name="auth")
+        mgr = PaymentManager(db=db, config={"default_rail": "auth"})
+        mgr.register_provider(p)
+        result = mgr.capture_fee("pi_hold_123", "order-1", _fee())
+        assert result.status == PaymentStatus.COMPLETED
+        assert len(p.capture_calls) == 1
+        assert p.capture_calls[0] == "pi_hold_123"
+
+    def test_capture_without_hold_falls_back_to_charge(self, db, provider):
+        """Empty payment_id means no hold — should do a normal charge."""
+        mgr = PaymentManager(db=db, config={"default_rail": "fake"})
+        mgr.register_provider(provider)
+        result = mgr.capture_fee("", "order-2", _fee())
+        assert result.success is True
+        assert len(provider.calls) == 1  # fell back to create_payment
+
+    def test_capture_no_provider_raises(self, db):
+        mgr = PaymentManager(db=db)
+        with pytest.raises(PaymentError, match="No payment providers"):
+            mgr.capture_fee("pi_123", "order-x", _fee())
+
+
+class TestCancelFee:
+    def test_cancel_releases_hold(self, db):
+        p = AuthCaptureProvider(name="auth")
+        mgr = PaymentManager(db=db, config={"default_rail": "auth"})
+        mgr.register_provider(p)
+        result = mgr.cancel_fee("pi_hold_123")
+        assert result.status == PaymentStatus.CANCELLED
+        assert len(p.cancel_calls) == 1
+
+    def test_cancel_empty_id_is_noop(self, db, provider):
+        mgr = PaymentManager(db=db, config={"default_rail": "fake"})
+        mgr.register_provider(provider)
+        result = mgr.cancel_fee("")
+        assert result.status == PaymentStatus.CANCELLED
+        assert result.success is True
+
+    def test_cancel_fallback_for_unsupported(self, db, provider):
+        """FakeProvider doesn't have cancel_payment — should not raise."""
+        mgr = PaymentManager(db=db, config={"default_rail": "fake"})
+        mgr.register_provider(provider)
+        result = mgr.cancel_fee("pi_fake")
+        assert result.status == PaymentStatus.CANCELLED
