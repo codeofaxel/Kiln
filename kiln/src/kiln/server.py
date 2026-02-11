@@ -355,9 +355,37 @@ def _get_payment_mgr() -> PaymentManager:
     return _payment_mgr
 
 
-def _error_dict(message: str, code: str = "ERROR") -> Dict[str, Any]:
-    """Build a standardised error response dict."""
-    return {"success": False, "error": {"code": code, "message": message}}
+# Error codes that represent transient failures the caller may retry.
+_RETRYABLE_CODES = frozenset({
+    "ERROR",  # Generic printer / runtime errors are typically transient.
+    "INTERNAL_ERROR",
+    "GENERATION_TIMEOUT",
+    "RATE_LIMIT",
+})
+
+
+def _error_dict(
+    message: str,
+    code: str = "ERROR",
+    *,
+    retryable: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Build a standardised error response dict.
+
+    If *retryable* is not supplied explicitly it is inferred from *code*:
+    codes in ``_RETRYABLE_CODES`` are assumed retryable, everything else
+    (auth, validation, not-found, unsupported) is not.
+    """
+    if retryable is None:
+        retryable = code in _RETRYABLE_CODES
+    return {
+        "success": False,
+        "error": {
+            "code": code,
+            "message": message,
+            "retryable": retryable,
+        },
+    }
 
 
 def _check_auth(scope: str) -> Optional[Dict[str, Any]]:

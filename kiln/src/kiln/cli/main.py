@@ -1130,6 +1130,9 @@ def order_place(quote_id: str, shipping_id: str, json_mode: bool) -> None:
     """
     from kiln.fulfillment import OrderRequest
     from kiln.billing import BillingLedger
+    from kiln.persistence import get_db
+    from kiln.payments.manager import PaymentManager
+    from kiln.payments.base import PaymentError
 
     try:
         provider = _get_fulfillment_provider()
@@ -1139,11 +1142,23 @@ def order_place(quote_id: str, shipping_id: str, json_mode: bool) -> None:
         ))
         order_data = result.to_dict()
         if result.total_price and result.total_price > 0:
-            ledger = BillingLedger()
+            ledger = BillingLedger(db=get_db())
             fee_calc = ledger.calculate_fee(
                 result.total_price, currency=result.currency,
             )
-            ledger.record_charge(result.order_id, fee_calc)
+            try:
+                mgr = PaymentManager()
+                if mgr.available_rails:
+                    pay_result = mgr.charge_fee(result.order_id, fee_calc)
+                    order_data["payment"] = pay_result.to_dict()
+                else:
+                    ledger.record_charge(result.order_id, fee_calc)
+                    order_data["payment"] = {"status": "no_payment_method"}
+            except PaymentError:
+                ledger.record_charge(
+                    result.order_id, fee_calc, payment_status="failed",
+                )
+                order_data["payment"] = {"status": "failed"}
             order_data["kiln_fee"] = fee_calc.to_dict()
             order_data["total_with_fee"] = fee_calc.total_cost
         click.echo(format_order(order_data, json_mode=json_mode))

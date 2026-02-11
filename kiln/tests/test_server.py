@@ -73,6 +73,30 @@ class TestErrorDict:
         d = _error_dict("not found", code="FILE_NOT_FOUND")
         assert d["error"]["code"] == "FILE_NOT_FOUND"
 
+    def test_retryable_inferred_true_for_generic_error(self):
+        d = _error_dict("timeout")
+        assert d["error"]["retryable"] is True
+
+    def test_retryable_inferred_true_for_internal_error(self):
+        d = _error_dict("oops", code="INTERNAL_ERROR")
+        assert d["error"]["retryable"] is True
+
+    def test_retryable_inferred_false_for_not_found(self):
+        d = _error_dict("missing", code="NOT_FOUND")
+        assert d["error"]["retryable"] is False
+
+    def test_retryable_inferred_false_for_auth(self):
+        d = _error_dict("denied", code="AUTH_ERROR")
+        assert d["error"]["retryable"] is False
+
+    def test_retryable_inferred_false_for_unsupported(self):
+        d = _error_dict("nope", code="UNSUPPORTED")
+        assert d["error"]["retryable"] is False
+
+    def test_retryable_explicit_override(self):
+        d = _error_dict("network flake", code="NOT_FOUND", retryable=True)
+        assert d["error"]["retryable"] is True
+
 
 # ---------------------------------------------------------------------------
 # printer_status()
