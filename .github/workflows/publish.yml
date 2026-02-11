@@ -103,7 +103,7 @@ jobs:
 
     steps:
       - name: Download kiln artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: dist-kiln
           path: dist/
@@ -145,7 +145,7 @@ jobs:
 
     steps:
       - name: Download octoprint-cli artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: dist-octoprint-cli
           path: dist/
