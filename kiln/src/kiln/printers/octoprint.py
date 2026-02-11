@@ -141,6 +141,15 @@ class OctoPrintAdapter(PrinterAdapter):
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+        # Configure HTTP proxy from environment variables.
+        _http_proxy = os.environ.get("HTTP_PROXY")
+        _https_proxy = os.environ.get("HTTPS_PROXY")
+        if _http_proxy or _https_proxy:
+            self._session.proxies = {
+                "http": _http_proxy,
+                "https": _https_proxy,
+            }
+
     # -- PrinterAdapter identity properties ---------------------------------
 
     @property

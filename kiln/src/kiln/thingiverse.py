@@ -160,6 +160,15 @@ class ThingiverseClient:
         self._base_url = base_url.rstrip("/")
         self._session = session or requests.Session()
 
+        # Configure HTTP proxy from environment variables.
+        _http_proxy = os.environ.get("HTTP_PROXY")
+        _https_proxy = os.environ.get("HTTPS_PROXY")
+        if _http_proxy or _https_proxy:
+            self._session.proxies = {
+                "http": _http_proxy,
+                "https": _https_proxy,
+            }
+
     # -- low-level request helper ------------------------------------------
 
     def _request(

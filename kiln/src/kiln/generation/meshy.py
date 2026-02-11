@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 import time
 from typing import Any, Dict, List, Optional
 
@@ -179,7 +180,7 @@ class MeshyProvider(GenerationProvider):
     def download_result(
         self,
         job_id: str,
-        output_dir: str = "/tmp/kiln_generated",
+        output_dir: str = os.path.join(tempfile.gettempdir(), "kiln_generated"),
     ) -> GenerationResult:
         """Download the generated model file.
 

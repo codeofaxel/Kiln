@@ -14,6 +14,8 @@ Workflow::
 from __future__ import annotations
 
 import enum
+import os
+import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
@@ -180,7 +182,7 @@ class GenerationProvider(ABC):
     def download_result(
         self,
         job_id: str,
-        output_dir: str = "/tmp/kiln_generated",
+        output_dir: str = os.path.join(tempfile.gettempdir(), "kiln_generated"),
     ) -> GenerationResult:
         """Download the generated model to local storage.
 

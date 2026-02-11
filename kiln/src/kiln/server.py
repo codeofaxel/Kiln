@@ -40,6 +40,7 @@ import re
 import shutil
 import signal
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -193,6 +194,10 @@ _AUTO_PRINT_MARKETPLACE: bool = (
 _AUTO_PRINT_GENERATED: bool = (
     os.environ.get("KILN_AUTO_PRINT_GENERATED", "").lower() in ("1", "true", "yes")
 )
+
+# Default snapshot directory — use ~/.kiln/snapshots/ instead of /tmp to
+# avoid macOS periodic /tmp cleanup deleting saved snapshots.
+_DEFAULT_SNAPSHOT_DIR = os.path.join(os.path.expanduser("~"), ".kiln", "snapshots")
 
 # ---------------------------------------------------------------------------
 # MCP server instance
@@ -2267,11 +2272,14 @@ def model_files(thing_id: int) -> dict:
 
 @mcp.tool()
 def download_model(
-    file_id: int,
-    dest_dir: str = "/tmp/kiln_downloads",
+    file_id: int | None = None,
+    dest_dir: str = os.path.join(tempfile.gettempdir(), "kiln_downloads"),
     file_name: str | None = None,
+    model_id: str | None = None,
+    source: str = "thingiverse",
+    download_all: bool = False,
 ) -> dict:
-    """Download a model file from Thingiverse to local storage.
+    """Download model file(s) from a marketplace to local storage.
 
     **Community models are unverified.** Always preview dimensions and
     validate the mesh (``validate_generated_mesh``) before printing.
@@ -2280,11 +2288,19 @@ def download_model(
     hardware — prefer proven blueprints when possible.
 
     Args:
-        file_id: Numeric file ID (from ``model_files`` results).
+        file_id: Numeric file ID (from ``model_files`` results).  If
+            omitted and ``model_id`` is provided, downloads all files
+            for the model.
         dest_dir: Local directory to save the file in (default:
-            ``/tmp/kiln_downloads``).
-        file_name: Override the saved file name.  Defaults to the
-            original name from Thingiverse.
+            the system temp directory).
+        file_name: Override the saved file name (single-file mode only).
+            Defaults to the original name from the marketplace.
+        model_id: Model/thing ID.  When ``file_id`` is omitted,
+            all files for this model are downloaded.
+        source: Marketplace source — ``"thingiverse"`` (default),
+            ``"myminifactory"``, etc.
+        download_all: When True, downloads all files for the model
+            regardless of whether ``file_id`` is provided.
 
     After downloading, validate with ``validate_generated_mesh``, then
     upload to a printer with ``upload_file`` and print with ``start_print``.
@@ -2292,6 +2308,71 @@ def download_model(
     if disk_err := _check_disk_space(dest_dir):
         return disk_err
     try:
+        # Multi-file download: model_id provided without file_id, or download_all
+        if (file_id is None or download_all) and model_id is not None:
+            if _marketplace_registry.count == 0:
+                _init_marketplace_registry()
+
+            mkt = _marketplace_registry.get(source)
+            if not mkt.supports_download:
+                return _error_dict(
+                    f"{mkt.display_name} does not support direct downloads.",
+                    code="UNSUPPORTED",
+                )
+
+            files = mkt.get_files(str(model_id))
+            if not files:
+                return _error_dict(
+                    f"No files found for model {model_id} on {source}.",
+                    code="NOT_FOUND",
+                )
+
+            downloaded: list[dict] = []
+            errors: list[dict] = []
+            for mf in files:
+                try:
+                    path = mkt.download_file(
+                        mf.id, dest_dir, file_name=None,
+                    )
+                    downloaded.append({
+                        "file_id": mf.id,
+                        "file_name": mf.name,
+                        "local_path": path,
+                    })
+                except (MarketplaceError, RuntimeError) as exc:
+                    errors.append({
+                        "file_id": mf.id,
+                        "file_name": mf.name,
+                        "error": str(exc),
+                    })
+
+            return {
+                "success": len(downloaded) > 0,
+                "model_id": model_id,
+                "source": source,
+                "downloaded": downloaded,
+                "errors": errors,
+                "total_files": len(files),
+                "downloaded_count": len(downloaded),
+                "verification_status": "unverified",
+                "safety_notice": (
+                    "These are community-uploaded models and have NOT been "
+                    "verified for print safety or quality. Validate each mesh "
+                    "with validate_generated_mesh before printing. Prefer "
+                    "proven models with high download counts."
+                ),
+                "message": (
+                    f"Downloaded {len(downloaded)}/{len(files)} files "
+                    f"from {source} to {dest_dir}"
+                ),
+            }
+
+        # Single-file download (legacy Thingiverse path)
+        if file_id is None:
+            return _error_dict(
+                "Either file_id or model_id must be provided.",
+                code="INVALID_INPUT",
+            )
         client = _get_thingiverse()
         path = client.download_file(file_id, dest_dir, file_name=file_name)
         return {
@@ -2307,9 +2388,12 @@ def download_model(
             ),
             "message": f"Downloaded to {path}",
         }
-    except ThingiverseNotFoundError:
-        return _error_dict(f"File {file_id} not found.", code="NOT_FOUND")
-    except (ThingiverseError, RuntimeError) as exc:
+    except (ThingiverseNotFoundError, MktNotFoundError):
+        return _error_dict(
+            f"File {file_id or model_id} not found on {source}.",
+            code="NOT_FOUND",
+        )
+    except (ThingiverseError, MarketplaceError, RuntimeError) as exc:
         return _error_dict(str(exc))
     except Exception as exc:
         logger.exception("Unexpected error in download_model")
@@ -2318,11 +2402,12 @@ def download_model(
 
 @mcp.tool()
 def download_and_upload(
-    file_id: str,
+    file_id: str | None = None,
     source: str = "thingiverse",
     printer_name: str | None = None,
+    model_id: str | None = None,
 ) -> dict:
-    """Download a model file from any marketplace and upload it to a printer.
+    """Download model file(s) from any marketplace and upload to a printer.
 
     **Community models are unverified.** This tool downloads and uploads
     but does NOT start printing automatically.  You must call
@@ -2330,22 +2415,120 @@ def download_and_upload(
     3D printers are delicate hardware — misconfigured or malformed models
     can cause physical damage.
 
+    When ``file_id`` is provided, downloads and uploads that single file.
+    When ``model_id`` is provided without ``file_id``, downloads and
+    uploads all printable files (.stl, .gcode, .3mf) for the model.
+
     Args:
         file_id: File ID (from ``model_files`` results).  For Thingiverse
             this is a numeric ID; for MyMiniFactory it's the file ID string.
+            If omitted and ``model_id`` is given, all printable files are
+            downloaded and uploaded.
         source: Which marketplace to download from — "thingiverse" (default)
             or "myminifactory".  Cults3D does not support direct downloads.
         printer_name: Target printer name.  Omit to use the default printer.
+        model_id: Model/thing ID.  When ``file_id`` is omitted, all
+            printable files for this model are downloaded and uploaded.
 
     After uploading, review the model and call ``start_print`` to begin.
     """
+    _dl_dir = os.path.join(tempfile.gettempdir(), "kiln_downloads")
     if err := _check_auth("files"):
         return err
-    if disk_err := _check_disk_space("/tmp/kiln_downloads"):
+    if disk_err := _check_disk_space(_dl_dir):
         return disk_err
     try:
         if _marketplace_registry.count == 0:
             _init_marketplace_registry()
+
+        # Resolve printer adapter once
+        if printer_name:
+            adapter = _registry.get(printer_name)
+        else:
+            adapter = _get_adapter()
+
+        # -----------------------------------------------------------------
+        # Multi-file mode: model_id without file_id
+        # -----------------------------------------------------------------
+        if file_id is None and model_id is not None:
+            mkt = _marketplace_registry.get(source)
+            if not mkt.supports_download:
+                return _error_dict(
+                    f"{mkt.display_name} does not support direct downloads.",
+                    code="UNSUPPORTED",
+                )
+
+            all_files = mkt.get_files(str(model_id))
+            if not all_files:
+                return _error_dict(
+                    f"No files found for model {model_id} on {source}.",
+                    code="NOT_FOUND",
+                )
+
+            # Filter to printable extensions
+            _printable_exts = {"stl", "gcode", "gco", "g", "3mf"}
+            printable_files = [
+                mf for mf in all_files
+                if (
+                    mf.name.rsplit(".", 1)[-1].lower() if "." in mf.name else ""
+                ) in _printable_exts
+            ]
+            if not printable_files:
+                return _error_dict(
+                    f"No printable files (.stl, .gcode, .3mf) found for "
+                    f"model {model_id} on {source}.",
+                    code="NOT_FOUND",
+                )
+
+            uploaded: list[dict] = []
+            errors: list[dict] = []
+            for mf in printable_files:
+                try:
+                    local_path = mkt.download_file(mf.id, _dl_dir)
+                    upload_result = adapter.upload_file(local_path)
+                    up_name = upload_result.file_name or os.path.basename(local_path)
+                    uploaded.append({
+                        "file_id": mf.id,
+                        "file_name": up_name,
+                        "local_path": local_path,
+                        "upload": upload_result.to_dict(),
+                    })
+                except (MarketplaceError, PrinterError, RuntimeError) as exc:
+                    errors.append({
+                        "file_id": mf.id,
+                        "file_name": mf.name,
+                        "error": str(exc),
+                    })
+
+            return {
+                "success": len(uploaded) > 0,
+                "model_id": model_id,
+                "source": source,
+                "uploaded": uploaded,
+                "errors": errors,
+                "total_printable_files": len(printable_files),
+                "uploaded_count": len(uploaded),
+                "verification_status": "unverified",
+                "auto_print_enabled": _AUTO_PRINT_MARKETPLACE,
+                "safety_notice": (
+                    "Models uploaded but NOT started. Community models are "
+                    "unverified — review before printing. Call start_print "
+                    "to begin printing after review."
+                ),
+                "message": (
+                    f"Downloaded and uploaded {len(uploaded)}/"
+                    f"{len(printable_files)} printable files from {source}."
+                ),
+            }
+
+        # -----------------------------------------------------------------
+        # Single-file mode (original behavior)
+        # -----------------------------------------------------------------
+        if file_id is None:
+            return _error_dict(
+                "Either file_id or model_id must be provided.",
+                code="INVALID_INPUT",
+            )
 
         mkt = _marketplace_registry.get(source) if source != "thingiverse" else None
 
@@ -2356,18 +2539,13 @@ def download_and_upload(
                     f"{mkt.display_name} does not support direct downloads.",
                     code="UNSUPPORTED",
                 )
-            local_path = mkt.download_file(str(file_id), "/tmp/kiln_downloads")
+            local_path = mkt.download_file(str(file_id), _dl_dir)
         else:
             # Fallback to legacy Thingiverse client
             client = _get_thingiverse()
-            local_path = client.download_file(int(file_id), "/tmp/kiln_downloads")
+            local_path = client.download_file(int(file_id), _dl_dir)
 
         # Step 2: Upload to printer
-        if printer_name:
-            adapter = _registry.get(printer_name)
-        else:
-            adapter = _get_adapter()
-
         upload_result = adapter.upload_file(local_path)
         file_name = upload_result.file_name or os.path.basename(local_path)
 
@@ -2411,12 +2589,15 @@ def download_and_upload(
             )
             resp["message"] = (
                 f"Downloaded from {source} and uploaded to printer. "
-                f"Call start_print('{file_name}') to begin printing."
+                f"Call start_print(\'{file_name}\') to begin printing."
             )
 
         return resp
     except (ThingiverseNotFoundError, MktNotFoundError):
-        return _error_dict(f"File {file_id} not found on {source}.", code="NOT_FOUND")
+        return _error_dict(
+            f"File {file_id or model_id} not found on {source}.",
+            code="NOT_FOUND",
+        )
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (ThingiverseError, MarketplaceError, PrinterError, RuntimeError) as exc:
@@ -2515,7 +2696,7 @@ def slice_model(
     Args:
         input_path: Path to the input file (STL, 3MF, STEP, OBJ, AMF).
         output_dir: Directory for the output G-code.  Defaults to
-            ``/tmp/kiln_sliced``.
+            the system temp directory.
         profile: Path to a slicer profile/config file (.ini or .json).
         slicer_path: Explicit path to the slicer binary.  Auto-detected
             if omitted.
@@ -2663,9 +2844,8 @@ def printer_snapshot(
         if save_path:
             _safe = os.path.realpath(save_path)
             _home = os.path.expanduser("~")
-            import tempfile as _tempfile
-            _tmpdir = os.path.realpath(_tempfile.gettempdir())
-            _allowed = (_home, "/tmp", "/private/tmp", _tmpdir)
+            _tmpdir = os.path.realpath(tempfile.gettempdir())
+            _allowed = (_home, _tmpdir)
             if not any(_safe.startswith(p) for p in _allowed):
                 return _error_dict(
                     "save_path must be under home directory or a temp directory.",
@@ -3987,12 +4167,13 @@ def validate_print_quality(
                         "size_bytes": len(image_data),
                     }
                     if save_snapshot:
-                        # Sanitise path — restrict to home dir or /tmp
+                        # Sanitise path — restrict to home dir or temp dir
                         _safe = os.path.abspath(save_snapshot)
                         _home = os.path.expanduser("~")
-                        if not (_safe.startswith(_home) or _safe.startswith("/tmp")):
+                        _tmpdir = os.path.realpath(tempfile.gettempdir())
+                        if not (_safe.startswith(_home) or _safe.startswith(_tmpdir)):
                             return _error_dict(
-                                "save_snapshot path must be under home directory or /tmp.",
+                                "save_snapshot path must be under home directory or temp directory.",
                                 code="VALIDATION_ERROR",
                             )
                         os.makedirs(os.path.dirname(_safe) or ".", exist_ok=True)
@@ -4470,11 +4651,11 @@ def download_generated_model(
         job_id: Job ID of a completed generation job.
         provider: Provider that owns the job (``"meshy"`` or ``"openscad"``).
         output_path: Directory to save the file.  Defaults to
-            ``/tmp/kiln_generated``.
+            the system temp directory.
     """
     if err := _check_auth("generate"):
         return err
-    output_dir = output_path or "/tmp/kiln_generated"
+    output_dir = output_path or os.path.join(tempfile.gettempdir(), "kiln_generated")
     if disk_err := _check_disk_space(output_dir):
         return disk_err
     try:
@@ -5133,12 +5314,13 @@ def monitor_print_vision(
                         "captured_at": time.time(),
                     }
                     if save_snapshot:
-                        # Sanitise path — restrict to home dir or /tmp
+                        # Sanitise path — restrict to home dir or temp dir
                         _safe = os.path.abspath(save_snapshot)
                         _home = os.path.expanduser("~")
-                        if not (_safe.startswith(_home) or _safe.startswith("/tmp")):
+                        _tmpdir = os.path.realpath(tempfile.gettempdir())
+                        if not (_safe.startswith(_home) or _safe.startswith(_tmpdir)):
                             return _error_dict(
-                                "save_snapshot path must be under home directory or /tmp.",
+                                "save_snapshot path must be under home directory or temp directory.",
                                 code="VALIDATION_ERROR",
                             )
                         os.makedirs(os.path.dirname(_safe) or ".", exist_ok=True)

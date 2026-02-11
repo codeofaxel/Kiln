@@ -12,6 +12,12 @@ Keys can also be managed programmatically:
     auth = AuthManager()
     auth.create_key("my-agent", scopes=["read", "write"])
     auth.verify("sk_abc123...")
+
+Key rotation is supported with a configurable grace period:
+
+    auth.rotate_key("sk_old_key...", "sk_new_key...", grace_period=86400)
+    auth.list_keys()     # shows status: active / deprecated / expired
+    auth.revoke_key("sk_old_key...")  # immediately invalidate
 """
 
 from __future__ import annotations
@@ -23,12 +29,15 @@ import os
 import secrets
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Literal, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 # Prefix for generated keys
 _KEY_PREFIX = "sk_kiln_"
+
+# Default grace period for key rotation (24 hours)
+_DEFAULT_GRACE_PERIOD = 86400  # seconds
 
 
 @dataclass
@@ -41,10 +50,24 @@ class ApiKey:
     active: bool = True
     created_at: float = field(default_factory=time.time)
     last_used_at: Optional[float] = None
+    deprecated_at: Optional[float] = None
+    expires_at: Optional[float] = None
+
+    @property
+    def status(self) -> Literal["active", "deprecated", "expired", "revoked"]:
+        """Derive current key status from metadata."""
+        if not self.active:
+            return "revoked"
+        if self.expires_at is not None and time.time() >= self.expires_at:
+            return "expired"
+        if self.deprecated_at is not None:
+            return "deprecated"
+        return "active"
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["scopes"] = sorted(self.scopes)
+        data["status"] = self.status
         return data
 
 
@@ -116,14 +139,90 @@ class AuthManager:
         logger.info("Created API key %r (id=%s)", name, key_id)
         return api_key, raw_key
 
+    def rotate_key(
+        self,
+        old_key: str,
+        new_key: Optional[str] = None,
+        grace_period: float = _DEFAULT_GRACE_PERIOD,
+    ) -> tuple[ApiKey, str]:
+        """Rotate an API key: deprecate the old one and activate a new one.
+
+        During the grace period, both old and new keys are accepted.
+        After the grace period, the old key stops working.
+
+        Args:
+            old_key: The raw old API key string.
+            new_key: Optional raw new key. If ``None``, a new key is generated.
+            grace_period: Seconds the old key remains valid (default 24 hours).
+
+        Returns:
+            (new ApiKey metadata, raw new key string).
+
+        Raises:
+            AuthError: If the old key is not found, already revoked, or expired.
+        """
+        old_hash = self._hash_key(old_key)
+        old_api_key = self._keys.get(old_hash)
+
+        if old_api_key is None:
+            raise AuthError("Old key not found — cannot rotate an unregistered key")
+
+        old_status = old_api_key.status
+        if old_status == "revoked":
+            raise AuthError("Old key has been revoked — cannot rotate")
+        if old_status == "expired":
+            raise AuthError("Old key has already expired — cannot rotate")
+
+        # Mark old key as deprecated with expiry
+        now = time.time()
+        old_api_key.deprecated_at = now
+        old_api_key.expires_at = now + grace_period
+        logger.info(
+            "Deprecated API key %r (id=%s), expires in %.0fs",
+            old_api_key.name, old_api_key.id, grace_period,
+        )
+
+        # Create the replacement key
+        raw_new = new_key if new_key else self.generate_key()
+        new_hash = self._hash_key(raw_new)
+        new_key_id = secrets.token_hex(6)
+
+        new_api_key = ApiKey(
+            id=new_key_id,
+            name=f"{old_api_key.name} (rotated)",
+            key_hash=new_hash,
+            scopes=set(old_api_key.scopes),
+        )
+        self._keys[new_hash] = new_api_key
+        logger.info("Created rotated API key (id=%s) replacing (id=%s)", new_key_id, old_api_key.id)
+        return new_api_key, raw_new
+
     def revoke_key(self, key_id: str) -> bool:
-        """Revoke (deactivate) a key by ID."""
+        """Revoke (deactivate) a key by its internal ID.
+
+        Returns True if the key was found and revoked, False otherwise.
+        """
         for api_key in self._keys.values():
             if api_key.id == key_id:
                 api_key.active = False
+                api_key.deprecated_at = api_key.deprecated_at or time.time()
                 logger.info("Revoked API key %r (id=%s)", api_key.name, key_id)
                 return True
         return False
+
+    def revoke_key_by_raw(self, raw_key: str) -> bool:
+        """Immediately invalidate a key by its raw key string.
+
+        Returns True if the key was found and revoked, False otherwise.
+        """
+        key_hash = self._hash_key(raw_key)
+        api_key = self._keys.get(key_hash)
+        if api_key is None:
+            return False
+        api_key.active = False
+        api_key.deprecated_at = api_key.deprecated_at or time.time()
+        logger.info("Revoked API key %r (id=%s)", api_key.name, api_key.id)
+        return True
 
     def delete_key(self, key_id: str) -> bool:
         """Permanently delete a key by ID."""
@@ -138,14 +237,18 @@ class AuthManager:
         return False
 
     def list_keys(self) -> List[ApiKey]:
-        """Return all registered keys (without the raw key values)."""
+        """Return all registered keys.
+
+        Use ``ApiKey.to_dict()`` on individual entries if you need a
+        serialisable representation.
+        """
         return list(self._keys.values())
 
     def verify(self, key: str, required_scope: Optional[str] = None) -> ApiKey:
         """Verify an API key and optionally check scope.
 
         Returns the ApiKey if valid.
-        Raises AuthError if invalid, revoked, or missing scope.
+        Raises AuthError if invalid, revoked, expired, or missing scope.
         """
         if not self._enabled:
             # Auth disabled -- return a permissive stub
@@ -172,6 +275,10 @@ class AuthManager:
 
         if not api_key.active:
             raise AuthError("API key has been revoked")
+
+        # Check expiry (for deprecated/rotated keys past their grace period)
+        if api_key.expires_at is not None and time.time() >= api_key.expires_at:
+            raise AuthError("API key has expired (rotation grace period ended)")
 
         if required_scope and required_scope not in api_key.scopes:
             raise AuthError(f"Key missing required scope: {required_scope!r}")
