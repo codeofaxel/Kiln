@@ -376,3 +376,65 @@ def get_tool_registry() -> Dict[str, Callable]:
     """
     _ensure_loaded()
     return dict(_TOOL_REGISTRY)
+
+
+# ---------------------------------------------------------------------------
+# Safety-annotated schemas
+# ---------------------------------------------------------------------------
+
+_SAFETY_DATA: Optional[dict] = None
+
+
+def _load_tool_safety() -> dict:
+    """Load tool safety classifications from the bundled JSON data file."""
+    global _SAFETY_DATA
+    if _SAFETY_DATA is not None:
+        return _SAFETY_DATA
+
+    import json
+    from importlib import resources
+
+    try:
+        data_pkg = resources.files("kiln") / "data" / "tool_safety.json"
+        raw = data_pkg.read_text(encoding="utf-8")
+    except (FileNotFoundError, TypeError):
+        # Fallback for editable installs or non-standard layouts.
+        import os
+
+        fallback = os.path.join(
+            os.path.dirname(__file__), "data", "tool_safety.json"
+        )
+        with open(fallback, "r") as fh:
+            raw = fh.read()
+
+    data = json.loads(raw)
+    _SAFETY_DATA = data.get("classifications", {})
+    return _SAFETY_DATA
+
+
+def get_annotated_tool_schemas(tier: str = "full") -> List[dict]:
+    """Get OpenAI schemas enriched with safety-level metadata.
+
+    Each schema dict gains a ``safety`` key under ``function`` containing
+    the tool's safety classification from ``data/tool_safety.json``.
+
+    Args:
+        tier: Tool tier name (``"essential"``, ``"standard"``, ``"full"``).
+
+    Returns:
+        A list of annotated OpenAI function-calling schema dicts.
+    """
+    import copy
+
+    schemas = get_all_tool_schemas(tier)
+    safety = _load_tool_safety()
+    annotated = []
+    for schema in schemas:
+        schema = copy.deepcopy(schema)
+        name = schema.get("function", {}).get("name", "")
+        if name in safety:
+            schema["function"]["safety"] = safety[name]
+        else:
+            schema["function"]["safety"] = {"level": "safe"}
+        annotated.append(schema)
+    return annotated
