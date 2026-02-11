@@ -41,6 +41,10 @@ _STATUS_MAP: Dict[str, GenerationStatus] = {
 }
 
 
+_MAX_RETRIES = 3
+_RETRY_BACKOFF_BASE = 2.0  # seconds: 2, 4, 8
+
+
 class MeshyProvider(GenerationProvider):
     """Meshy text-to-3D generation via REST API.
 
@@ -109,22 +113,7 @@ class MeshyProvider(GenerationProvider):
         if style:
             body["art_style"] = style
 
-        try:
-            resp = self._session.post(
-                f"{_BASE_URL}/text-to-3d",
-                json=body,
-                timeout=self._timeout,
-            )
-        except requests.ConnectionError:
-            raise GenerationError(
-                "Could not connect to Meshy API.", code="CONNECTION_ERROR"
-            )
-        except requests.Timeout:
-            raise GenerationError(
-                "Meshy API request timed out.", code="TIMEOUT"
-            )
-
-        self._handle_http_error(resp)
+        resp = self._request("POST", f"{_BASE_URL}/text-to-3d", json_body=body)
 
         data = resp.json()
         task_id = data.get("result", "")
@@ -155,21 +144,7 @@ class MeshyProvider(GenerationProvider):
         Returns:
             Updated :class:`GenerationJob`.
         """
-        try:
-            resp = self._session.get(
-                f"{_BASE_URL}/text-to-3d/{job_id}",
-                timeout=self._timeout,
-            )
-        except requests.ConnectionError:
-            raise GenerationError(
-                "Could not connect to Meshy API.", code="CONNECTION_ERROR"
-            )
-        except requests.Timeout:
-            raise GenerationError(
-                "Meshy API request timed out.", code="TIMEOUT"
-            )
-
-        self._handle_http_error(resp)
+        resp = self._request("GET", f"{_BASE_URL}/text-to-3d/{job_id}")
 
         data = resp.json()
         status_str = data.get("status", "PENDING")
@@ -242,18 +217,7 @@ class MeshyProvider(GenerationProvider):
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{job_id}.{ext}")
 
-        try:
-            resp = self._session.get(url, timeout=120, stream=True)
-            resp.raise_for_status()
-        except requests.ConnectionError:
-            raise GenerationError(
-                "Could not download model from Meshy.", code="CONNECTION_ERROR"
-            )
-        except requests.HTTPError as exc:
-            raise GenerationError(
-                f"Download failed: HTTP {exc.response.status_code}",
-                code="DOWNLOAD_ERROR",
-            )
+        resp = self._request("GET", url, timeout=120, stream=True)
 
         with open(out_path, "wb") as fh:
             for chunk in resp.iter_content(chunk_size=65536):
@@ -277,6 +241,60 @@ class MeshyProvider(GenerationProvider):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        json_body: Optional[Dict[str, Any]] = None,
+        timeout: Optional[int] = None,
+        stream: bool = False,
+    ) -> requests.Response:
+        """Make an HTTP request with rate-limit retry and backoff.
+
+        Retries up to ``_MAX_RETRIES`` times on HTTP 429 (rate limit)
+        and 502/503/504 (transient server errors).  Uses exponential
+        backoff: 2s, 4s, 8s.
+        """
+        req_timeout = timeout or self._timeout
+        last_exc: Exception | None = None
+
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                resp = self._session.request(
+                    method,
+                    url,
+                    json=json_body,
+                    timeout=req_timeout,
+                    stream=stream,
+                )
+            except requests.ConnectionError:
+                raise GenerationError(
+                    "Could not connect to Meshy API.", code="CONNECTION_ERROR"
+                )
+            except requests.Timeout:
+                raise GenerationError(
+                    "Meshy API request timed out.", code="TIMEOUT"
+                )
+
+            if resp.status_code in (429, 502, 503, 504) and attempt < _MAX_RETRIES:
+                wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
+                logger.warning(
+                    "Meshy API returned %d, retrying in %.0fs (attempt %d/%d)",
+                    resp.status_code, wait, attempt + 1, _MAX_RETRIES,
+                )
+                time.sleep(wait)
+                last_exc = None
+                continue
+
+            self._handle_http_error(resp)
+            return resp
+
+        # Should not reach here, but just in case.
+        raise GenerationError(
+            "Meshy API request failed after retries.", code="RETRY_EXHAUSTED"
+        )
 
     def _handle_http_error(self, resp: requests.Response) -> None:
         """Raise a typed exception for non-2xx responses."""

@@ -31,12 +31,14 @@ from kiln.printers.base import (
 )
 from kiln.server import (
     _error_dict,
+    _generation_providers,
     _get_generation_provider,
     await_generation,
     download_generated_model,
     generate_and_print,
     generate_model,
     generation_status,
+    list_generation_providers,
     validate_generated_mesh,
 )
 
@@ -507,3 +509,254 @@ class TestValidateGeneratedMesh:
         assert result["validation"]["valid"] is False
         assert "Zero volume" in result["message"]
         assert "Non-manifold" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# list_generation_providers()
+# ---------------------------------------------------------------------------
+
+
+class TestListGenerationProviders:
+    """Tests for the list_generation_providers MCP tool."""
+
+    def test_returns_provider_list(self):
+        result = list_generation_providers()
+        assert result["success"] is True
+        assert isinstance(result["providers"], list)
+        assert len(result["providers"]) >= 2
+
+    def test_meshy_provider_metadata(self):
+        result = list_generation_providers()
+        meshy = next(p for p in result["providers"] if p["name"] == "meshy")
+        assert meshy["display_name"] == "Meshy"
+        assert meshy["requires_api_key"] is True
+        assert meshy["api_key_env"] == "KILN_MESHY_API_KEY"
+        assert isinstance(meshy["api_key_set"], bool)
+        assert "realistic" in meshy["styles"]
+        assert "sculpture" in meshy["styles"]
+        assert meshy["async"] is True
+
+    def test_openscad_provider_metadata(self):
+        result = list_generation_providers()
+        openscad = next(p for p in result["providers"] if p["name"] == "openscad")
+        assert openscad["display_name"] == "OpenSCAD"
+        assert openscad["requires_api_key"] is False
+        assert openscad["styles"] == []
+        assert openscad["async"] is False
+
+
+# ---------------------------------------------------------------------------
+# Provider singleton caching
+# ---------------------------------------------------------------------------
+
+
+class TestProviderCaching:
+    """Tests for _get_generation_provider singleton cache."""
+
+    def test_same_provider_returns_same_instance(self):
+        """Calling with the same name twice returns the cached instance."""
+        _generation_providers.clear()
+        with patch("kiln.server.MeshyProvider") as MockMeshy:
+            instance = MagicMock()
+            MockMeshy.return_value = instance
+            first = _get_generation_provider("meshy")
+            second = _get_generation_provider("meshy")
+        assert first is second
+        # Constructor called only once.
+        assert MockMeshy.call_count == 1
+        _generation_providers.clear()
+
+    def test_different_providers_are_distinct(self):
+        """Different provider names return different instances."""
+        _generation_providers.clear()
+        with patch("kiln.server.MeshyProvider") as MockMeshy, \
+             patch("kiln.server.OpenSCADProvider") as MockOpenSCAD:
+            MockMeshy.return_value = MagicMock()
+            MockOpenSCAD.return_value = MagicMock()
+            meshy = _get_generation_provider("meshy")
+            openscad = _get_generation_provider("openscad")
+        assert meshy is not openscad
+        _generation_providers.clear()
+
+    def test_unknown_provider_raises(self):
+        """Unknown provider name raises GenerationError."""
+        _generation_providers.clear()
+        from kiln.generation.base import GenerationError
+        with pytest.raises(GenerationError, match="Unknown generation provider"):
+            _get_generation_provider("nonexistent")
+        _generation_providers.clear()
+
+
+# ---------------------------------------------------------------------------
+# Dimensions in download response
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadDimensions:
+    """Tests for dimensions dict returned by download_generated_model."""
+
+    @_AUTH_PATCH
+    @patch("kiln.server.validate_mesh")
+    @patch("kiln.server._get_generation_provider")
+    def test_dimensions_present_for_stl(self, mock_get_provider, mock_validate, _auth):
+        """Download of STL should include dimensions from bounding box."""
+        provider = MagicMock()
+        provider.download_result.return_value = _make_result(fmt="stl")
+        mock_get_provider.return_value = provider
+
+        mock_validate.return_value = MeshValidationResult(
+            valid=True,
+            errors=[],
+            warnings=[],
+            triangle_count=100,
+            vertex_count=50,
+            is_manifold=True,
+            bounding_box={
+                "x_min": 0.0, "x_max": 20.0,
+                "y_min": 5.0, "y_max": 15.0,
+                "z_min": 0.0, "z_max": 30.0,
+            },
+        )
+
+        result = download_generated_model("test-job-123", provider="meshy")
+        assert result["success"] is True
+        dims = result["dimensions"]
+        assert dims is not None
+        assert dims["width_mm"] == 20.0
+        assert dims["depth_mm"] == 10.0
+        assert dims["height_mm"] == 30.0
+        assert "20.0" in dims["summary"]
+        assert "10.0" in dims["summary"]
+        assert "30.0" in dims["summary"]
+
+    @_AUTH_PATCH
+    @patch("kiln.server.validate_mesh")
+    @patch("kiln.server._get_generation_provider")
+    def test_dimensions_none_for_non_stl(self, mock_get_provider, mock_validate, _auth):
+        """GLB format should have no dimensions (no validation)."""
+        provider = MagicMock()
+        provider.download_result.return_value = _make_result(fmt="glb")
+        mock_get_provider.return_value = provider
+
+        result = download_generated_model("test-job-123")
+        assert result["success"] is True
+        assert result["dimensions"] is None
+
+    @_AUTH_PATCH
+    @patch("kiln.server.validate_mesh")
+    @patch("kiln.server._get_generation_provider")
+    def test_dimensions_none_when_no_bounding_box(self, mock_get_provider, mock_validate, _auth):
+        """If validation has no bounding box, dimensions should be None."""
+        provider = MagicMock()
+        provider.download_result.return_value = _make_result(fmt="stl")
+        mock_get_provider.return_value = provider
+
+        mock_validate.return_value = MeshValidationResult(
+            valid=True,
+            errors=[],
+            warnings=[],
+            triangle_count=100,
+            vertex_count=50,
+            is_manifold=True,
+            bounding_box=None,
+        )
+
+        result = download_generated_model("test-job-123")
+        assert result["success"] is True
+        assert result["dimensions"] is None
+
+
+# ---------------------------------------------------------------------------
+# OBJ -> STL auto-conversion in download pipeline
+# ---------------------------------------------------------------------------
+
+
+class TestObjToStlAutoConversion:
+    """Tests for auto-convert OBJ to STL in download_generated_model."""
+
+    @_AUTH_PATCH
+    @patch("kiln.server.os.path.getsize", return_value=50000)
+    @patch("kiln.server.convert_to_stl")
+    @patch("kiln.server.validate_mesh")
+    @patch("kiln.server._get_generation_provider")
+    def test_obj_auto_converted_to_stl(
+        self, mock_get_provider, mock_validate, mock_convert, mock_getsize, _auth,
+    ):
+        """When provider returns OBJ, it is automatically converted to STL."""
+        provider = MagicMock()
+        provider.download_result.return_value = _make_result(
+            fmt="obj", local_path="/tmp/kiln_generated/model.obj",
+        )
+        mock_get_provider.return_value = provider
+        mock_convert.return_value = "/tmp/kiln_generated/model.stl"
+        mock_validate.return_value = MeshValidationResult(
+            valid=True,
+            errors=[],
+            warnings=[],
+            triangle_count=100,
+            vertex_count=50,
+            is_manifold=True,
+            bounding_box={
+                "x_min": 0.0, "x_max": 10.0,
+                "y_min": 0.0, "y_max": 10.0,
+                "z_min": 0.0, "z_max": 10.0,
+            },
+        )
+
+        result = download_generated_model("test-job-123")
+        assert result["success"] is True
+        mock_convert.assert_called_once_with("/tmp/kiln_generated/model.obj")
+        # After conversion, the result should reference the STL.
+        assert result["result"]["format"] == "stl"
+        assert result["result"]["local_path"] == "/tmp/kiln_generated/model.stl"
+
+    @_AUTH_PATCH
+    @patch("kiln.server.convert_to_stl")
+    @patch("kiln.server.validate_mesh")
+    @patch("kiln.server._get_generation_provider")
+    def test_obj_conversion_failure_keeps_obj(
+        self, mock_get_provider, mock_validate, mock_convert, _auth,
+    ):
+        """If OBJ->STL conversion fails, the original OBJ is kept."""
+        provider = MagicMock()
+        provider.download_result.return_value = _make_result(
+            fmt="obj", local_path="/tmp/kiln_generated/model.obj",
+        )
+        mock_get_provider.return_value = provider
+        mock_convert.side_effect = ValueError("parse error")
+        mock_validate.return_value = MeshValidationResult(
+            valid=True,
+            errors=[],
+            warnings=[],
+            triangle_count=100,
+            vertex_count=50,
+            is_manifold=True,
+            bounding_box={
+                "x_min": 0.0, "x_max": 10.0,
+                "y_min": 0.0, "y_max": 10.0,
+                "z_min": 0.0, "z_max": 10.0,
+            },
+        )
+
+        result = download_generated_model("test-job-123")
+        assert result["success"] is True
+        # Should fall back to OBJ.
+        assert result["result"]["format"] == "obj"
+        assert result["result"]["local_path"] == "/tmp/kiln_generated/model.obj"
+
+    @_AUTH_PATCH
+    @patch("kiln.server.convert_to_stl")
+    @patch("kiln.server.validate_mesh")
+    @patch("kiln.server._get_generation_provider")
+    def test_stl_format_not_converted(
+        self, mock_get_provider, mock_validate, mock_convert, _auth,
+    ):
+        """STL results are not passed through convert_to_stl."""
+        provider = MagicMock()
+        provider.download_result.return_value = _make_result(fmt="stl")
+        mock_get_provider.return_value = provider
+        mock_validate.return_value = _make_validation(valid=True)
+
+        result = download_generated_model("test-job-123")
+        assert result["success"] is True
+        mock_convert.assert_not_called()
