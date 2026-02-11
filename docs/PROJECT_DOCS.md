@@ -42,7 +42,7 @@ Kiln is agentic infrastructure for physical fabrication. It provides a unified i
 
 **Mesh Validation** — Pipeline that checks generated STL/OBJ files for 3D-printing readiness: geometry parsing, manifold checks, dimension limits, polygon count validation. Uses pure Python (no external mesh libraries).
 
-**Job Queue** — Priority queue backed by SQLite. Jobs are dispatched to idle printers by a background scheduler.
+**Job Queue** — Priority queue backed by SQLite. Jobs are dispatched to idle printers by a background scheduler with history-based smart routing (best-performing printer for the job's file/material is preferred).
 
 **DeviceType** — Enum classifying physical devices: `FDM_PRINTER`, `SLA_PRINTER`, `CNC_ROUTER`, `LASER_CUTTER`, `GENERIC`. Enables future expansion beyond 3D printing.
 
@@ -279,7 +279,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 | Tool | Input | Output |
 |---|---|---|
-| `submit_job` | `filename`, `printer`, `priority` | Job ID |
+| `submit_job` | `filename`, `printer`, `priority`, `metadata` | Job ID (routes to best printer via historical success rate when printer is unspecified) |
 | `job_status` | `job_id` | Job state and progress |
 | `queue_summary` | — | Queue overview |
 | `cancel_job` | `job_id` | Confirmation |
@@ -675,7 +675,7 @@ kiln/src/kiln/
     slicer.py            # PrusaSlicer/OrcaSlicer integration
     registry.py          # Fleet printer registry
     queue.py             # Priority job queue
-    scheduler.py         # Background job dispatcher
+    scheduler.py         # Background job dispatcher with smart routing
     events.py            # Pub/sub event bus
     persistence.py       # SQLite storage
     webhooks.py          # Webhook delivery

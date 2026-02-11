@@ -145,6 +145,8 @@ The `JobQueue` accepts print jobs with optional priority levels and dispatches t
 
 The `Scheduler` runs a background loop that matches pending jobs to idle printers. When a printer finishes a job, the scheduler automatically dispatches the next job in the queue. Failed jobs are retried up to a configurable limit (default 2 retries) before being permanently marked as failed — transient errors like network timeouts don't kill a batch run. This enables unattended batch production.
 
+For unassigned jobs (no explicit printer target), the scheduler applies **history-based smart routing**: it queries the persistence layer for each candidate printer's historical success rate with the job's file hash and material type, then dispatches to the printer with the highest success rate. Printers without relevant history fall back to default ordering. This allows the fleet to self-optimize over time — printers that consistently succeed with a given material or geometry are automatically preferred.
+
 ## 5. Event System and Webhooks
 
 ### 5.1 Event Bus

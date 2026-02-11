@@ -672,3 +672,107 @@ class TestDefaultSystemPrompt:
         assert "printer_status" in prompt
         assert "preflight_check" in prompt
         assert "fleet_status" in prompt
+
+
+
+# ---------------------------------------------------------------------------
+# Tier-aware error messages in _execute_tool
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteToolTierAwareErrors:
+    """Test that _execute_tool returns tier-aware errors for tools in higher tiers."""
+
+    @mock.patch("kiln.agent_loop._ensure_tool_cache")
+    def test_tool_in_higher_tier_returns_tier_error(self, mock_cache):
+        """When an agent on 'essential' calls a tool only in 'full', the error
+        message should include the required tier and suggest alternatives."""
+        import kiln.agent_loop as al
+
+        mock_cache.return_value = {}  # Tool not in cache (tier-filtered)
+        old_tier = al._current_tier
+        al._current_tier = "essential"
+        try:
+            with mock.patch(
+                "kiln.tool_schema._find_tier_for_tool", return_value="full"
+            ) as mock_find, mock.patch(
+                "kiln.tool_schema._suggest_alternatives",
+                return_value=["printer_status", "fleet_status"],
+            ) as mock_suggest:
+                result = _execute_tool("manage_webhooks", {})
+                parsed = json.loads(result)
+
+                assert parsed["success"] is False
+                assert "'full'" in parsed["error"]
+                assert "'essential'" in parsed["error"]
+                assert "manage_webhooks" in parsed["error"]
+                assert "printer_status" in parsed["error"]
+                assert "fleet_status" in parsed["error"]
+
+                mock_find.assert_called_once_with("manage_webhooks")
+                mock_suggest.assert_called_once_with("manage_webhooks", "essential")
+        finally:
+            al._current_tier = old_tier
+
+    @mock.patch("kiln.agent_loop._ensure_tool_cache")
+    def test_tool_in_higher_tier_no_alternatives(self, mock_cache):
+        """When no alternatives are found, the error omits the alternatives clause."""
+        import kiln.agent_loop as al
+
+        mock_cache.return_value = {}
+        old_tier = al._current_tier
+        al._current_tier = "essential"
+        try:
+            with mock.patch(
+                "kiln.tool_schema._find_tier_for_tool", return_value="standard"
+            ), mock.patch(
+                "kiln.tool_schema._suggest_alternatives",
+                return_value=[],
+            ):
+                result = _execute_tool("some_unique_tool", {})
+                parsed = json.loads(result)
+
+                assert parsed["success"] is False
+                assert "'standard'" in parsed["error"]
+                assert "'essential'" in parsed["error"]
+                assert "Alternatives" not in parsed["error"]
+        finally:
+            al._current_tier = old_tier
+
+    @mock.patch("kiln.agent_loop._ensure_tool_cache")
+    def test_completely_nonexistent_tool_returns_generic_error(self, mock_cache):
+        """When a tool doesn't exist in any tier, the generic 'Unknown tool'
+        message is returned."""
+        import kiln.agent_loop as al
+
+        mock_cache.return_value = {}
+        old_tier = al._current_tier
+        al._current_tier = "essential"
+        try:
+            with mock.patch(
+                "kiln.tool_schema._find_tier_for_tool", return_value=None
+            ):
+                result = _execute_tool("totally_fake_tool_xyz", {})
+                parsed = json.loads(result)
+
+                assert parsed["error"] == "Unknown tool: totally_fake_tool_xyz"
+                assert parsed["success"] is False
+        finally:
+            al._current_tier = old_tier
+
+    @mock.patch("kiln.agent_loop._ensure_tool_cache")
+    def test_no_tier_set_returns_generic_error(self, mock_cache):
+        """When _current_tier is None (no active loop), fall back to generic error."""
+        import kiln.agent_loop as al
+
+        mock_cache.return_value = {}
+        old_tier = al._current_tier
+        al._current_tier = None
+        try:
+            result = _execute_tool("some_tool", {})
+            parsed = json.loads(result)
+
+            assert parsed["error"] == "Unknown tool: some_tool"
+            assert parsed["success"] is False
+        finally:
+            al._current_tier = old_tier

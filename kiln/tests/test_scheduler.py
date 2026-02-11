@@ -920,3 +920,176 @@ class TestEdgeCases:
         assert result["completed"] == []
         # The RuntimeError is not a PrinterNotFoundError, so it is just logged
         assert result["failed"] == []
+
+
+
+# ---------------------------------------------------------------------------
+# Smart printer routing (persistence-based ranking)
+# ---------------------------------------------------------------------------
+
+class TestSmartPrinterRouting:
+    """Tests for persistence-based printer ranking in dispatch."""
+
+    def test_rank_printers_no_persistence(self, queue, registry, event_bus):
+        """Without persistence, _rank_printers returns list unchanged."""
+        scheduler = JobScheduler(queue, registry, event_bus, persistence=None)
+        from kiln.queue import PrintJob, JobStatus
+        job = PrintJob(
+            id="j1", file_name="test.gcode", printer_name=None,
+            status=JobStatus.QUEUED, submitted_by="test",
+            metadata={"file_hash": "abc123"},
+        )
+        result = scheduler._rank_printers(["printer-a", "printer-b"], job)
+        assert result == ["printer-a", "printer-b"]
+
+    def test_rank_printers_no_metadata(self, queue, registry, event_bus):
+        """Without file_hash/material_type in metadata, returns list unchanged."""
+        mock_persistence = MagicMock()
+        scheduler = JobScheduler(queue, registry, event_bus, persistence=mock_persistence)
+        from kiln.queue import PrintJob, JobStatus
+        job = PrintJob(
+            id="j1", file_name="test.gcode", printer_name=None,
+            status=JobStatus.QUEUED, submitted_by="test",
+            metadata={},
+        )
+        result = scheduler._rank_printers(["printer-a", "printer-b"], job)
+        assert result == ["printer-a", "printer-b"]
+        mock_persistence.suggest_printer_for_outcome.assert_not_called()
+
+    def test_rank_printers_reorders_by_success_rate(self, queue, registry, event_bus):
+        """Printers are reordered so the best success rate comes first."""
+        mock_persistence = MagicMock()
+        mock_persistence.suggest_printer_for_outcome.return_value = [
+            {"printer_name": "printer-b", "total_prints": 10, "successes": 9, "success_rate": 0.9},
+            {"printer_name": "printer-a", "total_prints": 10, "successes": 5, "success_rate": 0.5},
+        ]
+        scheduler = JobScheduler(queue, registry, event_bus, persistence=mock_persistence)
+        from kiln.queue import PrintJob, JobStatus
+        job = PrintJob(
+            id="j1", file_name="test.gcode", printer_name=None,
+            status=JobStatus.QUEUED, submitted_by="test",
+            metadata={"file_hash": "abc123"},
+        )
+        result = scheduler._rank_printers(["printer-a", "printer-b"], job)
+        assert result == ["printer-b", "printer-a"]
+
+    def test_rank_printers_unknown_printers_last(self, queue, registry, event_bus):
+        """Printers without history sort after those with history."""
+        mock_persistence = MagicMock()
+        mock_persistence.suggest_printer_for_outcome.return_value = [
+            {"printer_name": "printer-b", "total_prints": 5, "successes": 4, "success_rate": 0.8},
+        ]
+        scheduler = JobScheduler(queue, registry, event_bus, persistence=mock_persistence)
+        from kiln.queue import PrintJob, JobStatus
+        job = PrintJob(
+            id="j1", file_name="test.gcode", printer_name=None,
+            status=JobStatus.QUEUED, submitted_by="test",
+            metadata={"material_type": "PLA"},
+        )
+        # printer-a has no history, printer-b has 80% success
+        result = scheduler._rank_printers(["printer-a", "printer-b"], job)
+        assert result == ["printer-b", "printer-a"]
+
+    def test_rank_printers_empty_rankings(self, queue, registry, event_bus):
+        """When persistence returns no rankings, list unchanged."""
+        mock_persistence = MagicMock()
+        mock_persistence.suggest_printer_for_outcome.return_value = []
+        scheduler = JobScheduler(queue, registry, event_bus, persistence=mock_persistence)
+        from kiln.queue import PrintJob, JobStatus
+        job = PrintJob(
+            id="j1", file_name="test.gcode", printer_name=None,
+            status=JobStatus.QUEUED, submitted_by="test",
+            metadata={"file_hash": "abc123"},
+        )
+        result = scheduler._rank_printers(["printer-a", "printer-b"], job)
+        assert result == ["printer-a", "printer-b"]
+
+    def test_dispatch_uses_smart_routing(self, queue, registry, event_bus):
+        """Full integration: job dispatches to the historically best printer."""
+        mock_persistence = MagicMock()
+        mock_persistence.suggest_printer_for_outcome.return_value = [
+            {"printer_name": "printer-b", "total_prints": 20, "successes": 19, "success_rate": 0.95},
+            {"printer_name": "printer-a", "total_prints": 20, "successes": 10, "success_rate": 0.5},
+        ]
+
+        scheduler = JobScheduler(
+            queue, registry, event_bus,
+            poll_interval=0.1, max_retries=0,
+            persistence=mock_persistence,
+        )
+
+        # Register two idle printers — printer-a first in iteration order
+        adapter_a = make_mock_adapter(name="printer-a")
+        adapter_b = make_mock_adapter(name="printer-b")
+        registry.register("printer-a", adapter_a)
+        registry.register("printer-b", adapter_b)
+
+        # Submit an unassigned job with metadata
+        queue.submit(
+            file_name="benchy.gcode",
+            submitted_by="test",
+            metadata={"file_hash": "abc123", "material_type": "PLA"},
+        )
+
+        result = scheduler.tick()
+
+        assert len(result["dispatched"]) == 1
+        # printer-b has a 95% success rate vs printer-a's 50%, so it should
+        # be ranked first and get the job
+        assert result["dispatched"][0]["printer_name"] == "printer-b"
+        adapter_b.start_print.assert_called_once_with("benchy.gcode")
+        adapter_a.start_print.assert_not_called()
+
+    def test_dispatch_falls_back_without_metadata(self, queue, registry, event_bus):
+        """Without metadata, dispatch uses default order (no ranking)."""
+        mock_persistence = MagicMock()
+        scheduler = JobScheduler(
+            queue, registry, event_bus,
+            poll_interval=0.1, max_retries=0,
+            persistence=mock_persistence,
+        )
+
+        adapter_a = make_mock_adapter(name="printer-a")
+        adapter_b = make_mock_adapter(name="printer-b")
+        registry.register("printer-a", adapter_a)
+        registry.register("printer-b", adapter_b)
+
+        queue.submit(file_name="benchy.gcode", submitted_by="test")
+
+        result = scheduler.tick()
+
+        assert len(result["dispatched"]) == 1
+        # Without metadata, ranking is not applied
+        mock_persistence.suggest_printer_for_outcome.assert_not_called()
+
+    def test_dispatch_assigned_job_ignores_ranking(self, queue, registry, event_bus):
+        """Jobs assigned to a specific printer bypass smart routing."""
+        mock_persistence = MagicMock()
+        mock_persistence.suggest_printer_for_outcome.return_value = [
+            {"printer_name": "printer-b", "total_prints": 20, "successes": 19, "success_rate": 0.95},
+        ]
+
+        scheduler = JobScheduler(
+            queue, registry, event_bus,
+            poll_interval=0.1, max_retries=0,
+            persistence=mock_persistence,
+        )
+
+        adapter_a = make_mock_adapter(name="printer-a")
+        adapter_b = make_mock_adapter(name="printer-b")
+        registry.register("printer-a", adapter_a)
+        registry.register("printer-b", adapter_b)
+
+        # Job explicitly assigned to printer-a
+        queue.submit(
+            file_name="benchy.gcode",
+            printer_name="printer-a",
+            submitted_by="test",
+            metadata={"file_hash": "abc123"},
+        )
+
+        result = scheduler.tick()
+
+        assert len(result["dispatched"]) == 1
+        # Even though printer-b has better stats, the job is assigned to printer-a
+        assert result["dispatched"][0]["printer_name"] == "printer-a"

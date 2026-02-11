@@ -116,7 +116,7 @@ def _validate_config_schema(data: Dict[str, Any], path: Path) -> None:
     if "printers" not in data:
         logger.warning(
             "Config file %s is missing 'printers' section -- "
-            "run 'kiln auth' to add a printer",
+            "run 'kiln setup' for guided setup or 'kiln auth' to add a printer",
             path,
         )
 
@@ -203,7 +203,8 @@ def load_printer_config(
             name = next(iter(printers))
         elif len(printers) == 0:
             raise ValueError(
-                "No printers configured.  Run 'kiln auth' to add one."
+                "No printers configured.  Run 'kiln setup' for guided setup, "
+                "or 'kiln auth' to add one manually."
             )
         else:
             raise ValueError(

@@ -68,7 +68,7 @@ def _make_adapter(cfg: Dict[str, Any]):
         if BambuAdapter is None:
             raise click.ClickException(
                 "Bambu support requires paho-mqtt. "
-                "Install it with: pip install 'kiln[bambu]'"
+                "Install it with: pip install paho-mqtt"
             )
         return BambuAdapter(
             host=host,
@@ -451,9 +451,11 @@ def preflight(ctx: click.Context, file_path: Optional[str], material: Optional[s
 @click.argument("files", nargs=-1)
 @click.option("--status", "show_status", is_flag=True, help="Show print status instead of starting a print.")
 @click.option("--queue", "use_queue", is_flag=True, help="Submit files to the job queue for sequential printing.")
+@click.option("--skip-preflight", is_flag=True, help="Skip automatic pre-print safety checks.")
+@click.option("--dry-run", is_flag=True, help="Preview what would happen without actually printing.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bool, json_mode: bool) -> None:
+def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bool, skip_preflight: bool, dry_run: bool, json_mode: bool) -> None:
     """Start a print or check print status.
 
     Pass a file name/path to start printing.  Use --status to check progress.
@@ -546,6 +548,57 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
         if len(expanded) > 1 and not use_queue:
             if not json_mode:
                 click.echo(f"Printing {len(expanded)} files sequentially (use --queue for background)...")
+
+        # Auto-preflight: check printer is ready before starting
+        _preflight_state = None
+        if not skip_preflight:
+            try:
+                state = adapter.get_state()
+                _preflight_state = state
+                preflight_errors = []
+                if state.status.value in ("error", "offline"):
+                    preflight_errors.append(f"Printer is {state.status.value}")
+                if state.temperatures:
+                    tool_temp = state.temperatures.get("tool", {})
+                    bed_temp = state.temperatures.get("bed", {})
+                    actual_tool = tool_temp.get("actual", 0) if isinstance(tool_temp, dict) else 0
+                    actual_bed = bed_temp.get("actual", 0) if isinstance(bed_temp, dict) else 0
+                    if actual_tool > 50 and state.status.value == "idle":
+                        preflight_errors.append(f"Hotend is warm ({actual_tool:.0f}°C) but printer is idle")
+                if preflight_errors:
+                    msg = "Pre-flight check failed: " + "; ".join(preflight_errors)
+                    click.echo(format_error(msg, code="PREFLIGHT_FAILED", json_mode=json_mode))
+                    if not json_mode:
+                        click.echo("Use --skip-preflight to bypass.")
+                    sys.exit(1)
+                if not json_mode:
+                    click.echo("Pre-flight ✓")
+            except Exception:
+                pass  # Don't block printing if preflight itself fails
+
+        # Dry-run: show what would happen without actually printing
+        if dry_run:
+            import json as _json
+
+            summary = {
+                "dry_run": True,
+                "files": [os.path.basename(f) for f in expanded],
+                "local_upload_needed": [f for f in expanded if os.path.isfile(f)],
+                "preflight": "passed" if not skip_preflight else "skipped",
+                "printer_status": _preflight_state.status.value if _preflight_state else "unknown",
+                "action": "Would start printing" if len(expanded) == 1 else f"Would print {len(expanded)} files",
+            }
+            if json_mode:
+                click.echo(_json.dumps(summary, indent=2))
+            else:
+                click.echo("Dry run — no actions taken:")
+                click.echo(f"  Files: {', '.join(summary['files'])}")
+                uploads = summary["local_upload_needed"]
+                if uploads:
+                    click.echo(f"  Would upload: {', '.join(os.path.basename(u) for u in uploads)}")
+                click.echo(f"  Preflight: {summary['preflight']}")
+                click.echo(f"  Action: {summary['action']}")
+            return
 
         for i, f in enumerate(expanded):
             file_name = f
@@ -2834,6 +2887,10 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
 
         if any(not c["ok"] for c in checks):
             sys.exit(1)
+
+
+# ``kiln doctor`` is an alias for ``kiln verify``.
+cli.add_command(verify, name="doctor")
 
 
 # ---------------------------------------------------------------------------

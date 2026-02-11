@@ -410,7 +410,7 @@ The server also exposes read-only resources that agents can use for context:
 | `slicer.py` | Slicer integration (PrusaSlicer, OrcaSlicer) with auto-detection |
 | `registry.py` | Fleet registry for multi-printer management |
 | `queue.py` | Priority job queue with status tracking |
-| `scheduler.py` | Background job dispatcher (queue -> idle printers) |
+| `scheduler.py` | Background job dispatcher with history-based smart routing |
 | `events.py` | Pub/sub event bus with history |
 | `persistence.py` | SQLite storage for jobs, events, and settings |
 | `webhooks.py` | Event-driven webhook delivery with HMAC signing |
@@ -579,7 +579,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (2,970+ total)
+# Run tests (3,000+ total)
 cd kiln && python3 -m pytest tests/ -v        # 2,734 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```

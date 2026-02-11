@@ -238,6 +238,9 @@ _STANDARD_TOOLS = _ESSENTIAL_TOOLS | frozenset({
 # (set dynamically from the MCP server's registered tools)
 _FULL_TIER_MARKER = "full"
 
+# Current tool tier for the active agent loop (set/cleared by run_agent_loop)
+_current_tier: str | None = None
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -443,6 +446,26 @@ def _execute_tool(name: str, arguments: Dict[str, Any]) -> str:
     """
     cache = _ensure_tool_cache()
     if name not in cache:
+        # Provide a tier-aware error if the tool exists in a higher tier
+        from kiln.tool_schema import _find_tier_for_tool, _suggest_alternatives
+
+        tier = _current_tier
+        if tier is not None:
+            required_tier = _find_tier_for_tool(name)
+            if required_tier is not None:
+                alternatives = _suggest_alternatives(name, tier)
+                alt_str = (
+                    f" Alternatives in your tier: {', '.join(alternatives)}"
+                    if alternatives
+                    else ""
+                )
+                return json.dumps({
+                    "error": (
+                        f"Tool '{name}' requires the '{required_tier}' tier "
+                        f"(you are on '{tier}').{alt_str}"
+                    ),
+                    "success": False,
+                })
         return json.dumps({"error": f"Unknown tool: {name}", "success": False})
 
     mcp_server = _get_mcp_server()
@@ -691,106 +714,111 @@ def run_agent_loop(
     total_tokens: int | None = None
     turns = 0
 
-    for turn in range(config.max_turns):
-        turns += 1
+    global _current_tier  # noqa: PLW0603
+    _current_tier = config.tool_tier
+    try:
+        for turn in range(config.max_turns):
+            turns += 1
 
-        # Call the LLM
-        response = _call_llm(messages, tools, config)
+            # Call the LLM
+            response = _call_llm(messages, tools, config)
 
-        # Track token usage if reported
-        usage = response.get("usage")
-        if usage:
-            turn_tokens = usage.get("total_tokens", 0)
-            total_tokens = (total_tokens or 0) + turn_tokens
+            # Track token usage if reported
+            usage = response.get("usage")
+            if usage:
+                turn_tokens = usage.get("total_tokens", 0)
+                total_tokens = (total_tokens or 0) + turn_tokens
 
-        # Extract the first choice
-        choices = response.get("choices", [])
-        if not choices:
-            raise AgentLoopError(
-                "LLM returned empty choices array. "
-                "The model may not support tool calling."
-            )
+            # Extract the first choice
+            choices = response.get("choices", [])
+            if not choices:
+                raise AgentLoopError(
+                    "LLM returned empty choices array. "
+                    "The model may not support tool calling."
+                )
 
-        choice = choices[0]
-        finish_reason = choice.get("finish_reason", "")
-        assistant_msg = choice.get("message", {})
+            choice = choices[0]
+            finish_reason = choice.get("finish_reason", "")
+            assistant_msg = choice.get("message", {})
 
-        # Append the assistant's message to conversation history
-        messages.append(assistant_msg)
+            # Append the assistant's message to conversation history
+            messages.append(assistant_msg)
 
-        # Check if the model wants to call tools
-        tool_calls = assistant_msg.get("tool_calls")
-        if not tool_calls:
-            # No tool calls -- the model is done
-            final_content = assistant_msg.get("content", "")
-            logger.info(
-                "Agent loop complete: turns=%d tool_calls=%d",
+            # Check if the model wants to call tools
+            tool_calls = assistant_msg.get("tool_calls")
+            if not tool_calls:
+                # No tool calls -- the model is done
+                final_content = assistant_msg.get("content", "")
+                logger.info(
+                    "Agent loop complete: turns=%d tool_calls=%d",
+                    turns,
+                    total_tool_calls,
+                )
+
+                # Reconstruct the full history as AgentMessage objects
+                history = _messages_to_agent_messages(messages)
+
+                return AgentResult(
+                    response=final_content or "",
+                    messages=history,
+                    tool_calls_made=total_tool_calls,
+                    turns=turns,
+                    model=config.model,
+                    total_tokens=total_tokens,
+                )
+
+            # Execute each tool call and feed results back
+            for tc in tool_calls:
+                total_tool_calls += 1
+                tc_id = tc.get("id", f"call_{total_tool_calls}")
+
+                result_str = _execute_tool_call(tc)
+
+                # Add tool result message (sanitized then redacted for privacy)
+                tool_msg: Dict[str, Any] = {
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": _redact_sensitive_data(_sanitize_tool_output(result_str)),
+                }
+                messages.append(tool_msg)
+
+            logger.debug(
+                "Turn %d: executed %d tool calls, continuing loop",
                 turns,
-                total_tool_calls,
+                len(tool_calls),
             )
 
-            # Reconstruct the full history as AgentMessage objects
-            history = _messages_to_agent_messages(messages)
+        # Exhausted max_turns -- return what we have
+        logger.warning(
+            "Agent loop hit max_turns (%d). Returning partial result.",
+            config.max_turns,
+        )
 
-            return AgentResult(
-                response=final_content or "",
-                messages=history,
-                tool_calls_made=total_tool_calls,
-                turns=turns,
-                model=config.model,
-                total_tokens=total_tokens,
+        # Try to get the last assistant content
+        last_content = ""
+        for msg in reversed(messages):
+            if msg.get("role") == "assistant" and msg.get("content"):
+                last_content = msg["content"]
+                break
+
+        if not last_content:
+            last_content = (
+                f"[Agent loop reached the maximum of {config.max_turns} turns "
+                "without a final response. The model may need a simpler prompt "
+                "or a higher max_turns value.]"
             )
 
-        # Execute each tool call and feed results back
-        for tc in tool_calls:
-            total_tool_calls += 1
-            tc_id = tc.get("id", f"call_{total_tool_calls}")
-
-            result_str = _execute_tool_call(tc)
-
-            # Add tool result message (sanitized then redacted for privacy)
-            tool_msg: Dict[str, Any] = {
-                "role": "tool",
-                "tool_call_id": tc_id,
-                "content": _redact_sensitive_data(_sanitize_tool_output(result_str)),
-            }
-            messages.append(tool_msg)
-
-        logger.debug(
-            "Turn %d: executed %d tool calls, continuing loop",
-            turns,
-            len(tool_calls),
+        history = _messages_to_agent_messages(messages)
+        return AgentResult(
+            response=last_content,
+            messages=history,
+            tool_calls_made=total_tool_calls,
+            turns=turns,
+            model=config.model,
+            total_tokens=total_tokens,
         )
-
-    # Exhausted max_turns -- return what we have
-    logger.warning(
-        "Agent loop hit max_turns (%d). Returning partial result.",
-        config.max_turns,
-    )
-
-    # Try to get the last assistant content
-    last_content = ""
-    for msg in reversed(messages):
-        if msg.get("role") == "assistant" and msg.get("content"):
-            last_content = msg["content"]
-            break
-
-    if not last_content:
-        last_content = (
-            f"[Agent loop reached the maximum of {config.max_turns} turns "
-            "without a final response. The model may need a simpler prompt "
-            "or a higher max_turns value.]"
-        )
-
-    history = _messages_to_agent_messages(messages)
-    return AgentResult(
-        response=last_content,
-        messages=history,
-        tool_calls_made=total_tool_calls,
-        turns=turns,
-        model=config.model,
-        total_tokens=total_tokens,
-    )
+    finally:
+        _current_tier = None
 
 
 def _messages_to_agent_messages(messages: list[dict]) -> list[AgentMessage]:

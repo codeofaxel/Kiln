@@ -342,7 +342,7 @@ def format_printers(
         )
 
     if not printers:
-        msg = "No printers configured.  Run 'kiln auth' to add one."
+        msg = "No printers configured.  Run 'kiln setup' for guided setup, or 'kiln auth' to add one manually."
         if RICH_AVAILABLE:
             return _render(Panel(msg, border_style="yellow"))
         return msg

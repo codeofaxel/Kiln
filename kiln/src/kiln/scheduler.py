@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from kiln.events import EventBus, EventType
 from kiln.printers.base import PrinterError, PrinterStatus
@@ -49,6 +49,7 @@ class JobScheduler:
         poll_interval: float = 5.0,
         max_retries: int = 2,
         retry_backoff_base: float = 30.0,
+        persistence: Optional[object] = None,
     ) -> None:
         self._queue = queue
         self._registry = registry
@@ -56,6 +57,7 @@ class JobScheduler:
         self._poll_interval = poll_interval
         self._max_retries = max_retries
         self._retry_backoff_base = retry_backoff_base
+        self._persistence = persistence
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._active_jobs: Dict[str, str] = {}  # job_id -> printer_name
@@ -150,6 +152,38 @@ class JobScheduler:
         )
         failed_list.append({"job_id": job_id, "error": error_msg})
         return False
+
+    def _rank_printers(self, available: List[str], job) -> List[str]:
+        """Reorder available printers by historical success rate for this job.
+
+        When a persistence layer is configured and the job metadata contains
+        ``file_hash`` or ``material_type``, printers are sorted so that those
+        with the highest historical success rate for the given criteria come
+        first.  Printers without history are placed last (original order
+        preserved among them).
+
+        If no persistence is configured or no ranking data is available, the
+        list is returned unchanged.
+        """
+        if not self._persistence:
+            return available
+        file_hash = job.metadata.get("file_hash") if job.metadata else None
+        material_type = job.metadata.get("material_type") if job.metadata else None
+        if not file_hash and not material_type:
+            return available
+        rankings = self._persistence.suggest_printer_for_outcome(
+            file_hash=file_hash, material_type=material_type,
+        )
+        if not rankings:
+            return available
+        # Build a score map: printer_name -> success_rate
+        score = {r["printer_name"]: r["success_rate"] for r in rankings}
+        # Sort available printers by score (highest first); unknown printers
+        # sort last (score -1) but preserve their relative order via the
+        # enumerate index as a tiebreaker.
+        indexed = list(enumerate(available))
+        indexed.sort(key=lambda pair: (-score.get(pair[1], -1), pair[0]))
+        return [name for _, name in indexed]
 
     def tick(self) -> Dict[str, Any]:
         """Run one scheduling cycle.  Can be called manually for testing.
@@ -259,6 +293,17 @@ class JobScheduler:
         with self._lock:
             busy_printers = set(self._active_jobs.values())
         available = [p for p in idle_printers if p not in busy_printers]
+
+        # Smart routing: rank printers by historical success rate for the
+        # next queued unassigned job.  This ensures the best-performing
+        # printer for the job's file/material gets first dispatch priority.
+        if self._persistence and available:
+            queued = [
+                j for j in self._queue.list_jobs(status=JobStatus.QUEUED)
+                if j.printer_name is None
+            ]
+            if queued:
+                available = self._rank_printers(available, queued[0])
 
         for printer_name in available:
             next_job = self._queue.next_job(printer_name=printer_name)

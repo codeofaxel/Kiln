@@ -583,7 +583,7 @@ def _check_confirmation(tool_name: str, args: Dict[str, Any]) -> Optional[dict]:
 _registry = PrinterRegistry()
 _queue = PrintQueue(db_path=os.path.join(str(Path.home()), ".kiln", "queue.db"))
 _event_bus = EventBus()
-_scheduler = JobScheduler(_queue, _registry, _event_bus)
+_scheduler = JobScheduler(_queue, _registry, _event_bus, persistence=get_db())
 _webhook_mgr = WebhookManager(_event_bus)
 _auth = AuthManager()
 _billing = BillingLedger(db=get_db())
@@ -2599,17 +2599,22 @@ def get_started() -> dict:
         "safety_tools": [
             "preflight_check — validates printer readiness before printing",
             "validate_gcode — checks G-code for dangerous commands before sending",
+            "safety_status — comprehensive safety dashboard (limits, rate-limits, blocked actions, auth)",
             "safety_settings — shows current auto-print and confirmation settings",
             "safety_audit — reviews recent safety-relevant actions",
         ],
         "tool_tiers": tier_summary,
+        "session_recovery": {
+            "description": "If resuming a previous session, call get_agent_context to restore your memory.",
+            "tool": "get_agent_context",
+            "usage": "Call get_agent_context() at session start to retrieve notes saved in prior sessions.",
+        },
         "tip": (
             "Start with `printer_status` to see what's connected, then "
-            "explore from there. Use `safety_settings` to understand what "
-            "safety protections are active."
+            "explore from there. Use `safety_status` for a full safety "
+            "dashboard, or `safety_settings` to check auto-print settings."
         ),
     }
-
 
 @mcp.tool()
 def marketplace_info() -> dict:
