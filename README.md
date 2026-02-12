@@ -523,16 +523,6 @@ The server also exposes read-only resources that agents can use for context:
 | `wallets.py` | Crypto wallet configuration (Solana/Ethereum for donations and fees) |
 | `cli/` | Click CLI with 50+ subcommands and JSON output |
 
-## Beyond 3D Printing
-
-Kiln's adapter pattern is designed to generalize beyond FDM printers. The `DeviceType` enum and `DeviceAdapter` alias provide forward-compatible extension points for:
-
-- **SLA/Resin** — Exposure-based printers with different state models
-- **CNC Routers** — Spindle control, tool changes, work coordinate systems
-- **Laser Cutters** — Power control, raster/vector modes, material focus
-
-Existing printer adapters continue to work unchanged. New device types implement the same base interface with optional device-specific methods (`set_spindle_speed()`, `set_laser_power()`, `get_tool_position()`). Agents interact with all device types through the same MCP tools — the adapter pattern abstracts the hardware differences.
-
 ## Authentication (Optional)
 
 Kiln supports optional API key authentication for MCP tools. Disabled by default.

@@ -242,22 +242,7 @@ Agents record structured print outcomes after each job: success/failure/partial,
 
 All learning data is advisory — it informs agent decisions but never overrides safety limits. The system rejects outcome records with physically dangerous parameter values. Every insight response carries an explicit safety notice stating that data reflects past outcomes only and must not be used to bypass safety validation.
 
-## 11. Physical Fabrication Generalization
-
-### 11.1 Evolutionary Extension
-
-Kiln's adapter pattern was designed for 3D printers but the abstraction generalizes to any computer-controlled fabrication device. Rather than a breaking rename, Kiln introduces forward-compatible extension points:
-
-- **`DeviceType` enum** — Classifies devices: `FDM_PRINTER`, `SLA_PRINTER`, `CNC_ROUTER`, `LASER_CUTTER`, `GENERIC`.
-- **`DeviceAdapter` alias** — `DeviceAdapter = PrinterAdapter`. Existing code continues to reference `PrinterAdapter`; new integrations can use `DeviceAdapter`.
-- **Extended `PrinterCapabilities`** — Adds `device_type` and `can_snapshot` fields with backward-compatible defaults.
-- **Optional device methods** — `set_spindle_speed()`, `set_laser_power()`, `get_tool_position()` provide hooks for non-printer devices. Default implementations raise `PrinterError` or return `None`, so existing adapters are unaffected.
-
-### 11.2 Compatibility Guarantee
-
-All four existing adapters (OctoPrint, Moonraker, Bambu, Prusa Connect) continue to work without modification. The new fields default to `device_type="fdm_printer"` and `can_snapshot=False` (overridden to `True` for OctoPrint and Moonraker which support webcam capture). No existing tests break; the extensions are purely additive.
-
-### 11.3 Distributed Manufacturing Network
+## 11. Distributed Manufacturing Network
 
 Kiln integrates with the 3DOS distributed manufacturing network, enabling peer-to-peer job routing across independent printer operators. Local printers can be registered on the network with material capabilities and location metadata. The `ThreeDOSClient` gateway handles printer registration, availability updates, job submission, and status polling. Agents can discover available printers on the network by material type or location, submit jobs for remote fabrication, and track order status — extending Kiln's reach beyond locally-connected hardware.
 
@@ -281,12 +266,11 @@ Kiln extends beyond printer owners to serve users who have never touched a 3D pr
 
 ## 13. Future Work
 - **Remote agent collaboration.** Enable multiple agents to coordinate across a shared printer fleet.
-- **CNC and laser adapter implementations.** Concrete adapters for Grbl, LinuxCNC, and LightBurn backends.
 - **Federated learning.** Aggregate anonymized print outcomes across Kiln instances (opt-in) for community-level printer insights.
 
 ## 14. Conclusion
 
-Kiln demonstrates that AI agents can safely operate physical manufacturing hardware given the right protocol abstractions. By normalizing heterogeneous printer APIs into a typed adapter interface, enforcing safety invariants at the protocol level, and exposing all operations through MCP, Kiln transforms any MCP-compatible agent into a manufacturing operator. Closed-loop vision monitoring lets agents observe and intervene during prints. Cross-printer learning enables data-driven printer selection with safety-first guardrails. The generalized device abstraction positions Kiln to expand beyond 3D printing to CNC, laser, and resin fabrication. The system is local-first, open-source, and extensible to new device backends and manufacturing services.
+Kiln demonstrates that AI agents can safely operate physical manufacturing hardware given the right protocol abstractions. By normalizing heterogeneous printer APIs into a typed adapter interface, enforcing safety invariants at the protocol level, and exposing all operations through MCP, Kiln transforms any MCP-compatible agent into a manufacturing operator. Closed-loop vision monitoring lets agents observe and intervene during prints. Cross-printer learning enables data-driven printer selection with safety-first guardrails. The system is local-first, open-source, and extensible to new device backends and manufacturing services.
 
 ---
 

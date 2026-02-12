@@ -44,9 +44,9 @@ Kiln is agentic infrastructure for physical fabrication. It provides a unified i
 
 **Job Queue** — Priority queue backed by SQLite. Jobs are dispatched to idle printers by a background scheduler with history-based smart routing (best-performing printer for the job's file/material is preferred).
 
-**DeviceType** — Enum classifying physical devices: `FDM_PRINTER`, `SLA_PRINTER`, `CNC_ROUTER`, `LASER_CUTTER`, `GENERIC`. Enables future expansion beyond 3D printing.
+**DeviceType** — Enum classifying physical devices. Currently covers FDM printers with room for future device types.
 
-**DeviceAdapter** — Alias for `PrinterAdapter`. Forward-compatible name for non-printer device integrations.
+**DeviceAdapter** — Alias for `PrinterAdapter`. Alternative import name.
 
 **Cross-Printer Learning** — Agent-curated outcome database (`print_outcomes` table) that records success/failure/quality per printer and file. Safety-validated: rejects physically dangerous parameter values.
 
