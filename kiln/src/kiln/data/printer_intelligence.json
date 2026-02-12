@@ -800,5 +800,711 @@
         "fix": "Check probe wiring. Increase probe travel height (probe_hop). Ensure probe is not triggering from bed vibration."
       }
     ]
+  },
+  "ender5": {
+    "display_name": "Creality Ender 5 / Ender 5 Plus",
+    "firmware": "marlin",
+    "extruder_type": "bowden",
+    "hotend_type": "ptfe_lined",
+    "has_enclosure": false,
+    "has_abl": false,
+    "materials": {
+      "PLA": {
+        "hotend": 200,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Same PTFE hotend as Ender 3. Excellent PLA performance."
+      },
+      "PETG": {
+        "hotend": 230,
+        "bed": 80,
+        "fan": 50,
+        "notes": "Keep below 240C for PTFE safety."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Difficult with bowden \u2014 print at 15-20mm/s, disable retraction."
+      }
+    },
+    "quirks": [
+      "Cube-frame design makes it quieter than Ender 3 but harder to access prints.",
+      "Ender 5 Plus has BLTouch for ABL \u2014 standard Ender 5 requires manual leveling.",
+      "PTFE tube degrades above 240\u00b0C \u2014 same limit as Ender 3.",
+      "Bowden tube is longer than Ender 3 \u2014 may need slightly higher retraction (6mm).",
+      "Z-axis lead screw can develop wobble over time \u2014 ensure anti-backlash nut is snug."
+    ],
+    "calibration": {
+      "first_steps": "Manual bed leveling with paper method. Ender 5 Plus: run BLTouch auto-level.",
+      "retraction_test": "Bowden needs 5-6mm retraction at 45mm/s. Longer tube than Ender 3 may need 6mm.",
+      "esteps": "Same extruder as Ender 3 \u2014 calibrate e-steps via M92 E<value>."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Z wobble / inconsistent layer height",
+        "cause": "Lead screw bent or anti-backlash nut worn",
+        "fix": "Check lead screw straightness. Replace anti-backlash nut. Ensure coupler is aligned."
+      },
+      {
+        "symptom": "Bed leveling won't hold",
+        "cause": "Stock springs too weak for heavy glass bed",
+        "fix": "Upgrade to stiffer yellow springs or silicone spacers."
+      }
+    ]
+  },
+  "cr10": {
+    "display_name": "Creality CR-10 / CR-10S",
+    "firmware": "marlin",
+    "extruder_type": "bowden",
+    "hotend_type": "ptfe_lined",
+    "has_enclosure": false,
+    "has_abl": false,
+    "materials": {
+      "PLA": {
+        "hotend": 200,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Large bed takes longer to heat \u2014 allow 5-10 min for even temp."
+      },
+      "PETG": {
+        "hotend": 230,
+        "bed": 80,
+        "fan": 50,
+        "notes": "Keep below 240C for PTFE safety. Works well on large bed."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Bowden makes flexibles difficult. Very slow speeds (15mm/s), minimal retraction."
+      }
+    },
+    "quirks": [
+      "Large bed can have significant temperature variation across surface \u2014 use glass bed or PEI sheet for flatness.",
+      "Long bowden tube (>50cm) requires higher retraction (6-7mm).",
+      "PTFE tube degrades above 240\u00b0C \u2014 upgrade to all-metal hotend for ABS/PETG at higher temps.",
+      "CR-10S adds filament runout sensor and dual Z lead screws \u2014 improved stability.",
+      "Stock Marlin may lack thermal runaway protection \u2014 flash updated firmware immediately."
+    ],
+    "calibration": {
+      "first_steps": "Manual mesh bed leveling. Large bed needs extra attention to corners. Use glass bed for flatness.",
+      "retraction_test": "Long bowden tube needs 6-7mm retraction at 40mm/s.",
+      "esteps": "Calibrate e-steps \u2014 stock extruder often under-extrudes by 5-10%."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Warping on large prints",
+        "cause": "Bed temperature uneven on large surface area",
+        "fix": "Print with brim. Verify bed temp with IR thermometer at corners. Consider enclosure."
+      },
+      {
+        "symptom": "Under-extrusion after long prints",
+        "cause": "PTFE tube degradation or plastic extruder arm crack",
+        "fix": "Replace PTFE tube. Upgrade to metal extruder arm."
+      }
+    ]
+  },
+  "voron_0": {
+    "display_name": "Voron 0 / 0.2",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": false,
+    "materials": {
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Remove top hat or open panels for PLA to avoid heat creep in tiny enclosure."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50,
+        "notes": "Enclosed chamber helps adhesion. Small volume limits part size."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 110,
+        "fan": 0,
+        "notes": "Enclosed design ideal for ABS. Chamber heats up quickly due to small volume."
+      },
+      "ASA": {
+        "hotend": 250,
+        "bed": 105,
+        "fan": 20,
+        "notes": "Similar to ABS. Voron 0 is great for small ASA parts."
+      }
+    },
+    "quirks": [
+      "Tiny build volume (120x120x120) \u2014 plan parts carefully. Ideal for small functional prints.",
+      "Kit build \u2014 quality depends on build precision. Follow Voron assembly docs closely.",
+      "No Z probe by default \u2014 manual Z offset with paper method or aftermarket probe.",
+      "Mini Stealthburner toolhead \u2014 lower max flow rate than full Stealthburner.",
+      "Enclosed volume heats up very fast \u2014 excellent for ABS but can overheat PLA quickly."
+    ],
+    "calibration": {
+      "first_steps": "Manual Z offset calibration. Input shaping with ADXL345 strongly recommended.",
+      "pressure_advance": "Tune pressure advance per-filament. Critical for print quality at speed.",
+      "retraction_test": "Mini Stealthburner: 0.3-0.5mm retraction. Very short for direct drive."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Inconsistent extrusion at high speed",
+        "cause": "Mini Stealthburner hitting volumetric flow limit",
+        "fix": "Reduce speed or upgrade hotend. Stock Mini SB maxes out around 10-12mm\u00b3/s."
+      },
+      {
+        "symptom": "Parts warping despite enclosure",
+        "cause": "Build plate adhesion issue or Z offset too high",
+        "fix": "Clean bed with IPA. Re-calibrate Z offset. For ABS, let chamber soak at temp 10 min before printing."
+      }
+    ]
+  },
+  "ratrig_vcore3": {
+    "display_name": "Rat Rig V-Core 3 / V-Core 3.1",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Large bed takes longer to heat evenly. Allow soak time."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50,
+        "notes": "Good PETG performance. Draft-free room recommended (open frame)."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 110,
+        "fan": 0,
+        "notes": "Open frame \u2014 requires aftermarket enclosure for ABS. Available from Rat Rig."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive handles TPU well. Print at 25-40mm/s."
+      }
+    },
+    "quirks": [
+      "Kit printer with 3-point bed leveling \u2014 ensure kinematic mounts are properly seated.",
+      "EVA toolhead platform \u2014 many toolhead options. Performance varies by hotend choice.",
+      "Open-frame CoreXY \u2014 fast and accurate but needs enclosure for ABS.",
+      "Beacon or Klicky probe common \u2014 configure in Klipper's printer.cfg.",
+      "Large build volume models (400+mm) may need re-squared gantry after shipping."
+    ],
+    "calibration": {
+      "first_steps": "Home axes, run bed mesh calibrate, set Z offset via PROBE_CALIBRATE, SAVE_CONFIG.",
+      "flow_rate_test": "Varies by EVA toolhead hotend \u2014 test volumetric flow empirically.",
+      "retraction_test": "Direct drive: 0.4-0.8mm retraction depending on hotend.",
+      "pressure_advance": "Tune per-filament. Print PA tower for best results."
+    },
+    "failure_modes": [
+      {
+        "symptom": "First layer inconsistency across large bed",
+        "cause": "Bed mesh not compensating enough or kinematic mounts shifted",
+        "fix": "Re-run BED_MESH_CALIBRATE with finer probe grid (7x7 or 9x9). Check kinematic mount tightness."
+      },
+      {
+        "symptom": "Gantry sag on large models",
+        "cause": "Belt tension uneven or rail alignment off",
+        "fix": "Re-tension belts evenly. Verify linear rails are parallel using straight edge."
+      }
+    ]
+  },
+  "elegoo_neptune3": {
+    "display_name": "Elegoo Neptune 3 / 3 Pro / 3 Plus",
+    "firmware": "marlin",
+    "extruder_type": "direct_drive",
+    "hotend_type": "ptfe_lined",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 200,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Excellent budget PLA printer."
+      },
+      "PETG": {
+        "hotend": 230,
+        "bed": 80,
+        "fan": 50,
+        "notes": "Keep below 240C for PTFE safety. Direct drive helps with retraction."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive handles TPU decently. Print at 25-30mm/s."
+      }
+    },
+    "quirks": [
+      "PTFE-lined hotend limits max temp to 240\u00b0C \u2014 upgrade to all-metal for ABS.",
+      "Neptune 3 Pro adds auto-leveling (CR-Touch) \u2014 standard Neptune 3 is manual leveling.",
+      "Neptune 3 Plus has a larger bed (320x320) \u2014 check your specific model for correct dimensions.",
+      "PEI magnetic build plate works well but needs cleaning with IPA between prints.",
+      "Direct drive extruder is a nice upgrade over bowden-based budget printers."
+    ],
+    "calibration": {
+      "first_steps": "Pro/Plus: run auto-level from menu. Standard: manual leveling with paper method.",
+      "retraction_test": "Direct drive: 1-2mm retraction at 40mm/s. Much less than bowden printers.",
+      "flow_rate_test": "Print single-wall cube. Adjust flow multiplier."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Auto-level inconsistent on Pro/Plus",
+        "cause": "CR-Touch probe needs recalibration or nozzle residue interfering",
+        "fix": "Clean nozzle tip. Re-run auto-level. Ensure probe deploys freely."
+      },
+      {
+        "symptom": "Under-extrusion with PETG",
+        "cause": "PTFE tube swelling at higher temps",
+        "fix": "Print PETG at 225-230C max. Replace PTFE tube if deformed."
+      }
+    ]
+  },
+  "anker_m5": {
+    "display_name": "AnkerMake M5 / M5C",
+    "firmware": "marlin",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Excellent high-speed PLA printing. 250mm/s capable."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50,
+        "notes": "All-metal hotend handles PETG well. Reduce speed for quality."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive. Print at 30-50mm/s for TPU."
+      }
+    },
+    "quirks": [
+      "Proprietary firmware \u2014 limited community modification options.",
+      "Built-in camera for timelapse and monitoring via AnkerMake app.",
+      "M5C is the budget version \u2014 no camera, no auto-level, but same speed capability.",
+      "High-speed printing requires well-tuned input shaping \u2014 factory calibrated.",
+      "AnkerMake slicer recommended but PrusaSlicer/OrcaSlicer work with manual profile setup."
+    ],
+    "calibration": {
+      "first_steps": "Run built-in auto-level and vibration compensation from touchscreen.",
+      "flow_rate_test": "Factory calibration is usually good. Only adjust if measuring wall deviation.",
+      "retraction_test": "0.8mm at 40mm/s is a good starting point for the direct drive extruder."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Ringing artifacts at high speed",
+        "cause": "Input shaping needs recalibration",
+        "fix": "Re-run vibration compensation from printer menu."
+      },
+      {
+        "symptom": "First layer adhesion issues",
+        "cause": "Z offset needs adjustment or bed not clean",
+        "fix": "Clean PEI sheet with IPA. Adjust Z offset in 0.05mm increments."
+      }
+    ]
+  },
+  "artillery_sw_x3": {
+    "display_name": "Artillery Sidewinder X3 Plus / X3 Pro",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Large bed (300x300). Allow extra heat soak time."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50,
+        "notes": "All-metal hotend. Good PETG performance on large bed."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Open frame \u2014 enclosure recommended for ABS. Draft shield in slicer as minimum."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive handles TPU. 25-40mm/s."
+      }
+    },
+    "quirks": [
+      "Klipper firmware with custom Artillery modifications \u2014 access via Mainsail/Fluidd web UI.",
+      "Large 300x300mm bed \u2014 auto-level probe essential for consistent first layers.",
+      "X3 Pro has higher-speed capability than X3 Plus \u2014 check your model for max speeds.",
+      "Direct drive extruder with all-metal hotend \u2014 capable of engineering materials.",
+      "PEI build plate needs regular IPA cleaning for reliable adhesion."
+    ],
+    "calibration": {
+      "first_steps": "Run auto-level from touchscreen. Input shaping may be pre-configured \u2014 verify with test print.",
+      "pressure_advance": "Tune via SET_PRESSURE_ADVANCE. Important for quality at speed.",
+      "retraction_test": "Direct drive: 0.5-0.8mm retraction."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Uneven first layer on large prints",
+        "cause": "Bed mesh needs finer probe grid for 300x300 surface",
+        "fix": "Re-run BED_MESH_CALIBRATE with 7x7 or 9x9 grid."
+      },
+      {
+        "symptom": "Communication timeout errors",
+        "cause": "USB connection to MCU unstable",
+        "fix": "Use high-quality USB cable. Avoid USB hubs."
+      }
+    ]
+  },
+  "sovol_sv06": {
+    "display_name": "Sovol SV06 / SV06 Plus",
+    "firmware": "marlin",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Excellent PLA printer. MK3S-like performance at a fraction of the price."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50,
+        "notes": "All-metal hotend handles PETG well."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 100,
+        "fan": 0,
+        "notes": "All-metal hotend supports ABS temps. Enclosure needed to prevent warping."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Planetary gear direct drive handles TPU well. 25-35mm/s."
+      }
+    },
+    "quirks": [
+      "Often called a 'MK3S clone' \u2014 similar dual-gear extruder and probe-based leveling.",
+      "SV06 Plus has a larger bed (300x300) vs standard (220x220).",
+      "Planetary gear extruder provides strong grip but can grind soft filaments if tension is too high.",
+      "PEI spring steel sheet included \u2014 dual-sided (smooth and textured).",
+      "Active community with custom Marlin firmware builds for additional features."
+    ],
+    "calibration": {
+      "first_steps": "Run auto-level from LCD. Fine-tune Z offset during first layer print.",
+      "retraction_test": "Direct drive: 0.6-1.0mm retraction at 40mm/s.",
+      "esteps": "Stock e-steps usually accurate but verify with 100mm extrusion test."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Filament grinding",
+        "cause": "Extruder gear tension too high for the material",
+        "fix": "Loosen tension screw. Softer filaments (TPU) need lighter grip."
+      },
+      {
+        "symptom": "ABL probe offset drift",
+        "cause": "Probe mount screws loosening from vibration",
+        "fix": "Tighten probe mounting screws. Re-run auto-level."
+      }
+    ]
+  },
+  "sovol_sv07": {
+    "display_name": "Sovol SV07 / SV07 Plus",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Klipper enables high-speed PLA printing."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50,
+        "notes": "All-metal hotend. Good PETG performance."
+      },
+      "ABS": {
+        "hotend": 250,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Open frame \u2014 enclosure recommended for ABS."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive handles TPU. Print at 25-40mm/s."
+      }
+    },
+    "quirks": [
+      "Klipper firmware \u2014 access Mainsail/Fluidd web interface via printer IP.",
+      "SV07 Plus has a large bed (300x300) vs standard (220x220).",
+      "Input shaping pre-configured \u2014 may need re-tuning after modifications.",
+      "Sonic pad / MCU board may have limited community firmware support.",
+      "OctoPrint not needed \u2014 Moonraker/Mainsail built into the printer."
+    ],
+    "calibration": {
+      "first_steps": "Run auto-level from touchscreen. Verify Z offset. Input shaping usually pre-tuned.",
+      "pressure_advance": "Tune via SET_PRESSURE_ADVANCE for best quality at speed.",
+      "retraction_test": "Direct drive: 0.5-0.8mm retraction."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Print quality degrades at high speed",
+        "cause": "Input shaping not properly tuned for the specific machine",
+        "fix": "Re-run input shaper calibration. Attach ADXL345 for best results."
+      },
+      {
+        "symptom": "Web interface not reachable",
+        "cause": "Moonraker service crashed or network configuration issue",
+        "fix": "Power cycle printer. Check network settings via touchscreen."
+      }
+    ]
+  },
+  "flashforge_adventurer5m": {
+    "display_name": "FlashForge Adventurer 5M / 5M Pro",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "ptfe_lined",
+    "has_enclosure": true,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Good high-speed PLA printer. Open door for PLA to manage chamber heat."
+      },
+      "PETG": {
+        "hotend": 230,
+        "bed": 80,
+        "fan": 50,
+        "notes": "Keep below 240C for PTFE safety on standard model. 5M Pro has all-metal hotend."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive handles TPU. Print at 30-40mm/s."
+      }
+    },
+    "quirks": [
+      "PTFE-lined hotend on standard 5M (280C max). 5M Pro has all-metal hotend for higher temps.",
+      "Klipper firmware with FlashForge modifications \u2014 limited community customization.",
+      "Enclosed design good for draft-sensitive materials.",
+      "Quick-swap nozzle system \u2014 convenient but proprietary nozzle format.",
+      "FlashPrint slicer recommended by manufacturer but OrcaSlicer has community profiles."
+    ],
+    "calibration": {
+      "first_steps": "Run built-in auto-calibration from touchscreen. Vibration compensation auto-tuned.",
+      "flow_rate_test": "Factory calibration usually sufficient. Adjust if switching filament brands.",
+      "retraction_test": "0.5-0.8mm retraction for direct drive."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Nozzle clog with PETG",
+        "cause": "PTFE tube swelling at higher temps (standard 5M only)",
+        "fix": "Print PETG at 225-230C max on standard model. Upgrade to 5M Pro for higher temps."
+      },
+      {
+        "symptom": "Quick-swap nozzle leaking",
+        "cause": "Nozzle not seated properly in quick-swap mechanism",
+        "fix": "Remove and re-seat nozzle. Ensure it clicks into place. Tighten if thread-based."
+      }
+    ]
+  },
+  "prusa_xl": {
+    "display_name": "Prusa XL",
+    "firmware": "marlin",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 215,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Open door/panels for PLA. Segmented heatbed heats only used area."
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 85,
+        "fan": 50,
+        "notes": "Nextruder handles PETG well."
+      },
+      "ABS": {
+        "hotend": 255,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Enclosed design excellent for ABS. Segmented bed reduces heat-up time."
+      },
+      "ASA": {
+        "hotend": 260,
+        "bed": 105,
+        "fan": 20,
+        "notes": "Same approach as ABS. Great for large outdoor parts."
+      },
+      "PA-CF": {
+        "hotend": 280,
+        "bed": 100,
+        "fan": 30,
+        "notes": "Hardened nozzle required. Enclosed chamber. Dry filament critical."
+      }
+    },
+    "quirks": [
+      "Segmented heatbed \u2014 only heats zones under the print, saving energy and time.",
+      "Up to 5 tool heads \u2014 multi-material/multi-color without purge tower waste.",
+      "Nextruder toolhead \u2014 same 0.4mm retraction rule as MK4. Don't increase it.",
+      "Load cell bed probe per-toolhead \u2014 each tool calibrates independently.",
+      "Very large build volume (360x360x360) \u2014 ensure model fits before slicing."
+    ],
+    "calibration": {
+      "first_steps": "Run built-in calibration wizard. Each toolhead calibrates its own Z offset.",
+      "flow_rate_test": "Stock profiles well-calibrated. Per-toolhead flow adjustment available.",
+      "retraction_test": "0.4mm retraction per Nextruder. Same as MK4 \u2014 do not increase."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Tool change leaves blob on print",
+        "cause": "Wipe tower calibration off or nozzle not clean",
+        "fix": "Recalibrate tool offsets. Ensure wipe tower is enabled in slicer."
+      },
+      {
+        "symptom": "Segmented bed zone boundary visible in first layer",
+        "cause": "Temperature difference at zone boundaries",
+        "fix": "Allow extra bed soak time (5-10 min) for zones to equalize."
+      }
+    ]
+  },
+  "bambu_p1p": {
+    "display_name": "Bambu Lab P1P",
+    "firmware": "bambu",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Excellent high-speed PLA performance."
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40,
+        "notes": "Open frame \u2014 draft-free room recommended."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive handles TPU. Reduce speed to 50mm/s."
+      }
+    },
+    "quirks": [
+      "Open frame \u2014 no ABS without aftermarket enclosure.",
+      "Same CoreXY mechanics as X1C/P1S but exposed \u2014 keep area clean.",
+      "AMS compatible but no enclosure means drafts can affect multi-material prints.",
+      "MQTT control via Kiln's Bambu adapter \u2014 LAN mode must be enabled.",
+      "Aftermarket enclosure kits available from Bambu and third parties."
+    ],
+    "calibration": {
+      "first_steps": "Run built-in auto-calibration from touchscreen.",
+      "flow_rate_test": "Auto-flow calibration included. Re-run when changing filament brands."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Parts warping (ABS/ASA)",
+        "cause": "No enclosure \u2014 ambient air cooling causes differential shrinkage",
+        "fix": "Add aftermarket enclosure. Or switch to draft-resistant materials (PLA, PETG)."
+      }
+    ]
+  },
+  "bambu_a1_mini": {
+    "display_name": "Bambu Lab A1 Mini",
+    "firmware": "bambu",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 220,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Compact but fast PLA printer."
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 40,
+        "notes": "Open frame. Good PETG results in draft-free room."
+      },
+      "TPU": {
+        "hotend": 225,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive handles TPU. Print at 30-50mm/s."
+      }
+    },
+    "quirks": [
+      "Small build volume (180x180x180) \u2014 same as Prusa Mini. Plan parts carefully.",
+      "AMS Lite compatible (4-slot) for multi-color prints.",
+      "Open frame \u2014 no ABS without enclosure.",
+      "Bed-slinger Y axis \u2014 heavy parts may shift at max acceleration.",
+      "State values sent as UPPERCASE via MQTT \u2014 Kiln adapter normalizes this."
+    ],
+    "calibration": {
+      "first_steps": "Run auto-calibration from touchscreen. Very quick and reliable."
+    },
+    "failure_modes": [
+      {
+        "symptom": "Parts detaching at high speed",
+        "cause": "Y-axis acceleration too aggressive for bed-slinger with heavy part",
+        "fix": "Reduce acceleration for tall or heavy prints."
+      }
+    ]
   }
 }
