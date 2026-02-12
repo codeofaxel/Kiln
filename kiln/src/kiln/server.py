@@ -79,7 +79,7 @@ from kiln.scheduler import JobScheduler
 from kiln.persistence import get_db
 from kiln.webhooks import WebhookManager
 from kiln.auth import AuthManager
-from kiln.licensing import LicenseTier, requires_tier
+from kiln.licensing import LicenseTier, check_tier, requires_tier
 from kiln.billing import BillingLedger, FeeCalculation, FeePolicy
 from kiln.payments.manager import PaymentManager
 from kiln.payments.base import PaymentError
@@ -6821,7 +6821,10 @@ def validate_gcode_safe(
 def list_slicer_profiles_tool() -> dict:
     """List all bundled slicer profiles for supported printers.
 
-    Returns profile IDs, display names, and recommended slicer for each.
+    Returns profile IDs, display names, recommended slicer, and the
+    minimum license tier required for each.  Free-tier profiles can be
+    used by everyone; PRO profiles require a Kiln Pro license.
+
     Use with ``get_slicer_profile_tool`` to see full settings, or
     ``slice_model`` with printer_id for auto-profile selection.
     """
@@ -6837,6 +6840,7 @@ def list_slicer_profiles_tool() -> dict:
                     "id": p.id,
                     "display_name": p.display_name,
                     "slicer": p.slicer,
+                    "tier": p.tier,
                 })
             except KeyError:
                 continue
@@ -6851,7 +6855,9 @@ def get_slicer_profile_tool(printer_id: str) -> dict:
     """Get the full bundled slicer profile for a printer model.
 
     Returns all INI settings (layer height, speeds, temps, retraction, etc.)
-    and the recommended slicer.
+    and the recommended slicer.  Free-tier profiles (default, ender3,
+    prusa_mk3s, klipper_generic) are available to all users.  Premium
+    profiles require a Kiln Pro license.
 
     Args:
         printer_id: Printer model identifier (e.g. ``"ender3"``,
@@ -6861,6 +6867,23 @@ def get_slicer_profile_tool(printer_id: str) -> dict:
         return err
     try:
         profile = get_slicer_profile(printer_id)
+
+        # Gate premium profiles behind PRO license
+        if profile.tier == "pro":
+            ok, message = check_tier(LicenseTier.PRO)
+            if not ok:
+                return {
+                    "success": False,
+                    "error": (
+                        f"Profile '{profile.display_name}' requires Kiln Pro. "
+                        f"Free profiles: default, ender3, prusa_mk3s, klipper_generic. "
+                        f"{message}"
+                    ),
+                    "code": "LICENSE_REQUIRED",
+                    "required_tier": "pro",
+                    "upgrade_url": "https://kiln.sh/pro",
+                }
+
         return {"success": True, "profile": slicer_profile_to_dict(profile)}
     except KeyError:
         return _error_dict(

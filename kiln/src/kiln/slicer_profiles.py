@@ -47,6 +47,7 @@ class SlicerProfile:
         slicer: Recommended slicer (``"prusaslicer"`` or ``"orcaslicer"``).
         notes: Guidance about the profile.
         settings: INI key-value pairs suitable for ``--load``.
+        tier: Minimum license tier required (``"free"`` or ``"pro"``).
     """
 
     id: str
@@ -54,6 +55,16 @@ class SlicerProfile:
     slicer: str
     notes: str
     settings: Dict[str, str]
+    tier: str = "free"
+
+
+# Profile IDs available on the free tier.  Everything else requires PRO.
+_FREE_PROFILES: frozenset[str] = frozenset({
+    "default",
+    "ender3",
+    "prusa_mk3s",
+    "klipper_generic",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -80,12 +91,14 @@ def _load() -> None:
         if key == "_meta":
             continue
         try:
+            tier = "free" if key in _FREE_PROFILES else "pro"
             _cache[key] = SlicerProfile(
                 id=key,
                 display_name=data.get("display_name", key),
                 slicer=data.get("slicer", "prusaslicer"),
                 notes=data.get("notes", ""),
                 settings=dict(data.get("settings", {})),
+                tier=tier,
             )
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("Skipping malformed slicer profile '%s': %s", key, exc)
@@ -184,6 +197,7 @@ def slicer_profile_to_dict(profile: SlicerProfile) -> Dict[str, Any]:
         "slicer": profile.slicer,
         "notes": profile.notes,
         "settings": dict(profile.settings),
+        "tier": profile.tier,
     }
 
 
