@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Kiln installer — works on macOS, Linux, and WSL
 # Usage: git clone https://github.com/codeofaxel/Kiln.git ~/.kiln/src && ~/.kiln/src/install.sh
+#        install.sh --uninstall   # Remove Kiln
+#        install.sh --update      # Pull latest and reinstall
 set -euo pipefail
 
 REPO="https://github.com/codeofaxel/Kiln.git"
 INSTALL_DIR="${KILN_INSTALL_DIR:-$HOME/.kiln/src}"
+PKG_NAME="kiln3d"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -16,6 +19,39 @@ warn()  { printf '\033[1;33m ⚠\033[0m  %s\n' "$*"; }
 fail()  { printf '\033[1;31m ✗\033[0m  %s\n' "$*" >&2; exit 1; }
 
 has() { command -v "$1" >/dev/null 2>&1; }
+
+# ---------------------------------------------------------------------------
+# Handle --uninstall / --update flags
+# ---------------------------------------------------------------------------
+
+if [ "${1:-}" = "--uninstall" ]; then
+    info "Uninstalling Kiln..."
+    if has pipx; then
+        pipx uninstall "$PKG_NAME" 2>/dev/null && ok "Kiln uninstalled" || warn "Kiln was not installed via pipx"
+    else
+        warn "pipx not found — trying pip3"
+        pip3 uninstall -y "$PKG_NAME" 2>/dev/null && ok "Kiln uninstalled" || warn "Kiln was not installed via pip3"
+    fi
+    exit 0
+fi
+
+if [ "${1:-}" = "--update" ]; then
+    info "Updating Kiln..."
+    if [ -d "$INSTALL_DIR/.git" ]; then
+        git -C "$INSTALL_DIR" pull --ff-only -q
+        ok "Source updated"
+    else
+        fail "No git repo at $INSTALL_DIR — run install.sh without flags first"
+    fi
+    if has pipx; then
+        pipx install --force "$INSTALL_DIR/kiln"
+        ok "Kiln updated"
+    else
+        pip3 install --upgrade "$INSTALL_DIR/kiln"
+        ok "Kiln updated"
+    fi
+    exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # Detect OS
@@ -107,10 +143,10 @@ fi
 info "Installing Kiln via pipx..."
 
 # Uninstall previous version if exists (ignore errors)
-pipx uninstall kiln3d 2>/dev/null || true
+pipx uninstall "$PKG_NAME" 2>/dev/null || true
 
 pipx install "$INSTALL_DIR/kiln"
-ok "Kiln installed"
+ok "Kiln installed (package: $PKG_NAME)"
 
 # ---------------------------------------------------------------------------
 # Verify
@@ -136,6 +172,11 @@ echo ""
 echo "  kiln setup          # Interactive wizard — finds printers, saves config"
 echo "  kiln verify         # Check everything is working"
 echo "  kiln status --json  # See what your printer is doing"
+echo ""
+echo "  Manage installation:"
+echo "  install.sh --update     # Pull latest + reinstall"
+echo "  install.sh --uninstall  # Remove Kiln"
+echo "  pipx uninstall $PKG_NAME  # Manual uninstall (package name is $PKG_NAME, not kiln)"
 echo ""
 
 if [ "$OS" = "wsl" ]; then

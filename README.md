@@ -100,6 +100,9 @@ Kiln runs natively on Linux and Ubuntu under WSL 2.
 `pipx` installs Kiln into its own isolated environment and puts the `kiln`
 command on your PATH — works from any directory, no virtualenv to manage.
 
+> **Note:** The pip package name is **`kiln3d`** (not `kiln`). This matters
+> for `pipx uninstall`, `pip show`, etc. The CLI command is still `kiln`.
+
 ```bash
 # One-time: install pipx
 sudo apt install pipx
@@ -116,6 +119,21 @@ sudo apt install openscad        # Required only for text-to-3D generation
 
 # Verify
 kiln verify
+```
+
+#### Uninstall / Update
+
+```bash
+# Uninstall (package name is kiln3d, not kiln)
+pipx uninstall kiln3d
+
+# Update to latest version (if installed from a git clone)
+cd Kiln
+git pull
+pipx install --force ./kiln
+
+# Check what pipx has installed (useful for troubleshooting)
+pipx list
 ```
 
 #### Option 2: virtualenv
