@@ -191,7 +191,9 @@ Kiln supports third-party extensions through a plugin system based on Python ent
 
 ## 7. Revenue Model
 
-Local printer control is free and unrestricted. Kiln charges a 5% platform fee on orders placed through external manufacturing services (Craftcloud, and future providers), with the first 5 outsourced orders per month free and a $0.25 minimum / $50 maximum per-order cap. The fee is surfaced transparently in every quote response before the user commits to an order.
+Local printer control is free and unrestricted. Kiln charges a 5% platform fee on orders placed through external manufacturing services (Craftcloud, and future providers), with the first 5 outsourced orders per month free and a $0.25 minimum / $200 maximum per-order cap. The fee is surfaced transparently in every quote response before the user commits to an order.
+
+Kiln uses a three-tier licensing model: **Free** (all local printing, up to 2 printers, 10-job queue, billing visibility), **Pro** ($29/mo — unlimited printers, fleet orchestration, analytics, unlimited queue, cloud sync), and **Business** ($99/mo — fulfillment brokering, hosted deployment, priority support). The free tier is designed to be excellent for solo operators, with the paywall boundary at multi-printer fleet orchestration rather than individual feature gating. License keys are validated offline-first via key prefix detection with optional cached remote validation, ensuring printer operations are never blocked by network issues.
 
 ## 8. Security Considerations
 

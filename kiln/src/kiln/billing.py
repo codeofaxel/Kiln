@@ -71,7 +71,7 @@ class FeePolicy:
 
     network_fee_percent: float = 5.0
     min_fee_usd: float = 0.25
-    max_fee_usd: float = 50.0
+    max_fee_usd: float = 200.0
     free_tier_jobs: int = 5
     currency: str = "USD"
 

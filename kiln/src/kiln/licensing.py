@@ -141,8 +141,8 @@ class TierRequiredError(LicenseError):
         self.feature = feature
         self.required_tier = required_tier
         super().__init__(
-            f"{feature} requires Kiln {required_tier.value.title()} tier. "
-            f"Run 'kiln upgrade' or visit https://kiln.sh/pro"
+            f"{feature} requires a Kiln {required_tier.value.title()} license. "
+            f"Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
         )
 
 
@@ -312,9 +312,9 @@ class LicenseManager:
         if current >= required:
             return True, None
         return False, (
-            f"This feature requires Kiln {required.value.title()}. "
-            f"Current tier: {current.value}. "
-            f"Run 'kiln upgrade' or visit https://kiln.sh/pro"
+            f"This feature requires a Kiln {required.value.title()} license. "
+            f"You're on the {current.value.title()} tier. "
+            f"Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
         )
 
     def activate_license(self, key: str) -> LicenseInfo:
@@ -423,7 +423,7 @@ def requires_tier(tier: LicenseTier) -> Callable:
                     "error": message,
                     "code": "LICENSE_REQUIRED",
                     "required_tier": tier.value,
-                    "upgrade_url": "https://kiln.sh/pro",
+                    "upgrade_url": "https://kiln3d.com/pro",
                 }
             return func(*args, **kwargs)
         return wrapper
@@ -437,20 +437,22 @@ def requires_tier(tier: LicenseTier) -> Callable:
 # Which features require which tier.  Used by the decorator and by
 # documentation/help text generation.
 FEATURE_TIERS: Dict[str, LicenseTier] = {
-    # Fleet management
+    # Fleet orchestration (multi-printer coordination) — Pro
     "fleet_status": LicenseTier.PRO,
-    "register_printer": LicenseTier.PRO,
     "fleet_analytics": LicenseTier.PRO,
-    # Job queue & scheduler
-    "submit_job": LicenseTier.PRO,
-    "job_status": LicenseTier.PRO,
-    "queue_summary": LicenseTier.PRO,
-    "cancel_job": LicenseTier.PRO,
-    "job_history": LicenseTier.PRO,
-    # Advanced features
-    "billing_summary": LicenseTier.PRO,
-    "billing_history": LicenseTier.PRO,
     # Business tier
     "fulfillment_order": LicenseTier.BUSINESS,
     "fulfillment_cancel": LicenseTier.BUSINESS,
 }
+
+# ---------------------------------------------------------------------------
+# Free-tier resource limits
+# ---------------------------------------------------------------------------
+
+#: Maximum printers a FREE-tier user can register (independent control,
+#: no cross-printer orchestration).  PRO and above are unlimited.
+FREE_TIER_MAX_PRINTERS: int = 2
+
+#: Maximum queued jobs for a single-printer FREE-tier user.
+#: PRO and above get unlimited queue depth.
+FREE_TIER_MAX_QUEUED_JOBS: int = 10

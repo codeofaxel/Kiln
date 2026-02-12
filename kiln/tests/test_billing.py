@@ -34,7 +34,7 @@ class TestFeePolicy:
         policy = FeePolicy()
         assert policy.network_fee_percent == 5.0
         assert policy.min_fee_usd == 0.25
-        assert policy.max_fee_usd == 50.0
+        assert policy.max_fee_usd == 200.0
         assert policy.free_tier_jobs == 5
         assert policy.currency == "USD"
 

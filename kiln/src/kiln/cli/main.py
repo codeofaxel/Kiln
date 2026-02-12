@@ -1312,10 +1312,10 @@ def order_cancel(order_id: str, json_mode: bool) -> None:
 
 @cli.group()
 def fleet() -> None:
-    """Manage your printer fleet (Pro).
+    """Manage your printer fleet.
 
     View status of all registered printers and register new ones.
-    Requires a Kiln Pro or Business license.
+    Free tier: up to 2 printers.  Pro: unlimited + fleet orchestration.
     """
 
 
@@ -1364,14 +1364,9 @@ def fleet_register_cmd(
     NAME is a unique friendly name (e.g. 'voron-350').
     PRINTER_TYPE is the backend: octoprint, moonraker, bambu, or prusaconnect.
     HOST is the printer's URL or IP address.
+
+    Free tier allows up to 2 printers.  Pro unlocks unlimited.
     """
-    from kiln.licensing import LicenseTier, check_tier
-
-    ok, msg = check_tier(LicenseTier.PRO)
-    if not ok:
-        click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
-        sys.exit(1)
-
     try:
         from kiln.server import register_printer as _register_printer
 
@@ -1403,10 +1398,10 @@ def fleet_register_cmd(
 
 @cli.group()
 def queue() -> None:
-    """Manage the print job queue (Pro).
+    """Manage the print job queue.
 
     Submit, monitor, list, and cancel print jobs in the queue.
-    Requires a Kiln Pro or Business license.
+    Free tier: up to 10 queued jobs.  Pro: unlimited queue depth.
     """
 
 
@@ -1419,14 +1414,8 @@ def queue_submit_cmd(file: str, printer: Optional[str], priority: int, json_mode
     """Submit a print job to the queue.
 
     FILE is the G-code file name (must already exist on the printer).
+    Free tier: up to 10 queued jobs.  Pro: unlimited.
     """
-    from kiln.licensing import LicenseTier, check_tier
-
-    ok, msg = check_tier(LicenseTier.PRO)
-    if not ok:
-        click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
-        sys.exit(1)
-
     try:
         from kiln.server import submit_job as _submit_job
 
@@ -1457,13 +1446,6 @@ def queue_status_cmd(job_id: str, json_mode: bool) -> None:
 
     JOB_ID is the ID returned by 'kiln queue submit'.
     """
-    from kiln.licensing import LicenseTier, check_tier
-
-    ok, msg = check_tier(LicenseTier.PRO)
-    if not ok:
-        click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
-        sys.exit(1)
-
     try:
         from kiln.server import job_status as _job_status
 
@@ -1490,13 +1472,6 @@ def queue_status_cmd(job_id: str, json_mode: bool) -> None:
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def queue_list_cmd(filter_status: Optional[str], limit: int, json_mode: bool) -> None:
     """List jobs in the queue with optional status filter."""
-    from kiln.licensing import LicenseTier, check_tier
-
-    ok, msg = check_tier(LicenseTier.PRO)
-    if not ok:
-        click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
-        sys.exit(1)
-
     try:
         if filter_status:
             from kiln.server import job_history as _job_history
@@ -1530,13 +1505,6 @@ def queue_cancel_cmd(job_id: str, json_mode: bool) -> None:
 
     JOB_ID is the ID returned by 'kiln queue submit'.
     """
-    from kiln.licensing import LicenseTier, check_tier
-
-    ok, msg = check_tier(LicenseTier.PRO)
-    if not ok:
-        click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
-        sys.exit(1)
-
     try:
         from kiln.server import cancel_job as _cancel_job
 
@@ -3220,7 +3188,7 @@ def upgrade(ctx: click.Context, key: Optional[str], json_mode: bool) -> None:
             if info.tier == LicenseTier.FREE:
                 click.echo(f"\n  Upgrade to Pro for fleet management, job queue,")
                 click.echo(f"  analytics, and more.")
-                click.echo(f"\n  Visit: https://kiln.sh/pro")
+                click.echo(f"\n  Visit: https://kiln3d.com/pro")
                 click.echo(f"  Or:    kiln upgrade --key <your-license-key>")
             else:
                 click.echo(f"\n  ✓ Active and valid.")

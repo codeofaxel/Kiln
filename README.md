@@ -589,9 +589,19 @@ All local printing is **free forever** — status checks, file management, slici
 Kiln charges a **5% platform fee** on orders placed through external manufacturing services (`kiln order` / fulfillment MCP tools), with:
 
 - First 5 outsourced orders per month **free**
-- $0.25 minimum / $50 maximum per-order cap
+- $0.25 minimum / $200 maximum per-order cap
 
 The fee is shown transparently in every quote before you commit.
+
+### Licensing Tiers
+
+| Tier | Price | What You Get |
+|------|-------|-------------|
+| **Free** | $0 | All local printing, slicing, marketplace, safety profiles. Job queue (10 jobs). Up to 2 printers. Billing visibility. |
+| **Pro** | $29/mo | Unlimited printers + fleet orchestration, fleet analytics, unlimited queue depth, cloud sync, priority scheduler. |
+| **Business** | $99/mo | Everything in Pro + unlimited fulfillment orders (5% fee), hosted deployment, priority support. |
+
+Run `kiln upgrade` to activate a license key.
 
 ## Safety
 

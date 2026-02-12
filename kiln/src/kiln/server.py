@@ -79,7 +79,14 @@ from kiln.scheduler import JobScheduler
 from kiln.persistence import get_db
 from kiln.webhooks import WebhookManager
 from kiln.auth import AuthManager
-from kiln.licensing import LicenseTier, check_tier, requires_tier
+from kiln.licensing import (
+    FREE_TIER_MAX_PRINTERS,
+    FREE_TIER_MAX_QUEUED_JOBS,
+    LicenseTier,
+    check_tier,
+    get_tier,
+    requires_tier,
+)
 from kiln.billing import BillingLedger, FeeCalculation, FeePolicy
 from kiln.payments.manager import PaymentManager
 from kiln.payments.base import PaymentError
@@ -2108,6 +2115,62 @@ def fleet_status() -> dict:
 
 @mcp.tool()
 @requires_tier(LicenseTier.PRO)
+def fleet_analytics() -> dict:
+    """Get fleet-wide analytics: per-printer success rates, utilization, and job throughput.
+
+    Returns statistics for every registered printer including total prints,
+    success rate, average print duration, and total print hours.  Also
+    includes fleet-wide aggregate metrics.
+
+    Requires Kiln Pro or Business license.
+    """
+    try:
+        if _registry.count == 0:
+            return {
+                "success": True,
+                "printers": [],
+                "fleet_totals": {"total_prints": 0, "total_hours": 0.0, "avg_success_rate": 0.0},
+                "message": "No printers registered.",
+            }
+
+        db = get_db()
+        printer_stats = []
+        total_prints = 0
+        total_hours = 0.0
+        success_sum = 0.0
+        printers_with_data = 0
+
+        for name in _registry.list_names():
+            stats = db.get_printer_stats(name)
+            printer_stats.append(stats)
+            total_prints += stats["total_prints"]
+            total_hours += stats["total_print_hours"]
+            if stats["total_prints"] > 0:
+                success_sum += stats["success_rate"]
+                printers_with_data += 1
+
+        avg_success = round(success_sum / printers_with_data, 4) if printers_with_data > 0 else 0.0
+
+        # Queue stats
+        queue_counts = _queue.summary()
+
+        return {
+            "success": True,
+            "printers": printer_stats,
+            "fleet_totals": {
+                "total_prints": total_prints,
+                "total_hours": round(total_hours, 2),
+                "avg_success_rate": avg_success,
+                "printer_count": _registry.count,
+            },
+            "queue": queue_counts,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in fleet_analytics")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
 def register_printer(
     name: str,
     printer_type: str,
@@ -2117,6 +2180,9 @@ def register_printer(
     verify_ssl: bool = True,
 ) -> dict:
     """Register a new printer in the fleet.
+
+    Free tier allows up to 2 printers with independent control.
+    Pro tier unlocks unlimited printers with fleet orchestration.
 
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
@@ -2134,6 +2200,25 @@ def register_printer(
     if err := _check_auth("admin"):
         return err
     try:
+        # Free-tier printer cap: allow up to FREE_TIER_MAX_PRINTERS
+        # without a Pro license.  Replacing an existing printer doesn't
+        # count against the limit.
+        current_tier = get_tier()
+        if current_tier < LicenseTier.PRO:
+            if name not in _registry and _registry.count >= FREE_TIER_MAX_PRINTERS:
+                return {
+                    "success": False,
+                    "error": (
+                        f"Fleet registration is limited to {FREE_TIER_MAX_PRINTERS} printers on the Free tier "
+                        f"(you have {_registry.count}). "
+                        "Kiln Pro unlocks unlimited printers with fleet orchestration. "
+                        "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+                    ),
+                    "code": "FREE_TIER_LIMIT",
+                    "current_count": _registry.count,
+                    "max_allowed": FREE_TIER_MAX_PRINTERS,
+                    "upgrade_url": "https://kiln3d.com/pro",
+                }
         if printer_type == "octoprint":
             if not api_key:
                 return _error_dict(
@@ -2215,13 +2300,15 @@ def discover_printers(timeout: float = 5.0) -> dict:
 
 
 @mcp.tool()
-@requires_tier(LicenseTier.PRO)
 def submit_job(
     file_name: str,
     printer_name: str | None = None,
     priority: int = 0,
 ) -> dict:
     """Submit a print job to the queue.
+
+    Free tier allows up to 10 queued jobs for single-printer use.
+    Pro tier unlocks unlimited queue depth with multi-printer scheduling.
 
     Args:
         file_name: G-code file name (must already exist on the printer).
@@ -2234,6 +2321,24 @@ def submit_job(
     """
     if err := _check_auth("queue"):
         return err
+    # Free-tier queue cap: limit pending jobs.
+    current_tier = get_tier()
+    if current_tier < LicenseTier.PRO:
+        pending = _queue.pending_count()
+        if pending >= FREE_TIER_MAX_QUEUED_JOBS:
+            return {
+                "success": False,
+                "error": (
+                    f"Job queue is limited to {FREE_TIER_MAX_QUEUED_JOBS} pending jobs on the Free tier "
+                    f"(you have {pending}). Wait for jobs to complete, "
+                    "or upgrade to Kiln Pro for unlimited queue depth with multi-printer scheduling. "
+                    "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+                ),
+                "code": "FREE_TIER_LIMIT",
+                "pending_count": pending,
+                "max_allowed": FREE_TIER_MAX_QUEUED_JOBS,
+                "upgrade_url": "https://kiln3d.com/pro",
+            }
     try:
         job_id = _queue.submit(
             file_name=file_name,
@@ -2257,7 +2362,6 @@ def submit_job(
 
 
 @mcp.tool()
-@requires_tier(LicenseTier.PRO)
 def job_status(job_id: str) -> dict:
     """Get the status of a queued or completed print job.
 
@@ -2280,7 +2384,6 @@ def job_status(job_id: str) -> dict:
 
 
 @mcp.tool()
-@requires_tier(LicenseTier.PRO)
 def queue_summary() -> dict:
     """Get an overview of the print job queue.
 
@@ -2305,7 +2408,6 @@ def queue_summary() -> dict:
 
 
 @mcp.tool()
-@requires_tier(LicenseTier.PRO)
 def cancel_job(job_id: str) -> dict:
     """Cancel a queued or running print job.
 
@@ -2338,7 +2440,6 @@ def cancel_job(job_id: str) -> dict:
 
 
 @mcp.tool()
-@requires_tier(LicenseTier.PRO)
 def job_history(limit: int = 20, status: str | None = None) -> dict:
     """Get history of completed, failed, and cancelled print jobs.
 
@@ -2414,13 +2515,14 @@ def recent_events(limit: int = 20) -> dict:
 
 
 @mcp.tool()
-@requires_tier(LicenseTier.PRO)
 def billing_summary() -> dict:
     """Get a summary of Kiln platform fees for the current month.
 
     Shows total fees collected, number of outsourced orders, free tier
     usage, and the current fee policy.  Only orders placed through
     external fulfillment services incur fees -- all local printing is free.
+
+    Available on all tiers — anyone who transacts can view their billing.
     """
     try:
         revenue = _billing.monthly_revenue()
@@ -2485,9 +2587,10 @@ def billing_status() -> dict:
 
 
 @mcp.tool()
-@requires_tier(LicenseTier.PRO)
 def billing_history(limit: int = 20) -> dict:
     """Get recent billing charge history with payment outcomes.
+
+    Available on all tiers — anyone who transacts can view their history.
 
     Args:
         limit: Maximum number of records to return (default 20).
@@ -6910,13 +7013,13 @@ def get_slicer_profile_tool(printer_id: str) -> dict:
                 return {
                     "success": False,
                     "error": (
-                        f"Profile '{profile.display_name}' requires Kiln Pro. "
-                        f"Free profiles: default, ender3, prusa_mk3s, klipper_generic. "
-                        f"{message}"
+                        f"The '{profile.display_name}' slicer profile requires a Kiln Pro license. "
+                        f"Free-tier profiles available: default, ender3, prusa_mk3s, klipper_generic. "
+                        f"Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
                     ),
                     "code": "LICENSE_REQUIRED",
                     "required_tier": "pro",
-                    "upgrade_url": "https://kiln.sh/pro",
+                    "upgrade_url": "https://kiln3d.com/pro",
                 }
 
         return {"success": True, "profile": slicer_profile_to_dict(profile)}

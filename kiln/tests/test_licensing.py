@@ -12,6 +12,8 @@ import pytest
 
 from kiln.licensing import (
     FEATURE_TIERS,
+    FREE_TIER_MAX_PRINTERS,
+    FREE_TIER_MAX_QUEUED_JOBS,
     LicenseError,
     LicenseInfo,
     LicenseManager,
@@ -584,10 +586,18 @@ class TestModuleLevelConvenience:
 
 
 class TestFeatureTiers:
-    def test_fleet_features_are_pro(self):
+    def test_fleet_orchestration_features_are_pro(self):
         assert FEATURE_TIERS["fleet_status"] == LicenseTier.PRO
-        assert FEATURE_TIERS["register_printer"] == LicenseTier.PRO
-        assert FEATURE_TIERS["submit_job"] == LicenseTier.PRO
+        assert FEATURE_TIERS["fleet_analytics"] == LicenseTier.PRO
+
+    def test_free_tier_features_not_gated(self):
+        """Queue, register, and billing features are free (with caps) — not in FEATURE_TIERS."""
+        for feature in [
+            "register_printer", "submit_job", "job_status",
+            "queue_summary", "cancel_job", "job_history",
+            "billing_summary", "billing_history",
+        ]:
+            assert feature not in FEATURE_TIERS, f"{feature} should be free"
 
     def test_fulfillment_features_are_business(self):
         assert FEATURE_TIERS["fulfillment_order"] == LicenseTier.BUSINESS
@@ -668,3 +678,16 @@ class TestEdgeCases:
         # Manually expire the resolved license
         mgr._resolved.expires_at = time.time() - 1
         assert mgr.get_tier() == LicenseTier.FREE
+
+
+# ---------------------------------------------------------------------------
+# 13. Free-tier resource limits
+# ---------------------------------------------------------------------------
+
+
+class TestFreeTierLimits:
+    def test_max_printers_constant(self):
+        assert FREE_TIER_MAX_PRINTERS == 2
+
+    def test_max_queued_jobs_constant(self):
+        assert FREE_TIER_MAX_QUEUED_JOBS == 10
