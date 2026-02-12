@@ -52,6 +52,8 @@ class AutonomyConstraints:
     allowed_tools: Optional[List[str]] = None  # specific tool names allowed
     blocked_tools: Optional[List[str]] = None  # tools that ALWAYS require confirmation
     require_first_layer_check: bool = False  # If True, autonomous prints must monitor first layer
+    monitoring_mode: Optional[str] = None  # "vision", "telemetry", "auto" (default). None = auto
+    max_order_cost: Optional[float] = None  # Max cost (USD) per fulfillment order. None = no limit
 
     def to_dict(self) -> Dict[str, Any]:
         """Return non-None fields as a plain dict.
@@ -66,6 +68,8 @@ class AutonomyConstraints:
             # Always include bool fields so False is distinguishable from None
         # require_first_layer_check is bool with a default, always include
         result["require_first_layer_check"] = self.require_first_layer_check
+        if self.monitoring_mode is not None:
+            result["monitoring_mode"] = self.monitoring_mode
         return result
 
 
@@ -102,7 +106,20 @@ def load_autonomy_config(*, config_path: Optional[Any] = None) -> AutonomyConfig
             )
             level = AutonomyLevel.CONFIRM_ALL
         _flc_env = os.environ.get("KILN_MONITOR_REQUIRE_FIRST_LAYER", "").lower() in ("true", "1", "yes")
-        constraints = AutonomyConstraints(require_first_layer_check=_flc_env)
+        _moc_env = os.environ.get("KILN_AUTONOMY_MAX_ORDER_COST")
+        _max_order_cost: Optional[float] = None
+        if _moc_env is not None:
+            try:
+                _max_order_cost = float(_moc_env)
+            except ValueError:
+                logger.warning("Invalid KILN_AUTONOMY_MAX_ORDER_COST=%r, ignoring", _moc_env)
+        _mm_env = os.environ.get("KILN_MONITOR_MODE", "").lower().strip()
+        _monitoring_mode: Optional[str] = _mm_env if _mm_env in ("vision", "telemetry", "auto") else None
+        constraints = AutonomyConstraints(
+            require_first_layer_check=_flc_env,
+            max_order_cost=_max_order_cost,
+            monitoring_mode=_monitoring_mode,
+        )
         return AutonomyConfig(level=level, constraints=constraints)
 
     # Config file path
@@ -128,6 +145,19 @@ def load_autonomy_config(*, config_path: Optional[Any] = None) -> AutonomyConfig
         _flc_raw = constraints_raw.get("require_first_layer_check", False)
         _flc = bool(_flc_raw) if not isinstance(_flc_raw, str) else _flc_raw.lower() in ("true", "1", "yes")
 
+        _moc_raw = constraints_raw.get("max_order_cost")
+        _max_order_cost_cfg: Optional[float] = None
+        if _moc_raw is not None:
+            try:
+                _max_order_cost_cfg = float(_moc_raw)
+            except (ValueError, TypeError):
+                logger.warning("Invalid max_order_cost=%r in config, ignoring", _moc_raw)
+
+        _mm_raw = constraints_raw.get("monitoring_mode")
+        _mm_cfg: Optional[str] = None
+        if isinstance(_mm_raw, str) and _mm_raw.lower().strip() in ("vision", "telemetry", "auto"):
+            _mm_cfg = _mm_raw.lower().strip()
+
         constraints = AutonomyConstraints(
             max_print_time_seconds=constraints_raw.get("max_print_time_seconds"),
             allowed_materials=constraints_raw.get("allowed_materials"),
@@ -136,6 +166,8 @@ def load_autonomy_config(*, config_path: Optional[Any] = None) -> AutonomyConfig
             allowed_tools=constraints_raw.get("allowed_tools"),
             blocked_tools=constraints_raw.get("blocked_tools"),
             require_first_layer_check=_flc,
+            max_order_cost=_max_order_cost_cfg,
+            monitoring_mode=_mm_cfg,
         )
 
         # Env var override for first-layer check
@@ -144,6 +176,19 @@ def load_autonomy_config(*, config_path: Optional[Any] = None) -> AutonomyConfig
             constraints.require_first_layer_check = True
         elif _flc_env in ("false", "0", "no"):
             constraints.require_first_layer_check = False
+
+        # Env var override for max order cost
+        _moc_env_override = os.environ.get("KILN_AUTONOMY_MAX_ORDER_COST")
+        if _moc_env_override is not None:
+            try:
+                constraints.max_order_cost = float(_moc_env_override)
+            except ValueError:
+                logger.warning("Invalid KILN_AUTONOMY_MAX_ORDER_COST=%r, ignoring", _moc_env_override)
+
+        # Env var override for monitoring mode
+        _mm_env_override = os.environ.get("KILN_MONITOR_MODE", "").lower().strip()
+        if _mm_env_override in ("vision", "telemetry", "auto"):
+            constraints.monitoring_mode = _mm_env_override
 
         return AutonomyConfig(level=level, constraints=constraints)
     except Exception:
@@ -293,6 +338,21 @@ def check_autonomy(
                 "reason": (
                     f"Bed temp {op_bed_temp}\u00b0C exceeds limit "
                     f"{c.max_bed_temp}\u00b0C"
+                ),
+                "level": 1,
+                "constraints_met": False,
+            }
+
+    # Check order cost constraint (spending cap)
+    _ORDER_TOOLS = ("fulfillment_place_order", "place_order", "fulfillment_order")
+    if c.max_order_cost is not None and tool_name in _ORDER_TOOLS:
+        op_cost = ctx.get("cost")
+        if op_cost is not None and op_cost > c.max_order_cost:
+            return {
+                "allowed": False,
+                "reason": (
+                    f"Order cost ${op_cost:.2f} exceeds spending cap "
+                    f"${c.max_order_cost:.2f}"
                 ),
                 "level": 1,
                 "constraints_met": False,

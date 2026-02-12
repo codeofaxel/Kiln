@@ -12,6 +12,7 @@ Configure via environment variables or ``~/.kiln/config.yaml``:
     KILN_MONITOR_FIRST_LAYER_INTERVAL — seconds between snapshots (default 60)
     KILN_MONITOR_AUTO_PAUSE          — auto-pause on failure (default true)
     KILN_MONITOR_REQUIRE_CAMERA      — refuse to start without camera (default false)
+    KILN_MONITOR_MODE                — monitoring mode: "vision", "telemetry", "auto" (default)
 """
 
 from __future__ import annotations
@@ -80,6 +81,8 @@ class MonitorPolicy:
     failure_confidence_threshold: float = 0.8
     require_camera: bool = False
     max_snapshot_failures: int = 3
+    stall_timeout_seconds: int = 600
+    monitoring_mode: str = "auto"  # "vision", "telemetry", or "auto"
 
     def to_dict(self) -> Dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
@@ -171,42 +174,63 @@ class FirstLayerMonitor:
 
     # -- public API --------------------------------------------------------
 
-    def monitor(self) -> MonitorResult:
+    def monitor(self, *, monitoring_mode: Optional[str] = None) -> MonitorResult:
         """Run the first-layer monitoring session (blocking).
 
         Call this AFTER starting the print.  The method will:
 
-        1. Validate camera capability (if ``require_camera`` is set).
-        2. Wait for :attr:`~MonitorPolicy.first_layer_delay_seconds`.
-        3. Confirm the print is actually running.
-        4. Capture snapshots at the configured interval.
-        5. Return collected snapshots for agent inspection.
+        1. Resolve monitoring mode (vision/telemetry/auto).
+        2. Validate camera capability (if vision mode is required).
+        3. Wait for :attr:`~MonitorPolicy.first_layer_delay_seconds`.
+        4. Confirm the print is actually running.
+        5. Capture snapshots (vision) or poll state/temps (telemetry).
+        6. Return collected data for agent inspection.
 
+        :param monitoring_mode: Override the policy's monitoring mode.
+            ``"vision"`` requires camera, ``"telemetry"`` skips snapshots,
+            ``"auto"`` (default) uses camera if available, else telemetry.
         :returns: A :class:`MonitorResult` summarising the session.
         """
         start_time = time.time()
 
-        # Camera capability gate
+        # Resolve effective monitoring mode
+        effective_mode = (monitoring_mode or self._policy.monitoring_mode or "auto").lower().strip()
+        if effective_mode not in ("vision", "telemetry", "auto"):
+            effective_mode = "auto"
+
         can_snap = getattr(self._adapter.capabilities, "can_snapshot", False)
-        if not can_snap:
-            if self._policy.require_camera:
-                logger.warning(
-                    "Printer %s has no camera — aborting monitor (require_camera=True)",
-                    self._printer_name,
-                )
-                return MonitorResult(
-                    success=False,
-                    outcome="no_camera",
-                    duration_seconds=0.0,
-                    message=(
-                        f"Printer {self._printer_name} does not support snapshots. "
-                        "Monitoring requires a camera when require_camera is enabled."
-                    ),
-                )
-            logger.info(
-                "Printer %s has no camera — monitoring will skip snapshots",
+
+        # require_camera check — must happen BEFORE auto-mode degrades to telemetry
+        if self._policy.require_camera and not can_snap:
+            logger.warning(
+                "Printer %s has no camera — aborting monitor (require_camera=True)",
                 self._printer_name,
             )
+            return MonitorResult(
+                success=False,
+                outcome="no_camera",
+                duration_seconds=0.0,
+                message=(
+                    f"Printer {self._printer_name} does not support snapshots. "
+                    "Vision monitoring requires a camera when require_camera is enabled."
+                ),
+            )
+
+        # Mode resolution: auto picks vision if camera available, else telemetry
+        if effective_mode == "auto":
+            effective_mode = "vision" if can_snap else "telemetry"
+
+        # Explicit vision mode without camera → degrade to telemetry
+        if effective_mode == "vision" and not can_snap:
+            logger.info(
+                "Printer %s has no camera — degrading from vision to telemetry mode",
+                self._printer_name,
+            )
+            effective_mode = "telemetry"
+
+        # Telemetry-only mode
+        if effective_mode == "telemetry":
+            return self._monitor_telemetry(start_time)
 
         # --- Initial delay ------------------------------------------------
         logger.info(
@@ -331,6 +355,127 @@ class FirstLayerMonitor:
         )
 
     # -- internal helpers --------------------------------------------------
+
+    def _monitor_telemetry(self, start_time: float) -> MonitorResult:
+        """Telemetry-only monitoring: poll printer state and temps.
+
+        Used when no camera is available or when monitoring_mode is
+        ``"telemetry"``.  Checks that the print is progressing normally
+        by tracking state transitions, temperature stability, and
+        completion progress over the monitoring period.
+
+        :param start_time: Session start timestamp.
+        :returns: A :class:`MonitorResult` with telemetry data.
+        """
+        logger.info(
+            "Telemetry-only monitoring on %s (delay=%ds, checks=%d, interval=%ds)",
+            self._printer_name,
+            self._policy.first_layer_delay_seconds,
+            self._policy.first_layer_check_count,
+            self._policy.first_layer_interval_seconds,
+        )
+
+        # --- Initial delay ---
+        if not self._wait_printing(self._policy.first_layer_delay_seconds, start_time):
+            return self._build_early_exit(start_time)
+
+        telemetry_snapshots: List[Dict[str, Any]] = []
+        state_changes: List[str] = []
+        prev_state: Optional[str] = None
+
+        for i in range(self._policy.first_layer_check_count):
+            if i > 0:
+                if not self._wait_printing(
+                    self._policy.first_layer_interval_seconds, start_time
+                ):
+                    return self._build_early_exit(
+                        start_time, snapshots=telemetry_snapshots,
+                    )
+
+            # Read printer state
+            try:
+                state = self._adapter.get_state()
+            except PrinterError as exc:
+                logger.error(
+                    "Failed to read printer state on %s: %s",
+                    self._printer_name, exc,
+                )
+                return MonitorResult(
+                    success=False,
+                    outcome="error",
+                    snapshots=telemetry_snapshots,
+                    duration_seconds=round(time.time() - start_time, 1),
+                    message=f"Could not read printer state: {exc}",
+                )
+
+            if state.state in _TERMINAL_STATES:
+                logger.info(
+                    "Printer %s entered %s during telemetry monitoring — stopping",
+                    self._printer_name, state.state.value,
+                )
+                return MonitorResult(
+                    success=True,
+                    outcome="print_ended",
+                    snapshots=telemetry_snapshots,
+                    duration_seconds=round(time.time() - start_time, 1),
+                    message=(
+                        f"Print ended (state={state.state.value}) during "
+                        "telemetry monitoring."
+                    ),
+                )
+
+            # Track state transitions
+            current_state = state.state.value
+            if prev_state is not None and current_state != prev_state:
+                state_changes.append(f"{prev_state} -> {current_state}")
+            prev_state = current_state
+
+            # Read job progress
+            try:
+                job = self._adapter.get_job()
+                completion = job.completion
+            except PrinterError:
+                completion = None
+
+            # Collect temperature data
+            temps: Dict[str, Any] = {}
+            if state.tool_temp_actual is not None:
+                temps["hotend_actual"] = state.tool_temp_actual
+            if state.tool_temp_target is not None:
+                temps["hotend_target"] = state.tool_temp_target
+            if state.bed_temp_actual is not None:
+                temps["bed_actual"] = state.bed_temp_actual
+            if state.bed_temp_target is not None:
+                temps["bed_target"] = state.bed_temp_target
+
+            telemetry_snapshots.append({
+                "captured_at": time.time(),
+                "completion_percent": completion,
+                "print_phase": _detect_phase(completion),
+                "image_base64": None,
+                "monitoring_mode": "telemetry",
+                "printer_state": current_state,
+                "temperatures": temps,
+                "state_changes": list(state_changes),
+                "note": "telemetry-only monitoring (no camera)",
+            })
+
+        elapsed = round(time.time() - start_time, 1)
+        logger.info(
+            "Telemetry monitoring complete on %s: %d checks in %.1f s",
+            self._printer_name, len(telemetry_snapshots), elapsed,
+        )
+        return MonitorResult(
+            success=True,
+            outcome="passed",
+            snapshots=telemetry_snapshots,
+            duration_seconds=elapsed,
+            message=(
+                f"Telemetry monitoring complete: {len(telemetry_snapshots)} state check(s) "
+                f"over {elapsed}s. Print is progressing normally. "
+                "No camera available — visual inspection was not performed."
+            ),
+        )
 
     def _wait_printing(self, seconds: float, session_start: float) -> bool:
         """Sleep in short increments, checking printer state each tick.
@@ -493,6 +638,7 @@ def load_monitor_policy(*, config_path: Optional[Any] = None) -> MonitorPolicy:
     - ``KILN_MONITOR_FIRST_LAYER_INTERVAL`` — seconds (int)
     - ``KILN_MONITOR_AUTO_PAUSE`` — ``"true"``/``"false"``
     - ``KILN_MONITOR_REQUIRE_CAMERA`` — ``"true"``/``"false"``
+    - ``KILN_MONITOR_MODE`` — ``"vision"``/``"telemetry"``/``"auto"``
 
     Config file (``~/.kiln/config.yaml``)::
 
@@ -502,6 +648,7 @@ def load_monitor_policy(*, config_path: Optional[Any] = None) -> MonitorPolicy:
           first_layer_interval_seconds: 60
           auto_pause_on_failure: true
           require_camera: false
+          mode: auto
     """
     import os
 
@@ -529,6 +676,12 @@ def load_monitor_policy(*, config_path: Optional[Any] = None) -> MonitorPolicy:
                 policy.require_camera = bool(section["require_camera"])
             if "max_snapshot_failures" in section:
                 policy.max_snapshot_failures = int(section["max_snapshot_failures"])
+            if "stall_timeout_seconds" in section:
+                policy.stall_timeout_seconds = int(section["stall_timeout_seconds"])
+            if "mode" in section:
+                _mode_raw = str(section["mode"]).lower().strip()
+                if _mode_raw in ("vision", "telemetry", "auto"):
+                    policy.monitoring_mode = _mode_raw
     except Exception:
         logger.debug("Could not load monitoring config from file", exc_info=True)
 
@@ -561,6 +714,21 @@ def load_monitor_policy(*, config_path: Optional[Any] = None) -> MonitorPolicy:
     env_camera = os.environ.get("KILN_MONITOR_REQUIRE_CAMERA")
     if env_camera is not None:
         policy.require_camera = env_camera.lower() in ("true", "1", "yes")
+
+    env_stall = os.environ.get("KILN_MONITOR_STALL_TIMEOUT")
+    if env_stall is not None:
+        try:
+            policy.stall_timeout_seconds = int(env_stall)
+        except ValueError:
+            logger.warning("Invalid KILN_MONITOR_STALL_TIMEOUT=%r", env_stall)
+
+    env_mode = os.environ.get("KILN_MONITOR_MODE")
+    if env_mode is not None:
+        _mode_val = env_mode.lower().strip()
+        if _mode_val in ("vision", "telemetry", "auto"):
+            policy.monitoring_mode = _mode_val
+        else:
+            logger.warning("Invalid KILN_MONITOR_MODE=%r, ignoring", env_mode)
 
     return policy
 

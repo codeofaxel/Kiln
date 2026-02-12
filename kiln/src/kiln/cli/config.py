@@ -51,6 +51,84 @@ def _normalize_host(host: str, printer_type: str = "octoprint") -> str:
     return host.rstrip("/")
 
 
+def _validate_printer_url(url: str, *, printer_type: str = "octoprint") -> tuple[str, list[str]]:
+    """Validate and clean a printer host URL.
+
+    Performs the following checks:
+
+    1. Strips trailing slashes.
+    2. Ensures URL has an ``http://`` or ``https://`` scheme (for HTTP
+       backends).  Bambu printers use raw hostnames — no scheme is added.
+    3. Ensures URL does not end with a path separator.
+    4. Attempts a basic HTTP HEAD request (5 s timeout) to verify
+       reachability.  A failure produces a warning but does **not** block
+       registration.
+    5. Returns warnings for any malformed-looking URLs.
+
+    :param url: Raw printer URL or hostname.
+    :param printer_type: Backend type (``"octoprint"``, ``"moonraker"``,
+        ``"bambu"``, ``"prusaconnect"``).
+    :returns: ``(cleaned_url, warnings)`` where *warnings* is a list of
+        human-readable strings (empty if everything looks good).
+    """
+    warnings: list[str] = []
+
+    if not url or not url.strip():
+        return "", ["URL is empty"]
+
+    cleaned = _normalize_host(url, printer_type)
+
+    if not cleaned:
+        return "", ["URL is empty after normalization"]
+
+    # Bambu printers use raw hostnames -- skip HTTP scheme checks.
+    if printer_type == "bambu":
+        # Basic hostname sanity check
+        if " " in cleaned:
+            warnings.append(f"Hostname contains spaces: {cleaned!r}")
+        return cleaned, warnings
+
+    # Scheme check (already handled by _normalize_host, but be explicit)
+    if not re.match(r"^https?://", cleaned, re.IGNORECASE):
+        warnings.append(
+            f"URL missing http:// or https:// scheme: {cleaned!r}. "
+            "Prepending http://."
+        )
+        cleaned = "http://" + cleaned
+
+    # Strip trailing path separators (beyond the authority)
+    cleaned = cleaned.rstrip("/")
+
+    # Check for double slashes after scheme (malformed)
+    scheme_end = cleaned.index("://") + 3
+    authority = cleaned[scheme_end:]
+    if "//" in authority:
+        warnings.append(
+            f"URL contains double slashes in path: {cleaned!r}. "
+            "This may indicate a malformed URL."
+        )
+
+    # Check for obviously bad patterns
+    if " " in cleaned:
+        warnings.append(f"URL contains spaces: {cleaned!r}")
+    if ".." in authority:
+        warnings.append(f"URL contains '..' traversal: {cleaned!r}")
+
+    # Connectivity check (best-effort, does not block)
+    try:
+        import requests
+        requests.head(cleaned, timeout=5, verify=False, allow_redirects=True)
+    except ImportError:
+        pass  # requests not available in this context
+    except Exception as exc:
+        warnings.append(
+            f"Could not reach {cleaned} (HEAD request failed: {exc}). "
+            "The printer may be offline or the URL may be incorrect."
+        )
+
+    return cleaned, warnings
+
+
 # ---------------------------------------------------------------------------
 # Load
 # ---------------------------------------------------------------------------
@@ -260,9 +338,11 @@ def save_printer(
     if not isinstance(printers, dict):
         raw["printers"] = printers = {}
 
+    cleaned_host, url_warnings = _validate_printer_url(host, printer_type=printer_type)
+
     entry: Dict[str, Any] = {
         "type": printer_type,
-        "host": _normalize_host(host, printer_type),
+        "host": cleaned_host,
     }
     if printer_type == "octoprint":
         if api_key:
@@ -286,6 +366,11 @@ def save_printer(
 
     raw.setdefault("settings", {"timeout": 30, "retries": 3})
     _write_config_file(path, raw)
+
+    if url_warnings:
+        for w in url_warnings:
+            logger.warning("Printer %r URL: %s", name, w)
+
     return path
 
 

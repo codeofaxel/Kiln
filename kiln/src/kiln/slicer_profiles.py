@@ -201,6 +201,105 @@ def slicer_profile_to_dict(profile: SlicerProfile) -> Dict[str, Any]:
     }
 
 
+
+def validate_profile_for_printer(profile_id: str, printer_model: str) -> Dict[str, Any]:
+    """Check if a slicer profile is compatible with a printer model.
+
+    Compares the slicer profile's temperature settings against the printer's
+    safety profile limits to catch mismatches (e.g. using a Bambu X1C profile
+    on an Ender 3 whose PTFE hotend cannot handle high temps).
+
+    :param profile_id: Slicer profile identifier (e.g. ``"bambu_x1c"``).
+    :param printer_model: Registered printer model (e.g. ``"ender3"``).
+    :returns: Dict with ``compatible`` (bool), ``warnings`` (list[str]),
+        and ``errors`` (list[str]).
+    """
+    from kiln.safety_profiles import get_profile as get_safety_profile
+
+    warnings: List[str] = []
+    errors: List[str] = []
+
+    # --- Resolve slicer profile ---
+    try:
+        slicer_prof = get_slicer_profile(profile_id)
+    except KeyError:
+        return {"compatible": True, "warnings": [], "errors": []}
+
+    # --- Resolve safety profile ---
+    try:
+        safety_prof = get_safety_profile(printer_model)
+    except KeyError:
+        warnings.append(
+            f"No safety profile for printer model {printer_model!r} -- "
+            "cannot validate temperature limits."
+        )
+        return {"compatible": True, "warnings": warnings, "errors": []}
+
+    # --- Check 1: Profile target mismatch ---
+    profile_norm = slicer_prof.id.lower().replace("-", "_")
+    printer_norm = printer_model.lower().replace("-", "_")
+
+    if profile_norm != "default" and profile_norm != printer_norm:
+        # Check if they share a family prefix (e.g. "ender3" vs "ender3_s1")
+        if not profile_norm.startswith(printer_norm) and not printer_norm.startswith(profile_norm):
+            warnings.append(
+                f"Slicer profile {slicer_prof.id!r} (target: {slicer_prof.display_name}) "
+                f"does not match printer model {printer_model!r} "
+                f"({safety_prof.display_name}). Speeds and settings may be unsuitable."
+            )
+
+    # --- Check 2: Hotend temperature ---
+    settings = slicer_prof.settings
+    hotend_temps: List[tuple[str, float]] = []
+    for key in ("temperature", "first_layer_temperature"):
+        val = settings.get(key)
+        if val is not None:
+            try:
+                hotend_temps.append((key, float(val)))
+            except (ValueError, TypeError):
+                pass
+
+    for key, temp in hotend_temps:
+        if temp > safety_prof.max_hotend_temp:
+            errors.append(
+                f"Profile hotend temp {key}={temp}°C exceeds "
+                f"{safety_prof.display_name} max hotend limit of "
+                f"{safety_prof.max_hotend_temp}°C."
+            )
+        elif temp > safety_prof.max_hotend_temp - 10:
+            warnings.append(
+                f"Profile hotend temp {key}={temp}°C is within 10°C of "
+                f"{safety_prof.display_name} max hotend limit "
+                f"({safety_prof.max_hotend_temp}°C)."
+            )
+
+    # --- Check 3: Bed temperature ---
+    bed_temps: List[tuple[str, float]] = []
+    for key in ("bed_temperature", "first_layer_bed_temperature"):
+        val = settings.get(key)
+        if val is not None:
+            try:
+                bed_temps.append((key, float(val)))
+            except (ValueError, TypeError):
+                pass
+
+    for key, temp in bed_temps:
+        if temp > safety_prof.max_bed_temp:
+            errors.append(
+                f"Profile bed temp {key}={temp}°C exceeds "
+                f"{safety_prof.display_name} max bed limit of "
+                f"{safety_prof.max_bed_temp}°C."
+            )
+        elif temp > safety_prof.max_bed_temp - 10:
+            warnings.append(
+                f"Profile bed temp {key}={temp}°C is within 10°C of "
+                f"{safety_prof.display_name} max bed limit "
+                f"({safety_prof.max_bed_temp}°C)."
+            )
+
+    compatible = len(errors) == 0
+    return {"compatible": compatible, "warnings": warnings, "errors": errors}
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

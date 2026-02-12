@@ -62,7 +62,7 @@ from kiln.gcode import validate_gcode as _validate_gcode_impl, validate_gcode_fo
 from kiln.safety_profiles import get_profile, list_profiles, profile_to_dict
 from kiln.slicer_profiles import (
     get_slicer_profile, list_slicer_profiles, resolve_slicer_profile,
-    slicer_profile_to_dict,
+    slicer_profile_to_dict, validate_profile_for_printer,
 )
 from kiln.printer_intelligence import (
     get_printer_intel, list_intel_profiles, get_material_settings,
@@ -77,6 +77,7 @@ from kiln.pipelines import (
     PipelineState as _PipelineState,
 )
 from kiln.registry import PrinterRegistry, PrinterNotFoundError
+from kiln.cli.config import _validate_printer_url
 from kiln.queue import PrintQueue, JobStatus, JobNotFoundError
 from kiln.events import Event, EventBus, EventType
 from kiln.scheduler import JobScheduler
@@ -1553,6 +1554,25 @@ def set_temperature(
                 "accepted": ok,
             }
 
+        # -- Heater-off safety net ----------------------------------------
+        # Some OctoPrint setups don't reliably turn off heaters at 0 deg C.
+        # Send explicit G-code commands as a best-effort safety measure.
+        if tool_temp == 0 or bed_temp == 0:
+            try:
+                gcode_cmds: list[str] = []
+                if tool_temp == 0:
+                    gcode_cmds.append("M104 S0")  # hotend off
+                if bed_temp == 0:
+                    gcode_cmds.append("M140 S0")  # bed off
+                if gcode_cmds:
+                    adapter.send_gcode(gcode_cmds)
+                    results["heater_off_gcode_sent"] = True
+            except Exception:
+                # Best-effort -- don't fail the main set_temperature op
+                logger.debug("Heater-off safety G-code failed (best-effort)")
+                results["heater_off_gcode_sent"] = False
+
+
         if rate_warnings:
             results["warnings"] = rate_warnings
 
@@ -2381,6 +2401,14 @@ def register_printer(
                     "max_allowed": FREE_TIER_MAX_PRINTERS,
                     "upgrade_url": "https://kiln3d.com/pro",
                 }
+        # Validate and clean the printer URL
+        host, url_warnings = _validate_printer_url(host, printer_type=printer_type)
+        if not host:
+            return _error_dict(
+                "Invalid printer URL: " + "; ".join(url_warnings),
+                code="INVALID_ARGS",
+            )
+
         if printer_type == "octoprint":
             if not api_key:
                 return _error_dict(
@@ -2418,11 +2446,14 @@ def register_printer(
             )
 
         _registry.register(name, adapter)
-        return {
+        result = {
             "success": True,
             "message": f"Registered printer {name!r} ({printer_type} @ {host}).",
             "name": name,
         }
+        if url_warnings:
+            result["warnings"] = url_warnings
+        return result
     except Exception as exc:
         logger.exception("Unexpected error in register_printer")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
@@ -3807,10 +3838,31 @@ def slice_model(
             profile=profile,
             slicer_path=slicer_path,
         )
-        return {
+        response: Dict[str, Any] = {
             "success": True,
             **result.to_dict(),
         }
+
+        # Cross-check slicer profile against printer safety limits
+        if _PRINTER_MODEL and profile:
+            # Extract profile_id from the profile path or use printer model
+            _profile_id = os.path.basename(profile).split("_")[0] if profile else None
+            if _profile_id:
+                validation = validate_profile_for_printer(_profile_id, _PRINTER_MODEL)
+                if validation["warnings"] or validation["errors"]:
+                    response["profile_validation"] = validation
+                    if validation["errors"]:
+                        response["profile_validation_warning"] = (
+                            f"Slicer profile may be incompatible with {_PRINTER_MODEL}: "
+                            + "; ".join(validation["errors"])
+                        )
+                    elif validation["warnings"]:
+                        response["profile_validation_warning"] = (
+                            "Profile compatibility note: "
+                            + "; ".join(validation["warnings"])
+                        )
+
+        return response
     except SlicerNotFoundError as exc:
         return _error_dict(str(exc), code="SLICER_NOT_FOUND")
     except SlicerError as exc:
@@ -7192,6 +7244,7 @@ class _PrintWatcher:
         timeout: int = 7200,
         poll_interval: int = 15,
         event_bus: "Optional[Any]" = None,
+        stall_timeout: int = 600,
     ) -> None:
         self._watch_id = watch_id
         self._adapter = adapter
@@ -7201,6 +7254,7 @@ class _PrintWatcher:
         self._timeout = timeout
         self._poll_interval = poll_interval
         self._event_bus = event_bus
+        self._stall_timeout = stall_timeout
 
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
@@ -7288,6 +7342,10 @@ class _PrintWatcher:
         can_snap = getattr(adapter.capabilities, "can_snapshot", False)
         last_snapshot_time = 0.0
 
+        # Stall detection state
+        _last_completion: Optional[float] = None
+        _last_progress_time: float = time.time()
+
         try:
             while not self._stop_event.is_set():
                 elapsed = time.time() - self._start_time
@@ -7315,6 +7373,51 @@ class _PrintWatcher:
                             "time": round(elapsed, 1),
                             "completion": job.completion,
                         })
+
+                # Stall detection — check if completion has changed
+                if job.completion is not None:
+                    if _last_completion is None or abs(job.completion - _last_completion) > 0.1:
+                        _last_completion = job.completion
+                        _last_progress_time = time.time()
+                    elif (
+                        self._stall_timeout > 0
+                        and (time.time() - _last_progress_time) > self._stall_timeout
+                    ):
+                        stall_duration = round(time.time() - _last_progress_time, 1)
+                        if self._event_bus is not None:
+                            try:
+                                self._event_bus.publish(
+                                    EventType.VISION_ALERT,
+                                    {
+                                        "printer_name": self._printer_name,
+                                        "alert_type": "stall",
+                                        "completion": job.completion,
+                                        "stall_duration_seconds": stall_duration,
+                                        "elapsed_seconds": round(elapsed, 1),
+                                    },
+                                    source="watch_print",
+                                )
+                            except Exception:
+                                pass
+                        result = {
+                            "success": True,
+                            "watch_id": self._watch_id,
+                            "outcome": "stalled",
+                            "elapsed_seconds": round(elapsed, 1),
+                            "stall_duration_seconds": stall_duration,
+                            "stalled_at_completion": job.completion,
+                            "progress_log": list(self._progress_log[-20:]),
+                            "snapshots": list(self._snapshots),
+                            "snapshot_failures": self._snapshot_failures,
+                            "final_state": state.to_dict(),
+                            "message": (
+                                f"Print appears stalled at {job.completion:.1f}% "
+                                f"for {stall_duration:.0f} seconds. "
+                                "Consider checking the printer or cancelling the print."
+                            ),
+                        }
+                        self._finish(result)
+                        return
 
                 # Check terminal states
                 if state.state == PrinterStatus.IDLE and elapsed > 30:
@@ -7479,6 +7582,7 @@ def watch_print(
     max_snapshots: int = 5,
     timeout: int = 7200,
     poll_interval: int = 15,
+    stall_timeout: int = 600,
 ) -> dict:
     """Start background monitoring of an in-progress print.
 
@@ -7500,6 +7604,8 @@ def watch_print(
         max_snapshots: Return after this many snapshots (default 5).
         timeout: Maximum seconds to monitor (default 7200 = 2 hours).
         poll_interval: Seconds between state polls (default 15).
+        stall_timeout: Seconds of zero progress before declaring stall
+            (default 600 = 10 min).  Set to 0 to disable stall detection.
     """
     if err := _check_auth("monitoring"):
         return err
@@ -7530,6 +7636,7 @@ def watch_print(
             timeout=timeout,
             poll_interval=poll_interval,
             event_bus=_event_bus,
+            stall_timeout=stall_timeout,
         )
         _watchers[watch_id] = watcher
         watcher.start()
@@ -7543,6 +7650,7 @@ def watch_print(
             "max_snapshots": max_snapshots,
             "timeout": timeout,
             "poll_interval": poll_interval,
+            "stall_timeout": stall_timeout,
             "message": (
                 f"Background watcher started (id={watch_id}). "
                 "Use watch_print_status to check progress, "

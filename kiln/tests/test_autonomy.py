@@ -91,6 +91,7 @@ class TestConstraints:
         assert c.max_bed_temp is None
         assert c.allowed_tools is None
         assert c.blocked_tools is None
+        assert c.max_order_cost is None
 
     def test_to_dict_empty_when_defaults(self):
         c = AutonomyConstraints()
@@ -103,6 +104,12 @@ class TestConstraints:
         assert d == {"max_print_time_seconds": 3600, "max_tool_temp": 250.0, "require_first_layer_check": False}
         assert "allowed_materials" not in d
         assert "blocked_tools" not in d
+        assert "max_order_cost" not in d
+
+    def test_to_dict_includes_max_order_cost(self):
+        c = AutonomyConstraints(max_order_cost=50.0)
+        d = c.to_dict()
+        assert d["max_order_cost"] == 50.0
 
     def test_to_dict_includes_lists(self):
         c = AutonomyConstraints(
@@ -555,6 +562,129 @@ class TestConstraintChecking:
         result = check_autonomy("start_print", "confirm", config=cfg)
         assert result["allowed"] is False
         assert "blocked" in result["reason"].lower()
+
+    # --- Order cost (spending cap) ---
+
+    def test_order_cost_within_limit(self):
+        cfg = self._cfg(max_order_cost=100.0)
+        result = check_autonomy(
+            "fulfillment_place_order", "confirm",
+            operation_context={"cost": 50.0},
+            config=cfg,
+        )
+        assert result["allowed"] is True
+
+    def test_order_cost_exceeds_limit(self):
+        cfg = self._cfg(max_order_cost=100.0)
+        result = check_autonomy(
+            "fulfillment_place_order", "confirm",
+            operation_context={"cost": 150.0},
+            config=cfg,
+        )
+        assert result["allowed"] is False
+        assert "spending cap" in result["reason"].lower()
+
+    def test_order_cost_exact_limit_passes(self):
+        cfg = self._cfg(max_order_cost=100.0)
+        result = check_autonomy(
+            "place_order", "confirm",
+            operation_context={"cost": 100.0},
+            config=cfg,
+        )
+        assert result["allowed"] is True
+
+    def test_order_cost_no_context_passes(self):
+        cfg = self._cfg(max_order_cost=100.0)
+        result = check_autonomy("fulfillment_place_order", "confirm", config=cfg)
+        assert result["allowed"] is True
+
+    def test_order_cost_non_order_tool_ignored(self):
+        """Spending cap only applies to order-related tools."""
+        cfg = self._cfg(max_order_cost=10.0)
+        result = check_autonomy(
+            "start_print", "confirm",
+            operation_context={"cost": 999.0},
+            config=cfg,
+        )
+        assert result["allowed"] is True
+
+    def test_order_cost_fulfillment_order_tool(self):
+        cfg = self._cfg(max_order_cost=25.0)
+        result = check_autonomy(
+            "fulfillment_order", "confirm",
+            operation_context={"cost": 30.0},
+            config=cfg,
+        )
+        assert result["allowed"] is False
+
+    def test_order_cost_no_limit_set(self):
+        cfg = self._cfg()  # max_order_cost=None (default)
+        result = check_autonomy(
+            "fulfillment_place_order", "confirm",
+            operation_context={"cost": 99999.0},
+            config=cfg,
+        )
+        assert result["allowed"] is True
+
+
+# ---------------------------------------------------------------------------
+# TestLoadMaxOrderCost
+# ---------------------------------------------------------------------------
+
+
+class TestLoadMaxOrderCost:
+    """Loading max_order_cost from env var and config file."""
+
+    def test_env_var_sets_max_order_cost(self, tmp_path):
+        with patch.dict(os.environ, {
+            "KILN_AUTONOMY_LEVEL": "1",
+            "KILN_AUTONOMY_MAX_ORDER_COST": "75.50",
+        }):
+            cfg = load_autonomy_config(config_path=tmp_path / "x.yaml")
+        assert cfg.constraints.max_order_cost == 75.50
+
+    def test_env_var_invalid_max_order_cost_ignored(self, tmp_path):
+        with patch.dict(os.environ, {
+            "KILN_AUTONOMY_LEVEL": "1",
+            "KILN_AUTONOMY_MAX_ORDER_COST": "not_a_number",
+        }):
+            cfg = load_autonomy_config(config_path=tmp_path / "x.yaml")
+        assert cfg.constraints.max_order_cost is None
+
+    def test_config_file_sets_max_order_cost(self, tmp_path):
+        config_path = _write_config(tmp_path, {
+            "autonomy": {
+                "level": 1,
+                "constraints": {"max_order_cost": 200.0},
+            },
+        })
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("KILN_AUTONOMY_LEVEL", None)
+            os.environ.pop("KILN_AUTONOMY_MAX_ORDER_COST", None)
+            cfg = load_autonomy_config(config_path=config_path)
+        assert cfg.constraints.max_order_cost == 200.0
+
+    def test_env_var_overrides_config_file_max_order_cost(self, tmp_path):
+        config_path = _write_config(tmp_path, {
+            "autonomy": {
+                "level": 1,
+                "constraints": {"max_order_cost": 200.0},
+            },
+        })
+        with patch.dict(os.environ, {
+            "KILN_AUTONOMY_MAX_ORDER_COST": "50.0",
+        }, clear=False):
+            os.environ.pop("KILN_AUTONOMY_LEVEL", None)
+            cfg = load_autonomy_config(config_path=config_path)
+        assert cfg.constraints.max_order_cost == 50.0
+
+    def test_no_max_order_cost_defaults_to_none(self, tmp_path):
+        config_path = _write_config(tmp_path, {"autonomy": {"level": 1}})
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("KILN_AUTONOMY_LEVEL", None)
+            os.environ.pop("KILN_AUTONOMY_MAX_ORDER_COST", None)
+            cfg = load_autonomy_config(config_path=config_path)
+        assert cfg.constraints.max_order_cost is None
 
 
 # ---------------------------------------------------------------------------
