@@ -28,6 +28,15 @@ jobs:
       - name: Install octoprint-cli with dev deps
         run: pip install -e "./octoprint-cli[dev]"
 
+      - name: Install linter
+        run: pip install ruff
+
+      - name: Lint kiln
+        run: cd kiln && ruff check src/
+
+      - name: Lint octoprint-cli
+        run: cd octoprint-cli && ruff check src/
+
       - name: Run kiln tests
         run: cd kiln && python -m pytest tests/ -v
 
