@@ -30,3 +30,6 @@ htmlcov/
 # Development tooling
 tools/
 .DS_Store
+
+# Internal working docs (backed up via iCloud)
+.dev
