@@ -218,6 +218,45 @@ class TestProbeHost:
         assert port80_octo == []
 
     @responses.activate
+    def test_prusaconnect_found_port_80(self):
+        """PrusaLink printer detected on port 80 via /api/v1/status."""
+        responses.add(
+            responses.GET,
+            "http://192.168.1.77:80/api/v1/status",
+            json={
+                "printer": {"state": "IDLE", "temp_nozzle": 25.0, "temp_bed": 22.0},
+                "job": {},
+            },
+            status=200,
+        )
+        results = probe_host("192.168.1.77", timeout=1.0)
+        prusa = [r for r in results if r.printer_type == "prusaconnect"]
+        assert len(prusa) >= 1
+        p = prusa[0]
+        assert p.host == "192.168.1.77"
+        assert p.port == 80
+        assert p.printer_type == "prusaconnect"
+        assert p.api_available is True
+        assert p.discovery_method == "manual"
+
+    @responses.activate
+    def test_prusaconnect_found_port_8080(self):
+        """PrusaLink printer detected on alternate port 8080."""
+        responses.add(
+            responses.GET,
+            "http://192.168.1.77:8080/api/v1/status",
+            json={
+                "printer": {"state": "PRINTING", "temp_nozzle": 215.0},
+                "job": {"id": 1, "progress": 42.0},
+            },
+            status=200,
+        )
+        results = probe_host("192.168.1.77", timeout=1.0)
+        prusa = [r for r in results if r.printer_type == "prusaconnect" and r.port == 8080]
+        assert len(prusa) == 1
+        assert prusa[0].api_available is True
+
+    @responses.activate
     def test_bambu_port_open(self):
         """Bambu detected when MQTT port is open."""
         with patch("kiln.discovery.socket.socket") as mock_sock:
@@ -380,6 +419,27 @@ class TestTryHttpProbe:
         """No printers on the subnet -- all probes fail."""
         results = _try_http_probe("10.99.99", timeout=5.0)
         assert results == []
+
+    @responses.activate
+    def test_finds_prusaconnect_on_subnet(self):
+        """Discovers a PrusaLink printer on the subnet."""
+        responses.add(
+            responses.GET,
+            "http://192.168.1.77:80/api/v1/status",
+            json={
+                "printer": {"state": "IDLE", "temp_nozzle": 25.0},
+                "job": {},
+            },
+            status=200,
+        )
+        results = _try_http_probe("192.168.1", timeout=10.0)
+        prusa = [r for r in results if r.printer_type == "prusaconnect"]
+        assert len(prusa) >= 1
+        p = prusa[0]
+        assert p.host == "192.168.1.77"
+        assert p.port == 80
+        assert p.api_available is True
+        assert p.discovery_method == "http_probe"
 
     @responses.activate
     def test_multiple_printers_found(self):

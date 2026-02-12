@@ -57,6 +57,8 @@ _PROBE_TARGETS = [
     (5000, "/api/version", "text", "octoprint"),  # common OctoPrint port
     (7125, "/server/info", "klippy_state", "moonraker"),
     (80, "/server/info", "klippy_state", "moonraker"),
+    (80, "/api/v1/status", "printer", "prusaconnect"),  # PrusaLink on default port
+    (8080, "/api/v1/status", "printer", "prusaconnect"),  # PrusaLink alternate port
     (8883, None, None, "bambu"),  # Bambu MQTT port (no HTTP probe)
 ]
 
@@ -174,6 +176,10 @@ def probe_host(host: str, timeout: float = 3.0) -> List[DiscoveredPrinter]:
                         version = data.get("server", "")
                     elif printer_type == "moonraker":
                         version = data.get("klippy_state", "")
+                    elif printer_type == "prusaconnect":
+                        printer_data = data.get("printer", {})
+                        name = printer_data.get("state", "PrusaLink")
+                        version = ""
 
                     results.append(
                         DiscoveredPrinter(
@@ -283,6 +289,10 @@ def _try_http_probe(subnet: str, timeout: float) -> List[DiscoveredPrinter]:
                             version = data.get("server", "")
                         elif printer_type == "moonraker":
                             version = data.get("klippy_state", "")
+                        elif printer_type == "prusaconnect":
+                            printer_data = data.get("printer", {})
+                            name = printer_data.get("state", "PrusaLink")
+                            version = ""
 
                         found.append(
                             DiscoveredPrinter(

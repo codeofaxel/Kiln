@@ -360,13 +360,27 @@
         "bed": 85,
         "fan": 50,
         "notes": "Keep below 240C for PTFE safety. Works well otherwise."
+      },
+      "ABS": {
+        "hotend": 240,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Marginal on stock PTFE hotend — 240C is the absolute max. No enclosure means warping risk on tall parts. Only recommended for small, low-profile prints."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Bowden extruder makes flexibles challenging. Print very slowly (20mm/s), reduce retraction to 1.5mm max to avoid jams."
       }
     },
     "quirks": [
       "PTFE-lined hotend \u2014 same 240C limit as Ender 3. Upgrade to all-metal for higher temps.",
       "SuperPINDA probe included on Mini+ \u2014 much better than original Mini's MINDA.",
       "Small build volume (180x180x180) \u2014 plan part orientation carefully.",
-      "Bowden tube needs replacement every ~500h or if retraction quality drops."
+      "Bowden tube needs replacement every ~500h or if retraction quality drops.",
+      "WiFi can be unreliable \u2014 connection may drop after hours of operation. USB serial via OctoPrint is more stable for long sessions.",
+      "PrusaLink API key may need to be re-entered after firmware updates."
     ],
     "calibration": {
       "first_steps": "Run first layer calibration from LCD. Mini's auto-level is reliable.",
@@ -377,6 +391,21 @@
         "symptom": "Stringing after many hours of use",
         "cause": "Bowden tube gap at hotend develops",
         "fix": "Re-seat bowden tube. Cut clean end. Push flush against nozzle."
+      },
+      {
+        "symptom": "Layer shifting on tall prints",
+        "cause": "Belt tension too loose or pulley grub screws loosened",
+        "fix": "Check belt tension on both X and Y axes. Tighten grub screws on motor pulleys with included hex key."
+      },
+      {
+        "symptom": "First layer adhesion fails after firmware update",
+        "cause": "Z-offset/first layer calibration reset by firmware",
+        "fix": "Re-run first layer calibration from LCD menu (Calibration > First Layer Calibration)."
+      },
+      {
+        "symptom": "PrusaLink connection drops during print",
+        "cause": "WiFi instability on Mini's built-in ESP module",
+        "fix": "Move printer closer to router, or use USB serial via OctoPrint on a Raspberry Pi for reliable monitoring."
       }
     ]
   },
