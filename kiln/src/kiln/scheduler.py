@@ -102,6 +102,7 @@ class JobScheduler:
         job_id: str,
         error_msg: str,
         failed_list: list[Dict[str, str]],
+        printer_name: str | None = None,
     ) -> bool:
         """Try to re-queue a failed job if retries remain.
 
@@ -150,6 +151,8 @@ class JobScheduler:
             {"job_id": job_id, "error": error_msg},
             source="scheduler",
         )
+        if printer_name:
+            self._auto_record_outcome(job_id, printer_name, "failed", error_msg=error_msg)
         failed_list.append({"job_id": job_id, "error": error_msg})
         return False
 
@@ -184,6 +187,44 @@ class JobScheduler:
         indexed = list(enumerate(available))
         indexed.sort(key=lambda pair: (-score.get(pair[1], -1), pair[0]))
         return [name for _, name in indexed]
+
+    def _auto_record_outcome(
+        self,
+        job_id: str,
+        printer_name: str,
+        outcome: str,
+        error_msg: str | None = None,
+    ) -> None:
+        """Best-effort auto-record a print outcome to the learning database."""
+        if not self._persistence:
+            return
+        try:
+            # Check if outcome already recorded (agent may have beaten us)
+            existing = self._persistence.get_print_outcome(job_id)
+            if existing is not None:
+                return  # Agent already recorded — don't overwrite
+
+            # Try to get job metadata for richer outcome data
+            job = self._queue.get_job(job_id)
+
+            self._persistence.save_print_outcome({
+                "job_id": job_id,
+                "printer_name": printer_name,
+                "file_name": job.file_name if job else None,
+                "file_hash": job.metadata.get("file_hash") if job and job.metadata else None,
+                "material_type": job.metadata.get("material_type") if job and job.metadata else None,
+                "outcome": outcome,
+                "quality_grade": None,  # Only agents can assess quality
+                "failure_mode": None,   # Only agents can classify failure mode
+                "settings": None,
+                "environment": None,
+                "notes": f"Auto-recorded by scheduler. {error_msg}" if error_msg else "Auto-recorded by scheduler.",
+                "agent_id": "scheduler",
+                "created_at": time.time(),
+            })
+            logger.debug("Auto-recorded %s outcome for job %s", outcome, job_id)
+        except Exception:
+            logger.debug("Failed to auto-record outcome for job %s (non-fatal)", job_id, exc_info=True)
 
     def tick(self) -> Dict[str, Any]:
         """Run one scheduling cycle.  Can be called manually for testing.
@@ -222,13 +263,14 @@ class JobScheduler:
                         {"job_id": job_id, "printer_name": printer_name},
                         source="scheduler",
                     )
+                    self._auto_record_outcome(job_id, printer_name, "success")
                     completed.append(job_id)
 
                 elif state.state == PrinterStatus.ERROR:
                     error_msg = f"Printer {printer_name} entered error state"
                     with self._lock:
                         self._active_jobs.pop(job_id, None)
-                    self._requeue_or_fail(job_id, error_msg, failed)
+                    self._requeue_or_fail(job_id, error_msg, failed, printer_name=printer_name)
 
                 elif state.state == PrinterStatus.PRINTING:
                     # Promote STARTING -> PRINTING when the printer confirms
@@ -258,7 +300,7 @@ class JobScheduler:
                             )
                             with self._lock:
                                 self._active_jobs.pop(job_id, None)
-                            self._requeue_or_fail(job_id, error_msg, failed)
+                            self._requeue_or_fail(job_id, error_msg, failed, printer_name=printer_name)
                             continue
                     except Exception:
                         pass
@@ -280,7 +322,7 @@ class JobScheduler:
                 error_msg = f"Printer {printer_name} no longer registered"
                 with self._lock:
                     self._active_jobs.pop(job_id, None)
-                self._requeue_or_fail(job_id, error_msg, failed)
+                self._requeue_or_fail(job_id, error_msg, failed, printer_name=printer_name)
             except Exception as exc:
                 logger.warning(
                     "Error checking job %s on %s: %s", job_id, printer_name, exc

@@ -1444,6 +1444,47 @@ class KilnDB:
             })
         return results
 
+    def get_successful_settings(
+        self,
+        printer_name: str | None = None,
+        material_type: str | None = None,
+        file_hash: str | None = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Return settings from successful print outcomes.
+
+        Filters by printer, material, and/or file hash. Returns only
+        outcomes where outcome='success' and settings is not NULL,
+        ordered by quality_grade (excellent > good > acceptable > poor)
+        then by created_at descending.
+        """
+        clauses: List[str] = ["outcome = 'success'", "settings IS NOT NULL"]
+        params: List[Any] = []
+        if printer_name:
+            clauses.append("printer_name = ?")
+            params.append(printer_name)
+        if material_type:
+            clauses.append("material_type = ?")
+            params.append(material_type)
+        if file_hash:
+            clauses.append("file_hash = ?")
+            params.append(file_hash)
+        where = " WHERE " + " AND ".join(clauses)
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM print_outcomes{where} "
+            "ORDER BY "
+            "CASE quality_grade "
+            "  WHEN 'excellent' THEN 0 "
+            "  WHEN 'good' THEN 1 "
+            "  WHEN 'acceptable' THEN 2 "
+            "  WHEN 'poor' THEN 3 "
+            "  ELSE 4 "
+            "END, created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [self._outcome_row_to_dict(r) for r in rows]
+
     def _outcome_row_to_dict(self, row) -> Dict[str, Any]:
         """Convert a print_outcomes row to a dictionary."""
         d = dict(row)

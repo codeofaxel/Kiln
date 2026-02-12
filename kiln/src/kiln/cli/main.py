@@ -33,10 +33,13 @@ from kiln.cli.output import (
     format_discovered,
     format_error,
     format_files,
+    format_fleet_status,
     format_history,
+    format_job_detail,
     format_materials,
     format_order,
     format_printers,
+    format_queue_summary,
     format_quote,
     format_response,
     format_status,
@@ -1297,6 +1300,256 @@ def order_cancel(order_id: str, json_mode: bool) -> None:
         click.echo(format_order(result.to_dict(), json_mode=json_mode))
     except click.ClickException:
         raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# fleet
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def fleet() -> None:
+    """Manage your printer fleet (Pro).
+
+    View status of all registered printers and register new ones.
+    Requires a Kiln Pro or Business license.
+    """
+
+
+@fleet.command("status")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def fleet_status_cmd(json_mode: bool) -> None:
+    """Show the status of all printers in the fleet."""
+    from kiln.licensing import LicenseTier, check_tier
+
+    ok, msg = check_tier(LicenseTier.PRO)
+    if not ok:
+        click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
+        sys.exit(1)
+
+    try:
+        from kiln.server import fleet_status as _fleet_status
+
+        result = _fleet_status()
+        if not result.get("success"):
+            click.echo(format_error(
+                result.get("error", "Unknown error"),
+                code=result.get("code", "ERROR"),
+                json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        click.echo(format_fleet_status(result.get("printers", []), json_mode=json_mode))
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@fleet.command("register")
+@click.argument("name")
+@click.argument("printer_type", type=click.Choice(["octoprint", "moonraker", "bambu", "prusaconnect"]))
+@click.argument("host")
+@click.option("--api-key", default=None, help="API key or LAN access code.")
+@click.option("--serial", default=None, help="Printer serial (required for Bambu).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def fleet_register_cmd(
+    name: str, printer_type: str, host: str,
+    api_key: Optional[str], serial: Optional[str], json_mode: bool,
+) -> None:
+    """Register a printer in the fleet.
+
+    NAME is a unique friendly name (e.g. 'voron-350').
+    PRINTER_TYPE is the backend: octoprint, moonraker, bambu, or prusaconnect.
+    HOST is the printer's URL or IP address.
+    """
+    from kiln.licensing import LicenseTier, check_tier
+
+    ok, msg = check_tier(LicenseTier.PRO)
+    if not ok:
+        click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
+        sys.exit(1)
+
+    try:
+        from kiln.server import register_printer as _register_printer
+
+        result = _register_printer(
+            name=name,
+            printer_type=printer_type,
+            host=host,
+            api_key=api_key,
+            serial=serial,
+        )
+        if not result.get("success"):
+            click.echo(format_error(
+                result.get("error", "Unknown error"),
+                code=result.get("code", "ERROR"),
+                json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        click.echo(format_response("success", data=result, json_mode=json_mode))
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# queue
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def queue() -> None:
+    """Manage the print job queue (Pro).
+
+    Submit, monitor, list, and cancel print jobs in the queue.
+    Requires a Kiln Pro or Business license.
+    """
+
+
+@queue.command("submit")
+@click.argument("file")
+@click.option("--printer", default=None, help="Target printer name (omit for auto-dispatch).")
+@click.option("--priority", default=0, type=int, help="Job priority (higher = first, default 0).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def queue_submit_cmd(file: str, printer: Optional[str], priority: int, json_mode: bool) -> None:
+    """Submit a print job to the queue.
+
+    FILE is the G-code file name (must already exist on the printer).
+    """
+    from kiln.licensing import LicenseTier, check_tier
+
+    ok, msg = check_tier(LicenseTier.PRO)
+    if not ok:
+        click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
+        sys.exit(1)
+
+    try:
+        from kiln.server import submit_job as _submit_job
+
+        result = _submit_job(
+            file_name=file,
+            printer_name=printer,
+            priority=priority,
+        )
+        if not result.get("success"):
+            click.echo(format_error(
+                result.get("error", "Unknown error"),
+                code=result.get("code", "ERROR"),
+                json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        click.echo(format_response("success", data=result, json_mode=json_mode))
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@queue.command("status")
+@click.argument("job_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def queue_status_cmd(job_id: str, json_mode: bool) -> None:
+    """Check the status of a specific job.
+
+    JOB_ID is the ID returned by 'kiln queue submit'.
+    """
+    from kiln.licensing import LicenseTier, check_tier
+
+    ok, msg = check_tier(LicenseTier.PRO)
+    if not ok:
+        click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
+        sys.exit(1)
+
+    try:
+        from kiln.server import job_status as _job_status
+
+        result = _job_status(job_id)
+        if not result.get("success"):
+            click.echo(format_error(
+                result.get("error", "Unknown error"),
+                code=result.get("code", "ERROR"),
+                json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        click.echo(format_job_detail(result.get("job", {}), json_mode=json_mode))
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@queue.command("list")
+@click.option("--status", "-s", "filter_status", default=None,
+              type=click.Choice(["completed", "failed", "cancelled"]),
+              help="Filter by job status.")
+@click.option("--limit", "-n", default=20, type=int, help="Max records (default 20).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def queue_list_cmd(filter_status: Optional[str], limit: int, json_mode: bool) -> None:
+    """List jobs in the queue with optional status filter."""
+    from kiln.licensing import LicenseTier, check_tier
+
+    ok, msg = check_tier(LicenseTier.PRO)
+    if not ok:
+        click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
+        sys.exit(1)
+
+    try:
+        if filter_status:
+            from kiln.server import job_history as _job_history
+            result = _job_history(limit=limit, status=filter_status)
+        else:
+            from kiln.server import queue_summary as _queue_summary
+            result = _queue_summary()
+
+        if not result.get("success"):
+            click.echo(format_error(
+                result.get("error", "Unknown error"),
+                code=result.get("code", "ERROR"),
+                json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        if filter_status:
+            click.echo(format_history(result.get("jobs", []), json_mode=json_mode))
+        else:
+            click.echo(format_queue_summary(result, json_mode=json_mode))
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@queue.command("cancel")
+@click.argument("job_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def queue_cancel_cmd(job_id: str, json_mode: bool) -> None:
+    """Cancel a queued or running job.
+
+    JOB_ID is the ID returned by 'kiln queue submit'.
+    """
+    from kiln.licensing import LicenseTier, check_tier
+
+    ok, msg = check_tier(LicenseTier.PRO)
+    if not ok:
+        click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
+        sys.exit(1)
+
+    try:
+        from kiln.server import cancel_job as _cancel_job
+
+        result = _cancel_job(job_id)
+        if not result.get("success"):
+            click.echo(format_error(
+                result.get("error", "Unknown error"),
+                code=result.get("code", "ERROR"),
+                json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        click.echo(format_response("success", data=result, json_mode=json_mode))
     except Exception as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
         sys.exit(1)
@@ -2914,6 +3167,86 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
 
 # ``kiln doctor`` is an alias for ``kiln verify``.
 cli.add_command(verify, name="doctor")
+
+
+# ---------------------------------------------------------------------------
+# upgrade
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option(
+    "--key", "-k", default=None,
+    help="License key to activate. If omitted, opens the upgrade page.",
+)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def upgrade(ctx: click.Context, key: Optional[str], json_mode: bool) -> None:
+    """Activate a Kiln Pro or Business license, or view current tier."""
+    from kiln.licensing import LicenseTier, get_license_manager
+
+    mgr = get_license_manager()
+
+    if key:
+        # Activate the provided license key
+        try:
+            info = mgr.activate_license(key)
+            data = info.to_dict()
+            if json_mode:
+                import json as _json
+                click.echo(_json.dumps({"success": True, **data}, indent=2))
+            else:
+                click.echo(f"  ✓ License activated: Kiln {info.tier.value.title()}")
+                if info.license_key_hint:
+                    click.echo(f"    Key: ...{info.license_key_hint}")
+                click.echo(f"    Source: {info.source}")
+        except Exception as exc:
+            click.echo(format_error(str(exc), code="LICENSE_ERROR", json_mode=json_mode))
+            sys.exit(1)
+    else:
+        # Show current tier and upgrade info
+        info = mgr.get_info()
+        data = info.to_dict()
+        if json_mode:
+            import json as _json
+            click.echo(_json.dumps({"success": True, **data}, indent=2))
+        else:
+            click.echo(f"\n  Kiln License")
+            click.echo(f"  ────────────")
+            click.echo(f"  Tier:   {info.tier.value.title()}")
+            if info.license_key_hint:
+                click.echo(f"  Key:    ...{info.license_key_hint}")
+            click.echo(f"  Source: {info.source}")
+            if info.tier == LicenseTier.FREE:
+                click.echo(f"\n  Upgrade to Pro for fleet management, job queue,")
+                click.echo(f"  analytics, and more.")
+                click.echo(f"\n  Visit: https://kiln.sh/pro")
+                click.echo(f"  Or:    kiln upgrade --key <your-license-key>")
+            else:
+                click.echo(f"\n  ✓ Active and valid.")
+
+
+@cli.command()
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def license_info(json_mode: bool) -> None:
+    """Show current license tier and details."""
+    from kiln.licensing import get_license_manager
+
+    mgr = get_license_manager()
+    info = mgr.get_info()
+    data = info.to_dict()
+
+    if json_mode:
+        import json as _json
+        click.echo(_json.dumps({"success": True, **data}, indent=2))
+    else:
+        click.echo(f"\n  Kiln License")
+        click.echo(f"  ────────────")
+        click.echo(f"  Tier:     {info.tier.value.title()}")
+        click.echo(f"  Valid:    {'Yes' if info.is_valid else 'No'}")
+        if info.license_key_hint:
+            click.echo(f"  Key:      ...{info.license_key_hint}")
+        click.echo(f"  Source:   {info.source}")
 
 
 # ---------------------------------------------------------------------------

@@ -79,6 +79,7 @@ from kiln.scheduler import JobScheduler
 from kiln.persistence import get_db
 from kiln.webhooks import WebhookManager
 from kiln.auth import AuthManager
+from kiln.licensing import LicenseTier, requires_tier
 from kiln.billing import BillingLedger, FeeCalculation, FeePolicy
 from kiln.payments.manager import PaymentManager
 from kiln.payments.base import PaymentError
@@ -1578,6 +1579,75 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
                 except Exception:
                     pass
 
+        # -- Outcome history advisory (learning database) ------------------
+        # Query past outcomes for this printer + material combo to warn
+        # about historically problematic combinations.  Advisory only —
+        # never blocks a print.
+        try:
+            _printer_name = None
+            if _registry.count > 0:
+                names = _registry.list_names()
+                if names:
+                    _printer_name = names[0]
+
+            if _printer_name:
+                _db = get_db()
+                _mat = expected_material
+
+                # Use get_printer_learning_insights for aggregate data
+                insights = _db.get_printer_learning_insights(_printer_name)
+
+                if insights["total_outcomes"] >= 3:
+                    success_rate = insights["success_rate"]
+
+                    # Check material-specific failure rate if material provided
+                    mat_warning = None
+                    if _mat and _mat.upper() in insights.get("material_stats", {}):
+                        mat_stats = insights["material_stats"][_mat.upper()]
+                        mat_success = mat_stats["success_rate"]
+                        mat_count = mat_stats["count"]
+                        if mat_count >= 3 and mat_success < 0.3:
+                            mat_warning = (
+                                f"Warning: {_mat.upper()} has a {int(mat_success * 100)}% success rate "
+                                f"on {_printer_name} ({mat_count} prints). "
+                                f"Consider adjusting settings or trying a different printer."
+                            )
+
+                    # Check top failure modes
+                    failure_info = insights.get("failure_breakdown", {})
+                    top_failures = sorted(failure_info.items(), key=lambda x: x[1], reverse=True)[:3]
+
+                    if mat_warning:
+                        checks.append({
+                            "name": "outcome_history",
+                            "passed": True,  # Advisory — always passes
+                            "message": mat_warning,
+                            "advisory": True,
+                        })
+                    elif success_rate < 0.5 and insights["total_outcomes"] >= 5:
+                        failure_summary = ", ".join(f"{m} ({c}x)" for m, c in top_failures) if top_failures else "unknown"
+                        checks.append({
+                            "name": "outcome_history",
+                            "passed": True,  # Advisory — always passes
+                            "message": (
+                                f"Advisory: {_printer_name} has a {int(success_rate * 100)}% overall success rate "
+                                f"({insights['total_outcomes']} prints). "
+                                f"Common failures: {failure_summary}."
+                            ),
+                            "advisory": True,
+                        })
+                    else:
+                        checks.append({
+                            "name": "outcome_history",
+                            "passed": True,
+                            "message": (
+                                f"Learning data: {int(success_rate * 100)}% success rate "
+                                f"({insights['total_outcomes']} outcomes recorded)"
+                            ),
+                        })
+        except Exception:
+            pass  # Learning DB not available — skip silently
+
         # -- File validation (optional) ------------------------------------
         file_result: Optional[Dict[str, Any]] = None
         if file_path is not None:
@@ -1995,6 +2065,7 @@ def safety_status() -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def fleet_status() -> dict:
     """Get the status of all registered printers in the fleet.
 
@@ -2036,6 +2107,7 @@ def fleet_status() -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def register_printer(
     name: str,
     printer_type: str,
@@ -2143,6 +2215,7 @@ def discover_printers(timeout: float = 5.0) -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def submit_job(
     file_name: str,
     printer_name: str | None = None,
@@ -2184,6 +2257,7 @@ def submit_job(
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def job_status(job_id: str) -> dict:
     """Get the status of a queued or completed print job.
 
@@ -2206,6 +2280,7 @@ def job_status(job_id: str) -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def queue_summary() -> dict:
     """Get an overview of the print job queue.
 
@@ -2230,6 +2305,7 @@ def queue_summary() -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def cancel_job(job_id: str) -> dict:
     """Cancel a queued or running print job.
 
@@ -2262,6 +2338,7 @@ def cancel_job(job_id: str) -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def job_history(limit: int = 20, status: str | None = None) -> dict:
     """Get history of completed, failed, and cancelled print jobs.
 
@@ -2337,6 +2414,7 @@ def recent_events(limit: int = 20) -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def billing_summary() -> dict:
     """Get a summary of Kiln platform fees for the current month.
 
@@ -2407,6 +2485,7 @@ def billing_status() -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def billing_history(limit: int = 20) -> dict:
     """Get recent billing charge history with payment outcomes.
 
@@ -3906,6 +3985,7 @@ def fulfillment_quote(
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.BUSINESS)
 def fulfillment_order(
     quote_id: str,
     shipping_option_id: str = "",
@@ -4011,6 +4091,7 @@ def fulfillment_order_status(order_id: str) -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.BUSINESS)
 def fulfillment_cancel(order_id: str) -> dict:
     """Cancel a fulfillment order (if still cancellable).
 
@@ -6386,6 +6467,150 @@ def suggest_printer_for_job(
         }
     except Exception as exc:
         logger.exception("Unexpected error in suggest_printer_for_job")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def recommend_settings(
+    printer_name: str | None = None,
+    material_type: str | None = None,
+    file_hash: str | None = None,
+) -> dict:
+    """Recommend print settings based on historical successful outcomes.
+
+    Queries the learning database for settings that produced successful
+    prints, filtered by printer, material, and/or file hash.  Returns
+    aggregated recommendations (most common temps, speeds, slicer profiles)
+    plus the raw successful settings for agent review.
+
+    **Note**: Recommendations are advisory.  They do NOT override safety
+    limits or preflight checks.  Always validate settings against printer
+    safety profiles before use.
+
+    Args:
+        printer_name: Filter by printer (e.g. ``"voron-350"``).
+        material_type: Filter by material (e.g. ``"PLA"``, ``"PETG"``).
+        file_hash: Filter by file hash for exact file matching.
+    """
+    if err := _check_auth("learning"):
+        return err
+
+    if not printer_name and not material_type and not file_hash:
+        return _error_dict(
+            "At least one filter required: printer_name, material_type, or file_hash",
+            code="VALIDATION_ERROR",
+        )
+
+    try:
+        outcomes = get_db().get_successful_settings(
+            printer_name=printer_name,
+            material_type=material_type,
+            file_hash=file_hash,
+            limit=20,
+        )
+
+        if not outcomes:
+            return {
+                "success": True,
+                "has_data": False,
+                "message": "No successful outcomes found for the given criteria.",
+                "query": {
+                    "printer_name": printer_name,
+                    "material_type": material_type,
+                    "file_hash": file_hash,
+                },
+                "safety_notice": _LEARNING_SAFETY_NOTICE,
+            }
+
+        # Aggregate settings across successful outcomes
+        temp_tools: list[float] = []
+        temp_beds: list[float] = []
+        speeds: list[float] = []
+        slicer_profiles: list[str] = []
+        quality_grades: list[str] = []
+
+        for o in outcomes:
+            settings = o.get("settings") or {}
+            if isinstance(settings, dict):
+                if "temp_tool" in settings:
+                    try:
+                        temp_tools.append(float(settings["temp_tool"]))
+                    except (ValueError, TypeError):
+                        pass
+                if "temp_bed" in settings:
+                    try:
+                        temp_beds.append(float(settings["temp_bed"]))
+                    except (ValueError, TypeError):
+                        pass
+                if "speed" in settings:
+                    try:
+                        speeds.append(float(settings["speed"]))
+                    except (ValueError, TypeError):
+                        pass
+                if "slicer_profile" in settings:
+                    slicer_profiles.append(str(settings["slicer_profile"]))
+            if o.get("quality_grade"):
+                quality_grades.append(o["quality_grade"])
+
+        def _median(vals: list[float]) -> float | None:
+            if not vals:
+                return None
+            s = sorted(vals)
+            n = len(s)
+            if n % 2 == 1:
+                return round(s[n // 2], 1)
+            return round((s[n // 2 - 1] + s[n // 2]) / 2, 1)
+
+        def _mode_str(vals: list[str]) -> str | None:
+            if not vals:
+                return None
+            from collections import Counter
+            return Counter(vals).most_common(1)[0][0]
+
+        recommended = {}
+        if temp_tools:
+            recommended["temp_tool"] = _median(temp_tools)
+        if temp_beds:
+            recommended["temp_bed"] = _median(temp_beds)
+        if speeds:
+            recommended["speed"] = _median(speeds)
+        if slicer_profiles:
+            recommended["slicer_profile"] = _mode_str(slicer_profiles)
+
+        # Confidence based on sample size
+        n = len(outcomes)
+        confidence = "low" if n < 3 else ("medium" if n < 10 else "high")
+
+        return {
+            "success": True,
+            "has_data": True,
+            "recommended_settings": recommended,
+            "sample_size": n,
+            "confidence": confidence,
+            "quality_distribution": {
+                grade: quality_grades.count(grade)
+                for grade in ["excellent", "good", "acceptable", "poor"]
+                if quality_grades.count(grade) > 0
+            },
+            "query": {
+                "printer_name": printer_name,
+                "material_type": material_type,
+                "file_hash": file_hash,
+            },
+            "recent_successful_settings": [
+                {
+                    "settings": o.get("settings"),
+                    "quality_grade": o.get("quality_grade"),
+                    "printer_name": o.get("printer_name"),
+                    "material_type": o.get("material_type"),
+                    "notes": o.get("notes"),
+                }
+                for o in outcomes[:5]  # Only show top 5
+            ],
+            "safety_notice": _LEARNING_SAFETY_NOTICE,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in recommend_settings")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 

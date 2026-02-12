@@ -1093,3 +1093,176 @@ class TestSmartPrinterRouting:
         assert len(result["dispatched"]) == 1
         # Even though printer-b has better stats, the job is assigned to printer-a
         assert result["dispatched"][0]["printer_name"] == "printer-a"
+
+
+# ---------------------------------------------------------------------------
+# Auto-outcome recording
+# ---------------------------------------------------------------------------
+
+class TestAutoOutcomeRecording:
+    """Tests for automatic outcome recording in the learning database."""
+
+    def test_auto_record_outcome_on_completion(self, queue, registry, event_bus):
+        """Complete a job and verify save_print_outcome is called with outcome='success'."""
+        mock_persistence = MagicMock()
+        mock_persistence.get_print_outcome.return_value = None
+        scheduler = JobScheduler(
+            queue, registry, event_bus,
+            poll_interval=0.1, max_retries=0,
+            persistence=mock_persistence,
+        )
+
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode", metadata={"file_hash": "abc123"})
+
+        # Dispatch
+        scheduler.tick()
+
+        # Printer returns to idle — job is done
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE,
+        )
+        scheduler.tick()
+
+        mock_persistence.save_print_outcome.assert_called_once()
+        call_args = mock_persistence.save_print_outcome.call_args[0][0]
+        assert call_args["job_id"] == job_id
+        assert call_args["printer_name"] == "printer-1"
+        assert call_args["outcome"] == "success"
+        assert call_args["file_name"] == "benchy.gcode"
+        assert call_args["file_hash"] == "abc123"
+        assert call_args["agent_id"] == "scheduler"
+        assert "Auto-recorded by scheduler" in call_args["notes"]
+
+    def test_auto_record_outcome_on_permanent_failure(self, queue, registry, event_bus):
+        """Exhaust retries and verify outcome='failed' is recorded."""
+        mock_persistence = MagicMock()
+        mock_persistence.get_print_outcome.return_value = None
+        scheduler = JobScheduler(
+            queue, registry, event_bus,
+            poll_interval=0.1, max_retries=0,
+            persistence=mock_persistence,
+        )
+
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+
+        # Dispatch
+        scheduler.tick()
+
+        # Printer enters error state — job fails permanently (max_retries=0)
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.ERROR,
+        )
+        scheduler.tick()
+
+        mock_persistence.save_print_outcome.assert_called_once()
+        call_args = mock_persistence.save_print_outcome.call_args[0][0]
+        assert call_args["job_id"] == job_id
+        assert call_args["printer_name"] == "printer-1"
+        assert call_args["outcome"] == "failed"
+        assert call_args["agent_id"] == "scheduler"
+        assert "error state" in call_args["notes"]
+
+    def test_auto_record_skips_when_agent_already_recorded(self, queue, registry, event_bus):
+        """If get_print_outcome returns existing data, save_print_outcome is NOT called."""
+        mock_persistence = MagicMock()
+        mock_persistence.get_print_outcome.return_value = {"job_id": "j1", "outcome": "success"}
+        scheduler = JobScheduler(
+            queue, registry, event_bus,
+            poll_interval=0.1, max_retries=0,
+            persistence=mock_persistence,
+        )
+
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        queue.submit(file_name="benchy.gcode")
+
+        # Dispatch
+        scheduler.tick()
+
+        # Complete
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE,
+        )
+        scheduler.tick()
+
+        mock_persistence.save_print_outcome.assert_not_called()
+
+    def test_auto_record_skips_without_persistence(self, queue, registry, event_bus):
+        """No persistence configured — verify no errors."""
+        scheduler = JobScheduler(
+            queue, registry, event_bus,
+            poll_interval=0.1, max_retries=0,
+            persistence=None,
+        )
+
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        queue.submit(file_name="benchy.gcode")
+
+        # Dispatch
+        scheduler.tick()
+
+        # Complete — should not raise
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE,
+        )
+        result = scheduler.tick()
+
+        assert len(result["completed"]) == 1
+
+    def test_auto_record_failure_does_not_crash_scheduler(self, queue, registry, event_bus):
+        """If save_print_outcome raises, the scheduler still functions normally."""
+        mock_persistence = MagicMock()
+        mock_persistence.get_print_outcome.return_value = None
+        mock_persistence.save_print_outcome.side_effect = RuntimeError("DB write failed")
+        scheduler = JobScheduler(
+            queue, registry, event_bus,
+            poll_interval=0.1, max_retries=0,
+            persistence=mock_persistence,
+        )
+
+        adapter = make_mock_adapter(name="printer-1")
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="benchy.gcode")
+
+        # Dispatch
+        scheduler.tick()
+
+        # Complete — save_print_outcome will raise, but scheduler should not crash
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.IDLE,
+        )
+        result = scheduler.tick()
+
+        # Job still completed successfully despite auto-record failure
+        assert job_id in result["completed"]
+        assert queue.get_job(job_id).status == JobStatus.COMPLETED
+
+    def test_auto_record_not_called_for_dispatch_failure(self, queue, registry, event_bus):
+        """Dispatch failure (Phase 2) should NOT record an outcome."""
+        mock_persistence = MagicMock()
+        mock_persistence.get_print_outcome.return_value = None
+        scheduler = JobScheduler(
+            queue, registry, event_bus,
+            poll_interval=0.1, max_retries=0,
+            persistence=mock_persistence,
+        )
+
+        adapter = make_mock_adapter(
+            name="printer-1",
+            start_print_success=False,
+            start_print_message="File not found",
+        )
+        registry.register("printer-1", adapter)
+        queue.submit(file_name="missing.gcode")
+
+        # tick will try to dispatch and fail — this is a Phase 2 failure
+        result = scheduler.tick()
+
+        assert len(result["failed"]) == 1
+        # No outcome should be recorded for dispatch failures
+        mock_persistence.save_print_outcome.assert_not_called()

@@ -763,6 +763,230 @@ def format_materials(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Fleet status
+# ---------------------------------------------------------------------------
+
+
+def format_fleet_status(
+    printers: List[Dict[str, Any]],
+    *,
+    json_mode: bool = False,
+) -> str:
+    """Format fleet printer status overview.
+
+    Expects a list of printer snapshot dicts from
+    ``PrinterRegistry.get_fleet_status()``.
+    """
+    if json_mode:
+        return json.dumps(
+            {"status": "success", "data": {"printers": printers, "count": len(printers)}},
+            indent=2,
+            sort_keys=False,
+        )
+
+    if not printers:
+        msg = "No printers in fleet.  Register one with 'kiln fleet register'."
+        if RICH_AVAILABLE:
+            return _render(Panel(msg, border_style="yellow"))
+        return msg
+
+    if RICH_AVAILABLE:
+        table = Table(title="Fleet Status", border_style="blue")
+        table.add_column("Name", style="bold")
+        table.add_column("Type")
+        table.add_column("State")
+        table.add_column("Hotend")
+        table.add_column("Bed")
+        table.add_column("File")
+
+        for p in printers:
+            state = p.get("state", "unknown")
+            color = {"idle": "green", "printing": "yellow", "paused": "yellow",
+                     "error": "red", "offline": "red"}.get(state, "white")
+
+            hotend = format_temp(p.get("tool_temp_actual"), p.get("tool_temp_target"))
+            bed = format_temp(p.get("bed_temp_actual"), p.get("bed_temp_target"))
+            file_name = p.get("file_name") or ""
+
+            table.add_row(
+                p.get("name", ""),
+                p.get("type", ""),
+                f"[{color}]{state}[/{color}]",
+                hotend,
+                bed,
+                file_name,
+            )
+        return _render(table)
+
+    # Plain-text fallback
+    lines = [f"{'Name':<20} {'Type':<12} {'State':<10} {'Hotend':<18} {'Bed':<18} {'File'}"]
+    lines.append("-" * 90)
+    for p in printers:
+        hotend = format_temp(p.get("tool_temp_actual"), p.get("tool_temp_target"))
+        bed = format_temp(p.get("bed_temp_actual"), p.get("bed_temp_target"))
+        lines.append(
+            f"{p.get('name', ''):<20} {p.get('type', ''):<12} "
+            f"{p.get('state', ''):<10} {hotend:<18} {bed:<18} "
+            f"{p.get('file_name') or ''}"
+        )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Queue summary
+# ---------------------------------------------------------------------------
+
+
+def format_queue_summary(
+    data: Dict[str, Any],
+    *,
+    json_mode: bool = False,
+) -> str:
+    """Format queue overview with counts and recent jobs.
+
+    Expects the dict from ``queue_summary()`` server function.
+    """
+    if json_mode:
+        return json.dumps(
+            {"status": "success", "data": data},
+            indent=2,
+            sort_keys=False,
+        )
+
+    counts = data.get("counts", {})
+    pending = data.get("pending", 0)
+    active = data.get("active", 0)
+    total = data.get("total", 0)
+    next_job = data.get("next_job")
+    recent = data.get("recent_jobs", [])
+
+    if RICH_AVAILABLE:
+        parts: list = []
+
+        parts.append(
+            f"[bold]Queue:[/bold] {total} total — "
+            f"[green]{pending} pending[/green], "
+            f"[yellow]{active} active[/yellow]"
+        )
+
+        if counts:
+            breakdown = ", ".join(f"{k}: {v}" for k, v in counts.items())
+            parts.append(f"[bold]Breakdown:[/bold] {breakdown}")
+
+        if next_job:
+            parts.append(
+                f"[bold]Next up:[/bold] {next_job.get('file_name', '?')} "
+                f"(job {next_job.get('id', '?')[:8]})"
+            )
+
+        content = "\n".join(parts)
+        result = _render(Panel(content, title="Queue Summary", border_style="blue"))
+
+        if recent:
+            result += "\n" + format_history(recent, json_mode=False)
+        return result
+
+    # Plain-text fallback
+    lines = [
+        f"Queue: {total} total — {pending} pending, {active} active",
+    ]
+    if counts:
+        breakdown = ", ".join(f"{k}: {v}" for k, v in counts.items())
+        lines.append(f"Breakdown: {breakdown}")
+    if next_job:
+        lines.append(f"Next up: {next_job.get('file_name', '?')} (job {next_job.get('id', '?')[:8]})")
+    if recent:
+        lines.append("")
+        lines.append(format_history(recent, json_mode=False))
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Job detail
+# ---------------------------------------------------------------------------
+
+
+def format_job_detail(
+    job: Dict[str, Any],
+    *,
+    json_mode: bool = False,
+) -> str:
+    """Format a single job record.
+
+    Expects a dict from ``PrintJob.to_dict()``.
+    """
+    if json_mode:
+        return json.dumps(
+            {"status": "success", "data": {"job": job}},
+            indent=2,
+            sort_keys=False,
+        )
+
+    status = job.get("status", "unknown")
+    color = {
+        "queued": "cyan", "starting": "yellow", "printing": "yellow",
+        "completed": "green", "failed": "red", "cancelled": "red",
+    }.get(status, "white")
+
+    if RICH_AVAILABLE:
+        table = Table(show_header=False, box=None, padding=(0, 2))
+        table.add_column("Key", style="bold cyan", no_wrap=True)
+        table.add_column("Value")
+
+        table.add_row("Job ID", job.get("id", ""))
+        table.add_row("File", job.get("file_name", ""))
+        table.add_row("Status", f"[{color}]{status}[/{color}]")
+        table.add_row("Priority", str(job.get("priority", 0)))
+
+        if job.get("printer_name"):
+            table.add_row("Printer", job["printer_name"])
+        if job.get("submitted_by"):
+            table.add_row("Submitted by", job["submitted_by"])
+        if job.get("submitted_at"):
+            try:
+                dt = datetime.fromtimestamp(job["submitted_at"]).strftime("%Y-%m-%d %H:%M")
+            except (OSError, ValueError, TypeError):
+                dt = str(job["submitted_at"])
+            table.add_row("Submitted", dt)
+        if job.get("started_at"):
+            try:
+                dt = datetime.fromtimestamp(job["started_at"]).strftime("%Y-%m-%d %H:%M")
+            except (OSError, ValueError, TypeError):
+                dt = str(job["started_at"])
+            table.add_row("Started", dt)
+        if job.get("completed_at"):
+            try:
+                dt = datetime.fromtimestamp(job["completed_at"]).strftime("%Y-%m-%d %H:%M")
+            except (OSError, ValueError, TypeError):
+                dt = str(job["completed_at"])
+            table.add_row("Completed", dt)
+        if job.get("error"):
+            table.add_row("Error", f"[red]{job['error']}[/red]")
+
+        return _render(Panel(table, title="Job Detail", border_style="blue"))
+
+    # Plain-text fallback
+    lines = [
+        f"Job ID:   {job.get('id', '')}",
+        f"File:     {job.get('file_name', '')}",
+        f"Status:   {status}",
+        f"Priority: {job.get('priority', 0)}",
+    ]
+    if job.get("printer_name"):
+        lines.append(f"Printer:  {job['printer_name']}")
+    if job.get("submitted_by"):
+        lines.append(f"By:       {job['submitted_by']}")
+    if job.get("error"):
+        lines.append(f"Error:    {job['error']}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Billing formatters
+# ---------------------------------------------------------------------------
+
+
 def format_billing_status(
     data: Dict[str, Any],
     *,

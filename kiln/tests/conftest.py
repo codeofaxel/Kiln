@@ -429,3 +429,26 @@ def mock_file_list():
         PrinterFile(name="benchy.gcode", path="benchy.gcode", size_bytes=1234567, date=1700000000),
         PrinterFile(name="cube.gcode", path="cube.gcode", size_bytes=456789, date=1700001000),
     ]
+
+
+# ---------------------------------------------------------------------------
+# License tier bypass for tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _bypass_license_tier(monkeypatch, tmp_path):
+    """Ensure all tests run with a BUSINESS-tier license by default.
+
+    This prevents tier-gated MCP tools from returning LICENSE_REQUIRED
+    errors in existing tests.  Tests that specifically test licensing
+    behaviour can override this by patching ``kiln.licensing._manager``
+    themselves.
+    """
+    from kiln.licensing import LicenseManager, _KEY_PREFIX_BUSINESS
+
+    mgr = LicenseManager(
+        license_key=f"{_KEY_PREFIX_BUSINESS}test_bypass_key",
+        license_path=tmp_path / "test_license",
+        cache_path=tmp_path / "test_cache.json",
+    )
+    monkeypatch.setattr("kiln.licensing._manager", mgr)

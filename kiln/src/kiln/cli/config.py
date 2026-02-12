@@ -26,7 +26,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 # Valid top-level keys in the config file.  Used for schema validation.
-_KNOWN_KEYS: set[str] = {"printers", "active_printer", "settings", "billing"}
+_KNOWN_KEYS: set[str] = {"printers", "active_printer", "settings", "billing", "licensing"}
 
 
 def get_config_path() -> Path:

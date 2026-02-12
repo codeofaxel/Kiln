@@ -407,6 +407,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 | `record_print_outcome` | `job_id`, `outcome`, `quality_grade`, `failure_mode`, `settings`, `notes` | Confirmation (safety-validated) |
 | `get_printer_insights` | `printer_name`, `limit` | Success rate, failure breakdown, material stats, confidence |
 | `suggest_printer_for_job` | `file_hash`, `material_type`, `file_name` | Ranked printers by success rate + availability |
+| `recommend_settings` | `printer_name`, `material_type`, `file_hash` | Median temps/speed, mode slicer profile, confidence, quality distribution |
 
 ### MCP Resources
 

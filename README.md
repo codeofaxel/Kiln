@@ -374,6 +374,7 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `record_print_outcome` | Record print quality outcome with safety-validated settings |
 | `get_printer_insights` | Query cross-printer learning: success rates, failure breakdown, material stats |
 | `suggest_printer_for_job` | Rank printers by historical success for a file/material combination |
+| `recommend_settings` | Recommend print settings (temps, speed, slicer profile) from historical successes |
 
 ## Supported Printers
 
@@ -577,7 +578,7 @@ pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
 # Run tests (3,000+ total)
-cd kiln && python3 -m pytest tests/ -v        # 2,734 tests
+cd kiln && python3 -m pytest tests/ -v        # 2,815 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
