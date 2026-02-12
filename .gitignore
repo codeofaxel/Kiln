@@ -33,6 +33,7 @@ tools/
 CLAUDE.md
 .claude/
 .pre-commit-config.yaml
+fly.toml
 
 # Internal working docs (backed up via iCloud)
 .dev
