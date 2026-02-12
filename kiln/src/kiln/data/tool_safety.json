@@ -77,6 +77,7 @@
     "register_webhook": {"level": "guarded"},
     "list_webhooks": {"level": "safe"},
     "delete_webhook": {"level": "confirm", "irreversible": true},
+    "analyze_print_file": {"level": "safe"},
     "analyze_print_failure": {"level": "safe"},
     "troubleshoot_printer": {"level": "safe"},
     "list_generation_providers": {"level": "safe"},
@@ -117,6 +118,10 @@
     "await_print_completion": {"level": "guarded"},
     "safety_audit": {"level": "safe"},
     "safety_status": {"level": "safe"},
-    "confirm_action": {"level": "guarded"}
+    "confirm_action": {"level": "guarded"},
+    "get_autonomy_level": {"level": "safe"},
+    "set_autonomy_level": {"level": "confirm"},
+    "check_autonomy": {"level": "safe"},
+    "get_skill_manifest": {"level": "safe"}
   }
 }

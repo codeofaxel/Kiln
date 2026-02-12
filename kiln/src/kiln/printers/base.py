@@ -108,10 +108,31 @@ class PrinterFile:
     path: str
     size_bytes: Optional[int] = None
     date: Optional[int] = None  # Unix timestamp
+    # G-code metadata fields (populated by gcode_metadata.enrich_printer_file)
+    material: Optional[str] = None
+    estimated_time_seconds: Optional[int] = None
+    tool_temp: Optional[float] = None
+    bed_temp: Optional[float] = None
+    slicer: Optional[str] = None
+    layer_height: Optional[float] = None
+    filament_used_mm: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        """Return a JSON-serialisable dictionary."""
-        return asdict(self)
+        """Return a JSON-serialisable dictionary.
+
+        Omits metadata fields that are ``None`` to keep output compact
+        when metadata has not been extracted.
+        """
+        data = asdict(self)
+        # Strip None metadata fields for cleaner output
+        _METADATA_KEYS = (
+            "material", "estimated_time_seconds", "tool_temp",
+            "bed_temp", "slicer", "layer_height", "filament_used_mm",
+        )
+        for key in _METADATA_KEYS:
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
 
 
 @dataclass

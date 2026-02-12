@@ -4401,6 +4401,193 @@ def restore(backup_path: str, force: bool, json_mode: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# setup-agent
+# ---------------------------------------------------------------------------
+
+
+@cli.command("setup-agent")
+@click.option("--workspace", "-w", default=None, help="Path to agent workspace (auto-detects if omitted).")
+@click.option("--force", is_flag=True, help="Overwrite existing skill file.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def setup_agent(ctx: click.Context, workspace: Optional[str], force: bool, json_mode: bool) -> None:
+    """Install the Kiln skill into an AI agent workspace.
+
+    Auto-detects agent workspaces (Claude Code, Cursor, Windsurf) or
+    specify --workspace to target a specific directory.
+    """
+    from kiln.skill_manifest import detect_agent_workspaces, install_skill
+
+    if workspace:
+        result = install_skill(workspace, force=force)
+        if json_mode:
+            click.echo(json.dumps(result))
+        else:
+            if result["success"]:
+                click.echo(f"Skill installed to {result['installed_path']}")
+            else:
+                click.echo(f"Error: {result['error']}", err=True)
+                ctx.exit(1)
+    else:
+        workspaces = detect_agent_workspaces()
+        if json_mode:
+            click.echo(json.dumps({"workspaces": workspaces}))
+        else:
+            if not workspaces:
+                click.echo("No agent workspaces detected. Use --workspace to specify one.")
+                ctx.exit(1)
+            for ws in workspaces:
+                status = "installed" if ws["skill_installed"] else "not installed"
+                click.echo(f"  {ws['agent_type']:15s} {ws['path']}  [{status}]")
+            click.echo()
+            click.echo("Run 'kiln setup-agent --workspace <path>' to install.")
+
+
+# ---------------------------------------------------------------------------
+# autonomy
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def autonomy() -> None:
+    """Manage agent autonomy level and constraints.
+
+    Controls how much freedom the AI agent has when operating the
+    printer -- from confirm-everything to full trust.
+    """
+
+
+@autonomy.command("show")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def autonomy_show(json_mode: bool) -> None:
+    """Show the current autonomy level and constraints."""
+    from kiln.autonomy import load_autonomy_config
+
+    try:
+        cfg = load_autonomy_config()
+        data = cfg.to_dict()
+        if json_mode:
+            click.echo(format_response("success", data=data, json_mode=True))
+        else:
+            level_names = {0: "Confirm All", 1: "Pre-screened", 2: "Full Trust"}
+            name = level_names.get(data["level"], "Unknown")
+            click.echo(f"Autonomy level: {data['level']} ({name})")
+            constraints = data.get("constraints", {})
+            if constraints:
+                click.echo("Constraints:")
+                for key, val in constraints.items():
+                    click.echo(f"  {key}: {val}")
+            else:
+                click.echo("Constraints: (none)")
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@autonomy.command("set")
+@click.argument("level", type=click.IntRange(0, 2))
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def autonomy_set(level: int, json_mode: bool) -> None:
+    """Set the autonomy level (0, 1, or 2).
+
+    \b
+    0 = Confirm All   -- every confirm-level tool requires approval
+    1 = Pre-screened   -- confirm-level tools allowed if constraints pass
+    2 = Full Trust     -- all tools allowed except emergency-level
+    """
+    from kiln.autonomy import (
+        AutonomyConfig,
+        AutonomyLevel,
+        load_autonomy_config,
+        save_autonomy_config,
+    )
+
+    try:
+        existing = load_autonomy_config()
+        new_config = AutonomyConfig(
+            level=AutonomyLevel(level), constraints=existing.constraints
+        )
+        save_autonomy_config(new_config)
+        data = new_config.to_dict()
+        if json_mode:
+            click.echo(format_response("success", data=data, json_mode=True))
+        else:
+            level_names = {0: "Confirm All", 1: "Pre-screened", 2: "Full Trust"}
+            name = level_names.get(level, "Unknown")
+            click.echo(f"Autonomy level set to {level} ({name})")
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@autonomy.command("configure")
+@click.option("--max-print-time", type=int, default=None, help="Max print time in seconds.")
+@click.option("--allowed-materials", type=str, default=None, help="Comma-separated list of allowed materials (e.g. PLA,PETG).")
+@click.option("--max-tool-temp", type=float, default=None, help="Max tool/nozzle temperature.")
+@click.option("--max-bed-temp", type=float, default=None, help="Max bed temperature.")
+@click.option("--allowed-tools", type=str, default=None, help="Comma-separated tool whitelist.")
+@click.option("--blocked-tools", type=str, default=None, help="Comma-separated tool blocklist.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def autonomy_configure(
+    max_print_time: Optional[int],
+    allowed_materials: Optional[str],
+    max_tool_temp: Optional[float],
+    max_bed_temp: Optional[float],
+    allowed_tools: Optional[str],
+    blocked_tools: Optional[str],
+    json_mode: bool,
+) -> None:
+    """Set Level 1 constraints for pre-screened autonomy.
+
+    Only values you provide are updated; omitted values keep their
+    current setting.  Pass empty string to clear a list constraint.
+    """
+    from kiln.autonomy import load_autonomy_config, save_autonomy_config
+
+    try:
+        cfg = load_autonomy_config()
+        c = cfg.constraints
+
+        if max_print_time is not None:
+            c.max_print_time_seconds = max_print_time if max_print_time > 0 else None
+        if allowed_materials is not None:
+            c.allowed_materials = (
+                [m.strip() for m in allowed_materials.split(",") if m.strip()]
+                or None
+            )
+        if max_tool_temp is not None:
+            c.max_tool_temp = max_tool_temp if max_tool_temp > 0 else None
+        if max_bed_temp is not None:
+            c.max_bed_temp = max_bed_temp if max_bed_temp > 0 else None
+        if allowed_tools is not None:
+            c.allowed_tools = (
+                [t.strip() for t in allowed_tools.split(",") if t.strip()]
+                or None
+            )
+        if blocked_tools is not None:
+            c.blocked_tools = (
+                [t.strip() for t in blocked_tools.split(",") if t.strip()]
+                or None
+            )
+
+        save_autonomy_config(cfg)
+        data = cfg.to_dict()
+        if json_mode:
+            click.echo(format_response("success", data=data, json_mode=True))
+        else:
+            click.echo("Autonomy constraints updated:")
+            constraints = data.get("constraints", {})
+            if constraints:
+                for key, val in constraints.items():
+                    click.echo(f"  {key}: {val}")
+            else:
+                click.echo("  (none)")
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

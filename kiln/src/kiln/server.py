@@ -1046,8 +1046,13 @@ def printer_files() -> dict:
     - ``size_bytes``: file size (may be null)
     - ``date``: upload timestamp as Unix epoch (may be null)
 
+    When G-code metadata is available, files may also include:
+    - ``material``, ``estimated_time_seconds``, ``tool_temp``,
+      ``bed_temp``, ``slicer``, ``layer_height``, ``filament_used_mm``
+
     Use this to discover which files are ready to print.  Pass a file's
     ``name`` or ``path`` to ``start_print`` to begin printing it.
+    For detailed metadata on a specific file, use ``analyze_print_file()``.
     """
     try:
         adapter = _get_adapter()
@@ -1194,6 +1199,71 @@ def upload_file_confirm(token: str) -> dict:
         return _error_dict(str(exc))
     except Exception as exc:
         logger.exception("Unexpected error in upload_file_confirm")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def analyze_print_file(filename: str) -> dict:
+    """Analyze a G-code file on the printer and extract its metadata.
+
+    Reads the file header to extract slicer-embedded metadata such as
+    material type, estimated print time, temperatures, layer height,
+    and filament usage.  This is especially useful when filenames are
+    meaningless (e.g. ``test5112.gcode``) and the agent needs to
+    understand what a file will print.
+
+    Args:
+        filename: Name or path of the file as shown by ``printer_files()``.
+
+    Returns a JSON object with:
+    - ``filename``: the file name
+    - ``metadata``: extracted metadata (material, time, temps, slicer, etc.)
+    - ``has_metadata``: whether any metadata was found
+    """
+    try:
+        from kiln.gcode_metadata import extract_metadata_from_content  # noqa: E402
+
+        adapter = _get_adapter()
+        files = adapter.list_files()
+
+        # Find the requested file
+        target = None
+        for f in files:
+            if f.name == filename or f.path == filename:
+                target = f
+                break
+
+        if target is None:
+            return _error_dict(
+                f"File not found on printer: {filename!r}. "
+                f"Use printer_files() to list available files.",
+                code="FILE_NOT_FOUND",
+            )
+
+        # Try to download file content for metadata extraction.
+        # Not all adapters support content download -- this is best-effort.
+        metadata_dict: Dict[str, Any] = {}
+        try:
+            if hasattr(adapter, "download_file_content"):
+                content = adapter.download_file_content(target.path)
+                if content:
+                    meta = extract_metadata_from_content(content)
+                    metadata_dict = meta.to_dict()
+        except Exception as exc:
+            logger.debug("Could not download file content for metadata: %s", exc)
+
+        return {
+            "success": True,
+            "filename": target.name,
+            "path": target.path,
+            "size_bytes": target.size_bytes,
+            "metadata": metadata_dict,
+            "has_metadata": bool(metadata_dict),
+        }
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in analyze_print_file")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
@@ -2984,6 +3054,101 @@ def safety_settings() -> dict:
             "Or run 'kiln setup' to configure interactively."
         ),
     }
+
+
+@mcp.tool()
+def get_autonomy_level() -> dict:
+    """Return the current autonomy tier and constraints.
+
+    Shows the autonomy level (0 = confirm all, 1 = pre-screened,
+    2 = full trust) and any Level 1 constraints that are configured.
+    Call this early in a session to understand how much freedom you have.
+    """
+    from kiln.autonomy import load_autonomy_config
+
+    try:
+        cfg = load_autonomy_config()
+        return {"success": True, **cfg.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in get_autonomy_level")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def set_autonomy_level(level: int) -> dict:
+    """Set the autonomy tier (0, 1, or 2).
+
+    Level 0 (Confirm All): Every confirm-level tool requires approval.
+    Level 1 (Pre-screened): Confirm-level tools allowed if constraints pass.
+    Level 2 (Full Trust): All tools allowed except emergency-level.
+
+    Changing this updates the config file.  Requires human confirmation
+    because it affects how much control the agent has.
+    """
+    from kiln.autonomy import (
+        AutonomyConfig,
+        AutonomyLevel,
+        load_autonomy_config,
+        save_autonomy_config,
+    )
+
+    try:
+        autonomy_level = AutonomyLevel(level)
+    except (ValueError, KeyError):
+        return _error_dict(
+            f"Invalid autonomy level: {level}. Must be 0, 1, or 2.",
+            code="VALIDATION_ERROR",
+        )
+
+    try:
+        existing = load_autonomy_config()
+        new_config = AutonomyConfig(
+            level=autonomy_level, constraints=existing.constraints
+        )
+        save_autonomy_config(new_config)
+        return {
+            "success": True,
+            "message": f"Autonomy level set to {level} ({autonomy_level.name.lower()})",
+            **new_config.to_dict(),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in set_autonomy_level")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def check_autonomy(
+    tool_name: str,
+    safety_level: str,
+    material: str = "",
+    estimated_time_seconds: int = 0,
+    tool_temp: float = 0.0,
+    bed_temp: float = 0.0,
+) -> dict:
+    """Check whether the agent may execute a tool without human confirmation.
+
+    Pass the tool name, its safety level, and optional operation context
+    (material, time, temperatures) to get a decision.  Use this before
+    calling confirm-level tools to decide whether to proceed or ask.
+    """
+    from kiln.autonomy import check_autonomy as _check
+
+    ctx: Dict[str, Any] = {}
+    if material:
+        ctx["material"] = material
+    if estimated_time_seconds > 0:
+        ctx["estimated_time_seconds"] = estimated_time_seconds
+    if tool_temp > 0:
+        ctx["tool_temp"] = tool_temp
+    if bed_temp > 0:
+        ctx["bed_temp"] = bed_temp
+
+    try:
+        result = _check(tool_name, safety_level, operation_context=ctx or None)
+        return {"success": True, **result}
+    except Exception as exc:
+        logger.exception("Unexpected error in check_autonomy")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -8840,6 +9005,25 @@ def untrust_printer(host: str) -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in untrust_printer")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def get_skill_manifest() -> dict:
+    """Get the Kiln skill manifest for agent self-discovery.
+
+    Returns a machine-readable description of Kiln's capabilities,
+    configuration requirements, available interfaces, and setup
+    instructions.  Use this when first connecting to understand what
+    Kiln can do and what configuration is needed.
+    """
+    try:
+        from kiln.skill_manifest import generate_manifest
+
+        manifest = generate_manifest()
+        return {"status": "success", "data": manifest.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in get_skill_manifest")
+        return _error_dict(f"Failed to generate manifest: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
