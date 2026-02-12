@@ -274,3 +274,231 @@ class TestWatchPrintTool:
         with mock.patch.object(_registry, 'get', return_value=adapter):
             result = watch_print(printer_name="test")
         assert result["outcome"] == "no_active_print"
+
+
+# ---------------------------------------------------------------------------
+# watch_print_status
+# ---------------------------------------------------------------------------
+
+
+class TestWatchPrintStatusTool:
+    """Integration tests for the watch_print_status MCP tool."""
+
+    def test_returns_status_for_active_watcher(self) -> None:
+        from kiln.server import watch_print_status, _watchers, _PrintWatcher
+        from kiln.printers.base import PrinterAdapter
+
+        adapter = mock.MagicMock(spec=PrinterAdapter)
+        watcher = _PrintWatcher(
+            watch_id="w-active",
+            adapter=adapter,
+            printer_name="test-printer",
+        )
+        watcher._start_time = time.time()
+        _watchers["w-active"] = watcher
+        try:
+            with mock.patch("kiln.server._check_auth", return_value=None):
+                result = watch_print_status(watch_id="w-active")
+            assert result["success"] is True
+            assert result["watch_id"] == "w-active"
+            assert result["printer_name"] == "test-printer"
+            assert result["outcome"] == "running"
+            assert isinstance(result["elapsed_seconds"], float)
+        finally:
+            _watchers.pop("w-active", None)
+
+    def test_not_found_returns_error(self) -> None:
+        from kiln.server import watch_print_status
+
+        with mock.patch("kiln.server._check_auth", return_value=None):
+            result = watch_print_status(watch_id="w-nonexistent")
+        assert result["success"] is False
+        assert result["error"]["code"] == "NOT_FOUND"
+        assert "w-nonexistent" in result["error"]["message"]
+
+    def test_auth_rejection(self) -> None:
+        from kiln.server import watch_print_status
+
+        auth_err = {"success": False, "error": {"code": "AUTH", "message": "denied"}}
+        with mock.patch("kiln.server._check_auth", return_value=auth_err):
+            result = watch_print_status(watch_id="w-any")
+        assert result["success"] is False
+        assert result["error"]["code"] == "AUTH"
+
+    def test_finished_watcher_shows_result(self) -> None:
+        from kiln.server import watch_print_status, _watchers, _PrintWatcher
+        from kiln.printers.base import PrinterAdapter
+
+        adapter = mock.MagicMock(spec=PrinterAdapter)
+        watcher = _PrintWatcher(
+            watch_id="w-done",
+            adapter=adapter,
+            printer_name="done-printer",
+        )
+        watcher._start_time = time.time() - 120.0
+        # Simulate a finished watcher by setting its internal result
+        watcher._result = {
+            "success": True,
+            "watch_id": "w-done",
+            "outcome": "completed",
+            "elapsed_seconds": 120.0,
+            "progress_log": [],
+            "snapshots": [],
+            "snapshot_failures": 0,
+        }
+        watcher._outcome = "completed"
+        _watchers["w-done"] = watcher
+        try:
+            with mock.patch("kiln.server._check_auth", return_value=None):
+                result = watch_print_status(watch_id="w-done")
+            assert result["success"] is True
+            assert result["finished"] is True
+            assert result["outcome"] == "completed"
+            assert result["result"]["outcome"] == "completed"
+        finally:
+            _watchers.pop("w-done", None)
+
+    def test_status_includes_snapshot_counts(self) -> None:
+        from kiln.server import watch_print_status, _watchers, _PrintWatcher
+        from kiln.printers.base import PrinterAdapter
+
+        adapter = mock.MagicMock(spec=PrinterAdapter)
+        watcher = _PrintWatcher(
+            watch_id="w-snaps",
+            adapter=adapter,
+            printer_name="snap-printer",
+        )
+        watcher._start_time = time.time()
+        watcher._snapshots = [{"ts": 1.0}, {"ts": 2.0}]
+        watcher._snapshot_failures = 3
+        _watchers["w-snaps"] = watcher
+        try:
+            with mock.patch("kiln.server._check_auth", return_value=None):
+                result = watch_print_status(watch_id="w-snaps")
+            assert result["success"] is True
+            assert result["snapshots_collected"] == 2
+            assert result["snapshot_failures"] == 3
+        finally:
+            _watchers.pop("w-snaps", None)
+
+
+# ---------------------------------------------------------------------------
+# stop_watch_print
+# ---------------------------------------------------------------------------
+
+
+class TestStopWatchPrintTool:
+    """Integration tests for the stop_watch_print MCP tool."""
+
+    def test_stops_active_watcher(self) -> None:
+        from kiln.server import stop_watch_print, _watchers, _PrintWatcher
+        from kiln.printers.base import PrinterAdapter
+
+        adapter = mock.MagicMock(spec=PrinterAdapter)
+        watcher = _PrintWatcher(
+            watch_id="w-stop",
+            adapter=adapter,
+            printer_name="stop-printer",
+        )
+        watcher._start_time = time.time()
+        _watchers["w-stop"] = watcher
+        with mock.patch("kiln.server._check_auth", return_value=None):
+            result = stop_watch_print(watch_id="w-stop")
+        assert result["success"] is True
+        assert result["outcome"] == "stopped"
+        assert "w-stop" not in _watchers
+
+    def test_not_found_returns_error(self) -> None:
+        from kiln.server import stop_watch_print
+
+        with mock.patch("kiln.server._check_auth", return_value=None):
+            result = stop_watch_print(watch_id="w-gone")
+        assert result["success"] is False
+        assert result["error"]["code"] == "NOT_FOUND"
+        assert "w-gone" in result["error"]["message"]
+
+    def test_auth_rejection(self) -> None:
+        from kiln.server import stop_watch_print
+
+        auth_err = {"success": False, "error": {"code": "AUTH", "message": "denied"}}
+        with mock.patch("kiln.server._check_auth", return_value=auth_err):
+            result = stop_watch_print(watch_id="w-any")
+        assert result["success"] is False
+        assert result["error"]["code"] == "AUTH"
+
+    def test_removes_watcher_from_registry(self) -> None:
+        from kiln.server import stop_watch_print, _watchers, _PrintWatcher
+        from kiln.printers.base import PrinterAdapter
+
+        adapter = mock.MagicMock(spec=PrinterAdapter)
+        watcher = _PrintWatcher(
+            watch_id="w-remove",
+            adapter=adapter,
+            printer_name="remove-printer",
+        )
+        watcher._start_time = time.time()
+        _watchers["w-remove"] = watcher
+
+        with mock.patch("kiln.server._check_auth", return_value=None):
+            stop_watch_print(watch_id="w-remove")
+
+        assert "w-remove" not in _watchers
+        # Calling again should return NOT_FOUND
+        with mock.patch("kiln.server._check_auth", return_value=None):
+            result = stop_watch_print(watch_id="w-remove")
+        assert result["error"]["code"] == "NOT_FOUND"
+
+    def test_stop_returns_final_result_if_already_finished(self) -> None:
+        from kiln.server import stop_watch_print, _watchers, _PrintWatcher
+        from kiln.printers.base import PrinterAdapter
+
+        adapter = mock.MagicMock(spec=PrinterAdapter)
+        watcher = _PrintWatcher(
+            watch_id="w-finished",
+            adapter=adapter,
+            printer_name="finished-printer",
+        )
+        watcher._start_time = time.time() - 300.0
+        watcher._result = {
+            "success": True,
+            "watch_id": "w-finished",
+            "outcome": "completed",
+            "elapsed_seconds": 300.0,
+            "progress_log": [{"pct": 100.0}],
+            "snapshots": [],
+            "snapshot_failures": 0,
+        }
+        watcher._outcome = "completed"
+        _watchers["w-finished"] = watcher
+
+        with mock.patch("kiln.server._check_auth", return_value=None):
+            result = stop_watch_print(watch_id="w-finished")
+
+        assert result["success"] is True
+        # When result was already set, stop() returns it
+        assert result["outcome"] == "completed"
+        assert "w-finished" not in _watchers
+
+    def test_stop_includes_progress_and_snapshots(self) -> None:
+        from kiln.server import stop_watch_print, _watchers, _PrintWatcher
+        from kiln.printers.base import PrinterAdapter
+
+        adapter = mock.MagicMock(spec=PrinterAdapter)
+        watcher = _PrintWatcher(
+            watch_id="w-data",
+            adapter=adapter,
+            printer_name="data-printer",
+        )
+        watcher._start_time = time.time()
+        watcher._progress_log = [{"pct": 10.0}, {"pct": 20.0}]
+        watcher._snapshots = [{"ts": 1.0, "url": "http://snap/1"}]
+        watcher._snapshot_failures = 1
+        _watchers["w-data"] = watcher
+
+        with mock.patch("kiln.server._check_auth", return_value=None):
+            result = stop_watch_print(watch_id="w-data")
+
+        assert result["success"] is True
+        assert len(result["progress_log"]) == 2
+        assert len(result["snapshots"]) == 1
+        assert result["snapshot_failures"] == 1

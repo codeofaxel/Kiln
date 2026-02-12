@@ -301,7 +301,7 @@ class TestPrinterCapabilities:
     def test_to_dict_all_fields(self):
         caps = PrinterCapabilities()
         d = caps.to_dict()
-        expected_keys = {"can_upload", "can_set_temp", "can_send_gcode", "can_pause", "can_stream", "can_probe_bed", "can_update_firmware", "can_snapshot", "device_type", "supported_extensions"}
+        expected_keys = {"can_upload", "can_set_temp", "can_send_gcode", "can_pause", "can_stream", "can_probe_bed", "can_update_firmware", "can_snapshot", "can_detect_filament", "device_type", "supported_extensions"}
         assert set(d.keys()) == expected_keys
 
 

@@ -16,6 +16,8 @@ Example::
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -59,11 +61,23 @@ class KilnDB:
         self._write_lock = threading.Lock()
 
         self._ensure_schema()
+        self._migrate_agent_memory()
         self._enforce_permissions()
 
     # ------------------------------------------------------------------
     # File permissions
     # ------------------------------------------------------------------
+
+    def _migrate_agent_memory(self) -> None:
+        """Add version and expires_at columns to existing agent_memory tables."""
+        cur = self._conn.cursor()
+        # Check existing columns
+        columns = {row[1] for row in cur.execute("PRAGMA table_info(agent_memory)").fetchall()}
+        if "version" not in columns:
+            cur.execute("ALTER TABLE agent_memory ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
+        if "expires_at" not in columns:
+            cur.execute("ALTER TABLE agent_memory ADD COLUMN expires_at REAL DEFAULT NULL")
+        self._conn.commit()
 
     def _enforce_permissions(self) -> None:
         """Enforce restrictive file permissions on the data directory and DB.
@@ -278,6 +292,8 @@ class KilnDB:
                     value           TEXT NOT NULL,
                     created_at      REAL NOT NULL,
                     updated_at      REAL NOT NULL,
+                    version         INTEGER NOT NULL DEFAULT 1,
+                    expires_at      REAL DEFAULT NULL,
                     UNIQUE(agent_id, scope, key)
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_memory_agent
@@ -327,8 +343,38 @@ class KilnDB:
                     ON safety_audit_log(action);
                 CREATE INDEX IF NOT EXISTS idx_audit_time
                     ON safety_audit_log(timestamp);
+
+                CREATE TABLE IF NOT EXISTS model_cache (
+                    cache_id        TEXT PRIMARY KEY,
+                    file_name       TEXT NOT NULL,
+                    file_path       TEXT NOT NULL,
+                    file_hash       TEXT NOT NULL,
+                    file_size_bytes INTEGER NOT NULL,
+                    source          TEXT NOT NULL,
+                    source_id       TEXT,
+                    prompt          TEXT,
+                    tags            TEXT,
+                    dimensions      TEXT,
+                    print_count     INTEGER DEFAULT 0,
+                    last_printed_at REAL,
+                    created_at      REAL NOT NULL,
+                    metadata        TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_model_cache_hash
+                    ON model_cache(file_hash);
+                CREATE INDEX IF NOT EXISTS idx_model_cache_source
+                    ON model_cache(source);
                 """
             )
+
+            # Add hmac_signature column to safety_audit_log if missing.
+            try:
+                cur.execute(
+                    "ALTER TABLE safety_audit_log ADD COLUMN hmac_signature TEXT"
+                )
+            except sqlite3.OperationalError:
+                pass  # Column already exists.
+
             self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -1162,24 +1208,48 @@ class KilnDB:
         scope: str,
         key: str,
         value: Any,
+        *,
+        ttl_seconds: Optional[int] = None,
     ) -> None:
         """Insert or replace an agent memory entry.
 
-        The *value* is JSON-encoded before storage.
+        The *value* is JSON-encoded before storage.  When *ttl_seconds* is
+        provided the entry will expire after that many seconds.  Overwriting
+        an existing key auto-increments the version number.
+
+        Args:
+            agent_id: Agent identifier.
+            scope: Namespace scope (e.g. ``"global"``, ``"printer:ender3"``).
+            key: Memory key name.
+            value: Value to store (will be JSON-encoded).
+            ttl_seconds: Optional time-to-live in seconds.  ``None`` means
+                the entry never expires.
         """
         now = time.time()
+        expires_at = (now + ttl_seconds) if ttl_seconds is not None else None
         with self._write_lock:
+            # Read current version for auto-increment
+            row = self._conn.execute(
+                "SELECT version, created_at FROM agent_memory "
+                "WHERE agent_id = ? AND scope = ? AND key = ?",
+                (agent_id, scope, key),
+            ).fetchone()
+            if row is not None:
+                new_version = row["version"] + 1
+                original_created = row["created_at"]
+            else:
+                new_version = 1
+                original_created = now
+
             self._conn.execute(
                 """
                 INSERT OR REPLACE INTO agent_memory
-                    (agent_id, scope, key, value, created_at, updated_at)
-                VALUES (?, ?, ?, ?, COALESCE(
-                    (SELECT created_at FROM agent_memory
-                     WHERE agent_id = ? AND scope = ? AND key = ?), ?
-                ), ?)
+                    (agent_id, scope, key, value, created_at, updated_at,
+                     version, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (agent_id, scope, key, json.dumps(value),
-                 agent_id, scope, key, now, now),
+                 original_created, now, new_version, expires_at),
             )
             self._conn.commit()
 
@@ -1189,11 +1259,12 @@ class KilnDB:
         scope: str,
         key: str,
     ) -> Optional[Any]:
-        """Fetch a single agent memory value, or ``None`` if not found."""
+        """Fetch a single agent memory value, or ``None`` if not found or expired."""
         row = self._conn.execute(
             "SELECT value FROM agent_memory "
-            "WHERE agent_id = ? AND scope = ? AND key = ?",
-            (agent_id, scope, key),
+            "WHERE agent_id = ? AND scope = ? AND key = ? "
+            "AND (expires_at IS NULL OR expires_at > ?)",
+            (agent_id, scope, key, time.time()),
         ).fetchone()
         if row is None:
             return None
@@ -1204,23 +1275,28 @@ class KilnDB:
         agent_id: str,
         scope: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Return all memory entries for an agent.
+        """Return all non-expired memory entries for an agent.
 
         Args:
             agent_id: The agent whose memory to retrieve.
             scope: Optional scope filter.
         """
+        now = time.time()
         if scope is not None:
             rows = self._conn.execute(
                 "SELECT * FROM agent_memory "
-                "WHERE agent_id = ? AND scope = ? ORDER BY updated_at DESC",
-                (agent_id, scope),
+                "WHERE agent_id = ? AND scope = ? "
+                "AND (expires_at IS NULL OR expires_at > ?) "
+                "ORDER BY updated_at DESC",
+                (agent_id, scope, now),
             ).fetchall()
         else:
             rows = self._conn.execute(
                 "SELECT * FROM agent_memory "
-                "WHERE agent_id = ? ORDER BY updated_at DESC",
-                (agent_id,),
+                "WHERE agent_id = ? "
+                "AND (expires_at IS NULL OR expires_at > ?) "
+                "ORDER BY updated_at DESC",
+                (agent_id, now),
             ).fetchall()
         results: List[Dict[str, Any]] = []
         for row in rows:
@@ -1247,6 +1323,20 @@ class KilnDB:
             )
             self._conn.commit()
             return cur.rowcount > 0
+
+    def clean_expired_notes(self) -> int:
+        """Delete all expired agent memory entries.
+
+        Returns the number of rows deleted.
+        """
+        with self._write_lock:
+            cur = self._conn.execute(
+                "DELETE FROM agent_memory "
+                "WHERE expires_at IS NOT NULL AND expires_at < ?",
+                (time.time(),),
+            )
+            self._conn.commit()
+            return cur.rowcount
 
     # ------------------------------------------------------------------
     # Print outcomes (cross-printer learning)
@@ -1494,6 +1584,154 @@ class KilnDB:
             d["environment"] = json.loads(d["environment"])
         return d
 
+
+    # ------------------------------------------------------------------
+    # Model Cache
+    # ------------------------------------------------------------------
+
+    def save_cache_entry(self, entry) -> None:
+        """Insert a model cache entry.
+
+        Args:
+            entry: A :class:`ModelCacheEntry` dataclass instance.
+        """
+        import json as _json
+        with self._write_lock:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO model_cache
+                    (cache_id, file_name, file_path, file_hash,
+                     file_size_bytes, source, source_id, prompt,
+                     tags, dimensions, print_count, last_printed_at,
+                     created_at, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry.cache_id,
+                    entry.file_name,
+                    entry.file_path,
+                    entry.file_hash,
+                    entry.file_size_bytes,
+                    entry.source,
+                    entry.source_id,
+                    entry.prompt,
+                    _json.dumps(entry.tags) if entry.tags else "[]",
+                    _json.dumps(entry.dimensions) if entry.dimensions else None,
+                    entry.print_count,
+                    entry.last_printed_at,
+                    entry.created_at,
+                    _json.dumps(entry.metadata) if entry.metadata else "{}",
+                ),
+            )
+            self._conn.commit()
+
+    def _cache_row_to_entry(self, row):
+        """Convert a model_cache row to a ModelCacheEntry."""
+        from kiln.model_cache import ModelCacheEntry
+        d = dict(row)
+        tags = json.loads(d["tags"]) if d.get("tags") else []
+        dimensions = json.loads(d["dimensions"]) if d.get("dimensions") else None
+        metadata = json.loads(d["metadata"]) if d.get("metadata") else {}
+        return ModelCacheEntry(
+            cache_id=d["cache_id"],
+            file_name=d["file_name"],
+            file_path=d["file_path"],
+            file_hash=d["file_hash"],
+            file_size_bytes=d["file_size_bytes"],
+            source=d["source"],
+            source_id=d.get("source_id"),
+            prompt=d.get("prompt"),
+            tags=tags,
+            dimensions=dimensions,
+            print_count=d.get("print_count", 0),
+            last_printed_at=d.get("last_printed_at"),
+            created_at=d["created_at"],
+            metadata=metadata,
+        )
+
+    def get_cache_entry(self, cache_id: str):
+        """Return a ModelCacheEntry by cache_id, or ``None``."""
+        row = self._conn.execute(
+            "SELECT * FROM model_cache WHERE cache_id = ?", (cache_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return self._cache_row_to_entry(row)
+
+    def get_cache_entry_by_hash(self, file_hash: str):
+        """Return a ModelCacheEntry by file_hash, or ``None``."""
+        row = self._conn.execute(
+            "SELECT * FROM model_cache WHERE file_hash = ? LIMIT 1",
+            (file_hash,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._cache_row_to_entry(row)
+
+    def search_cache(
+        self,
+        *,
+        query: Optional[str] = None,
+        source: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        limit: int = 20,
+    ):
+        """Search cached models by name, source, tags, or prompt text."""
+        clauses: List[str] = []
+        params: List[Any] = []
+
+        if query:
+            like_q = f"%{query}%"
+            clauses.append(
+                "(file_name LIKE ? OR prompt LIKE ? OR tags LIKE ?)"
+            )
+            params.extend([like_q, like_q, like_q])
+
+        if source:
+            clauses.append("source = ?")
+            params.append(source)
+
+        if tags:
+            for tag in tags:
+                clauses.append("tags LIKE ?")
+                params.append(f"%{tag}%")
+
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM model_cache{where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [self._cache_row_to_entry(r) for r in rows]
+
+    def list_cache_entries(self, *, limit: int = 50, offset: int = 0):
+        """List all cached models, newest first."""
+        rows = self._conn.execute(
+            "SELECT * FROM model_cache ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        return [self._cache_row_to_entry(r) for r in rows]
+
+    def record_cache_print(self, cache_id: str) -> None:
+        """Increment print_count and update last_printed_at."""
+        now = time.time()
+        with self._write_lock:
+            self._conn.execute(
+                "UPDATE model_cache SET print_count = print_count + 1, "
+                "last_printed_at = ? WHERE cache_id = ?",
+                (now, cache_id),
+            )
+            self._conn.commit()
+
+    def delete_cache_entry(self, cache_id: str) -> bool:
+        """Delete a model cache entry by ID. Returns True if a row was deleted."""
+        with self._write_lock:
+            cur = self._conn.execute(
+                "DELETE FROM model_cache WHERE cache_id = ?", (cache_id,)
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
     # ------------------------------------------------------------------
     # Cleanup & Maintenance
     # ------------------------------------------------------------------
@@ -1544,6 +1782,39 @@ class KilnDB:
     # Safety audit log
     # ------------------------------------------------------------------
 
+
+    def _get_hmac_key(self) -> bytes:
+        """Return the HMAC key for audit log signing.
+
+        Uses ``KILN_AUDIT_HMAC_KEY`` env var if set, otherwise derives
+        a per-installation key from the database path.
+        """
+        env_key = os.environ.get("KILN_AUDIT_HMAC_KEY", "")
+        if env_key:
+            return env_key.encode("utf-8")
+        return hashlib.sha256(self._db_path.encode("utf-8")).digest()
+
+    def _compute_audit_hmac(self, row_data: Dict[str, Any]) -> str:
+        """Compute an HMAC-SHA256 signature for an audit log row.
+
+        :param row_data: Dict with keys: timestamp, tool_name, safety_level,
+            action, agent_id, printer_name, details.
+        :returns: Hex-encoded HMAC digest.
+        """
+        key = self._get_hmac_key()
+        # Build a canonical message from the row fields.
+        parts = [
+            str(row_data.get("timestamp", "")),
+            str(row_data.get("tool_name", "")),
+            str(row_data.get("safety_level", "")),
+            str(row_data.get("action", "")),
+            str(row_data.get("agent_id", "") or ""),
+            str(row_data.get("printer_name", "") or ""),
+            str(row_data.get("details", "") or ""),
+        ]
+        message = "|".join(parts).encode("utf-8")
+        return hmac.new(key, message, hashlib.sha256).hexdigest()
+
     def log_audit(
         self,
         tool_name: str,
@@ -1568,12 +1839,22 @@ class KilnDB:
         """
         ts = time.time()
         with self._write_lock:
+            details_json = json.dumps(details) if details else None
+            hmac_sig = self._compute_audit_hmac({
+                "timestamp": ts,
+                "tool_name": tool_name,
+                "safety_level": safety_level,
+                "action": action,
+                "agent_id": agent_id,
+                "printer_name": printer_name,
+                "details": details_json,
+            })
             cur = self._conn.execute(
                 """
                 INSERT INTO safety_audit_log
                     (timestamp, tool_name, safety_level, action,
-                     agent_id, printer_name, details)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                     agent_id, printer_name, details, hmac_signature)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ts,
@@ -1582,11 +1863,52 @@ class KilnDB:
                     action,
                     agent_id,
                     printer_name,
-                    json.dumps(details) if details else None,
+                    details_json,
+                    hmac_sig,
                 ),
             )
             self._conn.commit()
             return cur.lastrowid  # type: ignore[return-value]
+
+
+    def verify_audit_log(self) -> Dict[str, Any]:
+        """Verify HMAC signatures on all audit log entries.
+
+        :returns: Dict with ``total``, ``valid``, ``invalid`` counts
+            and an ``integrity`` field (``"ok"`` or ``"compromised"``).
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM safety_audit_log ORDER BY id"
+        ).fetchall()
+        total = len(rows)
+        valid = 0
+        invalid = 0
+        for row in rows:
+            d = dict(row)
+            stored_sig = d.get("hmac_signature")
+            if stored_sig is None:
+                # Legacy row without HMAC — count as invalid.
+                invalid += 1
+                continue
+            expected = self._compute_audit_hmac({
+                "timestamp": d["timestamp"],
+                "tool_name": d["tool_name"],
+                "safety_level": d["safety_level"],
+                "action": d["action"],
+                "agent_id": d.get("agent_id"),
+                "printer_name": d.get("printer_name"),
+                "details": d.get("details"),
+            })
+            if hmac.compare_digest(stored_sig, expected):
+                valid += 1
+            else:
+                invalid += 1
+        return {
+            "total": total,
+            "valid": valid,
+            "invalid": invalid,
+            "integrity": "ok" if invalid == 0 else "compromised",
+        }
 
     def query_audit(
         self,

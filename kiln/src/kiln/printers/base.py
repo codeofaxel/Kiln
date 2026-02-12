@@ -156,6 +156,7 @@ class PrinterCapabilities:
     can_probe_bed: bool = False
     can_update_firmware: bool = False
     can_snapshot: bool = False
+    can_detect_filament: bool = False
     device_type: str = "fdm_printer"
     supported_extensions: Tuple[str, ...] = (".gcode", ".gco", ".g")
 
@@ -520,6 +521,18 @@ class PrinterAdapter(ABC):
         Returns a dict with mesh information (points, variance, etc.),
         or ``None`` if bed mesh data is not available.  This is an optional
         method -- the default implementation returns ``None``.
+        """
+        return None
+
+    # -- filament sensor (optional) ----------------------------------------
+
+    def get_filament_status(self) -> Optional[Dict[str, Any]]:
+        """Query the filament runout sensor status.
+
+        Returns a dict with sensor information (e.g. ``{"detected": True,
+        "sensor_enabled": True}``), or ``None`` if no filament sensor is
+        available.  This is an optional method -- the default implementation
+        returns ``None``.
         """
         return None
 

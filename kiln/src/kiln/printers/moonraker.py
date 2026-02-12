@@ -181,6 +181,7 @@ class MoonrakerAdapter(PrinterAdapter):
             can_probe_bed=True,
             can_update_firmware=True,
             can_snapshot=True,
+            can_detect_filament=True,
             supported_extensions=(".gcode", ".gco", ".g"),
         )
 
@@ -786,6 +787,38 @@ class MoonrakerAdapter(PrinterAdapter):
             return stream_url
         except Exception:
             logger.debug("Webcam stream URL discovery failed", exc_info=True)
+            return None
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- filament sensor
+    # ------------------------------------------------------------------
+
+    def get_filament_status(self) -> Optional[Dict[str, Any]]:
+        """Query Klipper for filament switch sensor status via Moonraker.
+
+        Uses ``GET /printer/objects/query?filament_switch_sensor`` to check
+        whether a filament runout sensor is configured and whether filament
+        is currently detected.  Returns ``None`` if no sensor is configured.
+        """
+        try:
+            payload = self._get_json(
+                "/printer/objects/query",
+                params={"filament_switch_sensor": ""},
+            )
+            sensor_data = _safe_get(
+                payload, "result", "status", "filament_switch_sensor", default=None,
+            )
+            if not sensor_data or not isinstance(sensor_data, dict):
+                return None
+
+            # Klipper reports: enabled (bool), filament_detected (bool)
+            return {
+                "detected": bool(sensor_data.get("filament_detected", False)),
+                "sensor_enabled": bool(sensor_data.get("enabled", False)),
+                "source": "klipper_filament_switch_sensor",
+            }
+        except Exception:
+            logger.debug("Filament sensor query failed", exc_info=True)
             return None
 
     # ------------------------------------------------------------------

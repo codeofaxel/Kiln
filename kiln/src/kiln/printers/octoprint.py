@@ -169,6 +169,7 @@ class OctoPrintAdapter(PrinterAdapter):
             can_probe_bed=True,
             can_update_firmware=True,
             can_snapshot=True,
+            can_detect_filament=True,
             supported_extensions=(".gcode", ".gco", ".g"),
         )
 
@@ -649,6 +650,36 @@ class OctoPrintAdapter(PrinterAdapter):
         ``/webcam/?action=stream``.
         """
         return f"{self._host}/webcam/?action=stream"
+
+    # -- filament sensor (optional) ----------------------------------------
+
+    def get_filament_status(self) -> Optional[Dict[str, Any]]:
+        """Query OctoPrint for filament sensor status via the Filament Manager plugin.
+
+        Uses ``GET /api/plugin/filamentmanager`` to check whether filament
+        is loaded and detected.  Returns ``None`` if the plugin is not
+        installed.
+        """
+        try:
+            payload = self._get_json("/api/plugin/filamentmanager")
+            # The plugin returns spool/selection info; if we get a response
+            # at all, the plugin is installed.
+            selections = payload.get("selections", [])
+            detected = len(selections) > 0 and any(
+                s.get("spool") is not None for s in selections
+            )
+            return {
+                "detected": detected,
+                "sensor_enabled": True,
+                "source": "filamentmanager_plugin",
+                "selections": selections,
+            }
+        except Exception:
+            logger.debug(
+                "Filament sensor query failed (plugin may not be installed)",
+                exc_info=True,
+            )
+            return None
 
     # -- bed mesh (optional) -----------------------------------------------
 

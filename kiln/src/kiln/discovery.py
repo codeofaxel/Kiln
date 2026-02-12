@@ -45,6 +45,7 @@ class DiscoveredPrinter:
     api_available: bool = False
     discovered_at: float = field(default_factory=time.time)
     discovery_method: str = ""  # "mdns", "http_probe", "manual"
+    trusted: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -131,7 +132,9 @@ def discover_printers(
         except Exception:
             logger.exception("Discovery method '%s' failed", method)
 
-    return _deduplicate(all_printers)
+    deduped = _deduplicate(all_printers)
+    _annotate_trust(deduped)
+    return deduped
 
 
 def probe_host(host: str, timeout: float = 3.0) -> List[DiscoveredPrinter]:
@@ -404,6 +407,20 @@ def _detect_wsl_host_subnet() -> str | None:
     except (OSError, IOError):
         pass
     return None
+
+
+def _annotate_trust(printers: List[DiscoveredPrinter]) -> None:
+    """Mark each printer as trusted or untrusted based on the config whitelist."""
+    try:
+        from kiln.cli.config import get_trusted_printers
+        trusted = get_trusted_printers()
+    except Exception:
+        # Config may not be available in all environments.
+        return
+
+    for p in printers:
+        if p.host in trusted:
+            p.trusted = True
 
 
 def _deduplicate(

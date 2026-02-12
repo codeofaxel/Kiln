@@ -73,6 +73,8 @@ from kiln.pipelines import (
     calibrate as _pipeline_calibrate,
     benchmark as _pipeline_benchmark,
     list_pipelines as _list_pipelines,
+    get_execution as _get_execution,
+    PipelineState as _PipelineState,
 )
 from kiln.registry import PrinterRegistry, PrinterNotFoundError
 from kiln.queue import PrintQueue, JobStatus, JobNotFoundError
@@ -98,6 +100,8 @@ from kiln.bed_leveling import BedLevelManager, LevelingPolicy
 from kiln.streaming import MJPEGProxy
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
 from kiln.heater_watchdog import HeaterWatchdog
+from kiln.backup import backup_database as _backup_db, BackupError
+from kiln.log_config import configure_logging as _configure_log_rotation
 from kiln.plugins import PluginManager, PluginContext
 from kiln.fulfillment import (
     FulfillmentError,
@@ -694,8 +698,7 @@ def _get_fulfillment() -> FulfillmentProvider:
         raise RuntimeError(
             "No fulfillment provider configured.  "
             "Set KILN_FULFILLMENT_PROVIDER and the matching API key env var "
-            "(e.g. KILN_CRAFTCLOUD_API_KEY, KILN_SHAPEWAYS_CLIENT_ID + "
-            "KILN_SHAPEWAYS_CLIENT_SECRET, or KILN_SCULPTEO_API_KEY)."
+            "(e.g. KILN_CRAFTCLOUD_API_KEY or KILN_SCULPTEO_API_KEY)."
         ) from exc
     return _fulfillment
 
@@ -1553,6 +1556,33 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
         })
         if not temps_safe:
             errors.extend(temp_warnings)
+
+        # -- Filament sensor check (optional) ----------------------------------
+        if adapter.capabilities.can_detect_filament:
+            try:
+                filament_status = adapter.get_filament_status()
+                if filament_status is not None:
+                    filament_detected = filament_status.get("detected", False)
+                    sensor_enabled = filament_status.get("sensor_enabled", False)
+                    if sensor_enabled and not filament_detected:
+                        checks.append({
+                            "name": "filament_loaded",
+                            "passed": True,  # Warning only -- does not block print
+                            "message": (
+                                "WARNING: Filament not detected by runout sensor. "
+                                "Verify filament is loaded before printing."
+                            ),
+                            "advisory": True,
+                        })
+                    elif sensor_enabled and filament_detected:
+                        checks.append({
+                            "name": "filament_loaded",
+                            "passed": True,
+                            "message": "Filament detected by runout sensor",
+                        })
+                    # If sensor not enabled, skip silently
+            except Exception:
+                pass  # Filament sensor not available -- skip silently
 
         # -- Material mismatch check (optional) ----------------------------
         _strict_material = os.environ.get(
@@ -7337,6 +7367,7 @@ def save_agent_note(
     value: str,
     scope: str = "global",
     printer_name: str | None = None,
+    ttl_seconds: int | None = None,
 ) -> dict:
     """Save a persistent note or preference that survives across sessions.
 
@@ -7348,18 +7379,22 @@ def save_agent_note(
         value: The information to store.
         scope: Namespace — ``"global"``, ``"fleet"``, or use *printer_name* for printer-specific.
         printer_name: If provided, scope is automatically set to ``"printer:<name>"``.
+        ttl_seconds: Optional time-to-live in seconds.  The note will be
+            automatically excluded from queries after this duration.  Pass
+            ``None`` (default) for notes that should never expire.
     """
     if err := _check_auth("memory"):
         return err
     try:
         agent_id = os.environ.get("KILN_AGENT_ID", "default")
         effective_scope = f"printer:{printer_name}" if printer_name else scope
-        get_db().save_memory(agent_id, effective_scope, key, value)
+        get_db().save_memory(agent_id, effective_scope, key, value, ttl_seconds=ttl_seconds)
         return {
             "success": True,
             "agent_id": agent_id,
             "scope": effective_scope,
             "key": key,
+            "ttl_seconds": ttl_seconds,
         }
     except Exception as exc:
         logger.exception("Unexpected error in save_agent_note")
@@ -7374,7 +7409,9 @@ def get_agent_context(
     """Retrieve all stored agent memory for context.
 
     Call this at the start of a session to recall what you've learned
-    about printers, materials, and past print outcomes.
+    about printers, materials, and past print outcomes.  Expired entries
+    are automatically filtered out.  Each entry includes a ``version``
+    field showing how many times it has been updated.
 
     Args:
         printer_name: If provided, retrieves printer-specific memory.
@@ -7419,6 +7456,27 @@ def delete_agent_note(
         return {"success": True, "key": key, "scope": effective_scope}
     except Exception as exc:
         logger.exception("Unexpected error in delete_agent_note")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def clean_agent_memory() -> dict:
+    """Remove all expired agent memory entries.
+
+    Entries with a TTL that has elapsed are permanently deleted.
+    Returns the count of entries removed.
+    """
+    if err := _check_auth("memory"):
+        return err
+    try:
+        deleted = get_db().clean_expired_notes()
+        return {
+            "success": True,
+            "deleted_count": deleted,
+            "message": f"Cleaned {deleted} expired memory entries.",
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in clean_agent_memory")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
@@ -7848,6 +7906,449 @@ def run_benchmark(
 
 
 # ---------------------------------------------------------------------------
+# Pipeline execution control tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def pipeline_status(execution_id: str) -> dict:
+    """Get the current state of a pipeline execution.
+
+    Returns the execution state (running/paused/completed/failed/aborted),
+    completed steps, and the name of the next step to run.
+
+    Args:
+        execution_id: The pipeline execution ID returned when starting a pipeline.
+    """
+    if err := _check_auth("pipeline"):
+        return err
+    ex = _get_execution(execution_id)
+    if ex is None:
+        return _error_dict(
+            f"No pipeline execution found with id '{execution_id}'",
+            code="NOT_FOUND",
+        )
+    return {"success": True, **ex.status_dict()}
+
+
+@mcp.tool()
+def pipeline_pause(execution_id: str) -> dict:
+    """Pause a running pipeline at the next step boundary.
+
+    The pipeline will finish the current step and then pause before
+    starting the next one.  Use ``pipeline_resume`` to continue.
+
+    Args:
+        execution_id: The pipeline execution ID.
+    """
+    if err := _check_auth("pipeline"):
+        return err
+    ex = _get_execution(execution_id)
+    if ex is None:
+        return _error_dict(
+            f"No pipeline execution found with id '{execution_id}'",
+            code="NOT_FOUND",
+        )
+    if ex.state != _PipelineState.RUNNING:
+        return _error_dict(
+            f"Cannot pause: pipeline state is {ex.state.value}",
+            code="INVALID_STATE",
+        )
+    ex.pause()
+    return {"success": True, "message": "Pause requested. Pipeline will pause before the next step."}
+
+
+@mcp.tool()
+def pipeline_resume(execution_id: str) -> dict:
+    """Resume a paused pipeline from where it stopped.
+
+    Continues executing from the next unfinished step.
+
+    Args:
+        execution_id: The pipeline execution ID.
+    """
+    if err := _check_auth("pipeline"):
+        return err
+    ex = _get_execution(execution_id)
+    if ex is None:
+        return _error_dict(
+            f"No pipeline execution found with id '{execution_id}'",
+            code="NOT_FOUND",
+        )
+    if ex.state != _PipelineState.PAUSED:
+        return _error_dict(
+            f"Cannot resume: pipeline state is {ex.state.value}",
+            code="INVALID_STATE",
+        )
+    result = ex.resume()
+    return {"success": result.success, **result.to_dict()}
+
+
+@mcp.tool()
+def pipeline_abort(execution_id: str) -> dict:
+    """Abort a running or paused pipeline.
+
+    Immediately marks the pipeline as aborted. Any completed steps
+    are preserved in the result.
+
+    Args:
+        execution_id: The pipeline execution ID.
+    """
+    if err := _check_auth("pipeline"):
+        return err
+    ex = _get_execution(execution_id)
+    if ex is None:
+        return _error_dict(
+            f"No pipeline execution found with id '{execution_id}'",
+            code="NOT_FOUND",
+        )
+    if ex.state in (_PipelineState.COMPLETED, _PipelineState.ABORTED):
+        return _error_dict(
+            f"Cannot abort: pipeline state is {ex.state.value}",
+            code="INVALID_STATE",
+        )
+    result = ex.abort()
+    return {"success": False, **result.to_dict()}
+
+
+@mcp.tool()
+def pipeline_retry_step(execution_id: str, step_index: int) -> dict:
+    """Retry a specific failed step in a pipeline, then continue from there.
+
+    Re-runs the step at the given index and, if it succeeds, continues
+    executing the remaining steps.
+
+    Args:
+        execution_id: The pipeline execution ID.
+        step_index: Zero-based index of the step to retry.
+    """
+    if err := _check_auth("pipeline"):
+        return err
+    ex = _get_execution(execution_id)
+    if ex is None:
+        return _error_dict(
+            f"No pipeline execution found with id '{execution_id}'",
+            code="NOT_FOUND",
+        )
+    if ex.state not in (_PipelineState.FAILED, _PipelineState.PAUSED):
+        return _error_dict(
+            f"Cannot retry: pipeline state is {ex.state.value} (must be failed or paused)",
+            code="INVALID_STATE",
+        )
+    result = ex.retry_step(step_index)
+    return {"success": result.success, **result.to_dict()}
+
+
+# ---------------------------------------------------------------------------
+# Model cache tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def cache_model(
+    file_path: str,
+    source: str,
+    source_id: str | None = None,
+    prompt: str | None = None,
+    tags: str | None = None,
+    dimensions: str | None = None,
+    metadata: str | None = None,
+) -> dict:
+    """Add a 3D model file to the local cache for reuse across jobs.
+
+    Copies the file into ``~/.kiln/model_cache/`` and stores metadata
+    (source, prompt, tags, dimensions) in the database.  Duplicate files
+    are detected automatically by SHA-256 hash.
+
+    Args:
+        file_path: Path to the model file on disk.
+        source: Origin — ``"thingiverse"``, ``"myminifactory"``, ``"meshy"``,
+            ``"openscad"``, ``"upload"``, etc.
+        source_id: Marketplace thing ID or generation job ID.
+        prompt: For generated models, the text prompt used.
+        tags: Comma-separated tags (e.g. ``"benchy,calibration,test"``).
+        dimensions: JSON object with bounding box in mm, e.g.
+            ``'{"x": 60, "y": 31, "z": 48}'``.
+        metadata: Optional JSON object with extra data.
+    """
+    if err := _check_auth("cache"):
+        return err
+    try:
+        from kiln.model_cache import get_model_cache
+        import json as _json
+
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+        dim_dict = _json.loads(dimensions) if dimensions else None
+        meta_dict = _json.loads(metadata) if metadata else None
+
+        cache = get_model_cache()
+        entry = cache.add(
+            file_path,
+            source=source,
+            source_id=source_id,
+            prompt=prompt,
+            tags=tag_list,
+            dimensions=dim_dict,
+            metadata=meta_dict,
+        )
+        return {"success": True, "entry": entry.to_dict()}
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="NOT_FOUND")
+    except (ValueError, _json.JSONDecodeError) as exc:
+        return _error_dict(str(exc), code="VALIDATION_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in cache_model")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def search_cached_models(
+    query: str | None = None,
+    source: str | None = None,
+    tags: str | None = None,
+    limit: int = 20,
+) -> dict:
+    """Search the local model cache by name, source, tags, or prompt text.
+
+    Args:
+        query: Free-text search against file name, prompt, and tags.
+        source: Filter by source (e.g. ``"thingiverse"``).
+        tags: Comma-separated tags to filter by.
+        limit: Maximum results (default 20).
+    """
+    if err := _check_auth("cache"):
+        return err
+    try:
+        from kiln.model_cache import get_model_cache
+
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+        cache = get_model_cache()
+        entries = cache.search(query=query, source=source, tags=tag_list, limit=limit)
+        return {
+            "success": True,
+            "entries": [e.to_dict() for e in entries],
+            "count": len(entries),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in search_cached_models")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def get_cached_model(cache_id: str) -> dict:
+    """Return details for a specific cached model.
+
+    Args:
+        cache_id: The unique cache ID of the model.
+    """
+    if err := _check_auth("cache"):
+        return err
+    try:
+        from kiln.model_cache import get_model_cache
+
+        entry = get_model_cache().get(cache_id)
+        if entry is None:
+            return _error_dict(
+                f"No cached model with id {cache_id!r}.", code="NOT_FOUND"
+            )
+        return {"success": True, "entry": entry.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in get_cached_model")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def list_cached_models(limit: int = 50, offset: int = 0) -> dict:
+    """List all models in the local cache, newest first.
+
+    Args:
+        limit: Maximum results (default 50).
+        offset: Number of entries to skip for pagination.
+    """
+    if err := _check_auth("cache"):
+        return err
+    try:
+        from kiln.model_cache import get_model_cache
+
+        entries = get_model_cache().list_all(limit=limit, offset=offset)
+        return {
+            "success": True,
+            "entries": [e.to_dict() for e in entries],
+            "count": len(entries),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in list_cached_models")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def delete_cached_model(cache_id: str) -> dict:
+    """Remove a model from the local cache (file and metadata).
+
+    Args:
+        cache_id: The unique cache ID of the model to delete.
+    """
+    if err := _check_auth("cache"):
+        return err
+    try:
+        from kiln.model_cache import get_model_cache
+
+        deleted = get_model_cache().delete(cache_id)
+        if not deleted:
+            return _error_dict(
+                f"No cached model with id {cache_id!r}.", code="NOT_FOUND"
+            )
+        return {"success": True, "cache_id": cache_id}
+    except Exception as exc:
+        logger.exception("Unexpected error in delete_cached_model")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+
+
+# ---------------------------------------------------------------------------
+# Database backup tool
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def backup_database(
+    output_path: str | None = None,
+    redact: bool = True,
+) -> dict:
+    """Back up the Kiln database with optional credential redaction.
+
+    Creates a copy of the SQLite database.  By default, sensitive fields
+    (API keys, access codes, payment refs) are replaced with "REDACTED"
+    in the backup.
+
+    Args:
+        output_path: Destination file path.  Defaults to
+            ``~/.kiln/backups/kiln-YYYYMMDD-HHMMSS.db``.
+        redact: If ``True`` (default), redact credentials in the backup.
+    """
+    auth_err = _check_auth("admin")
+    if auth_err:
+        return auth_err
+    try:
+        db = get_db()
+        result_path = _backup_db(
+            db.path,
+            output_path,
+            redact_credentials=redact,
+        )
+        return {
+            "success": True,
+            "backup_path": result_path,
+            "redacted": redact,
+        }
+    except BackupError as exc:
+        return _error_dict(str(exc), code="BACKUP_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in backup_database")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Audit integrity verification tool
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def verify_audit_integrity() -> dict:
+    """Verify HMAC signatures on all safety audit log entries.
+
+    Checks each audit log row against its stored HMAC signature to
+    detect tampering.  Returns counts of valid, invalid, and total
+    entries along with an overall integrity status.
+    """
+    auth_err = _check_auth("admin")
+    if auth_err:
+        return auth_err
+    try:
+        db = get_db()
+        result = db.verify_audit_log()
+        return {
+            "success": True,
+            **result,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in verify_audit_integrity")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+
+
+# ---------------------------------------------------------------------------
+# Trusted printers whitelist tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def list_trusted_printers() -> dict:
+    """Return the list of trusted printer hostnames/IPs.
+
+    Trusted printers are used to flag discovered printers that have been
+    explicitly approved by the user, preventing spoofed-printer attacks.
+    """
+    if err := _check_auth("config"):
+        return err
+    try:
+        from kiln.cli.config import get_trusted_printers
+
+        trusted = get_trusted_printers()
+        return {"success": True, "trusted_printers": trusted, "count": len(trusted)}
+    except Exception as exc:
+        logger.exception("Unexpected error in list_trusted_printers")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def trust_printer(host: str) -> dict:
+    """Add a printer hostname/IP to the trusted whitelist.
+
+    Trusted printers are flagged during network discovery.  Connecting
+    to an untrusted printer should raise a warning.
+
+    Args:
+        host: The hostname or IP address to trust.
+    """
+    if err := _check_auth("config"):
+        return err
+    try:
+        from kiln.cli.config import add_trusted_printer
+
+        add_trusted_printer(host)
+        return {"success": True, "host": host}
+    except ValueError as exc:
+        return _error_dict(str(exc), code="VALIDATION_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in trust_printer")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def untrust_printer(host: str) -> dict:
+    """Remove a printer hostname/IP from the trusted whitelist.
+
+    Args:
+        host: The hostname or IP address to untrust.
+    """
+    if err := _check_auth("config"):
+        return err
+    try:
+        from kiln.cli.config import remove_trusted_printer
+
+        remove_trusted_printer(host)
+        return {"success": True, "host": host}
+    except ValueError as exc:
+        return _error_dict(str(exc), code="NOT_FOUND")
+    except Exception as exc:
+        logger.exception("Unexpected error in untrust_printer")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -7856,6 +8357,9 @@ def main() -> None:
     """Run the Kiln MCP server."""
     # Configure structured logging if requested (before any log calls).
     _configure_logging()
+
+    # Set up log rotation and sensitive data scrubbing.
+    _configure_log_rotation()
 
     # Auto-register the env-configured printer so the scheduler can
     # dispatch jobs even if no explicit register_printer call is made.

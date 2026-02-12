@@ -26,7 +26,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 # Valid top-level keys in the config file.  Used for schema validation.
-_KNOWN_KEYS: set[str] = {"printers", "active_printer", "settings", "billing", "licensing"}
+_KNOWN_KEYS: set[str] = {"printers", "active_printer", "settings", "billing", "licensing", "trusted_printers"}
 
 
 def get_config_path() -> Path:
@@ -464,3 +464,85 @@ def get_or_create_user_id(
     """Return the user ID from billing config, creating one if needed."""
     billing = get_billing_config(config_path=config_path)
     return billing["user_id"]
+
+
+# ---------------------------------------------------------------------------
+# Trusted printers whitelist
+# ---------------------------------------------------------------------------
+
+
+def get_trusted_printers(
+    *,
+    config_path: Path | None = None,
+) -> List[str]:
+    """Return the list of trusted printer hostnames/IPs.
+
+    Checks ``KILN_TRUSTED_PRINTERS`` env var first (comma-separated).
+    Falls back to the ``trusted_printers`` list in the config file.
+    """
+    env_val = os.environ.get("KILN_TRUSTED_PRINTERS", "")
+    if env_val:
+        return [h.strip() for h in env_val.split(",") if h.strip()]
+
+    path = config_path or get_config_path()
+    raw = _read_config_file(path)
+    trusted = raw.get("trusted_printers", [])
+    if not isinstance(trusted, list):
+        return []
+    return [str(h) for h in trusted]
+
+
+def add_trusted_printer(
+    host: str,
+    *,
+    config_path: Path | None = None,
+) -> None:
+    """Add a hostname/IP to the trusted printers list."""
+    host = host.strip()
+    if not host:
+        raise ValueError("host is required")
+
+    path = config_path or get_config_path()
+    raw = _read_config_file(path)
+    trusted = raw.get("trusted_printers", [])
+    if not isinstance(trusted, list):
+        trusted = []
+
+    if host not in trusted:
+        trusted.append(host)
+        raw["trusted_printers"] = trusted
+        _write_config_file(path, raw)
+
+
+def remove_trusted_printer(
+    host: str,
+    *,
+    config_path: Path | None = None,
+) -> None:
+    """Remove a hostname/IP from the trusted printers list.
+
+    Raises :class:`ValueError` if the host is not in the list.
+    """
+    host = host.strip()
+    path = config_path or get_config_path()
+    raw = _read_config_file(path)
+    trusted = raw.get("trusted_printers", [])
+    if not isinstance(trusted, list):
+        trusted = []
+
+    if host not in trusted:
+        raise ValueError(f"Printer {host!r} is not in the trusted list.")
+
+    trusted.remove(host)
+    raw["trusted_printers"] = trusted
+    _write_config_file(path, raw)
+
+
+def is_trusted_printer(
+    host: str,
+    *,
+    config_path: Path | None = None,
+) -> bool:
+    """Check whether a hostname/IP is in the trusted printers list."""
+    trusted = get_trusted_printers(config_path=config_path)
+    return host.strip() in trusted
