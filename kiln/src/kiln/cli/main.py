@@ -152,6 +152,25 @@ def cli(ctx: click.Context, printer: Optional[str]) -> None:
     ctx.ensure_object(dict)
     ctx.obj["printer"] = printer
 
+    # Soft nag if terms haven't been accepted yet (non-blocking).
+    # Only shown in interactive terminals — never in piped/agent output.
+    try:
+        if sys.stderr.isatty():
+            from kiln.terms import is_current
+            if not is_current():
+                invoked = ctx.invoked_subcommand
+                if invoked not in ("setup", None):
+                    click.echo(
+                        click.style(
+                            "  Note: Terms of use not yet accepted. "
+                            "Run 'kiln setup' to review and accept.",
+                            fg="yellow",
+                        ),
+                        err=True,
+                    )
+    except Exception:
+        pass  # DB not initialised yet — don't block CLI startup.
+
 
 # ---------------------------------------------------------------------------
 # discover
@@ -2630,6 +2649,14 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     click.echo(click.style("  ----------", bold=True))
     click.echo("  Configure a 3D printer for Kiln to control.\n")
 
+    # -- Terms of use ------------------------------------------------------
+    from kiln.terms import is_current, prompt_acceptance
+
+    if not is_current():
+        if not prompt_acceptance():
+            click.echo("  You must accept the terms of use to use Kiln.")
+            sys.exit(1)
+
     # -- Check existing config ---------------------------------------------
     config_path = get_config_path()
     existing = _list_printers()
@@ -4225,7 +4252,7 @@ def cache_search(query: str, source: Optional[str], json_mode: bool) -> None:
 
 @cache.command("add")
 @click.argument("file_path", type=click.Path(exists=True))
-@click.option("--source", "-s", required=True, help="Model source (thingiverse, meshy, upload, ...).")
+@click.option("--source", "-s", required=True, help="Model source (myminifactory, meshy, upload, ...).")
 @click.option("--tags", "-t", default=None, help="Comma-separated tags.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def cache_add(file_path: str, source: str, tags: Optional[str], json_mode: bool) -> None:
