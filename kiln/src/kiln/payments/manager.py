@@ -668,8 +668,13 @@ class PaymentManager:
             from kiln.events import EventType
             event_type = EventType[event_name]
             self._event_bus.publish(event_type, data, source="payments")
-        except (KeyError, Exception):
-            logger.debug("Could not emit event %s", event_name)
+        except KeyError:
+            logger.warning(
+                "Unknown payment event type %r — check EventType enum has this member",
+                event_name,
+            )
+        except Exception:
+            logger.warning("Failed to emit payment event %s", event_name, exc_info=True)
 
 
 def _fee_currency(
@@ -680,7 +685,12 @@ def _fee_currency(
     try:
         return Currency(fee_calc.currency)
     except ValueError:
-        pass
+        logger.warning(
+            "Currency %r not recognized — falling back to provider default. "
+            "Supported currencies: %s",
+            fee_calc.currency,
+            [c.value for c in provider.supported_currencies] if provider.supported_currencies else ["USD"],
+        )
     # Default to the first currency the provider supports.
     if provider.supported_currencies:
         return provider.supported_currencies[0]

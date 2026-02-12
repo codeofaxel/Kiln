@@ -246,21 +246,51 @@ class CraftcloudProvider(FulfillmentProvider):
         for s in shipping_raw:
             if not isinstance(s, dict):
                 continue
+            ship_price = float(s.get("price", -1))
+            if ship_price < 0:
+                logger.warning(
+                    "Craftcloud shipping option %r missing price field — skipping",
+                    s.get("name", "unknown"),
+                )
+                continue
             shipping.append(ShippingOption(
                 id=str(s.get("id", "")),
                 name=s.get("name", ""),
-                price=float(s.get("price", 0)),
+                price=ship_price,
                 currency=s.get("currency", "USD"),
                 estimated_days=s.get("estimated_days"),
             ))
 
+        quote_id = str(data.get("quote_id") or data.get("id", ""))
+        if not quote_id:
+            raise FulfillmentError(
+                "Craftcloud quote response missing quote ID. "
+                f"Response keys: {list(data.keys())}",
+                code="MISSING_QUOTE_ID",
+            )
+
+        unit_price = float(data.get("unit_price", 0))
+        total_price = float(data.get("total_price", 0))
+        if unit_price <= 0 and total_price <= 0:
+            logger.warning(
+                "Craftcloud returned $0 pricing — API field names may have changed. "
+                "Response keys: %s",
+                list(data.keys()),
+            )
+            raise FulfillmentError(
+                "Craftcloud returned zero pricing. This likely means the API "
+                "response format has changed. Contact support or check API docs. "
+                f"Response keys: {list(data.keys())}",
+                code="ZERO_PRICE",
+            )
+
         return Quote(
-            quote_id=str(data.get("quote_id") or data.get("id", "")),
+            quote_id=quote_id,
             provider=self.name,
             material=data.get("material", request.material_id),
             quantity=data.get("quantity", request.quantity),
-            unit_price=float(data.get("unit_price", 0)),
-            total_price=float(data.get("total_price", 0)),
+            unit_price=unit_price,
+            total_price=total_price,
             currency=data.get("currency", "USD"),
             lead_time_days=data.get("lead_time_days"),
             shipping_options=shipping,
@@ -286,11 +316,26 @@ class CraftcloudProvider(FulfillmentProvider):
         data = self._request("POST", "/orders", json=payload)
 
         status_str = data.get("status", "submitted")
-        mapped_status = _STATUS_MAP.get(status_str, OrderStatus.SUBMITTED)
+        mapped_status = _STATUS_MAP.get(status_str)
+        if mapped_status is None:
+            logger.warning(
+                "Unknown Craftcloud order status %r — defaulting to SUBMITTED. "
+                "The API may have added new statuses.",
+                status_str,
+            )
+            mapped_status = OrderStatus.SUBMITTED
+
+        order_id = str(data.get("order_id") or data.get("id", ""))
+        if not order_id:
+            raise FulfillmentError(
+                "Craftcloud order response missing order ID. "
+                f"Response keys: {list(data.keys())}",
+                code="MISSING_ORDER_ID",
+            )
 
         return OrderResult(
             success=True,
-            order_id=str(data.get("order_id") or data.get("id", "")),
+            order_id=order_id,
             status=mapped_status,
             provider=self.name,
             tracking_url=data.get("tracking_url"),
@@ -308,7 +353,13 @@ class CraftcloudProvider(FulfillmentProvider):
         data = self._request("GET", f"/orders/{url_quote(order_id, safe='')}")
 
         status_str = data.get("status", "submitted")
-        mapped_status = _STATUS_MAP.get(status_str, OrderStatus.SUBMITTED)
+        mapped_status = _STATUS_MAP.get(status_str)
+        if mapped_status is None:
+            logger.warning(
+                "Unknown Craftcloud order status %r for order %s — defaulting to SUBMITTED",
+                status_str, order_id,
+            )
+            mapped_status = OrderStatus.SUBMITTED
 
         return OrderResult(
             success=True,

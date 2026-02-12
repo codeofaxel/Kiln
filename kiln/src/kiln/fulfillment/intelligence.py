@@ -731,7 +731,13 @@ class OrderHistory:
             )
             self._db.commit()
         except Exception:
-            logger.debug("Failed to persist order %s", record.order_id, exc_info=True)
+            logger.error(
+                "Failed to persist fulfillment order %s to database — "
+                "order was placed with provider but may not appear in history. "
+                "Check database connectivity and disk space.",
+                record.order_id,
+                exc_info=True,
+            )
 
 
 # Module-level singleton.

@@ -254,16 +254,36 @@ class SculpteoProvider(FulfillmentProvider):
         unit_price = float(price_data.get("unit_price", price_data.get("price", 0)))
         total_price = float(price_data.get("total_price", unit_price * request.quantity))
 
+        if unit_price <= 0 and total_price <= 0:
+            logger.warning(
+                "Sculpteo returned $0 pricing — API field names may have changed. "
+                "Response keys: %s",
+                list(price_data.keys()),
+            )
+            raise FulfillmentError(
+                "Sculpteo returned zero pricing. This likely means the API "
+                "response format has changed. Contact support or check API docs. "
+                f"Response keys: {list(price_data.keys())}",
+                code="ZERO_PRICE",
+            )
+
         # Parse shipping options
         shipping: List[ShippingOption] = []
         shipping_raw = price_data.get("shipping_options", [])
         for s in shipping_raw:
             if not isinstance(s, dict):
                 continue
+            ship_price = float(s.get("price", -1))
+            if ship_price < 0:
+                logger.warning(
+                    "Sculpteo shipping option %r missing price field — skipping",
+                    s.get("name", "unknown"),
+                )
+                continue
             shipping.append(ShippingOption(
                 id=str(s.get("id", "")),
                 name=s.get("name", ""),
-                price=float(s.get("price", 0)),
+                price=ship_price,
                 currency=s.get("currency", "EUR"),
                 estimated_days=s.get("estimated_days"),
             ))
@@ -314,11 +334,26 @@ class SculpteoProvider(FulfillmentProvider):
         data = self._request("POST", "/store/3D/order/", json=payload)
 
         status_str = str(data.get("status", "submitted")).lower()
-        mapped_status = _STATUS_MAP.get(status_str, OrderStatus.SUBMITTED)
+        mapped_status = _STATUS_MAP.get(status_str)
+        if mapped_status is None:
+            logger.warning(
+                "Unknown Sculpteo order status %r — defaulting to SUBMITTED. "
+                "The API may have added new statuses.",
+                status_str,
+            )
+            mapped_status = OrderStatus.SUBMITTED
+
+        order_id = str(data.get("order_id") or data.get("order_ref") or data.get("id", ""))
+        if not order_id:
+            raise FulfillmentError(
+                "Sculpteo order response missing order ID. "
+                f"Response keys: {list(data.keys())}",
+                code="MISSING_ORDER_ID",
+            )
 
         return OrderResult(
             success=True,
-            order_id=str(data.get("order_id") or data.get("order_ref") or data.get("id", "")),
+            order_id=order_id,
             status=mapped_status,
             provider=self.name,
             tracking_url=data.get("tracking_url"),
@@ -337,7 +372,13 @@ class SculpteoProvider(FulfillmentProvider):
         data = self._request("GET", f"/store/3D/order/{safe_id}/")
 
         status_str = str(data.get("status", "submitted")).lower()
-        mapped_status = _STATUS_MAP.get(status_str, OrderStatus.SUBMITTED)
+        mapped_status = _STATUS_MAP.get(status_str)
+        if mapped_status is None:
+            logger.warning(
+                "Unknown Sculpteo order status %r for order %s — defaulting to SUBMITTED",
+                status_str, order_id,
+            )
+            mapped_status = OrderStatus.SUBMITTED
 
         return OrderResult(
             success=True,

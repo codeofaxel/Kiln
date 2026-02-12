@@ -67,13 +67,23 @@ class TestSnapshotCapability:
         adapter = MoonrakerAdapter(host="http://test")
         assert adapter.capabilities.can_snapshot is True
 
-    def test_bambu_no_snapshot(self) -> None:
+    def test_bambu_no_snapshot_without_ffmpeg(self) -> None:
         try:
             from kiln.printers.bambu import BambuAdapter
         except ImportError:
             pytest.skip("paho-mqtt not installed")
-        adapter = BambuAdapter(host="192.168.1.1", access_code="12345678", serial="SN123")
-        assert adapter.capabilities.can_snapshot is False
+        with mock.patch("kiln.printers.bambu._find_ffmpeg", return_value=None):
+            adapter = BambuAdapter(host="192.168.1.1", access_code="12345678", serial="SN123")
+            assert adapter.capabilities.can_snapshot is False
+
+    def test_bambu_has_snapshot_with_ffmpeg(self) -> None:
+        try:
+            from kiln.printers.bambu import BambuAdapter
+        except ImportError:
+            pytest.skip("paho-mqtt not installed")
+        with mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg"):
+            adapter = BambuAdapter(host="192.168.1.1", access_code="12345678", serial="SN123")
+            assert adapter.capabilities.can_snapshot is True
 
     def test_capability_in_to_dict(self) -> None:
         caps = PrinterCapabilities(can_snapshot=True)

@@ -403,14 +403,34 @@ class CircleProvider(PaymentProvider):
 
         refund = data.get("data", data)
         refund_id = str(refund.get("id", ""))
+        if not refund_id:
+            raise PaymentError(
+                "Circle refund response missing transfer ID. "
+                f"Response keys: {list(refund.keys())}",
+                code="MISSING_REFUND_ID",
+            )
+
+        refund_amount = float(amount_info.get("amount", 0))
+        if refund_amount <= 0:
+            raise PaymentError(
+                f"Circle refund returned zero amount for payment {payment_id}. "
+                "Refund may not have been processed.",
+                code="ZERO_REFUND_AMOUNT",
+            )
+
         refund_status_str = refund.get("status", "pending")
         refund_status = _STATUS_MAP.get(refund_status_str, PaymentStatus.PROCESSING)
+        if refund_status_str not in _STATUS_MAP:
+            logger.warning(
+                "Unknown Circle refund status %r for payment %s — defaulting to PROCESSING",
+                refund_status_str, payment_id,
+            )
 
         return PaymentResult(
             success=refund_status != PaymentStatus.FAILED,
-            payment_id=refund_id or payment_id,
+            payment_id=refund_id,
             status=PaymentStatus.REFUNDED if refund_status != PaymentStatus.FAILED else PaymentStatus.FAILED,
-            amount=float(amount_info.get("amount", 0)),
+            amount=refund_amount,
             currency=Currency.USDC,
             rail=self.rail,
             tx_hash=refund.get("transactionHash"),
