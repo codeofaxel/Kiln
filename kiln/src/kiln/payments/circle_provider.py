@@ -19,7 +19,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-import time
 from typing import Any, Dict, Optional
 
 import requests
@@ -104,6 +103,8 @@ class CircleProvider(PaymentProvider):
 
     @property
     def rail(self) -> PaymentRail:
+        if self._default_network == "base":
+            return PaymentRail.BASE
         return PaymentRail.SOLANA
 
     # -- Internal HTTP helpers ------------------------------------------------
@@ -186,16 +187,16 @@ class CircleProvider(PaymentProvider):
     def create_payment(self, request: PaymentRequest) -> PaymentResult:
         """Create a USDC transfer via the Circle API.
 
-        Sends a ``POST /v1/transfers`` request, then polls for finality
-        with exponential backoff (up to ~60 s).  If the transfer has not
-        settled after the polling window, a result with status
-        :attr:`PaymentStatus.PROCESSING` is returned.
+        Sends a ``POST /v1/transfers`` request and returns immediately
+        with the initial transfer status (typically ``PROCESSING``).
+        Use :meth:`get_payment_status` to poll for finality.
 
         Args:
             request: Payment parameters including amount, rail, and job ID.
 
         Returns:
-            Transfer outcome with on-chain transaction hash when available.
+            Transfer outcome — usually with ``PROCESSING`` status.
+            Call ``get_payment_status`` to check for completion.
 
         Raises:
             PaymentError: If the transfer cannot be initiated.
@@ -266,22 +267,20 @@ class CircleProvider(PaymentProvider):
                 code="MISSING_ID",
             )
 
-        # Poll for finality (up to ~60 seconds)
-        for attempt in range(10):
-            time.sleep(min(2 ** attempt, 15))
-            result = self.get_payment_status(transfer_id)
-            if result.status in (PaymentStatus.COMPLETED, PaymentStatus.FAILED):
-                return result
+        # Map the initial status from the API response
+        initial_status_str = transfer.get("status", "pending")
+        mapped_status = _STATUS_MAP.get(initial_status_str, PaymentStatus.PROCESSING)
 
-        # Still pending after timeout — return current state
-        logger.warning(
-            "Circle transfer %s still processing after polling timeout",
+        logger.info(
+            "Circle transfer %s created with initial status: %s",
             transfer_id,
+            initial_status_str,
         )
+
         return PaymentResult(
-            success=False,
+            success=mapped_status == PaymentStatus.COMPLETED,
             payment_id=transfer_id,
-            status=PaymentStatus.PROCESSING,
+            status=mapped_status,
             amount=request.amount,
             currency=request.currency,
             rail=request.rail,
@@ -330,6 +329,17 @@ class CircleProvider(PaymentProvider):
         original transfer first to determine amount and destination, then
         posts a new reverse transfer.
 
+        The source of a refund is **always** the master wallet.  The
+        destination depends on how the original transfer was created:
+
+        - Inbound blockchain transfer (source.type == "blockchain"):
+          refund goes back to the original source address on-chain.
+        - Outbound payout (source.type == "wallet",
+          destination.type == "blockchain"): refund goes back to the
+          same on-chain address (logs a warning since this sends funds
+          back to the same destination).
+        - Wallet-to-wallet: destination is the original source wallet.
+
         Args:
             payment_id: The original transfer ID to refund.
 
@@ -347,16 +357,43 @@ class CircleProvider(PaymentProvider):
         source = original.get("source", {})
         destination = original.get("destination", {})
 
-        # Create a reverse transfer (swap source and destination)
-        refund_payload = {
-            "source": {
-                "type": destination.get("type", "blockchain"),
-                "id": destination.get("id", "master"),
-            },
-            "destination": {
+        # Source is always the master wallet for refunds.
+        refund_source = {"type": "wallet", "id": "master"}
+
+        # Determine refund destination based on original transfer direction.
+        source_type = source.get("type", "")
+        dest_type = destination.get("type", "")
+
+        if source_type == "blockchain":
+            # Inbound blockchain transfer -> refund to original sender address
+            refund_destination = {
+                "type": "blockchain",
+                "chain": source.get("chain", self._resolve_chain(self.rail)),
+                "address": source.get("address", ""),
+            }
+        elif source_type == "wallet" and dest_type == "blockchain":
+            # Outbound payout -> refund goes back to same blockchain address
+            logger.warning(
+                "Refunding outbound payout %s: sending back to same "
+                "destination address %s",
+                payment_id,
+                destination.get("address", "unknown"),
+            )
+            refund_destination = {
+                "type": "blockchain",
+                "chain": destination.get("chain", self._resolve_chain(self.rail)),
+                "address": destination.get("address", ""),
+            }
+        else:
+            # Wallet-to-wallet -> reverse to original source wallet
+            refund_destination = {
                 "type": source.get("type", "wallet"),
                 "id": source.get("id", "master"),
-            },
+            }
+
+        refund_payload = {
+            "source": refund_source,
+            "destination": refund_destination,
             "amount": amount_info,
         }
 

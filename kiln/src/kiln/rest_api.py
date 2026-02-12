@@ -509,6 +509,59 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
                 status_code=500,
             )
 
+    # ----- Stripe webhook ------------------------------------------------
+
+    @app.post("/api/webhooks/stripe")
+    async def stripe_webhook(request: Request):
+        """Handle Stripe webhook events (e.g. setup_intent.succeeded)."""
+        raw_body = await request.body()
+        sig_header = request.headers.get("Stripe-Signature", "")
+        webhook_secret = os.environ.get("KILN_STRIPE_WEBHOOK_SECRET", "")
+
+        if not webhook_secret:
+            logger.warning("Stripe webhook received but KILN_STRIPE_WEBHOOK_SECRET not set")
+            return JSONResponse(
+                {"error": "Webhook secret not configured"},
+                status_code=400,
+            )
+
+        try:
+            import stripe as _stripe_mod  # type: ignore[import-untyped]
+        except ImportError:
+            return JSONResponse(
+                {"error": "stripe package not installed"},
+                status_code=500,
+            )
+
+        try:
+            event = _stripe_mod.Webhook.construct_event(
+                raw_body, sig_header, webhook_secret,
+            )
+        except ValueError:
+            return JSONResponse({"error": "Invalid payload"}, status_code=400)
+        except _stripe_mod.error.SignatureVerificationError:
+            return JSONResponse({"error": "Invalid signature"}, status_code=400)
+
+        if event["type"] == "setup_intent.succeeded":
+            si = event["data"]["object"]
+            pm_id = si.get("payment_method")
+            customer_id = si.get("customer")
+            if pm_id:
+                try:
+                    from kiln.cli.config import save_billing_config
+                    save_data = {"stripe_payment_method_id": pm_id}
+                    if customer_id:
+                        save_data["stripe_customer_id"] = customer_id
+                    save_billing_config(save_data)
+                    logger.info(
+                        "Stripe webhook: persisted payment_method %s",
+                        pm_id,
+                    )
+                except Exception:
+                    logger.exception("Failed to persist payment method from webhook")
+
+        return {"received": True}
+
     return app
 
 

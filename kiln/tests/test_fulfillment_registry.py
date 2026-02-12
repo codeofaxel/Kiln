@@ -16,7 +16,6 @@ from kiln.fulfillment.registry import (
     register,
 )
 from kiln.fulfillment.sculpteo import SculpteoProvider
-from kiln.fulfillment.shapeways import ShapewaysProvider
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +27,6 @@ class TestListProviders:
     def test_builtins_registered(self):
         providers = list_providers()
         assert "craftcloud" in providers
-        assert "shapeways" in providers
         assert "sculpteo" in providers
 
     def test_sorted_order(self):
@@ -45,15 +43,12 @@ class TestGetProviderClass:
     def test_get_craftcloud(self):
         assert get_provider_class("craftcloud") is CraftcloudProvider
 
-    def test_get_shapeways(self):
-        assert get_provider_class("shapeways") is ShapewaysProvider
-
     def test_get_sculpteo(self):
         assert get_provider_class("sculpteo") is SculpteoProvider
 
     def test_case_insensitive(self):
         assert get_provider_class("Craftcloud") is CraftcloudProvider
-        assert get_provider_class("SHAPEWAYS") is ShapewaysProvider
+        assert get_provider_class("SCULPTEO") is SculpteoProvider
 
     def test_unknown_provider_raises(self):
         with pytest.raises(KeyError, match="Unknown fulfillment provider"):
@@ -113,24 +108,13 @@ class TestGetProvider:
     def test_auto_detect_craftcloud(self, monkeypatch):
         monkeypatch.delenv("KILN_FULFILLMENT_PROVIDER", raising=False)
         monkeypatch.setenv("KILN_CRAFTCLOUD_API_KEY", "test-key")
-        monkeypatch.delenv("KILN_SHAPEWAYS_CLIENT_ID", raising=False)
         monkeypatch.delenv("KILN_SCULPTEO_API_KEY", raising=False)
         provider = get_provider()
         assert isinstance(provider, CraftcloudProvider)
 
-    def test_auto_detect_shapeways(self, monkeypatch):
-        monkeypatch.delenv("KILN_FULFILLMENT_PROVIDER", raising=False)
-        monkeypatch.delenv("KILN_CRAFTCLOUD_API_KEY", raising=False)
-        monkeypatch.setenv("KILN_SHAPEWAYS_CLIENT_ID", "test-id")
-        monkeypatch.setenv("KILN_SHAPEWAYS_CLIENT_SECRET", "test-secret")
-        monkeypatch.delenv("KILN_SCULPTEO_API_KEY", raising=False)
-        provider = get_provider()
-        assert isinstance(provider, ShapewaysProvider)
-
     def test_auto_detect_sculpteo(self, monkeypatch):
         monkeypatch.delenv("KILN_FULFILLMENT_PROVIDER", raising=False)
         monkeypatch.delenv("KILN_CRAFTCLOUD_API_KEY", raising=False)
-        monkeypatch.delenv("KILN_SHAPEWAYS_CLIENT_ID", raising=False)
         monkeypatch.setenv("KILN_SCULPTEO_API_KEY", "test-key")
         provider = get_provider()
         assert isinstance(provider, SculpteoProvider)
@@ -138,7 +122,6 @@ class TestGetProvider:
     def test_no_provider_configured(self, monkeypatch):
         monkeypatch.delenv("KILN_FULFILLMENT_PROVIDER", raising=False)
         monkeypatch.delenv("KILN_CRAFTCLOUD_API_KEY", raising=False)
-        monkeypatch.delenv("KILN_SHAPEWAYS_CLIENT_ID", raising=False)
         monkeypatch.delenv("KILN_SCULPTEO_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="No fulfillment provider configured"):
             get_provider()

@@ -1,6 +1,6 @@
 """Abstract fulfillment provider interface and data types.
 
-Every external manufacturing service (Craftcloud, Shapeways, Sculpteo, etc.)
+Every external manufacturing service (Craftcloud, Sculpteo, etc.)
 implements :class:`FulfillmentProvider` so the rest of Kiln can outsource
 print jobs without knowing the underlying service.
 

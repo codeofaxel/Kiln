@@ -37,10 +37,12 @@ import atexit
 import logging
 import os
 import re
+import secrets
 import shutil
 import signal
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -734,8 +736,13 @@ def _get_payment_mgr() -> PaymentManager:
         try:
             from kiln.payments.stripe_provider import StripeProvider
             customer_id = config.get("stripe_customer_id")
+            payment_method_id = config.get("stripe_payment_method_id")
             _payment_mgr.register_provider(
-                StripeProvider(secret_key=stripe_key, customer_id=customer_id),
+                StripeProvider(
+                    secret_key=stripe_key,
+                    customer_id=customer_id,
+                    payment_method_id=payment_method_id,
+                ),
             )
         except Exception:
             logger.debug("Could not register Stripe provider")
@@ -2589,7 +2596,22 @@ def billing_setup_url(rail: str = "stripe") -> dict:
     try:
         mgr = _get_payment_mgr()
         url = mgr.get_setup_url(rail=rail)
-        return {"success": True, "setup_url": url, "rail": rail}
+        # Include setup_intent_id so the agent can poll for completion.
+        setup_intent_id = None
+        provider = mgr.get_provider(rail)
+        if provider and hasattr(provider, "_pending_setup_intent_id"):
+            setup_intent_id = provider._pending_setup_intent_id
+        return {
+            "success": True,
+            "setup_url": url,
+            "rail": rail,
+            "setup_intent_id": setup_intent_id,
+            "next_step": (
+                "Open the setup_url in a browser to complete card setup. "
+                "After the user finishes, call billing_check_setup to "
+                "activate the payment method."
+            ),
+        }
     except PaymentError as exc:
         return _error_dict(str(exc), code=getattr(exc, "code", "PAYMENT_ERROR"))
     except Exception as exc:
@@ -2634,6 +2656,99 @@ def billing_history(limit: int = 20) -> dict:
         return {"success": True, "charges": charges, "count": len(charges)}
     except Exception as exc:
         logger.exception("Unexpected error in billing_history")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def check_payment_status(payment_id: str) -> dict:
+    """Check the current status of a pending payment by ID.
+
+    Use this after a payment returns ``processing`` status to poll
+    for completion.  Works for both Stripe and Circle payments.
+
+    Args:
+        payment_id: The payment/transfer ID to check.
+    """
+    if err := _check_auth("billing"):
+        return err
+    try:
+        mgr = _get_payment_mgr()
+        # Try each registered provider until one recognises the ID
+        for name in mgr.available_rails:
+            provider = mgr.get_provider(name)
+            if provider is None:
+                continue
+            try:
+                result = provider.get_payment_status(payment_id)
+                return {
+                    "success": True,
+                    "payment_id": result.payment_id,
+                    "status": result.status.value,
+                    "amount": result.amount,
+                    "currency": result.currency.value,
+                    "rail": result.rail.value if result.rail else name,
+                    "tx_hash": result.tx_hash,
+                    "provider": name,
+                }
+            except Exception:
+                continue
+        return _error_dict(
+            f"Payment {payment_id!r} not found on any registered provider.",
+            code="NOT_FOUND",
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error in check_payment_status")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def billing_check_setup() -> dict:
+    """Check if billing setup is complete after user visited the setup URL.
+
+    After calling billing_setup_url and the user completes card setup in
+    their browser, call this tool to activate the payment method.  Polls
+    the Stripe SetupIntent for completion and configures the payment
+    method for future charges.
+    """
+    try:
+        mgr = _get_payment_mgr()
+        provider = mgr.get_provider("stripe")
+        if provider is None:
+            return _error_dict(
+                "Stripe provider not configured.",
+                code="NO_PROVIDER",
+            )
+        if not hasattr(provider, "poll_setup_intent"):
+            return _error_dict(
+                "Provider does not support setup polling.",
+                code="UNSUPPORTED",
+            )
+        pm_id = provider.poll_setup_intent()
+        if pm_id is None:
+            return {
+                "success": False,
+                "status": "pending",
+                "message": (
+                    "Setup not yet complete.  Ask the user to finish "
+                    "card setup in their browser, then call this tool again."
+                ),
+            }
+        # Activate the payment method on the provider.
+        provider.set_payment_method(pm_id)
+        # Persist to config so it survives restarts.
+        from kiln.cli.config import save_billing_config
+        save_billing_config({
+            "stripe_payment_method_id": pm_id,
+            "stripe_customer_id": getattr(provider, "_customer_id", None),
+        })
+        return {
+            "success": True,
+            "status": "active",
+            "payment_method_id": pm_id,
+            "message": "Payment method activated. Billing is now enabled.",
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in billing_check_setup")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
@@ -6362,6 +6477,312 @@ def monitor_print_vision(
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
+# ---------------------------------------------------------------------------
+# Background print watcher
+# ---------------------------------------------------------------------------
+
+_watchers: Dict[str, "_PrintWatcher"] = {}
+
+
+class _PrintWatcher:
+    """Background thread that monitors a running print.
+
+    Polls printer state and captures snapshots in a daemon thread so
+    that the MCP tool can return immediately.  Use :meth:`status` to
+    read current progress and :meth:`stop` to cancel monitoring.
+    """
+
+    def __init__(
+        self,
+        watch_id: str,
+        adapter: "PrinterAdapter",
+        printer_name: str,
+        *,
+        snapshot_interval: int = 60,
+        max_snapshots: int = 5,
+        timeout: int = 7200,
+        poll_interval: int = 15,
+        event_bus: "Optional[Any]" = None,
+    ) -> None:
+        self._watch_id = watch_id
+        self._adapter = adapter
+        self._printer_name = printer_name
+        self._snapshot_interval = snapshot_interval
+        self._max_snapshots = max_snapshots
+        self._timeout = timeout
+        self._poll_interval = poll_interval
+        self._event_bus = event_bus
+
+        self._stop_event = threading.Event()
+        self._lock = threading.Lock()
+        self._snapshots: list[dict] = []
+        self._progress_log: list[dict] = []
+        self._snapshot_failures: int = 0
+        self._result: Optional[dict] = None
+        self._outcome: str = "running"
+        self._start_time: float = 0.0
+        self._thread: Optional[threading.Thread] = None
+
+    # -- public API --------------------------------------------------------
+
+    def start(self) -> None:
+        """Start the background monitoring thread."""
+        self._start_time = time.time()
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"print-watcher-{self._watch_id}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> dict:
+        """Signal the watcher thread to stop and return final state."""
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+        with self._lock:
+            if self._result is not None:
+                return self._result
+            elapsed = round(time.time() - self._start_time, 1)
+            return {
+                "success": True,
+                "watch_id": self._watch_id,
+                "outcome": "stopped",
+                "elapsed_seconds": elapsed,
+                "progress_log": list(self._progress_log[-20:]),
+                "snapshots": list(self._snapshots),
+                "snapshot_failures": self._snapshot_failures,
+            }
+
+    def status(self) -> dict:
+        """Return current watcher state (thread-safe snapshot)."""
+        with self._lock:
+            elapsed = round(time.time() - self._start_time, 1)
+            return {
+                "watch_id": self._watch_id,
+                "printer_name": self._printer_name,
+                "outcome": self._outcome,
+                "elapsed_seconds": elapsed,
+                "snapshots_collected": len(self._snapshots),
+                "snapshot_failures": self._snapshot_failures,
+                "progress_log": list(self._progress_log[-20:]),
+                "snapshots": list(self._snapshots),
+                "finished": self._result is not None,
+                "result": self._result,
+            }
+
+    # -- internal ----------------------------------------------------------
+
+    def _finish(self, result: dict) -> None:
+        """Store the final result and publish a completion event."""
+        with self._lock:
+            self._result = result
+            self._outcome = result.get("outcome", "unknown")
+        if self._event_bus is not None:
+            try:
+                self._event_bus.publish(
+                    EventType.PRINT_TERMINAL,
+                    {
+                        "watch_id": self._watch_id,
+                        "printer_name": self._printer_name,
+                        "outcome": result.get("outcome"),
+                        "elapsed_seconds": result.get("elapsed_seconds"),
+                    },
+                    source="watch_print",
+                )
+            except Exception:
+                pass  # event delivery is best-effort
+
+    def _run(self) -> None:
+        """Main monitoring loop — runs in a background thread."""
+        adapter = self._adapter
+        can_snap = getattr(adapter.capabilities, "can_snapshot", False)
+        last_snapshot_time = 0.0
+
+        try:
+            while not self._stop_event.is_set():
+                elapsed = time.time() - self._start_time
+                if elapsed > self._timeout:
+                    result = {
+                        "success": True,
+                        "watch_id": self._watch_id,
+                        "outcome": "timeout",
+                        "elapsed_seconds": round(elapsed, 1),
+                        "progress_log": list(self._progress_log[-20:]),
+                        "snapshots": list(self._snapshots),
+                        "snapshot_failures": self._snapshot_failures,
+                        "final_state": adapter.get_state().to_dict(),
+                    }
+                    self._finish(result)
+                    return
+
+                state = adapter.get_state()
+                job = adapter.get_job()
+
+                # Record progress
+                if job.completion is not None:
+                    with self._lock:
+                        self._progress_log.append({
+                            "time": round(elapsed, 1),
+                            "completion": job.completion,
+                        })
+
+                # Check terminal states
+                if state.state == PrinterStatus.IDLE and elapsed > 30:
+                    result = {
+                        "success": True,
+                        "watch_id": self._watch_id,
+                        "outcome": "completed",
+                        "elapsed_seconds": round(elapsed, 1),
+                        "progress_log": list(self._progress_log[-20:]),
+                        "snapshots": list(self._snapshots),
+                        "snapshot_failures": self._snapshot_failures,
+                        "final_state": state.to_dict(),
+                    }
+                    self._finish(result)
+                    return
+
+                if state.state in (PrinterStatus.ERROR, PrinterStatus.OFFLINE):
+                    if self._event_bus is not None:
+                        try:
+                            self._event_bus.publish(
+                                EventType.VISION_ALERT,
+                                {
+                                    "printer_name": self._printer_name,
+                                    "alert_type": "printer_state",
+                                    "state": state.state.value,
+                                    "completion": job.completion,
+                                    "elapsed_seconds": round(elapsed, 1),
+                                },
+                                source="vision",
+                            )
+                        except Exception:
+                            pass
+                    result = {
+                        "success": True,
+                        "watch_id": self._watch_id,
+                        "outcome": "failed",
+                        "elapsed_seconds": round(elapsed, 1),
+                        "progress_log": list(self._progress_log[-20:]),
+                        "snapshots": list(self._snapshots),
+                        "snapshot_failures": self._snapshot_failures,
+                        "final_state": state.to_dict(),
+                        "error": f"Printer entered {state.state.value} state",
+                    }
+                    self._finish(result)
+                    return
+
+                if state.state == PrinterStatus.PAUSED:
+                    result = {
+                        "success": True,
+                        "watch_id": self._watch_id,
+                        "outcome": "paused",
+                        "elapsed_seconds": round(elapsed, 1),
+                        "progress_log": list(self._progress_log[-20:]),
+                        "snapshots": list(self._snapshots),
+                        "snapshot_failures": self._snapshot_failures,
+                        "final_state": state.to_dict(),
+                        "message": (
+                            "Print is paused. Call resume_print to continue, "
+                            "or cancel_print to abort."
+                        ),
+                    }
+                    self._finish(result)
+                    return
+
+                if state.state == PrinterStatus.CANCELLING:
+                    result = {
+                        "success": True,
+                        "watch_id": self._watch_id,
+                        "outcome": "cancelling",
+                        "elapsed_seconds": round(elapsed, 1),
+                        "progress_log": list(self._progress_log[-20:]),
+                        "snapshots": list(self._snapshots),
+                        "snapshot_failures": self._snapshot_failures,
+                        "final_state": state.to_dict(),
+                    }
+                    self._finish(result)
+                    return
+
+                # Snapshot capture
+                now = time.time()
+                if can_snap and (now - last_snapshot_time) >= self._snapshot_interval:
+                    try:
+                        image_data = adapter.get_snapshot()
+                        if image_data and len(image_data) > 100:
+                            import base64
+
+                            phase = _detect_phase(job.completion)
+                            snap = {
+                                "captured_at": now,
+                                "completion_percent": job.completion,
+                                "print_phase": phase,
+                                "image_base64": base64.b64encode(image_data).decode("ascii"),
+                            }
+                            with self._lock:
+                                self._snapshots.append(snap)
+                            if self._event_bus is not None:
+                                try:
+                                    self._event_bus.publish(
+                                        EventType.VISION_CHECK,
+                                        {
+                                            "printer_name": self._printer_name,
+                                            "completion": job.completion,
+                                            "phase": phase,
+                                            "snapshot_index": len(self._snapshots),
+                                        },
+                                        source="vision",
+                                    )
+                                except Exception:
+                                    pass
+                        else:
+                            with self._lock:
+                                self._snapshot_failures += 1
+                    except Exception:
+                        with self._lock:
+                            self._snapshot_failures += 1
+                    last_snapshot_time = now
+
+                # Return batch when enough snapshots accumulated
+                with self._lock:
+                    snap_count = len(self._snapshots)
+                if snap_count >= self._max_snapshots:
+                    result = {
+                        "success": True,
+                        "watch_id": self._watch_id,
+                        "outcome": "snapshot_check",
+                        "elapsed_seconds": round(time.time() - self._start_time, 1),
+                        "progress_log": list(self._progress_log[-20:]),
+                        "snapshots": list(self._snapshots),
+                        "snapshot_failures": self._snapshot_failures,
+                        "final_state": state.to_dict(),
+                        "message": (
+                            f"Captured {snap_count} snapshots. "
+                            "Review them for print quality issues. "
+                            "Call pause_print or cancel_print if problems are detected, "
+                            "then call watch_print again to continue monitoring."
+                        ),
+                    }
+                    self._finish(result)
+                    return
+
+                # Wait using the stop event so stop() can wake us
+                self._stop_event.wait(self._poll_interval)
+
+        except Exception as exc:
+            logger.exception("Error in print watcher %s", self._watch_id)
+            self._finish({
+                "success": False,
+                "watch_id": self._watch_id,
+                "outcome": "error",
+                "error": str(exc),
+                "elapsed_seconds": round(time.time() - self._start_time, 1),
+                "progress_log": list(self._progress_log[-20:]),
+                "snapshots": list(self._snapshots),
+                "snapshot_failures": self._snapshot_failures,
+            })
+
+
 @mcp.tool()
 def watch_print(
     printer_name: str | None = None,
@@ -6370,22 +6791,19 @@ def watch_print(
     timeout: int = 7200,
     poll_interval: int = 15,
 ) -> dict:
-    """Monitor an in-progress print with periodic snapshot capture.
+    """Start background monitoring of an in-progress print.
 
-    Polls the printer state every *poll_interval* seconds.  Every
-    *snapshot_interval* seconds a webcam snapshot is captured and
-    accumulated.  The tool returns in one of three cases:
+    Launches a background thread that polls the printer state every
+    *poll_interval* seconds and captures webcam snapshots every
+    *snapshot_interval* seconds.  Returns immediately with a
+    ``watch_id`` that can be used with ``watch_print_status`` and
+    ``stop_watch_print``.
+
+    The watcher finishes automatically when:
 
     1. **Print terminal state** — completed, failed, cancelled, or offline.
-    2. **Snapshot batch ready** — *max_snapshots* images have been collected
-       (outcome ``"snapshot_check"``).  The agent should review them and
-       call ``pause_print`` / ``cancel_print`` if issues are detected,
-       then call ``watch_print`` again to continue monitoring.
+    2. **Snapshot batch ready** — *max_snapshots* images collected.
     3. **Timeout** — the print has not finished within *timeout* seconds.
-
-    This creates a closed-loop workflow::
-
-        watch_print → agent reviews snapshots → pause if bad → watch_print again
 
     Args:
         printer_name: Target printer.  Omit for the default printer.
@@ -6398,9 +6816,8 @@ def watch_print(
         return err
     try:
         adapter = _registry.get(printer_name) if printer_name else _get_adapter()
-        can_snap = getattr(adapter.capabilities, "can_snapshot", False)
 
-        # Early exit: if printer is idle with no active job, don't block
+        # Early exit: if printer is idle with no active job, don't start
         initial_state = adapter.get_state()
         initial_job = adapter.get_job()
         if initial_state.state == PrinterStatus.IDLE and initial_job.completion is None:
@@ -6414,143 +6831,35 @@ def watch_print(
                 "message": "Printer is idle with no active print job.",
             }
 
-        start_time = time.time()
-        last_snapshot_time = 0.0
-        snapshots: list[dict] = []
-        progress_log: list[dict] = []
-        snapshot_failures = 0
+        watch_id = secrets.token_hex(6)
+        watcher = _PrintWatcher(
+            watch_id,
+            adapter,
+            printer_name or "default",
+            snapshot_interval=snapshot_interval,
+            max_snapshots=max_snapshots,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            event_bus=_event_bus,
+        )
+        _watchers[watch_id] = watcher
+        watcher.start()
 
-        while True:
-            elapsed = time.time() - start_time
-            if elapsed > timeout:
-                return {
-                    "success": True,
-                    "outcome": "timeout",
-                    "elapsed_seconds": round(elapsed, 1),
-                    "progress_log": progress_log[-20:],
-                    "snapshots": snapshots,
-                    "snapshot_failures": snapshot_failures,
-                    "final_state": adapter.get_state().to_dict(),
-                }
-
-            state = adapter.get_state()
-            job = adapter.get_job()
-
-            # Record progress
-            if job.completion is not None:
-                progress_log.append({
-                    "time": round(elapsed, 1),
-                    "completion": job.completion,
-                })
-
-            # Check terminal states
-            if state.state == PrinterStatus.IDLE and elapsed > 30:
-                return {
-                    "success": True,
-                    "outcome": "completed",
-                    "elapsed_seconds": round(elapsed, 1),
-                    "progress_log": progress_log[-20:],
-                    "snapshots": snapshots,
-                    "snapshot_failures": snapshot_failures,
-                    "final_state": state.to_dict(),
-                }
-            if state.state in (PrinterStatus.ERROR, PrinterStatus.OFFLINE):
-                _event_bus.publish(
-                    EventType.VISION_ALERT,
-                    {
-                        "printer_name": printer_name or "default",
-                        "alert_type": "printer_state",
-                        "state": state.state.value,
-                        "completion": job.completion,
-                        "elapsed_seconds": round(elapsed, 1),
-                    },
-                    source="vision",
-                )
-                return {
-                    "success": True,
-                    "outcome": "failed",
-                    "elapsed_seconds": round(elapsed, 1),
-                    "progress_log": progress_log[-20:],
-                    "snapshots": snapshots,
-                    "snapshot_failures": snapshot_failures,
-                    "final_state": state.to_dict(),
-                    "error": f"Printer entered {state.state.value} state",
-                }
-            if state.state == PrinterStatus.PAUSED:
-                return {
-                    "success": True,
-                    "outcome": "paused",
-                    "elapsed_seconds": round(elapsed, 1),
-                    "progress_log": progress_log[-20:],
-                    "snapshots": snapshots,
-                    "snapshot_failures": snapshot_failures,
-                    "final_state": state.to_dict(),
-                    "message": (
-                        "Print is paused. Call resume_print to continue, "
-                        "or cancel_print to abort."
-                    ),
-                }
-            if state.state == PrinterStatus.CANCELLING:
-                return {
-                    "success": True,
-                    "outcome": "cancelling",
-                    "elapsed_seconds": round(elapsed, 1),
-                    "progress_log": progress_log[-20:],
-                    "snapshots": snapshots,
-                    "snapshot_failures": snapshot_failures,
-                    "final_state": state.to_dict(),
-                }
-
-            # Snapshot capture — only if adapter supports it
-            now = time.time()
-            if can_snap and (now - last_snapshot_time) >= snapshot_interval:
-                try:
-                    image_data = adapter.get_snapshot()
-                    if image_data and len(image_data) > 100:
-                        import base64
-
-                        phase = _detect_phase(job.completion)
-                        snapshots.append({
-                            "captured_at": now,
-                            "completion_percent": job.completion,
-                            "print_phase": phase,
-                            "image_base64": base64.b64encode(image_data).decode("ascii"),
-                        })
-                        _event_bus.publish(
-                            EventType.VISION_CHECK,
-                            {
-                                "printer_name": printer_name or "default",
-                                "completion": job.completion,
-                                "phase": phase,
-                                "snapshot_index": len(snapshots),
-                            },
-                            source="vision",
-                        )
-                    else:
-                        snapshot_failures += 1
-                except Exception:
-                    snapshot_failures += 1
-                last_snapshot_time = now
-
-            # Return batch when enough snapshots accumulated
-            if len(snapshots) >= max_snapshots:
-                return {
-                    "success": True,
-                    "outcome": "snapshot_check",
-                    "elapsed_seconds": round(time.time() - start_time, 1),
-                    "progress_log": progress_log[-20:],
-                    "snapshots": snapshots,
-                    "snapshot_failures": snapshot_failures,
-                    "final_state": state.to_dict(),
-                    "message": (
-                        f"Captured {len(snapshots)} snapshots. "
-                        "Review them for print quality issues. "
-                        "Call pause_print or cancel_print if problems are detected, "
-                        "then call watch_print again to continue monitoring."
-                    ),
-                }
-
-            time.sleep(poll_interval)
+        return {
+            "success": True,
+            "watch_id": watch_id,
+            "status": "started",
+            "printer_name": printer_name or "default",
+            "snapshot_interval": snapshot_interval,
+            "max_snapshots": max_snapshots,
+            "timeout": timeout,
+            "poll_interval": poll_interval,
+            "message": (
+                f"Background watcher started (id={watch_id}). "
+                "Use watch_print_status to check progress, "
+                "or stop_watch_print to cancel."
+            ),
+        }
 
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
@@ -6559,6 +6868,51 @@ def watch_print(
     except Exception as exc:
         logger.exception("Unexpected error in watch_print")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def watch_print_status(watch_id: str) -> dict:
+    """Check the current status of a background print watcher.
+
+    Returns progress, collected snapshots, and whether the watcher
+    has finished.
+
+    Args:
+        watch_id: The watcher ID returned by ``watch_print``.
+    """
+    if err := _check_auth("monitoring"):
+        return err
+    watcher = _watchers.get(watch_id)
+    if watcher is None:
+        return _error_dict(
+            f"No active watcher with id {watch_id!r}. "
+            "It may have already been stopped or never existed.",
+            code="NOT_FOUND",
+        )
+    return {"success": True, **watcher.status()}
+
+
+@mcp.tool()
+def stop_watch_print(watch_id: str) -> dict:
+    """Stop a background print watcher and return its final state.
+
+    Signals the watcher thread to exit and removes it from the
+    active watchers registry.
+
+    Args:
+        watch_id: The watcher ID returned by ``watch_print``.
+    """
+    if err := _check_auth("monitoring"):
+        return err
+    watcher = _watchers.pop(watch_id, None)
+    if watcher is None:
+        return _error_dict(
+            f"No active watcher with id {watch_id!r}. "
+            "It may have already been stopped or never existed.",
+            code="NOT_FOUND",
+        )
+    result = watcher.stop()
+    return {"success": True, **result}
 
 
 # ---------------------------------------------------------------------------
@@ -7580,6 +7934,12 @@ def main() -> None:
         _stream_proxy.stop()
         if _cloud_sync is not None:
             _cloud_sync.stop()
+        # Stop all active print watchers
+        for wid in list(_watchers):
+            try:
+                _watchers.pop(wid).stop()
+            except Exception:
+                pass
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _shutdown_handler)
@@ -7592,6 +7952,15 @@ def main() -> None:
     atexit.register(_stream_proxy.stop)
     if _cloud_sync is not None:
         atexit.register(_cloud_sync.stop)
+
+    def _stop_all_watchers() -> None:
+        for wid in list(_watchers):
+            try:
+                _watchers.pop(wid).stop()
+            except Exception:
+                pass
+
+    atexit.register(_stop_all_watchers)
 
     mcp.run()
 

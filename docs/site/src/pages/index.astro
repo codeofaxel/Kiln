@@ -22,6 +22,22 @@ import '../styles/global.css';
       <span>K<span class="i">I</span>LN</span>
     </div>
     <p class="coming">Coming soon</p>
+
+    <div class="tip-section">
+      <p class="tip-label">Support the project</p>
+      <div class="wallets">
+        <div class="wallet">
+          <span class="chain">Solana</span>
+          <span class="domain">kiln3d.sol</span>
+          <code class="addr" title="Click to copy" onclick="navigator.clipboard.writeText('2jJUNvsDWGUrFqSVXokjS6253MPcMXGAhcvZsM5G55TS')">2jJUNv...G55TS</code>
+        </div>
+        <div class="wallet">
+          <span class="chain">Ethereum</span>
+          <span class="domain">kiln3d.eth</span>
+          <code class="addr" title="Click to copy" onclick="navigator.clipboard.writeText('0xe46D8557C3d93632e2D519Ebe9e42daff869217a')">0xe46D...9217a</code>
+        </div>
+      </div>
+    </div>
   </div>
 </body>
 </html>
@@ -56,5 +72,61 @@ import '../styles/global.css';
     color: var(--text-muted);
     letter-spacing: 0.15em;
     text-transform: uppercase;
+  }
+
+  /* Tip / donation section */
+  .tip-section {
+    margin-top: 80px;
+    padding-top: 32px;
+    border-top: 1px solid var(--border);
+  }
+  .tip-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .wallets {
+    display: flex;
+    gap: 24px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .wallet {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px 24px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-card);
+    min-width: 200px;
+  }
+  .wallet .chain {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .wallet .domain {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .wallet .addr {
+    font-family: var(--mono, monospace);
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+  .wallet .addr:hover { color: var(--text); }
+
+  @media (max-width: 480px) {
+    .wallets { flex-direction: column; align-items: center; }
+    .wallet { width: 100%; max-width: 280px; }
   }
 </style>

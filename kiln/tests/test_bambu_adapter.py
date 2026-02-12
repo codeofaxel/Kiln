@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tempfile
 import time
 from typing import Any, Dict, List, Optional
@@ -31,6 +32,7 @@ from kiln.printers.bambu import (
     _ImplicitFTP_TLS,
     _PRINT_ACTIVE_STATES,
     _STATE_MAP,
+    _find_ffmpeg,
 )
 
 
@@ -1099,37 +1101,50 @@ class TestBambuAdapterSnapshot:
         url = adapter.get_stream_url()
         assert url == f"rtsps://{HOST}:322/streaming/live/1"
 
-    @mock.patch("urllib.request.urlopen")
-    def test_get_snapshot_https_success(self, mock_urlopen) -> None:
+    @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
+    @mock.patch("kiln.printers.bambu.subprocess.run")
+    def test_get_snapshot_with_ffmpeg(self, mock_run, mock_ffmpeg) -> None:
         adapter = _adapter()
-        mock_resp = mock.MagicMock()
-        mock_resp.read.return_value = b"\x89PNG" + b"\x00" * 200
-        mock_resp.__enter__ = mock.MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = mock.MagicMock(return_value=False)
-        mock_urlopen.return_value = mock_resp
+        fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 200
+        mock_run.return_value = mock.MagicMock(
+            returncode=0,
+            stdout=fake_jpeg,
+        )
         result = adapter.get_snapshot()
         assert result is not None
-        assert result[:4] == b"\x89PNG"
+        assert result == fake_jpeg
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args
+        assert call_args[0][0][0] == "/usr/bin/ffmpeg"
+        assert "pipe:1" in call_args[0][0]
 
-    @mock.patch("urllib.request.urlopen")
-    def test_get_snapshot_falls_back_to_http(self, mock_urlopen) -> None:
+    @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value=None)
+    def test_get_snapshot_no_ffmpeg(self, mock_ffmpeg) -> None:
         adapter = _adapter()
-        # HTTPS fails, HTTP succeeds
-        good_resp = mock.MagicMock()
-        good_resp.read.return_value = b"\x89PNG" + b"\x00" * 200
-        good_resp.__enter__ = mock.MagicMock(return_value=good_resp)
-        good_resp.__exit__ = mock.MagicMock(return_value=False)
-        mock_urlopen.side_effect = [Exception("SSL error"), good_resp]
-        result = adapter.get_snapshot()
-        assert result is not None
-        assert mock_urlopen.call_count == 2
-
-    @mock.patch("urllib.request.urlopen")
-    def test_get_snapshot_returns_none_on_failure(self, mock_urlopen) -> None:
-        adapter = _adapter()
-        mock_urlopen.side_effect = Exception("connection refused")
         result = adapter.get_snapshot()
         assert result is None
+
+    @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
+    @mock.patch("kiln.printers.bambu.subprocess.run")
+    def test_get_snapshot_ffmpeg_timeout(self, mock_run, mock_ffmpeg) -> None:
+        adapter = _adapter()
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=10)
+        result = adapter.get_snapshot()
+        assert result is None
+
+    @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
+    def test_capabilities_with_ffmpeg(self, mock_ffmpeg) -> None:
+        adapter = _adapter()
+        caps = adapter.capabilities
+        assert caps.can_snapshot is True
+        assert caps.can_stream is True
+
+    @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value=None)
+    def test_capabilities_without_ffmpeg(self, mock_ffmpeg) -> None:
+        adapter = _adapter()
+        caps = adapter.capabilities
+        assert caps.can_snapshot is False
+        assert caps.can_stream is True
 
 
 class TestPrinterStateSerialization:

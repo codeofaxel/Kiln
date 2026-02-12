@@ -55,6 +55,7 @@ class EventType(enum.Enum):
     PRINT_FAILED = "print.failed"
     PRINT_CANCELLED = "print.cancelled"
     PRINT_PROGRESS = "print.progress"
+    PRINT_TERMINAL = "print.terminal"
 
     # Safety
     TEMPERATURE_WARNING = "safety.temperature_warning"
@@ -94,6 +95,7 @@ class EventType(enum.Enum):
     PAYMENT_INITIATED = "payment.initiated"
     PAYMENT_COMPLETED = "payment.completed"
     PAYMENT_FAILED = "payment.failed"
+    PAYMENT_PROCESSING = "payment.processing"
     PAYMENT_REFUNDED = "payment.refunded"
     BILLING_SETUP_COMPLETED = "billing.setup_completed"
     SPEND_LIMIT_REACHED = "billing.spend_limit_reached"

@@ -73,6 +73,35 @@ class StripeProvider(PaymentProvider):
 
         self._customer_id = customer_id
         self._payment_method_id = payment_method_id
+        self._pending_setup_intent_id: Optional[str] = None
+
+    def set_payment_method(self, payment_method_id: str) -> None:
+        """Update the default payment method for future charges."""
+        self._payment_method_id = payment_method_id
+
+    def poll_setup_intent(
+        self, setup_intent_id: Optional[str] = None
+    ) -> Optional[str]:
+        """Check if a SetupIntent has completed and return the payment_method_id.
+
+        Args:
+            setup_intent_id: Specific SetupIntent to check.  Falls back to
+                the most recently created one from :meth:`create_setup_url`.
+
+        Returns:
+            The ``pm_...`` payment method ID if setup succeeded, else ``None``.
+        """
+        sid = setup_intent_id or self._pending_setup_intent_id
+        if not sid:
+            return None
+        stripe = self._import_stripe()
+        try:
+            si = stripe.SetupIntent.retrieve(sid)
+            if si.status == "succeeded" and si.payment_method:
+                return si.payment_method
+            return None
+        except Exception:
+            return None
 
     # -- PaymentProvider identity ----------------------------------------------
 
@@ -148,13 +177,15 @@ class StripeProvider(PaymentProvider):
                 payment_method_types=["card"],
             )
 
+            self._pending_setup_intent_id = setup_intent.id
+
             logger.info(
                 "Created SetupIntent %s for customer %s",
                 setup_intent.id,
                 self._customer_id,
             )
 
-            # Build the URL — Stripe Checkout or a hosted page.  For
+            # Build the URL -- Stripe Checkout or a hosted page.  For
             # simplicity we return the SetupIntent's client_secret in a
             # redirect-style URL that the frontend can consume.
             url = (

@@ -242,7 +242,7 @@ class TestWatchPrintTool:
     """Integration tests for watch_print edge cases."""
 
     def test_paused_printer_returns_paused_outcome(self) -> None:
-        from kiln.server import watch_print, _registry
+        from kiln.server import watch_print, watch_print_status, _registry, _watchers
         from kiln.printers.base import PrinterAdapter, PrinterState, PrinterStatus, JobProgress, PrinterCapabilities
 
         adapter = mock.MagicMock(spec=PrinterAdapter)
@@ -251,11 +251,16 @@ class TestWatchPrintTool:
         adapter.capabilities = PrinterCapabilities(can_snapshot=False)
 
         with mock.patch.object(_registry, 'get', return_value=adapter):
-            with mock.patch('kiln.server.time') as mock_time:
-                mock_time.time.side_effect = [0, 40, 40]  # start, elapsed check, snapshot check
-                mock_time.sleep = mock.MagicMock()
-                result = watch_print(printer_name="test", poll_interval=1, timeout=60)
-        assert result["outcome"] == "paused"
+            result = watch_print(printer_name="test", poll_interval=1, timeout=60)
+        assert result["success"] is True
+        watch_id = result["watch_id"]
+        # Wait for the background thread to finish (adapter returns PAUSED immediately)
+        watcher = _watchers.get(watch_id)
+        assert watcher is not None
+        if watcher._thread is not None:
+            watcher._thread.join(timeout=5)
+        status = watch_print_status(watch_id)
+        assert status["outcome"] == "paused"
 
     def test_idle_with_no_active_job_returns_no_active_print(self) -> None:
         from kiln.server import watch_print, _registry

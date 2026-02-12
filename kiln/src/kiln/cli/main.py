@@ -1148,7 +1148,7 @@ def order() -> None:
     """Outsource prints to external manufacturing services.
 
     Use subcommands to get quotes, place orders, and track shipments
-    through services like Craftcloud, Shapeways, and Sculpteo.
+    through services like Craftcloud and Sculpteo.
     """
 
 

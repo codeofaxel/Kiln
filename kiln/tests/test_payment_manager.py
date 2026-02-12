@@ -363,6 +363,27 @@ class TestEvents:
         # Should have emitted SPEND_LIMIT_REACHED
         assert bus.publish.call_count >= 1
 
+    def test_emits_payment_processing(self, db):
+        """PROCESSING status emits PAYMENT_PROCESSING event."""
+        processing_provider = FakeProvider(
+            result=PaymentResult(
+                success=False,
+                payment_id="pay_proc",
+                status=PaymentStatus.PROCESSING,
+                amount=5.0,
+                currency=Currency.USD,
+                rail=PaymentRail.STRIPE,
+            ),
+        )
+        bus = MagicMock()
+        mgr = PaymentManager(db=db, config={"default_rail": "fake"}, event_bus=bus)
+        mgr.register_provider(processing_provider)
+        result = mgr.charge_fee("job-proc", _fee())
+        assert result.status == PaymentStatus.PROCESSING
+        # Should have emitted PAYMENT_INITIATED and PAYMENT_PROCESSING
+        event_values = [call.args[0].value for call in bus.publish.call_args_list]
+        assert "payment.processing" in event_values
+
     def test_no_event_bus_no_error(self, db, provider):
         """Charging without an event bus should not raise."""
         mgr = PaymentManager(db=db, config={"default_rail": "fake"})
@@ -582,3 +603,72 @@ class TestCancelFee:
         mgr.register_provider(provider)
         result = mgr.cancel_fee("pi_fake")
         assert result.status == PaymentStatus.CANCELLED
+
+
+# ---------------------------------------------------------------------------
+# Wallet address injection for Circle provider
+# ---------------------------------------------------------------------------
+
+
+class TestCircleWalletInjection:
+    """Verify charge_fee/authorize_fee inject the correct wallet address."""
+
+    def test_charge_fee_solana_wallet_for_solana_rail(self, db):
+        prov = FakeProvider(name="circle", rail=PaymentRail.SOLANA)
+        mgr = PaymentManager(db=db, config={"default_rail": "circle"})
+        mgr.register_provider(prov)
+
+        mgr.charge_fee("job1", _fee())
+        assert len(prov.calls) == 1
+        req = prov.calls[0]
+        assert req.metadata["destination_address"] == "2jJUNvsDWGUrFqSVXokjS6253MPcMXGAhcvZsM5G55TS"
+
+    def test_charge_fee_ethereum_wallet_for_base_rail(self, db):
+        prov = FakeProvider(name="circle", rail=PaymentRail.BASE)
+        mgr = PaymentManager(db=db, config={"default_rail": "circle"})
+        mgr.register_provider(prov)
+
+        mgr.charge_fee("job2", _fee())
+        assert len(prov.calls) == 1
+        req = prov.calls[0]
+        assert req.metadata["destination_address"] == "0xe46D8557C3d93632e2D519Ebe9e42daff869217a"
+
+    def test_charge_fee_ethereum_wallet_for_ethereum_rail(self, db):
+        prov = FakeProvider(name="circle", rail=PaymentRail.ETHEREUM)
+        mgr = PaymentManager(db=db, config={"default_rail": "circle"})
+        mgr.register_provider(prov)
+
+        mgr.charge_fee("job3", _fee())
+        req = prov.calls[0]
+        assert req.metadata["destination_address"] == "0xe46D8557C3d93632e2D519Ebe9e42daff869217a"
+
+    def test_charge_fee_no_metadata_for_non_circle(self, db):
+        prov = FakeProvider(name="stripe", rail=PaymentRail.STRIPE)
+        mgr = PaymentManager(db=db, config={"default_rail": "stripe"})
+        mgr.register_provider(prov)
+
+        mgr.charge_fee("job4", _fee())
+        req = prov.calls[0]
+        assert "destination_address" not in req.metadata
+
+    def test_charge_fee_env_override_solana(self, db):
+        prov = FakeProvider(name="circle", rail=PaymentRail.SOLANA)
+        mgr = PaymentManager(db=db, config={"default_rail": "circle"})
+        mgr.register_provider(prov)
+
+        import os
+        with patch.dict(os.environ, {"KILN_WALLET_SOLANA": "CustomSolAddr"}):
+            mgr.charge_fee("job5", _fee())
+        req = prov.calls[0]
+        assert req.metadata["destination_address"] == "CustomSolAddr"
+
+    def test_charge_fee_env_override_ethereum(self, db):
+        prov = FakeProvider(name="circle", rail=PaymentRail.BASE)
+        mgr = PaymentManager(db=db, config={"default_rail": "circle"})
+        mgr.register_provider(prov)
+
+        import os
+        with patch.dict(os.environ, {"KILN_WALLET_ETHEREUM": "0xCustomEth"}):
+            mgr.charge_fee("job6", _fee())
+        req = prov.calls[0]
+        assert req.metadata["destination_address"] == "0xCustomEth"

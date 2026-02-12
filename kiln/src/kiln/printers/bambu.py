@@ -22,8 +22,10 @@ import ftplib
 import json
 import logging
 import os
+import shutil
 import socket
 import ssl
+import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -72,6 +74,21 @@ _STATE_MAP: Dict[str, PrinterStatus] = {
 _PRINT_ACTIVE_STATES: frozenset[str] = frozenset({
     "running", "prepare", "slicing", "init",
 })
+
+
+def _find_ffmpeg() -> Optional[str]:
+    """Find ffmpeg binary on PATH or common install locations."""
+    path = shutil.which("ffmpeg")
+    if path:
+        return path
+    for candidate in (
+        "/usr/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        "/opt/homebrew/bin/ffmpeg",
+    ):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +235,8 @@ class BambuAdapter(PrinterAdapter):
             can_set_temp=True,
             can_send_gcode=True,
             can_pause=True,
+            can_snapshot=_find_ffmpeg() is not None,
+            can_stream=True,
             supported_extensions=(".3mf", ".gcode", ".gco"),
         )
 
@@ -915,32 +934,43 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_snapshot(self) -> Optional[bytes]:
-        """Capture a webcam snapshot from the Bambu printer.
+        """Capture a webcam snapshot via the RTSP stream.
 
-        Bambu printers with LAN mode enabled push JPEG frames over MQTT
-        on the ``ipcam`` field, or expose an RTSP stream.  This method
-        attempts to grab a single JPEG frame via the printer's built-in
-        HTTP snapshot endpoint (``/snapshot``), falling back to ``None``
-        if the camera is not available.
+        Uses ``ffmpeg`` to grab a single JPEG frame from the printer's
+        RTSP stream (``rtsps://<host>:322/streaming/live/1``).  Returns
+        ``None`` if ffmpeg is not installed or the camera is unreachable.
         """
-        import urllib.request
+        ffmpeg = _find_ffmpeg()
+        if not ffmpeg:
+            logger.debug("ffmpeg not found — cannot capture Bambu snapshot")
+            return None
 
-        # Bambu printers may expose a snapshot endpoint on port 80/443.
-        for scheme in ("https", "http"):
-            try:
-                url = f"{scheme}://{self._host}/snapshot"
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                req = urllib.request.Request(url, method="GET")
-                with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
-                    data = resp.read()
-                    if data and len(data) > 100:
-                        return data
-            except Exception:
-                continue
+        stream_url = self.get_stream_url()
+        if not stream_url:
+            return None
 
-        logger.debug("Bambu webcam snapshot not available")
+        try:
+            result = subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-rtsp_transport", "tcp",
+                    "-i", stream_url,
+                    "-frames:v", "1",
+                    "-f", "image2",
+                    "-vcodec", "mjpeg",
+                    "pipe:1",
+                ],
+                capture_output=True,
+                timeout=10,
+            )
+            if result.returncode == 0 and result.stdout and len(result.stdout) > 100:
+                return result.stdout
+        except subprocess.TimeoutExpired:
+            logger.debug("ffmpeg snapshot timed out for %s", self._host)
+        except Exception as exc:
+            logger.debug("ffmpeg snapshot failed for %s: %s", self._host, exc)
+
         return None
 
     def get_stream_url(self) -> Optional[str]:

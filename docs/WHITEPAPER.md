@@ -193,7 +193,9 @@ Kiln supports third-party extensions through a plugin system based on Python ent
 
 Local printer control is free and unrestricted. Kiln charges a 5% platform fee on orders placed through external manufacturing services (Craftcloud, and future providers), with the first 5 outsourced orders per month free and a $0.25 minimum / $200 maximum per-order cap. The fee is surfaced transparently in every quote response before the user commits to an order.
 
-Kiln uses a three-tier licensing model: **Free** (all local printing, up to 2 printers, 10-job queue, billing visibility), **Pro** ($29/mo — unlimited printers, fleet orchestration, analytics, unlimited queue, cloud sync), and **Business** ($99/mo — fulfillment brokering, hosted deployment, priority support). The free tier is designed to be excellent for solo operators, with the paywall boundary at multi-printer fleet orchestration rather than individual feature gating. License keys are validated offline-first via key prefix detection with optional cached remote validation, ensuring printer operations are never blocked by network issues.
+Kiln uses a three-tier licensing model: **Free** (all local printing, up to 2 printers, 10-job queue, billing visibility), **Pro** ($29/mo — unlimited printers, fleet orchestration, analytics, unlimited queue, cloud sync), and **Business** ($99/mo — fulfillment brokering, hosted deployment, priority support). The free tier is designed to be excellent for solo operators, with the paywall boundary at multi-printer fleet orchestration rather than individual feature gating. License keys are validated offline-first via key prefix detection (`kiln_pro_`, `kiln_biz_`) with cached remote validation. The licensing system never blocks printer operations if the validation API is unreachable. Billing is tracked through a `BillingLedger` with `FeeCalculation` structs that record fee type, amount, and associated order metadata.
+
+Kiln includes a multi-rail payment processing layer. A `PaymentProvider` abstract interface supports Stripe (fiat USD/EUR), Circle (USDC stablecoin), and on-chain crypto (Solana, Ethereum, Base L2). The `PaymentManager` orchestrates provider selection, spend limit enforcement, and auth-and-capture flows — placing holds at quote time and capturing at order time. All payment transactions are persisted to SQLite and emit events through the event bus. Spend limits (per-order and monthly caps) are enforced before any charge. Crypto donations are accepted at kiln3d.sol (Solana) and kiln3d.eth (Ethereum).
 
 ## 8. Security Considerations
 
@@ -201,6 +203,7 @@ Kiln uses a three-tier licensing model: **Free** (all local printing, up to 2 pr
 - **API key authentication.** Optional scope-based authentication gates MCP tools when enabled.
 - **Credential storage.** API keys and access codes are stored in `~/.kiln/config.yaml` with permission warnings for world-readable files.
 - **Input validation.** All file paths, G-code commands, and temperature values are validated before reaching printer hardware.
+- **Heater watchdog.** A background daemon monitors heater state and automatically cools down idle heaters after a configurable timeout (default 30 minutes, via `KILN_HEATER_TIMEOUT`). Prevents fire hazards from heaters left on when no print is active.
 
 ## 9. Closed-Loop Vision Monitoring
 
@@ -253,6 +256,10 @@ Kiln's adapter pattern was designed for 3D printers but the abstraction generali
 ### 11.2 Compatibility Guarantee
 
 All four existing adapters (OctoPrint, Moonraker, Bambu, Prusa Connect) continue to work without modification. The new fields default to `device_type="fdm_printer"` and `can_snapshot=False` (overridden to `True` for OctoPrint and Moonraker which support webcam capture). No existing tests break; the extensions are purely additive.
+
+### 11.3 Distributed Manufacturing Network
+
+Kiln integrates with the 3DOS distributed manufacturing network, enabling peer-to-peer job routing across independent printer operators. Local printers can be registered on the network with material capabilities and location metadata. The `ThreeDOSClient` gateway handles printer registration, availability updates, job submission, and status polling. Agents can discover available printers on the network by material type or location, submit jobs for remote fabrication, and track order status — extending Kiln's reach beyond locally-connected hardware.
 
 ## 12. Future Work
 - **Remote agent collaboration.** Enable multiple agents to coordinate across a shared printer fleet.

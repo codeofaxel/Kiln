@@ -127,215 +127,122 @@ class TestProperties:
 
 
 class TestCreatePayment:
-    @patch("kiln.payments.circle_provider.time.sleep")
-    def test_success_on_solana(self, mock_sleep):
+    def test_success_on_solana(self):
         p = _provider()
         create_resp = _mock_response(json_data={
             "data": {"id": "tx-sol-001", "status": "pending"},
         })
-        status_resp = _mock_response(json_data={
-            "data": {
-                "id": "tx-sol-001",
-                "status": "complete",
-                "amount": {"amount": "25.00", "currency": "USD"},
-                "transactionHash": "5KtP...solhash",
-            },
-        })
-        with patch.object(p._session, "request", side_effect=[create_resp, status_resp]):
+        with patch.object(p._session, "request", return_value=create_resp):
             result = p.create_payment(_payment_request())
 
-        assert result.success is True
         assert result.payment_id == "tx-sol-001"
-        assert result.status == PaymentStatus.COMPLETED
-        assert result.tx_hash == "5KtP...solhash"
-        mock_sleep.assert_called()
+        assert result.status == PaymentStatus.PROCESSING
 
-    @patch("kiln.payments.circle_provider.time.sleep")
-    def test_success_on_base(self, mock_sleep):
+    def test_success_on_base(self):
         p = _provider()
         create_resp = _mock_response(json_data={
             "data": {"id": "tx-base-001", "status": "pending"},
         })
-        status_resp = _mock_response(json_data={
-            "data": {
-                "id": "tx-base-001",
-                "status": "complete",
-                "amount": {"amount": "10.50", "currency": "USD"},
-                "transactionHash": "0xBaseTxHash...",
-            },
-        })
-        with patch.object(p._session, "request", side_effect=[create_resp, status_resp]):
+        with patch.object(p._session, "request", return_value=create_resp):
             result = p.create_payment(_payment_request(rail=PaymentRail.BASE))
 
-        assert result.success is True
         assert result.payment_id == "tx-base-001"
-        assert result.tx_hash == "0xBaseTxHash..."
+        assert result.status == PaymentStatus.PROCESSING
 
-    @patch("kiln.payments.circle_provider.time.sleep")
-    def test_network_routing_solana_chain(self, mock_sleep):
+    def test_network_routing_solana_chain(self):
         """Verify the POST body uses chain=SOL for Solana rail."""
         p = _provider()
         create_resp = _mock_response(json_data={
             "data": {"id": "tx-100", "status": "pending"},
         })
-        status_resp = _mock_response(json_data={
-            "data": {
-                "id": "tx-100",
-                "status": "complete",
-                "amount": {"amount": "5.00", "currency": "USD"},
-            },
-        })
-        with patch.object(p._session, "request", side_effect=[create_resp, status_resp]) as mock_req:
+        with patch.object(p._session, "request", return_value=create_resp) as mock_req:
             p.create_payment(_payment_request(rail=PaymentRail.SOLANA))
 
-        # First call is the POST /v1/transfers
         call_args = mock_req.call_args_list[0]
         payload = call_args.kwargs.get("json") or call_args[1].get("json")
         assert payload["destination"]["chain"] == "SOL"
 
-    @patch("kiln.payments.circle_provider.time.sleep")
-    def test_network_routing_base_chain(self, mock_sleep):
+    def test_network_routing_base_chain(self):
         """Verify the POST body uses chain=ETH-BASE for Base rail."""
         p = _provider()
         create_resp = _mock_response(json_data={
             "data": {"id": "tx-200", "status": "pending"},
         })
-        status_resp = _mock_response(json_data={
-            "data": {
-                "id": "tx-200",
-                "status": "complete",
-                "amount": {"amount": "5.00", "currency": "USD"},
-            },
-        })
-        with patch.object(p._session, "request", side_effect=[create_resp, status_resp]) as mock_req:
+        with patch.object(p._session, "request", return_value=create_resp) as mock_req:
             p.create_payment(_payment_request(rail=PaymentRail.BASE))
 
         call_args = mock_req.call_args_list[0]
         payload = call_args.kwargs.get("json") or call_args[1].get("json")
         assert payload["destination"]["chain"] == "ETH-BASE"
 
-    @patch("kiln.payments.circle_provider.time.sleep")
-    def test_polling_for_finality(self, mock_sleep):
-        """Transfer goes pending -> pending -> complete across 3 polls."""
+    def test_create_payment_returns_processing_immediately(self):
+        """create_payment returns immediately with PROCESSING — no polling."""
         p = _provider()
         create_resp = _mock_response(json_data={
-            "data": {"id": "tx-poll", "status": "pending"},
+            "data": {"id": "tx-immediate", "status": "pending"},
         })
-        pending_resp = _mock_response(json_data={
-            "data": {
-                "id": "tx-poll",
-                "status": "pending",
-                "amount": {"amount": "25.00", "currency": "USD"},
-            },
+        with patch.object(p._session, "request", return_value=create_resp) as mock_req:
+            result = p.create_payment(_payment_request())
+
+        # Only the POST call — no GET polling calls
+        assert mock_req.call_count == 1
+        assert result.payment_id == "tx-immediate"
+        assert result.status == PaymentStatus.PROCESSING
+        assert result.amount == 25.00
+
+    def test_complete_initial_status_returns_completed(self):
+        """If Circle returns complete immediately, result is COMPLETED."""
+        p = _provider()
+        create_resp = _mock_response(json_data={
+            "data": {"id": "tx-fast", "status": "complete"},
         })
-        complete_resp = _mock_response(json_data={
-            "data": {
-                "id": "tx-poll",
-                "status": "complete",
-                "amount": {"amount": "25.00", "currency": "USD"},
-                "transactionHash": "final-hash",
-            },
-        })
-        with patch.object(
-            p._session, "request",
-            side_effect=[create_resp, pending_resp, pending_resp, complete_resp],
-        ):
+        with patch.object(p._session, "request", return_value=create_resp):
             result = p.create_payment(_payment_request())
 
         assert result.status == PaymentStatus.COMPLETED
-        assert result.tx_hash == "final-hash"
-        assert mock_sleep.call_count == 3
+        assert result.success is True
+        assert result.payment_id == "tx-fast"
 
-    @patch("kiln.payments.circle_provider.time.sleep")
-    def test_polling_failure_detected(self, mock_sleep):
-        """Transfer fails during polling."""
+    def test_failed_initial_status_returns_failed(self):
+        """If Circle returns failed immediately, result is FAILED."""
         p = _provider()
         create_resp = _mock_response(json_data={
-            "data": {"id": "tx-fail", "status": "pending"},
+            "data": {"id": "tx-fail-now", "status": "failed"},
         })
-        failed_resp = _mock_response(json_data={
-            "data": {
-                "id": "tx-fail",
-                "status": "failed",
-                "amount": {"amount": "25.00", "currency": "USD"},
-            },
-        })
-        with patch.object(p._session, "request", side_effect=[create_resp, failed_resp]):
+        with patch.object(p._session, "request", return_value=create_resp):
             result = p.create_payment(_payment_request())
 
         assert result.status == PaymentStatus.FAILED
         assert result.success is False
+        assert result.payment_id == "tx-fail-now"
 
-    @patch("kiln.payments.circle_provider.time.sleep")
-    def test_timeout_returns_processing(self, mock_sleep):
-        """After 10 polls still pending, returns PROCESSING."""
-        p = _provider()
-        create_resp = _mock_response(json_data={
-            "data": {"id": "tx-slow", "status": "pending"},
-        })
-        pending_resp = _mock_response(json_data={
-            "data": {
-                "id": "tx-slow",
-                "status": "pending",
-                "amount": {"amount": "25.00", "currency": "USD"},
-            },
-        })
-        # 1 create + 10 pending polls
-        with patch.object(
-            p._session, "request",
-            side_effect=[create_resp] + [pending_resp] * 10,
-        ):
-            result = p.create_payment(_payment_request())
-
-        assert result.status == PaymentStatus.PROCESSING
-        assert result.success is False
-        assert result.payment_id == "tx-slow"
-        assert mock_sleep.call_count == 10
-
-    @patch("kiln.payments.circle_provider.time.sleep")
-    def test_missing_transfer_id_raises(self, mock_sleep):
+    def test_missing_transfer_id_raises(self):
         p = _provider()
         create_resp = _mock_response(json_data={"data": {}})
         with patch.object(p._session, "request", return_value=create_resp):
             with pytest.raises(PaymentError, match="transfer ID"):
                 p.create_payment(_payment_request())
 
-    @patch("kiln.payments.circle_provider.time.sleep")
-    def test_description_in_payload(self, mock_sleep):
+    def test_description_in_payload(self):
         """Verify description is included in the transfer payload."""
         p = _provider()
         create_resp = _mock_response(json_data={
             "data": {"id": "tx-desc", "status": "pending"},
         })
-        complete_resp = _mock_response(json_data={
-            "data": {
-                "id": "tx-desc",
-                "status": "complete",
-                "amount": {"amount": "25.00", "currency": "USD"},
-            },
-        })
-        with patch.object(p._session, "request", side_effect=[create_resp, complete_resp]) as mock_req:
+        with patch.object(p._session, "request", return_value=create_resp) as mock_req:
             p.create_payment(_payment_request(description="Test print"))
 
         call_args = mock_req.call_args_list[0]
         payload = call_args.kwargs.get("json") or call_args[1].get("json")
         assert payload["description"] == "Test print"
 
-    @patch("kiln.payments.circle_provider.time.sleep")
-    def test_amount_formatted_two_decimals(self, mock_sleep):
+    def test_amount_formatted_two_decimals(self):
         """Amount is always formatted to 2 decimal places."""
         p = _provider()
         create_resp = _mock_response(json_data={
             "data": {"id": "tx-fmt", "status": "pending"},
         })
-        complete_resp = _mock_response(json_data={
-            "data": {
-                "id": "tx-fmt",
-                "status": "complete",
-                "amount": {"amount": "5.10", "currency": "USD"},
-            },
-        })
-        with patch.object(p._session, "request", side_effect=[create_resp, complete_resp]) as mock_req:
+        with patch.object(p._session, "request", return_value=create_resp) as mock_req:
             p.create_payment(_payment_request(amount=5.1))
 
         call_args = mock_req.call_args_list[0]
@@ -469,7 +376,11 @@ class TestRefundPayment:
                 "status": "complete",
                 "amount": {"amount": "30.00", "currency": "USD"},
                 "source": {"type": "wallet", "id": "master"},
-                "destination": {"type": "blockchain", "id": "addr-123"},
+                "destination": {
+                    "type": "blockchain",
+                    "chain": "SOL",
+                    "address": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+                },
             },
         })
         refund_resp = _mock_response(json_data={
@@ -479,7 +390,7 @@ class TestRefundPayment:
                 "transactionHash": "refund-hash-abc",
             },
         })
-        with patch.object(p._session, "request", side_effect=[original_resp, refund_resp]):
+        with patch.object(p._session, "request", side_effect=[original_resp, refund_resp]) as mock_req:
             result = p.refund_payment("tx-orig")
 
         assert result.status == PaymentStatus.REFUNDED
@@ -487,6 +398,12 @@ class TestRefundPayment:
         assert result.amount == 30.00
         assert result.tx_hash == "refund-hash-abc"
         assert result.success is True
+        # Verify refund payload: source is always master wallet
+        refund_call = mock_req.call_args_list[1]
+        payload = refund_call.kwargs.get("json") or refund_call[1].get("json")
+        assert payload["source"] == {"type": "wallet", "id": "master"}
+        assert payload["destination"]["type"] == "blockchain"
+        assert payload["destination"]["address"] == "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
 
     def test_refund_failed_transfer(self):
         p = _provider()
@@ -496,7 +413,11 @@ class TestRefundPayment:
                 "status": "complete",
                 "amount": {"amount": "20.00", "currency": "USD"},
                 "source": {"type": "wallet", "id": "master"},
-                "destination": {"type": "blockchain", "id": "addr-456"},
+                "destination": {
+                    "type": "blockchain",
+                    "chain": "SOL",
+                    "address": "addr-456",
+                },
             },
         })
         refund_resp = _mock_response(json_data={
@@ -519,7 +440,11 @@ class TestRefundPayment:
                 "status": "complete",
                 "amount": {"amount": "10.00", "currency": "USD"},
                 "source": {"type": "wallet", "id": "master"},
-                "destination": {"type": "blockchain", "id": "addr-789"},
+                "destination": {
+                    "type": "blockchain",
+                    "chain": "SOL",
+                    "address": "addr-789",
+                },
             },
         })
         error_resp = _mock_response(status_code=500, ok=False, json_data={"error": "internal"})
@@ -622,3 +547,95 @@ class TestAbstractBase:
     def test_circle_is_payment_provider(self):
         p = _provider()
         assert isinstance(p, PaymentProvider)
+
+
+# ---------------------------------------------------------------------------
+# Refund direction tests (B5 fix)
+# ---------------------------------------------------------------------------
+
+
+class TestRefundDirection:
+    """Verify refund source/destination logic for different transfer types."""
+
+    def test_inbound_blockchain_refund_destination(self):
+        """Inbound blockchain transfer: refund goes to original sender address."""
+        p = _provider()
+        original_resp = _mock_response(json_data={
+            "data": {
+                "id": "tx-inbound",
+                "status": "complete",
+                "amount": {"amount": "50.00", "currency": "USD"},
+                "source": {
+                    "type": "blockchain",
+                    "chain": "SOL",
+                    "address": "SenderAddress123",
+                },
+                "destination": {"type": "wallet", "id": "master"},
+            },
+        })
+        refund_resp = _mock_response(json_data={
+            "data": {"id": "tx-refund-inbound", "status": "complete"},
+        })
+        with patch.object(p._session, "request", side_effect=[original_resp, refund_resp]) as mock_req:
+            result = p.refund_payment("tx-inbound")
+
+        refund_call = mock_req.call_args_list[1]
+        payload = refund_call.kwargs.get("json") or refund_call[1].get("json")
+        assert payload["source"] == {"type": "wallet", "id": "master"}
+        assert payload["destination"]["type"] == "blockchain"
+        assert payload["destination"]["address"] == "SenderAddress123"
+        assert payload["destination"]["chain"] == "SOL"
+        assert result.status == PaymentStatus.REFUNDED
+
+    def test_wallet_to_wallet_refund_destination(self):
+        """Wallet-to-wallet transfer: refund goes to original source wallet."""
+        p = _provider()
+        original_resp = _mock_response(json_data={
+            "data": {
+                "id": "tx-w2w",
+                "status": "complete",
+                "amount": {"amount": "15.00", "currency": "USD"},
+                "source": {"type": "wallet", "id": "wallet-sender-1"},
+                "destination": {"type": "wallet", "id": "wallet-receiver-2"},
+            },
+        })
+        refund_resp = _mock_response(json_data={
+            "data": {"id": "tx-refund-w2w", "status": "complete"},
+        })
+        with patch.object(p._session, "request", side_effect=[original_resp, refund_resp]) as mock_req:
+            result = p.refund_payment("tx-w2w")
+
+        refund_call = mock_req.call_args_list[1]
+        payload = refund_call.kwargs.get("json") or refund_call[1].get("json")
+        assert payload["source"] == {"type": "wallet", "id": "master"}
+        assert payload["destination"] == {"type": "wallet", "id": "wallet-sender-1"}
+        assert result.status == PaymentStatus.REFUNDED
+
+    def test_outbound_payout_refund_source_is_master(self):
+        """Outbound payout: refund source is always master wallet."""
+        p = _provider()
+        original_resp = _mock_response(json_data={
+            "data": {
+                "id": "tx-payout",
+                "status": "complete",
+                "amount": {"amount": "100.00", "currency": "USD"},
+                "source": {"type": "wallet", "id": "master"},
+                "destination": {
+                    "type": "blockchain",
+                    "chain": "ETH-BASE",
+                    "address": "0xDestAddr",
+                },
+            },
+        })
+        refund_resp = _mock_response(json_data={
+            "data": {"id": "tx-refund-payout", "status": "complete"},
+        })
+        with patch.object(p._session, "request", side_effect=[original_resp, refund_resp]) as mock_req:
+            result = p.refund_payment("tx-payout")
+
+        refund_call = mock_req.call_args_list[1]
+        payload = refund_call.kwargs.get("json") or refund_call[1].get("json")
+        assert payload["source"] == {"type": "wallet", "id": "master"}
+        assert payload["destination"]["type"] == "blockchain"
+        assert payload["destination"]["address"] == "0xDestAddr"
+        assert payload["destination"]["chain"] == "ETH-BASE"

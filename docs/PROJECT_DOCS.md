@@ -50,6 +50,14 @@ Kiln is agentic infrastructure for physical fabrication. It provides a unified i
 
 **Cross-Printer Learning** — Agent-curated outcome database (`print_outcomes` table) that records success/failure/quality per printer and file. Safety-validated: rejects physically dangerous parameter values.
 
+**PaymentProvider** — Abstract base class for payment processing backends. Implements: create_payment, get_payment_status, refund_payment, authorize_payment, capture_payment, cancel_payment. Concrete providers for Stripe and Circle (USDC).
+
+**PaymentManager** — Orchestrates payment collection across providers. Routes to the correct rail (Stripe/Circle/crypto), enforces spend limits, persists transactions, and emits payment events.
+
+**HeaterWatchdog** — Background daemon that monitors heater state and auto-cools idle heaters after a configurable timeout (default 30 min). Prevents heaters from being left on when no print is active.
+
+**LicenseManager** — Offline-first license tier management. Resolves tier from key prefix (`kiln_pro_`, `kiln_biz_`) with cached remote validation fallback. Never blocks printer operations.
+
 ---
 
 ## Getting Started
@@ -355,6 +363,34 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 | `list_plugins` | — | Plugin list |
 | `plugin_info` | `name` | Plugin details |
 
+#### Billing & Payments
+
+| Tool | Input | Output |
+|---|---|---|
+| `billing_status` | `user_id` | Fee policy, monthly spend, payment methods, spend limits |
+| `billing_summary` | — | Aggregated billing summary |
+| `billing_history` | `limit` | Recent billing charges with payment outcomes |
+| `billing_setup_url` | `rail` | URL to link a payment method |
+
+#### 3DOS Network
+
+| Tool | Input | Output |
+|---|---|---|
+| `network_register_printer` | `name`, `location`, `materials` | Registration confirmation |
+| `network_update_printer` | `printer_id`, `available` | Update confirmation |
+| `network_list_printers` | — | Your registered network printers |
+| `network_find_printers` | `material`, `location` | Available printers on the network |
+| `network_submit_job` | `file_url`, `material`, `printer_id` | Network job ID |
+| `network_job_status` | `job_id` | Job tracking details |
+
+#### Safety Audit
+
+| Tool | Input | Output |
+|---|---|---|
+| `safety_audit` | — | Safety compliance report |
+| `safety_settings` | — | Current safety/auto-print settings |
+| `safety_status` | — | Comprehensive safety status |
+
 #### Fulfillment Services
 
 | Tool | Input | Output |
@@ -652,7 +688,7 @@ pip install -e "./octoprint-cli[dev]"
 ### Running Tests
 
 ```bash
-cd kiln && python3 -m pytest tests/ -v    # 2413 tests
+cd kiln && python3 -m pytest tests/ -v    # 2815 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
@@ -692,7 +728,18 @@ kiln/src/kiln/
     bed_leveling.py      # Bed leveling trigger system
     streaming.py         # MJPEG webcam proxy
     cloud_sync.py        # Cloud sync manager
+    heater_watchdog.py   # Auto-cooldown watchdog for idle heaters
+    licensing.py         # License tier management (Free/Pro/Business)
+    model_metadata.py    # Model metadata management
+    wallets.py           # Crypto wallet configuration (Solana/Ethereum donations)
     plugins.py           # Plugin system
+    payments/
+        base.py          # PaymentProvider interface, PaymentRail enum
+        manager.py       # Payment orchestration across providers
+        stripe_provider.py   # Stripe payment provider
+        circle_provider.py   # Circle USDC payment provider
+    gateway/
+        threedos.py      # 3DOS distributed manufacturing network client
     data/
         safety_profiles.json     # Per-printer safety limits (temps, feedrates, flow)
         slicer_profiles.json     # Per-printer slicer settings (INI key-values)
@@ -707,7 +754,6 @@ kiln/src/kiln/
         base.py          # Fulfillment adapter interface
         registry.py      # Provider registry and factory
         craftcloud.py    # Craftcloud API client
-        shapeways.py     # Shapeways OAuth2 API client
         sculpteo.py      # Sculpteo partner API client
     marketplaces/
         base.py          # Marketplace adapter interface

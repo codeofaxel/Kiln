@@ -2,13 +2,13 @@
 
 Maintains a name→class mapping so the rest of Kiln can instantiate any
 supported fulfillment provider by its machine-readable name (e.g.
-``"craftcloud"``, ``"shapeways"``, ``"sculpteo"``).
+``"craftcloud"``, ``"sculpteo"``).
 
 Usage::
 
     from kiln.fulfillment.registry import get_provider, list_providers
 
-    provider = get_provider("shapeways", api_key="sk-...")
+    provider = get_provider("craftcloud", api_key="sk-...")
     for name in list_providers():
         print(name)
 """
@@ -27,7 +27,6 @@ _REGISTRY: Dict[str, Type[FulfillmentProvider]] = {}
 # configured when KILN_FULFILLMENT_PROVIDER is not set explicitly.
 _ENV_HINTS: Dict[str, str] = {
     "KILN_CRAFTCLOUD_API_KEY": "craftcloud",
-    "KILN_SHAPEWAYS_CLIENT_ID": "shapeways",
     "KILN_SCULPTEO_API_KEY": "sculpteo",
 }
 
@@ -109,8 +108,6 @@ def _ensure_builtins() -> None:
 
     from kiln.fulfillment.craftcloud import CraftcloudProvider
     from kiln.fulfillment.sculpteo import SculpteoProvider
-    from kiln.fulfillment.shapeways import ShapewaysProvider
 
     register("craftcloud", CraftcloudProvider)
-    register("shapeways", ShapewaysProvider)
     register("sculpteo", SculpteoProvider)

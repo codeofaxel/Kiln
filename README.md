@@ -340,7 +340,7 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `find_slicer_tool` | Detect installed slicer (PrusaSlicer/OrcaSlicer) |
 | `slice_and_print` | Slice a model then upload and print in one step |
 | `printer_snapshot` | Capture a webcam snapshot from the printer |
-| `fulfillment_materials` | List materials from external print services (Craftcloud, Shapeways, Sculpteo) |
+| `fulfillment_materials` | List materials from external print services (Craftcloud, Sculpteo) |
 | `fulfillment_quote` | Get a manufacturing quote for a 3D model |
 | `fulfillment_order` | Place an order based on a quote |
 | `fulfillment_order_status` | Track a fulfillment order |
@@ -405,6 +405,14 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `network_find_printers` | Search for available printers on the 3DOS network by material/location |
 | `network_submit_job` | Submit a print job to the 3DOS distributed manufacturing network |
 | `network_job_status` | Check the status of a job on the 3DOS network |
+| `billing_status` | Get billing status, fee policy, and payment methods |
+| `billing_summary` | Aggregated billing summary |
+| `billing_history` | Recent billing charges and payment outcomes |
+| `billing_setup_url` | Get URL to link a payment method (Stripe) |
+| `safety_audit` | Audit safety compliance across jobs |
+| `safety_settings` | Get current safety and auto-print settings |
+| `safety_status` | Comprehensive safety status check |
+| `delete_file` | Delete a file from the printer |
 
 ## Supported Printers
 
@@ -446,7 +454,7 @@ The server also exposes read-only resources that agents can use for context:
 | `billing.py` | Fee tracking for 3DOS network-routed jobs |
 | `discovery.py` | Network printer discovery (mDNS + HTTP probe) |
 | `generation/` | Text-to-model generation providers (Meshy AI, OpenSCAD) with mesh validation |
-| `fulfillment/` | External manufacturing service adapters (Craftcloud, Shapeways, Sculpteo) |
+| `fulfillment/` | External manufacturing service adapters (Craftcloud, Sculpteo) |
 | `cost_estimator.py` | Print cost estimation from G-code analysis |
 | `materials.py` | Multi-material and spool tracking |
 | `bed_leveling.py` | Automated bed leveling trigger system |
@@ -464,6 +472,11 @@ The server also exposes read-only resources that agents can use for context:
 | `openrouter.py` | OpenRouter integration with model catalog and auto-tier detection |
 | `rest_api.py` | REST API wrapper (FastAPI) exposing all MCP tools as HTTP endpoints |
 | `data/` | Bundled JSON databases (safety profiles, slicer profiles, printer intelligence) |
+| `payments/` | Payment processing (Stripe, Circle USDC, crypto rails) |
+| `gateway/` | 3DOS distributed manufacturing network gateway |
+| `heater_watchdog.py` | Auto-cooldown watchdog for idle heaters |
+| `licensing.py` | License tier management (Free/Pro/Business, offline-first) |
+| `wallets.py` | Crypto wallet configuration (Solana/Ethereum for donations and fees) |
 | `cli/` | Click CLI with 50+ subcommands and JSON output |
 
 ## Beyond 3D Printing
@@ -584,15 +597,11 @@ Configure your fulfillment provider:
 # Option 1: Auto-detect from API key (Craftcloud is default)
 export KILN_CRAFTCLOUD_API_KEY=your_key
 
-# Option 2: Shapeways (OAuth2)
-export KILN_SHAPEWAYS_CLIENT_ID=your_id
-export KILN_SHAPEWAYS_CLIENT_SECRET=your_secret
-
-# Option 3: Sculpteo
+# Option 2: Sculpteo
 export KILN_SCULPTEO_API_KEY=your_key
 
 # Optional: explicitly select a provider
-export KILN_FULFILLMENT_PROVIDER=shapeways  # or craftcloud, sculpteo
+export KILN_FULFILLMENT_PROVIDER=craftcloud  # or sculpteo
 ```
 
 Agents use `fulfillment_quote` and `fulfillment_order` MCP tools for the same workflow.
@@ -665,6 +674,14 @@ Logo files live in [`docs/assets/`](docs/assets/):
 | `wallpapers/kiln-wallpaper-macbook-*.svg` | MacBook wallpapers (Air 13/15, Pro 14/16) |
 
 All files are vector SVG — scale to any size.
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Litepaper](docs/LITEPAPER.md) | Quick overview for non-technical readers |
+| [Whitepaper](docs/WHITEPAPER.md) | Full technical architecture and protocol design |
+| [Project Docs](docs/PROJECT_DOCS.md) | Complete reference (CLI, MCP tools, adapters, config) |
 
 ## License
 

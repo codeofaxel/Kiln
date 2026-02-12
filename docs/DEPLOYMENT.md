@@ -65,12 +65,9 @@ Comprehensive reference for deploying Kiln as a hosted REST API service or local
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `KILN_FULFILLMENT_PROVIDER` | No | auto-detect | Explicit fulfillment provider: `craftcloud`, `shapeways`, `sculpteo` |
+| `KILN_FULFILLMENT_PROVIDER` | No | auto-detect | Explicit fulfillment provider: `craftcloud`, `sculpteo` |
 | `KILN_CRAFTCLOUD_API_KEY` | No | `""` | Craftcloud API key |
 | `KILN_CRAFTCLOUD_BASE_URL` | No | Craftcloud default | Override Craftcloud API base URL |
-| `KILN_SHAPEWAYS_CLIENT_ID` | No | `""` | Shapeways OAuth client ID |
-| `KILN_SHAPEWAYS_CLIENT_SECRET` | No | `""` | Shapeways OAuth client secret |
-| `KILN_SHAPEWAYS_BASE_URL` | No | Shapeways default | Override Shapeways API base URL |
 | `KILN_SCULPTEO_API_KEY` | No | `""` | Sculpteo API key |
 | `KILN_SCULPTEO_BASE_URL` | No | Sculpteo default | Override Sculpteo API base URL |
 

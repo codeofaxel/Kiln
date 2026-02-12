@@ -216,12 +216,20 @@ class PaymentManager:
             )
 
         # 3. Build request
+        metadata: Dict[str, Any] = {}
+        if provider.name == "circle":
+            from kiln.wallets import get_ethereum_wallet, get_solana_wallet
+            if provider.rail in (PaymentRail.BASE, PaymentRail.ETHEREUM):
+                metadata["destination_address"] = get_ethereum_wallet().address
+            else:
+                metadata["destination_address"] = get_solana_wallet().address
         request = PaymentRequest(
             amount=fee_calc.fee_amount,
             currency=_fee_currency(fee_calc, provider),
             rail=provider.rail,
             job_id=job_id,
             description=f"Kiln platform fee for order {job_id}",
+            metadata=metadata,
         )
 
         # 4. Emit initiated event
@@ -288,6 +296,18 @@ class PaymentManager:
                 "amount": result.amount,
                 "rail": provider.name,
             })
+        elif result.status == PaymentStatus.PROCESSING:
+            self._emit("PAYMENT_PROCESSING", {
+                "job_id": job_id,
+                "charge_id": charge_id,
+                "payment_id": result.payment_id,
+                "amount": result.amount,
+                "rail": provider.name,
+                "message": (
+                    "Payment initiated but not yet confirmed. "
+                    "Use check_payment_status to poll for completion."
+                ),
+            })
         else:
             self._emit("PAYMENT_FAILED", {
                 "job_id": job_id,
@@ -353,12 +373,20 @@ class PaymentManager:
                 code="NO_PROVIDER",
             )
 
+        metadata: Dict[str, Any] = {}
+        if provider.name == "circle":
+            from kiln.wallets import get_ethereum_wallet, get_solana_wallet
+            if provider.rail in (PaymentRail.BASE, PaymentRail.ETHEREUM):
+                metadata["destination_address"] = get_ethereum_wallet().address
+            else:
+                metadata["destination_address"] = get_solana_wallet().address
         request = PaymentRequest(
             amount=fee_calc.fee_amount,
             currency=_fee_currency(fee_calc, provider),
             rail=provider.rail,
             job_id=job_id,
             description=f"Kiln fee hold for quote {job_id}",
+            metadata=metadata,
         )
 
         try:
