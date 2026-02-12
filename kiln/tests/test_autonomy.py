@@ -94,12 +94,13 @@ class TestConstraints:
 
     def test_to_dict_empty_when_defaults(self):
         c = AutonomyConstraints()
-        assert c.to_dict() == {}
+        # Bool fields are always included (even when False)
+        assert c.to_dict() == {"require_first_layer_check": False}
 
     def test_to_dict_excludes_none(self):
         c = AutonomyConstraints(max_print_time_seconds=3600, max_tool_temp=250.0)
         d = c.to_dict()
-        assert d == {"max_print_time_seconds": 3600, "max_tool_temp": 250.0}
+        assert d == {"max_print_time_seconds": 3600, "max_tool_temp": 250.0, "require_first_layer_check": False}
         assert "allowed_materials" not in d
         assert "blocked_tools" not in d
 
@@ -140,7 +141,7 @@ class TestAutonomyConfig:
         d = cfg.to_dict()
         assert d["level"] == 0
         assert d["level_name"] == "confirm_all"
-        assert d["constraints"] == {}
+        assert d["constraints"] == {"require_first_layer_check": False}
 
     def test_to_dict_with_level_and_constraints(self):
         cfg = AutonomyConfig(

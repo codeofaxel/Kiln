@@ -7605,6 +7605,144 @@ def stop_watch_print(watch_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Monitored print (start + first-layer monitoring)
+# ---------------------------------------------------------------------------
+
+# Store active first-layer monitors so agents can check progress.
+_first_layer_monitors: Dict[str, Any] = {}
+
+
+@mcp.tool()
+def start_monitored_print(
+    file_name: str,
+    printer_name: str | None = None,
+    first_layer_delay: int = 120,
+    first_layer_checks: int = 3,
+    first_layer_interval: int = 60,
+    auto_pause: bool = True,
+) -> dict:
+    """Start a print and automatically monitor the first layer.
+
+    This is the recommended way to start prints autonomously. It combines
+    start_print with first-layer monitoring in a single operation:
+
+    1. Starts the print
+    2. Waits for the configured delay (default 2 minutes)
+    3. Captures snapshots during first layers
+    4. Returns snapshots for you to visually inspect
+    5. Optionally auto-pauses if you report a failure
+
+    Use this instead of start_print when operating autonomously (Level 1/2)
+    to satisfy the first-layer monitoring safety requirement.
+
+    Args:
+        file_name: Name of the file to print (must exist on printer).
+        printer_name: Target printer. Omit for default.
+        first_layer_delay: Seconds to wait before first snapshot (default 120).
+        first_layer_checks: Number of first-layer snapshots to capture (default 3).
+        first_layer_interval: Seconds between snapshots (default 60).
+        auto_pause: Auto-pause if snapshot analysis detects failure (default True).
+    """
+    if err := _check_auth("print"):
+        return err
+    if err := _check_rate_limit("start_monitored_print"):
+        return err
+    if conf := _check_confirmation("start_monitored_print", {"file_name": file_name}):
+        return conf
+    try:
+        adapter = _registry.get(printer_name) if printer_name else _get_adapter()
+
+        # -- Automatic pre-flight safety gate (mandatory) --
+        pf = preflight_check()
+        if not pf.get("ready", False):
+            _audit("start_monitored_print", "preflight_failed", details={
+                "file": file_name, "summary": pf.get("summary", ""),
+            })
+            result = _error_dict(
+                pf.get("summary", "Pre-flight checks failed"),
+                code="PREFLIGHT_FAILED",
+            )
+            result["preflight"] = pf
+            return result
+
+        # Start the print
+        print_result = adapter.start_print(file_name)
+        _heater_watchdog.notify_print_started()
+        _audit("start_monitored_print", "print_started", details={"file": file_name})
+
+        # Set up first-layer monitoring in background
+        from kiln.print_monitor import FirstLayerMonitor, MonitorPolicy
+
+        monitor_id = secrets.token_hex(6)
+        policy = MonitorPolicy(
+            delay_seconds=first_layer_delay,
+            num_checks=first_layer_checks,
+            interval_seconds=first_layer_interval,
+            auto_pause=auto_pause,
+        )
+        monitor = FirstLayerMonitor(
+            adapter,
+            policy=policy,
+            monitor_id=monitor_id,
+        )
+        _first_layer_monitors[monitor_id] = monitor
+        monitor.start()
+
+        return {
+            "success": True,
+            "print_result": print_result.to_dict(),
+            "monitor_id": monitor_id,
+            "monitor_status": "started",
+            "first_layer_policy": policy.to_dict(),
+            "message": (
+                f"Print started and first-layer monitor launched (id={monitor_id}). "
+                "Use watch_print_status or check back after "
+                f"~{first_layer_delay + first_layer_checks * first_layer_interval}s "
+                "for first-layer snapshots."
+            ),
+        }
+    except PrinterNotFoundError:
+        return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in start_monitored_print")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def first_layer_status(monitor_id: str) -> dict:
+    """Check the status of a first-layer monitor.
+
+    Returns the current monitoring state, including any captured snapshots
+    once monitoring is complete.
+
+    Args:
+        monitor_id: The monitor ID returned by ``start_monitored_print``.
+    """
+    if err := _check_auth("monitoring"):
+        return err
+    monitor = _first_layer_monitors.get(monitor_id)
+    if monitor is None:
+        return _error_dict(
+            f"No active first-layer monitor with id {monitor_id!r}. "
+            "It may have already completed or never existed.",
+            code="NOT_FOUND",
+        )
+    result = monitor.result()
+    if result is not None:
+        # Clean up completed monitors
+        _first_layer_monitors.pop(monitor_id, None)
+        return {"success": True, "monitor_id": monitor_id, "finished": True, **result.to_dict()}
+    return {
+        "success": True,
+        "monitor_id": monitor_id,
+        "finished": False,
+        "message": "First-layer monitoring still in progress.",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Cross-printer learning tools
 # ---------------------------------------------------------------------------
 

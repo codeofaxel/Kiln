@@ -51,10 +51,22 @@ class AutonomyConstraints:
     max_bed_temp: Optional[float] = None
     allowed_tools: Optional[List[str]] = None  # specific tool names allowed
     blocked_tools: Optional[List[str]] = None  # tools that ALWAYS require confirmation
+    require_first_layer_check: bool = False  # If True, autonomous prints must monitor first layer
 
     def to_dict(self) -> Dict[str, Any]:
-        """Return non-None fields as a plain dict."""
-        return {k: v for k, v in asdict(self).items() if v is not None}
+        """Return non-None fields as a plain dict.
+
+        Boolean fields are always included (even when ``False``) so that
+        the caller can distinguish "not set" from "explicitly disabled".
+        """
+        result: Dict[str, Any] = {}
+        for k, v in asdict(self).items():
+            if v is not None:
+                result[k] = v
+            # Always include bool fields so False is distinguishable from None
+        # require_first_layer_check is bool with a default, always include
+        result["require_first_layer_check"] = self.require_first_layer_check
+        return result
 
 
 @dataclass
@@ -89,7 +101,9 @@ def load_autonomy_config(*, config_path: Optional[Any] = None) -> AutonomyConfig
                 "Invalid KILN_AUTONOMY_LEVEL=%r, defaulting to 0", env_level
             )
             level = AutonomyLevel.CONFIRM_ALL
-        return AutonomyConfig(level=level)
+        _flc_env = os.environ.get("KILN_MONITOR_REQUIRE_FIRST_LAYER", "").lower() in ("true", "1", "yes")
+        constraints = AutonomyConstraints(require_first_layer_check=_flc_env)
+        return AutonomyConfig(level=level, constraints=constraints)
 
     # Config file path
     try:
@@ -111,6 +125,9 @@ def load_autonomy_config(*, config_path: Optional[Any] = None) -> AutonomyConfig
         if not isinstance(constraints_raw, dict):
             constraints_raw = {}
 
+        _flc_raw = constraints_raw.get("require_first_layer_check", False)
+        _flc = bool(_flc_raw) if not isinstance(_flc_raw, str) else _flc_raw.lower() in ("true", "1", "yes")
+
         constraints = AutonomyConstraints(
             max_print_time_seconds=constraints_raw.get("max_print_time_seconds"),
             allowed_materials=constraints_raw.get("allowed_materials"),
@@ -118,7 +135,15 @@ def load_autonomy_config(*, config_path: Optional[Any] = None) -> AutonomyConfig
             max_bed_temp=constraints_raw.get("max_bed_temp"),
             allowed_tools=constraints_raw.get("allowed_tools"),
             blocked_tools=constraints_raw.get("blocked_tools"),
+            require_first_layer_check=_flc,
         )
+
+        # Env var override for first-layer check
+        _flc_env = os.environ.get("KILN_MONITOR_REQUIRE_FIRST_LAYER", "").lower()
+        if _flc_env in ("true", "1", "yes"):
+            constraints.require_first_layer_check = True
+        elif _flc_env in ("false", "0", "no"):
+            constraints.require_first_layer_check = False
 
         return AutonomyConfig(level=level, constraints=constraints)
     except Exception:
@@ -186,12 +211,15 @@ def check_autonomy(
                 "level": 2,
                 "constraints_met": False,
             }
-        return {
+        result_l2: Dict[str, Any] = {
             "allowed": True,
             "reason": "Autonomy level 2 -- full trust granted",
             "level": 2,
             "constraints_met": True,
         }
+        if config.constraints.require_first_layer_check and tool_name in ("start_print", "quick_print"):
+            result_l2["require_first_layer_check"] = True
+        return result_l2
 
     # Level 1: pre-screened -- check constraints
     c = config.constraints
@@ -270,12 +298,15 @@ def check_autonomy(
                 "constraints_met": False,
             }
 
-    return {
+    result: Dict[str, Any] = {
         "allowed": True,
         "reason": "All Level 1 constraints satisfied",
         "level": 1,
         "constraints_met": True,
     }
+    if c.require_first_layer_check and tool_name in ("start_print", "quick_print"):
+        result["require_first_layer_check"] = True
+    return result
 
 
 def save_autonomy_config(

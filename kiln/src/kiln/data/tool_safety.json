@@ -10,118 +10,374 @@
     }
   },
   "classifications": {
-    "printer_status": {"level": "safe"},
-    "printer_files": {"level": "safe"},
-    "upload_file": {"level": "guarded", "configurable": true, "note": "KILN_CONFIRM_UPLOAD can elevate to confirm"},
-    "upload_file_confirm": {"level": "guarded"},
-    "delete_file": {"level": "confirm", "irreversible": true},
-    "start_print": {"level": "confirm", "physical_effect": true},
-    "cancel_print": {"level": "confirm", "physical_effect": true, "irreversible": true},
-    "emergency_stop": {"level": "emergency", "physical_effect": true, "irreversible": true},
-    "pause_print": {"level": "guarded", "physical_effect": true},
-    "resume_print": {"level": "guarded", "physical_effect": true},
-    "set_temperature": {"level": "confirm", "physical_effect": true},
-    "preflight_check": {"level": "safe"},
-    "send_gcode": {"level": "confirm", "physical_effect": true},
-    "validate_gcode": {"level": "safe"},
-    "validate_gcode_safe": {"level": "safe"},
-    "fleet_status": {"level": "safe"},
-    "discover_printers": {"level": "safe"},
-    "register_printer": {"level": "guarded"},
-    "submit_job": {"level": "confirm"},
-    "job_status": {"level": "safe"},
-    "queue_summary": {"level": "safe"},
-    "cancel_job": {"level": "confirm"},
-    "job_history": {"level": "safe"},
-    "recent_events": {"level": "safe"},
-    "billing_summary": {"level": "safe"},
-    "billing_setup_url": {"level": "guarded"},
-    "billing_status": {"level": "safe"},
-    "billing_history": {"level": "safe"},
-    "health_check": {"level": "safe"},
-    "kiln_health": {"level": "safe"},
-    "safety_settings": {"level": "safe"},
-    "marketplace_info": {"level": "safe"},
-    "search_models": {"level": "safe"},
-    "search_all_models": {"level": "safe"},
-    "browse_models": {"level": "safe"},
-    "model_details": {"level": "safe"},
-    "model_files": {"level": "safe"},
-    "download_model": {"level": "guarded"},
-    "download_and_upload": {"level": "confirm", "physical_effect": true},
-    "list_model_categories": {"level": "safe"},
-    "find_slicer_tool": {"level": "safe"},
-    "slice_model": {"level": "guarded"},
-    "slice_and_print": {"level": "confirm", "physical_effect": true},
-    "list_materials": {"level": "safe"},
-    "get_material": {"level": "safe"},
-    "set_material": {"level": "guarded"},
-    "get_material_recommendation": {"level": "safe"},
-    "check_material_match": {"level": "safe"},
-    "list_spools": {"level": "safe"},
-    "add_spool": {"level": "guarded"},
-    "remove_spool": {"level": "guarded"},
-    "bed_level_status": {"level": "safe"},
-    "trigger_bed_level": {"level": "confirm", "physical_effect": true},
-    "set_leveling_policy": {"level": "guarded"},
-    "cloud_sync_status": {"level": "safe"},
-    "cloud_sync_configure": {"level": "guarded"},
-    "cloud_sync_now": {"level": "guarded"},
-    "list_plugins": {"level": "safe"},
-    "plugin_info": {"level": "safe"},
-    "fulfillment_materials": {"level": "safe"},
-    "fulfillment_quote": {"level": "confirm"},
-    "fulfillment_order": {"level": "confirm"},
-    "fulfillment_order_status": {"level": "safe"},
-    "fulfillment_cancel": {"level": "confirm"},
-    "register_webhook": {"level": "guarded"},
-    "list_webhooks": {"level": "safe"},
-    "delete_webhook": {"level": "confirm", "irreversible": true},
-    "analyze_print_file": {"level": "safe"},
-    "analyze_print_failure": {"level": "safe"},
-    "troubleshoot_printer": {"level": "safe"},
-    "list_generation_providers": {"level": "safe"},
-    "generate_model": {"level": "confirm"},
-    "generation_status": {"level": "safe"},
-    "await_generation": {"level": "guarded"},
-    "download_generated_model": {"level": "confirm"},
-    "generate_and_print": {"level": "confirm", "physical_effect": true},
-    "validate_generated_mesh": {"level": "safe"},
-    "firmware_status": {"level": "safe"},
-    "update_firmware": {"level": "confirm", "physical_effect": true},
-    "rollback_firmware": {"level": "confirm", "physical_effect": true},
-    "printer_stats": {"level": "safe"},
-    "annotate_print": {"level": "guarded"},
-    "record_print_outcome": {"level": "guarded"},
-    "print_history": {"level": "safe"},
-    "validate_print_quality": {"level": "guarded"},
-    "estimate_cost": {"level": "safe"},
-    "compare_print_options": {"level": "safe"},
-    "suggest_printer_for_job": {"level": "safe"},
-    "save_agent_note": {"level": "guarded"},
-    "delete_agent_note": {"level": "guarded"},
-    "get_agent_context": {"level": "safe"},
-    "list_safety_profiles": {"level": "safe"},
-    "get_safety_profile": {"level": "safe"},
-    "list_slicer_profiles_tool": {"level": "safe"},
-    "get_slicer_profile_tool": {"level": "safe"},
-    "get_printer_intelligence": {"level": "safe"},
-    "get_printer_insights": {"level": "safe"},
-    "list_print_pipelines": {"level": "safe"},
-    "run_quick_print": {"level": "confirm", "physical_effect": true},
-    "run_calibrate": {"level": "confirm", "physical_effect": true},
-    "run_benchmark": {"level": "confirm", "physical_effect": true},
-    "printer_snapshot": {"level": "safe"},
-    "webcam_stream": {"level": "safe"},
-    "monitor_print_vision": {"level": "guarded"},
-    "watch_print": {"level": "guarded"},
-    "await_print_completion": {"level": "guarded"},
-    "safety_audit": {"level": "safe"},
-    "safety_status": {"level": "safe"},
-    "confirm_action": {"level": "guarded"},
-    "get_autonomy_level": {"level": "safe"},
-    "set_autonomy_level": {"level": "confirm"},
-    "check_autonomy": {"level": "safe"},
-    "get_skill_manifest": {"level": "safe"}
+    "printer_status": {
+      "level": "safe"
+    },
+    "printer_files": {
+      "level": "safe"
+    },
+    "upload_file": {
+      "level": "guarded",
+      "configurable": true,
+      "note": "KILN_CONFIRM_UPLOAD can elevate to confirm"
+    },
+    "upload_file_confirm": {
+      "level": "guarded"
+    },
+    "delete_file": {
+      "level": "confirm",
+      "irreversible": true
+    },
+    "start_print": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "cancel_print": {
+      "level": "confirm",
+      "physical_effect": true,
+      "irreversible": true
+    },
+    "emergency_stop": {
+      "level": "emergency",
+      "physical_effect": true,
+      "irreversible": true
+    },
+    "pause_print": {
+      "level": "guarded",
+      "physical_effect": true
+    },
+    "resume_print": {
+      "level": "guarded",
+      "physical_effect": true
+    },
+    "set_temperature": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "preflight_check": {
+      "level": "safe"
+    },
+    "send_gcode": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "validate_gcode": {
+      "level": "safe"
+    },
+    "validate_gcode_safe": {
+      "level": "safe"
+    },
+    "fleet_status": {
+      "level": "safe"
+    },
+    "discover_printers": {
+      "level": "safe"
+    },
+    "register_printer": {
+      "level": "guarded"
+    },
+    "submit_job": {
+      "level": "confirm"
+    },
+    "job_status": {
+      "level": "safe"
+    },
+    "queue_summary": {
+      "level": "safe"
+    },
+    "cancel_job": {
+      "level": "confirm"
+    },
+    "job_history": {
+      "level": "safe"
+    },
+    "recent_events": {
+      "level": "safe"
+    },
+    "billing_summary": {
+      "level": "safe"
+    },
+    "billing_setup_url": {
+      "level": "guarded"
+    },
+    "billing_status": {
+      "level": "safe"
+    },
+    "billing_history": {
+      "level": "safe"
+    },
+    "health_check": {
+      "level": "safe"
+    },
+    "kiln_health": {
+      "level": "safe"
+    },
+    "safety_settings": {
+      "level": "safe"
+    },
+    "marketplace_info": {
+      "level": "safe"
+    },
+    "search_models": {
+      "level": "safe"
+    },
+    "search_all_models": {
+      "level": "safe"
+    },
+    "browse_models": {
+      "level": "safe"
+    },
+    "model_details": {
+      "level": "safe"
+    },
+    "model_files": {
+      "level": "safe"
+    },
+    "download_model": {
+      "level": "guarded"
+    },
+    "download_and_upload": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "list_model_categories": {
+      "level": "safe"
+    },
+    "find_slicer_tool": {
+      "level": "safe"
+    },
+    "slice_model": {
+      "level": "guarded"
+    },
+    "slice_and_print": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "list_materials": {
+      "level": "safe"
+    },
+    "get_material": {
+      "level": "safe"
+    },
+    "set_material": {
+      "level": "guarded"
+    },
+    "get_material_recommendation": {
+      "level": "safe"
+    },
+    "check_material_match": {
+      "level": "safe"
+    },
+    "list_spools": {
+      "level": "safe"
+    },
+    "add_spool": {
+      "level": "guarded"
+    },
+    "remove_spool": {
+      "level": "guarded"
+    },
+    "bed_level_status": {
+      "level": "safe"
+    },
+    "trigger_bed_level": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "set_leveling_policy": {
+      "level": "guarded"
+    },
+    "cloud_sync_status": {
+      "level": "safe"
+    },
+    "cloud_sync_configure": {
+      "level": "guarded"
+    },
+    "cloud_sync_now": {
+      "level": "guarded"
+    },
+    "list_plugins": {
+      "level": "safe"
+    },
+    "plugin_info": {
+      "level": "safe"
+    },
+    "fulfillment_materials": {
+      "level": "safe"
+    },
+    "fulfillment_quote": {
+      "level": "confirm"
+    },
+    "fulfillment_order": {
+      "level": "confirm"
+    },
+    "fulfillment_order_status": {
+      "level": "safe"
+    },
+    "fulfillment_cancel": {
+      "level": "confirm"
+    },
+    "register_webhook": {
+      "level": "guarded"
+    },
+    "list_webhooks": {
+      "level": "safe"
+    },
+    "delete_webhook": {
+      "level": "confirm",
+      "irreversible": true
+    },
+    "analyze_print_file": {
+      "level": "safe"
+    },
+    "analyze_print_failure": {
+      "level": "safe"
+    },
+    "troubleshoot_printer": {
+      "level": "safe"
+    },
+    "list_generation_providers": {
+      "level": "safe"
+    },
+    "generate_model": {
+      "level": "confirm"
+    },
+    "generation_status": {
+      "level": "safe"
+    },
+    "await_generation": {
+      "level": "guarded"
+    },
+    "download_generated_model": {
+      "level": "confirm"
+    },
+    "generate_and_print": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "validate_generated_mesh": {
+      "level": "safe"
+    },
+    "firmware_status": {
+      "level": "safe"
+    },
+    "update_firmware": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "rollback_firmware": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "printer_stats": {
+      "level": "safe"
+    },
+    "annotate_print": {
+      "level": "guarded"
+    },
+    "record_print_outcome": {
+      "level": "guarded"
+    },
+    "print_history": {
+      "level": "safe"
+    },
+    "validate_print_quality": {
+      "level": "guarded"
+    },
+    "estimate_cost": {
+      "level": "safe"
+    },
+    "compare_print_options": {
+      "level": "safe"
+    },
+    "suggest_printer_for_job": {
+      "level": "safe"
+    },
+    "save_agent_note": {
+      "level": "guarded"
+    },
+    "delete_agent_note": {
+      "level": "guarded"
+    },
+    "get_agent_context": {
+      "level": "safe"
+    },
+    "list_safety_profiles": {
+      "level": "safe"
+    },
+    "get_safety_profile": {
+      "level": "safe"
+    },
+    "list_slicer_profiles_tool": {
+      "level": "safe"
+    },
+    "get_slicer_profile_tool": {
+      "level": "safe"
+    },
+    "get_printer_intelligence": {
+      "level": "safe"
+    },
+    "get_printer_insights": {
+      "level": "safe"
+    },
+    "list_print_pipelines": {
+      "level": "safe"
+    },
+    "run_quick_print": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "run_calibrate": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "run_benchmark": {
+      "level": "confirm",
+      "physical_effect": true
+    },
+    "printer_snapshot": {
+      "level": "safe"
+    },
+    "webcam_stream": {
+      "level": "safe"
+    },
+    "monitor_print_vision": {
+      "level": "guarded"
+    },
+    "watch_print": {
+      "level": "guarded"
+    },
+    "await_print_completion": {
+      "level": "guarded"
+    },
+    "safety_audit": {
+      "level": "safe"
+    },
+    "safety_status": {
+      "level": "safe"
+    },
+    "confirm_action": {
+      "level": "guarded"
+    },
+    "get_autonomy_level": {
+      "level": "safe"
+    },
+    "set_autonomy_level": {
+      "level": "confirm"
+    },
+    "check_autonomy": {
+      "level": "safe"
+    },
+    "get_skill_manifest": {
+      "level": "safe"
+    },
+    "start_monitored_print": {
+      "level": "confirm",
+      "physical_effect": true,
+      "note": "Starts print and monitors first layer autonomously"
+    },
+    "first_layer_status": {
+      "level": "safe"
+    }
   }
 }

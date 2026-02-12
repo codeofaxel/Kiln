@@ -4588,6 +4588,78 @@ def autonomy_configure(
 
 
 # ---------------------------------------------------------------------------
+# watch (first-layer monitoring)
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--printer", default=None, help="Printer name.")
+@click.option("--delay", default=120, type=int, help="Seconds before first check.")
+@click.option("--checks", default=3, type=int, help="Number of first-layer snapshots.")
+@click.option("--interval", default=60, type=int, help="Seconds between checks.")
+@click.option("--json", "use_json", is_flag=True, help="JSON output.")
+def watch(printer: str | None, delay: int, checks: int, interval: int, use_json: bool) -> None:
+    """Monitor an active print's first layer with webcam snapshots."""
+    from kiln.print_monitor import FirstLayerMonitor, MonitorPolicy
+
+    try:
+        # Load adapter — respect --printer flag or fall back to active printer
+        cfg = load_printer_config(printer)
+        ok, err = validate_printer_config(cfg)
+        if not ok:
+            click.echo(format_error(f"Invalid printer config: {err}", json_mode=use_json))
+            sys.exit(1)
+        adapter = _make_adapter(cfg)
+
+        policy = MonitorPolicy(
+            delay_seconds=delay,
+            num_checks=checks,
+            interval_seconds=interval,
+            auto_pause=True,
+        )
+        monitor = FirstLayerMonitor(adapter, policy=policy, monitor_id="cli")
+
+        if not use_json:
+            total_wait = delay + checks * interval
+            click.echo(
+                f"Monitoring first layer: waiting {delay}s, "
+                f"then {checks} checks every {interval}s "
+                f"(~{total_wait}s total)..."
+            )
+
+        result = monitor.run()
+
+        if use_json:
+            click.echo(json.dumps({
+                "status": "success" if result.outcome == "success" else "error",
+                "data": result.to_dict(),
+            }, indent=2))
+        else:
+            click.echo(f"Outcome: {result.outcome}")
+            click.echo(f"Elapsed: {result.elapsed_seconds:.1f}s")
+            if result.snapshots:
+                click.echo(f"Snapshots captured: {len(result.snapshots)}")
+                for snap in result.snapshots:
+                    idx = snap.get("check_index", "?")
+                    pct = snap.get("completion_percent")
+                    pct_str = f" ({pct:.0f}%)" if pct is not None else ""
+                    click.echo(f"  Snapshot {idx}{pct_str}")
+            elif result.snapshot_failures:
+                click.echo(f"Snapshot failures: {result.snapshot_failures}")
+            if result.message:
+                click.echo(result.message)
+
+    except click.ClickException:
+        raise
+    except PrinterError as exc:
+        click.echo(format_error(str(exc), json_mode=use_json))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=use_json))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
