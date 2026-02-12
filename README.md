@@ -53,10 +53,11 @@ This monorepo contains two packages:
 ### Kiln CLI
 
 ```bash
-# Install from source (recommended until PyPI release)
-pip install -e ./kiln
+# One-line install (clones repo + installs via pipx)
+git clone https://github.com/codeofaxel/Kiln.git ~/.kiln/src && ~/.kiln/src/install.sh
 
-# On modern Linux/WSL, use pipx (see Linux section below)
+# Or install manually from a local clone
+pip install -e ./kiln
 
 # Discover printers on your network
 kiln discover

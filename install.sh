@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Kiln installer — works on macOS, Linux, and WSL
-# Usage: curl -fsSL https://raw.githubusercontent.com/codeofaxel/Kiln/main/install.sh | sh
+# Usage: git clone https://github.com/codeofaxel/Kiln.git ~/.kiln/src && ~/.kiln/src/install.sh
 set -euo pipefail
 
 REPO="https://github.com/codeofaxel/Kiln.git"
