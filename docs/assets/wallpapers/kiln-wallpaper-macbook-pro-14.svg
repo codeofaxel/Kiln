@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3024 1964" width="3024" height="1964">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="45.0%" r="25.0%">
+      <stop offset="0%" stop-color="#FF6B2B" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#FF6B2B" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="3024" height="1964" fill="#0D0D0D"/>
+
+  <!-- Subtle radial glow -->
+  <ellipse cx="1512" cy="884" rx="756" ry="756" fill="url(#glow)"/>
+
+  <!-- Kiln icon -->
+  <g fill="none" stroke="#E8E8E8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Left leg -->
+    <line x1="1209.6" y1="1019.9" x2="1324.5" y2="679.6"/>
+    <!-- Right leg -->
+    <line x1="1814.4" y1="1019.9" x2="1699.5" y2="679.6"/>
+    <!-- Bottom -->
+    <line x1="1209.6" y1="1019.9" x2="1814.4" y2="1019.9"/>
+    <!-- Top-left cap -->
+    <line x1="1324.5" y1="679.6" x2="1463.6" y2="679.6"/>
+    <!-- Top-right cap -->
+    <line x1="1560.4" y1="679.6" x2="1699.5" y2="679.6"/>
+  </g>
+
+  <!-- Orange heat bar -->
+  <line x1="1304.4" y1="793.0" x2="1719.6" y2="793.0" stroke="#FF6B2B" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Wordmark: K [I] L N -->
+  <text x="1281.4" y="1269.3" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="151" font-weight="300" fill="#E8E8E8" dominant-baseline="central">K</text>
+  <rect x="1422.2" y="1216.5" width="24" height="109" rx="2" fill="#FF6B2B"/>
+  <text x="1589.0" y="1269.3" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="151" font-weight="300" fill="#E8E8E8" dominant-baseline="central">L</text>
+  <text x="1742.6" y="1269.3" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="151" font-weight="300" fill="#E8E8E8" dominant-baseline="central">N</text>
+</svg>
