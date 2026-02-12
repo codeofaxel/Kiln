@@ -1178,12 +1178,12 @@ def start_print(file_name: str) -> dict:
             _audit("start_print", "preflight_failed", details={
                 "file": file_name, "summary": pf.get("summary", ""),
             })
-            return {
-                "success": False,
-                "error": pf.get("summary", "Pre-flight checks failed"),
-                "code": "PREFLIGHT_FAILED",
-                "preflight": pf,
-            }
+            result = _error_dict(
+                pf.get("summary", "Pre-flight checks failed"),
+                code="PREFLIGHT_FAILED",
+            )
+            result["preflight"] = pf
+            return result
 
         result = adapter.start_print(file_name)
         _heater_watchdog.notify_print_started()
@@ -3143,7 +3143,18 @@ def download_and_upload(
         print_data = None
         auto_printed = False
         if _AUTO_PRINT_MARKETPLACE:
+            # Mandatory pre-flight safety gate before starting print.
+            pf = preflight_check()
+            if not pf.get("ready", False):
+                _audit("download_and_upload", "preflight_failed", details={
+                    "file": file_name, "summary": pf.get("summary", ""),
+                })
+                return _error_dict(
+                    pf.get("summary", "Pre-flight checks failed"),
+                    code="PREFLIGHT_FAILED",
+                )
             print_res = adapter.start_print(file_name)
+            _heater_watchdog.notify_print_started()
             print_data = print_res.to_dict()
             auto_printed = True
 
@@ -3371,7 +3382,20 @@ def slice_and_print(
 
         upload = adapter.upload_file(result.output_path)
         file_name = upload.file_name or os.path.basename(result.output_path)
+
+        # Mandatory pre-flight safety gate before starting print.
+        pf = preflight_check()
+        if not pf.get("ready", False):
+            _audit("slice_and_print", "preflight_failed", details={
+                "file": file_name, "summary": pf.get("summary", ""),
+            })
+            return _error_dict(
+                pf.get("summary", "Pre-flight checks failed"),
+                code="PREFLIGHT_FAILED",
+            )
+
         print_result = adapter.start_print(file_name)
+        _heater_watchdog.notify_print_started()
 
         return {
             "success": True,
@@ -5513,7 +5537,18 @@ def generate_and_print(
         print_data = None
         auto_printed = False
         if _AUTO_PRINT_GENERATED:
+            # Mandatory pre-flight safety gate before starting print.
+            pf = preflight_check()
+            if not pf.get("ready", False):
+                _audit("generate_and_print", "preflight_failed", details={
+                    "file": file_name, "summary": pf.get("summary", ""),
+                })
+                return _error_dict(
+                    pf.get("summary", "Pre-flight checks failed"),
+                    code="PREFLIGHT_FAILED",
+                )
             print_result = adapter.start_print(file_name)
+            _heater_watchdog.notify_print_started()
             print_data = print_result.to_dict()
             auto_printed = True
 

@@ -224,10 +224,6 @@ class WebhookManager:
         if not valid:
             raise ValueError(f"Invalid webhook URL: {reason}")
 
-        valid, reason = _validate_webhook_url(url)
-        if not valid:
-            raise ValueError(f"Invalid webhook URL: {reason}")
-
         endpoint_id = uuid.uuid4().hex[:12]
         event_set = set(events) if events else set()
 

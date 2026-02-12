@@ -105,11 +105,25 @@ def _list_tool_schemas(mcp_instance, *, tier: str = "full") -> List[Dict[str, An
     """Extract tool metadata from the FastMCP tool manager.
 
     Returns a list of dicts with name, description, parameters, and
-    endpoint path for each registered tool.
+    endpoint path for each registered tool, filtered by *tier*.
     """
+    # Build the set of tool names allowed for this tier.
+    # The "full" tier exposes all tools — no filtering needed.
+    allowed: set[str] | None = None
+    if tier != "full":
+        try:
+            from kiln.tool_tiers import TIERS
+            tier_list = TIERS.get(tier)
+            if tier_list is not None:
+                allowed = set(tier_list)
+        except ImportError:
+            pass  # If tool_tiers is unavailable, expose all tools.
+
     tools = mcp_instance._tool_manager.list_tools()
     schemas = []
     for t in tools:
+        if allowed is not None and t.name not in allowed:
+            continue
         schemas.append({
             "name": t.name,
             "description": t.description or "",
@@ -118,6 +132,20 @@ def _list_tool_schemas(mcp_instance, *, tier: str = "full") -> List[Dict[str, An
             "endpoint": f"/api/tools/{t.name}",
         })
     return schemas
+
+
+def _allowed_tool_names(tier: str) -> set[str] | None:
+    """Return the set of tool names allowed for *tier*, or None if all."""
+    if tier == "full":
+        return None  # Full tier exposes everything.
+    try:
+        from kiln.tool_tiers import TIERS
+        tier_list = TIERS.get(tier)
+        if tier_list is not None:
+            return set(tier_list)
+    except ImportError:
+        pass
+    return None
 
 
 def _get_tool_function(mcp_instance, tool_name: str):
@@ -182,8 +210,10 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
         """Verify Bearer token if auth is configured."""
         if not config.auth_token:
             return
+        import hmac as _hmac
         auth_header = request.headers.get("Authorization", "")
-        if auth_header != f"Bearer {config.auth_token}":
+        expected = f"Bearer {config.auth_token}"
+        if not _hmac.compare_digest(auth_header, expected):
             raise HTTPException(
                 status_code=401,
                 detail="Invalid or missing auth token",
@@ -224,6 +254,14 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
             return JSONResponse(
                 {"success": False, "error": "Rate limit exceeded. Try again later."},
                 status_code=429,
+            )
+
+        # Tier gate: reject tools outside the configured tier.
+        allowed = _allowed_tool_names(config.tool_tier)
+        if allowed is not None and tool_name not in allowed:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Tool '{tool_name}' is not available in the '{config.tool_tier}' tier.",
             )
 
         mcp_instance = _get_mcp_instance()

@@ -63,7 +63,7 @@ _STATE_MAP: Dict[str, PrinterStatus] = {
     "init": PrinterStatus.BUSY,
     "pause": PrinterStatus.PAUSED,
     "failed": PrinterStatus.ERROR,
-    "cancelling": PrinterStatus.BUSY,
+    "cancelling": PrinterStatus.CANCELLING,
     "offline": PrinterStatus.OFFLINE,
     "unknown": PrinterStatus.UNKNOWN,
 }
