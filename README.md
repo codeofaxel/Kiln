@@ -647,6 +647,8 @@ Logo files live in [`docs/assets/`](docs/assets/):
 | `kiln-favicon-256.svg` | Favicon / app icon |
 | `kiln-logo-transparent.svg` | Transparent bg (for dark UIs) |
 | `kiln-logo-transparent-dark.svg` | Transparent bg (for light UIs) |
+| `kiln-pfp-1024.svg` | Social media profile picture (1024×1024) |
+| `wallpapers/kiln-wallpaper-iphone-*.svg` | iPhone wallpapers (15, 15 Pro, 15 Pro Max, 16, 16 Pro, 16 Pro Max) |
 
 All files are vector SVG — scale to any size.
 

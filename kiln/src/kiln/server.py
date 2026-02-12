@@ -2487,18 +2487,24 @@ def job_history(limit: int = 20, status: str | None = None) -> dict:
 
 
 @mcp.tool()
-def recent_events(limit: int = 20) -> dict:
+def recent_events(limit: int = 20, *, type: Optional[str] = None) -> dict:
     """Get recent events from the Kiln event bus.
 
     Args:
         limit: Maximum number of events to return (default 20, max 100).
+        type: Filter by event type prefix (e.g. ``"print"`` matches
+            ``print.started``, ``print.completed``; ``"job"`` matches
+            ``job.submitted``, ``job.completed``).  Omit for all events.
 
     Returns events covering job lifecycle, printer state changes,
     safety warnings, and more.
     """
     try:
         capped = min(max(limit, 1), 100)
-        events = _event_bus.recent_events(limit=capped)
+        events = _event_bus.recent_events(
+            limit=capped,
+            event_type_prefix=type,
+        )
         return {
             "success": True,
             "events": [e.to_dict() for e in events],
