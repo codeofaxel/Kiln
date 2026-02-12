@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 500" width="1500" height="500">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="40%">
+      <stop offset="0%" stop-color="#FF6B2B" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#FF6B2B" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1500" height="500" fill="#0D0D0D"/>
+
+  <!-- Subtle radial glow -->
+  <ellipse cx="750" cy="230" rx="500" ry="300" fill="url(#glow)"/>
+
+  <!-- Kiln icon — centered, positioned in upper portion -->
+  <g fill="none" stroke="#E8E8E8" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Left leg -->
+    <line x1="630" y1="290" x2="666" y2="170"/>
+    <!-- Right leg -->
+    <line x1="870" y1="290" x2="834" y2="170"/>
+    <!-- Bottom -->
+    <line x1="630" y1="290" x2="870" y2="290"/>
+    <!-- Top-left cap -->
+    <line x1="666" y1="170" x2="718" y2="170"/>
+    <!-- Top-right cap -->
+    <line x1="782" y1="170" x2="834" y2="170"/>
+  </g>
+
+  <!-- Orange heat bar -->
+  <line x1="654" y1="248" x2="846" y2="248" stroke="#FF6B2B" stroke-width="4.5" stroke-linecap="round"/>
+
+  <!-- Tagline text -->
+  <text x="750" y="380" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="22" font-weight="300" fill="#888888" text-anchor="middle" letter-spacing="0.15em">AI-POWERED 3D PRINTER CONTROL</text>
+
+  <!-- Subtle bottom accent line -->
+  <line x1="680" y1="410" x2="820" y2="410" stroke="#FF6B2B" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/>
+</svg>
