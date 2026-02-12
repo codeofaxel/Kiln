@@ -9393,5 +9393,709 @@ def main() -> None:
     mcp.run()
 
 
+# ---------------------------------------------------------------------------
+# Ported Forge tools — material substitution, recovery, health monitoring,
+# credential management, design caching, job routing, fleet orchestration,
+# file metadata, progress estimation, emergency stop, state locking,
+# snapshot analysis, quote caching, firmware management
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def find_material_substitute(
+    material: str,
+    *,
+    reason: Optional[str] = None,
+    min_score: float = 0.5,
+) -> dict:
+    """Find substitute filament materials when your preferred material is unavailable.
+
+    Checks a built-in knowledge base of FDM filament compatibility and returns
+    ranked alternatives with trade-off descriptions.
+
+    Args:
+        material: The original filament material (e.g. "PLA", "PETG", "ABS").
+        reason: Optional filter — only return substitutions matching this reason
+            (unavailable, cost, strength, finish_quality, heat_resistance, lead_time).
+        min_score: Minimum compatibility score threshold (0.0–1.0).
+    """
+    try:
+        from kiln.material_substitution import (
+            SubstitutionReason,
+            find_substitutes,
+        )
+
+        reason_enum = None
+        if reason:
+            try:
+                reason_enum = SubstitutionReason(reason.lower())
+            except ValueError:
+                return _error_dict(
+                    f"Invalid reason: {reason!r}. Valid: {[r.value for r in SubstitutionReason]}",
+                    code="VALIDATION_ERROR",
+                )
+
+        subs = find_substitutes(material, "fdm", reason=reason_enum, min_score=min_score)
+        return {
+            "success": True,
+            "material": material,
+            "substitutes": [s.to_dict() for s in subs],
+            "count": len(subs),
+        }
+    except Exception as exc:
+        logger.exception("Error in find_material_substitute")
+        return _error_dict(str(exc), code="SUBSTITUTION_ERROR")
+
+
+@mcp.tool()
+def get_best_material_substitute(material: str) -> dict:
+    """Get the single best substitute for a filament material.
+
+    Args:
+        material: The original filament material (e.g. "PLA", "PETG").
+    """
+    try:
+        from kiln.material_substitution import get_best_substitute
+
+        sub = get_best_substitute(material, "fdm")
+        if sub is None:
+            return {"success": True, "material": material, "substitute": None, "message": "No substitutes found"}
+        return {"success": True, "material": material, "substitute": sub.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in get_best_material_substitute")
+        return _error_dict(str(exc), code="SUBSTITUTION_ERROR")
+
+
+@mcp.tool()
+def extract_file_metadata(file_path: str) -> dict:
+    """Extract metadata from a 3D printing file (.gcode, .3mf, .stl, .ufp).
+
+    Parses file headers for estimated print time, layer count, filament usage,
+    dimensions, slicer info, and material hints — without re-slicing.
+
+    Args:
+        file_path: Path to the print file.
+    """
+    try:
+        from kiln.file_metadata import extract_metadata
+
+        meta = extract_metadata(file_path)
+        return {"success": True, "metadata": meta.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in extract_file_metadata")
+        return _error_dict(str(exc), code="FILE_METADATA_ERROR")
+
+
+@mcp.tool()
+def save_print_checkpoint(
+    printer_name: str,
+    job_id: str,
+    *,
+    z_height: Optional[float] = None,
+    layer_number: Optional[int] = None,
+    hotend_temp: Optional[float] = None,
+    bed_temp: Optional[float] = None,
+    filament_used_mm: Optional[float] = None,
+) -> dict:
+    """Save a checkpoint during an active print for crash recovery.
+
+    If the print fails or power is lost, the checkpoint data can be used
+    to plan a recovery strategy.
+
+    Args:
+        printer_name: Name of the printer running the job.
+        job_id: Unique job identifier.
+        z_height: Current Z height in mm.
+        layer_number: Current layer number.
+        hotend_temp: Hotend temperature at checkpoint time.
+        bed_temp: Bed temperature at checkpoint time.
+        filament_used_mm: Filament consumed so far in mm.
+    """
+    try:
+        from kiln.recovery import get_recovery_manager
+
+        mgr = get_recovery_manager()
+        cp = mgr.save_checkpoint(
+            printer_name=printer_name,
+            job_id=job_id,
+            z_height=z_height,
+            layer_number=layer_number,
+            hotend_temp=hotend_temp,
+            bed_temp=bed_temp,
+            filament_used_mm=filament_used_mm,
+        )
+        return {"success": True, "checkpoint": cp.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in save_print_checkpoint")
+        return _error_dict(str(exc), code="CHECKPOINT_ERROR")
+
+
+@mcp.tool()
+def plan_print_recovery(
+    printer_name: str,
+    job_id: str,
+    *,
+    failure_type: Optional[str] = None,
+) -> dict:
+    """Plan a recovery strategy after a print failure.
+
+    Analyzes the last checkpoint and failure type to recommend whether to
+    resume, restart, or abort the print.
+
+    Args:
+        printer_name: Name of the printer that failed.
+        job_id: The failed job's identifier.
+        failure_type: Type of failure (power_loss, filament_runout, nozzle_clog,
+            bed_adhesion, thermal_runaway, layer_shift, first_layer_failure).
+    """
+    try:
+        from kiln.recovery import get_recovery_manager
+
+        mgr = get_recovery_manager()
+        rec = mgr.plan_recovery(
+            printer_name=printer_name,
+            job_id=job_id,
+            failure_type=failure_type,
+        )
+        return {"success": True, "recommendation": rec.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in plan_print_recovery")
+        return _error_dict(str(exc), code="RECOVERY_ERROR")
+
+
+@mcp.tool()
+def emergency_stop(printer_name: Optional[str] = None) -> dict:
+    """Trigger an emergency stop on one or all printers.
+
+    Sends M112 (emergency stop), turns off heaters, and disables steppers.
+    Use this when a safety issue is detected.
+
+    Args:
+        printer_name: Specific printer to stop. If None, stops ALL printers.
+    """
+    try:
+        from kiln.emergency import get_emergency_coordinator
+
+        coord = get_emergency_coordinator()
+        if printer_name:
+            result = coord.emergency_stop(printer_name)
+        else:
+            result = coord.emergency_stop_all()
+        return {"success": True, "emergency_stop": result.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in emergency_stop")
+        return _error_dict(str(exc), code="EMERGENCY_ERROR")
+
+
+@mcp.tool()
+def check_printer_health(printer_name: str) -> dict:
+    """Run a comprehensive health check on a printer.
+
+    Monitors hotend/bed temperature stability, print progress, and
+    detects anomalies like temperature drift or unexpected shutdowns.
+
+    Args:
+        printer_name: Name of the printer to check.
+    """
+    try:
+        from kiln.print_health_monitor import get_print_health_monitor
+
+        monitor = get_print_health_monitor()
+        report = monitor.check_health(printer_name)
+        return {"success": True, "health_report": report.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in check_printer_health")
+        return _error_dict(str(exc), code="HEALTH_CHECK_ERROR")
+
+
+@mcp.tool()
+def start_printer_health_monitoring(
+    printer_name: str,
+    *,
+    interval_seconds: int = 30,
+) -> dict:
+    """Start continuous background health monitoring for a printer.
+
+    Args:
+        printer_name: Printer to monitor.
+        interval_seconds: Check interval in seconds (default 30).
+    """
+    try:
+        from kiln.print_health_monitor import get_print_health_monitor
+
+        monitor = get_print_health_monitor()
+        monitor.start_monitoring(printer_name, interval_seconds=interval_seconds)
+        return {"success": True, "printer": printer_name, "interval_seconds": interval_seconds}
+    except Exception as exc:
+        logger.exception("Error in start_printer_health_monitoring")
+        return _error_dict(str(exc), code="MONITORING_ERROR")
+
+
+@mcp.tool()
+def stop_printer_health_monitoring(printer_name: str) -> dict:
+    """Stop background health monitoring for a printer.
+
+    Args:
+        printer_name: Printer to stop monitoring.
+    """
+    try:
+        from kiln.print_health_monitor import get_print_health_monitor
+
+        monitor = get_print_health_monitor()
+        monitor.stop_monitoring(printer_name)
+        return {"success": True, "printer": printer_name, "monitoring": "stopped"}
+    except Exception as exc:
+        logger.exception("Error in stop_printer_health_monitoring")
+        return _error_dict(str(exc), code="MONITORING_ERROR")
+
+
+@mcp.tool()
+def estimate_print_progress(
+    printer_name: str,
+    *,
+    elapsed_seconds: Optional[float] = None,
+    total_layers: Optional[int] = None,
+    current_layer: Optional[int] = None,
+) -> dict:
+    """Estimate print progress with phase-aware time prediction.
+
+    Breaks a print into phases (preparing, printing, cooling, post-processing)
+    and estimates time remaining using historical data.
+
+    Args:
+        printer_name: Printer running the job.
+        elapsed_seconds: Time elapsed since print start.
+        total_layers: Total layer count for the job.
+        current_layer: Current layer being printed.
+    """
+    try:
+        from kiln.progress import get_progress_estimator
+
+        estimator = get_progress_estimator()
+        estimate = estimator.estimate(
+            printer_name=printer_name,
+            elapsed_seconds=elapsed_seconds,
+            total_layers=total_layers,
+            current_layer=current_layer,
+        )
+        return {"success": True, "progress": estimate.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in estimate_print_progress")
+        return _error_dict(str(exc), code="PROGRESS_ERROR")
+
+
+@mcp.tool()
+def route_print_job(
+    file_path: str,
+    *,
+    material: Optional[str] = None,
+    quality: Optional[str] = None,
+    priority: Optional[str] = None,
+) -> dict:
+    """Route a print job to the best available printer in the fleet.
+
+    Scores each printer based on material match, build volume, availability,
+    and quality/speed preference, then recommends the optimal assignment.
+
+    Args:
+        file_path: Path to the file to print.
+        material: Required filament material (e.g. "PLA", "PETG").
+        quality: Quality preference — "draft", "standard", or "fine".
+        priority: Job priority — "low", "normal", or "high".
+    """
+    try:
+        from kiln.job_router import get_job_router
+
+        router = get_job_router()
+        result = router.route_job(
+            file_path=file_path,
+            material=material,
+            quality=quality,
+            priority=priority,
+        )
+        return {"success": True, "routing": result.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in route_print_job")
+        return _error_dict(str(exc), code="ROUTING_ERROR")
+
+
+@mcp.tool()
+def fleet_submit_job(
+    file_path: str,
+    *,
+    printer_name: Optional[str] = None,
+    material: Optional[str] = None,
+    priority: Optional[str] = None,
+) -> dict:
+    """Submit a print job to the fleet orchestrator.
+
+    If no printer is specified, the orchestrator auto-assigns to the best
+    available printer. Tracks the job through completion.
+
+    Args:
+        file_path: Path to the file to print.
+        printer_name: Specific printer to assign to (auto-routes if None).
+        material: Required filament material.
+        priority: Job priority (low, normal, high).
+    """
+    try:
+        from kiln.fleet_orchestrator import get_fleet_orchestrator
+
+        orch = get_fleet_orchestrator()
+        job = orch.submit_job(
+            file_path=file_path,
+            printer_name=printer_name,
+            material=material,
+            priority=priority,
+        )
+        return {"success": True, "job": job.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in fleet_submit_job")
+        return _error_dict(str(exc), code="FLEET_ERROR")
+
+
+@mcp.tool()
+def fleet_job_status(job_id: str) -> dict:
+    """Get the status of a fleet-managed print job.
+
+    Args:
+        job_id: The orchestrated job's identifier.
+    """
+    try:
+        from kiln.fleet_orchestrator import get_fleet_orchestrator
+
+        orch = get_fleet_orchestrator()
+        job = orch.get_job_status(job_id)
+        if job is None:
+            return _error_dict(f"Job {job_id!r} not found", code="NOT_FOUND")
+        return {"success": True, "job": job.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in fleet_job_status")
+        return _error_dict(str(exc), code="FLEET_ERROR")
+
+
+@mcp.tool()
+def fleet_utilization() -> dict:
+    """Get fleet utilization metrics across all registered printers.
+
+    Returns busy/idle/offline counts and utilization percentage.
+    """
+    try:
+        from kiln.fleet_orchestrator import get_fleet_orchestrator
+
+        orch = get_fleet_orchestrator()
+        util = orch.get_fleet_utilization()
+        return {"success": True, "utilization": util}
+    except Exception as exc:
+        logger.exception("Error in fleet_utilization")
+        return _error_dict(str(exc), code="FLEET_ERROR")
+
+
+@mcp.tool()
+def cache_design(
+    file_path: str,
+    *,
+    label: Optional[str] = None,
+    material: Optional[str] = None,
+) -> dict:
+    """Cache a 3D design file for faster access and version tracking.
+
+    Args:
+        file_path: Path to the design file to cache.
+        label: Human-readable label for the cached design.
+        material: Intended material for this design.
+    """
+    try:
+        from kiln.design_cache import get_design_cache
+
+        cache = get_design_cache()
+        entry = cache.add(file_path, label=label, material=material)
+        return {"success": True, "cached_design": entry.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in cache_design")
+        return _error_dict(str(exc), code="CACHE_ERROR")
+
+
+@mcp.tool()
+def list_cached_designs(
+    *,
+    material: Optional[str] = None,
+    limit: int = 50,
+) -> dict:
+    """List cached designs, optionally filtered by material.
+
+    Args:
+        material: Filter by material (e.g. "PLA", "PETG").
+        limit: Maximum number of results.
+    """
+    try:
+        from kiln.design_cache import get_design_cache
+
+        cache = get_design_cache()
+        designs = cache.list_designs(material=material, limit=limit)
+        return {
+            "success": True,
+            "designs": [d.to_dict() for d in designs],
+            "count": len(designs),
+        }
+    except Exception as exc:
+        logger.exception("Error in list_cached_designs")
+        return _error_dict(str(exc), code="CACHE_ERROR")
+
+
+@mcp.tool()
+def get_cached_design(design_id: str) -> dict:
+    """Retrieve a cached design by ID.
+
+    Args:
+        design_id: The cached design's identifier.
+    """
+    try:
+        from kiln.design_cache import get_design_cache
+
+        cache = get_design_cache()
+        entry = cache.get(design_id)
+        if entry is None:
+            return _error_dict(f"Design {design_id!r} not found", code="NOT_FOUND")
+        return {"success": True, "design": entry.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in get_cached_design")
+        return _error_dict(str(exc), code="CACHE_ERROR")
+
+
+@mcp.tool()
+def store_credential(
+    credential_type: str,
+    value: str,
+    *,
+    label: str = "",
+) -> dict:
+    """Encrypt and store a credential (API key, webhook secret, etc.).
+
+    The value is encrypted at rest using PBKDF2 + XOR stream encryption.
+    Only metadata is returned — the plaintext is never exposed.
+
+    Args:
+        credential_type: Type of credential (api_key, webhook_secret,
+            stripe_key, marketplace_token, printer_password).
+        value: The plaintext secret to store.
+        label: Human-readable description.
+    """
+    try:
+        from kiln.credential_store import CredentialType, store_credential as _store
+
+        try:
+            ctype = CredentialType(credential_type)
+        except ValueError:
+            return _error_dict(
+                f"Invalid type: {credential_type!r}. Valid: {[t.value for t in CredentialType]}",
+                code="VALIDATION_ERROR",
+            )
+        cred = _store(ctype, value, label=label)
+        return {"success": True, "credential": cred.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in store_credential")
+        return _error_dict(str(exc), code="CREDENTIAL_ERROR")
+
+
+@mcp.tool()
+def list_credentials() -> dict:
+    """List all stored credentials (metadata only, no plaintext)."""
+    try:
+        from kiln.credential_store import get_credential_store
+
+        store = get_credential_store()
+        creds = store.list_credentials()
+        return {
+            "success": True,
+            "credentials": [c.to_dict() for c in creds],
+            "count": len(creds),
+        }
+    except Exception as exc:
+        logger.exception("Error in list_credentials")
+        return _error_dict(str(exc), code="CREDENTIAL_ERROR")
+
+
+@mcp.tool()
+def retrieve_credential(credential_id: str) -> dict:
+    """Decrypt and return a stored credential.
+
+    Args:
+        credential_id: The credential's unique identifier.
+    """
+    try:
+        from kiln.credential_store import retrieve_credential as _retrieve
+
+        value = _retrieve(credential_id)
+        return {"success": True, "credential_id": credential_id, "value": value}
+    except Exception as exc:
+        logger.exception("Error in retrieve_credential")
+        return _error_dict(str(exc), code="CREDENTIAL_ERROR")
+
+
+@mcp.tool()
+def analyze_print_snapshot(file_path: str) -> dict:
+    """Analyze a webcam snapshot for print monitoring quality.
+
+    Checks image brightness, variance, resolution, and format to determine
+    if the snapshot is usable for print monitoring.
+
+    Args:
+        file_path: Path to the snapshot image file.
+    """
+    try:
+        from kiln.snapshot_analysis import analyze_snapshot
+
+        result = analyze_snapshot(file_path)
+        return {"success": True, "analysis": result.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in analyze_print_snapshot")
+        return _error_dict(str(exc), code="SNAPSHOT_ERROR")
+
+
+@mcp.tool()
+def acquire_printer_lock(
+    printer_name: str,
+    *,
+    holder: str = "agent",
+    timeout_seconds: float = 30.0,
+) -> dict:
+    """Acquire an exclusive lock on a printer for safe concurrent access.
+
+    Prevents multiple agents from controlling the same printer simultaneously.
+
+    Args:
+        printer_name: Printer to lock.
+        holder: Identifier of the lock holder.
+        timeout_seconds: Maximum time to wait for the lock.
+    """
+    try:
+        from kiln.state_lock import get_state_lock_manager
+
+        mgr = get_state_lock_manager()
+        acquired = mgr.acquire(printer_name, holder=holder, timeout=timeout_seconds)
+        if not acquired:
+            return _error_dict(
+                f"Could not acquire lock on {printer_name!r} within {timeout_seconds}s",
+                code="LOCK_TIMEOUT",
+            )
+        return {"success": True, "printer": printer_name, "holder": holder, "locked": True}
+    except Exception as exc:
+        logger.exception("Error in acquire_printer_lock")
+        return _error_dict(str(exc), code="LOCK_ERROR")
+
+
+@mcp.tool()
+def release_printer_lock(printer_name: str, *, holder: str = "agent") -> dict:
+    """Release an exclusive lock on a printer.
+
+    Args:
+        printer_name: Printer to unlock.
+        holder: Identifier of the lock holder (must match acquire).
+    """
+    try:
+        from kiln.state_lock import get_state_lock_manager
+
+        mgr = get_state_lock_manager()
+        released = mgr.release(printer_name, holder=holder)
+        return {"success": True, "printer": printer_name, "released": released}
+    except Exception as exc:
+        logger.exception("Error in release_printer_lock")
+        return _error_dict(str(exc), code="LOCK_ERROR")
+
+
+@mcp.tool()
+def get_fulfillment_quote_cached(
+    file_path: str,
+    *,
+    provider: Optional[str] = None,
+    material: Optional[str] = None,
+) -> dict:
+    """Get a cached fulfillment provider quote (or fetch fresh if expired).
+
+    Uses TTL-based caching to avoid redundant provider API calls.
+
+    Args:
+        file_path: Path to the design file.
+        provider: Fulfillment provider name.
+        material: Material specification.
+    """
+    try:
+        from kiln.quote_cache import get_quote_cache
+
+        cache = get_quote_cache()
+        quote = cache.get_quote(file_path, provider=provider, material=material)
+        if quote is None:
+            return {"success": True, "quote": None, "message": "No cached quote available"}
+        return {"success": True, "quote": quote.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in get_fulfillment_quote_cached")
+        return _error_dict(str(exc), code="QUOTE_CACHE_ERROR")
+
+
+@mcp.tool()
+def check_firmware_status(printer_name: str) -> dict:
+    """Check firmware version and update availability for a printer.
+
+    Args:
+        printer_name: Printer to check.
+    """
+    try:
+        from kiln.firmware import get_firmware_manager
+
+        mgr = get_firmware_manager()
+        info = mgr.check_version(printer_name)
+        return {"success": True, "firmware": info.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in check_firmware_status")
+        return _error_dict(str(exc), code="FIRMWARE_ERROR")
+
+
+@mcp.tool()
+def update_printer_firmware(
+    printer_name: str,
+    *,
+    target_version: Optional[str] = None,
+) -> dict:
+    """Start a firmware update on a printer.
+
+    Args:
+        printer_name: Printer to update.
+        target_version: Specific version to update to (latest if None).
+    """
+    try:
+        from kiln.firmware import get_firmware_manager
+
+        mgr = get_firmware_manager()
+        result = mgr.update_firmware(printer_name, target_version=target_version)
+        return {"success": True, "update": result.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in update_printer_firmware")
+        return _error_dict(str(exc), code="FIRMWARE_ERROR")
+
+
+@mcp.tool()
+def rollback_printer_firmware(
+    printer_name: str,
+    *,
+    target_version: Optional[str] = None,
+) -> dict:
+    """Rollback printer firmware to a previous version.
+
+    Args:
+        printer_name: Printer to rollback.
+        target_version: Specific version to rollback to.
+    """
+    try:
+        from kiln.firmware import get_firmware_manager
+
+        mgr = get_firmware_manager()
+        result = mgr.rollback_firmware(printer_name, target_version=target_version)
+        return {"success": True, "rollback": result.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in rollback_printer_firmware")
+        return _error_dict(str(exc), code="FIRMWARE_ERROR")
+
+
 if __name__ == "__main__":
     main()
