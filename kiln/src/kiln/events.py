@@ -100,6 +100,16 @@ class EventType(enum.Enum):
     BILLING_SETUP_COMPLETED = "billing.setup_completed"
     SPEND_LIMIT_REACHED = "billing.spend_limit_reached"
 
+    # Fulfillment / outsourced manufacturing
+    FULFILLMENT_QUOTED = "fulfillment.quoted"
+    FULFILLMENT_ORDERED = "fulfillment.ordered"
+    FULFILLMENT_PROCESSING = "fulfillment.processing"
+    FULFILLMENT_PRINTING = "fulfillment.printing"
+    FULFILLMENT_SHIPPING = "fulfillment.shipping"
+    FULFILLMENT_DELIVERED = "fulfillment.delivered"
+    FULFILLMENT_CANCELLED = "fulfillment.cancelled"
+    FULFILLMENT_FAILED = "fulfillment.failed"
+
     # Vision monitoring
     VISION_CHECK = "vision.check"
     VISION_ALERT = "vision.alert"

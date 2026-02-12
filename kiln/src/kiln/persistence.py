@@ -364,6 +364,31 @@ class KilnDB:
                     ON model_cache(file_hash);
                 CREATE INDEX IF NOT EXISTS idx_model_cache_source
                     ON model_cache(source);
+
+                CREATE TABLE IF NOT EXISTS fulfillment_orders (
+                    id              TEXT PRIMARY KEY,
+                    order_id        TEXT NOT NULL UNIQUE,
+                    provider        TEXT NOT NULL,
+                    status          TEXT NOT NULL DEFAULT 'submitted',
+                    file_path       TEXT NOT NULL,
+                    material_id     TEXT NOT NULL,
+                    quantity        INTEGER NOT NULL DEFAULT 1,
+                    total_price     REAL NOT NULL DEFAULT 0.0,
+                    currency        TEXT NOT NULL DEFAULT 'USD',
+                    shipping_address TEXT,
+                    tracking_url    TEXT,
+                    tracking_number TEXT,
+                    quote_id        TEXT,
+                    notes           TEXT,
+                    created_at      REAL NOT NULL,
+                    updated_at      REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_fulfillment_orders_order
+                    ON fulfillment_orders(order_id);
+                CREATE INDEX IF NOT EXISTS idx_fulfillment_orders_status
+                    ON fulfillment_orders(status);
+                CREATE INDEX IF NOT EXISTS idx_fulfillment_orders_provider
+                    ON fulfillment_orders(provider);
                 """
             )
 

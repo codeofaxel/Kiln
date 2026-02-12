@@ -261,12 +261,30 @@ All four existing adapters (OctoPrint, Moonraker, Bambu, Prusa Connect) continue
 
 Kiln integrates with the 3DOS distributed manufacturing network, enabling peer-to-peer job routing across independent printer operators. Local printers can be registered on the network with material capabilities and location metadata. The `ThreeDOSClient` gateway handles printer registration, availability updates, job submission, and status polling. Agents can discover available printers on the network by material type or location, submit jobs for remote fabrication, and track order status — extending Kiln's reach beyond locally-connected hardware.
 
-## 12. Future Work
+## 12. Consumer Manufacturing Workflow
+
+Kiln extends beyond printer owners to serve users who have never touched a 3D printer. The consumer workflow enables agents to handle the complete journey from a natural-language request to a delivered physical product.
+
+**Guided Onboarding.** A seven-step onboarding pipeline walks agents through model discovery or generation, material recommendation, price estimation, quoting, address validation, order placement, and delivery tracking. Each step maps to a specific MCP tool.
+
+**Material Recommendation Engine.** A knowledge base maps ten consumer use cases (decorative, functional, mechanical, prototype, miniature, jewelry, enclosure, wearable, outdoor, food-safe) to ranked material recommendations across FDM, SLA, SLS, and MJF technologies. Agents filter by budget tier, weather resistance, food safety, detail level, and strength requirements.
+
+**Instant Price Estimation.** Before requesting a full API quote, agents estimate price ranges from part volume or bounding box dimensions using per-technology cost models. This enables agents to set user expectations without network round-trips.
+
+**Timeline Estimation.** Per-stage timeline breakdowns (order confirmation, production, quality check, packaging, shipping) give agents and users visibility into the full delivery pipeline. Production time scales with quantity and technology; shipping estimates vary by destination region.
+
+**Multi-Provider Intelligence.** A fulfillment intelligence layer sits above individual providers, adding health monitoring (consecutive failure detection with automatic skip), cross-provider quote comparison (cheapest, fastest, and recommended), batch quoting for multi-part assemblies, retry with provider fallback, and persistent order history for reordering.
+
+**Address Validation.** Country-specific postal code validation (US ZIP, Canadian postal, UK postcode) catches formatting errors before orders are placed. The system supports 23 countries across North America, Europe, and Asia-Pacific.
+
+**Shipping Insurance.** Tiered protection options (loss-only, loss+damage, full protection with reprint guarantee) are priced as a percentage of order value, giving users and agents clear risk management choices.
+
+## 13. Future Work
 - **Remote agent collaboration.** Enable multiple agents to coordinate across a shared printer fleet.
 - **CNC and laser adapter implementations.** Concrete adapters for Grbl, LinuxCNC, and LightBurn backends.
 - **Federated learning.** Aggregate anonymized print outcomes across Kiln instances (opt-in) for community-level printer insights.
 
-## 13. Conclusion
+## 14. Conclusion
 
 Kiln demonstrates that AI agents can safely operate physical manufacturing hardware given the right protocol abstractions. By normalizing heterogeneous printer APIs into a typed adapter interface, enforcing safety invariants at the protocol level, and exposing all operations through MCP, Kiln transforms any MCP-compatible agent into a manufacturing operator. Closed-loop vision monitoring lets agents observe and intervene during prints. Cross-printer learning enables data-driven printer selection with safety-first guardrails. The generalized device abstraction positions Kiln to expand beyond 3D printing to CNC, laser, and resin fabrication. The system is local-first, open-source, and extensible to new device backends and manufacturing services.
 

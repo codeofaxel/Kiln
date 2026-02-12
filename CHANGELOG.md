@@ -58,7 +58,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Pre-validated pipelines: quick_print, calibrate, benchmark
 - Slicer integration (PrusaSlicer, OrcaSlicer) with auto-detection
 - Model marketplace adapters: Thingiverse, MyMiniFactory, Cults3D
-- Fulfillment service adapters: Craftcloud, Shapeways, Sculpteo
+- Fulfillment service adapters: Craftcloud, Sculpteo
 - Text-to-model generation via Meshy AI (cloud) and OpenSCAD (local)
 - Mesh validation pipeline (STL/OBJ parsing, manifold check, dimension limits)
 - Print cost estimation from G-code analysis

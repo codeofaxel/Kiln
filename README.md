@@ -439,6 +439,19 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `pipeline_resume` | Resume a paused pipeline |
 | `pipeline_abort` | Abort a running or paused pipeline |
 | `pipeline_retry_step` | Retry the failed step in a pipeline |
+| `consumer_onboarding` | Step-by-step guide for users without a 3D printer |
+| `validate_shipping_address` | Validate and normalize a shipping address |
+| `recommend_material` | Recommend material by use case (decorative, functional, outdoor, etc.) |
+| `estimate_price` | Instant price estimate before requesting a full quote |
+| `estimate_timeline` | Order-to-delivery timeline with per-stage breakdown |
+| `fulfillment_compare_providers` | Side-by-side quotes from all fulfillment providers |
+| `fulfillment_filter_materials` | Search/filter materials by technology, color, price |
+| `fulfillment_batch_quote` | Quote multiple parts in one operation (assemblies) |
+| `fulfillment_provider_health` | Health status of all fulfillment providers |
+| `fulfillment_order_history` | View past orders for status review or reorder |
+| `fulfillment_reorder` | Look up past order details for easy reordering |
+| `fulfillment_insurance_options` | Shipping insurance/protection options with pricing |
+| `supported_shipping_countries` | List countries supported for fulfillment shipping |
 
 ## Supported Printers
 
@@ -480,7 +493,8 @@ The server also exposes read-only resources that agents can use for context:
 | `billing.py` | Fee tracking for 3DOS network-routed jobs |
 | `discovery.py` | Network printer discovery (mDNS + HTTP probe) |
 | `generation/` | Text-to-model generation providers (Meshy AI, OpenSCAD) with mesh validation |
-| `fulfillment/` | External manufacturing service adapters (Craftcloud, Sculpteo) |
+| `consumer.py` | Consumer workflow for non-printer users (address validation, material recommendations, timeline/price estimation, onboarding) |
+| `fulfillment/` | External manufacturing service adapters (Craftcloud, Sculpteo) with intelligence layer (provider health, multi-provider comparison, batch quoting, retry/fallback, order history, shipping insurance) |
 | `cost_estimator.py` | Print cost estimation from G-code analysis |
 | `materials.py` | Multi-material and spool tracking |
 | `bed_leveling.py` | Automated bed leveling trigger system |
@@ -601,20 +615,41 @@ Supported on OctoPrint, Moonraker, and Prusa Connect backends. Agents use the `p
 
 ## Fulfillment Services
 
-Outsource prints to external manufacturing services when local printers lack the material, capacity, or technology:
+Outsource prints to external manufacturing services — **no 3D printer required**. Kiln handles the entire workflow from idea to delivered product:
 
 ```bash
+# Get material recommendations for your use case
+kiln order recommend functional --budget budget
+
+# Instant price estimate (no API call needed)
+kiln order estimate FDM --x 80 --y 60 --z 40
+
+# Estimate delivery timeline
+kiln order timeline SLA --country US
+
 # List available materials (FDM, SLA, SLS, MJF, etc.)
 kiln order materials
 
 # Get a quote for a model
 kiln order quote model.stl --material pla-white --quantity 2
 
+# Validate your shipping address
+kiln order validate-address --street "123 Main St" --city Austin --state TX --postal-code 78701 --country US
+
+# View shipping insurance options
+kiln order insurance 45.00
+
 # Place the order
 kiln order place q-abc123 --shipping std
 
 # Track order status
 kiln order status o-def456
+
+# View order history
+kiln order history
+
+# List supported shipping countries
+kiln order countries
 ```
 
 Configure your fulfillment provider:
@@ -630,7 +665,7 @@ export KILN_SCULPTEO_API_KEY=your_key
 export KILN_FULFILLMENT_PROVIDER=craftcloud  # or sculpteo
 ```
 
-Agents use `fulfillment_quote` and `fulfillment_order` MCP tools for the same workflow.
+Agents use the consumer workflow MCP tools: `consumer_onboarding` for guided setup, `recommend_material` for material selection, `estimate_price` / `estimate_timeline` for quick estimates, `fulfillment_compare_providers` for cross-provider quotes, `fulfillment_batch_quote` for multi-part assemblies, and `fulfillment_order_history` / `fulfillment_reorder` for repeat orders.
 
 ## Development
 

@@ -403,6 +403,24 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 | `fulfillment_order_status` | `order_id` | Order tracking details |
 | `fulfillment_cancel` | `order_id` | Cancellation confirmation |
 | `compare_print_options` | `file_path`, `material` | Local vs. fulfillment cost comparison |
+| `fulfillment_compare_providers` | `file_path`, `material_id`, `quantity` | Side-by-side quotes from all providers |
+| `fulfillment_filter_materials` | `technology`, `color`, `finish`, `max_price_per_cm3` | Filtered material catalog |
+| `fulfillment_batch_quote` | `file_paths`, `material_id`, `quantities` | Per-item quotes with aggregated total |
+| `fulfillment_provider_health` | — | Health status of all fulfillment providers |
+| `fulfillment_order_history` | `limit`, `provider` | Past orders for review or reorder |
+| `fulfillment_reorder` | `order_id` | Past order details with reorder hints |
+| `fulfillment_insurance_options` | `order_value` | Tiered shipping insurance options |
+
+#### Consumer Workflow (No Printer Required)
+
+| Tool | Input | Output |
+|---|---|---|
+| `consumer_onboarding` | — | Step-by-step guide from idea to delivered product |
+| `validate_shipping_address` | `street`, `city`, `country`, `state`, `postal_code` | Address validation with normalization |
+| `recommend_material` | `use_case`, `budget`, constraints | Ranked material recommendations with reasoning |
+| `estimate_price` | `technology`, `volume_cm3` or `dimensions` | Instant price range (no API call) |
+| `estimate_timeline` | `technology`, `quantity`, `country` | Order-to-delivery timeline with stage breakdown |
+| `supported_shipping_countries` | — | Supported shipping countries (23+ countries) |
 
 #### Model Generation
 

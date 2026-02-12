@@ -139,6 +139,37 @@ from kiln.generation import (
     validate_mesh,
 )
 from kiln.gateway.threedos import ThreeDOSClient, ThreeDOSError
+from kiln.consumer import (
+    AddressValidation,
+    MaterialGuide,
+    OrderTimeline,
+    PriceEstimate,
+    ConsumerOnboarding,
+    validate_address,
+    recommend_material,
+    estimate_timeline,
+    estimate_price,
+    get_onboarding,
+    list_supported_countries,
+)
+from kiln.fulfillment.intelligence import (
+    BatchQuote,
+    BatchQuoteItem,
+    InsuranceOption,
+    InsuranceTier,
+    MaterialFilter,
+    OrderHistory,
+    ProviderHealth,
+    ProviderStatus,
+    QuoteComparison,
+    RetryResult,
+    batch_quote as _batch_quote,
+    compare_providers as _compare_providers,
+    filter_materials as _filter_materials,
+    get_health_monitor as _get_health_monitor,
+    get_insurance_options as _get_insurance_options,
+    get_order_history as _get_order_history,
+)
 
 
 
@@ -4433,6 +4464,469 @@ def fulfillment_cancel(order_id: str) -> dict:
         return _error_dict(str(exc))
     except Exception as exc:
         logger.exception("Unexpected error in fulfillment_cancel")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Consumer workflow tools — for users without 3D printers
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def consumer_onboarding() -> dict:
+    """Get the guided onboarding workflow for users without a 3D printer.
+
+    Returns a step-by-step guide covering model discovery/generation,
+    material recommendations, pricing, ordering, and delivery tracking.
+    Perfect for first-time users who want to manufacture a custom part.
+    """
+    try:
+        guide = get_onboarding()
+        return {
+            "success": True,
+            "onboarding": guide.to_dict(),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in consumer_onboarding")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def validate_shipping_address(
+    street: str,
+    city: str,
+    country: str,
+    state: str = "",
+    postal_code: str = "",
+) -> dict:
+    """Validate and normalize a shipping address for fulfillment orders.
+
+    Args:
+        street: Street address (e.g. "123 Main St").
+        city: City name.
+        country: ISO 3166-1 alpha-2 country code (e.g. "US", "GB", "DE").
+        state: State/province (recommended for US addresses).
+        postal_code: ZIP/postal code (validated per country format).
+
+    Checks required fields, validates postal codes per country (US ZIP,
+    Canadian postal, UK postcode), and returns warnings for missing optional
+    fields.  Use the ``normalized`` address in the response when placing
+    fulfillment orders.
+    """
+    try:
+        result = validate_address({
+            "street": street,
+            "city": city,
+            "state": state,
+            "postal_code": postal_code,
+            "country": country,
+        })
+        return {
+            "success": True,
+            "validation": result.to_dict(),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in validate_shipping_address")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def recommend_material(
+    use_case: str,
+    budget: str = "",
+    need_weather_resistant: bool = False,
+    need_food_safe: bool = False,
+    need_high_detail: bool = False,
+    need_high_strength: bool = False,
+) -> dict:
+    """Recommend the best 3D printing material for a consumer use case.
+
+    Args:
+        use_case: What the part is for. Options: decorative, functional,
+            mechanical, prototype, miniature, jewelry, enclosure, wearable,
+            outdoor, food_safe.
+        budget: Price preference: "budget", "mid", or "premium". Empty = any.
+        need_weather_resistant: Only recommend weather-resistant materials.
+        need_food_safe: Only recommend food-safe materials.
+        need_high_detail: Prefer high-detail materials (SLA/MJF).
+        need_high_strength: Prefer high-strength materials (SLS/MJF).
+
+    Returns ranked material recommendations with technology, reasoning,
+    price tier, and which fulfillment provider to use.
+    """
+    try:
+        from kiln.consumer import recommend_material as _recommend
+        guide = _recommend(
+            use_case,
+            budget=budget or None,
+            need_weather_resistant=need_weather_resistant,
+            need_food_safe=need_food_safe,
+            need_high_detail=need_high_detail,
+            need_high_strength=need_high_strength,
+        )
+        return {
+            "success": True,
+            "recommendation": guide.to_dict(),
+        }
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_INPUT")
+    except Exception as exc:
+        logger.exception("Unexpected error in recommend_material")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def estimate_price(
+    technology: str,
+    volume_cm3: Optional[float] = None,
+    dimensions_x_mm: Optional[float] = None,
+    dimensions_y_mm: Optional[float] = None,
+    dimensions_z_mm: Optional[float] = None,
+    quantity: int = 1,
+) -> dict:
+    """Get an instant price estimate before requesting a full quote.
+
+    Args:
+        technology: Manufacturing technology: FDM, SLA, SLS, MJF, or DMLS.
+        volume_cm3: Part volume in cubic centimeters (if known).
+        dimensions_x_mm: Bounding box X dimension in mm (alternative to volume).
+        dimensions_y_mm: Bounding box Y dimension in mm.
+        dimensions_z_mm: Bounding box Z dimension in mm.
+        quantity: Number of copies (default 1).
+
+    Returns a low/high price range based on typical per-cm³ pricing for
+    the technology.  For exact pricing, use ``fulfillment_quote`` with a
+    real model file.
+
+    Either ``volume_cm3`` or all three dimension parameters must be provided.
+    """
+    try:
+        from kiln.consumer import estimate_price as _estimate
+        dims = None
+        if dimensions_x_mm and dimensions_y_mm and dimensions_z_mm:
+            dims = {"x": dimensions_x_mm, "y": dimensions_y_mm, "z": dimensions_z_mm}
+        result = _estimate(
+            technology,
+            volume_cm3=volume_cm3,
+            dimensions_mm=dims,
+            quantity=quantity,
+        )
+        return {
+            "success": True,
+            "estimate": result.to_dict(),
+        }
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_INPUT")
+    except Exception as exc:
+        logger.exception("Unexpected error in estimate_price")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def estimate_timeline(
+    technology: str,
+    shipping_days: Optional[int] = None,
+    quantity: int = 1,
+    country: str = "US",
+) -> dict:
+    """Estimate order-to-delivery timeline with per-stage breakdown.
+
+    Args:
+        technology: Manufacturing technology (FDM, SLA, SLS, MJF, DMLS).
+        shipping_days: Known shipping days from a quote (optional).
+        quantity: Number of copies (larger quantities add production time).
+        country: Destination country code for shipping estimate fallback.
+
+    Returns a stage-by-stage timeline (order confirmation, production,
+    quality check, packaging, shipping) with estimated days per stage
+    and a total delivery date.
+    """
+    try:
+        from kiln.consumer import estimate_timeline as _timeline
+        timeline = _timeline(
+            technology,
+            shipping_days=shipping_days,
+            quantity=quantity,
+            country=country,
+        )
+        return {
+            "success": True,
+            "timeline": timeline.to_dict(),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in estimate_timeline")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def fulfillment_compare_providers(
+    file_path: str,
+    material_id: str,
+    quantity: int = 1,
+    shipping_country: str = "US",
+) -> dict:
+    """Get quotes from ALL fulfillment providers and compare side-by-side.
+
+    Args:
+        file_path: Path to the model file (STL, 3MF, OBJ).
+        material_id: Material ID to quote across providers.
+        quantity: Number of copies.
+        shipping_country: ISO country code for shipping.
+
+    Queries every configured provider (Craftcloud, Sculpteo, etc.),
+    identifies the cheapest, fastest, and recommended option, and returns
+    a comparison summary.  Unhealthy providers are automatically skipped.
+    """
+    try:
+        comparison = _compare_providers(
+            file_path,
+            material_id,
+            quantity=quantity,
+            shipping_country=shipping_country,
+        )
+        return {
+            "success": True,
+            "comparison": comparison.to_dict(),
+        }
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except Exception as exc:
+        logger.exception("Unexpected error in fulfillment_compare_providers")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def fulfillment_filter_materials(
+    technology: str = "",
+    color: str = "",
+    finish: str = "",
+    max_price_per_cm3: Optional[float] = None,
+    search_text: str = "",
+) -> dict:
+    """Search and filter available fulfillment materials.
+
+    Args:
+        technology: Filter by technology (FDM, SLA, SLS, MJF, DMLS).
+        color: Filter by color (partial match, e.g. "white", "black").
+        finish: Filter by finish (e.g. "polished", "dyed", "raw").
+        max_price_per_cm3: Maximum price per cm³ in USD.
+        search_text: Free-text search across name, technology, and color.
+
+    Returns filtered materials from the configured fulfillment provider.
+    All filters are combined with AND logic.
+    """
+    try:
+        provider = _get_fulfillment()
+        all_materials = provider.list_materials()
+        criteria = MaterialFilter(
+            technology=technology or None,
+            color=color or None,
+            finish=finish or None,
+            max_price_per_cm3=max_price_per_cm3,
+            search_text=search_text or None,
+        )
+        filtered = _filter_materials(all_materials, criteria)
+        return {
+            "success": True,
+            "provider": provider.name,
+            "materials": [m.to_dict() for m in filtered],
+            "count": len(filtered),
+            "total_available": len(all_materials),
+            "filters": criteria.to_dict(),
+        }
+    except (FulfillmentError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in fulfillment_filter_materials")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def fulfillment_batch_quote(
+    file_paths: str,
+    material_id: str,
+    quantities: str = "",
+    labels: str = "",
+    shipping_country: str = "US",
+) -> dict:
+    """Get quotes for multiple parts in a single operation (batch/assembly).
+
+    Args:
+        file_paths: Comma-separated list of model file paths.
+        material_id: Material ID (applied to all parts).
+        quantities: Comma-separated quantities per part (default all 1).
+        labels: Comma-separated labels for each part (optional).
+        shipping_country: ISO country code for shipping.
+
+    Returns per-item quotes and an aggregated total price. Use this for
+    multi-part assemblies where you need to quote the full set together.
+    """
+    try:
+        paths = [p.strip() for p in file_paths.split(",") if p.strip()]
+        if not paths:
+            return _error_dict("No file paths provided.", code="INVALID_INPUT")
+
+        qty_list = [int(q.strip()) for q in quantities.split(",") if q.strip()] if quantities else []
+        label_list = [l.strip() for l in labels.split(",") if l.strip()] if labels else []
+
+        items = []
+        for i, path in enumerate(paths):
+            items.append(BatchQuoteItem(
+                file_path=path,
+                material_id=material_id,
+                quantity=qty_list[i] if i < len(qty_list) else 1,
+                label=label_list[i] if i < len(label_list) else "",
+            ))
+
+        result = _batch_quote(items, shipping_country=shipping_country)
+        return {
+            "success": True,
+            "batch_quote": result.to_dict(),
+        }
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except (FulfillmentError, RuntimeError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in fulfillment_batch_quote")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def fulfillment_provider_health() -> dict:
+    """Check the health status of all fulfillment providers.
+
+    Returns the health state (healthy, degraded, down, unknown),
+    last check time, response time, and consecutive failure count
+    for each registered provider.  Useful for agents to decide
+    which provider to use before requesting a quote.
+    """
+    try:
+        monitor = _get_health_monitor()
+        statuses = monitor.get_all_statuses()
+        provider_names = list_fulfillment_providers()
+
+        # Include unknown providers that haven't been probed yet.
+        known = {s.provider for s in statuses}
+        for name in provider_names:
+            if name not in known:
+                statuses.append(monitor.get_status(name))
+
+        return {
+            "success": True,
+            "providers": [s.to_dict() for s in statuses],
+            "count": len(statuses),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in fulfillment_provider_health")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def fulfillment_order_history(
+    limit: int = 20,
+    provider: str = "",
+) -> dict:
+    """View past fulfillment orders for reorder or status review.
+
+    Args:
+        limit: Maximum number of orders to return (default 20).
+        provider: Filter by provider name (optional).
+
+    Returns recent fulfillment orders with status, pricing, and tracking.
+    """
+    try:
+        history = _get_order_history()
+        orders = history.list_orders(
+            limit=limit,
+            provider=provider or None,
+        )
+        return {
+            "success": True,
+            "orders": [o.to_dict() for o in orders],
+            "count": len(orders),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in fulfillment_order_history")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def fulfillment_reorder(order_id: str) -> dict:
+    """Look up a past order's details for easy reordering.
+
+    Args:
+        order_id: Order ID from a previous fulfillment order.
+
+    Returns the original order details (file, material, quantity, address)
+    so the agent can quickly create a new quote with the same parameters.
+    """
+    try:
+        history = _get_order_history()
+        record = history.get_order(order_id)
+        if record is None:
+            return _error_dict(
+                f"Order '{order_id}' not found in history.",
+                code="NOT_FOUND",
+            )
+        return {
+            "success": True,
+            "order": record.to_dict(),
+            "reorder_hint": {
+                "file_path": record.file_path,
+                "material_id": record.material_id,
+                "quantity": record.quantity,
+                "shipping_address": record.shipping_address,
+                "provider": record.provider,
+            },
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in fulfillment_reorder")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def fulfillment_insurance_options(
+    order_value: float,
+    currency: str = "USD",
+) -> dict:
+    """Get shipping insurance/protection options for a fulfillment order.
+
+    Args:
+        order_value: Total order value in the given currency.
+        currency: Currency code (default "USD").
+
+    Returns tiered insurance options from no coverage to full protection
+    with reprint guarantee, each with pricing based on order value.
+    """
+    try:
+        options = _get_insurance_options(order_value, currency=currency)
+        return {
+            "success": True,
+            "options": [o.to_dict() for o in options],
+            "count": len(options),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in fulfillment_insurance_options")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def supported_shipping_countries() -> dict:
+    """List all countries supported for fulfillment shipping.
+
+    Returns ISO country codes and full names for all 23+ countries
+    where Kiln fulfillment providers can ship manufactured parts.
+    """
+    try:
+        countries = list_supported_countries()
+        return {
+            "success": True,
+            "countries": countries,
+            "count": len(countries),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in supported_shipping_countries")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 

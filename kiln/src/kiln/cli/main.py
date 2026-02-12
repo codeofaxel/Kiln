@@ -1382,6 +1382,263 @@ def order_cancel(order_id: str, json_mode: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Consumer workflow commands — for users without printers
+# ---------------------------------------------------------------------------
+
+
+@order.command("recommend")
+@click.argument("use_case")
+@click.option("--budget", type=click.Choice(["budget", "mid", "premium"]), default=None, help="Price tier preference.")
+@click.option("--weather-resistant", is_flag=True, help="Filter to weather-resistant materials.")
+@click.option("--food-safe", is_flag=True, help="Filter to food-safe materials.")
+@click.option("--high-detail", is_flag=True, help="Prefer high-detail materials.")
+@click.option("--high-strength", is_flag=True, help="Prefer high-strength materials.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def order_recommend(
+    use_case: str,
+    budget: Optional[str],
+    weather_resistant: bool,
+    food_safe: bool,
+    high_detail: bool,
+    high_strength: bool,
+    json_mode: bool,
+) -> None:
+    """Recommend the best material for your use case.
+
+    USE_CASE: decorative, functional, mechanical, prototype, miniature,
+    jewelry, enclosure, wearable, outdoor, food_safe.
+    """
+    from kiln.consumer import recommend_material
+
+    try:
+        guide = recommend_material(
+            use_case,
+            budget=budget,
+            need_weather_resistant=weather_resistant,
+            need_food_safe=food_safe,
+            need_high_detail=high_detail,
+            need_high_strength=high_strength,
+        )
+        data = guide.to_dict()
+        if json_mode:
+            click.echo(json.dumps({"status": "success", "data": data}, indent=2))
+        else:
+            click.echo(f"\n  Material Recommendation: {use_case}\n")
+            click.echo(f"  Best pick: {guide.best_pick.material_name} ({guide.best_pick.technology})")
+            click.echo(f"  Reason: {guide.best_pick.reason}")
+            click.echo(f"  Price tier: {guide.best_pick.price_tier}")
+            click.echo(f"  Provider: {guide.best_pick.recommended_provider}")
+            click.echo(f"\n  {guide.explanation}\n")
+            if len(guide.recommendations) > 1:
+                click.echo("  Alternatives:")
+                for r in guide.recommendations[1:]:
+                    click.echo(f"    - {r.material_name} ({r.technology}) — {r.price_tier}: {r.reason}")
+                click.echo()
+    except ValueError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@order.command("estimate")
+@click.argument("technology")
+@click.option("--volume", type=float, default=None, help="Part volume in cm³.")
+@click.option("--x", "dim_x", type=float, default=None, help="Bounding box X dimension (mm).")
+@click.option("--y", "dim_y", type=float, default=None, help="Bounding box Y dimension (mm).")
+@click.option("--z", "dim_z", type=float, default=None, help="Bounding box Z dimension (mm).")
+@click.option("--quantity", "-q", default=1, help="Number of copies.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def order_estimate(
+    technology: str,
+    volume: Optional[float],
+    dim_x: Optional[float],
+    dim_y: Optional[float],
+    dim_z: Optional[float],
+    quantity: int,
+    json_mode: bool,
+) -> None:
+    """Get an instant price estimate before requesting a full quote.
+
+    TECHNOLOGY: FDM, SLA, SLS, MJF, or DMLS.
+
+    Provide either --volume or --x --y --z dimensions.
+    """
+    from kiln.consumer import estimate_price
+
+    try:
+        dims = None
+        if dim_x and dim_y and dim_z:
+            dims = {"x": dim_x, "y": dim_y, "z": dim_z}
+        result = estimate_price(
+            technology,
+            volume_cm3=volume,
+            dimensions_mm=dims,
+            quantity=quantity,
+        )
+        data = result.to_dict()
+        if json_mode:
+            click.echo(json.dumps({"status": "success", "data": data}, indent=2))
+        else:
+            click.echo(f"\n  Price Estimate ({result.technology})")
+            click.echo(f"  Range: ${result.estimated_price_low:.2f} — ${result.estimated_price_high:.2f} {result.currency}")
+            if result.volume_cm3:
+                click.echo(f"  Volume: {result.volume_cm3} cm³")
+            click.echo(f"  Confidence: {result.confidence}")
+            click.echo(f"  {result.note}\n")
+    except ValueError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@order.command("timeline")
+@click.argument("technology")
+@click.option("--shipping-days", type=int, default=None, help="Known shipping days from quote.")
+@click.option("--quantity", "-q", default=1, help="Number of copies.")
+@click.option("--country", default="US", help="Destination country code.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def order_timeline(
+    technology: str,
+    shipping_days: Optional[int],
+    quantity: int,
+    country: str,
+    json_mode: bool,
+) -> None:
+    """Estimate order-to-delivery timeline with stage breakdown.
+
+    TECHNOLOGY: FDM, SLA, SLS, MJF, or DMLS.
+    """
+    from kiln.consumer import estimate_timeline
+
+    try:
+        timeline = estimate_timeline(
+            technology,
+            shipping_days=shipping_days,
+            quantity=quantity,
+            country=country,
+        )
+        data = timeline.to_dict()
+        if json_mode:
+            click.echo(json.dumps({"status": "success", "data": data}, indent=2))
+        else:
+            click.echo(f"\n  Order Timeline ({technology.upper()})")
+            click.echo(f"  Total: {timeline.total_days} days")
+            click.echo(f"  Estimated delivery: {timeline.estimated_delivery_date}")
+            click.echo(f"  Confidence: {timeline.confidence}\n")
+            for stage in timeline.stages:
+                click.echo(f"    [{stage.estimated_days}d] {stage.stage}: {stage.description}")
+            click.echo()
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@order.command("validate-address")
+@click.option("--street", required=True, help="Street address.")
+@click.option("--city", required=True, help="City.")
+@click.option("--state", default="", help="State/province.")
+@click.option("--postal-code", default="", help="ZIP/postal code.")
+@click.option("--country", required=True, help="Country code (e.g. US, GB, DE).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def order_validate_address(
+    street: str,
+    city: str,
+    state: str,
+    postal_code: str,
+    country: str,
+    json_mode: bool,
+) -> None:
+    """Validate a shipping address before placing an order."""
+    from kiln.consumer import validate_address
+
+    result = validate_address({
+        "street": street,
+        "city": city,
+        "state": state,
+        "postal_code": postal_code,
+        "country": country,
+    })
+    data = result.to_dict()
+    if json_mode:
+        click.echo(json.dumps({"status": "success" if result.valid else "error", "data": data}, indent=2))
+    else:
+        status = "VALID" if result.valid else "INVALID"
+        click.echo(f"\n  Address: {status}")
+        if result.errors:
+            for e in result.errors:
+                click.echo(f"    Error: {e}")
+        if result.warnings:
+            for w in result.warnings:
+                click.echo(f"    Warning: {w}")
+        if result.valid:
+            n = result.normalized
+            click.echo(f"    Normalized: {n.get('street')}, {n.get('city')}, {n.get('state')} {n.get('postal_code')}, {n.get('country')}")
+        click.echo()
+    if not result.valid:
+        sys.exit(1)
+
+
+@order.command("history")
+@click.option("--limit", default=20, help="Max orders to show.")
+@click.option("--provider", default="", help="Filter by provider name.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def order_history(limit: int, provider: str, json_mode: bool) -> None:
+    """View past fulfillment orders."""
+    from kiln.fulfillment.intelligence import get_order_history
+
+    history = get_order_history()
+    orders = history.list_orders(limit=limit, provider=provider or None)
+    data = [o.to_dict() for o in orders]
+    if json_mode:
+        click.echo(json.dumps({"status": "success", "data": data, "count": len(data)}, indent=2))
+    else:
+        if not orders:
+            click.echo("\n  No fulfillment orders found.\n")
+        else:
+            click.echo(f"\n  Fulfillment Order History ({len(orders)} orders)\n")
+            for o in orders:
+                click.echo(f"    {o.order_id}  {o.status:<12}  ${o.total_price:.2f}  {o.provider}  {o.material_id}")
+            click.echo()
+
+
+@order.command("insurance")
+@click.argument("order_value", type=float)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def order_insurance(order_value: float, json_mode: bool) -> None:
+    """Show shipping insurance options for an order value.
+
+    ORDER_VALUE: Total order value in USD.
+    """
+    from kiln.fulfillment.intelligence import get_insurance_options
+
+    options = get_insurance_options(order_value)
+    data = [o.to_dict() for o in options]
+    if json_mode:
+        click.echo(json.dumps({"status": "success", "data": data}, indent=2))
+    else:
+        click.echo(f"\n  Shipping Insurance Options (order: ${order_value:.2f})\n")
+        for o in options:
+            price_str = f"${o.price:.2f}" if o.price > 0 else "Free"
+            click.echo(f"    [{o.tier.value}] {o.name} — {price_str}")
+            click.echo(f"      {o.description}")
+        click.echo()
+
+
+@order.command("countries")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def order_countries(json_mode: bool) -> None:
+    """List countries supported for fulfillment shipping."""
+    from kiln.consumer import list_supported_countries
+
+    countries = list_supported_countries()
+    if json_mode:
+        click.echo(json.dumps({"status": "success", "data": countries}, indent=2))
+    else:
+        click.echo(f"\n  Supported Shipping Countries ({len(countries)})\n")
+        for code, name in sorted(countries.items(), key=lambda x: x[1]):
+            click.echo(f"    {code}  {name}")
+        click.echo()
+
+
+# ---------------------------------------------------------------------------
 # fleet
 # ---------------------------------------------------------------------------
 
