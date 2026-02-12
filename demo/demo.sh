@@ -1,0 +1,86 @@
+#!/bin/bash
+# Simulated demo output for Kiln GIF recording
+# This script fakes printer responses for demo purposes
+
+case "$1" in
+  "help")
+    kiln --help
+    ;;
+  "discover")
+    echo "Scanning local network for 3D printers..."
+    echo ""
+    sleep 1
+    echo "  Found 3 printers:"
+    echo ""
+    echo "  ┌──────────────────────────────────────────────────────────────┐"
+    echo "  │  🖨  ender3          OctoPrint    http://ender3.local       │"
+    echo "  │  🖨  voron-2.4       Moonraker    http://voron.local        │"
+    echo "  │  🖨  bambu-x1c       Bambu Lab    192.168.1.42              │"
+    echo "  └──────────────────────────────────────────────────────────────┘"
+    echo ""
+    echo "  Run 'kiln auth --name <printer> --host <url>' to configure."
+    ;;
+  "status")
+    echo "┌─────────────────────────────────────────────────────┐"
+    echo "│  Printer: ender3  (OctoPrint)                       │"
+    echo "│  Status:  🟢 Printing                               │"
+    echo "│                                                     │"
+    echo "│  Job:     benchy.gcode                              │"
+    echo "│  Progress: ████████████░░░░░░░░  62.4%              │"
+    echo "│  Time:     1h 12m elapsed  ·  43m remaining         │"
+    echo "│                                                     │"
+    echo "│  Hotend:   210°C / 210°C                            │"
+    echo "│  Bed:      60°C / 60°C                              │"
+    echo "└─────────────────────────────────────────────────────┘"
+    ;;
+  "slice")
+    echo "Slicing benchy.stl with PrusaSlicer..."
+    echo "  Profile: Creality Ender 3 (0.2mm, PLA)"
+    sleep 1
+    echo "  ✓ Layer height: 0.2mm"
+    echo "  ✓ Infill: 20% gyroid"
+    echo "  ✓ Supports: none"
+    echo "  ✓ Estimated time: 1h 55m"
+    echo "  ✓ Filament: 12.3m (36.8g)"
+    echo ""
+    echo "  Output: benchy_0.2mm_PLA_ender3.gcode"
+    ;;
+  "preflight")
+    echo "Running pre-flight safety checks..."
+    echo ""
+    echo "  ✓ Printer online and idle"
+    echo "  ✓ Hotend temp within safe range (max 260°C)"
+    echo "  ✓ Bed temp within safe range (max 110°C)"
+    echo "  ✓ G-code validated — no dangerous commands"
+    echo "  ✓ File exists on printer"
+    echo "  ✓ Filament detected"
+    echo ""
+    echo "  All checks passed. Safe to print."
+    ;;
+  "print")
+    echo "Starting print: benchy_0.2mm_PLA_ender3.gcode"
+    echo ""
+    echo "  ✓ Pre-flight checks passed"
+    echo "  ✓ Print started successfully"
+    echo ""
+    echo "  Estimated completion: 1h 55m"
+    echo "  Monitor with: kiln status"
+    ;;
+  "fleet")
+    echo "┌─────────────────────────────────────────────────────────────────┐"
+    echo "│  Fleet Status                                                   │"
+    echo "├──────────────┬──────────┬──────────┬───────────┬───────────────┤"
+    echo "│  Printer     │  Type    │  Status  │  Job      │  Progress     │"
+    echo "├──────────────┼──────────┼──────────┼───────────┼───────────────┤"
+    echo "│  ender3      │  FDM     │ Printing │ benchy    │  ████░░  62%  │"
+    echo "│  voron-2.4   │  FDM     │ Idle     │  —        │  —            │"
+    echo "│  bambu-x1c   │  FDM     │ Printing │ bracket   │  ██████░ 84%  │"
+    echo "└──────────────┴──────────┴──────────┴───────────┴───────────────┘"
+    echo ""
+    echo "  3 printers registered  ·  2 active jobs  ·  1 idle"
+    ;;
+  *)
+    echo "Unknown demo command: $1"
+    exit 1
+    ;;
+esac
