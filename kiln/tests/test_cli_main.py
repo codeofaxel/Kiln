@@ -546,7 +546,7 @@ class TestLicenseCommands:
             result = runner.invoke(cli, ["upgrade"])
         assert result.exit_code == 0
         assert "Free" in result.output
-        assert "kiln.sh/pro" in result.output
+        assert "kiln3d.com/pro" in result.output
 
     def test_upgrade_activates_pro_key(self, runner, tmp_path):
         """kiln upgrade --key activates a Pro license."""
@@ -729,7 +729,7 @@ class TestFleetCLI:
              patch.dict("os.environ", {}, clear=True):
             result = runner.invoke(cli, ["fleet", "status"])
         assert result.exit_code != 0
-        assert "LICENSE" in result.output or "license" in result.output.lower()
+        assert "Free tier" in result.output or "upgrade" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -934,4 +934,4 @@ class TestQueueCLI:
              patch.dict("os.environ", {}, clear=True):
             result = runner.invoke(cli, ["queue", "submit", "test.gcode"])
         assert result.exit_code != 0
-        assert "LICENSE" in result.output or "license" in result.output.lower()
+        assert "Free tier" in result.output or "upgrade" in result.output.lower()

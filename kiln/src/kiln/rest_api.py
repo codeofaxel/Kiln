@@ -33,10 +33,13 @@ import asyncio
 import inspect
 import json as _json
 import logging
+import math
+import os
+import threading
 import time as _time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -46,28 +49,92 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class _RateLimiter:
-    """Simple in-memory token-bucket rate limiter."""
+class RateLimiter:
+    """Thread-safe in-memory sliding-window rate limiter.
+
+    Tracks request timestamps per client key (API key or IP address)
+    within a rolling time window.  Configurable via the ``KILN_RATE_LIMIT``
+    environment variable (requests per minute; ``0`` to disable).
+
+    Each :meth:`check` call returns ``(allowed, remaining, reset_epoch)``
+    so callers can populate standard rate-limit response headers.
+    """
 
     def __init__(self, max_requests: int = 60, window_seconds: float = 60.0):
         self._max = max_requests
         self._window = window_seconds
         self._hits: dict[str, list[float]] = defaultdict(list)
+        self._lock = threading.Lock()
 
-    def check(self, key: str) -> bool:
-        """Return True if the request is allowed, False if rate-limited."""
-        now = _time.monotonic()
-        hits = self._hits[key]
-        # Purge expired entries
-        cutoff = now - self._window
-        self._hits[key] = [t for t in hits if t > cutoff]
-        if len(self._hits[key]) >= self._max:
-            return False
-        self._hits[key].append(now)
-        return True
+    @property
+    def limit(self) -> int:
+        """Maximum requests allowed per window."""
+        return self._max
+
+    @property
+    def window(self) -> float:
+        """Window duration in seconds."""
+        return self._window
+
+    @property
+    def enabled(self) -> bool:
+        """Whether rate limiting is active (max > 0)."""
+        return self._max > 0
+
+    def check(self, key: str) -> Tuple[bool, int, float]:
+        """Check whether a request from *key* is allowed.
+
+        Returns:
+            A 3-tuple ``(allowed, remaining, reset_epoch)`` where:
+
+            - *allowed*: ``True`` if the request should proceed.
+            - *remaining*: How many requests remain in the current window.
+            - *reset_epoch*: Unix timestamp when the window resets (for
+              the ``X-RateLimit-Reset`` / ``Retry-After`` headers).
+        """
+        if not self.enabled:
+            return True, self._max, _time.time() + self._window
+
+        now_mono = _time.monotonic()
+        now_wall = _time.time()
+        cutoff = now_mono - self._window
+
+        with self._lock:
+            hits = self._hits[key]
+            # Purge expired entries
+            self._hits[key] = hits = [t for t in hits if t > cutoff]
+
+            if len(hits) >= self._max:
+                # Earliest hit determines when the window opens next
+                oldest = hits[0] if hits else now_mono
+                retry_after = oldest + self._window - now_mono
+                reset_epoch = now_wall + retry_after
+                return False, 0, reset_epoch
+
+            hits.append(now_mono)
+            remaining = max(0, self._max - len(hits))
+            reset_epoch = now_wall + self._window
+            return True, remaining, reset_epoch
 
 
-_rate_limiter = _RateLimiter()
+def _build_rate_limiter() -> RateLimiter:
+    """Create a :class:`RateLimiter` from the ``KILN_RATE_LIMIT`` env var.
+
+    The env var is interpreted as *requests per minute*.  Defaults to
+    ``60``.  Set to ``0`` to disable rate limiting entirely.
+    """
+    raw = os.environ.get("KILN_RATE_LIMIT", "60").strip()
+    try:
+        limit = int(raw)
+    except ValueError:
+        logger.warning("Invalid KILN_RATE_LIMIT value %r, defaulting to 60", raw)
+        limit = 60
+    if limit < 0:
+        limit = 0
+    return RateLimiter(max_requests=limit, window_seconds=60.0)
+
+
+_rate_limiter = _build_rate_limiter()
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +271,65 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
         allow_headers=["*"],
     )
 
+    # ----- Rate-limit middleware ------------------------------------------
+
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import Response as StarletteResponse
+
+    class _RateLimitMiddleware(BaseHTTPMiddleware):
+        """Middleware that enforces rate limits and injects headers."""
+
+        async def dispatch(self, request: Request, call_next):
+            # Skip rate limiting for health checks
+            if request.url.path == "/api/health":
+                return await call_next(request)
+
+            # Determine client identity: auth token > IP
+            client_key = self._client_key(request)
+            allowed, remaining, reset_epoch = _rate_limiter.check(client_key)
+
+            if not allowed and _rate_limiter.enabled:
+                retry_after = max(1, int(math.ceil(reset_epoch - _time.time())))
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Rate limit exceeded. Try again later.",
+                    },
+                    status_code=429,
+                    headers={
+                        "Retry-After": str(retry_after),
+                        "X-RateLimit-Limit": str(_rate_limiter.limit),
+                        "X-RateLimit-Remaining": "0",
+                        "X-RateLimit-Reset": str(int(reset_epoch)),
+                    },
+                )
+
+            response: StarletteResponse = await call_next(request)
+
+            # Attach rate-limit headers to all responses
+            if _rate_limiter.enabled:
+                response.headers["X-RateLimit-Limit"] = str(_rate_limiter.limit)
+                response.headers["X-RateLimit-Remaining"] = str(remaining)
+                response.headers["X-RateLimit-Reset"] = str(int(reset_epoch))
+
+            return response
+
+        @staticmethod
+        def _client_key(request: Request) -> str:
+            """Derive a rate-limit key from the request.
+
+            Uses the Bearer token (if present) so that authenticated
+            clients get their own bucket.  Falls back to client IP.
+            """
+            auth = request.headers.get("Authorization", "")
+            if auth.startswith("Bearer ") and len(auth) > 7:
+                return f"token:{auth[7:]}"
+            if request.client:
+                return f"ip:{request.client.host}"
+            return "ip:unknown"
+
+    app.add_middleware(_RateLimitMiddleware)
+
     # ----- Auth dependency ------------------------------------------------
 
     async def verify_auth(request: Request):
@@ -248,14 +374,6 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
         _=Depends(verify_auth),
     ):
         """Execute an MCP tool by name with JSON parameters."""
-        # Rate limiting
-        client_ip = request.client.host if request.client else "unknown"
-        if not _rate_limiter.check(client_ip):
-            return JSONResponse(
-                {"success": False, "error": "Rate limit exceeded. Try again later."},
-                status_code=429,
-            )
-
         # Tier gate: reject tools outside the configured tier.
         allowed = _allowed_tool_names(config.tool_tier)
         if allowed is not None and tool_name not in allowed:
@@ -336,14 +454,6 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
         Requires an API key for the LLM provider (OpenRouter, OpenAI, etc.)
         in the request body.
         """
-        # Rate limiting
-        client_ip = request.client.host if request.client else "unknown"
-        if not _rate_limiter.check(client_ip):
-            return JSONResponse(
-                {"success": False, "error": "Rate limit exceeded. Try again later."},
-                status_code=429,
-            )
-
         try:
             body = await request.json()
         except Exception:

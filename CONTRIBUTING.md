@@ -9,81 +9,84 @@ Thanks for your interest in contributing to Kiln! Here's how to get started.
 git clone https://github.com/codeofaxel/Kiln.git
 cd Kiln
 
-# Install both packages in editable mode
-pip install -e "./kiln[dev,bambu]"
-pip install -e "./octoprint-cli[dev]"
+# Create a virtualenv (recommended)
+python3 -m venv .venv && source .venv/bin/activate
+
+# Install both packages in editable mode with dev extras
+pip3 install -e "./kiln[dev,bambu]"
+pip3 install -e "./octoprint-cli[dev]"
 
 # Install pre-commit hooks
-pip install pre-commit
+pip3 install pre-commit
 pre-commit install
-
-# Run tests
-cd kiln && pytest tests/ -q
-cd ../octoprint-cli && pytest tests/ -q
 ```
 
-## Pre-Commit Hooks
-
-This project uses [pre-commit](https://pre-commit.com/) with [Ruff](https://docs.astral.sh/ruff/) for linting and formatting. Hooks run automatically on `git commit`:
-
-- **Ruff lint** — catches common errors, import sorting, Python upgrades
-- **Ruff format** — consistent code formatting
-- **Trailing whitespace / end-of-file** — basic hygiene
-- **Large file check** — blocks files > 500KB from being committed
-
-To run hooks manually on all files:
+## Running Tests
 
 ```bash
+# Kiln (2,800+ tests)
+cd kiln && python3 -m pytest tests/ -q
+
+# OctoPrint CLI (239 tests)
+cd octoprint-cli && python3 -m pytest tests/ -q
+```
+
+## Linting & Formatting
+
+Ruff handles both linting and formatting. Pre-commit hooks run automatically on `git commit`, but you can run them manually:
+
+```bash
+# Check linting
+ruff check kiln/ octoprint-cli/
+
+# Auto-format
+ruff format kiln/ octoprint-cli/
+
+# Run all pre-commit hooks
 pre-commit run --all-files
 ```
 
-## Project Structure
-
-- **`kiln/`** — MCP server package (`kiln3d` on PyPI)
-- **`octoprint-cli/`** — Standalone OctoPrint CLI (`kiln3d-octoprint` on PyPI)
-- **`docs/`** — Whitepaper, project docs, task tracking
-
-This is a monorepo with two independent Python packages. Each has its own `pyproject.toml`, test suite, and entry point. PRs that touch both packages should have tests passing for both.
-
-## Making Changes
-
-1. **Fork and branch** — Create a feature branch from `main`.
-2. **Write tests** — New features need tests. Bug fixes need regression tests.
-3. **Run the full suite** — `cd kiln && pytest tests/ -q` (2,730+ tests should pass).
-4. **Keep commits focused** — One logical change per commit.
-
 ## Code Style
 
+- Follow existing patterns -- look at neighboring code before inventing something new.
 - Type hints on all public functions.
-- Docstrings on public classes and functions.
+- Ruff handles formatting and import sorting. Don't fight the formatter.
 - No `# TODO` in critical paths (print submission, temperature control, G-code execution, auth).
-- Use the existing patterns — look at how neighboring code does it before inventing something new.
-- Ruff handles formatting and import sorting — don't fight the formatter.
 
-## Safety-Critical Code
+## PR Process
 
-Kiln controls physical machines. Extra care is required when modifying:
+1. **Fork** the repo and create a feature branch from `main`.
+2. **Write tests.** New features need tests. Bug fixes need regression tests.
+3. **Run the full suite** before opening a PR.
+4. **Keep PRs small and focused.** One logical change per PR.
+5. **Open a PR against `main`** with a description of *why*, not just *what*.
+6. If your PR adds a CLI command or MCP tool, update the relevant docs.
 
-- **Temperature control** — always validate against safety profiles before sending to hardware
-- **G-code execution** — all commands must pass through the validator in `gcode.py`
-- **Print submission** — pre-flight checks are mandatory and cannot be bypassed
-- **Authentication** — no credentials in source code, ever
+## Project Structure
 
-See `docs/LESSONS_LEARNED.md` for patterns and pitfalls discovered during development.
+This is a monorepo with two independent Python packages:
 
-## Pull Requests
+- **`kiln/`** -- MCP server + CLI (`kiln3d` on PyPI)
+- **`octoprint-cli/`** -- Standalone OctoPrint CLI (`kiln3d-octoprint` on PyPI)
+- **`docs/`** -- Whitepaper, project docs, task tracking
 
-- Keep PRs small and focused. Big PRs take forever to review.
-- Describe *why*, not just *what*.
-- If your PR adds a CLI command or MCP tool, update the relevant docs.
+Each package has its own `pyproject.toml`, test suite, and entry point. PRs that touch both packages should have tests passing for both.
+
+## Safety Rules (Hard Laws)
+
+Kiln controls physical machines. These rules exist to prevent hardware damage and are non-negotiable:
+
+1. **Pre-flight checks are mandatory.** Never bypass `preflight_check()`. Temperature, file existence, and printer state must be validated before every print.
+2. **G-code must be validated.** All G-code commands pass through the validator in `gcode.py` before reaching hardware. Commands that home axes, set temperatures, or move steppers can cause physical damage if unchecked.
+3. **Temperature limits are enforced.** Validate against the printer's safety profile before sending temperature commands. Never hardcode temperature limits -- use the safety profiles database.
+4. **Network calls always fail.** Every HTTP/MQTT request to a printer must be wrapped in try/except. Printers go offline, networks drop, APIs timeout. Return structured errors, never raw exceptions.
+5. **No credentials in source code.** API keys, host URLs, and secrets come from environment variables or config files. Never committed to the repo.
+6. **Confirmation required for destructive ops.** Cancel, raw G-code, firmware updates -- these require explicit confirmation context.
+7. **Normalize external data.** Printer APIs return different JSON shapes. Adapters must convert to internal dataclass types. Never pass raw API responses through to the MCP layer.
 
 ## Reporting Bugs
 
-Open a [GitHub issue](https://github.com/codeofaxel/Kiln/issues) with:
-- Kiln version and Python version
-- Printer type (OctoPrint / Moonraker / Bambu / Prusa Connect)
-- Steps to reproduce
-- Expected vs actual behavior
+Open a [GitHub issue](https://github.com/codeofaxel/Kiln/issues) using the bug report template.
 
 ## Security Issues
 
