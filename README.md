@@ -176,6 +176,16 @@ If PrusaSlicer is not in your PATH, set it explicitly:
 export KILN_SLICER_PATH=/path/to/prusa-slicer
 ```
 
+**Bambu webcam snapshots** require `ffmpeg` for RTSP frame capture. Install it if you want vision monitoring on Bambu printers:
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu/Debian
+sudo apt install ffmpeg
+```
+Without `ffmpeg`, Bambu printers will work normally but `can_snapshot` will be `False` and vision monitoring tools won't capture frames.
+
 ### CLI Commands
 
 ```
@@ -282,7 +292,7 @@ kiln rest --port 8420 --tier full
 pip install kiln3d[rest]
 ```
 
-Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (43 tools) for mid-range, **full** (101 tools) for Claude/GPT-4/Gemini.
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (43 tools) for mid-range, **full** (124 tools) for Claude/GPT-4/Gemini.
 
 ### OctoPrint CLI
 
@@ -413,6 +423,22 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `safety_settings` | Get current safety and auto-print settings |
 | `safety_status` | Comprehensive safety status check |
 | `delete_file` | Delete a file from the printer |
+| `cache_model` | Cache a downloaded model locally for reuse |
+| `search_cached_models` | Search cached models by name, source, or tags |
+| `list_cached_models` | List all cached models with metadata |
+| `get_cached_model` | Get details and local path for a cached model |
+| `delete_cached_model` | Remove a model from the local cache |
+| `backup_database` | Create a timestamped backup of the Kiln SQLite database |
+| `verify_audit_integrity` | Verify integrity of the audit log (hash chain validation) |
+| `clean_agent_memory` | Prune stale or expired agent memory entries |
+| `list_trusted_printers` | List printers in the trust store with verification status |
+| `trust_printer` | Add a printer to the trust store (fingerprint + TLS pinning) |
+| `untrust_printer` | Remove a printer from the trust store |
+| `pipeline_status` | Get real-time status of a running pipeline |
+| `pipeline_pause` | Pause a running pipeline at the current step boundary |
+| `pipeline_resume` | Resume a paused pipeline |
+| `pipeline_abort` | Abort a running or paused pipeline |
+| `pipeline_retry_step` | Retry the failed step in a pipeline |
 
 ## Supported Printers
 
@@ -616,8 +642,8 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (3,000+ total)
-cd kiln && python3 -m pytest tests/ -v        # 2,815 tests
+# Run tests (3,125+ total)
+cd kiln && python3 -m pytest tests/ -v        # 2,886 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 

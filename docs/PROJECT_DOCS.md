@@ -371,6 +371,8 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 | `billing_summary` | — | Aggregated billing summary |
 | `billing_history` | `limit` | Recent billing charges with payment outcomes |
 | `billing_setup_url` | `rail` | URL to link a payment method |
+| `billing_check_setup` | — | Polls pending Stripe SetupIntent; persists payment method on success |
+| `check_payment_status` | `payment_id` | Non-blocking check of Circle/Stripe payment finality |
 
 #### 3DOS Network
 
@@ -434,7 +436,9 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 | Tool | Input | Output |
 |---|---|---|
 | `monitor_print_vision` | `printer_name`, `include_snapshot`, `save_snapshot` | Snapshot + state + phase + failure hints |
-| `watch_print` | `printer_name`, `snapshot_interval`, `max_snapshots`, `timeout`, `poll_interval` | Batch of snapshots with state transitions |
+| `watch_print` | `printer_name`, `snapshot_interval`, `max_snapshots`, `timeout`, `poll_interval` | Starts background watcher; returns `watch_id` immediately |
+| `watch_print_status` | `watch_id` | Current progress, snapshots, outcome of background watcher |
+| `stop_watch_print` | `watch_id` | Stops background watcher and returns final state |
 
 #### Cross-Printer Learning
 
@@ -444,6 +448,43 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 | `get_printer_insights` | `printer_name`, `limit` | Success rate, failure breakdown, material stats, confidence |
 | `suggest_printer_for_job` | `file_hash`, `material_type`, `file_name` | Ranked printers by success rate + availability |
 | `recommend_settings` | `printer_name`, `material_type`, `file_hash` | Median temps/speed, mode slicer profile, confidence, quality distribution |
+
+
+#### Pipelines (Runtime)
+
+| Tool | Input | Output |
+|---|---|---|
+| `pipeline_status` | `pipeline_id` | Current step, progress, elapsed time |
+| `pipeline_pause` | `pipeline_id` | Confirmation (pauses at step boundary) |
+| `pipeline_resume` | `pipeline_id` | Confirmation |
+| `pipeline_abort` | `pipeline_id` | Confirmation with cleanup summary |
+| `pipeline_retry_step` | `pipeline_id` | Retry result for the failed step |
+
+#### Model Cache
+
+| Tool | Input | Output |
+|---|---|---|
+| `cache_model` | `file_path`, `source`, `source_id`, `tags` | Cache entry with local path |
+| `search_cached_models` | `query`, `source`, `tags` | Matching cached models |
+| `get_cached_model` | `cache_id` | Model details and local path |
+| `list_cached_models` | `limit`, `sort` | All cached models with metadata |
+| `delete_cached_model` | `cache_id` | Confirmation |
+
+#### Database Management
+
+| Tool | Input | Output |
+|---|---|---|
+| `backup_database` | `output_dir` | Backup file path and size |
+| `verify_audit_integrity` | — | Integrity report (pass/fail, broken links) |
+| `clean_agent_memory` | `max_age_days`, `dry_run` | Pruned entry count |
+
+#### Printer Trust
+
+| Tool | Input | Output |
+|---|---|---|
+| `list_trusted_printers` | — | Trusted printers with fingerprints and verification status |
+| `trust_printer` | `printer_name`, `fingerprint` | Trust confirmation |
+| `untrust_printer` | `printer_name` | Removal confirmation |
 
 ### MCP Resources
 
@@ -733,6 +774,9 @@ kiln/src/kiln/
     model_metadata.py    # Model metadata management
     wallets.py           # Crypto wallet configuration (Solana/Ethereum donations)
     plugins.py           # Plugin system
+    backup.py            # Database backup and restore
+    log_config.py        # Structured logging configuration
+    model_cache.py       # Local model cache with metadata tracking
     payments/
         base.py          # PaymentProvider interface, PaymentRail enum
         manager.py       # Payment orchestration across providers
