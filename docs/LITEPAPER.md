@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/kiln-logo-dark.svg" alt="Kiln" width="200">
+</p>
+
 # Kiln
 
 ### Litepaper -- February 2026
