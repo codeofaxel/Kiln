@@ -1,0 +1,123 @@
+---
+interface Row {
+  feature: string;
+  kiln: string;
+  octoprint: string;
+  cura: string;
+  prusa: string;
+}
+
+const check = '\u2713';
+const cross = '\u2014';
+const partial = '\u00BD';
+
+const rows: Row[] = [
+  { feature: 'Agent / AI Support',        kiln: check, octoprint: cross,   cura: cross,   prusa: cross   },
+  { feature: 'Multi-Printer Fleet',       kiln: check, octoprint: partial, cura: cross,   prusa: check   },
+  { feature: 'Unified API',               kiln: check, octoprint: cross,   cura: cross,   prusa: cross   },
+  { feature: 'Safety Validation',         kiln: check, octoprint: cross,   cura: cross,   prusa: partial },
+  { feature: 'Integrated Slicing',        kiln: check, octoprint: cross,   cura: check,   prusa: partial },
+  { feature: 'Marketplace Search',        kiln: check, octoprint: cross,   cura: partial, prusa: cross   },
+  { feature: 'Manufacturing Outsourcing', kiln: check, octoprint: cross,   cura: partial, prusa: cross   },
+  { feature: 'REST API',                  kiln: check, octoprint: check,   cura: cross,   prusa: check   },
+];
+---
+
+<section class="bordered">
+  <div class="container">
+    <h2>How Kiln compares</h2>
+    <p class="lead">Kiln is purpose-built for AI agents. Existing tools weren't.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th class="highlight">Kiln</th>
+            <th>OctoPrint</th>
+            <th>Cura</th>
+            <th>Prusa&nbsp;Connect</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr>
+              <td class="feature-name">{r.feature}</td>
+              <td class="highlight cell-check">{r.kiln}</td>
+              <td class="cell-val">{r.octoprint}</td>
+              <td class="cell-val">{r.cura}</td>
+              <td class="cell-val">{r.prusa}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<style>
+  .bordered {
+    border-top: 1px solid var(--border);
+  }
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  th, td {
+    padding: 14px 18px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    font-weight: 600;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    background: var(--bg-code);
+  }
+  th:first-child, td:first-child {
+    text-align: left;
+  }
+  .feature-name {
+    font-weight: 500;
+    color: var(--text);
+  }
+  .highlight {
+    background: rgba(255, 107, 43, 0.06);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  th.highlight {
+    color: var(--accent);
+  }
+  .cell-check {
+    color: var(--accent);
+    font-size: 18px;
+  }
+  .cell-val {
+    color: var(--text-muted);
+    font-size: 16px;
+  }
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+  tbody tr {
+    transition: background 0.1s;
+  }
+  tbody tr:hover {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  @media (max-width: 640px) {
+    th, td {
+      padding: 10px 12px;
+      font-size: 13px;
+    }
+  }
+</style>

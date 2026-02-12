@@ -1,0 +1,82 @@
+---
+const steps = [
+  {
+    title: 'Install & discover',
+    desc: 'One command installs Kiln. kiln setup auto-discovers printers on your network and saves config.',
+  },
+  {
+    title: 'Agent reads the skill',
+    desc: 'Your AI agent reads SKILL.md \u2014 a structured document defining every command, safety level, and workflow pattern.',
+  },
+  {
+    title: 'Safely operate hardware',
+    desc: 'The agent slices, uploads, prints, and monitors \u2014 with Kiln enforcing temperature limits, G-code validation, and pre-flight checks at every step.',
+  },
+  {
+    title: 'Human stays in control',
+    desc: 'Irreversible actions (start print, cancel, raw G-code) require human confirmation. The agent asks, the human approves.',
+  },
+];
+---
+
+<section id="how-it-works" class="bordered">
+  <div class="container">
+    <h2>How it works</h2>
+    <p class="lead">
+      Give your agent the Kiln skill definition. It handles the rest.
+    </p>
+
+    <div class="steps">
+      {steps.map((s) => (
+        <div class="step">
+          <h3>{s.title}</h3>
+          <p>{s.desc}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .bordered {
+    border-top: 1px solid var(--border);
+  }
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    counter-reset: step;
+  }
+  .step {
+    position: relative;
+    padding: 28px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .step::before {
+    counter-increment: step;
+    content: counter(step);
+    display: block;
+    width: 32px;
+    height: 32px;
+    line-height: 32px;
+    text-align: center;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 14px;
+  }
+  .step h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .step p {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+</style>

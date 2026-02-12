@@ -1,0 +1,104 @@
+---
+const features = [
+  {
+    icon: '\u{1F6E1}\uFE0F',
+    title: 'Hardware-Safe by Default',
+    desc: "Per-printer temperature limits, G-code validation, mandatory pre-flight checks, rate limiting, and emergency stop. Safety profiles for 26+ printer models \u2014 agents can\u2019t bypass them.",
+  },
+  {
+    icon: '\u{1F5A8}\uFE0F',
+    title: '4 Printer Backends',
+    desc: 'Native adapters for OctoPrint, Moonraker (Klipper), Bambu Lab (MQTT), and Prusa Connect. Same commands work across all of them.',
+  },
+  {
+    icon: '\u{1F527}',
+    title: 'CLI + MCP Server',
+    desc: '50+ CLI commands with --json output for agents, or 100+ MCP tools for deeper integration. Pick whichever your agent platform supports.',
+  },
+  {
+    icon: '\u2702\uFE0F',
+    title: 'Integrated Slicing',
+    desc: 'PrusaSlicer and OrcaSlicer integration with bundled profiles for popular printers. Go from STL to print in one pipeline.',
+  },
+  {
+    icon: '\u{1F3ED}',
+    title: 'Outsourced Manufacturing',
+    desc: 'No local printer? Kiln quotes and places orders through Craftcloud, Shapeways, and Sculpteo. Same CLI, same safety model.',
+  },
+  {
+    icon: '\u{1F4E1}',
+    title: 'Fleet Management',
+    desc: 'Multi-printer registry, priority job queue, smart routing based on print history, background scheduling, and pub/sub event bus.',
+  },
+  {
+    icon: '\u{1F441}\uFE0F',
+    title: 'Vision Monitoring',
+    desc: "Webcam snapshots for first-layer checks and print quality monitoring. Agents can see what\u2019s happening on the build plate.",
+  },
+  {
+    icon: '\u{1F9CA}',
+    title: 'Text-to-3D Generation',
+    desc: 'Generate printable models from text descriptions via Meshy AI and OpenSCAD. Parametric or AI-generated, with mesh validation before printing.',
+  },
+  {
+    icon: '\u{1F510}',
+    title: 'Confirmation Protocol',
+    desc: 'Every command has a safety level (safe/guarded/confirm/emergency). Agents know when to act autonomously and when to ask the human first.',
+  },
+];
+---
+
+<section id="features">
+  <div class="container">
+    <h2>What Kiln does</h2>
+    <p class="lead">
+      Everything an AI agent needs to go from a model file to a finished print,
+      with safety enforced at every step.
+    </p>
+
+    <div class="features">
+      {features.map((f) => (
+        <div class="feature">
+          <div class="icon">{f.icon}</div>
+          <h3>{f.title}</h3>
+          <p>{f.desc}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+  }
+  .feature {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 28px;
+  }
+  .icon {
+    width: 40px;
+    height: 40px;
+    background: var(--accent-glow);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    font-size: 20px;
+  }
+  .feature h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .feature p {
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+</style>

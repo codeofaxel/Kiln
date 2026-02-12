@@ -1,0 +1,51 @@
+---
+const printers = [
+  { name: 'OctoPrint', desc: 'REST API \u00B7 Any printer with OctoPrint' },
+  { name: 'Moonraker', desc: 'REST API \u00B7 Klipper-based printers' },
+  { name: 'Bambu Lab', desc: 'MQTT \u00B7 X1C, P1S, A1 Mini, A1' },
+  { name: 'Prusa Connect', desc: 'REST API \u00B7 MK4, MK3.9, MINI+, XL' },
+];
+---
+
+<section class="bordered">
+  <div class="container">
+    <h2>Supported printers</h2>
+    <p class="lead">Works with the most popular 3D printer ecosystems out of the box.</p>
+
+    <div class="printer-grid">
+      {printers.map((p) => (
+        <div class="printer-card">
+          <div class="name">{p.name}</div>
+          <div class="desc">{p.desc}</div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .bordered {
+    border-top: 1px solid var(--border);
+  }
+  .printer-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+  }
+  .printer-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    text-align: center;
+  }
+  .name {
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 4px;
+  }
+  .desc {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+</style>

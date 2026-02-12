@@ -1,0 +1,368 @@
+---
+import DocsLayout from '../layouts/DocsLayout.astro';
+import TOC from '../components/TOC.astro';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { marked } from 'marked';
+
+// Read the whitepaper markdown at build time
+const mdPath = resolve(process.cwd(), '..', 'WHITEPAPER.md');
+let rawMd = readFileSync(mdPath, 'utf-8');
+
+// Strip the centered logo image block and the h1 title + version line
+rawMd = rawMd.replace(/<p align="center">[\s\S]*?<\/p>\s*/, '');
+rawMd = rawMd.replace(/^# Kiln: A Protocol.*\n+\*\*Version.*\*\*\s*\n*/m, '');
+
+// Custom renderer to generate heading IDs and collect headings for TOC
+interface Heading {
+  level: number;
+  text: string;
+  id: string;
+}
+
+const headings: Heading[] = [];
+
+const renderer = new marked.Renderer();
+renderer.heading = function({ tokens, depth }: { tokens: any[]; depth: number }) {
+  const text = this.parser.parseInline(tokens);
+  const id = text
+    .replace(/<[^>]*>/g, '')
+    .toLowerCase()
+    .replace(/[^\w]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+
+  if (depth === 2 || depth === 3) {
+    // Strip section numbers for cleaner TOC text (e.g., "1. Introduction" -> "Introduction")
+    const cleanText = text.replace(/^\d+(\.\d+)*\.?\s*/, '');
+    headings.push({ level: depth, text: cleanText, id });
+  }
+
+  return `<h${depth} id="${id}">${text}</h${depth}>`;
+};
+
+marked.setOptions({ renderer });
+const htmlContent = await marked.parse(rawMd);
+---
+
+<DocsLayout
+  title="Kiln Whitepaper — Protocol for Agent-Operated Manufacturing"
+  description="Technical whitepaper describing the Kiln protocol for safe AI agent control of 3D printers and physical manufacturing hardware."
+  current="whitepaper"
+>
+  <!-- Page Header -->
+  <header class="wp-header">
+    <a href="/" class="wp-breadcrumb">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <polyline points="15 18 9 12 15 6" />
+      </svg>
+      Home
+    </a>
+    <div class="wp-header-badge">Technical Whitepaper</div>
+    <h1 class="wp-title">Kiln: A Protocol for Agent-Operated Physical Manufacturing</h1>
+    <p class="wp-subtitle">Version 0.1.0 &mdash; February 2026</p>
+  </header>
+
+  <!-- Two-column layout -->
+  <div class="wp-layout">
+    <TOC headings={headings} />
+    <article class="wp-content" set:html={htmlContent} />
+  </div>
+</DocsLayout>
+
+<style>
+  /* ── Header ── */
+  .wp-header {
+    padding: 48px 0 40px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 48px;
+  }
+
+  .wp-breadcrumb {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+    margin-bottom: 20px;
+  }
+
+  .wp-breadcrumb:hover {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .wp-header-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    background: var(--accent-glow);
+    border: 1px solid rgba(255, 107, 43, 0.25);
+    padding: 4px 12px;
+    border-radius: 20px;
+    margin-bottom: 16px;
+  }
+
+  .wp-title {
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-bottom: 12px;
+    max-width: 720px;
+  }
+
+  .wp-subtitle {
+    font-size: 15px;
+    color: var(--text-muted);
+  }
+
+  /* ── Layout ── */
+  .wp-layout {
+    display: flex;
+    gap: 48px;
+    padding-bottom: 80px;
+    align-items: flex-start;
+  }
+
+  /* ── Article Prose ── */
+  .wp-content {
+    flex: 1;
+    min-width: 0;
+    max-width: 720px;
+    font-size: 17px;
+    line-height: 1.8;
+    color: var(--text);
+  }
+
+  /* Headings */
+  .wp-content :global(h2) {
+    font-size: 24px;
+    font-weight: 700;
+    margin-top: 56px;
+    margin-bottom: 20px;
+    padding-top: 32px;
+    border-top: 1px solid var(--border);
+    scroll-margin-top: 100px;
+  }
+
+  .wp-content :global(h2:first-child) {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .wp-content :global(h3) {
+    font-size: 19px;
+    font-weight: 600;
+    margin-top: 40px;
+    margin-bottom: 16px;
+    padding-left: 16px;
+    border-left: 3px solid var(--accent);
+    scroll-margin-top: 100px;
+  }
+
+  .wp-content :global(h4) {
+    font-size: 16px;
+    font-weight: 600;
+    margin-top: 32px;
+    margin-bottom: 12px;
+    scroll-margin-top: 100px;
+  }
+
+  /* Paragraphs */
+  .wp-content :global(p) {
+    margin-bottom: 20px;
+  }
+
+  /* Bold/Strong text */
+  .wp-content :global(strong) {
+    font-weight: 600;
+    color: #fff;
+  }
+
+  /* Links */
+  .wp-content :global(a) {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: rgba(255, 107, 43, 0.3);
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.15s;
+  }
+
+  .wp-content :global(a:hover) {
+    text-decoration-color: var(--accent);
+  }
+
+  /* Lists */
+  .wp-content :global(ul),
+  .wp-content :global(ol) {
+    margin-bottom: 20px;
+    padding-left: 24px;
+  }
+
+  .wp-content :global(li) {
+    margin-bottom: 8px;
+  }
+
+  .wp-content :global(li > ul),
+  .wp-content :global(li > ol) {
+    margin-top: 8px;
+    margin-bottom: 8px;
+  }
+
+  /* Code inline */
+  .wp-content :global(code) {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    border-radius: 4px;
+    color: #ccc;
+  }
+
+  /* Code blocks */
+  .wp-content :global(pre) {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    margin: 24px 0;
+  }
+
+  .wp-content :global(pre code) {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+    color: var(--text);
+    border-radius: 0;
+  }
+
+  /* Tables */
+  .wp-content :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 24px 0;
+    font-size: 15px;
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .wp-content :global(thead) {
+    background: var(--bg-card);
+  }
+
+  .wp-content :global(th) {
+    text-align: left;
+    font-weight: 600;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    white-space: nowrap;
+    color: #fff;
+    font-size: 14px;
+  }
+
+  .wp-content :global(td) {
+    padding: 10px 16px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  .wp-content :global(tr:nth-child(even)) {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .wp-content :global(tr:hover) {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  /* Blockquotes */
+  .wp-content :global(blockquote) {
+    margin: 24px 0;
+    padding: 16px 24px;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-glow);
+    border-radius: 0 8px 8px 0;
+    font-style: italic;
+    color: var(--text-muted);
+  }
+
+  .wp-content :global(blockquote p) {
+    margin-bottom: 0;
+  }
+
+  .wp-content :global(blockquote p + p) {
+    margin-top: 12px;
+  }
+
+  /* Horizontal rules */
+  .wp-content :global(hr) {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 48px 0;
+  }
+
+  /* Emphasis/italic */
+  .wp-content :global(em) {
+    color: var(--text-muted);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .wp-header {
+      padding: 32px 0 28px;
+      margin-bottom: 32px;
+    }
+
+    .wp-title {
+      font-size: 24px;
+    }
+
+    .wp-layout {
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .wp-content {
+      font-size: 16px;
+      max-width: 100%;
+    }
+
+    .wp-content :global(h2) {
+      font-size: 20px;
+      margin-top: 40px;
+      padding-top: 24px;
+    }
+
+    .wp-content :global(h3) {
+      font-size: 17px;
+      margin-top: 32px;
+    }
+
+    .wp-content :global(pre) {
+      padding: 16px;
+      font-size: 12px;
+      border-radius: 8px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .wp-title {
+      font-size: 21px;
+    }
+
+    .wp-content {
+      font-size: 15px;
+      line-height: 1.7;
+    }
+  }
+</style>

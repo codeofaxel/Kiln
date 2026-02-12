@@ -1,0 +1,121 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0F0F0F;
+  --bg-card: #1A1A1A;
+  --bg-code: #141414;
+  --text: #E8E8E8;
+  --text-muted: #888888;
+  --accent: #FF6B2B;
+  --accent-hover: #e85e22;
+  --accent-glow: rgba(255, 107, 43, 0.15);
+  --border: #2A2A2A;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+.container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+.container-wide { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+/* Buttons */
+.btn {
+  display: inline-block;
+  padding: 14px 32px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 15px;
+  border-radius: 8px;
+  transition: all 0.15s;
+}
+.btn:hover { background: var(--accent-hover); text-decoration: none; }
+.btn-ghost {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  margin-left: 12px;
+}
+.btn-ghost:hover { border-color: var(--text-muted); }
+
+/* Section defaults */
+section { padding: 80px 0; }
+section h2 {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+section .lead {
+  color: var(--text-muted);
+  font-size: 16px;
+  margin-bottom: 48px;
+  max-width: 600px;
+}
+
+/* Card defaults */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 28px;
+}
+
+/* Code block */
+.code-block {
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 24px 0;
+  position: relative;
+}
+.code-block .comment { color: #555; }
+.code-block .string { color: #6B8A6B; }
+.code-block .cmd { color: var(--text); }
+
+/* Copy button (reusable) */
+.copy-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 12px;
+  transition: all 0.15s;
+}
+.copy-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  section { padding: 50px 0; }
+  section h2 { font-size: 24px; }
+}

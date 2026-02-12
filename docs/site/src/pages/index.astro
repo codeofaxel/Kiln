@@ -1,0 +1,60 @@
+---
+// Coming Soon page — swap back to landing.astro content when ready to launch
+import '../styles/global.css';
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kiln</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo">
+      <img src="/assets/kiln-logo-dark-notext.svg" alt="Kiln" width="48" height="48">
+      <span>K<span class="i">I</span>LN</span>
+    </div>
+    <p class="coming">Coming soon</p>
+  </div>
+</body>
+</html>
+
+<style>
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+  }
+  .wrap {
+    text-align: center;
+    padding: 24px;
+  }
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 48px;
+  }
+  .logo span {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    color: var(--text);
+  }
+  .logo .i { color: var(--accent); }
+  .coming {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-muted);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+</style>

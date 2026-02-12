@@ -1,0 +1,103 @@
+---
+const { current = '' } = Astro.props;
+---
+
+<nav>
+  <div class="container">
+    <a href="/" class="logo">
+      <img src="/assets/kiln-logo-dark-notext.svg" alt="Kiln" width="28" height="28">
+      <span>K<span class="accent">I</span>LN</span>
+    </a>
+    <button class="mobile-toggle" aria-label="Toggle menu">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="3" y1="6" x2="21" y2="6"/>
+        <line x1="3" y1="12" x2="21" y2="12"/>
+        <line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+    </button>
+    <div class="links">
+      <a href="/#features" class:list={[{ active: current === 'features' }]}>Features</a>
+      <a href="/install" class:list={[{ active: current === 'install' }]}>Install</a>
+      <a href="/docs" class:list={[{ active: current === 'docs' }]}>Docs</a>
+      <a href="/whitepaper" class:list={[{ active: current === 'whitepaper' }]}>Whitepaper</a>
+      <a href="/pricing" class:list={[{ active: current === 'pricing' }]}>Pricing</a>
+      <a href="https://github.com/codeofaxel/Kiln" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<style>
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(15, 15, 15, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 0;
+  }
+  nav .container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: 0.15em;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .logo:hover { text-decoration: none; }
+  .logo .accent { color: var(--accent); }
+  .links {
+    display: flex;
+    gap: 24px;
+    font-size: 14px;
+  }
+  .links a {
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+  .links a:hover, .links a.active {
+    color: var(--text);
+    text-decoration: none;
+  }
+  .mobile-toggle {
+    display: none;
+    background: none;
+    border: none;
+    color: var(--text);
+    cursor: pointer;
+    padding: 4px;
+  }
+
+  @media (max-width: 640px) {
+    .mobile-toggle { display: block; }
+    .links {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: rgba(15, 15, 15, 0.95);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      flex-direction: column;
+      padding: 16px 24px;
+      gap: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .links.open { display: flex; }
+  }
+</style>
+
+<script>
+  const toggle = document.querySelector('.mobile-toggle');
+  const links = document.querySelector('.links');
+  toggle?.addEventListener('click', () => links?.classList.toggle('open'));
+</script>

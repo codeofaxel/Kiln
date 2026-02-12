@@ -1,0 +1,146 @@
+---
+interface Section {
+  title: string;
+  id: string;
+  children: Array<{ title: string; id: string }>;
+}
+
+interface Props {
+  sections: Section[];
+}
+
+const { sections } = Astro.props;
+---
+
+<aside class="sidebar">
+  <nav class="sidebar-nav" aria-label="Documentation sections">
+    {sections.map((section) => (
+      <details class="sidebar-section" open>
+        <summary>
+          <a href={`#${section.id}`}>{section.title}</a>
+          <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 2 8 6 4 10"/>
+          </svg>
+        </summary>
+        {section.children.length > 0 && (
+          <ul>
+            {section.children.map((child) => (
+              <li>
+                <a href={`#${child.id}`}>{child.title}</a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </details>
+    ))}
+  </nav>
+</aside>
+
+<style>
+  .sidebar {
+    position: sticky;
+    top: 80px;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+    width: 260px;
+    flex-shrink: 0;
+    padding-right: 24px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .sidebar::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .sidebar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .sidebar::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+  }
+
+  .sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .sidebar-section {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-section:last-child {
+    border-bottom: none;
+  }
+
+  .sidebar-section summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+  }
+
+  .sidebar-section summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .sidebar-section summary::marker {
+    display: none;
+    content: '';
+  }
+
+  .sidebar-section summary a {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    text-decoration: none;
+    flex: 1;
+  }
+
+  .sidebar-section summary a:hover {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .chevron {
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .sidebar-section[open] .chevron {
+    transform: rotate(90deg);
+  }
+
+  .sidebar-section ul {
+    list-style: none;
+    padding: 0 0 8px 0;
+    margin: 0;
+  }
+
+  .sidebar-section ul li {
+    margin: 0;
+  }
+
+  .sidebar-section ul li a {
+    display: block;
+    padding: 5px 0 5px 16px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+    border-left: 2px solid var(--border);
+    transition: all 0.15s ease;
+  }
+
+  .sidebar-section ul li a:hover {
+    color: var(--accent);
+    border-left-color: var(--accent);
+    text-decoration: none;
+  }
+</style>

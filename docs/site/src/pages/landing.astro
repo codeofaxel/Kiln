@@ -1,0 +1,56 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Hero from '../components/Hero.astro';
+import Terminal from '../components/Terminal.astro';
+import FeatureGrid from '../components/FeatureGrid.astro';
+import Steps from '../components/Steps.astro';
+import PrinterGrid from '../components/PrinterGrid.astro';
+import ComparisonTable from '../components/ComparisonTable.astro';
+import CTA from '../components/CTA.astro';
+
+const codeHtml = `<span class="comment"># Check what the printer is doing</span>
+$ kiln status --json
+<span class="string">{"status": "printing", "progress": 67.2, "temps": {"tool": 210, "bed": 60}}</span>
+
+<span class="comment"># Slice an STL and start printing (with safety checks)</span>
+$ kiln slice model.stl --print-after --json
+<span class="string">{"status": "success", "gcode": "model.gcode", "print_started": true}</span>
+
+<span class="comment"># No local printer? Get a manufacturing quote</span>
+$ kiln order quote model.stl -m pla_standard --json
+<span class="string">{"price_usd": 12.50, "lead_time_days": 5, "quote_id": "q_abc123"}</span>
+
+<span class="comment"># Compare local vs. outsourced cost</span>
+$ kiln compare-cost model.gcode --fulfillment-material pla_standard --json
+<span class="string">{"local_cost_usd": 1.20, "fulfillment_cost_usd": 12.50}</span>`;
+---
+
+<BaseLayout
+  title="Kiln — Agentic 3D Printing Infrastructure"
+  description="Kiln lets AI agents safely control 3D printers. Open-source CLI and MCP server for OctoPrint, Moonraker, Bambu Lab, and Prusa Connect."
+>
+  <Hero />
+  <Terminal />
+  <FeatureGrid />
+  <Steps />
+  <PrinterGrid />
+  <ComparisonTable />
+
+  <!-- Code example -->
+  <section class="bordered">
+    <div class="container">
+      <h2>Built for agents, works for humans</h2>
+      <p class="lead">Every command returns structured JSON. Agents parse it, humans read it.</p>
+
+      <div class="code-block" set:html={codeHtml} />
+    </div>
+  </section>
+
+  <CTA />
+</BaseLayout>
+
+<style>
+  .bordered {
+    border-top: 1px solid var(--border);
+  }
+</style>

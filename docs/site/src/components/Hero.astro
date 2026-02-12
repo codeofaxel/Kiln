@@ -1,0 +1,127 @@
+---
+---
+
+<div class="hero">
+  <div class="container">
+    <h1>AI agents that <span class="accent">safely</span> control<br>3D printers</h1>
+    <p class="subtitle">
+      Open-source CLI and MCP server that lets any AI agent discover, slice, print, and monitor
+      on real hardware &mdash; with built-in safety limits that can't be bypassed.
+    </p>
+
+    <div class="install-block">
+      <code><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeofaxel/Kiln/main/install.sh | sh</code>
+      <button class="copy-install">Copy</button>
+    </div>
+    <p class="install-alt">
+      or: <code>pip install kiln3d</code> &middot;
+      Requires Python 3.10+
+    </p>
+
+    <div class="badges">
+      <a href="https://github.com/codeofaxel/Kiln/actions/workflows/ci.yml" target="_blank" rel="noopener">
+        <img src="https://github.com/codeofaxel/Kiln/actions/workflows/ci.yml/badge.svg" alt="CI" width="90" height="20">
+      </a>
+      <img src="https://img.shields.io/badge/python-3.10%E2%80%933.13-blue" alt="Python 3.10-3.13" width="120" height="20">
+      <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" width="80" height="20">
+      <img src="https://img.shields.io/badge/tests-2%2C788%20passed-brightgreen" alt="Tests" width="130" height="20">
+      <img src="https://img.shields.io/badge/MCP%20tools-100%2B-orange" alt="100+ MCP Tools" width="120" height="20">
+    </div>
+  </div>
+</div>
+
+<script>
+  const copyBtn = document.querySelector('.copy-install');
+  copyBtn?.addEventListener('click', () => {
+    navigator.clipboard.writeText(
+      'curl -fsSL https://raw.githubusercontent.com/codeofaxel/Kiln/main/install.sh | sh'
+    );
+    if (copyBtn) {
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+    }
+  });
+</script>
+
+<style>
+  .hero {
+    padding: 100px 0 80px;
+    text-align: center;
+  }
+  .hero h1 {
+    font-size: clamp(32px, 5vw, 56px);
+    font-weight: 700;
+    line-height: 1.15;
+    margin-bottom: 20px;
+  }
+  .hero h1 .accent { color: var(--accent); }
+  .subtitle {
+    font-size: clamp(16px, 2.5vw, 20px);
+    color: var(--text-muted);
+    max-width: 600px;
+    margin: 0 auto 40px;
+    line-height: 1.5;
+  }
+
+  /* Install block */
+  .install-block {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 28px;
+    max-width: 560px;
+    margin: 0 auto 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .install-block code {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .install-block .prompt { color: var(--accent); }
+  .install-block button {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 12px;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .install-block button:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .install-alt {
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 40px;
+  }
+  .install-alt code {
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+
+  /* Badges */
+  .badges {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 60px;
+    flex-wrap: wrap;
+  }
+  .badges img { height: 22px; width: auto; }
+
+  @media (max-width: 640px) {
+    .hero { padding: 60px 0 50px; }
+    .install-block { flex-direction: column; text-align: center; }
+  }
+</style>

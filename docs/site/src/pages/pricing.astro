@@ -1,0 +1,302 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout title="Pricing — Kiln" description="Kiln pricing plans. Local printing is free forever. Pay only for fleet management or outsourced manufacturing." current="pricing">
+  <section class="pricing-hero">
+    <div class="container">
+      <h1>Pricing</h1>
+      <p class="lead">Local printing is free forever. Pay only when you need fleet management or outsourced manufacturing.</p>
+    </div>
+  </section>
+
+  <section class="pricing-cards">
+    <div class="container-wide">
+      <div class="cards-grid">
+        <!-- Free Tier -->
+        <div class="card pricing-card">
+          <div class="card-header">
+            <h3>Free</h3>
+            <div class="price">
+              <span class="amount">$0</span>
+              <span class="period">/ forever</span>
+            </div>
+          </div>
+          <ul class="features">
+            <li><span class="check">&#10003;</span> Unlimited local printing</li>
+            <li><span class="check">&#10003;</span> Up to 2 printers</li>
+            <li><span class="check">&#10003;</span> 10-job queue</li>
+            <li><span class="check">&#10003;</span> Community support</li>
+            <li><span class="check">&#10003;</span> 5 fulfillment orders/month free</li>
+            <li><span class="check">&#10003;</span> 5% platform fee on fulfillment</li>
+          </ul>
+          <a href="/install" class="btn card-cta">Get Started</a>
+        </div>
+
+        <!-- Pro Tier -->
+        <div class="card pricing-card featured">
+          <div class="badge">Most Popular</div>
+          <div class="card-header">
+            <h3>Pro</h3>
+            <div class="price">
+              <span class="amount">$29</span>
+              <span class="period">/ month</span>
+            </div>
+          </div>
+          <ul class="features">
+            <li><span class="check">&#10003;</span> Everything in Free</li>
+            <li><span class="check">&#10003;</span> Unlimited printers</li>
+            <li><span class="check">&#10003;</span> Unlimited job queue</li>
+            <li><span class="check">&#10003;</span> Fleet orchestration &amp; analytics</li>
+            <li><span class="check">&#10003;</span> Cloud sync</li>
+            <li><span class="check">&#10003;</span> Community support</li>
+            <li><span class="check">&#10003;</span> 5 fulfillment orders/month free</li>
+            <li><span class="check">&#10003;</span> 5% platform fee on fulfillment</li>
+          </ul>
+          <span class="btn card-cta disabled">Coming Soon</span>
+        </div>
+
+        <!-- Business Tier -->
+        <div class="card pricing-card">
+          <div class="card-header">
+            <h3>Business</h3>
+            <div class="price">
+              <span class="amount">$99</span>
+              <span class="period">/ month</span>
+            </div>
+          </div>
+          <ul class="features">
+            <li><span class="check">&#10003;</span> Everything in Pro</li>
+            <li><span class="check">&#10003;</span> Unlimited fulfillment orders</li>
+            <li><span class="check">&#10003;</span> Hosted MCP server</li>
+            <li><span class="check">&#10003;</span> Priority support</li>
+            <li><span class="check">&#10003;</span> Custom safety profiles</li>
+          </ul>
+          <a href="mailto:hello@kiln3d.com" class="btn btn-ghost card-cta">Contact Us</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="faq">
+    <div class="container">
+      <h2>Frequently Asked Questions</h2>
+      <div class="faq-list">
+        <details>
+          <summary>Is local printing really free?</summary>
+          <p>Yes. Kiln is open source (MIT). Local printing, slicing, and printer control are free forever with no limits on print volume.</p>
+        </details>
+        <details>
+          <summary>What is a fulfillment order?</summary>
+          <p>When you outsource manufacturing through Craftcloud, Shapeways, or Sculpteo via Kiln. Local printing to your own printers does not count.</p>
+        </details>
+        <details>
+          <summary>Can I self-host everything?</summary>
+          <p>Yes. Kiln runs entirely locally. Pro/Business tiers add optional cloud features but local functionality never requires a subscription.</p>
+        </details>
+        <details>
+          <summary>Do I need a paid plan for multiple printers?</summary>
+          <p>Free tier supports 2 printers. For 3+ printers, you need Pro.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .pricing-hero {
+    text-align: center;
+    padding: 100px 0 40px;
+  }
+  .pricing-hero h1 {
+    font-size: 40px;
+    font-weight: 700;
+    margin-bottom: 16px;
+  }
+  .pricing-hero .lead {
+    color: var(--text-muted);
+    font-size: 17px;
+    max-width: 580px;
+    margin: 0 auto;
+    line-height: 1.6;
+  }
+
+  /* Cards grid */
+  .pricing-cards {
+    padding: 20px 0 80px;
+  }
+  .cards-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    align-items: start;
+  }
+
+  /* Card */
+  .pricing-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    padding: 36px 32px;
+  }
+  .pricing-card .card-header {
+    margin-bottom: 28px;
+  }
+  .pricing-card h3 {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  .price {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+  }
+  .price .amount {
+    font-size: 44px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1;
+  }
+  .price .period {
+    font-size: 15px;
+    color: var(--text-muted);
+  }
+
+  /* Features list */
+  .features {
+    list-style: none;
+    margin-bottom: 32px;
+    flex: 1;
+  }
+  .features li {
+    padding: 7px 0;
+    font-size: 14px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    line-height: 1.5;
+  }
+  .features .check {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 14px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  /* CTA button */
+  .card-cta {
+    width: 100%;
+    text-align: center;
+    margin-top: auto;
+  }
+
+  /* Featured card (Pro) */
+  .pricing-card.featured {
+    border-color: var(--accent);
+    box-shadow: 0 0 40px var(--accent-glow), 0 0 80px rgba(255, 107, 43, 0.05);
+  }
+  .badge {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 16px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+
+  /* Disabled CTA */
+  .card-cta.disabled {
+    display: inline-block;
+    padding: 14px 32px;
+    font-weight: 600;
+    font-size: 15px;
+    border-radius: 8px;
+    background: var(--border);
+    color: var(--text-muted);
+    cursor: default;
+    pointer-events: none;
+  }
+
+  /* FAQ */
+  .faq {
+    padding: 60px 0 100px;
+    border-top: 1px solid var(--border);
+  }
+  .faq h2 {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+  .faq-list {
+    max-width: 680px;
+    margin: 0 auto;
+  }
+  details {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    background: var(--bg-card);
+    overflow: hidden;
+  }
+  summary {
+    padding: 18px 24px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::after {
+    content: '+';
+    font-size: 20px;
+    color: var(--text-muted);
+    font-weight: 400;
+    flex-shrink: 0;
+    margin-left: 16px;
+    transition: transform 0.2s;
+  }
+  details[open] summary::after {
+    content: '\2212';
+  }
+  details p {
+    padding: 0 24px 18px;
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.7;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .cards-grid {
+      grid-template-columns: 1fr;
+      max-width: 420px;
+      margin: 0 auto;
+    }
+    .pricing-card.featured {
+      order: -1;
+    }
+  }
+  @media (max-width: 640px) {
+    .pricing-hero {
+      padding: 70px 0 24px;
+    }
+    .pricing-hero h1 {
+      font-size: 32px;
+    }
+    .pricing-cards {
+      padding: 20px 0 50px;
+    }
+  }
+</style>

@@ -1,0 +1,688 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import Sidebar from '../../components/Sidebar.astro';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { marked } from 'marked';
+
+// Read the project docs markdown at build time
+const docsPath = resolve(process.cwd(), '../PROJECT_DOCS.md');
+let markdown = readFileSync(docsPath, 'utf-8');
+
+// Strip the logo image and top-level title
+markdown = markdown.replace(/<p align="center">[\s\S]*?<\/p>\s*/, '');
+markdown = markdown.replace(/^# Kiln Documentation\s*\n/, '');
+
+// Generate heading IDs from text
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .trim();
+}
+
+// Extract h2 and h3 headings for sidebar navigation
+interface SidebarChild {
+  title: string;
+  id: string;
+}
+interface SidebarSection {
+  title: string;
+  id: string;
+  children: SidebarChild[];
+}
+
+const sections: SidebarSection[] = [];
+const headingRegex = /^(#{2,3})\s+(.+)$/gm;
+let match: RegExpExecArray | null;
+
+while ((match = headingRegex.exec(markdown)) !== null) {
+  const level = match[1].length;
+  const title = match[2].trim();
+  const id = slugify(title);
+
+  if (level === 2) {
+    sections.push({ title, id, children: [] });
+  } else if (level === 3 && sections.length > 0) {
+    sections[sections.length - 1].children.push({ title, id });
+  }
+}
+
+// Configure marked with custom renderer for heading IDs
+const renderer = new marked.Renderer();
+renderer.heading = function ({ text, depth }: { text: string; depth: number }) {
+  const id = slugify(text);
+  return `<h${depth} id="${id}">${text}</h${depth}>`;
+};
+
+marked.setOptions({
+  renderer,
+  gfm: true,
+  breaks: false,
+});
+
+const htmlContent = await marked.parse(markdown);
+---
+
+<DocsLayout
+  title="Kiln Documentation — CLI, MCP Server, and API Reference"
+  description="Complete documentation for Kiln: CLI commands, MCP tools, printer adapters, safety systems, and configuration reference."
+  current="docs"
+>
+  <!-- Mobile TOC toggle -->
+  <button class="toc-toggle" aria-label="Table of Contents" id="toc-toggle">
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+      <line x1="3" y1="4" x2="17" y2="4"/>
+      <line x1="3" y1="10" x2="13" y2="10"/>
+      <line x1="3" y1="16" x2="15" y2="16"/>
+      <circle cx="17" cy="10" r="1.5" fill="currentColor" stroke="none"/>
+      <circle cx="15" cy="16" r="1.5" fill="currentColor" stroke="none"/>
+    </svg>
+    <span>Table of Contents</span>
+  </button>
+
+  <!-- Mobile drawer overlay -->
+  <div class="drawer-overlay" id="drawer-overlay"></div>
+
+  <!-- Mobile sidebar drawer -->
+  <div class="drawer" id="sidebar-drawer">
+    <div class="drawer-header">
+      <span class="drawer-title">Table of Contents</span>
+      <button class="drawer-close" id="drawer-close" aria-label="Close">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="4" y1="4" x2="16" y2="16"/>
+          <line x1="16" y1="4" x2="4" y2="16"/>
+        </svg>
+      </button>
+    </div>
+    <Sidebar sections={sections} />
+  </div>
+
+  <div class="docs-layout">
+    <!-- Desktop sidebar -->
+    <div class="sidebar-col">
+      <Sidebar sections={sections} />
+    </div>
+
+    <!-- Main content -->
+    <main class="content-col">
+      <div class="page-header">
+        <h1>Documentation</h1>
+        <p class="subtitle">Complete reference for the Kiln CLI, MCP server, adapters, and configuration.</p>
+      </div>
+      <article class="prose" set:html={htmlContent} />
+    </main>
+
+    <!-- Right TOC (desktop only) -->
+    <div class="toc-col">
+      <nav class="right-toc" id="right-toc" aria-label="On this page">
+        <p class="toc-label">On this page</p>
+        <ul id="toc-links"></ul>
+      </nav>
+    </div>
+  </div>
+</DocsLayout>
+
+<style>
+  /* ------------------------------------------------ */
+  /* Layout                                           */
+  /* ------------------------------------------------ */
+  .docs-layout {
+    display: flex;
+    gap: 32px;
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  .sidebar-col {
+    flex-shrink: 0;
+    width: 260px;
+  }
+
+  .content-col {
+    flex: 1;
+    min-width: 0;
+    max-width: 760px;
+  }
+
+  .toc-col {
+    flex-shrink: 0;
+    width: 200px;
+  }
+
+  /* ------------------------------------------------ */
+  /* Page Header                                      */
+  /* ------------------------------------------------ */
+  .page-header {
+    margin-bottom: 48px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .page-header h1 {
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+  }
+
+  .page-header .subtitle {
+    color: var(--text-muted);
+    font-size: 16px;
+    line-height: 1.6;
+    max-width: 560px;
+  }
+
+  /* ------------------------------------------------ */
+  /* Right TOC (on this page)                         */
+  /* ------------------------------------------------ */
+  .right-toc {
+    position: sticky;
+    top: 80px;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .right-toc::-webkit-scrollbar {
+    width: 3px;
+  }
+
+  .right-toc::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+  }
+
+  .toc-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+
+  .right-toc ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .right-toc :global(li) {
+    margin: 0;
+  }
+
+  .right-toc :global(a) {
+    display: block;
+    padding: 4px 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    padding-left: 12px;
+    transition: all 0.15s ease;
+  }
+
+  .right-toc :global(a:hover) {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .right-toc :global(a.active) {
+    color: var(--accent);
+    border-left-color: var(--accent);
+  }
+
+  /* ------------------------------------------------ */
+  /* Prose (rendered markdown)                        */
+  /* ------------------------------------------------ */
+  .prose {
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+
+  .prose :global(h2) {
+    font-size: 24px;
+    font-weight: 700;
+    margin-top: 56px;
+    margin-bottom: 16px;
+    padding-top: 32px;
+    border-top: 1px solid var(--border);
+    letter-spacing: -0.01em;
+  }
+
+  .prose :global(h2:first-child) {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .prose :global(h3) {
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 40px;
+    margin-bottom: 12px;
+    padding-left: 14px;
+    border-left: 3px solid var(--accent);
+  }
+
+  .prose :global(h4) {
+    font-size: 15px;
+    font-weight: 600;
+    margin-top: 28px;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+
+  .prose :global(p) {
+    margin-bottom: 16px;
+  }
+
+  .prose :global(strong) {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .prose :global(a) {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .prose :global(a:hover) {
+    text-decoration: underline;
+  }
+
+  .prose :global(ul),
+  .prose :global(ol) {
+    margin-bottom: 16px;
+    padding-left: 24px;
+  }
+
+  .prose :global(li) {
+    margin-bottom: 4px;
+  }
+
+  .prose :global(li > ul),
+  .prose :global(li > ol) {
+    margin-top: 4px;
+    margin-bottom: 4px;
+  }
+
+  .prose :global(hr) {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 48px 0;
+  }
+
+  /* Inline code */
+  .prose :global(code) {
+    font-family: var(--mono);
+    font-size: 0.875em;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 4px;
+    word-break: break-word;
+  }
+
+  /* Code blocks */
+  .prose :global(pre) {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    margin: 20px 0;
+    position: relative;
+  }
+
+  .prose :global(pre code) {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+    border-radius: 0;
+    word-break: normal;
+  }
+
+  /* Tables */
+  .prose :global(.table-wrap) {
+    overflow-x: auto;
+    margin: 20px 0;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+  }
+
+  .prose :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin: 20px 0;
+  }
+
+  .prose :global(th) {
+    text-align: left;
+    padding: 10px 14px;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .prose :global(td) {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  .prose :global(tr:last-child td) {
+    border-bottom: none;
+  }
+
+  .prose :global(tr:nth-child(even)) {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .prose :global(td code) {
+    font-size: 12px;
+  }
+
+  /* Blockquotes */
+  .prose :global(blockquote) {
+    border-left: 3px solid var(--accent);
+    padding: 12px 20px;
+    margin: 20px 0;
+    background: rgba(255, 107, 43, 0.05);
+    border-radius: 0 8px 8px 0;
+    color: var(--text-muted);
+  }
+
+  .prose :global(blockquote p) {
+    margin-bottom: 0;
+  }
+
+  /* ------------------------------------------------ */
+  /* Mobile TOC Toggle                                */
+  /* ------------------------------------------------ */
+  .toc-toggle {
+    display: none;
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 90;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 500;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    transition: all 0.15s ease;
+  }
+
+  .toc-toggle:hover {
+    border-color: var(--accent);
+  }
+
+  /* Drawer overlay */
+  .drawer-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 200;
+  }
+
+  .drawer-overlay.open {
+    display: block;
+  }
+
+  /* Drawer */
+  .drawer {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 300px;
+    max-width: 85vw;
+    background: var(--bg);
+    border-right: 1px solid var(--border);
+    z-index: 201;
+    overflow-y: auto;
+    padding: 0 20px 40px;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+  }
+
+  .drawer.open {
+    transform: translateX(0);
+  }
+
+  .drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 1;
+  }
+
+  .drawer-title {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .drawer-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+  }
+
+  .drawer-close:hover {
+    color: var(--text);
+  }
+
+  /* In the drawer, the sidebar should not be sticky/fixed */
+  .drawer :global(.sidebar) {
+    position: static;
+    max-height: none;
+    width: 100%;
+    padding-right: 0;
+  }
+
+  /* ------------------------------------------------ */
+  /* Responsive                                       */
+  /* ------------------------------------------------ */
+  @media (max-width: 1100px) {
+    .toc-col {
+      display: none;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .sidebar-col {
+      display: none;
+    }
+
+    .toc-toggle {
+      display: flex;
+    }
+
+    .drawer {
+      display: block;
+    }
+
+    .docs-layout {
+      padding: 24px 16px 100px;
+    }
+
+    .page-header h1 {
+      font-size: 28px;
+    }
+
+    .prose :global(h2) {
+      font-size: 20px;
+      margin-top: 40px;
+      padding-top: 24px;
+    }
+
+    .prose :global(h3) {
+      font-size: 16px;
+      margin-top: 28px;
+    }
+
+    .prose :global(pre) {
+      padding: 16px;
+      font-size: 12px;
+      border-radius: 8px;
+    }
+
+    .prose :global(table) {
+      font-size: 13px;
+    }
+
+    .prose :global(th),
+    .prose :global(td) {
+      padding: 8px 10px;
+    }
+  }
+</style>
+
+<script>
+  // ---- Mobile drawer toggle ----
+  const tocToggle = document.getElementById('toc-toggle');
+  const drawerOverlay = document.getElementById('drawer-overlay');
+  const sidebarDrawer = document.getElementById('sidebar-drawer');
+  const drawerClose = document.getElementById('drawer-close');
+
+  function openDrawer() {
+    drawerOverlay?.classList.add('open');
+    sidebarDrawer?.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeDrawer() {
+    drawerOverlay?.classList.remove('open');
+    sidebarDrawer?.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  tocToggle?.addEventListener('click', openDrawer);
+  drawerOverlay?.addEventListener('click', closeDrawer);
+  drawerClose?.addEventListener('click', closeDrawer);
+
+  // Close drawer when a link inside it is clicked
+  sidebarDrawer?.querySelectorAll('a').forEach(link => {
+    link.addEventListener('click', () => {
+      setTimeout(closeDrawer, 150);
+    });
+  });
+
+  // ---- Copy buttons on code blocks ----
+  document.querySelectorAll('.prose pre').forEach(pre => {
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = 'Copy';
+    btn.addEventListener('click', () => {
+      const code = pre.querySelector('code');
+      navigator.clipboard.writeText((code || pre).textContent || '');
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 1500);
+    });
+    pre.style.position = 'relative';
+    pre.appendChild(btn);
+  });
+
+  // ---- Right TOC: populate with h3 headings from visible h2 section ----
+  const rightToc = document.getElementById('toc-links');
+  const allH2 = Array.from(document.querySelectorAll('.prose h2'));
+  const allH3 = Array.from(document.querySelectorAll('.prose h3'));
+
+  function updateRightToc() {
+    if (!rightToc) return;
+
+    const scrollY = window.scrollY + 120;
+    let activeH2: Element | null = null;
+
+    // Find the current h2 section
+    for (let i = allH2.length - 1; i >= 0; i--) {
+      if ((allH2[i] as HTMLElement).offsetTop <= scrollY) {
+        activeH2 = allH2[i];
+        break;
+      }
+    }
+
+    if (!activeH2 && allH2.length > 0) {
+      activeH2 = allH2[0];
+    }
+
+    if (!activeH2) return;
+
+    const activeId = activeH2.id;
+
+    // Find h3s belonging to this h2 section
+    const h2Index = allH2.indexOf(activeH2);
+    const nextH2 = allH2[h2Index + 1];
+    const sectionH3s = allH3.filter(h3 => {
+      const h3Top = (h3 as HTMLElement).offsetTop;
+      const h2Top = (activeH2 as HTMLElement).offsetTop;
+      const nextTop = nextH2 ? (nextH2 as HTMLElement).offsetTop : Infinity;
+      return h3Top >= h2Top && h3Top < nextTop;
+    });
+
+    // Find the active h3
+    let activeH3Id = '';
+    for (let i = sectionH3s.length - 1; i >= 0; i--) {
+      if ((sectionH3s[i] as HTMLElement).offsetTop <= scrollY) {
+        activeH3Id = sectionH3s[i].id;
+        break;
+      }
+    }
+
+    // Build the TOC HTML
+    const html = sectionH3s.map(h3 => {
+      const isActive = h3.id === activeH3Id ? ' class="active"' : '';
+      return `<li><a href="#${h3.id}"${isActive}>${h3.textContent}</a></li>`;
+    }).join('');
+
+    if (rightToc.innerHTML !== html) {
+      rightToc.innerHTML = html;
+    }
+  }
+
+  let ticking = false;
+  window.addEventListener('scroll', () => {
+    if (!ticking) {
+      requestAnimationFrame(() => {
+        updateRightToc();
+        ticking = false;
+      });
+      ticking = true;
+    }
+  });
+
+  updateRightToc();
+</script>

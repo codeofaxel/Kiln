@@ -1,0 +1,374 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import InstallTabs from '../components/InstallTabs.astro';
+import FAQ from '../components/FAQ.astro';
+
+const mcpConfig = JSON.stringify({
+  mcpServers: {
+    kiln: {
+      command: "python3",
+      args: ["-m", "kiln", "serve"],
+      env: {
+        KILN_PRINTER_HOST: "http://your-printer:port",
+        KILN_PRINTER_API_KEY: "your_key",
+        KILN_PRINTER_TYPE: "octoprint"
+      }
+    }
+  }
+}, null, 2);
+
+const mcpConfigCompact = JSON.stringify({
+  mcpServers: {
+    kiln: {
+      command: "python3",
+      args: ["-m", "kiln", "serve"],
+      env: {
+        KILN_PRINTER_HOST: "http://your-printer:port",
+        KILN_PRINTER_API_KEY: "your_key",
+        KILN_PRINTER_TYPE: "octoprint"
+      }
+    }
+  }
+});
+---
+
+<BaseLayout
+  title="Install Kiln — 3D Printing Infrastructure for AI Agents"
+  description="Install Kiln in under a minute on macOS, Linux, or WSL 2. Connect your 3D printer and start printing with AI agents."
+  current="install"
+>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <h1>Get Started with Kiln</h1>
+      <p class="subtitle">Install Kiln in under a minute and connect to your first printer.</p>
+    </div>
+  </section>
+
+  <!-- Platform Tabs -->
+  <section class="install-section">
+    <div class="container">
+      <h2>Installation</h2>
+      <p class="lead">Choose your platform. Kiln runs on macOS, Linux, and Windows via WSL 2.</p>
+      <InstallTabs />
+    </div>
+  </section>
+
+  <!-- Post-Install Steps -->
+  <section class="steps-section">
+    <div class="container">
+      <h2>After Installing</h2>
+      <p class="lead">Four commands to go from install to your first AI-controlled print.</p>
+
+      <ol class="steps">
+        <li>
+          <div class="step-number">1</div>
+          <div class="step-content">
+            <h3>Discover and configure printers</h3>
+            <p>The interactive setup wizard scans your network for printers and saves their credentials.</p>
+            <div class="code-block">
+              <button class="copy-btn" data-code="kiln setup">Copy</button>
+              <code><span class="cmd">kiln setup</span></code>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="step-number">2</div>
+          <div class="step-content">
+            <h3>Verify dependencies and connectivity</h3>
+            <p>Checks that Python, slicer, and printer connections are all working.</p>
+            <div class="code-block">
+              <button class="copy-btn" data-code="kiln verify">Copy</button>
+              <code><span class="cmd">kiln verify</span></code>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="step-number">3</div>
+          <div class="step-content">
+            <h3>Confirm your printer is reachable</h3>
+            <p>Returns the full printer state as JSON — temperatures, job status, and connection info.</p>
+            <div class="code-block">
+              <button class="copy-btn" data-code="kiln status --json">Copy</button>
+              <code><span class="cmd">kiln status --json</span></code>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="step-number">4</div>
+          <div class="step-content">
+            <h3>Start the MCP server</h3>
+            <p>Exposes 100+ tools to any MCP-compatible AI agent (Claude, GPT, custom).</p>
+            <div class="code-block">
+              <button class="copy-btn" data-code="kiln serve">Copy</button>
+              <code><span class="cmd">kiln serve</span></code>
+            </div>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- MCP Server Setup -->
+  <section class="mcp-section">
+    <div class="container">
+      <h2>Claude Desktop Integration</h2>
+      <p class="lead">Add Kiln to Claude Desktop so Claude can control your printer directly.</p>
+
+      <p class="config-path">
+        Add the following to your Claude Desktop config file:<br>
+        <code>~/.config/Claude/claude_desktop_config.json</code> (Linux / WSL)<br>
+        <code>~/Library/Application Support/Claude/claude_desktop_config.json</code> (macOS)
+      </p>
+
+      <div class="code-block">
+        <button class="copy-btn" data-code={mcpConfigCompact}>Copy</button>
+        <pre><code set:text={mcpConfig} /></pre>
+      </div>
+
+      <p class="config-note">
+        Replace <code>your-printer:port</code>, <code>your_key</code>, and <code>octoprint</code> with your actual printer host, API key, and backend type (<code>octoprint</code>, <code>moonraker</code>, <code>bambu</code>, or <code>prusa-connect</code>).
+      </p>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="faq-section">
+    <div class="container">
+      <h2>Frequently Asked Questions</h2>
+      <p class="lead">Common issues and quick answers.</p>
+      <FAQ />
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section">
+    <div class="container">
+      <h2>Ready to print?</h2>
+      <p class="cta-text">Read the full documentation or browse the source on GitHub.</p>
+      <div class="cta-buttons">
+        <a href="/docs" class="btn">Documentation</a>
+        <a href="https://github.com/codeofaxel/Kiln" target="_blank" rel="noopener" class="btn btn-ghost">GitHub</a>
+      </div>
+    </div>
+  </section>
+
+</BaseLayout>
+
+<style>
+  /* Hero */
+  .hero {
+    padding: 100px 0 60px;
+    text-align: center;
+  }
+
+  .hero h1 {
+    font-size: 42px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
+  }
+
+  .hero .subtitle {
+    font-size: 18px;
+    color: var(--text-muted);
+    max-width: 480px;
+    margin: 0 auto;
+  }
+
+  /* Install Section */
+  .install-section {
+    padding-top: 40px;
+  }
+
+  /* Steps Section */
+  .steps {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .steps li {
+    display: flex;
+    gap: 24px;
+    padding: 32px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .steps li:last-child {
+    border-bottom: none;
+  }
+
+  .step-number {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(255, 107, 43, 0.1);
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 14px;
+    border: 1px solid rgba(255, 107, 43, 0.25);
+  }
+
+  .step-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .step-content h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .step-content p {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    line-height: 1.6;
+  }
+
+  .step-content .code-block {
+    margin: 12px 0 0;
+  }
+
+  /* MCP Section */
+  .mcp-section .code-block pre {
+    margin: 0;
+    white-space: pre;
+  }
+
+  .mcp-section .code-block code {
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+
+  .config-path {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+    line-height: 1.8;
+  }
+
+  .config-path code {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    color: var(--accent);
+  }
+
+  .config-note {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 8px;
+    line-height: 1.7;
+  }
+
+  .config-note code {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    color: var(--accent);
+  }
+
+  /* FAQ Section */
+  .faq-section {
+    padding-bottom: 40px;
+  }
+
+  /* CTA Section */
+  .cta-section {
+    text-align: center;
+    padding: 60px 0 100px;
+    border-top: 1px solid var(--border);
+  }
+
+  .cta-section h2 {
+    font-size: 28px;
+    margin-bottom: 12px;
+  }
+
+  .cta-text {
+    color: var(--text-muted);
+    font-size: 16px;
+    margin-bottom: 28px;
+  }
+
+  .cta-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  @media (max-width: 640px) {
+    .hero {
+      padding: 70px 0 40px;
+    }
+
+    .hero h1 {
+      font-size: 30px;
+    }
+
+    .hero .subtitle {
+      font-size: 16px;
+    }
+
+    .steps li {
+      flex-direction: column;
+      gap: 12px;
+      padding: 24px 0;
+    }
+
+    .cta-section {
+      padding: 50px 0 70px;
+    }
+  }
+</style>
+
+<script>
+  // Copy-to-clipboard for all code blocks on the page
+  document.querySelectorAll('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const code = btn.getAttribute('data-code') || '';
+      try {
+        await navigator.clipboard.writeText(code);
+        const original = btn.textContent;
+        btn.textContent = 'Copied!';
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.color = 'var(--accent)';
+        setTimeout(() => {
+          btn.textContent = original;
+          btn.style.borderColor = '';
+          btn.style.color = '';
+        }, 1500);
+      } catch {
+        // Fallback for non-HTTPS contexts
+        const textarea = document.createElement('textarea');
+        textarea.value = code;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        const original = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = original; }, 1500);
+      }
+    });
+  });
+</script>

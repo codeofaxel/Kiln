@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kiln — Agentic 3D Printing Infrastructure</title>
+  <meta name="description" content="Kiln lets AI agents safely control 3D printers. Open-source CLI and MCP server for OctoPrint, Moonraker, Bambu Lab, and Prusa Connect.">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Kiln — Agentic 3D Printing Infrastructure">
+  <meta property="og:description" content="Let AI agents safely control your 3D printer. Open-source CLI + MCP server.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/codeofaxel/Kiln/main/docs/assets/kiln-social-preview.png">
+  <meta property="og:type" content="website">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Kiln — Agentic 3D Printing Infrastructure">
+  <meta name="twitter:description" content="Let AI agents safely control your 3D printer. Open-source CLI + MCP server.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/codeofaxel/Kiln/main/docs/assets/kiln-social-preview.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="https://raw.githubusercontent.com/codeofaxel/Kiln/main/docs/assets/kiln-favicon-32.svg">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0F0F0F;
+      --bg-card: #1A1A1A;
+      --bg-code: #141414;
+      --text: #E8E8E8;
+      --text-muted: #888888;
+      --accent: #FF6B2B;
+      --accent-glow: rgba(255, 107, 43, 0.15);
+      --border: #2A2A2A;
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Layout ── */
+    .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(15, 15, 15, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 0;
+    }
+    nav .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    nav .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: 0.15em;
+      color: var(--text);
+    }
+    nav .logo img { height: 28px; }
+    nav .links { display: flex; gap: 24px; font-size: 14px; }
+    nav .links a { color: var(--text-muted); }
+    nav .links a:hover { color: var(--text); text-decoration: none; }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 100px 0 80px;
+      text-align: center;
+    }
+    .hero h1 {
+      font-size: clamp(32px, 5vw, 56px);
+      font-weight: 700;
+      line-height: 1.15;
+      margin-bottom: 20px;
+    }
+    .hero h1 span { color: var(--accent); }
+    .hero .subtitle {
+      font-size: clamp(16px, 2.5vw, 20px);
+      color: var(--text-muted);
+      max-width: 600px;
+      margin: 0 auto 40px;
+      line-height: 1.5;
+    }
+
+    /* ── Install block ── */
+    .install-block {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 28px;
+      max-width: 560px;
+      margin: 0 auto 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .install-block code {
+      font-family: var(--mono);
+      font-size: 14px;
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .install-block .prompt { color: var(--accent); }
+    .install-block button {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 12px;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .install-block button:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+    .install-alt {
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 40px;
+    }
+
+    /* ── Badges ── */
+    .badges {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 60px;
+      flex-wrap: wrap;
+    }
+    .badges img { height: 22px; }
+
+    /* ── Demo placeholder ── */
+    .demo {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      max-width: 720px;
+      margin: 0 auto 100px;
+      overflow: hidden;
+    }
+    .demo-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 12px 16px;
+      background: var(--bg-code);
+      border-bottom: 1px solid var(--border);
+    }
+    .demo-bar .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--border);
+    }
+    .demo-bar .dot:nth-child(1) { background: #FF5F56; }
+    .demo-bar .dot:nth-child(2) { background: #FFBD2E; }
+    .demo-bar .dot:nth-child(3) { background: #27C93F; }
+    .demo-content {
+      padding: 24px;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.8;
+      color: var(--text-muted);
+    }
+    .demo-content .cmd { color: var(--text); }
+    .demo-content .prompt { color: var(--accent); }
+    .demo-content .output { color: #6B8A6B; }
+    .demo-content .dim { color: #555; }
+
+    /* ── Section ── */
+    section { padding: 80px 0; }
+    section h2 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    section .lead {
+      color: var(--text-muted);
+      font-size: 16px;
+      margin-bottom: 48px;
+      max-width: 600px;
+    }
+
+    /* ── Feature grid ── */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    .feature {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px;
+    }
+    .feature .icon {
+      width: 40px;
+      height: 40px;
+      background: var(--accent-glow);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+      font-size: 20px;
+    }
+    .feature h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .feature p {
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* ── Printers ── */
+    .printer-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+    }
+    .printer-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px;
+      text-align: center;
+    }
+    .printer-card .name {
+      font-weight: 600;
+      font-size: 15px;
+      margin-bottom: 4px;
+    }
+    .printer-card .desc {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    /* ── Code snippet ── */
+    .code-block {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px;
+      overflow-x: auto;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.7;
+      margin: 24px 0;
+    }
+    .code-block .comment { color: #555; }
+    .code-block .string { color: #6B8A6B; }
+    .code-block .cmd { color: var(--text); }
+
+    /* ── How it works ── */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      counter-reset: step;
+    }
+    .step {
+      position: relative;
+      padding: 28px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      display: block;
+      width: 32px;
+      height: 32px;
+      line-height: 32px;
+      text-align: center;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 50%;
+      font-weight: 700;
+      font-size: 14px;
+      margin-bottom: 14px;
+    }
+    .step h3 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .step p {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* ── CTA ── */
+    .cta {
+      text-align: center;
+      padding: 80px 0 100px;
+    }
+    .cta h2 { margin-bottom: 16px; }
+    .cta p {
+      color: var(--text-muted);
+      margin-bottom: 32px;
+      font-size: 16px;
+    }
+    .btn {
+      display: inline-block;
+      padding: 14px 32px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      font-size: 15px;
+      border-radius: 8px;
+      transition: all 0.15s;
+    }
+    .btn:hover { background: #e85e22; text-decoration: none; }
+    .btn-ghost {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text);
+      margin-left: 12px;
+    }
+    .btn-ghost:hover { border-color: var(--text-muted); }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0;
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    footer a { color: var(--text-muted); }
+    footer a:hover { color: var(--text); }
+    footer .footer-links { display: flex; justify-content: center; gap: 24px; margin-bottom: 12px; }
+
+    /* ── Responsive ── */
+    @media (max-width: 640px) {
+      .hero { padding: 60px 0 50px; }
+      .install-block { flex-direction: column; text-align: center; }
+      nav .links { gap: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Nav ── -->
+<nav>
+  <div class="container">
+    <div class="logo">
+      <img src="https://raw.githubusercontent.com/codeofaxel/Kiln/main/docs/assets/kiln-logo-dark-notext.svg" alt="Kiln">
+      K<span style="color: var(--accent)">I</span>LN
+    </div>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#how-it-works">How It Works</a>
+      <a href="https://github.com/codeofaxel/Kiln/blob/main/docs/WHITEPAPER.md">Whitepaper</a>
+      <a href="https://github.com/codeofaxel/Kiln">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ── Hero ── -->
+<div class="hero">
+  <div class="container">
+    <h1>AI agents that <span>safely</span> control<br>3D printers</h1>
+    <p class="subtitle">
+      Open-source CLI and MCP server that lets any AI agent discover, slice, print, and monitor
+      on real hardware &mdash; with built-in safety limits that can't be bypassed.
+    </p>
+
+    <div class="install-block">
+      <code><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeofaxel/Kiln/main/install.sh | sh</code>
+      <button onclick="navigator.clipboard.writeText('curl -fsSL https://raw.githubusercontent.com/codeofaxel/Kiln/main/install.sh | sh'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+    </div>
+    <p class="install-alt">
+      or: <code style="font-family: var(--mono); font-size: 13px;">pip install kiln3d</code> &middot;
+      Requires Python 3.10+
+    </p>
+
+    <div class="badges">
+      <a href="https://github.com/codeofaxel/Kiln/actions/workflows/ci.yml"><img src="https://github.com/codeofaxel/Kiln/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+      <img src="https://img.shields.io/badge/python-3.10%E2%80%933.13-blue" alt="Python 3.10–3.13">
+      <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
+      <img src="https://img.shields.io/badge/tests-2%2C788%20passed-brightgreen" alt="Tests">
+      <img src="https://img.shields.io/badge/MCP%20tools-100%2B-orange" alt="100+ MCP Tools">
+    </div>
+  </div>
+</div>
+
+<!-- ── Demo terminal ── -->
+<div class="container">
+  <div class="demo">
+    <div class="demo-bar">
+      <span class="dot"></span>
+      <span class="dot"></span>
+      <span class="dot"></span>
+    </div>
+    <div class="demo-content">
+      <span class="prompt">$</span> <span class="cmd">kiln setup</span><br>
+      <span class="output">&nbsp;==> Scanning network for printers...</span><br>
+      <span class="output">&nbsp; ✓&nbsp; Found: Bambu A1 Mini (192.168.1.42)</span><br>
+      <span class="output">&nbsp; ✓&nbsp; Config saved to ~/.kiln/config.yaml</span><br>
+      <br>
+      <span class="prompt">$</span> <span class="cmd">kiln print bracket.gcode --dry-run --json</span><br>
+      <span class="output">&nbsp;{"preflight": "passed", "file": "bracket.gcode", "material": "PLA"}</span><br>
+      <br>
+      <span class="dim"># Agent asks human: "Ready to print bracket.gcode with PLA. Proceed?"</span><br>
+      <span class="dim"># Human: "yes"</span><br>
+      <br>
+      <span class="prompt">$</span> <span class="cmd">kiln print bracket.gcode --json</span><br>
+      <span class="output">&nbsp;{"status": "success", "message": "Print started"}</span><br>
+      <br>
+      <span class="prompt">$</span> <span class="cmd">kiln status --json</span><br>
+      <span class="output">&nbsp;{"status": "printing", "progress": 42.5, "temps": {"tool": 210, "bed": 60}}</span><br>
+    </div>
+  </div>
+</div>
+
+<!-- ── Features ── -->
+<section id="features">
+  <div class="container">
+    <h2>What Kiln does</h2>
+    <p class="lead">
+      Everything an AI agent needs to go from a model file to a finished print,
+      with safety enforced at every step.
+    </p>
+
+    <div class="features">
+      <div class="feature">
+        <div class="icon">🛡️</div>
+        <h3>Hardware-Safe by Default</h3>
+        <p>Per-printer temperature limits, G-code validation, mandatory pre-flight checks, rate limiting, and emergency stop. Safety profiles for 26+ printer models — agents can't bypass them.</p>
+      </div>
+
+      <div class="feature">
+        <div class="icon">🖨️</div>
+        <h3>4 Printer Backends</h3>
+        <p>Native adapters for OctoPrint, Moonraker (Klipper), Bambu Lab (MQTT), and Prusa Connect. Same commands work across all of them.</p>
+      </div>
+
+      <div class="feature">
+        <div class="icon">🔧</div>
+        <h3>CLI + MCP Server</h3>
+        <p>50+ CLI commands with <code>--json</code> output for agents, or 100+ MCP tools for deeper integration. Pick whichever your agent platform supports.</p>
+      </div>
+
+      <div class="feature">
+        <div class="icon">✂️</div>
+        <h3>Integrated Slicing</h3>
+        <p>PrusaSlicer and OrcaSlicer integration with bundled profiles for popular printers. Go from STL to print in one pipeline.</p>
+      </div>
+
+      <div class="feature">
+        <div class="icon">🏭</div>
+        <h3>Outsourced Manufacturing</h3>
+        <p>No local printer? Kiln quotes and places orders through Craftcloud, Shapeways, and Sculpteo. Same CLI, same safety model.</p>
+      </div>
+
+      <div class="feature">
+        <div class="icon">📡</div>
+        <h3>Fleet Management</h3>
+        <p>Multi-printer registry, priority job queue, smart routing based on print history, background scheduling, and pub/sub event bus.</p>
+      </div>
+
+      <div class="feature">
+        <div class="icon">👁️</div>
+        <h3>Vision Monitoring</h3>
+        <p>Webcam snapshots for first-layer checks and print quality monitoring. Agents can see what's happening on the build plate.</p>
+      </div>
+
+      <div class="feature">
+        <div class="icon">🧊</div>
+        <h3>Text-to-3D Generation</h3>
+        <p>Generate printable models from text descriptions via Meshy AI and OpenSCAD. Parametric or AI-generated, with mesh validation before printing.</p>
+      </div>
+
+      <div class="feature">
+        <div class="icon">🔐</div>
+        <h3>Confirmation Protocol</h3>
+        <p>Every command has a safety level (safe/guarded/confirm/emergency). Agents know when to act autonomously and when to ask the human first.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── How it works ── -->
+<section id="how-it-works" style="border-top: 1px solid var(--border);">
+  <div class="container">
+    <h2>How it works</h2>
+    <p class="lead">
+      Give your agent the Kiln skill definition. It handles the rest.
+    </p>
+
+    <div class="steps">
+      <div class="step">
+        <h3>Install &amp; discover</h3>
+        <p>One command installs Kiln. <code>kiln setup</code> auto-discovers printers on your network and saves config.</p>
+      </div>
+      <div class="step">
+        <h3>Agent reads the skill</h3>
+        <p>Your AI agent reads <code>SKILL.md</code> — a structured document defining every command, safety level, and workflow pattern.</p>
+      </div>
+      <div class="step">
+        <h3>Safely operate hardware</h3>
+        <p>The agent slices, uploads, prints, and monitors — with Kiln enforcing temperature limits, G-code validation, and pre-flight checks at every step.</p>
+      </div>
+      <div class="step">
+        <h3>Human stays in control</h3>
+        <p>Irreversible actions (start print, cancel, raw G-code) require human confirmation. The agent asks, the human approves.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Supported Printers ── -->
+<section style="border-top: 1px solid var(--border);">
+  <div class="container">
+    <h2>Supported printers</h2>
+    <p class="lead">Works with the most popular 3D printer ecosystems out of the box.</p>
+
+    <div class="printer-grid">
+      <div class="printer-card">
+        <div class="name">OctoPrint</div>
+        <div class="desc">REST API &middot; Any printer with OctoPrint</div>
+      </div>
+      <div class="printer-card">
+        <div class="name">Moonraker</div>
+        <div class="desc">REST API &middot; Klipper-based printers</div>
+      </div>
+      <div class="printer-card">
+        <div class="name">Bambu Lab</div>
+        <div class="desc">MQTT &middot; X1C, P1S, A1 Mini, A1</div>
+      </div>
+      <div class="printer-card">
+        <div class="name">Prusa Connect</div>
+        <div class="desc">REST API &middot; MK4, MK3.9, MINI+, XL</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Code example ── -->
+<section style="border-top: 1px solid var(--border);">
+  <div class="container">
+    <h2>Built for agents, works for humans</h2>
+    <p class="lead">Every command returns structured JSON. Agents parse it, humans read it.</p>
+
+    <div class="code-block">
+      <span class="comment"># Check what the printer is doing</span><br>
+      $ kiln status --json<br>
+      <span class="string">{"status": "printing", "progress": 67.2, "temps": {"tool": 210, "bed": 60}}</span><br>
+      <br>
+      <span class="comment"># Slice an STL and start printing (with safety checks)</span><br>
+      $ kiln slice model.stl --print-after --json<br>
+      <span class="string">{"status": "success", "gcode": "model.gcode", "print_started": true}</span><br>
+      <br>
+      <span class="comment"># No local printer? Get a manufacturing quote</span><br>
+      $ kiln order quote model.stl -m pla_standard --json<br>
+      <span class="string">{"price_usd": 12.50, "lead_time_days": 5, "quote_id": "q_abc123"}</span><br>
+      <br>
+      <span class="comment"># Compare local vs. outsourced cost</span><br>
+      $ kiln compare-cost model.gcode --fulfillment-material pla_standard --json<br>
+      <span class="string">{"local_cost_usd": 1.20, "fulfillment_cost_usd": 12.50}</span>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA ── -->
+<div class="cta">
+  <div class="container">
+    <h2>Start printing with AI</h2>
+    <p>Open source, MIT licensed, free for local printing forever.</p>
+    <a href="https://github.com/codeofaxel/Kiln" class="btn">View on GitHub</a>
+    <a href="https://github.com/codeofaxel/Kiln/blob/main/docs/WHITEPAPER.md" class="btn btn-ghost">Read the Whitepaper</a>
+  </div>
+</div>
+
+<!-- ── Footer ── -->
+<footer>
+  <div class="container">
+    <div class="footer-links">
+      <a href="https://github.com/codeofaxel/Kiln">GitHub</a>
+      <a href="https://github.com/codeofaxel/Kiln/blob/main/docs/WHITEPAPER.md">Whitepaper</a>
+      <a href="https://github.com/codeofaxel/Kiln/blob/main/docs/PROJECT_DOCS.md">Docs</a>
+      <a href="https://github.com/codeofaxel/Kiln/blob/main/LICENSE">MIT License</a>
+    </div>
+    <p>Built by <a href="https://github.com/codeofaxel">codeofaxel</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

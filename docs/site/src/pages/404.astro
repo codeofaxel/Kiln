@@ -1,0 +1,44 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout title="404 — Kiln" description="Page not found.">
+  <section class="not-found">
+    <div class="container">
+      <img src="/assets/kiln-logo-dark-notext.svg" alt="Kiln" width="64" height="64" class="logo-icon">
+      <h1>404</h1>
+      <p>Page not found</p>
+      <a href="/" class="btn">Go Home</a>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .not-found {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    min-height: calc(100vh - 200px);
+    padding: 80px 0;
+  }
+  .logo-icon {
+    margin-bottom: 24px;
+    opacity: 0.6;
+  }
+  .not-found h1 {
+    font-size: 96px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, var(--text) 0%, var(--text-muted) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .not-found p {
+    font-size: 18px;
+    color: var(--text-muted);
+    margin-bottom: 36px;
+  }
+</style>

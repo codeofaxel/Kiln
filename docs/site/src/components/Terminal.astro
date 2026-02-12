@@ -1,0 +1,69 @@
+---
+const lines = `<span class="prompt">$</span> <span class="cmd">kiln setup</span>
+<span class="output">&nbsp;==&gt; Scanning network for printers...</span>
+<span class="output">&nbsp; &#10003;&nbsp; Found: Bambu A1 Mini (192.168.1.42)</span>
+<span class="output">&nbsp; &#10003;&nbsp; Config saved to ~/.kiln/config.yaml</span>
+
+<span class="prompt">$</span> <span class="cmd">kiln print bracket.gcode --dry-run --json</span>
+<span class="output">&nbsp;{"preflight": "passed", "file": "bracket.gcode", "material": "PLA"}</span>
+
+<span class="dim"># Agent asks human: "Ready to print bracket.gcode with PLA. Proceed?"</span>
+<span class="dim"># Human: "yes"</span>
+
+<span class="prompt">$</span> <span class="cmd">kiln print bracket.gcode --json</span>
+<span class="output">&nbsp;{"status": "success", "message": "Print started"}</span>
+
+<span class="prompt">$</span> <span class="cmd">kiln status --json</span>
+<span class="output">&nbsp;{"status": "printing", "progress": 42.5, "temps": {"tool": 210, "bed": 60}}</span>`;
+---
+
+<div class="container">
+  <div class="demo">
+    <div class="demo-bar">
+      <span class="dot red"></span>
+      <span class="dot yellow"></span>
+      <span class="dot green"></span>
+    </div>
+    <div class="demo-content" set:html={lines} />
+  </div>
+</div>
+
+<style>
+  .demo {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    max-width: 720px;
+    margin: 0 auto 100px;
+    overflow: hidden;
+  }
+  .demo-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 16px;
+    background: var(--bg-code);
+    border-bottom: 1px solid var(--border);
+  }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border);
+  }
+  .dot.red { background: #FF5F56; }
+  .dot.yellow { background: #FFBD2E; }
+  .dot.green { background: #27C93F; }
+  .demo-content {
+    padding: 24px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--text-muted);
+    white-space: pre-wrap;
+  }
+  .demo-content :global(.cmd) { color: var(--text); }
+  .demo-content :global(.prompt) { color: var(--accent); }
+  .demo-content :global(.output) { color: #6B8A6B; }
+  .demo-content :global(.dim) { color: #555; }
+</style>

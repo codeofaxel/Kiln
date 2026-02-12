@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://kiln3d.com/sitemap-index.xml

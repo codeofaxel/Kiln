@@ -1,0 +1,129 @@
+---
+const faqs = [
+  {
+    q: '"kiln: command not found" after install',
+    a: 'Your shell cannot find the <code>kiln</code> binary. Add <code>~/.local/bin</code> to your PATH by running <code>pipx ensurepath</code>, then restart your terminal. If you installed with pip into a virtualenv, make sure the virtualenv is activated.',
+  },
+  {
+    q: "WSL 2 can't discover printers",
+    a: 'WSL 2 uses NAT networking, which blocks mDNS discovery. Connect to your printer by IP address instead:<br><code>kiln auth --name my-printer --host http://192.168.1.x:port --type octoprint</code>',
+  },
+  {
+    q: 'PrusaSlicer not found',
+    a: 'Kiln auto-detects PrusaSlicer and OrcaSlicer on your PATH and in standard macOS app bundle locations. If it is installed in a non-standard location, set the path explicitly:<br><code>export KILN_SLICER_PATH=/path/to/prusa-slicer</code>',
+  },
+  {
+    q: 'How do I uninstall Kiln?',
+    a: 'If you installed with pipx: <code>pipx uninstall kiln3d</code><br>If you installed with pip: <code>pip uninstall kiln3d</code><br>If you used the install script: <code>~/.kiln/src/install.sh --uninstall</code>',
+  },
+  {
+    q: 'What Python version do I need?',
+    a: 'Python 3.10 or newer. Check your version with <code>python3 --version</code>.',
+  },
+  {
+    q: 'Does Kiln work on Windows?',
+    a: 'Not natively. Use WSL 2 (Windows Subsystem for Linux) with an Ubuntu distribution. Kiln runs fully inside the WSL environment. See the WSL 2 tab above for setup instructions.',
+  },
+  {
+    q: 'What printers are supported?',
+    a: 'Any printer running OctoPrint, Moonraker (Klipper), Bambu Lab (X1C, P1S, A1 via LAN MQTT), or Prusa Connect (MK4, XL, Mini+). 27+ printer models have been tested with bundled safety profiles.',
+  },
+  {
+    q: 'Is Kiln free?',
+    a: 'Yes. All local printing features are free forever — status, file management, slicing, fleet control, and printing to your own printers. A 5% platform fee applies only to orders placed through external manufacturing services, with the first 5 orders per month free and a $200 per-order cap.',
+  },
+];
+---
+
+<div class="faq-list">
+  {faqs.map((faq) => (
+    <details class="faq-item">
+      <summary>{faq.q}</summary>
+      <div class="faq-answer" set:html={faq.a} />
+    </details>
+  ))}
+</div>
+
+<style>
+  .faq-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .faq-item {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .faq-item:first-child {
+    border-top: 1px solid var(--border);
+  }
+
+  .faq-item summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+    list-style: none;
+    transition: color 0.15s;
+  }
+
+  .faq-item summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .faq-item summary::after {
+    content: '+';
+    font-size: 20px;
+    font-weight: 300;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+    margin-left: 16px;
+  }
+
+  .faq-item[open] summary::after {
+    content: '\2212';
+  }
+
+  .faq-item summary:hover {
+    color: var(--accent);
+  }
+
+  .faq-answer {
+    padding: 0 0 20px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text-muted);
+  }
+
+  .faq-answer code {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 0.85em;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+
+  @media (max-width: 640px) {
+    .faq-item summary {
+      font-size: 14px;
+      padding: 16px 0;
+    }
+
+    .faq-answer {
+      font-size: 13px;
+    }
+
+    .faq-answer code {
+      white-space: normal;
+      word-break: break-all;
+    }
+  }
+</style>
