@@ -132,6 +132,7 @@ from kiln.generation import (
     convert_to_stl,
     validate_mesh,
 )
+from kiln.gateway.threedos import ThreeDOSClient, ThreeDOSError
 
 
 
@@ -697,6 +698,23 @@ def _get_fulfillment() -> FulfillmentProvider:
     return _fulfillment
 
 
+_threedos_client: Optional[ThreeDOSClient] = None
+
+
+def _get_threedos_client() -> ThreeDOSClient:
+    """Return the lazily-initialised 3DOS gateway client.
+
+    Requires ``KILN_3DOS_API_KEY`` to be set.
+    """
+    global _threedos_client  # noqa: PLW0603
+
+    if _threedos_client is not None:
+        return _threedos_client
+
+    _threedos_client = ThreeDOSClient()
+    return _threedos_client
+
+
 def _get_payment_mgr() -> PaymentManager:
     """Return the lazily-initialised payment manager."""
     global _payment_mgr  # noqa: PLW0603
@@ -726,7 +744,13 @@ def _get_payment_mgr() -> PaymentManager:
     if circle_key:
         try:
             from kiln.payments.circle_provider import CircleProvider
-            _payment_mgr.register_provider(CircleProvider(api_key=circle_key))
+            circle_network = os.environ.get(
+                "KILN_CIRCLE_NETWORK",
+                config.get("circle_default_network", "solana"),
+            )
+            _payment_mgr.register_provider(
+                CircleProvider(api_key=circle_key, default_network=circle_network),
+            )
         except Exception:
             logger.debug("Could not register Circle provider")
 
@@ -2613,6 +2637,24 @@ def billing_history(limit: int = 20) -> dict:
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
+@mcp.tool()
+def donate_info() -> dict:
+    """Get crypto wallet addresses to tip/donate to the Kiln project.
+
+    Kiln is free, open-source software.  This tool returns wallet
+    addresses (with ENS/SNS domains) where users can send tips in
+    SOL, ETH, USDC, or other tokens to support development.
+
+    No payment is required — Kiln is fully functional without donating.
+    """
+    try:
+        from kiln.wallets import get_donation_info
+        return {"success": True, **get_donation_info()}
+    except Exception as exc:
+        logger.exception("Unexpected error in donate_info")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
 # ---------------------------------------------------------------------------
 # Multi-marketplace tools — unified search across all sources
 # ---------------------------------------------------------------------------
@@ -4246,6 +4288,183 @@ def fulfillment_cancel(order_id: str) -> dict:
         return _error_dict(str(exc))
     except Exception as exc:
         logger.exception("Unexpected error in fulfillment_cancel")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# 3DOS Network tools — distributed manufacturing via 3DOS
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def network_register_printer(
+    name: str,
+    location: str,
+    capabilities: Optional[Dict[str, Any]] = None,
+    price_per_gram: Optional[float] = None,
+) -> dict:
+    """Register a local printer on the 3DOS distributed manufacturing network.
+
+    Args:
+        name: Human-readable printer name (e.g. "Prusa MK4 #2").
+        location: Geographic location (e.g. "Austin, TX").
+        capabilities: Optional dict of printer capabilities (build volume,
+            supported materials, etc.).
+        price_per_gram: Price per gram of filament in USD (optional).
+
+    Makes this printer available for remote print jobs from the 3DOS
+    network.  Requires ``KILN_3DOS_API_KEY`` to be set.
+    """
+    try:
+        client = _get_threedos_client()
+        listing = client.register_printer(
+            name=name,
+            location=location,
+            capabilities=capabilities,
+            price_per_gram=price_per_gram,
+        )
+        return {
+            "success": True,
+            "printer": listing.to_dict(),
+        }
+    except (ThreeDOSError, ValueError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in network_register_printer")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def network_update_printer(
+    printer_id: str,
+    available: bool,
+) -> dict:
+    """Update a printer's availability on the 3DOS network.
+
+    Args:
+        printer_id: ID of the registered printer.
+        available: Whether the printer is available for new jobs.
+    """
+    try:
+        client = _get_threedos_client()
+        client.update_printer_status(printer_id=printer_id, available=available)
+        return {
+            "success": True,
+            "printer_id": printer_id,
+            "available": available,
+        }
+    except (ThreeDOSError, ValueError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in network_update_printer")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def network_list_printers() -> dict:
+    """List printers registered by this account on the 3DOS network.
+
+    Returns all printers that this Kiln instance has registered,
+    including their current availability status and pricing.
+    """
+    try:
+        client = _get_threedos_client()
+        printers = client.list_my_printers()
+        return {
+            "success": True,
+            "printers": [p.to_dict() for p in printers],
+            "count": len(printers),
+        }
+    except (ThreeDOSError, ValueError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in network_list_printers")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def network_find_printers(
+    material: str,
+    location: Optional[str] = None,
+) -> dict:
+    """Search for available printers on the 3DOS network.
+
+    Args:
+        material: Material type to filter by (e.g. "PLA", "PETG", "ABS").
+        location: Optional geographic filter (e.g. "Austin, TX").
+
+    Returns printers that can handle the requested material.  Use the
+    printer ``id`` from the results with ``network_submit_job`` to
+    target a specific printer.
+    """
+    try:
+        client = _get_threedos_client()
+        printers = client.find_printers(material=material, location=location)
+        return {
+            "success": True,
+            "printers": [p.to_dict() for p in printers],
+            "count": len(printers),
+        }
+    except (ThreeDOSError, ValueError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in network_find_printers")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def network_submit_job(
+    file_url: str,
+    material: str,
+    printer_id: Optional[str] = None,
+) -> dict:
+    """Submit a print job to the 3DOS distributed manufacturing network.
+
+    Args:
+        file_url: Public URL of the model file to print.
+        material: Material to print with (e.g. "PLA", "PETG").
+        printer_id: Optional target printer ID.  If omitted, 3DOS
+            auto-assigns the best available printer.
+
+    Returns the network job with ID, status, and estimated cost.
+    Use ``network_job_status`` to track progress.
+    """
+    try:
+        client = _get_threedos_client()
+        job = client.submit_network_job(
+            file_url=file_url,
+            material=material,
+            printer_id=printer_id,
+        )
+        return {
+            "success": True,
+            "job": job.to_dict(),
+        }
+    except (ThreeDOSError, ValueError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in network_submit_job")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def network_job_status(job_id: str) -> dict:
+    """Check the status of a job on the 3DOS network.
+
+    Args:
+        job_id: Job ID from ``network_submit_job``.
+    """
+    try:
+        client = _get_threedos_client()
+        job = client.get_network_job(job_id=job_id)
+        return {
+            "success": True,
+            "job": job.to_dict(),
+        }
+    except (ThreeDOSError, ValueError) as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in network_job_status")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 

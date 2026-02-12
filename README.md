@@ -215,6 +215,12 @@ kiln generate-download <job_id> -o ./models --json      # Download generated mod
 kiln firmware status --json                # Check for firmware updates
 kiln firmware update [--component klipper] # Apply firmware updates
 kiln firmware rollback <component>         # Roll back firmware
+kiln network register --name N --location L # Register printer on 3DOS network
+kiln network find --material PLA           # Find network printers by material
+kiln network submit URL --material PLA     # Submit job to 3DOS network
+kiln network status <job_id>               # Check network job status
+kiln network list                          # List your registered network printers
+kiln network update <id> --available       # Update printer availability
 kiln setup                                 # Interactive printer setup wizard
 kiln serve                                 # Start MCP server
 kiln rest [--port 8420] [--tier full]      # Start REST API server
@@ -393,6 +399,12 @@ The Kiln MCP server (`kiln serve`) exposes these tools to agents:
 | `get_printer_insights` | Query cross-printer learning: success rates, failure breakdown, material stats |
 | `suggest_printer_for_job` | Rank printers by historical success for a file/material combination |
 | `recommend_settings` | Recommend print settings (temps, speed, slicer profile) from historical successes |
+| `network_register_printer` | Register a local printer on the 3DOS distributed manufacturing network |
+| `network_update_printer` | Update a printer's availability on the 3DOS network |
+| `network_list_printers` | List printers registered by this account on the 3DOS network |
+| `network_find_printers` | Search for available printers on the 3DOS network by material/location |
+| `network_submit_job` | Submit a print job to the 3DOS distributed manufacturing network |
+| `network_job_status` | Check the status of a job on the 3DOS network |
 
 ## Supported Printers
 

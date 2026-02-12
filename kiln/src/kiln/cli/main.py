@@ -2149,6 +2149,64 @@ def billing_history(limit: int, json_mode: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# donate (tip the project)
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def donate(json_mode: bool) -> None:
+    """Show crypto wallet addresses to tip/donate to the Kiln project.
+
+    Kiln is free, open-source software.  If you find it useful,
+    consider sending a tip to support development.
+    """
+    from kiln.wallets import get_donation_info
+
+    info = get_donation_info()
+    if json_mode:
+        import json as _json
+        click.echo(_json.dumps(
+            {"status": "success", "data": info},
+            indent=2,
+            sort_keys=False,
+        ))
+        return
+
+    sol = info["wallets"]["solana"]
+    eth = info["wallets"]["ethereum"]
+
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+
+        console = Console(stderr=True)
+        lines = [
+            info["message"],
+            "",
+            f"[bold]Solana[/bold]  {sol['domain']}",
+            f"         {sol['address']}",
+            f"         Accepts: {', '.join(sol['accepts'])}",
+            "",
+            f"[bold]Ethereum[/bold] {eth['domain']}",
+            f"          {eth['address']}",
+            f"          Accepts: {', '.join(eth['accepts'])}",
+            "",
+            f"[dim]{info['note']}[/dim]",
+        ]
+        console.print(Panel("\n".join(lines), title="Support Kiln", border_style="green"))
+    except ImportError:
+        click.echo(info["message"])
+        click.echo()
+        click.echo(f"Solana:   {sol['domain']}  ({sol['address']})")
+        click.echo(f"          Accepts: {', '.join(sol['accepts'])}")
+        click.echo(f"Ethereum: {eth['domain']}  ({eth['address']})")
+        click.echo(f"          Accepts: {', '.join(eth['accepts'])}")
+        click.echo()
+        click.echo(info["note"])
+
+
+# ---------------------------------------------------------------------------
 # setup (interactive onboarding wizard)
 # ---------------------------------------------------------------------------
 
@@ -3215,6 +3273,166 @@ def license_info(json_mode: bool) -> None:
         if info.license_key_hint:
             click.echo(f"  Key:      ...{info.license_key_hint}")
         click.echo(f"  Source:   {info.source}")
+
+
+# ---------------------------------------------------------------------------
+# network (3DOS distributed manufacturing)
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def network() -> None:
+    """Distributed manufacturing via the 3DOS network.
+
+    Register local printers, find remote printers, and submit jobs
+    to the 3DOS distributed manufacturing network.
+    """
+
+
+def _get_threedos_client():
+    """Create a 3DOS client from env config."""
+    from kiln.gateway.threedos import ThreeDOSClient
+
+    try:
+        return ThreeDOSClient()
+    except ValueError as exc:
+        raise click.ClickException(
+            f"3DOS not configured: {exc}. Set KILN_3DOS_API_KEY."
+        ) from exc
+
+
+@network.command("register")
+@click.option("--name", "-n", required=True, help="Printer name.")
+@click.option("--location", "-l", required=True, help="Geographic location.")
+@click.option("--price", type=float, default=None, help="Price per gram (USD).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def network_register(name: str, location: str, price: Optional[float], json_mode: bool) -> None:
+    """Register a local printer on the 3DOS network."""
+    try:
+        client = _get_threedos_client()
+        listing = client.register_printer(name=name, location=location, price_per_gram=price)
+        if json_mode:
+            click.echo(format_response("success", data=listing.to_dict(), json_mode=True))
+        else:
+            click.echo(f"Registered printer '{listing.name}' (id: {listing.id})")
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@network.command("update")
+@click.argument("printer_id")
+@click.option("--available/--unavailable", default=True, help="Set availability.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def network_update(printer_id: str, available: bool, json_mode: bool) -> None:
+    """Update a printer's availability on the 3DOS network."""
+    try:
+        client = _get_threedos_client()
+        client.update_printer_status(printer_id=printer_id, available=available)
+        if json_mode:
+            click.echo(format_response("success", data={"printer_id": printer_id, "available": available}, json_mode=True))
+        else:
+            status = "available" if available else "unavailable"
+            click.echo(f"Printer {printer_id} is now {status}")
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@network.command("list")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def network_list(json_mode: bool) -> None:
+    """List your printers registered on the 3DOS network."""
+    try:
+        client = _get_threedos_client()
+        printers = client.list_my_printers()
+        if json_mode:
+            click.echo(format_response("success", data={"printers": [p.to_dict() for p in printers], "count": len(printers)}, json_mode=True))
+        else:
+            if not printers:
+                click.echo("No printers registered on the 3DOS network.")
+            else:
+                for p in printers:
+                    avail = "available" if p.available else "offline"
+                    click.echo(f"  {p.name} ({p.id}) — {p.location} [{avail}]")
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@network.command("find")
+@click.option("--material", "-m", required=True, help="Material type (PLA, PETG, ABS).")
+@click.option("--location", "-l", default=None, help="Geographic filter.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def network_find(material: str, location: Optional[str], json_mode: bool) -> None:
+    """Search for available printers on the 3DOS network."""
+    try:
+        client = _get_threedos_client()
+        printers = client.find_printers(material=material, location=location)
+        if json_mode:
+            click.echo(format_response("success", data={"printers": [p.to_dict() for p in printers], "count": len(printers)}, json_mode=True))
+        else:
+            if not printers:
+                click.echo(f"No printers found for material '{material}'.")
+            else:
+                click.echo(f"Found {len(printers)} printer(s):")
+                for p in printers:
+                    price_str = f"${p.price_per_gram}/g" if p.price_per_gram else "price TBD"
+                    click.echo(f"  {p.name} ({p.id}) — {p.location} [{price_str}]")
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@network.command("submit")
+@click.argument("file_url")
+@click.option("--material", "-m", required=True, help="Material type.")
+@click.option("--printer", "-p", default=None, help="Target printer ID (auto-assign if omitted).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def network_submit(file_url: str, material: str, printer: Optional[str], json_mode: bool) -> None:
+    """Submit a print job to the 3DOS network."""
+    try:
+        client = _get_threedos_client()
+        job = client.submit_network_job(file_url=file_url, material=material, printer_id=printer)
+        if json_mode:
+            click.echo(format_response("success", data=job.to_dict(), json_mode=True))
+        else:
+            cost = f" (est. ${job.estimated_cost:.2f})" if job.estimated_cost else ""
+            click.echo(f"Job submitted: {job.id} — status: {job.status}{cost}")
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@network.command("status")
+@click.argument("job_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def network_status(job_id: str, json_mode: bool) -> None:
+    """Check the status of a 3DOS network job."""
+    try:
+        client = _get_threedos_client()
+        job = client.get_network_job(job_id=job_id)
+        if json_mode:
+            click.echo(format_response("success", data=job.to_dict(), json_mode=True))
+        else:
+            cost = f" (est. ${job.estimated_cost:.2f})" if job.estimated_cost else ""
+            printer_info = f" on {job.printer_id}" if job.printer_id else ""
+            click.echo(f"Job {job.id}: {job.status}{printer_info}{cost}")
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
