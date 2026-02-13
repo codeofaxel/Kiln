@@ -864,21 +864,30 @@ def _check_price_drift(
     quoted_price: float,
     actual_price: float,
     *,
-    threshold: float = 0.10,
-) -> Optional[str]:
+    warn_threshold: float = 0.10,
+    block_threshold: float = 0.25,
+) -> Tuple[Optional[str], bool]:
     """Check if the actual price drifted from the quoted price.
 
-    Returns a warning string if drift exceeds *threshold*, ``None`` otherwise.
+    :returns:
+        Tuple of (warning_message_or_None, should_block).
+        If should_block is True, the order should be rejected.
     """
     if quoted_price <= 0:
-        return None
+        return None, False
     drift = abs(actual_price - quoted_price) / quoted_price
-    if drift > threshold:
+    if drift > block_threshold:
+        return (
+            f"Price changed significantly from ${quoted_price:.2f} to "
+            f"${actual_price:.2f} ({drift:.0%} drift, exceeds {block_threshold:.0%} "
+            f"safety limit). Order blocked — please request a new quote."
+        ), True
+    if drift > warn_threshold:
         return (
             f"Price changed from ${quoted_price:.2f} to ${actual_price:.2f} "
             f"({drift:.0%} drift). The fee was calculated on the actual price."
-        )
-    return None
+        ), False
+    return None, False
 
 
 def validate_quote_for_order(

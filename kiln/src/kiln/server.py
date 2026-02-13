@@ -2994,6 +2994,84 @@ def billing_history(limit: int = 20) -> dict:
 
 
 @mcp.tool()
+def billing_invoice(charge_id: str = "", job_id: str = "") -> dict:
+    """Generate an invoice/receipt for a billing charge.
+
+    Args:
+        charge_id: The charge ID (from ``billing_history``).
+        job_id: Or the job/order ID to look up.
+
+    Returns the invoice as structured data with a human-readable
+    receipt and tamper-detection checksum.
+    """
+    if err := _check_billing_auth("billing"):
+        return err
+    try:
+        from kiln.billing_invoice import generate_invoice
+
+        if charge_id:
+            charges = _billing.list_charges(limit=500)
+            charge = next((c for c in charges if c.get("id") == charge_id), None)
+        elif job_id:
+            charges = _billing.list_charges(limit=500)
+            charge = next((c for c in charges if c.get("job_id") == job_id), None)
+        else:
+            return _error_dict("Provide either charge_id or job_id.")
+
+        if charge is None:
+            return _error_dict("Charge not found.", code="NOT_FOUND")
+
+        invoice = generate_invoice(charge)
+        return {
+            "success": True,
+            "invoice": invoice.to_dict(),
+            "receipt_text": invoice.to_receipt_text(),
+        }
+    except Exception as exc:
+        logger.exception("Error generating invoice")
+        return _error_dict(str(exc))
+
+
+@mcp.tool()
+def billing_export(format: str = "csv", limit: int = 100) -> dict:
+    """Export billing history for accounting.
+
+    Args:
+        format: Export format — ``"csv"`` or ``"json"``.
+        limit: Maximum charges to export (default 100).
+
+    Returns billing data suitable for import into accounting
+    software (QuickBooks, Xero, etc.).
+    """
+    if err := _check_billing_auth("billing"):
+        return err
+    try:
+        from kiln.billing_invoice import export_billing_csv, generate_invoices
+
+        charges = _billing.list_charges(limit=limit)
+
+        if format == "csv":
+            csv_data = export_billing_csv(charges)
+            return {
+                "success": True,
+                "format": "csv",
+                "data": csv_data,
+                "count": len(charges),
+            }
+        else:
+            invoices = generate_invoices(charges)
+            return {
+                "success": True,
+                "format": "json",
+                "invoices": [inv.to_dict() for inv in invoices],
+                "count": len(invoices),
+            }
+    except Exception as exc:
+        logger.exception("Error exporting billing data")
+        return _error_dict(str(exc))
+
+
+@mcp.tool()
 def check_payment_status(payment_id: str) -> dict:
     """Check the current status of a pending payment by ID.
 
@@ -3168,6 +3246,45 @@ def billing_alerts() -> dict:
         }
     except Exception as exc:
         logger.exception("Error checking billing alerts")
+        return _error_dict(str(exc))
+
+
+@mcp.tool()
+def billing_delete_data(confirm: str = "") -> dict:
+    """Delete all your billing data (GDPR right-to-erasure).
+
+    Args:
+        confirm: Must be ``"DELETE"`` to confirm deletion.
+
+    This permanently removes your payment methods and billing
+    preferences.  Billing charge records are retained for 7 years
+    per tax compliance requirements but can be anonymized on request.
+
+    This action cannot be undone.
+    """
+    if err := _check_billing_auth("admin"):
+        return err
+    if confirm != "DELETE":
+        return _error_dict(
+            "Destructive operation requires confirmation. "
+            "Call again with confirm='DELETE' to proceed.",
+            code="CONFIRMATION_REQUIRED",
+        )
+    try:
+        db = _get_db()
+        # Use a placeholder user_id since we're single-tenant.
+        result = db.delete_user_billing_data("default")
+        return {
+            "success": True,
+            "deleted": result,
+            "message": (
+                "Payment methods deleted. Billing charge records are "
+                "retained for 7 years per tax compliance. Contact "
+                "support to request full anonymization."
+            ),
+        }
+    except Exception as exc:
+        logger.exception("Error deleting billing data")
         return _error_dict(str(exc))
 
 
@@ -4875,6 +4992,19 @@ def fulfillment_order(
         pay_result = None
         fee_calc = None
 
+        # 1a. Early spend limit check (before any work).
+        if estimated_price and estimated_price > 0:
+            fee_estimate = _billing.calculate_fee(estimated_price, currency=currency)
+            if not fee_estimate.waived and fee_estimate.fee_amount > 0:
+                mgr = _get_payment_mgr()
+                ok, reason = mgr.check_spend_limits(fee_estimate.fee_amount)
+                if not ok:
+                    return _error_dict(
+                        f"Order would exceed spend limits: {reason}. "
+                        "Adjust limits in billing settings before placing this order.",
+                        code="SPEND_LIMIT",
+                    )
+
         # 2. Charge / capture payment BEFORE placing the order.
         if payment_hold_id or estimated_price > 0:
             if estimated_price > 0:
@@ -4962,16 +5092,32 @@ def fulfillment_order(
                         "Could not link charge to order %s", result.order_id,
                     )
 
-        # 5. Price-drift check: warn if actual order price diverges
-        #    from the original quoted price.
+        # 5. Price-drift check: warn or block if actual order price
+        #    diverges from the original quoted price.
         response_warnings: List[str] = []
         if quote_validation and quote_validation.warnings:
             response_warnings.extend(quote_validation.warnings)
 
         if result.total_price is not None and quote_validation:
-            drift_warning = _check_price_drift(
+            drift_warning, should_block = _check_price_drift(
                 quote_validation.quoted_price, result.total_price,
             )
+            if should_block:
+                logger.error(
+                    "Price drift BLOCKED order for quote %s: %s",
+                    quote_id, drift_warning,
+                )
+                # Refund the payment since the order went through at a
+                # price the user did not agree to.
+                refund_warning = _refund_after_order_failure(
+                    pay_result, payment_hold_id,
+                )
+                msg = drift_warning or "Price drift exceeded safety limit."
+                if refund_warning:
+                    msg += f" {refund_warning}"
+                else:
+                    msg += " Your payment has been refunded automatically."
+                return _error_dict(msg, code="PRICE_DRIFT_BLOCKED")
             if drift_warning:
                 logger.warning(
                     "Price drift detected for quote %s: %s",

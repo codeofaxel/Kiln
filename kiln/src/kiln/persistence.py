@@ -1235,6 +1235,72 @@ class KilnDB:
             self._conn.commit()
 
     # ------------------------------------------------------------------
+    # Data retention & GDPR deletion
+    # ------------------------------------------------------------------
+
+    def purge_old_billing_charges(self, *, retain_days: int = 2555) -> int:
+        """Delete billing charges older than retain_days.
+
+        Default retention is ~7 years (2555 days) for tax compliance.
+
+        :param retain_days: Number of days to retain.
+        :returns: Number of records deleted.
+        """
+        cutoff = time.time() - (retain_days * 86400)
+        with self._write_lock:
+            cursor = self._conn.execute(
+                "DELETE FROM billing_charges WHERE created_at < ?",
+                (cutoff,),
+            )
+            self._conn.commit()
+            count = cursor.rowcount
+        if count > 0:
+            logger.info("Purged %d billing charges older than %d days", count, retain_days)
+        return count
+
+    def purge_old_payments(self, *, retain_days: int = 2555) -> int:
+        """Delete payment records older than retain_days.
+
+        :param retain_days: Number of days to retain.
+        :returns: Number of records deleted.
+        """
+        cutoff = time.time() - (retain_days * 86400)
+        with self._write_lock:
+            cursor = self._conn.execute(
+                "DELETE FROM payments WHERE created_at < ?",
+                (cutoff,),
+            )
+            self._conn.commit()
+            count = cursor.rowcount
+        if count > 0:
+            logger.info("Purged %d payment records older than %d days", count, retain_days)
+        return count
+
+    def delete_user_billing_data(self, user_id: str) -> Dict[str, int]:
+        """Delete all billing data for a user (GDPR right-to-erasure).
+
+        Removes payment methods associated with the user.
+
+        :param user_id: The user identifier.
+        :returns: Dict with counts of deleted records by table.
+        """
+        deleted: Dict[str, int] = {}
+        with self._write_lock:
+            cursor = self._conn.execute(
+                "DELETE FROM payment_methods WHERE user_id = ?",
+                (user_id,),
+            )
+            deleted["payment_methods"] = cursor.rowcount
+
+            self._conn.commit()
+
+        logger.info(
+            "Deleted billing data for user %s: %s",
+            user_id, deleted,
+        )
+        return deleted
+
+    # ------------------------------------------------------------------
     # Print history
     # ------------------------------------------------------------------
 
