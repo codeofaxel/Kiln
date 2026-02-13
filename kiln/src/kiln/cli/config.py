@@ -297,8 +297,10 @@ def load_printer_config(
             name = next(iter(printers))
         elif len(printers) == 0:
             raise ValueError(
-                "No printers configured.  Run 'kiln setup' for guided setup, "
-                "or 'kiln auth' to add one manually."
+                "No printers configured. Run 'kiln setup' for guided network discovery and setup, "
+                "or add one manually with:\n"
+                "  kiln auth --name my-printer --host <IP_OR_HOSTNAME> --type <TYPE> --api-key <KEY>\n"
+                "Supported types: octoprint, moonraker, bambu, prusaconnect"
             )
         else:
             raise ValueError(
@@ -308,8 +310,9 @@ def load_printer_config(
 
     if name not in printers:
         raise ValueError(
-            f"Printer {name!r} not found in config.  "
-            f"Available: {', '.join(printers.keys())}"
+            f"Printer {name!r} not found in config. "
+            f"Available: {', '.join(printers.keys())}. "
+            f"Run 'kiln printers' to list all, or 'kiln use <name>' to switch."
         )
 
     cfg = dict(printers[name])

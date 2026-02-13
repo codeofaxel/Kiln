@@ -168,6 +168,31 @@ class PrusaConnectAdapter(PrinterAdapter):
                     return response
 
                 if response.status_code not in _RETRYABLE_STATUS_CODES:
+                    if response.status_code == 401:
+                        raise PrinterError(
+                            f"Authentication failed (HTTP 401) for Prusa Link at {self._host}. "
+                            f"Your API key is invalid or missing. Find the correct key in "
+                            f"Settings > Network > PrusaLink on your printer's LCD, then update "
+                            f"with: kiln auth --name <name> --host {self._host} "
+                            f"--type prusaconnect --api-key <YOUR_KEY>",
+                        )
+                    if response.status_code == 403:
+                        raise PrinterError(
+                            f"Access forbidden (HTTP 403) for Prusa Link at {self._host}. "
+                            f"Your API key may lack required permissions. Check the key in "
+                            f"Settings > Network > PrusaLink on your printer's LCD.",
+                        )
+                    if response.status_code == 404:
+                        raise PrinterError(
+                            f"Endpoint not found (HTTP 404) for {method} {path} on {self._host}. "
+                            f"This may indicate an unsupported Prusa Link firmware version. "
+                            f"Ensure your printer firmware is up to date.",
+                        )
+                    if response.status_code == 409:
+                        raise PrinterError(
+                            f"Conflict (HTTP 409) for {method} {path} — the printer may be busy "
+                            f"with another operation. Wait a moment and try again.",
+                        )
                     raise PrinterError(
                         f"Prusa Link returned HTTP {response.status_code} "
                         f"for {method} {path}: {response.text[:300]}",
@@ -181,14 +206,20 @@ class PrusaConnectAdapter(PrinterAdapter):
 
             except Timeout as exc:
                 last_exc = PrinterError(
-                    f"Request to {url} timed out after {self._timeout}s "
-                    f"(attempt {attempt + 1}/{self._retries})",
+                    f"Request to Prusa Link at {self._host} timed out after {self._timeout}s "
+                    f"(attempt {attempt + 1}/{self._retries}). "
+                    f"The printer may be busy, overloaded, or on a slow network. "
+                    f"Try: (1) check the printer's LCD for errors, "
+                    f"(2) restart the printer, (3) verify the IP is correct.",
                     cause=exc,
                 )
             except ReqConnectionError as exc:
                 last_exc = PrinterError(
                     f"Could not connect to Prusa Link at {self._host} "
-                    f"(attempt {attempt + 1}/{self._retries})",
+                    f"(attempt {attempt + 1}/{self._retries}). "
+                    f"Check: (1) printer is powered on and connected to WiFi, "
+                    f"(2) IP address is correct (find it on the printer's LCD under "
+                    f"Settings > Network), (3) Prusa Link is enabled.",
                     cause=exc,
                 )
             except RequestException as exc:
