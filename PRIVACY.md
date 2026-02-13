@@ -24,7 +24,7 @@ explicitly use features that connect to external services.
 | Fulfillment orders | Model file, shipping address, material choice | Craftcloud, Sculpteo (manufacturing providers) |
 | Card payments | Payment amount, currency | Stripe |
 | USDC payments | Wallet address, payment amount | Circle |
-| Marketplace browsing | Search queries | Thingiverse, MyMiniFactory, Cults3D |
+| Marketplace browsing | Search queries | MyMiniFactory, Cults3D, Thingiverse (deprecated) |
 
 Kiln does **not** share data with advertising networks, analytics services, or
 data brokers. Kiln does **not** have telemetry or usage tracking.

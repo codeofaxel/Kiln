@@ -36,7 +36,7 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Connect, direct USB. Manage a mixed fleet from one place.
 - **AI-native** — 186+ MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
-- **Search → Slice → Print** — Browse Thingiverse/MMF/Cults3D, auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
+- **Search → Slice → Print** — Browse MyMiniFactory/Cults3D (and legacy Thingiverse), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
 - **Safety at scale** — 27 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs.
 
 ## Architecture
@@ -60,9 +60,9 @@ graph TD
 
     N --> N1["Remote Printers"]
 
-    D --> H["Thingiverse"]
     D --> I["MyMiniFactory"]
     D --> J["Cults3D"]
+    D --> H["Thingiverse (deprecated)"]
 
     style A fill:#1a1a2e,stroke:#e94560,color:#fff
     style B fill:#16213e,stroke:#0f3460,color:#fff
@@ -384,15 +384,15 @@ The Kiln MCP server (`kiln serve`) exposes **186 tools** to agents. Key tools ar
 | `register_webhook` | Register a webhook for event notifications |
 | `list_webhooks` | List all registered webhooks |
 | `delete_webhook` | Remove a webhook endpoint |
-| `search_all_models` | Search Thingiverse, MyMiniFactory, and Cults3D simultaneously |
+| `search_all_models` | Search MyMiniFactory, Cults3D, and Thingiverse (deprecated) simultaneously |
 | `marketplace_info` | Show connected marketplaces and setup hints |
-| `search_models` | Search Thingiverse for 3D models |
-| `model_details` | Get details for a Thingiverse model |
-| `model_files` | List files for a Thingiverse model |
-| `download_model` | Download a model file from Thingiverse |
+| `search_models` | Search a single marketplace for 3D models |
+| `model_details` | Get details for a marketplace model |
+| `model_files` | List files for a marketplace model |
+| `download_model` | Download a model file from a marketplace |
 | `download_and_upload` | Download from any marketplace and upload to printer in one step |
 | `browse_models` | Browse popular/newest/featured models |
-| `list_model_categories` | List Thingiverse categories |
+| `list_model_categories` | List marketplace categories |
 | `slice_model` | Slice an STL/3MF file to G-code |
 | `find_slicer_tool` | Detect installed slicer (PrusaSlicer/OrcaSlicer) |
 | `slice_and_print` | Slice a model then upload and print in one step |
@@ -528,7 +528,7 @@ The server also exposes read-only resources that agents can use for context:
 |---|---|
 | `server.py` | MCP server with tools, resources, and subsystem wiring |
 | `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Bambu, Prusa Connect) |
-| `marketplaces/` | Model marketplace adapters (Thingiverse, MyMiniFactory, Cults3D) |
+| `marketplaces/` | Model marketplace adapters (MyMiniFactory, Cults3D, Thingiverse — deprecated) |
 | `slicer.py` | Slicer integration (PrusaSlicer, OrcaSlicer) with auto-detection |
 | `registry.py` | Fleet registry for multi-printer management |
 | `queue.py` | Priority job queue with status tracking |
@@ -607,9 +607,9 @@ Kiln includes adapters for discovering and downloading 3D models from popular ma
 
 | Marketplace | Status | Features |
 |---|---|---|
-| **Thingiverse** | Deprecated | Search, browse, download, categories. *Acquired by MyMiniFactory (Feb 2026); prefer MyMiniFactory adapter for new integrations.* |
-| **MyMiniFactory** | Stable | Search, details, download |
+| **MyMiniFactory** | Stable | Search, details, download. *Primary marketplace — recommended for new integrations.* |
 | **Cults3D** | Stable | Search, details (metadata-only, no direct download) |
+| **Thingiverse** | Deprecated | Search, browse, download, categories. *Acquired by MyMiniFactory (Feb 2026). API may be sunset or merged; prefer MyMiniFactory adapter.* |
 
 Configure credentials for the marketplaces you use:
 

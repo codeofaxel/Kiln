@@ -28,8 +28,8 @@ By using Kiln you agree that:
 
 ## Third-Party Content
 
-Kiln connects to third-party model marketplaces (Thingiverse, MyMiniFactory,
-Cults3D, and others). Content from these services is governed by their
+Kiln connects to third-party model marketplaces (MyMiniFactory, Cults3D,
+Thingiverse, and others). Content from these services is governed by their
 respective terms of use and licensing. Kiln does not host, curate, endorse,
 or take responsibility for any third-party content.
 

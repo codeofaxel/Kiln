@@ -102,7 +102,7 @@ Kiln implements defense in depth across five layers:
 ### Out of Scope
 
 - Third-party printer firmware (OctoPrint, Klipper, Bambu firmware)
-- Third-party marketplace APIs (Thingiverse, MyMiniFactory, Cults3D)
+- Third-party marketplace APIs (MyMiniFactory, Cults3D, Thingiverse)
 - Third-party slicer software (PrusaSlicer, OrcaSlicer)
 - Vulnerabilities that require physical access to the host machine
 - Social engineering attacks against project maintainers

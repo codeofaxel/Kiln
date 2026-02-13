@@ -89,7 +89,7 @@ flowchart TD
 
 | Phase | Kiln Tools Used | Notes |
 |-------|----------------|-------|
-| **Find a design** | `search_models`, `model_details`, `model_files`, `download_model` | Thingiverse integration; most users start here |
+| **Find a design** | `search_models`, `model_details`, `model_files`, `download_model` | MyMiniFactory / marketplace integration; most users start here |
 | **Slice** | *(external)* | PrusaSlicer, Cura, OrcaSlicer — Kiln handles .gcode |
 | **Setup printer** | `kiln discover`, `kiln auth` | One-time; saved to `~/.kiln/config.yaml` |
 | **Preflight** | `preflight_check` | Validates state, temps, errors before printing |

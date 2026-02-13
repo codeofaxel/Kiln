@@ -66,7 +66,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Printer intelligence database (firmware quirks, material compatibility, failure modes)
 - Pre-validated pipelines: quick_print, calibrate, benchmark
 - Slicer integration (PrusaSlicer, OrcaSlicer) with auto-detection
-- Model marketplace adapters: Thingiverse, MyMiniFactory, Cults3D
+- Model marketplace adapters: MyMiniFactory, Cults3D, Thingiverse (deprecated — acquired by MyMiniFactory, Feb 2026)
 - Fulfillment service adapters: Craftcloud, Sculpteo
 - Text-to-model generation via Meshy AI (cloud) and OpenSCAD (local)
 - Mesh validation pipeline (STL/OBJ parsing, manifold check, dimension limits)

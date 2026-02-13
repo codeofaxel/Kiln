@@ -162,7 +162,8 @@ KILN_LOG_FORMAT=json
 KILN_RATE_LIMIT=60
 
 # === Optional: Marketplace access ===
-# KILN_THINGIVERSE_TOKEN=CHANGE_ME_your_thingiverse_token
+# KILN_MMF_API_KEY=CHANGE_ME_your_myminifactory_key          # Recommended (primary marketplace)
+# KILN_THINGIVERSE_TOKEN=CHANGE_ME_your_thingiverse_token   # Deprecated — acquired by MMF, Feb 2026
 
 # === Optional: License key for Pro/Business features ===
 # KILN_LICENSE_KEY=kiln_pro_CHANGE_ME

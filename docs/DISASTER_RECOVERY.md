@@ -19,7 +19,7 @@ Last reviewed: 2026-02-12
 | Circle wallet ID | `KILN_CIRCLE_WALLET_ID` | Static |
 | Printer API keys | `KILN_PRINTER_API_KEY` | 90 days |
 | Bambu access code | `KILN_PRINTER_ACCESS_CODE` | 90 days |
-| Marketplace keys | `KILN_THINGIVERSE_TOKEN`, `KILN_CULTS3D_API_KEY`, `KILN_CRAFTCLOUD_API_KEY`, `KILN_MESHY_API_KEY` | 90 days |
+| Marketplace keys | `KILN_MMF_API_KEY`, `KILN_CULTS3D_API_KEY`, `KILN_THINGIVERSE_TOKEN` (deprecated), `KILN_CRAFTCLOUD_API_KEY`, `KILN_MESHY_API_KEY` | 90 days |
 | Kiln auth token | `KILN_API_AUTH_TOKEN` | 30 days |
 | Kiln master key | `KILN_MASTER_KEY` | On compromise |
 | GitHub tokens | GitHub Settings | 30 days |

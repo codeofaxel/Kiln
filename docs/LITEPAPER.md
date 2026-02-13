@@ -30,7 +30,7 @@ An agent can start a PLA prototype on your desk printer, send the SLA version to
 
 **Beyond printing:**
 
-- **Full print workflow.** An agent can search for 3D models across Thingiverse, MyMiniFactory, and Cults3D; slice them into printer-ready files; upload to a printer; start, monitor, and cancel prints -- all without human intervention.
+- **Full print workflow.** An agent can search for 3D models across MyMiniFactory, Cults3D, and other marketplaces; slice them into printer-ready files; upload to a printer; start, monitor, and cancel prints -- all without human intervention.
 
 - **Agent-designed models.** Kiln includes two model generation paths: cloud-based AI text-to-3D (via Meshy) that turns a natural-language description into a printable mesh, and local parametric generation (via OpenSCAD) where the agent writes code to produce precise, dimensionally accurate parts. Generated models are automatically validated for printability -- manifold checks, wall thickness, bounding box -- before they ever reach a slicer. An agent can go from "I need a 40mm fan duct with a 30-degree deflection" to a sliced, printing G-code file with no human in the loop.
 

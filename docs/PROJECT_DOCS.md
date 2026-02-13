@@ -42,7 +42,7 @@ All three modes use the same MCP tools and CLI commands.
 
 **MCP Tools** — Typed functions exposed to agents via the Model Context Protocol. Each tool has a defined input schema and returns structured JSON.
 
-**MarketplaceAdapter** — Abstract base class for 3D model repositories. Implements: search, details, files, download. Concrete adapters for Thingiverse, MyMiniFactory, and Cults3D.
+**MarketplaceAdapter** — Abstract base class for 3D model repositories. Implements: search, details, files, download. Concrete adapters for MyMiniFactory, Cults3D, and Thingiverse (deprecated — acquired by MyMiniFactory, Feb 2026).
 
 **MarketplaceRegistry** — Manages connected marketplace adapters. Provides `search_all()` for parallel fan-out search across all sources with round-robin result interleaving.
 
@@ -308,7 +308,7 @@ Kiln exposes **186 MCP tools** in total. The most commonly used tools are docume
 |---|---|---|
 | `search_all_models` | `query`, `page`, `sources` | Interleaved results from all marketplaces |
 | `marketplace_info` | — | Connected sources, setup hints |
-| `search_models` | `query`, `page` | Thingiverse-only model list |
+| `search_models` | `query`, `page` | Single-marketplace model list (Thingiverse — deprecated) |
 | `model_details` | `thing_id` | Model metadata |
 | `model_files` | `thing_id` | File list |
 | `download_model` | `thing_id`, `file_id` | Local path |
@@ -831,9 +831,9 @@ kiln/src/kiln/
         sculpteo.py      # Sculpteo partner API client
     marketplaces/
         base.py          # Marketplace adapter interface
-        thingiverse.py   # Thingiverse API client
-        myminifactory.py # MyMiniFactory API client
+        myminifactory.py # MyMiniFactory API client (primary)
         cults3d.py       # Cults3D API client
+        thingiverse.py   # Thingiverse API client (deprecated — acquired by MMF)
     cli/
         main.py          # Click CLI entry point
         config.py        # Config management
