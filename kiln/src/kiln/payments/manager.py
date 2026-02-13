@@ -246,9 +246,9 @@ class PaymentManager:
             provider = self._providers.get(provider_name)
             if provider is None:
                 raise PaymentError(
-                    "No payment method configured. "
-                    "Set up a payment method first: use 'billing_setup_url' to get a "
-                    "Stripe setup link, or configure Circle USDC with 'kiln billing setup'."
+                    f"Payment provider {provider_name!r} not registered. "
+                    "Use 'billing_setup_url' to set up Stripe, or configure "
+                    "Circle USDC with 'kiln billing setup'."
                     + BILLING_SUPPORT_SUFFIX,
                     code="NO_PROVIDER",
                 )
@@ -416,9 +416,9 @@ class PaymentManager:
             provider = self._providers.get(provider_name)
             if provider is None:
                 raise PaymentError(
-                    "No payment method configured. "
-                    "Set up a payment method first: use 'billing_setup_url' to get a "
-                    "Stripe setup link, or configure Circle USDC with 'kiln billing setup'."
+                    f"Payment provider {provider_name!r} not registered. "
+                    "Use 'billing_setup_url' to set up Stripe, or configure "
+                    "Circle USDC with 'kiln billing setup'."
                     + BILLING_SUPPORT_SUFFIX,
                     code="NO_PROVIDER",
                 )

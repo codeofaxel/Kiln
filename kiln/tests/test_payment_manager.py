@@ -210,7 +210,7 @@ class TestRailResolution:
 
     def test_no_providers_raises(self, db):
         mgr = PaymentManager(db=db)
-        with pytest.raises(PaymentError, match="No payment providers"):
+        with pytest.raises(PaymentError, match="No payment method configured"):
             mgr.get_active_rail()
 
     def test_crypto_mapped_to_circle(self, db):
@@ -311,7 +311,7 @@ class TestChargeFee:
 
     def test_no_provider_registered(self, db):
         mgr = PaymentManager(db=db)
-        with pytest.raises(PaymentError, match="No payment providers"):
+        with pytest.raises(PaymentError, match="No payment method configured"):
             mgr.charge_fee("job-none", _fee())
 
     def test_unknown_provider_name(self, db, provider):
@@ -577,7 +577,7 @@ class TestCaptureFee:
 
     def test_capture_no_provider_raises(self, db):
         mgr = PaymentManager(db=db)
-        with pytest.raises(PaymentError, match="No payment providers"):
+        with pytest.raises(PaymentError, match="No payment method configured"):
             mgr.capture_fee("pi_123", "order-x", _fee())
 
 
