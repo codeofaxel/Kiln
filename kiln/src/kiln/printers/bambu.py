@@ -337,8 +337,8 @@ class BambuAdapter(PrinterAdapter):
             try:
                 self._mqtt_client.loop_stop()
                 self._mqtt_client.disconnect()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to tear down stale MQTT client: %s", exc)
             self._mqtt_client = None
 
         try:
@@ -712,8 +712,8 @@ class BambuAdapter(PrinterAdapter):
         finally:
             try:
                 ftp.quit()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to quit FTP session after listing files: %s", exc)
 
     def _list_via_mlsd(self, ftp: ftplib.FTP_TLS) -> List[PrinterFile]:
         """List files using MLSD (rich metadata: name, size, modify time)."""
@@ -839,8 +839,8 @@ class BambuAdapter(PrinterAdapter):
         finally:
             try:
                 ftp.quit()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to quit FTP session after upload: %s", exc)
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- print control
@@ -1051,8 +1051,8 @@ class BambuAdapter(PrinterAdapter):
         finally:
             try:
                 ftp.quit()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to quit FTP session after delete: %s", exc)
 
     # ------------------------------------------------------------------
     # Webcam (optional)
@@ -1117,8 +1117,8 @@ class BambuAdapter(PrinterAdapter):
             try:
                 self._mqtt_client.loop_stop()
                 self._mqtt_client.disconnect()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to disconnect MQTT client: %s", exc)
             self._mqtt_client = None
             self._mqtt_connected.clear()
             with self._state_lock:

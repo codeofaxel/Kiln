@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -92,6 +93,8 @@ class MJPEGProxy:
         source_url: str,
         port: int = 8081,
         printer_name: Optional[str] = None,
+        *,
+        host: Optional[str] = None,
     ) -> StreamInfo:
         """Start the proxy server.
 
@@ -99,6 +102,8 @@ class MJPEGProxy:
             source_url: Upstream MJPEG stream URL.
             port: Local port to serve on.
             printer_name: Name of the printer (for status reporting).
+            host: Bind address.  Defaults to ``KILN_STREAM_HOST`` env var,
+                then ``127.0.0.1``.
 
         Returns:
             :class:`StreamInfo` with the local URL.
@@ -171,7 +176,8 @@ class MJPEGProxy:
                 # Suppress default HTTP logging
                 pass
 
-        self._server = HTTPServer(("0.0.0.0", port), Handler)
+        bind_host = host or os.environ.get("KILN_STREAM_HOST", "127.0.0.1")
+        self._server = HTTPServer((bind_host, port), Handler)
         self._thread = threading.Thread(
             target=lambda: self._server.serve_forever(poll_interval=0.1),
             daemon=True,

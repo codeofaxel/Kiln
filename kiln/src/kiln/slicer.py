@@ -189,8 +189,8 @@ def _get_version(slicer_path: str) -> Optional[str]:
         # OrcaSlicer outputs "OrcaSlicer 2.0.0"
         if output:
             return output.split("\n")[0].rstrip("\r")[:100]
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to get slicer version from %s: %s", slicer_path, exc)
     return None
 
 

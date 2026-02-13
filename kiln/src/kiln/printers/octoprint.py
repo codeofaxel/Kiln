@@ -194,8 +194,8 @@ class OctoPrintSockJSMonitor:
         if self._ws is not None:
             try:
                 self._ws.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to close OctoPrint WebSocket: %s", exc)
         if self._thread is not None:
             self._thread.join(timeout=5.0)
             self._thread = None
@@ -1146,8 +1146,8 @@ class OctoPrintAdapter(PrinterAdapter):
                 )
         except PrinterError:
             raise
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to check printer state before firmware update: %s", exc)
 
         # Build the update targets
         if component:

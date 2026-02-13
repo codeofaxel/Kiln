@@ -11,6 +11,7 @@ behaviour).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -63,6 +64,8 @@ from kiln.cli.output import (
     format_response,
     format_status,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -168,8 +171,8 @@ def cli(ctx: click.Context, printer: Optional[str]) -> None:
                         ),
                         err=True,
                     )
-    except Exception:
-        pass  # DB not initialised yet — don't block CLI startup.
+    except Exception as exc:
+        logger.debug("DB not initialised yet — skipping startup check: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +298,8 @@ def status(ctx: click.Context, json_mode: bool) -> None:
                 cfg = load_printer_config(ctx.obj.get("printer"))
                 extra["printer_name"] = ctx.obj.get("printer") or "default"
                 extra["printer_type"] = cfg.get("type", "unknown")
-            except Exception:
-                pass  # Best-effort enrichment
+            except Exception as exc:
+                logger.debug("Failed to enrich printer info: %s", exc)  # Best-effort enrichment
 
         click.echo(format_status(state.to_dict(), job.to_dict(), json_mode=json_mode, extra=extra))
     except click.ClickException:
@@ -652,8 +655,8 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
                     sys.exit(1)
                 if not json_mode:
                     click.echo("Pre-flight ✓")
-            except Exception:
-                pass  # Don't block printing if preflight itself fails
+            except Exception as exc:
+                logger.debug("Preflight check itself failed: %s", exc)  # Don't block printing if preflight itself fails
 
         # Dry-run: show what would happen without actually printing
         if dry_run:
@@ -2769,7 +2772,8 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                     type=click.Choice(["octoprint", "moonraker", "bambu", "prusaconnect"]),
                 )
                 suggested_name = printer_type
-        except Exception:
+        except Exception as exc:
+            logger.debug("Printer probe failed for %s: %s", host, exc)
             click.echo("  Probe failed. Enter type manually.")
             printer_type = click.prompt(
                 "  Select printer type",
@@ -3130,7 +3134,8 @@ def _quickstart_verify() -> List[Dict[str, Any]]:
         if info.version:
             label += f" {info.version}"
         checks.append({"name": "slicer", "ok": True, "detail": label})
-    except Exception:
+    except Exception as exc:
+        logger.debug("Slicer discovery failed: %s", exc)
         checks.append({
             "name": "slicer",
             "ok": False,
@@ -3163,8 +3168,8 @@ def _quickstart_verify() -> List[Dict[str, Any]]:
                     "warn": True,
                     "detail": "WSL 2 detected — mDNS discovery will not work, use explicit IPs",
                 })
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("WSL detection failed in doctor checks: %s", exc)
 
     return checks
 
@@ -3831,7 +3836,8 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
                 req = urllib.request.Request(url, method="GET")
                 urllib.request.urlopen(req, timeout=5)
                 checks.append({"name": "printer_reachable", "ok": True, "detail": host})
-            except Exception:
+            except Exception as exc:
+                logger.debug("Printer reachability check failed for %s: %s", host, exc)
                 checks.append({
                     "name": "printer_reachable",
                     "ok": False,
@@ -3866,8 +3872,8 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
             release = platform.uname().release.lower()
             if "microsoft" in release or "wsl" in release:
                 wsl = True
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("WSL detection failed in diag checks: %s", exc)
     if wsl:
         checks.append({
             "name": "wsl",

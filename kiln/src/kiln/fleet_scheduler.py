@@ -364,8 +364,8 @@ def get_fleet_capabilities(
                     if r.get("printer_name") == name:
                         success_rate = r.get("success_rate", 0.8)
                         break
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to enrich printer capabilities for %s: %s", name, exc)
 
         result.append(
             PrinterCapabilities(

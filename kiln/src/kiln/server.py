@@ -2115,7 +2115,8 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
                 })
                 if not file_found:
                     errors.append(f"File '{remote_file}' not found on printer")
-            except Exception:
+            except Exception as exc:
+                logger.debug("Failed to verify remote file on printer: %s", exc)
                 checks.append({
                     "name": "file_on_printer",
                     "passed": False,
@@ -3006,7 +3007,8 @@ def check_payment_status(payment_id: str) -> dict:
                     "tx_hash": result.tx_hash,
                     "provider": name,
                 }
-            except Exception:
+            except Exception as exc:
+                logger.debug("Failed to check payment %s on provider %s: %s", payment_id, name, exc)
                 continue
         return _error_dict(
             f"Payment {payment_id!r} not found on any registered provider.",
@@ -3071,7 +3073,8 @@ def refund_payment(payment_id: str, reason: str = "") -> dict:
                 }
             except PaymentError:
                 continue  # Not this provider's payment.
-            except Exception:
+            except Exception as exc:
+                logger.debug("Failed to refund payment %s on provider %s: %s", payment_id, provider_name, exc)
                 continue
         return _error_dict(
             f"Payment {payment_id!r} not found in any registered provider. "
@@ -3293,8 +3296,8 @@ def health_check() -> dict:
     try:
         get_db()._conn.execute("SELECT 1")
         db_ok = True
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Database health check failed: %s", exc)
 
     health_data: Dict[str, Any] = {
         "success": True,
@@ -3316,7 +3319,8 @@ def health_check() -> dict:
     try:
         alert_mgr = _get_billing_alert_mgr()
         health_data["billing_health"] = alert_mgr.get_health_summary()
-    except Exception:
+    except Exception as exc:
+        logger.debug("Failed to get billing health summary: %s", exc)
         health_data["billing_health"] = {"status": "unknown"}
 
     return health_data
@@ -5915,8 +5919,8 @@ def resource_status() -> str:
                 "connected": state.connected,
                 "state": state.state.value,
             }]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to get default printer info for dashboard: %s", exc)
 
     # Queue
     q_summary = _queue.summary()
@@ -6954,7 +6958,8 @@ def monitor_print_vision(
                     result["snapshot"] = snap
                 else:
                     result["snapshot"] = {"available": False}
-            except Exception:
+            except Exception as exc:
+                logger.debug("Failed to capture snapshot for vision monitoring: %s", exc)
                 result["snapshot"] = {"available": False}
         else:
             result["snapshot"] = {"available": False, "reason": "not_requested"}
@@ -7151,8 +7156,8 @@ class _PrintWatcher:
                     },
                     source="watch_print",
                 )
-            except Exception:
-                pass  # event delivery is best-effort
+            except Exception as exc:
+                logger.debug("Failed to publish print terminal event: %s", exc)  # event delivery is best-effort
 
     def _run(self) -> None:
         """Main monitoring loop — runs in a background thread."""
@@ -7215,8 +7220,8 @@ class _PrintWatcher:
                                     },
                                     source="watch_print",
                                 )
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                logger.debug("Failed to publish stall vision alert: %s", exc)
                         result = {
                             "success": True,
                             "watch_id": self._watch_id,
@@ -7266,8 +7271,8 @@ class _PrintWatcher:
                                 },
                                 source="vision",
                             )
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug("Failed to publish printer state vision alert: %s", exc)
                     result = {
                         "success": True,
                         "watch_id": self._watch_id,
@@ -7369,12 +7374,13 @@ class _PrintWatcher:
                                         },
                                         source="vision",
                                     )
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    logger.debug("Failed to publish vision check event: %s", exc)
                         else:
                             with self._lock:
                                 self._snapshot_failures += 1
-                    except Exception:
+                    except Exception as exc:
+                        logger.debug("Failed to capture snapshot in print watcher: %s", exc)
                         with self._lock:
                             self._snapshot_failures += 1
                     last_snapshot_time = now
@@ -8771,8 +8777,8 @@ def main() -> None:
         for wid in list(_watchers):
             try:
                 _watchers.pop(wid).stop()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to stop watcher %s during shutdown: %s", wid, exc)
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _shutdown_handler)
@@ -8790,8 +8796,8 @@ def main() -> None:
         for wid in list(_watchers):
             try:
                 _watchers.pop(wid).stop()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to stop watcher %s during atexit: %s", wid, exc)
 
     atexit.register(_stop_all_watchers)
 

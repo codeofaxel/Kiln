@@ -278,8 +278,8 @@ class JobScheduler:
                         job = self._queue.get_job(job_id)
                         if job.status == JobStatus.STARTING:
                             self._queue.mark_printing(job_id)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Failed to promote job %s to PRINTING: %s", job_id, exc)
 
                     # Stuck job detection: fail jobs in PRINTING too long
                     try:
@@ -302,8 +302,8 @@ class JobScheduler:
                                 self._active_jobs.pop(job_id, None)
                             self._requeue_or_fail(job_id, error_msg, failed, printer_name=printer_name)
                             continue
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Failed to check stuck job %s: %s", job_id, exc)
 
                     # Publish progress event
                     if job_progress.completion is not None:

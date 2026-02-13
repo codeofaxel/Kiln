@@ -20,7 +20,7 @@ from kiln.rest_api import RestApiConfig, _get_mcp_instance, _list_tool_schemas, 
 class TestRestApiConfig:
     def test_default_host(self):
         cfg = RestApiConfig()
-        assert cfg.host == "0.0.0.0"
+        assert cfg.host == "127.0.0.1"
 
     def test_default_port(self):
         cfg = RestApiConfig()

@@ -221,8 +221,8 @@ class SerialPrinterAdapter(PrinterAdapter):
         if self._serial is not None:
             try:
                 self._serial.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to close serial port on disconnect: %s", exc)
         self._connected = False
         self._serial = None
         logger.info("Disconnected from serial printer on %s", self._port)
@@ -240,7 +240,8 @@ class SerialPrinterAdapter(PrinterAdapter):
         while time.monotonic() < deadline:
             try:
                 line = self._serial.readline().decode("utf-8", errors="replace").strip()
-            except Exception:
+            except Exception as exc:
+                logger.debug("Failed to read startup line from serial port: %s", exc)
                 break
             if not line:
                 continue
@@ -272,8 +273,8 @@ class SerialPrinterAdapter(PrinterAdapter):
                 if self._serial is not None:
                     try:
                         self._serial.close()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Failed to close stale serial port during reconnect: %s", exc)
                     self._serial = None
                 self.connect()
                 return

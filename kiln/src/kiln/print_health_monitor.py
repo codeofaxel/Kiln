@@ -575,8 +575,8 @@ class PrintHealthMonitor:
         try:
             progress = adapter.get_job_progress()
             completion_for_phase = progress.completion
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to get job progress for phase detection: %s", exc)
         phase = detect_print_phase(completion_for_phase, is_heating=is_heating)
 
         report = PrinterHealthReport(
@@ -996,7 +996,8 @@ class PrintHealthMonitor:
                 unit="bool",
                 detail="Filament not detected — runout or sensor fault" if is_warning else None,
             )
-        except Exception:
+        except Exception as exc:
+            logger.debug("Filament sensor check failed for %s: %s", printer_name, exc)
             return None
 
     def _check_power_consumption(
@@ -1050,7 +1051,8 @@ class PrintHealthMonitor:
                 unit="W",
                 detail=detail,
             )
-        except Exception:
+        except Exception as exc:
+            logger.debug("Power consumption check failed for %s: %s", printer_name, exc)
             return None
 
     def _check_webcam_quality(
@@ -1096,7 +1098,8 @@ class PrintHealthMonitor:
                 severity=HealthSeverity.OK,
                 unit="bool",
             )
-        except Exception:
+        except Exception as exc:
+            logger.debug("Webcam quality check failed for %s: %s", printer_name, exc)
             return None
 
     # -- stall detection ---------------------------------------------------
@@ -1198,8 +1201,8 @@ class PrintHealthMonitor:
             )
             bus.publish(event)
             logger.info("Stall event published for printer=%s", alert_data.get("printer_name"))
-        except Exception:
-            pass  # event delivery is best-effort
+        except Exception as exc:
+            logger.debug("Failed to publish stall event: %s", exc)  # event delivery is best-effort
 
     # -- history management ------------------------------------------------
 

@@ -209,8 +209,8 @@ class MoonrakerWebSocketMonitor:
         if self._ws is not None:
             try:
                 self._ws.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to close Moonraker WebSocket: %s", exc)
         if self._thread is not None:
             self._thread.join(timeout=5.0)
             self._thread = None
@@ -1227,8 +1227,8 @@ class MoonrakerAdapter(PrinterAdapter):
                 )
         except PrinterError:
             raise
-        except Exception:
-            pass  # If we can't check state, let Moonraker decide
+        except Exception as exc:
+            logger.debug("Failed to check printer state before firmware update: %s", exc)  # If we can't check state, let Moonraker decide
 
         payload = {}
         if component:

@@ -164,8 +164,8 @@ class _LearningToolsPlugin:
                     printer_name = job_record.get("printer_name", "unknown")
                 if job_record and not file_name:
                     file_name = job_record.get("file_name")
-            except Exception:
-                pass  # Best-effort resolution
+            except Exception as exc:
+                logger.debug("Failed to resolve printer/file from job %s: %s", job_id, exc)  # Best-effort resolution
 
             if not printer_name:
                 printer_name = "unknown"
@@ -273,7 +273,8 @@ class _LearningToolsPlugin:
                 # Cross-reference availability from registry
                 try:
                     idle = set(_registry.get_idle_printers())
-                except Exception:
+                except Exception as exc:
+                    logger.debug("Failed to get idle printers for ranking: %s", exc)
                     idle = set()
 
                 suggestions = []

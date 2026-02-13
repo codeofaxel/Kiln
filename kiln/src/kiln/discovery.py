@@ -29,7 +29,8 @@ def _is_wsl() -> bool:
     try:
         release = platform.release().lower()
         return "microsoft" in release or "wsl" in release
-    except Exception:
+    except Exception as exc:
+        logger.debug("WSL detection failed: %s", exc)
         return False
 
 
@@ -329,8 +330,8 @@ def _try_http_probe(subnet: str, timeout: float) -> List[DiscoveredPrinter]:
             try:
                 found = future.result(timeout=0)
                 results.extend(found)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to get result from discovery probe future: %s", exc)
 
     return results
 
@@ -414,8 +415,9 @@ def _annotate_trust(printers: List[DiscoveredPrinter]) -> None:
     try:
         from kiln.cli.config import get_trusted_printers
         trusted = get_trusted_printers()
-    except Exception:
+    except Exception as exc:
         # Config may not be available in all environments.
+        logger.debug("Failed to load trusted printers config: %s", exc)
         return
 
     for p in printers:
