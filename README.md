@@ -31,6 +31,14 @@ Kiln lets AI agents design, queue, and execute physical manufacturing jobs on re
 
 All three modes use the same MCP tools and CLI commands. An agent can seamlessly fall back from a busy local printer to a fulfillment center, or route specialty materials to the 3DOS network — all in one workflow.
 
+### Why Kiln?
+
+- **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Connect, direct USB. Manage a mixed fleet from one place.
+- **AI-native** — 186+ MCP tools built for AI agents. Not a web UI with an API bolted on.
+- **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
+- **Search → Slice → Print** — Browse Thingiverse/MMF/Cults3D, auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
+- **Safety at scale** — 27 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs.
+
 ## Architecture
 
 ```mermaid
