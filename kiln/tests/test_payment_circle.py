@@ -818,6 +818,35 @@ class TestNetworkMapping:
         result = p._resolve_chain(PaymentRail.STRIPE)
         assert result == "SOL"
 
+    def test_is_testnet_false_for_live_key(self):
+        p = _provider(api_key="LIVE_KEY:abc123")
+        assert not p._is_testnet
+
+    def test_is_testnet_true_for_test_key(self):
+        p = _provider(api_key="TEST_API_KEY:abc123:def456")
+        assert p._is_testnet
+
+    def test_testnet_solana_maps_to_devnet(self):
+        p = _provider(api_key="TEST_API_KEY:abc:def")
+        assert p._resolve_chain(PaymentRail.SOLANA) == "SOL-DEVNET"
+
+    def test_testnet_base_maps_to_sepolia(self):
+        p = _provider(api_key="TEST_API_KEY:abc:def")
+        assert p._resolve_chain(PaymentRail.BASE) == "BASE-SEPOLIA"
+
+    def test_testnet_fallback_solana_maps_to_devnet(self):
+        p = _provider(api_key="TEST_API_KEY:abc:def", default_network="solana")
+        assert p._resolve_chain(PaymentRail.CIRCLE) == "SOL-DEVNET"
+
+    def test_testnet_fallback_base_maps_to_sepolia(self):
+        p = _provider(api_key="TEST_API_KEY:abc:def", default_network="base")
+        assert p._resolve_chain(PaymentRail.CIRCLE) == "BASE-SEPOLIA"
+
+    def test_usdc_address_sol_devnet(self):
+        p = _provider()
+        addr = p._get_usdc_token_address("SOL-DEVNET")
+        assert addr == "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+
     def test_usdc_address_sol(self):
         p = _provider()
         addr = p._get_usdc_token_address("SOL")

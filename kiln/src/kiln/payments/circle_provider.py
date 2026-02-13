@@ -283,21 +283,39 @@ class CircleProvider(PaymentProvider):
         pem = self._get_public_key()
         return _encrypt_entity_secret(self._entity_secret, pem)
 
+    @property
+    def _is_testnet(self) -> bool:
+        """Whether this provider is using a test/sandbox API key."""
+        return self._api_key.startswith("TEST_API_KEY")
+
     def _resolve_chain(self, rail: PaymentRail) -> str:
         """Map a :class:`PaymentRail` to a Circle W3S blockchain identifier.
+
+        Automatically appends testnet suffixes (``-DEVNET``, ``-SEPOLIA``)
+        when using a ``TEST_API_KEY``.
 
         Falls back to *default_network* when the rail is not explicitly
         mapped (e.g. ``PaymentRail.CIRCLE``).
         """
         if rail in _RAIL_TO_CHAIN:
-            return _RAIL_TO_CHAIN[rail]
-        # Fall back to default network
-        default_rail = (
-            PaymentRail.SOLANA
-            if self._default_network == "solana"
-            else PaymentRail.BASE
-        )
-        return _RAIL_TO_CHAIN.get(default_rail, "SOL")
+            chain = _RAIL_TO_CHAIN[rail]
+        else:
+            # Fall back to default network
+            default_rail = (
+                PaymentRail.SOLANA
+                if self._default_network == "solana"
+                else PaymentRail.BASE
+            )
+            chain = _RAIL_TO_CHAIN.get(default_rail, "SOL")
+
+        # TEST_API_KEY requires testnet blockchains
+        if self._is_testnet:
+            if chain == "SOL":
+                chain = "SOL-DEVNET"
+            elif chain in ("ETH", "BASE"):
+                chain = f"{chain}-SEPOLIA"
+
+        return chain
 
     def _get_usdc_token_address(self, blockchain: str) -> str:
         """Return the USDC token contract address for the given blockchain.
