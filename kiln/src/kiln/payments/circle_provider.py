@@ -223,12 +223,14 @@ class CircleProvider(PaymentProvider):
 
         except Timeout as exc:
             raise PaymentError(
-                "Circle API timeout",
+                "Circle API timeout. USDC transfers usually complete in "
+                "under 30 seconds — please try again shortly.",
                 code="TIMEOUT",
             ) from exc
         except ReqConnectionError as exc:
             raise PaymentError(
-                "Cannot reach Circle API",
+                "Cannot reach Circle API. Check your network connection "
+                "and Circle service status at https://status.circle.com.",
                 code="CONNECTION_ERROR",
             ) from exc
         except PaymentError:
@@ -578,9 +580,18 @@ class CircleProvider(PaymentProvider):
             request.job_id,
         )
 
-        data = self._request(
-            "POST", "/v1/w3s/developer/transactions/transfer", json=payload
-        )
+        try:
+            data = self._request(
+                "POST", "/v1/w3s/developer/transactions/transfer", json=payload
+            )
+        except PaymentError as exc:
+            raise PaymentError(
+                f"USDC transfer failed: {exc}. "
+                "Check your Circle wallet balance and network status. "
+                f"{'Solana' if 'SOL' in chain else 'Base'} transfers "
+                "usually complete in under 30 seconds.",
+                code="CIRCLE_TRANSFER_FAILED",
+            ) from exc
 
         # W3S returns transaction IDs in data.challengeId or data.transactionIds
         # For developer-controlled wallets, we get transactionIds directly.

@@ -93,6 +93,7 @@ from kiln.licensing import (
     requires_tier,
 )
 from kiln.billing import BillingLedger, FeeCalculation, FeePolicy
+from kiln.billing_alerts import BillingAlertManager
 from kiln.payments.manager import PaymentManager
 from kiln.payments.base import PaymentError
 from kiln.cost_estimator import CostEstimator
@@ -163,13 +164,16 @@ from kiln.fulfillment.intelligence import (
     ProviderHealth,
     ProviderStatus,
     QuoteComparison,
+    QuoteValidation,
     RetryResult,
+    _check_price_drift,
     batch_quote as _batch_quote,
     compare_providers as _compare_providers,
     filter_materials as _filter_materials,
     get_health_monitor as _get_health_monitor,
     get_insurance_options as _get_insurance_options,
     get_order_history as _get_order_history,
+    validate_quote_for_order as _validate_quote_for_order,
 )
 
 
@@ -639,6 +643,7 @@ _webhook_mgr = WebhookManager(_event_bus)
 _auth = AuthManager()
 _billing = BillingLedger(db=get_db())
 _payment_mgr: Optional[PaymentManager] = None
+_billing_alert_mgr: Optional[BillingAlertManager] = None
 _cost_estimator = CostEstimator()
 _material_tracker = MaterialTracker(db=get_db(), event_bus=_event_bus)
 _bed_level_mgr = BedLevelManager(
@@ -819,6 +824,16 @@ def _get_payment_mgr() -> PaymentManager:
             logger.debug("Could not register Circle provider")
 
     return _payment_mgr
+
+
+def _get_billing_alert_mgr() -> BillingAlertManager:
+    """Return the lazily-initialised billing alert manager."""
+    global _billing_alert_mgr  # noqa: PLW0603
+
+    if _billing_alert_mgr is None:
+        _billing_alert_mgr = BillingAlertManager(event_bus=_event_bus)
+        _billing_alert_mgr.subscribe()
+    return _billing_alert_mgr
 
 
 def _refund_after_order_failure(
@@ -3080,6 +3095,25 @@ def billing_check_setup() -> dict:
 
 
 @mcp.tool()
+def billing_alerts() -> dict:
+    """Check billing system health and active alerts.
+
+    Returns payment failure alerts, spend limit violations, and
+    overall payment system health metrics.
+    """
+    try:
+        alert_mgr = _get_billing_alert_mgr()
+        return {
+            "success": True,
+            "health": alert_mgr.get_health_summary(),
+            "alerts": alert_mgr.get_alerts(),
+        }
+    except Exception as exc:
+        logger.exception("Error checking billing alerts")
+        return _error_dict(str(exc))
+
+
+@mcp.tool()
 def donate_info() -> dict:
     """Get crypto wallet addresses to tip/donate to the Kiln project.
 
@@ -3185,7 +3219,7 @@ def health_check() -> dict:
     except Exception:
         pass
 
-    return {
+    health_data: Dict[str, Any] = {
         "success": True,
         "status": "healthy",
         "uptime": f"{hours}h {minutes}m {secs}s",
@@ -3201,6 +3235,14 @@ def health_check() -> dict:
         "auth_enabled": os.environ.get("KILN_AUTH_ENABLED", "").lower()
             in ("1", "true", "yes"),
     }
+
+    try:
+        alert_mgr = _get_billing_alert_mgr()
+        health_data["billing_health"] = alert_mgr.get_health_summary()
+    except Exception:
+        health_data["billing_health"] = {"status": "unknown"}
+
+    return health_data
 
 
 @mcp.tool()
@@ -4753,6 +4795,18 @@ def fulfillment_order(
     try:
         provider = _get_fulfillment()
 
+        # 0. Validate quote is still valid (exists, not expired, provider up).
+        quote_validation: Optional[QuoteValidation] = None
+        try:
+            quote_validation = _validate_quote_for_order(
+                quote_id, provider_name=provider.name,
+            )
+        except FulfillmentError as exc:
+            return _error_dict(
+                f"Quote validation failed: {exc}",
+                code=getattr(exc, "code", None) or "QUOTE_INVALID",
+            )
+
         # 1. Determine the price and calculate the fee BEFORE placing.
         estimated_price = quoted_price
         currency = quoted_currency
@@ -4836,6 +4890,26 @@ def fulfillment_order(
                     logger.debug(
                         "Could not link charge to order %s", result.order_id,
                     )
+
+        # 5. Price-drift check: warn if actual order price diverges
+        #    from the original quoted price.
+        response_warnings: List[str] = []
+        if quote_validation and quote_validation.warnings:
+            response_warnings.extend(quote_validation.warnings)
+
+        if result.total_price is not None and quote_validation:
+            drift_warning = _check_price_drift(
+                quote_validation.quoted_price, result.total_price,
+            )
+            if drift_warning:
+                logger.warning(
+                    "Price drift detected for quote %s: %s",
+                    quote_id, drift_warning,
+                )
+                response_warnings.append(drift_warning)
+
+        if response_warnings:
+            order_data["warnings"] = response_warnings
 
         return {
             "success": True,

@@ -837,3 +837,116 @@ def get_insurance_options(order_value: float, *, currency: str = "USD") -> List[
             max_coverage=order_value * 1.5,
         ),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Quote validation and price-drift detection
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class QuoteValidation:
+    """Result of pre-order quote validation."""
+
+    valid: bool
+    quote_id: str
+    provider: str
+    quoted_price: float
+    currency: str = "USD"
+    error: Optional[str] = None
+    warnings: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def _check_price_drift(
+    quoted_price: float,
+    actual_price: float,
+    *,
+    threshold: float = 0.10,
+) -> Optional[str]:
+    """Check if the actual price drifted from the quoted price.
+
+    Returns a warning string if drift exceeds *threshold*, ``None`` otherwise.
+    """
+    if quoted_price <= 0:
+        return None
+    drift = abs(actual_price - quoted_price) / quoted_price
+    if drift > threshold:
+        return (
+            f"Price changed from ${quoted_price:.2f} to ${actual_price:.2f} "
+            f"({drift:.0%} drift). The fee was calculated on the actual price."
+        )
+    return None
+
+
+def validate_quote_for_order(
+    quote_id: str,
+    *,
+    provider_name: Optional[str] = None,
+) -> QuoteValidation:
+    """Validate that a quote is still eligible for order placement.
+
+    Checks:
+    1. Quote exists in the cache.
+    2. Quote has not expired.
+    3. The manufacturing provider is not DOWN.
+
+    Args:
+        quote_id: Provider-assigned quote ID (from ``fulfillment_quote``).
+        provider_name: If known, the provider to health-check.  When
+            ``None``, the provider is inferred from the cached quote.
+
+    Returns:
+        A :class:`QuoteValidation` with ``valid=True`` on success.
+
+    Raises:
+        FulfillmentError: If validation fails (expired, missing, provider down).
+    """
+    from kiln.quote_cache import get_cached_quote_by_id
+
+    # 1. Quote must exist in cache.
+    cached = get_cached_quote_by_id(quote_id)
+    if cached is None:
+        raise FulfillmentError(
+            f"Quote '{quote_id}' not found. It may have expired or was never "
+            "cached.  Please request a new quote with fulfillment_quote.",
+            code="QUOTE_NOT_FOUND",
+        )
+
+    # 2. Quote must not be expired.
+    if cached.is_expired:
+        raise FulfillmentError(
+            f"Quote '{quote_id}' expired at "
+            f"{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(cached.expires_at))}. "
+            "Please request a new quote with fulfillment_quote.",
+            code="QUOTE_EXPIRED",
+        )
+
+    # 3. Provider must not be DOWN.
+    prov = provider_name or cached.provider_name
+    monitor = get_health_monitor()
+    status = monitor.get_status(prov)
+    if status.health == ProviderHealth.DOWN:
+        raise FulfillmentError(
+            f"Manufacturing provider '{prov}' is currently unavailable. "
+            "Please try again later or use a different provider.",
+            code="PROVIDER_DOWN",
+        )
+
+    warnings: List[str] = []
+    if status.health == ProviderHealth.DEGRADED:
+        warnings.append(
+            f"Provider '{prov}' is experiencing degraded performance. "
+            "The order may take longer to process."
+        )
+
+    return QuoteValidation(
+        valid=True,
+        quote_id=quote_id,
+        provider=prov,
+        quoted_price=cached.quoted_price,
+        currency=cached.currency,
+        warnings=warnings,
+    )

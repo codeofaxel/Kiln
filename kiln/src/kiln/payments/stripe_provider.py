@@ -41,6 +41,19 @@ _STATUS_MAP: Dict[str, PaymentStatus] = {
     "canceled": PaymentStatus.CANCELLED,
 }
 
+# Map Stripe decline codes to actionable user-facing messages.
+_DECLINE_MESSAGES: Dict[str, str] = {
+    "insufficient_funds": "Insufficient funds. Please use a different card or add funds.",
+    "lost_card": "Card reported lost. Please use a different payment method.",
+    "stolen_card": "Card reported stolen. Please use a different payment method.",
+    "expired_card": "Card has expired. Update your payment method with 'billing_setup_url'.",
+    "incorrect_cvc": "Incorrect CVC code. Please retry with the correct CVC.",
+    "card_declined": (
+        "Card was declined by your bank. Try a different card or contact your bank."
+    ),
+    "processing_error": "Card processor error. Please try again in a few minutes.",
+}
+
 
 class StripeProvider(PaymentProvider):
     """Concrete :class:`PaymentProvider` backed by the Stripe API.
@@ -259,7 +272,21 @@ class StripeProvider(PaymentProvider):
             )
 
         except stripe.error.CardError as exc:
-            logger.warning("Card declined for job %s: %s", request.job_id, exc)
+            decline_code = (
+                exc.error.decline_code
+                if hasattr(exc, "error")
+                and hasattr(exc.error, "decline_code")
+                else "unknown"
+            )
+            message = _DECLINE_MESSAGES.get(
+                decline_code,
+                f"Card was declined (code: {decline_code}). "
+                "Please try a different payment method or contact your bank.",
+            )
+            logger.warning(
+                "Card declined for job %s (code=%s): %s",
+                request.job_id, decline_code, exc,
+            )
             return PaymentResult(
                 success=False,
                 payment_id=getattr(exc, "payment_intent", {}).get("id", "")
@@ -269,12 +296,14 @@ class StripeProvider(PaymentProvider):
                 amount=request.amount,
                 currency=request.currency,
                 rail=PaymentRail.STRIPE,
-                error="Card was declined.",
+                error=message,
             )
 
         except stripe.error.StripeError as exc:
             raise PaymentError(
-                "Payment processing error. Please try again.",
+                "Payment processing error. This is usually temporary — "
+                "please try again in 1-2 minutes. If the problem persists, "
+                "check your payment method with 'billing_status'.",
                 code="STRIPE_ERROR",
             ) from exc
 
@@ -423,7 +452,21 @@ class StripeProvider(PaymentProvider):
             )
 
         except stripe.error.CardError as exc:
-            logger.warning("Card declined during auth for job %s: %s", request.job_id, exc)
+            decline_code = (
+                exc.error.decline_code
+                if hasattr(exc, "error")
+                and hasattr(exc.error, "decline_code")
+                else "unknown"
+            )
+            message = _DECLINE_MESSAGES.get(
+                decline_code,
+                f"Card was declined (code: {decline_code}). "
+                "Please try a different payment method or contact your bank.",
+            )
+            logger.warning(
+                "Card declined during auth for job %s (code=%s): %s",
+                request.job_id, decline_code, exc,
+            )
             return PaymentResult(
                 success=False,
                 payment_id="",
@@ -431,12 +474,14 @@ class StripeProvider(PaymentProvider):
                 amount=request.amount,
                 currency=request.currency,
                 rail=PaymentRail.STRIPE,
-                error="Card was declined.",
+                error=message,
             )
 
         except stripe.error.StripeError as exc:
             raise PaymentError(
-                "Payment processing error. Please try again.",
+                "Payment processing error. This is usually temporary — "
+                "please try again in 1-2 minutes. If the problem persists, "
+                "check your payment method with 'billing_status'.",
                 code="STRIPE_AUTH_ERROR",
             ) from exc
 

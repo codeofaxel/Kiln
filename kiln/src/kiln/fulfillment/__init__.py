@@ -44,6 +44,7 @@ from kiln.fulfillment.intelligence import (
     ProviderQuote,
     ProviderStatus,
     QuoteComparison,
+    QuoteValidation,
     RetryResult,
     batch_quote,
     compare_providers,
@@ -52,6 +53,7 @@ from kiln.fulfillment.intelligence import (
     get_insurance_options,
     get_order_history,
     place_order_with_retry,
+    validate_quote_for_order,
 )
 
 __all__ = [
@@ -77,6 +79,7 @@ __all__ = [
     "Quote",
     "QuoteComparison",
     "QuoteRequest",
+    "QuoteValidation",
     "RetryResult",
     "SculpteoProvider",
     "ShippingOption",
@@ -91,4 +94,5 @@ __all__ = [
     "list_providers",
     "place_order_with_retry",
     "register",
+    "validate_quote_for_order",
 ]

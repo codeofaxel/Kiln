@@ -90,6 +90,12 @@ class PaymentResult:
         return data
 
 
+BILLING_SUPPORT_SUFFIX = (
+    " For help, run 'billing_status' to check your account, "
+    "or open an issue at https://github.com/Kiln3D/kiln/issues."
+)
+
+
 class PaymentError(Exception):
     """Base exception for payment-related errors."""
 

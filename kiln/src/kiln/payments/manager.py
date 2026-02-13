@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from kiln.billing import BillingLedger, FeeCalculation, SpendLimits
 from kiln.payments.base import (
+    BILLING_SUPPORT_SUFFIX,
     Currency,
     PaymentError,
     PaymentProvider,
@@ -126,8 +127,10 @@ class PaymentManager:
         if self._providers:
             return next(iter(self._providers))
         raise PaymentError(
-            "No payment providers registered. "
-            "Run 'kiln billing setup' to link a payment method.",
+            "No payment method configured. "
+            "Set up a payment method first: use 'billing_setup_url' to get a "
+            "Stripe setup link, or configure Circle USDC with 'kiln billing setup'."
+            + BILLING_SUPPORT_SUFFIX,
             code="NO_PROVIDER",
         )
 
@@ -232,7 +235,9 @@ class PaymentManager:
                     "reason": reason,
                 })
                 raise PaymentError(
-                    f"Spend limit exceeded: {reason}",
+                    f"Spend limit exceeded: {reason}. "
+                    "Adjust your limits in billing settings or wait until next month."
+                    + BILLING_SUPPORT_SUFFIX,
                     code="SPEND_LIMIT",
                 )
 
@@ -241,7 +246,10 @@ class PaymentManager:
             provider = self._providers.get(provider_name)
             if provider is None:
                 raise PaymentError(
-                    f"Payment provider {provider_name!r} not registered.",
+                    "No payment method configured. "
+                    "Set up a payment method first: use 'billing_setup_url' to get a "
+                    "Stripe setup link, or configure Circle USDC with 'kiln billing setup'."
+                    + BILLING_SUPPORT_SUFFIX,
                     code="NO_PROVIDER",
                 )
 
@@ -398,7 +406,9 @@ class PaymentManager:
                     "reason": reason,
                 })
                 raise PaymentError(
-                    f"Spend limit exceeded: {reason}",
+                    f"Spend limit exceeded: {reason}. "
+                    "Adjust your limits in billing settings or wait until next month."
+                    + BILLING_SUPPORT_SUFFIX,
                     code="SPEND_LIMIT",
                 )
 
@@ -406,7 +416,10 @@ class PaymentManager:
             provider = self._providers.get(provider_name)
             if provider is None:
                 raise PaymentError(
-                    f"Payment provider {provider_name!r} not registered.",
+                    "No payment method configured. "
+                    "Set up a payment method first: use 'billing_setup_url' to get a "
+                    "Stripe setup link, or configure Circle USDC with 'kiln billing setup'."
+                    + BILLING_SUPPORT_SUFFIX,
                     code="NO_PROVIDER",
                 )
 
