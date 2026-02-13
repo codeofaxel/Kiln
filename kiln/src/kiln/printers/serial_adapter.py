@@ -102,7 +102,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         self,
         port: str,
         baudrate: int = 115200,
-        timeout: int = 10,
+        timeout: float = 10,
         *,
         printer_name: str = "serial",
     ) -> None:
@@ -119,7 +119,7 @@ class SerialPrinterAdapter(PrinterAdapter):
 
         self._port: str = port
         self._baudrate: int = baudrate
-        self._timeout: int = timeout
+        self._timeout: float = timeout
         self._printer_name: str = printer_name
 
         self._serial: Optional[Any] = None  # serial.Serial instance
@@ -480,7 +480,14 @@ class SerialPrinterAdapter(PrinterAdapter):
 
         try:
             temp_response = self._send_command("M105")
-        except PrinterError:
+        except PrinterError as exc:
+            # Distinguish unreachable (OFFLINE) from firmware error (ERROR).
+            msg = str(exc).lower()
+            if "firmware error" in msg or "printer halted" in msg or "thermal runaway" in msg:
+                return PrinterState(
+                    connected=True,
+                    state=PrinterStatus.ERROR,
+                )
             return PrinterState(
                 connected=False,
                 state=PrinterStatus.OFFLINE,
@@ -811,19 +818,30 @@ class SerialPrinterAdapter(PrinterAdapter):
         Raises:
             PrinterError: If the M112 command cannot be delivered.
         """
+        m112_sent = False
         try:
             self._send_command("M112", wait_for_ok=False)
-        except PrinterError:
-            # Even if reading fails, M112 was likely sent -- report success.
-            pass
+            m112_sent = True
+        except PrinterError as exc:
+            # M112 is fire-and-forget: even if the response read fails, the
+            # write may have succeeded.  Only flag a real write failure.
+            if "failed to send" in str(exc).lower():
+                logger.error("Emergency stop: M112 write failed: %s", exc)
+            else:
+                # Write succeeded but read failed (expected -- printer halts).
+                m112_sent = True
 
         self._current_file = None
         self._paused = False
         self._connected = False
         return PrintResult(
-            success=True,
-            message="Emergency stop triggered (M112 sent). "
-                    "Printer will need to be reset.",
+            success=m112_sent,
+            message=(
+                "Emergency stop triggered (M112 sent). "
+                "Printer will need to be reset."
+                if m112_sent
+                else "Emergency stop failed: could not deliver M112 to printer."
+            ),
         )
 
     # ------------------------------------------------------------------

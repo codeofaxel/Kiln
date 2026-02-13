@@ -14,7 +14,13 @@ Environment variables
     API key used for authenticating with the printer server.
 ``KILN_PRINTER_TYPE``
     Printer backend type.  Supported values: ``"octoprint"``,
-    ``"moonraker"``, and ``"bambu"``.  Defaults to ``"octoprint"``.
+    ``"moonraker"``, ``"bambu"``, ``"prusaconnect"``, and ``"serial"``.
+    Defaults to ``"octoprint"``.
+``KILN_PRINTER_PORT``
+    Serial port path for USB printers (required when ``KILN_PRINTER_TYPE``
+    is ``"serial"``).  E.g. ``"/dev/ttyUSB0"`` or ``"COM3"``.
+``KILN_PRINTER_BAUDRATE``
+    Baud rate for serial printers (default 115200).
 ``KILN_PRINTER_SERIAL``
     Bambu printer serial number (required when ``KILN_PRINTER_TYPE``
     is ``"bambu"``).
@@ -57,6 +63,7 @@ from kiln.printers import (
     PrinterError,
     PrinterStatus,
     PrusaConnectAdapter,
+    SerialPrinterAdapter,
 )
 from kiln.gcode import validate_gcode as _validate_gcode_impl, validate_gcode_for_printer
 from kiln.safety_profiles import (
@@ -370,10 +377,19 @@ def _get_adapter() -> PrinterAdapter:
         _adapter = BambuAdapter(host=host, access_code=api_key, serial=serial)
     elif printer_type == "prusaconnect":
         _adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
+    elif printer_type == "serial":
+        port = os.environ.get("KILN_PRINTER_PORT", "")
+        if not port:
+            raise RuntimeError(
+                "KILN_PRINTER_PORT environment variable is not set.  "
+                "Set it to the serial port path (e.g. /dev/ttyUSB0, /dev/ttyACM0, COM3)."
+            )
+        baudrate = int(os.environ.get("KILN_PRINTER_BAUDRATE", "115200"))
+        _adapter = SerialPrinterAdapter(port=port, baudrate=baudrate)
     else:
         raise RuntimeError(
             f"Unsupported printer type: {printer_type!r}.  "
-            f"Supported types are 'octoprint', 'moonraker', 'bambu', and 'prusaconnect'."
+            f"Supported types are 'octoprint', 'moonraker', 'bambu', 'prusaconnect', and 'serial'."
         )
 
     # Propagate safety profile to adapter for defense-in-depth temp limits.
@@ -890,8 +906,8 @@ def _refund_after_order_failure(
                     "error": f"Auto-refund failed: {exc}",
                     "requires_manual_refund": True,
                 }, source="fulfillment")
-            except Exception:
-                pass
+            except Exception as exc2:
+                logger.debug("Failed to publish refund failure event: %s", exc2)
             return (
                 f"WARNING: Automatic refund of payment {payment_id} failed. "
                 "Manual refund may be required."
@@ -916,8 +932,8 @@ def _refund_after_order_failure(
                     "error": f"Hold cancellation failed: {exc}",
                     "requires_manual_refund": True,
                 }, source="fulfillment")
-            except Exception:
-                pass
+            except Exception as exc2:
+                logger.debug("Failed to publish hold cancellation failure event: %s", exc2)
             return (
                 f"WARNING: Cancellation of payment hold {payment_hold_id} failed. "
                 "Manual cancellation may be required."
@@ -1765,8 +1781,8 @@ def set_temperature(
                         f"{state.bed_temp_target:.0f}°C -> {bed_temp:.0f}°C "
                         f"(delta {delta:.0f}°C)."
                     )
-        except Exception:
-            pass  # Don't let warning logic block the actual operation.
+        except Exception as exc:
+            logger.debug("Failed to compute temperature rate warnings: %s", exc)  # Don't let warning logic block the actual operation.
 
         if tool_temp is not None:
             ok = adapter.set_tool_temp(tool_temp)
@@ -1930,8 +1946,8 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
                             "message": "Filament detected by runout sensor",
                         })
                     # If sensor not enabled, skip silently
-            except Exception:
-                pass  # Filament sensor not available -- skip silently
+            except Exception as exc:
+                logger.debug("Filament sensor check failed: %s", exc)  # Filament sensor not available -- skip silently
 
         # -- Material mismatch check (optional) ----------------------------
         _strict_material = os.environ.get(
@@ -1961,9 +1977,9 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
                         "passed": True,
                         "message": f"Loaded material matches expected ({expected_material.upper()})",
                     })
-            except Exception:
+            except Exception as exc:
                 # Material tracking not configured — skip silently
-                pass
+                logger.debug("Material match check failed: %s", exc)
 
             # 2) Check against printer intelligence DB (material compatibility)
             if _PRINTER_MODEL:
@@ -1993,8 +2009,8 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
                                 f"(hotend {mat_settings.hotend_temp}C, bed {mat_settings.bed_temp}C)"
                             ),
                         })
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Failed to check material compatibility via intelligence DB: %s", exc)
 
         # -- Outcome history advisory (learning database) ------------------
         # Query past outcomes for this printer + material combo to warn
@@ -2062,8 +2078,8 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
                                 f"({insights['total_outcomes']} outcomes recorded)"
                             ),
                         })
-        except Exception:
-            pass  # Learning DB not available — skip silently
+        except Exception as exc:
+            logger.debug("Learning DB outcome history check failed: %s", exc)  # Learning DB not available — skip silently
 
         # -- File validation (optional) ------------------------------------
         file_result: Optional[Dict[str, Any]] = None
@@ -2446,8 +2462,8 @@ def safety_status() -> dict:
             db = get_db()
             summary = db.audit_summary(window_seconds=3600.0)
             recent_blocked = summary.get("recent_blocked", [])
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to fetch audit summary for safety status: %s", exc)
 
         # G-code blocked command list
         from kiln.gcode import _BLOCKED_COMMANDS  # noqa: E402
@@ -2596,10 +2612,13 @@ def register_printer(
 
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
-        printer_type: Backend type -- "octoprint", "moonraker", or "bambu".
-        host: Base URL or IP address of the printer.
+        printer_type: Backend type -- "octoprint", "moonraker", "bambu",
+            "prusaconnect", or "serial".
+        host: Base URL or IP address of the printer.  For serial printers,
+            this is the port path (e.g. "/dev/ttyUSB0", "COM3").
         api_key: API key (required for OctoPrint and Bambu, optional for
-            Moonraker).  For Bambu printers this is the LAN Access Code.
+            Moonraker, unused for serial).  For Bambu printers this is the
+            LAN Access Code.
         serial: Printer serial number (required for Bambu printers).
         verify_ssl: Whether to verify SSL certificates (default True).
             Set to False for printers using self-signed certificates.
@@ -2666,10 +2685,15 @@ def register_printer(
             adapter = BambuAdapter(host=host, access_code=api_key, serial=serial)
         elif printer_type == "prusaconnect":
             adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
+        elif printer_type == "serial":
+            # For serial printers, 'host' is the serial port path (e.g.
+            # /dev/ttyUSB0) and 'api_key' is unused.
+            baudrate = 115200
+            adapter = SerialPrinterAdapter(port=host, baudrate=baudrate)
         else:
             return _error_dict(
                 f"Unsupported printer_type: {printer_type!r}. "
-                "Supported: 'octoprint', 'moonraker', 'bambu', 'prusaconnect'.",
+                "Supported: 'octoprint', 'moonraker', 'bambu', 'prusaconnect', 'serial'.",
                 code="INVALID_ARGS",
             )
 
@@ -6027,7 +6051,7 @@ def fleet_workflow() -> str:
     return (
         "To manage a fleet of printers:\n\n"
         "1. Call `fleet_status` to see all registered printers and their states\n"
-        "2. Use `register_printer` to add new printers (octoprint, moonraker, or bambu)\n"
+        "2. Use `register_printer` to add new printers (octoprint, moonraker, bambu, prusaconnect, or serial)\n"
         "3. Submit jobs with `submit_job` — the scheduler auto-dispatches to idle printers\n"
         "4. Monitor via `queue_summary` and `job_status`\n"
         "5. Check `recent_events` for lifecycle updates\n\n"
