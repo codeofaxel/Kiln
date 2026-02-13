@@ -241,6 +241,11 @@ kiln rest [--port 8420] [--tier full]      # Start REST API server
 kiln agent [--model openai/gpt-4o]         # Interactive agent REPL (any LLM)
 ```
 
+The REST API can be deployed to Fly.io for production use — see `deploy.sh` for one-command deployment.
+
+```
+```
+
 Global option: `--printer <name>` to target a specific printer per-command.
 
 ### MCP Server
@@ -671,8 +676,8 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (3,125+ total)
-cd kiln && python3 -m pytest tests/ -v        # 2,886 tests
+# Run tests (3,650+ total)
+cd kiln && python3 -m pytest tests/ -v        # 3,415 tests (approximately)
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
@@ -737,6 +742,13 @@ All files are vector SVG — scale to any size.
 | [Litepaper](docs/LITEPAPER.md) | Quick overview for non-technical readers |
 | [Whitepaper](docs/WHITEPAPER.md) | Full technical architecture and protocol design |
 | [Project Docs](docs/PROJECT_DOCS.md) | Complete reference (CLI, MCP tools, adapters, config) |
+
+## Support Development
+
+Kiln is free, open-source software. If you find it useful, consider sending a tip:
+
+- **Solana:** `kiln3d.sol`
+- **Ethereum:** `kiln3d.eth`
 
 ## License
 

@@ -16,6 +16,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Smart printer routing based on historical success rates
 - Tier-aware agent error messages with suggested alternative tools
 - Agent onboarding improvements (`get_started` tool, session recovery hints)
+- Fly.io deployment support (`deploy.sh`, `Dockerfile.api`, GitHub Actions workflow)
+- Circle setup script (`scripts/circle_setup.py`) for one-time entity secret and wallet provisioning
+- Health check endpoint (`/api/health`) on REST API
+- Donation info endpoint on REST API
 
 ### Changed
 - `generate_and_print` and `download_and_upload` no longer auto-start prints (upload only, explicit start required)
@@ -24,6 +28,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Enriched `kiln status --json` with `printer_name` and `printer_type` fields
 - Improved config validation errors with actionable quick-fix suggestions
 - Bambu MQTT timeout error now includes troubleshooting checklist
+- Rewrote Circle payment provider for W3S Programmable Wallets API (replaced deprecated Transfers API)
+- Circle payments now use RSA-OAEP entity secret encryption for secure wallet operations
 
 ### Fixed
 - CI failures: OpenSCAD macOS fallback test on Linux, flaky uptime test tolerance
@@ -31,6 +37,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Bambu A-series implicit FTPS on port 990
 - Print start confirmation polling for Bambu printers
 - YAML parse errors now surfaced instead of silently returning empty config
+
+### Dependencies
+- Added `cryptography>=41.0` to payments optional dependencies
 
 ### Security
 - Safety audit log records all guarded/confirm/emergency tool executions
