@@ -40,3 +40,7 @@ fly.toml
 
 # Internal R&D (not public-facing)
 .forge
+
+# Circle recovery files
+.circle-recovery.txt
+recovery.dat
