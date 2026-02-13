@@ -41,6 +41,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from starlette.requests import Request  # module-level so PEP 563 deferred annotations resolve
+
 logger = logging.getLogger(__name__)
 
 
@@ -237,12 +239,24 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
     All tool functions are imported lazily from ``kiln.server`` and wrapped
     as POST endpoints under ``/api/tools/{tool_name}``.
 
+    .. note:: Loads ``.env`` from the working directory and ``~/.kiln/.env``
+       so that Stripe/Circle API keys are available without manual export.
+
     Also provides:
 
     - ``GET /api/tools`` -- list all available tools with schemas
     - ``GET /api/health`` -- server health check
     - ``POST /api/agent`` -- run agent loop (requires OpenRouter/OpenAI key)
     """
+    # Load .env file if present.
+    try:
+        from pathlib import Path as _P
+        from dotenv import load_dotenv
+        load_dotenv()
+        load_dotenv(_P.home() / ".kiln" / ".env")
+    except ImportError:
+        pass
+
     try:
         from fastapi import FastAPI, HTTPException, Request, Depends
         from fastapi.middleware.cors import CORSMiddleware

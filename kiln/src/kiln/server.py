@@ -9279,6 +9279,14 @@ def get_skill_manifest() -> dict:
 
 def main() -> None:
     """Run the Kiln MCP server."""
+    # Load .env file if present (project root or ~/.kiln/.env).
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()  # loads .env from cwd first
+        load_dotenv(Path.home() / ".kiln" / ".env")  # then ~/.kiln/.env
+    except ImportError:
+        pass
+
     # Configure structured logging if requested (before any log calls).
     _configure_logging()
 

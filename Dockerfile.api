@@ -1,0 +1,28 @@
+# Dockerfile for the Kiln REST API (stealth deployment).
+# Serves only the webhook + API endpoints — no static site.
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system deps (ffmpeg for Bambu webcam snapshots)
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install kiln with REST + payments extras
+COPY kiln/ ./kiln/
+RUN pip install --no-cache-dir "./kiln[rest,payments]" python-dotenv
+
+# Create non-root user
+RUN adduser --disabled-password --gecos '' kiln
+USER kiln
+
+# Port is set by Fly.io via $PORT env var (default 8080)
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health')" || exit 1
+
+# Start the REST API server.
+# Reads KILN_STRIPE_SECRET_KEY, KILN_STRIPE_WEBHOOK_SECRET, etc. from env.
+CMD ["python3", "-m", "uvicorn", "kiln.rest_api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]

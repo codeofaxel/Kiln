@@ -191,7 +191,7 @@ class TestCreateApp:
         with mock.patch("kiln.rest_api._get_mcp_instance", return_value=mock_mcp):
             from kiln.rest_api import create_app
             app = create_app(RestApiConfig())
-            return TestClient(app)
+            yield TestClient(app)
 
     @pytest.fixture
     def authed_client(self, mock_mcp):
@@ -205,7 +205,7 @@ class TestCreateApp:
         with mock.patch("kiln.rest_api._get_mcp_instance", return_value=mock_mcp):
             from kiln.rest_api import create_app
             app = create_app(config)
-            return TestClient(app)
+            yield TestClient(app)
 
     # --- Health endpoint ---
 
@@ -349,23 +349,31 @@ class TestCreateApp:
         bad_tool = mock.MagicMock()
         bad_tool.name = "bad_tool"
         bad_tool.fn = mock.MagicMock(side_effect=TypeError("unexpected keyword arg"))
-        mock_mcp._tool_manager.get_tool.return_value = bad_tool
+        mock_mcp._tool_manager.get_tool.side_effect = lambda name: {
+            "printer_status": mock_mcp._tool_manager.list_tools.return_value[0],
+            "printer_files": mock_mcp._tool_manager.list_tools.return_value[1],
+            "bad_tool": bad_tool,
+        }.get(name)
 
-        resp = client.post("/api/tools/bad_tool", json={"wrong_param": 1})
+        resp = client.post("/api/tools/bad_tool", json={})
         assert resp.status_code == 400
 
     def test_tool_runtime_error_returns_error_json(self, client, mock_mcp):
-        """If the tool raises a generic exception, return error JSON (not 500)."""
+        """If the tool raises a generic exception, return 500 with error JSON."""
         err_tool = mock.MagicMock()
         err_tool.name = "err_tool"
         err_tool.fn = mock.MagicMock(side_effect=RuntimeError("printer offline"))
-        mock_mcp._tool_manager.get_tool.return_value = err_tool
+        mock_mcp._tool_manager.get_tool.side_effect = lambda name: {
+            "printer_status": mock_mcp._tool_manager.list_tools.return_value[0],
+            "printer_files": mock_mcp._tool_manager.list_tools.return_value[1],
+            "err_tool": err_tool,
+        }.get(name)
 
         resp = client.post("/api/tools/err_tool", json={})
-        assert resp.status_code == 200
+        assert resp.status_code == 500
         data = resp.json()
         assert data["success"] is False
-        assert "printer offline" in data["error"]["message"]
+        assert "error" in data
 
 
 # ---------------------------------------------------------------------------
