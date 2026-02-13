@@ -293,10 +293,10 @@ class TestSafetyValidationInServerLayer:
     """Test MCP tool safety enforcement for record_print_outcome."""
 
     def test_negative_temp_rejected(self) -> None:
-        from kiln.server import record_print_outcome
+        from kiln.plugins.learning_tools import record_print_outcome
         from unittest.mock import patch
 
-        with patch("kiln.server.get_db") as mock_db, \
+        with patch("kiln.persistence.get_db") as mock_db, \
              patch("kiln.server._check_auth", return_value=None):
             result = record_print_outcome(
                 job_id="j1", outcome="success",
@@ -305,14 +305,14 @@ class TestSafetyValidationInServerLayer:
         assert result.get("error", {}).get("code") == "SAFETY_VIOLATION"
 
     def test_zero_temp_accepted(self) -> None:
-        from kiln.server import record_print_outcome
+        from kiln.plugins.learning_tools import record_print_outcome
         from unittest.mock import patch, MagicMock
 
         mock_db_instance = MagicMock()
         mock_db_instance.get_print_record.return_value = None
         mock_db_instance.save_print_outcome.return_value = 1
 
-        with patch("kiln.server.get_db", return_value=mock_db_instance), \
+        with patch("kiln.persistence.get_db", return_value=mock_db_instance), \
              patch("kiln.server._check_auth", return_value=None):
             result = record_print_outcome(
                 job_id="j1", outcome="success",
@@ -321,10 +321,10 @@ class TestSafetyValidationInServerLayer:
         assert result.get("success") is True
 
     def test_non_numeric_temp_returns_validation_error(self) -> None:
-        from kiln.server import record_print_outcome
+        from kiln.plugins.learning_tools import record_print_outcome
         from unittest.mock import patch
 
-        with patch("kiln.server.get_db"), \
+        with patch("kiln.persistence.get_db"), \
              patch("kiln.server._check_auth", return_value=None):
             result = record_print_outcome(
                 job_id="j1", outcome="success",
@@ -333,10 +333,10 @@ class TestSafetyValidationInServerLayer:
         assert result.get("error", {}).get("code") == "VALIDATION_ERROR"
 
     def test_negative_speed_rejected(self) -> None:
-        from kiln.server import record_print_outcome
+        from kiln.plugins.learning_tools import record_print_outcome
         from unittest.mock import patch
 
-        with patch("kiln.server.get_db"), \
+        with patch("kiln.persistence.get_db"), \
              patch("kiln.server._check_auth", return_value=None):
             result = record_print_outcome(
                 job_id="j1", outcome="success",

@@ -183,6 +183,7 @@ class WebhookManager:
         self._delivery_queue: queue.Queue = queue.Queue(maxsize=10_000)
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._handler_ref: Optional[Any] = None
 
         # HTTP sender (injectable for testing)
         self._send_func = self._default_send
@@ -282,7 +283,9 @@ class WebhookManager:
         if self._running:
             return
         self._running = True
-        self._event_bus.subscribe(None, self._on_event)  # wildcard
+        # Store bound method ref so unsubscribe's identity check works
+        self._handler_ref = self._on_event
+        self._event_bus.subscribe(None, self._handler_ref)  # wildcard
         self._thread = threading.Thread(
             target=self._delivery_loop,
             name="kiln-webhooks",
@@ -294,11 +297,17 @@ class WebhookManager:
     def stop(self) -> None:
         """Stop the webhook delivery thread."""
         self._running = False
-        self._event_bus.unsubscribe(None, self._on_event)
+        self._event_bus.unsubscribe(None, self._handler_ref)
         if self._thread is not None:
             self._delivery_queue.put(None)  # sentinel to unblock
             self._thread.join(timeout=5.0)
             self._thread = None
+        # Drain any leftover items so they don't leak into the next start()
+        while not self._delivery_queue.empty():
+            try:
+                self._delivery_queue.get_nowait()
+            except queue.Empty:
+                break
         logger.info("Webhook manager stopped")
 
     def _on_event(self, event: Event) -> None:

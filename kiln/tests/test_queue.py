@@ -21,7 +21,7 @@ import time
 
 import pytest
 
-from kiln.queue import JobNotFoundError, JobStatus, PrintJob, PrintQueue
+from kiln.queue import InvalidStateTransition, JobNotFoundError, JobStatus, PrintJob, PrintQueue
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ class TestJobStatus:
     """Tests for the JobStatus enum."""
 
     def test_all_members_present(self):
-        expected = {"QUEUED", "STARTING", "PRINTING", "COMPLETED", "FAILED", "CANCELLED"}
+        expected = {"QUEUED", "STARTING", "PRINTING", "PAUSED", "COMPLETED", "FAILED", "CANCELLED"}
         actual = {member.name for member in JobStatus}
         assert actual == expected
 
@@ -273,6 +273,7 @@ class TestPrintQueueCancel:
     def test_cancel_printing_job(self):
         queue = PrintQueue()
         job_id = queue.submit(file_name="test.gcode")
+        queue.mark_starting(job_id)
         queue.mark_printing(job_id)
         job = queue.cancel(job_id)
         assert job.status == JobStatus.CANCELLED
@@ -287,22 +288,25 @@ class TestPrintQueueCancel:
     def test_cancel_completed_raises_value_error(self):
         queue = PrintQueue()
         job_id = queue.submit(file_name="test.gcode")
+        queue.mark_starting(job_id)
+        queue.mark_printing(job_id)
         queue.mark_completed(job_id)
-        with pytest.raises(ValueError, match="already completed"):
+        with pytest.raises(InvalidStateTransition):
             queue.cancel(job_id)
 
     def test_cancel_failed_raises_value_error(self):
         queue = PrintQueue()
         job_id = queue.submit(file_name="test.gcode")
+        queue.mark_starting(job_id)
         queue.mark_failed(job_id, error="nozzle clog")
-        with pytest.raises(ValueError, match="already failed"):
+        with pytest.raises(InvalidStateTransition):
             queue.cancel(job_id)
 
     def test_cancel_already_cancelled_raises_value_error(self):
         queue = PrintQueue()
         job_id = queue.submit(file_name="test.gcode")
         queue.cancel(job_id)
-        with pytest.raises(ValueError, match="already cancelled"):
+        with pytest.raises(InvalidStateTransition):
             queue.cancel(job_id)
 
     def test_cancel_not_found_raises(self):
@@ -328,6 +332,7 @@ class TestStatusTransitions:
     def test_mark_printing(self):
         queue = PrintQueue()
         job_id = queue.submit(file_name="test.gcode")
+        queue.mark_starting(job_id)
         job = queue.mark_printing(job_id)
         assert job.status == JobStatus.PRINTING
         assert job.started_at is not None
@@ -343,12 +348,14 @@ class TestStatusTransitions:
     def test_mark_printing_sets_started_at_if_missing(self):
         queue = PrintQueue()
         job_id = queue.submit(file_name="test.gcode")
+        queue.mark_starting(job_id)
         job = queue.mark_printing(job_id)
         assert job.started_at is not None
 
     def test_mark_completed(self):
         queue = PrintQueue()
         job_id = queue.submit(file_name="test.gcode")
+        queue.mark_starting(job_id)
         queue.mark_printing(job_id)
         job = queue.mark_completed(job_id)
         assert job.status == JobStatus.COMPLETED
@@ -357,6 +364,7 @@ class TestStatusTransitions:
     def test_mark_failed(self):
         queue = PrintQueue()
         job_id = queue.submit(file_name="test.gcode")
+        queue.mark_starting(job_id)
         queue.mark_printing(job_id)
         job = queue.mark_failed(job_id, error="thermal runaway")
         assert job.status == JobStatus.FAILED
@@ -428,6 +436,7 @@ class TestPrintQueueQueries:
         queue = PrintQueue()
         id1 = queue.submit(file_name="a.gcode")
         queue.submit(file_name="b.gcode")
+        queue.mark_starting(id1)
         queue.mark_printing(id1)
 
         queued_jobs = queue.list_jobs(status=JobStatus.QUEUED)
@@ -452,6 +461,7 @@ class TestPrintQueueQueries:
         queue = PrintQueue()
         id1 = queue.submit(file_name="a.gcode", printer_name="voron")
         queue.submit(file_name="b.gcode", printer_name="voron")
+        queue.mark_starting(id1)
         queue.mark_printing(id1)
 
         jobs = queue.list_jobs(status=JobStatus.QUEUED, printer_name="voron")
@@ -503,6 +513,7 @@ class TestPrintQueueQueries:
     def test_next_job_no_queued_jobs(self):
         queue = PrintQueue()
         job_id = queue.submit(file_name="test.gcode")
+        queue.mark_starting(job_id)
         queue.mark_printing(job_id)
         assert queue.next_job() is None
 
@@ -551,6 +562,7 @@ class TestPrintQueueCounts:
         queue = PrintQueue()
         id1 = queue.submit(file_name="a.gcode")
         queue.submit(file_name="b.gcode")
+        queue.mark_starting(id1)
         queue.mark_printing(id1)
         assert queue.pending_count() == 1
 
@@ -563,6 +575,7 @@ class TestPrintQueueCounts:
     def test_active_count_printing(self):
         queue = PrintQueue()
         id1 = queue.submit(file_name="a.gcode")
+        queue.mark_starting(id1)
         queue.mark_printing(id1)
         assert queue.active_count() == 1
 
@@ -572,12 +585,15 @@ class TestPrintQueueCounts:
         id2 = queue.submit(file_name="b.gcode")
         queue.submit(file_name="c.gcode")
         queue.mark_starting(id1)
+        queue.mark_starting(id2)
         queue.mark_printing(id2)
         assert queue.active_count() == 2
 
     def test_active_count_excludes_completed(self):
         queue = PrintQueue()
         id1 = queue.submit(file_name="a.gcode")
+        queue.mark_starting(id1)
+        queue.mark_printing(id1)
         queue.mark_completed(id1)
         assert queue.active_count() == 0
 
@@ -586,6 +602,8 @@ class TestPrintQueueCounts:
         assert queue.total_count == 0
         id1 = queue.submit(file_name="a.gcode")
         queue.submit(file_name="b.gcode")
+        queue.mark_starting(id1)
+        queue.mark_printing(id1)
         queue.mark_completed(id1)
         assert queue.total_count == 2
 
@@ -594,7 +612,10 @@ class TestPrintQueueCounts:
         id1 = queue.submit(file_name="a.gcode")
         queue.submit(file_name="b.gcode")
         id3 = queue.submit(file_name="c.gcode")
+        queue.mark_starting(id1)
         queue.mark_printing(id1)
+        queue.mark_starting(id3)
+        queue.mark_printing(id3)
         queue.mark_completed(id3)
 
         s = queue.summary()

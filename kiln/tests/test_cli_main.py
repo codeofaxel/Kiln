@@ -593,7 +593,7 @@ class TestLicenseCommands:
             cache_path=tmp_path / "cache.json",
         )
         with patch("kiln.licensing._manager", mgr), \
-             patch.dict("os.environ", {}, clear=True):
+             patch.dict("os.environ", {"KILN_LICENSE_OFFLINE": "1"}, clear=True):
             result = runner.invoke(cli, ["upgrade"])
         assert result.exit_code == 0
         assert "Pro" in result.output
@@ -747,7 +747,7 @@ class TestQueueCLI:
             "job_id": "job-abc-123",
             "message": "Job job-abc-123 submitted to queue.",
         }
-        with patch("kiln.server.submit_job", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.submit_job", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "submit", "benchy.gcode"])
         assert result.exit_code == 0
         assert "job-abc-123" in result.output
@@ -759,7 +759,7 @@ class TestQueueCLI:
             "job_id": "job-xyz-789",
             "message": "Job submitted.",
         }
-        with patch("kiln.server.submit_job", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.submit_job", return_value=mock_result):
             result = runner.invoke(cli, [
                 "queue", "submit", "cube.gcode",
                 "--printer", "voron-350", "--priority", "5",
@@ -774,7 +774,7 @@ class TestQueueCLI:
             "job_id": "job-json-test",
             "message": "Job submitted.",
         }
-        with patch("kiln.server.submit_job", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.submit_job", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "submit", "test.gcode", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -797,7 +797,7 @@ class TestQueueCLI:
                 "error": None,
             },
         }
-        with patch("kiln.server.job_status", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.job_status", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "status", "job-abc-123"])
         assert result.exit_code == 0
         assert "benchy.gcode" in result.output
@@ -809,7 +809,7 @@ class TestQueueCLI:
             "error": "Job not found: 'nonexistent'",
             "code": "NOT_FOUND",
         }
-        with patch("kiln.server.job_status", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.job_status", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "status", "nonexistent"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
@@ -825,7 +825,7 @@ class TestQueueCLI:
                 "priority": 0,
             },
         }
-        with patch("kiln.server.job_status", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.job_status", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "status", "job-json-stat", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -842,7 +842,7 @@ class TestQueueCLI:
             "next_job": {"id": "job-next", "file_name": "next.gcode"},
             "recent_jobs": [],
         }
-        with patch("kiln.server.queue_summary", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.queue_summary", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "list"])
         assert result.exit_code == 0
         assert "14" in result.output or "total" in result.output.lower()
@@ -863,7 +863,7 @@ class TestQueueCLI:
             ],
             "count": 1,
         }
-        with patch("kiln.server.job_history", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.job_history", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "list", "--status", "failed"])
         assert result.exit_code == 0
         assert "failed_print.gcode" in result.output
@@ -879,7 +879,7 @@ class TestQueueCLI:
             "next_job": None,
             "recent_jobs": [],
         }
-        with patch("kiln.server.queue_summary", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.queue_summary", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "list", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -892,7 +892,7 @@ class TestQueueCLI:
             "job": {"id": "job-cancel-me", "status": "cancelled"},
             "message": "Job job-cancel-me cancelled.",
         }
-        with patch("kiln.server.cancel_job", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.cancel_job", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "cancel", "job-cancel-me"])
         assert result.exit_code == 0
         assert "cancel" in result.output.lower() or "success" in result.output.lower()
@@ -904,7 +904,7 @@ class TestQueueCLI:
             "error": "Job not found: 'ghost'",
             "code": "NOT_FOUND",
         }
-        with patch("kiln.server.cancel_job", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.cancel_job", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "cancel", "ghost"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
@@ -916,7 +916,7 @@ class TestQueueCLI:
             "job": {"id": "job-c", "status": "cancelled"},
             "message": "Job cancelled.",
         }
-        with patch("kiln.server.cancel_job", return_value=mock_result):
+        with patch("kiln.plugins.queue_tools.cancel_job", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "cancel", "job-c", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)

@@ -250,10 +250,10 @@ class TestAgentMemoryMigration:
 
 class TestAgentMemoryMCPTools:
 
-    @patch("kiln.server.get_db")
+    @patch("kiln.persistence.get_db")
     @patch("kiln.server._check_auth", return_value=None)
     def test_save_agent_note_with_ttl(self, mock_auth, mock_get_db):
-        from kiln.server import save_agent_note
+        from kiln.plugins.learning_tools import save_agent_note
 
         mock_db = MagicMock()
         mock_get_db.return_value = mock_db
@@ -266,10 +266,10 @@ class TestAgentMemoryMCPTools:
         call_kwargs = mock_db.save_memory.call_args
         assert call_kwargs.kwargs["ttl_seconds"] == 600
 
-    @patch("kiln.server.get_db")
+    @patch("kiln.persistence.get_db")
     @patch("kiln.server._check_auth", return_value=None)
     def test_save_agent_note_without_ttl(self, mock_auth, mock_get_db):
-        from kiln.server import save_agent_note
+        from kiln.plugins.learning_tools import save_agent_note
 
         mock_db = MagicMock()
         mock_get_db.return_value = mock_db
@@ -281,10 +281,10 @@ class TestAgentMemoryMCPTools:
         call_kwargs = mock_db.save_memory.call_args
         assert call_kwargs.kwargs["ttl_seconds"] is None
 
-    @patch("kiln.server.get_db")
+    @patch("kiln.persistence.get_db")
     @patch("kiln.server._check_auth", return_value=None)
     def test_get_agent_context_returns_entries(self, mock_auth, mock_get_db):
-        from kiln.server import get_agent_context
+        from kiln.plugins.learning_tools import get_agent_context
 
         mock_db = MagicMock()
         mock_db.list_memory.return_value = [
@@ -297,10 +297,10 @@ class TestAgentMemoryMCPTools:
         assert result["count"] == 1
         assert result["entries"][0]["version"] == 3
 
-    @patch("kiln.server.get_db")
+    @patch("kiln.persistence.get_db")
     @patch("kiln.server._check_auth", return_value=None)
     def test_clean_agent_memory_returns_count(self, mock_auth, mock_get_db):
-        from kiln.server import clean_agent_memory
+        from kiln.plugins.learning_tools import clean_agent_memory
 
         mock_db = MagicMock()
         mock_db.clean_expired_notes.return_value = 5

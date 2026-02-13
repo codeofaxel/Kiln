@@ -446,6 +446,9 @@ def _bypass_license_tier(monkeypatch, tmp_path):
     """
     from kiln.licensing import LicenseManager, _KEY_PREFIX_BUSINESS
 
+    # Allow legacy prefix keys in tests (no HMAC signature available)
+    monkeypatch.setenv("KILN_LICENSE_OFFLINE", "1")
+
     mgr = LicenseManager(
         license_key=f"{_KEY_PREFIX_BUSINESS}test_bypass_key",
         license_path=tmp_path / "test_license",

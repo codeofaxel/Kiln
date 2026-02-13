@@ -59,7 +59,7 @@ class TestEventType:
         assert EventType.FILE_UPLOADED.value == "file.uploaded"
 
     def test_all_members_count(self):
-        assert len(EventType) == 57
+        assert len(EventType) == 58
 
     def test_from_value(self):
         assert EventType("job.queued") is EventType.JOB_QUEUED

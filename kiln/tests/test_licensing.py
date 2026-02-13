@@ -120,7 +120,7 @@ class TestLicenseManagerDefaults:
     def test_pro_from_env_var(self, tmp_path):
         """KILN_LICENSE_KEY with pro prefix resolves to PRO."""
         key = f"{_KEY_PREFIX_PRO}test_key_123456"
-        with mock.patch.dict(os.environ, {"KILN_LICENSE_KEY": key}, clear=True):
+        with mock.patch.dict(os.environ, {"KILN_LICENSE_KEY": key, "KILN_LICENSE_OFFLINE": "1"}, clear=True):
             mgr = LicenseManager(
                 license_path=tmp_path / "license",
                 cache_path=tmp_path / "cache.json",
@@ -130,7 +130,7 @@ class TestLicenseManagerDefaults:
     def test_business_from_env_var(self, tmp_path):
         """KILN_LICENSE_KEY with business prefix resolves to BUSINESS."""
         key = f"{_KEY_PREFIX_BUSINESS}test_key_789012"
-        with mock.patch.dict(os.environ, {"KILN_LICENSE_KEY": key}, clear=True):
+        with mock.patch.dict(os.environ, {"KILN_LICENSE_KEY": key, "KILN_LICENSE_OFFLINE": "1"}, clear=True):
             mgr = LicenseManager(
                 license_path=tmp_path / "license",
                 cache_path=tmp_path / "cache.json",
@@ -164,7 +164,7 @@ class TestLicenseManagerFromFile:
         key = f"{_KEY_PREFIX_PRO}file_key_abcdef"
         license_file.write_text(key, encoding="utf-8")
 
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {"KILN_LICENSE_OFFLINE": "1"}, clear=True):
             mgr = LicenseManager(
                 license_path=license_file,
                 cache_path=tmp_path / "cache.json",
@@ -177,7 +177,7 @@ class TestLicenseManagerFromFile:
         license_file.write_text(f"{_KEY_PREFIX_PRO}file_key", encoding="utf-8")
 
         env_key = f"{_KEY_PREFIX_BUSINESS}env_key_123456"
-        with mock.patch.dict(os.environ, {"KILN_LICENSE_KEY": env_key}, clear=True):
+        with mock.patch.dict(os.environ, {"KILN_LICENSE_KEY": env_key, "KILN_LICENSE_OFFLINE": "1"}, clear=True):
             mgr = LicenseManager(
                 license_path=license_file,
                 cache_path=tmp_path / "cache.json",
@@ -620,7 +620,7 @@ class TestEdgeCases:
         key = f"  {_KEY_PREFIX_PRO}whitespace_key  \n"
         license_file.write_text(key, encoding="utf-8")
 
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {"KILN_LICENSE_OFFLINE": "1"}, clear=True):
             mgr = LicenseManager(
                 license_path=license_file,
                 cache_path=tmp_path / "cache.json",

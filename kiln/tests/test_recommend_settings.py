@@ -104,7 +104,7 @@ class TestGetSuccessfulSettings:
 class TestRecommendSettingsTool:
     """Test the MCP tool layer."""
 
-    @patch("kiln.server.get_db")
+    @patch("kiln.persistence.get_db")
     @patch("kiln.server._check_auth", return_value=None)
     def test_recommends_median_settings(self, mock_auth, mock_get_db):
         mock_db = MagicMock()
@@ -115,7 +115,7 @@ class TestRecommendSettingsTool:
             {"settings": {"temp_tool": 220, "temp_bed": 65, "speed": 60}, "quality_grade": "excellent", "printer_name": "v", "material_type": "PLA", "notes": None},
         ]
 
-        from kiln.server import recommend_settings
+        from kiln.plugins.learning_tools import recommend_settings
         result = recommend_settings(printer_name="voron", material_type="PLA")
 
         assert result["success"] is True
@@ -125,24 +125,24 @@ class TestRecommendSettingsTool:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_requires_at_least_one_filter(self, mock_auth):
-        from kiln.server import recommend_settings
+        from kiln.plugins.learning_tools import recommend_settings
         result = recommend_settings()
         assert "error" in result
 
-    @patch("kiln.server.get_db")
+    @patch("kiln.persistence.get_db")
     @patch("kiln.server._check_auth", return_value=None)
     def test_no_data_returns_gracefully(self, mock_auth, mock_get_db):
         mock_db = MagicMock()
         mock_get_db.return_value = mock_db
         mock_db.get_successful_settings.return_value = []
 
-        from kiln.server import recommend_settings
+        from kiln.plugins.learning_tools import recommend_settings
         result = recommend_settings(printer_name="voron")
 
         assert result["success"] is True
         assert result["has_data"] is False
 
-    @patch("kiln.server.get_db")
+    @patch("kiln.persistence.get_db")
     @patch("kiln.server._check_auth", return_value=None)
     def test_confidence_scales_with_sample_size(self, mock_auth, mock_get_db):
         mock_db = MagicMock()
@@ -153,11 +153,11 @@ class TestRecommendSettingsTool:
             {"settings": {"temp_tool": 210}, "quality_grade": "good", "printer_name": "v", "material_type": "PLA", "notes": None},
             {"settings": {"temp_tool": 210}, "quality_grade": "good", "printer_name": "v", "material_type": "PLA", "notes": None},
         ]
-        from kiln.server import recommend_settings
+        from kiln.plugins.learning_tools import recommend_settings
         result = recommend_settings(printer_name="voron")
         assert result["confidence"] == "low"
 
-    @patch("kiln.server.get_db")
+    @patch("kiln.persistence.get_db")
     @patch("kiln.server._check_auth", return_value=None)
     def test_includes_safety_notice(self, mock_auth, mock_get_db):
         mock_db = MagicMock()
@@ -165,11 +165,11 @@ class TestRecommendSettingsTool:
         mock_db.get_successful_settings.return_value = [
             {"settings": {"temp_tool": 210}, "quality_grade": "good", "printer_name": "v", "material_type": "PLA", "notes": None},
         ]
-        from kiln.server import recommend_settings
+        from kiln.plugins.learning_tools import recommend_settings
         result = recommend_settings(material_type="PLA")
         assert "safety_notice" in result
 
-    @patch("kiln.server.get_db")
+    @patch("kiln.persistence.get_db")
     @patch("kiln.server._check_auth", return_value=None)
     def test_slicer_profile_mode(self, mock_auth, mock_get_db):
         """Most common slicer profile should be recommended."""
@@ -180,6 +180,6 @@ class TestRecommendSettingsTool:
             {"settings": {"slicer_profile": "fast", "temp_tool": 210}, "quality_grade": "good", "printer_name": "v", "material_type": "PLA", "notes": None},
             {"settings": {"slicer_profile": "quality", "temp_tool": 200}, "quality_grade": "excellent", "printer_name": "v", "material_type": "PLA", "notes": None},
         ]
-        from kiln.server import recommend_settings
+        from kiln.plugins.learning_tools import recommend_settings
         result = recommend_settings(printer_name="voron")
         assert result["recommended_settings"]["slicer_profile"] == "fast"

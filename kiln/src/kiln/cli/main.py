@@ -1889,7 +1889,7 @@ def queue_submit_cmd(file: str, printer: Optional[str], priority: int, json_mode
     Free tier: up to 10 queued jobs.  Pro: unlimited.
     """
     try:
-        from kiln.server import submit_job as _submit_job
+        from kiln.plugins.queue_tools import submit_job as _submit_job
 
         result = _submit_job(
             file_name=file,
@@ -1928,7 +1928,7 @@ def queue_status_cmd(job_id: str, json_mode: bool) -> None:
     JOB_ID is the ID returned by 'kiln queue submit'.
     """
     try:
-        from kiln.server import job_status as _job_status
+        from kiln.plugins.queue_tools import job_status as _job_status
 
         result = _job_status(job_id)
         if not result.get("success"):
@@ -1964,10 +1964,10 @@ def queue_list_cmd(filter_status: Optional[str], limit: int, json_mode: bool) ->
     """List jobs in the queue with optional status filter."""
     try:
         if filter_status:
-            from kiln.server import job_history as _job_history
+            from kiln.plugins.queue_tools import job_history as _job_history
             result = _job_history(limit=limit, status=filter_status)
         else:
-            from kiln.server import queue_summary as _queue_summary
+            from kiln.plugins.queue_tools import queue_summary as _queue_summary
             result = _queue_summary()
 
         if not result.get("success"):
@@ -2005,7 +2005,7 @@ def queue_cancel_cmd(job_id: str, json_mode: bool) -> None:
     JOB_ID is the ID returned by 'kiln queue submit'.
     """
     try:
-        from kiln.server import cancel_job as _cancel_job
+        from kiln.plugins.queue_tools import cancel_job as _cancel_job
 
         result = _cancel_job(job_id)
         if not result.get("success"):

@@ -122,7 +122,7 @@ class TestMJPEGProxyUnit:
 
         mock_server_cls.assert_called_once()
         call_args = mock_server_cls.call_args
-        assert call_args[0][0] == ("0.0.0.0", 9999)
+        assert call_args[0][0] == ("127.0.0.1", 9999)
 
         proxy._running = False
         proxy._stop_event.set()

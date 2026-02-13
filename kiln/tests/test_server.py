@@ -291,6 +291,10 @@ class TestStartPrint:
             bed_temp_target=0.0,
         )
         adapter.get_job.return_value = MagicMock(file_name=None)
+        # Mock list_files so the file_on_printer preflight check passes
+        adapter.list_files.return_value = [
+            PrinterFile(name="benchy.gcode", path="benchy.gcode", size_bytes=1234),
+        ]
         mock_get_adapter.return_value = adapter
 
         result = server_start_print("benchy.gcode")
@@ -957,10 +961,6 @@ from kiln.server import (
     validate_gcode as server_validate_gcode,
     fleet_status,
     register_printer,
-    submit_job as server_submit_job,
-    job_status as server_job_status,
-    queue_summary,
-    cancel_job as server_cancel_job,
     recent_events,
     search_models,
     model_details,
@@ -968,6 +968,12 @@ from kiln.server import (
     download_model,
     browse_models,
     list_model_categories,
+)
+from kiln.plugins.queue_tools import (
+    submit_job as server_submit_job,
+    job_status as server_job_status,
+    queue_summary,
+    cancel_job as server_cancel_job,
 )
 from kiln.registry import PrinterRegistry
 from kiln.queue import PrintQueue, JobStatus
@@ -1502,6 +1508,8 @@ class TestJobStatus:
         monkeypatch.setattr(mod, "_queue", fresh_queue)
 
         job_id = fresh_queue.submit(file_name="done.gcode", submitted_by="test")
+        fresh_queue.mark_starting(job_id)
+        fresh_queue.mark_printing(job_id)
         fresh_queue.mark_completed(job_id)
 
         result = server_job_status(job_id)
@@ -1555,6 +1563,7 @@ class TestQueueSummary:
         monkeypatch.setattr(mod, "_queue", fresh_queue)
 
         id1 = fresh_queue.submit(file_name="printing.gcode", submitted_by="test")
+        fresh_queue.mark_starting(id1)
         fresh_queue.mark_printing(id1)
         fresh_queue.submit(file_name="queued.gcode", submitted_by="test")
 
@@ -1600,6 +1609,7 @@ class TestCancelJob:
         monkeypatch.setattr(mod, "_event_bus", fresh_bus)
 
         job_id = fresh_queue.submit(file_name="active.gcode", submitted_by="test")
+        fresh_queue.mark_starting(job_id)
         fresh_queue.mark_printing(job_id)
 
         result = server_cancel_job(job_id)
@@ -1627,6 +1637,8 @@ class TestCancelJob:
         monkeypatch.setattr(mod, "_event_bus", fresh_bus)
 
         job_id = fresh_queue.submit(file_name="done.gcode", submitted_by="test")
+        fresh_queue.mark_starting(job_id)
+        fresh_queue.mark_printing(job_id)
         fresh_queue.mark_completed(job_id)
 
         result = server_cancel_job(job_id)

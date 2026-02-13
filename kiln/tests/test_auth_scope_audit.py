@@ -104,9 +104,6 @@ READ_ONLY_TOOLS: Set[str] = {
     "validate_gcode",
     "fleet_status",
     "fleet_analytics",
-    "job_status",
-    "queue_summary",
-    "job_history",
     "recent_events",
     "firmware_status",
     "bed_level_status",
@@ -134,10 +131,6 @@ READ_ONLY_TOOLS: Set[str] = {
     "billing_summary",
     "billing_check_setup",
     "billing_alerts",
-    "tax_estimate",
-    "tax_jurisdictions",
-    "tax_jurisdiction_lookup",
-    "donate_info",
 
     # Marketplace read-only (searches / metadata)
     "search_all_models",
@@ -156,22 +149,6 @@ READ_ONLY_TOOLS: Set[str] = {
     "fulfillment_quote",
     "fulfillment_order_status",
     "fulfillment_alerts",
-    "consumer_onboarding",
-    "validate_shipping_address",
-    "recommend_material",
-    "estimate_price",
-    "estimate_timeline",
-    "fulfillment_compare_providers",
-    "fulfillment_filter_materials",
-    "fulfillment_batch_quote",
-    "fulfillment_provider_health",
-    "fulfillment_order_history",
-    "supported_shipping_countries",
-
-    # Network read-only
-    "network_list_printers",
-    "network_find_printers",
-    "network_job_status",
 
     # Monitoring / analysis (read-only)
     "list_webhooks",
@@ -243,15 +220,6 @@ KNOWN_UNSCOPED_MUTATING_TOOLS: Set[str] = {
 
     # Slicer (writes files)
     "slice_model",
-
-    # Fulfillment mutating
-    "fulfillment_reorder",
-    "fulfillment_insurance_options",
-
-    # Network / fleet mutating
-    "network_register_printer",
-    "network_update_printer",
-    "network_submit_job",
 
     # Long-running blocking operations
     "await_print_completion",
