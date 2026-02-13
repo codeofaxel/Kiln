@@ -459,6 +459,21 @@ class QuoteCache:
 
         return results
 
+    def get_by_quote_id(self, quote_id: str) -> Optional[CachedQuote]:
+        """Look up a cached quote by its provider-assigned quote ID.
+
+        Unlike :meth:`get`, this does **not** auto-evict expired entries —
+        the caller decides how to handle expiry (e.g. validation errors).
+
+        :param quote_id: The quote ID assigned by the fulfillment provider.
+        :returns: The matching :class:`CachedQuote`, or ``None``.
+        """
+        with self._lock:
+            for quote in self._cache.values():
+                if quote.quote_id == quote_id:
+                    return quote
+        return None
+
     def invalidate(self, provider: str) -> int:
         """Remove all cached quotes for a specific provider.
 
@@ -625,11 +640,21 @@ def get_cached_quote(
     return get_quote_cache().get(provider, service_type, material, quantity)
 
 
+def get_cached_quote_by_id(quote_id: str) -> Optional[CachedQuote]:
+    """Look up a cached quote by its provider-assigned quote ID.
+
+    :param quote_id: The quote ID from the fulfillment provider.
+    :returns: The cached quote, or ``None`` if not found.
+    """
+    return get_quote_cache().get_by_quote_id(quote_id)
+
+
 __all__ = [
     "CachedQuote",
     "QuoteCache",
     "QuoteCacheConfig",
     "cache_quote",
     "get_cached_quote",
+    "get_cached_quote_by_id",
     "get_quote_cache",
 ]

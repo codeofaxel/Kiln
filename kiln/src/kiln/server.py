@@ -735,6 +735,28 @@ def _get_fulfillment() -> FulfillmentProvider:
     return _fulfillment
 
 
+_fulfillment_monitor: Optional[Any] = None
+
+
+def _get_fulfillment_monitor() -> Any:
+    """Return the lazily-initialised fulfillment monitor.
+
+    Starts the background polling thread on first access.
+    """
+    global _fulfillment_monitor  # noqa: PLW0603
+
+    if _fulfillment_monitor is not None:
+        return _fulfillment_monitor
+
+    from kiln.fulfillment_monitor import FulfillmentMonitor
+
+    _fulfillment_monitor = FulfillmentMonitor(
+        db=get_db(), event_bus=_event_bus,
+    )
+    _fulfillment_monitor.start()
+    return _fulfillment_monitor
+
+
 _threedos_client: Optional[ThreeDOSClient] = None
 
 
