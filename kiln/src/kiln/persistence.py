@@ -389,6 +389,26 @@ class KilnDB:
                     ON fulfillment_orders(status);
                 CREATE INDEX IF NOT EXISTS idx_fulfillment_orders_provider
                     ON fulfillment_orders(provider);
+
+                CREATE TABLE IF NOT EXISTS snapshots (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id          TEXT,
+                    printer_name    TEXT NOT NULL,
+                    phase           TEXT NOT NULL DEFAULT 'unknown',
+                    image_path      TEXT NOT NULL,
+                    image_size_bytes INTEGER,
+                    analysis         TEXT,
+                    agent_notes      TEXT,
+                    confidence       REAL,
+                    completion_pct   REAL,
+                    created_at       REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_snapshots_job
+                    ON snapshots(job_id);
+                CREATE INDEX IF NOT EXISTS idx_snapshots_printer
+                    ON snapshots(printer_name);
+                CREATE INDEX IF NOT EXISTS idx_snapshots_phase
+                    ON snapshots(phase);
                 """
             )
 
@@ -2011,6 +2031,115 @@ class KilnDB:
             "recent_blocked": blocked_list,
             "total": sum(counts.values()),
         }
+
+    # ------------------------------------------------------------------
+    # Snapshot persistence
+    # ------------------------------------------------------------------
+
+    def save_snapshot(
+        self,
+        printer_name: str,
+        image_path: str,
+        *,
+        job_id: Optional[str] = None,
+        phase: str = "unknown",
+        image_size_bytes: Optional[int] = None,
+        analysis: Optional[str] = None,
+        agent_notes: Optional[str] = None,
+        confidence: Optional[float] = None,
+        completion_pct: Optional[float] = None,
+    ) -> int:
+        """Persist a snapshot record and return its row ID.
+
+        :param printer_name: Printer that captured the snapshot.
+        :param image_path: Filesystem path to the saved image file.
+        :param job_id: Associated print job ID (if known).
+        :param phase: Print phase at capture time (e.g. "first_layer", "mid_print", "final_layer").
+        :param image_size_bytes: Size of the image file in bytes.
+        :param analysis: JSON-encoded analysis result from vision model.
+        :param agent_notes: Free-form notes from the monitoring agent.
+        :param confidence: Vision model confidence score (0.0–1.0).
+        :param completion_pct: Print completion percentage at capture time.
+        :returns: The auto-incremented snapshot row ID.
+        """
+        with self._write_lock:
+            cur = self._conn.execute(
+                """
+                INSERT INTO snapshots
+                    (job_id, printer_name, phase, image_path, image_size_bytes,
+                     analysis, agent_notes, confidence, completion_pct, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id, printer_name, phase, image_path, image_size_bytes,
+                    analysis, agent_notes, confidence, completion_pct, time.time(),
+                ),
+            )
+            self._conn.commit()
+            return cur.lastrowid
+
+    def get_snapshots(
+        self,
+        *,
+        job_id: Optional[str] = None,
+        printer_name: Optional[str] = None,
+        phase: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Query snapshot records with optional filters.
+
+        :param job_id: Filter by job ID.
+        :param printer_name: Filter by printer name.
+        :param phase: Filter by capture phase.
+        :param limit: Maximum number of records to return.
+        :returns: List of snapshot dicts, newest first.
+        """
+        clauses: List[str] = []
+        params: List[Any] = []
+        if job_id is not None:
+            clauses.append("job_id = ?")
+            params.append(job_id)
+        if printer_name is not None:
+            clauses.append("printer_name = ?")
+            params.append(printer_name)
+        if phase is not None:
+            clauses.append("phase = ?")
+            params.append(phase)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        rows = self._conn.execute(
+            f"SELECT * FROM snapshots{where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_snapshots(
+        self,
+        *,
+        job_id: Optional[str] = None,
+        older_than: Optional[float] = None,
+    ) -> int:
+        """Delete snapshot records matching filters. Returns count deleted.
+
+        :param job_id: Delete snapshots for this job.
+        :param older_than: Delete snapshots created before this Unix timestamp.
+        :returns: Number of rows deleted.
+        """
+        clauses: List[str] = []
+        params: List[Any] = []
+        if job_id is not None:
+            clauses.append("job_id = ?")
+            params.append(job_id)
+        if older_than is not None:
+            clauses.append("created_at < ?")
+            params.append(older_than)
+        if not clauses:
+            return 0
+        where = " WHERE " + " AND ".join(clauses)
+        with self._write_lock:
+            cur = self._conn.execute(f"DELETE FROM snapshots{where}", params)
+            self._conn.commit()
+            return cur.rowcount
 
     # ------------------------------------------------------------------
 

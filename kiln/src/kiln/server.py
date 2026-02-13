@@ -7245,6 +7245,7 @@ class _PrintWatcher:
         poll_interval: int = 15,
         event_bus: "Optional[Any]" = None,
         stall_timeout: int = 600,
+        save_to_disk: bool = False,
     ) -> None:
         self._watch_id = watch_id
         self._adapter = adapter
@@ -7255,6 +7256,7 @@ class _PrintWatcher:
         self._poll_interval = poll_interval
         self._event_bus = event_bus
         self._stall_timeout = stall_timeout
+        self._save_to_disk = save_to_disk
 
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
@@ -7265,6 +7267,11 @@ class _PrintWatcher:
         self._outcome: str = "running"
         self._start_time: float = 0.0
         self._thread: Optional[threading.Thread] = None
+        self._save_dir: Optional[str] = None
+        if self._save_to_disk:
+            self._save_dir = os.path.join(
+                str(Path.home()), ".kiln", "timelapses", watch_id
+            )
 
     # -- public API --------------------------------------------------------
 
@@ -7511,6 +7518,32 @@ class _PrintWatcher:
                                 "print_phase": phase,
                                 "image_base64": base64.b64encode(image_data).decode("ascii"),
                             }
+
+                            # Persist to disk + DB when save_to_disk is enabled
+                            if self._save_to_disk and self._save_dir is not None:
+                                try:
+                                    os.makedirs(self._save_dir, exist_ok=True)
+                                    frame_idx = len(self._snapshots)
+                                    fpath = os.path.join(
+                                        self._save_dir, f"frame_{frame_idx:04d}.jpg"
+                                    )
+                                    with open(fpath, "wb") as f:
+                                        f.write(image_data)
+                                    snap["saved_path"] = fpath
+                                    get_db().save_snapshot(
+                                        printer_name=self._printer_name,
+                                        image_path=fpath,
+                                        job_id=self._watch_id,
+                                        phase=phase,
+                                        image_size_bytes=len(image_data),
+                                        completion_pct=job.completion,
+                                    )
+                                except Exception:
+                                    logger.debug(
+                                        "Failed to persist snapshot to disk/DB",
+                                        exc_info=True,
+                                    )
+
                             with self._lock:
                                 self._snapshots.append(snap)
                             if self._event_bus is not None:
@@ -7583,6 +7616,7 @@ def watch_print(
     timeout: int = 7200,
     poll_interval: int = 15,
     stall_timeout: int = 600,
+    save_to_disk: bool = False,
 ) -> dict:
     """Start background monitoring of an in-progress print.
 
@@ -7606,6 +7640,10 @@ def watch_print(
         poll_interval: Seconds between state polls (default 15).
         stall_timeout: Seconds of zero progress before declaring stall
             (default 600 = 10 min).  Set to 0 to disable stall detection.
+        save_to_disk: Save snapshots as JPEG files to
+            ``~/.kiln/timelapses/<watch_id>/`` and persist metadata to the
+            database.  Use ``list_snapshots`` to query saved frames after
+            the print completes (default False).
     """
     if err := _check_auth("monitoring"):
         return err
@@ -7637,11 +7675,12 @@ def watch_print(
             poll_interval=poll_interval,
             event_bus=_event_bus,
             stall_timeout=stall_timeout,
+            save_to_disk=save_to_disk,
         )
         _watchers[watch_id] = watcher
         watcher.start()
 
-        return {
+        resp: Dict[str, Any] = {
             "success": True,
             "watch_id": watch_id,
             "status": "started",
@@ -7651,12 +7690,16 @@ def watch_print(
             "timeout": timeout,
             "poll_interval": poll_interval,
             "stall_timeout": stall_timeout,
+            "save_to_disk": save_to_disk,
             "message": (
                 f"Background watcher started (id={watch_id}). "
                 "Use watch_print_status to check progress, "
                 "or stop_watch_print to cancel."
             ),
         }
+        if save_to_disk and watcher._save_dir:
+            resp["save_dir"] = watcher._save_dir
+        return resp
 
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
@@ -10103,6 +10146,98 @@ def rollback_printer_firmware(
     except Exception as exc:
         logger.exception("Error in rollback_printer_firmware")
         return _error_dict(str(exc), code="FIRMWARE_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Lightweight print status (token-efficient polling)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def print_status_lite(printer_name: str | None = None) -> dict:
+    """Lightweight print status for efficient agent polling.
+
+    Returns only the essential fields an agent needs to monitor a print:
+    state, completion percentage, and estimated time remaining.  Use this
+    instead of ``get_printer_status`` when polling frequently to minimise
+    token cost.
+
+    Args:
+        printer_name: Target printer.  Omit for the default printer.
+    """
+    try:
+        adapter = _registry.get(printer_name) if printer_name else _get_adapter()
+        state = adapter.get_state()
+        job = adapter.get_job()
+
+        result: Dict[str, Any] = {
+            "state": state.state.value,
+            "completion_pct": job.completion,
+            "file_name": job.file_name,
+        }
+
+        # Include ETA if available
+        if job.time_left is not None:
+            result["eta_seconds"] = job.time_left
+        if job.time_elapsed is not None:
+            result["elapsed_seconds"] = job.time_elapsed
+
+        # Include temperatures if printing
+        if state.state in (PrinterStatus.PRINTING, PrinterStatus.PAUSED):
+            result["hotend_temp"] = state.hotend_temp
+            result["bed_temp"] = state.bed_temp
+
+        return result
+
+    except PrinterNotFoundError:
+        return {"state": "not_found", "error": f"Printer {printer_name!r} not found"}
+    except (PrinterError, RuntimeError) as exc:
+        return {"state": "error", "error": str(exc)}
+    except Exception as exc:
+        logger.exception("Error in print_status_lite")
+        return {"state": "error", "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Snapshot history
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def list_snapshots(
+    printer_name: str | None = None,
+    job_id: str | None = None,
+    phase: str | None = None,
+    limit: int = 20,
+) -> dict:
+    """List persisted snapshots from the database.
+
+    Returns metadata for snapshots captured during print monitoring,
+    timelapses, or manual captures.  Use this to review print history
+    visually or correlate snapshots with print outcomes.
+
+    Args:
+        printer_name: Filter by printer name.
+        job_id: Filter by job or timelapse ID.
+        phase: Filter by capture phase (e.g. "first_layer", "timelapse", "mid_print").
+        limit: Maximum records to return (default 20).
+    """
+    try:
+        db = get_db()
+        snapshots = db.get_snapshots(
+            job_id=job_id,
+            printer_name=printer_name,
+            phase=phase,
+            limit=limit,
+        )
+        return {
+            "success": True,
+            "snapshots": snapshots,
+            "count": len(snapshots),
+        }
+    except Exception as exc:
+        logger.exception("Error in list_snapshots")
+        return _error_dict(str(exc), code="INTERNAL_ERROR")
 
 
 if __name__ == "__main__":
