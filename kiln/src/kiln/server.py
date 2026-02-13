@@ -1046,8 +1046,9 @@ def _billing_hook(event: Event) -> None:
     if network_cost is None:
         return  # Local job — free
     try:
-        fee_calc = _billing.calculate_fee(float(network_cost))
-        _billing.record_charge(event.data["job_id"], fee_calc)
+        fee_calc, _charge_id = _billing.calculate_and_record_fee(
+            event.data["job_id"], float(network_cost),
+        )
         logger.info(
             "Billing: job %s network_cost=%.2f fee=%.2f (waived=%s)",
             event.data["job_id"],
@@ -1056,7 +1057,13 @@ def _billing_hook(event: Event) -> None:
             fee_calc.waived,
         )
     except Exception:
-        logger.debug("Failed to record billing for job %s", event.data.get("job_id"), exc_info=True)
+        logger.error(
+            "Failed to record billing for job %s — "
+            "this job may not appear in billing history. "
+            "Check billing_history for accuracy.",
+            event.data.get("job_id"),
+            exc_info=True,
+        )
 
 
 def _log_print_completion(event: Event) -> None:
@@ -1095,6 +1102,19 @@ _event_bus.subscribe(None, _persist_event)
 _event_bus.subscribe(EventType.JOB_COMPLETED, _billing_hook)
 _event_bus.subscribe(EventType.JOB_COMPLETED, _log_print_completion)
 _event_bus.subscribe(EventType.JOB_FAILED, _log_print_completion)
+
+# Wire billing alert manager (lazy init on first access).
+try:
+    _get_billing_alert_mgr()
+except Exception:
+    logger.debug("Billing alert manager not initialized", exc_info=True)
+
+# Start fulfillment order monitor if fulfillment is available.
+try:
+    monitor = _get_fulfillment_monitor()
+    monitor.start()
+except Exception:
+    logger.debug("Fulfillment monitor not started", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -3186,10 +3206,14 @@ def search_all_models(
         return {
             "success": True,
             "query": query,
-            "models": [r.to_dict() for r in results],
-            "count": len(results),
+            "models": [r.to_dict() for r in results.models],
+            "count": len(results.models),
             "page": page,
             "sources": _marketplace_registry.connected,
+            "searched": results.searched,
+            "skipped": results.skipped,
+            "failed": results.failed,
+            "health_summary": results.summary,
         }
     except MarketplaceError as exc:
         return _error_dict(str(exc))
