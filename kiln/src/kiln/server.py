@@ -3299,17 +3299,22 @@ def tax_estimate(
     jurisdiction: str,
     business_tax_id: str = "",
 ) -> dict:
-    """Estimate tax on a Kiln platform fee before placing an order.
+    """Preview the complete price breakdown — including tax — before placing an order.
+
+    Call this after ``fulfillment_quote`` to show the user exactly what
+    they'll pay: manufacturing cost + Kiln fee + applicable tax.  No
+    surprises at checkout.
 
     Args:
-        fee_amount: The platform fee amount to calculate tax on.
-        jurisdiction: Buyer's tax jurisdiction code (e.g. "US-CA", "DE", "AU").
+        fee_amount: The platform fee amount (from the quote's ``kiln_fee``).
+        jurisdiction: Where the buyer is located (e.g. "US-CA", "DE", "AU").
             Use ``tax_jurisdictions`` to see all supported codes.
-        business_tax_id: Buyer's business tax ID. If provided and the
-            jurisdiction supports B2B reverse charge (EU, UK, AU, JP),
-            no tax will be collected — the buyer self-assesses.
+        business_tax_id: If the buyer is a business, their tax ID
+            (e.g. EU VAT number).  In the EU, UK, Australia, and Japan,
+            businesses are exempt — the tax line will show $0.00 with
+            a note that reverse charge applies.
 
-    Returns tax amount, rate, type, and whether reverse charge applies.
+    Returns the tax amount, rate, type, and exemption status.
     """
     try:
         from kiln.tax import TaxCalculator
@@ -3325,11 +3330,12 @@ def tax_estimate(
 
 @mcp.tool()
 def tax_jurisdictions() -> dict:
-    """List all supported tax jurisdictions with their rates and rules.
+    """List all 22 supported regions so the agent can match the user's location.
 
-    Returns jurisdiction codes, tax types, rates, and whether B2B
-    reverse charge is available. Use these codes when placing
-    fulfillment orders to ensure correct tax calculation.
+    Returns jurisdiction codes, tax types, and rates for the US (8 states),
+    EU (7 countries), UK, Canada (4 provinces), Australia, and Japan.
+    Pass the matching code to ``fulfillment_order`` or ``tax_estimate``
+    to include tax in the price breakdown.
     """
     try:
         from kiln.tax import TaxCalculator
@@ -3346,10 +3352,11 @@ def tax_jurisdictions() -> dict:
 
 @mcp.tool()
 def tax_jurisdiction_lookup(code: str) -> dict:
-    """Look up tax rules for a specific jurisdiction.
+    """Look up tax details for a specific region (rate, type, B2B exemptions).
 
     Args:
         code: Jurisdiction code (e.g. "US-CA", "DE", "GB", "AU").
+            Use ``tax_jurisdictions`` to browse all codes.
     """
     try:
         from kiln.tax import TaxCalculator
@@ -5045,14 +5052,14 @@ def fulfillment_order(
             is provided).  Required when ``payment_hold_id`` is
             empty and a payment rail is configured.
         quoted_currency: Currency of ``quoted_price`` (default USD).
-        jurisdiction: Buyer's tax jurisdiction code (e.g. ``"US-CA"``,
-            ``"DE"``, ``"AU"``).  Use ``tax_jurisdictions`` to see all
-            supported codes.  When provided, the platform fee includes
-            the applicable tax.
-        business_tax_id: Buyer's business tax ID for B2B reverse
-            charge.  If provided and the jurisdiction supports it
-            (EU, UK, AU, JP), no tax is collected — the buyer
-            self-assesses.
+        jurisdiction: Buyer's region (e.g. ``"US-CA"``, ``"DE"``, ``"AU"``).
+            When provided, the response includes an accurate total with
+            tax so the user sees exactly what they'll pay — no hidden
+            fees.  Use ``tax_jurisdictions`` to see all supported codes.
+        business_tax_id: If the buyer is a registered business, their
+            tax ID (EU VAT number, AU ABN, etc.).  Businesses in the
+            EU, UK, Australia, and Japan are tax-exempt via reverse
+            charge — the tax line shows $0.00.
 
     Use ``fulfillment_order_status`` to track progress after placing.
     """
