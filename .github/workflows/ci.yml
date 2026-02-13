@@ -46,3 +46,35 @@ jobs:
 
       - name: Run octoprint-cli tests
         run: cd octoprint-cli && python -m pytest tests/ -v --cov=octoprint_cli --cov-report=term-missing
+
+      - name: Check kiln dependency drift
+        run: |
+          pip freeze | grep -v "^-e" | sort > /tmp/current-deps.txt
+          if [ -f kiln/requirements-lock.txt ]; then
+            # Strip comments from lock file
+            grep -v "^#" kiln/requirements-lock.txt | sort > /tmp/lock-deps.txt
+            DIFF=$(diff /tmp/lock-deps.txt /tmp/current-deps.txt || true)
+            if [ -n "$DIFF" ]; then
+              echo "::warning::Dependency drift detected between installed packages and kiln/requirements-lock.txt"
+              echo "$DIFF"
+            else
+              echo "Dependencies match lock file"
+            fi
+          fi
+        continue-on-error: true
+
+      - name: Check octoprint-cli dependency drift
+        run: |
+          pip freeze | grep -v "^-e" | sort > /tmp/current-deps.txt
+          if [ -f octoprint-cli/requirements-lock.txt ]; then
+            # Strip comments from lock file
+            grep -v "^#" octoprint-cli/requirements-lock.txt | sort > /tmp/lock-deps.txt
+            DIFF=$(diff /tmp/lock-deps.txt /tmp/current-deps.txt || true)
+            if [ -n "$DIFF" ]; then
+              echo "::warning::Dependency drift detected between installed packages and octoprint-cli/requirements-lock.txt"
+              echo "$DIFF"
+            else
+              echo "Dependencies match lock file"
+            fi
+          fi
+        continue-on-error: true

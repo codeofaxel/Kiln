@@ -442,8 +442,8 @@ The Kiln MCP server (`kiln serve`) exposes **186 tools** to agents. Key tools ar
 | `run_quick_print` | Full pipeline: slice → validate → upload → print in one shot |
 | `run_calibrate` | Home → bed level → calibration guidance pipeline |
 | `run_benchmark` | Slice → upload → stats report (manual start) |
-| `monitor_print_vision` | Capture snapshot + printer state + print phase hints for agent vision analysis |
-| `watch_print` | Poll printer with periodic snapshots; returns batch for agent review |
+| `monitor_print_vision` | Capture snapshot + printer state + phase hints; agent's vision model analyzes for defects |
+| `watch_print` | Poll printer with periodic snapshots; returns batch for agent vision review |
 | `record_print_outcome` | Record print quality outcome with safety-validated settings |
 | `get_printer_insights` | Query cross-printer learning: success rates, failure breakdown, material stats |
 | `suggest_printer_for_job` | Rank printers by historical success for a file/material combination |

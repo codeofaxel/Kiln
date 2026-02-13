@@ -459,11 +459,13 @@ Kiln exposes **186 MCP tools** in total. The most commonly used tools are docume
 | `update_firmware` | `component` | Update result |
 | `rollback_firmware` | `component` | Rollback result |
 
-#### Vision Monitoring
+#### Vision Monitoring (Agent-Delegated)
+
+Kiln provides structured monitoring data (webcam snapshots, temperatures, print progress, phase context, failure hints) to agents. The agent's own vision model (Claude, GPT-4V, Gemini, etc.) analyzes the snapshots for defects — Kiln does not embed its own vision model. Kiln adds lightweight heuristic validation (brightness/variance checks) to detect blocked cameras or corrupted frames.
 
 | Tool | Input | Output |
 |---|---|---|
-| `monitor_print_vision` | `printer_name`, `include_snapshot`, `save_snapshot` | Snapshot + state + phase + failure hints |
+| `monitor_print_vision` | `printer_name`, `include_snapshot`, `save_snapshot` | Snapshot + state + phase + failure hints for agent vision analysis |
 | `watch_print` | `printer_name`, `snapshot_interval`, `max_snapshots`, `timeout`, `poll_interval` | Starts background watcher; returns `watch_id` immediately |
 | `watch_print_status` | `watch_id` | Current progress, snapshots, outcome of background watcher |
 | `stop_watch_print` | `watch_id` | Stops background watcher and returns final state |

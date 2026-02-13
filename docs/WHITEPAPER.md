@@ -227,11 +227,13 @@ All SQL queries in the persistence layer use parameterized statements — no str
 
 Safety-critical operations are recorded through two mechanisms. The event bus persists all significant state changes — job transitions, printer status changes, temperature warnings — to SQLite, providing a queryable history of system behavior. A dedicated `safety_audit` tool reviews recent safety-relevant actions (guarded commands, emergency stops, temperature limit rejections) and surfaces them to agents or operators on demand. Together, these provide a tamper-evident record of every physical action the system has taken.
 
-## 9. Closed-Loop Vision Monitoring
+## 9. Agent-Delegated Vision Monitoring
 
 ### 9.1 Design Philosophy
 
-Rather than embedding a separate computer vision model, Kiln leverages the agent itself as the vision system. Modern multimodal agents (Claude, GPT-4V) can analyze images directly. Kiln's role is to provide structured context alongside each snapshot: printer state, job progress, print phase classification, and phase-specific failure hints.
+Kiln does not embed its own computer vision model. Instead, it provides structured monitoring data — webcam snapshots, temperature readings, print progress, layer metadata, and phase-specific failure hints — and delegates visual analysis to the agent's own vision model (Claude, GPT-4V, Gemini, or any future multimodal model). This is an intentional architectural choice: it keeps Kiln model-agnostic, avoids coupling to a specific vision backend, and automatically benefits from improvements in the agent's underlying vision capabilities.
+
+Kiln adds lightweight heuristic validation to each captured frame — brightness and variance checks that detect blocked cameras, corrupted images, or lens obstructions — so agents can trust that the snapshot they receive is usable before running inference.
 
 ### 9.2 Phase Detection
 
@@ -242,9 +244,9 @@ Prints are classified into three phases based on completion percentage:
 
 ### 9.3 Monitoring Tools
 
-`monitor_print_vision` captures a single snapshot with full metadata: printer status, temperatures, job progress percentage, phase classification, and phase-specific failure hints. The agent receives everything needed to make an informed decision about print quality.
+`monitor_print_vision` captures a single snapshot with full structured context: printer status, temperatures, job progress percentage, phase classification, phase-specific failure hints, and image quality heuristics. The agent's vision model analyzes the snapshot for defects; the agent then decides what action to take (pause, cancel, continue, or alert the operator).
 
-`watch_print` creates a continuous monitoring loop. It polls printer state at a configurable interval and captures snapshots periodically (default every 60 seconds). After accumulating a batch of snapshots (default 5), it returns them to the agent for review. The agent analyzes the batch, decides whether to pause or continue, and calls `watch_print` again — closing the feedback loop.
+`watch_print` creates a continuous monitoring loop. It polls printer state at a configurable interval and captures snapshots periodically (default every 60 seconds). After accumulating a batch of snapshots (default 5), it returns them to the agent for review. The agent's vision model analyzes the batch, the agent decides whether to pause or continue, and calls `watch_print` again — closing the feedback loop.
 
 Both tools work gracefully without a webcam — metadata is still returned for state-based monitoring.
 
@@ -292,7 +294,7 @@ Kiln extends beyond printer owners to serve users who have never touched a 3D pr
 
 ## 14. Conclusion
 
-Kiln demonstrates that AI agents can safely operate physical manufacturing hardware given the right protocol abstractions. By normalizing heterogeneous printer APIs into a typed adapter interface, enforcing safety invariants at the protocol level, and exposing all operations through MCP, Kiln transforms any MCP-compatible agent into a manufacturing operator. Closed-loop vision monitoring lets agents observe and intervene during prints. Cross-printer learning enables data-driven printer selection with safety-first guardrails. The system is local-first, open-source, and extensible to new device backends and manufacturing services.
+Kiln demonstrates that AI agents can safely operate physical manufacturing hardware given the right protocol abstractions. By normalizing heterogeneous printer APIs into a typed adapter interface, enforcing safety invariants at the protocol level, and exposing all operations through MCP, Kiln transforms any MCP-compatible agent into a manufacturing operator. Agent-delegated vision monitoring provides structured snapshot data and context so agents can observe and intervene during prints using their own vision models. Cross-printer learning enables data-driven printer selection with safety-first guardrails. The system is local-first, open-source, and extensible to new device backends and manufacturing services.
 
 ---
 

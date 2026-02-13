@@ -43,9 +43,15 @@ class Invoice:
     waiver_reason: Optional[str]
     # Integrity
     checksum: str
+    # Tax
+    tax_amount: float = 0.0
+    tax_rate: float = 0.0
+    tax_jurisdiction: Optional[str] = None
+    tax_type: Optional[str] = None
+    tax_reverse_charge: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d: Dict[str, Any] = {
             "invoice_number": self.invoice_number,
             "charge_id": self.charge_id,
             "job_id": self.job_id,
@@ -66,6 +72,13 @@ class Invoice:
             "waiver_reason": self.waiver_reason,
             "checksum": self.checksum,
         }
+        if self.tax_jurisdiction is not None:
+            d["tax_amount"] = self.tax_amount
+            d["tax_rate"] = self.tax_rate
+            d["tax_jurisdiction"] = self.tax_jurisdiction
+            d["tax_type"] = self.tax_type
+            d["tax_reverse_charge"] = self.tax_reverse_charge
+        return d
 
     def to_receipt_text(self) -> str:
         """Format as a human-readable plain-text receipt."""
@@ -84,6 +97,18 @@ class Invoice:
         else:
             lines.append(f"Mfg cost:   ${self.job_cost:.2f} {self.currency}")
             lines.append(f"Kiln fee:   ${self.fee_amount:.2f} ({self.fee_percent}%)")
+            if self.tax_jurisdiction is not None:
+                if self.tax_reverse_charge:
+                    lines.append(
+                        "Tax:        $0.00 (B2B reverse charge"
+                        " \u2014 buyer self-assesses)"
+                    )
+                else:
+                    tax_label = (self.tax_type or "TAX").upper()
+                    lines.append(
+                        f"Tax ({tax_label} {self.tax_jurisdiction}):"
+                        f" ${self.tax_amount:.2f} ({self.tax_rate}%)"
+                    )
             lines.append(f"Total:      ${self.total_cost:.2f} {self.currency}")
         lines.append("-" * 50)
         if self.payment_id:
@@ -138,6 +163,11 @@ def generate_invoice(charge: Dict[str, Any]) -> Invoice:
         fee_percent=charge.get("fee_percent", 0.0),
         total_cost=charge.get("total_cost", 0.0),
         currency=charge.get("currency", "USD"),
+        tax_amount=charge.get("tax_amount", 0.0),
+        tax_rate=charge.get("tax_rate", 0.0),
+        tax_jurisdiction=charge.get("tax_jurisdiction"),
+        tax_type=charge.get("tax_type"),
+        tax_reverse_charge=bool(charge.get("tax_reverse_charge", False)),
         payment_id=charge.get("payment_id"),
         payment_rail=charge.get("payment_rail"),
         payment_status=charge.get("payment_status", "unknown"),
@@ -161,7 +191,9 @@ def export_billing_csv(charges: List[Dict[str, Any]]) -> str:
     """
     headers = [
         "invoice_number", "date", "order_id", "job_cost",
-        "fee_amount", "fee_percent", "total_cost", "currency",
+        "fee_amount", "fee_percent", "tax_amount", "tax_rate",
+        "tax_jurisdiction", "tax_type", "tax_reverse_charge",
+        "total_cost", "currency",
         "payment_rail", "payment_status", "waived",
     ]
     lines = [",".join(headers)]
@@ -175,6 +207,11 @@ def export_billing_csv(charges: List[Dict[str, Any]]) -> str:
             f"{inv.job_cost:.2f}",
             f"{inv.fee_amount:.2f}",
             f"{inv.fee_percent:.2f}",
+            f"{inv.tax_amount:.2f}",
+            f"{inv.tax_rate:.2f}",
+            inv.tax_jurisdiction or "",
+            inv.tax_type or "",
+            str(inv.tax_reverse_charge).lower(),
             f"{inv.total_cost:.2f}",
             inv.currency,
             inv.payment_rail or "",

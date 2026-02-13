@@ -3288,6 +3288,83 @@ def billing_delete_data(confirm: str = "") -> dict:
         return _error_dict(str(exc))
 
 
+# ---------------------------------------------------------------------------
+# Tax tools — tax estimation and jurisdiction lookup
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def tax_estimate(
+    fee_amount: float,
+    jurisdiction: str,
+    business_tax_id: str = "",
+) -> dict:
+    """Estimate tax on a Kiln platform fee before placing an order.
+
+    Args:
+        fee_amount: The platform fee amount to calculate tax on.
+        jurisdiction: Buyer's tax jurisdiction code (e.g. "US-CA", "DE", "AU").
+            Use ``tax_jurisdictions`` to see all supported codes.
+        business_tax_id: Buyer's business tax ID. If provided and the
+            jurisdiction supports B2B reverse charge (EU, UK, AU, JP),
+            no tax will be collected — the buyer self-assesses.
+
+    Returns tax amount, rate, type, and whether reverse charge applies.
+    """
+    try:
+        from kiln.tax import TaxCalculator
+        calc = TaxCalculator()
+        result = calc.calculate_tax(
+            fee_amount, jurisdiction,
+            business_tax_id=business_tax_id or None,
+        )
+        return {"status": "success", "tax": result.to_dict()}
+    except Exception as exc:
+        return _error_dict(f"Tax calculation failed: {exc}")
+
+
+@mcp.tool()
+def tax_jurisdictions() -> dict:
+    """List all supported tax jurisdictions with their rates and rules.
+
+    Returns jurisdiction codes, tax types, rates, and whether B2B
+    reverse charge is available. Use these codes when placing
+    fulfillment orders to ensure correct tax calculation.
+    """
+    try:
+        from kiln.tax import TaxCalculator
+        calc = TaxCalculator()
+        jurisdictions = [j.to_dict() for j in calc.list_jurisdictions()]
+        return {
+            "status": "success",
+            "jurisdictions": jurisdictions,
+            "count": len(jurisdictions),
+        }
+    except Exception as exc:
+        return _error_dict(f"Failed to list jurisdictions: {exc}")
+
+
+@mcp.tool()
+def tax_jurisdiction_lookup(code: str) -> dict:
+    """Look up tax rules for a specific jurisdiction.
+
+    Args:
+        code: Jurisdiction code (e.g. "US-CA", "DE", "GB", "AU").
+    """
+    try:
+        from kiln.tax import TaxCalculator
+        calc = TaxCalculator()
+        jur = calc.get_jurisdiction(code)
+        if jur is None:
+            return _error_dict(
+                f"Unknown jurisdiction: {code}. "
+                "Use tax_jurisdictions to see all supported codes."
+            )
+        return {"status": "success", "jurisdiction": jur.to_dict()}
+    except Exception as exc:
+        return _error_dict(f"Jurisdiction lookup failed: {exc}")
+
+
 @mcp.tool()
 def donate_info() -> dict:
     """Get crypto wallet addresses to tip/donate to the Kiln project.
@@ -4946,6 +5023,8 @@ def fulfillment_order(
     payment_hold_id: str = "",
     quoted_price: float = 0.0,
     quoted_currency: str = "USD",
+    jurisdiction: str = "",
+    business_tax_id: str = "",
 ) -> dict:
     """Place a manufacturing order based on a previous quote.
 
@@ -4966,6 +5045,14 @@ def fulfillment_order(
             is provided).  Required when ``payment_hold_id`` is
             empty and a payment rail is configured.
         quoted_currency: Currency of ``quoted_price`` (default USD).
+        jurisdiction: Buyer's tax jurisdiction code (e.g. ``"US-CA"``,
+            ``"DE"``, ``"AU"``).  Use ``tax_jurisdictions`` to see all
+            supported codes.  When provided, the platform fee includes
+            the applicable tax.
+        business_tax_id: Buyer's business tax ID for B2B reverse
+            charge.  If provided and the jurisdiction supports it
+            (EU, UK, AU, JP), no tax is collected — the buyer
+            self-assesses.
 
     Use ``fulfillment_order_status`` to track progress after placing.
     """
@@ -4994,7 +5081,11 @@ def fulfillment_order(
 
         # 1a. Early spend limit check (before any work).
         if estimated_price and estimated_price > 0:
-            fee_estimate = _billing.calculate_fee(estimated_price, currency=currency)
+            fee_estimate = _billing.calculate_fee(
+                estimated_price, currency=currency,
+                jurisdiction=jurisdiction or None,
+                business_tax_id=business_tax_id or None,
+            )
             if not fee_estimate.waived and fee_estimate.fee_amount > 0:
                 mgr = _get_payment_mgr()
                 ok, reason = mgr.check_spend_limits(fee_estimate.fee_amount)
@@ -5010,6 +5101,8 @@ def fulfillment_order(
             if estimated_price > 0:
                 fee_calc = _billing.calculate_fee(
                     estimated_price, currency=currency,
+                    jurisdiction=jurisdiction or None,
+                    business_tax_id=business_tax_id or None,
                 )
 
             try:
@@ -5042,6 +5135,8 @@ def fulfillment_order(
                     if estimated_price > 0:
                         fee_calc, _charge_id = _billing.calculate_and_record_fee(
                             quote_id, estimated_price, currency=currency,
+                            jurisdiction=jurisdiction or None,
+                            business_tax_id=business_tax_id or None,
                         )
             except PaymentError as pe:
                 # Payment failed — do NOT place the order.

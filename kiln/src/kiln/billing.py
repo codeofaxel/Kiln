@@ -84,10 +84,15 @@ class FeeCalculation:
         job_cost: Raw cost from the manufacturing provider.
         fee_amount: Kiln's calculated fee (may be 0 if waived).
         fee_percent: Effective fee percentage applied.
-        total_cost: ``job_cost + fee_amount``.
+        total_cost: ``job_cost + fee_amount + tax_amount``.
         currency: Currency of the amounts.
         waived: ``True`` if the fee was waived (e.g. free tier).
         waiver_reason: Human-readable explanation when ``waived`` is True.
+        tax_amount: Tax on the platform fee (0.0 if no tax applies).
+        tax_rate: Effective tax rate applied (decimal, e.g. 0.19).
+        tax_jurisdiction: Jurisdiction code (e.g. ``"DE"``, ``"US-CA"``).
+        tax_type: Type of tax (``"vat"``, ``"sales_tax"``, etc.).
+        tax_reverse_charge: ``True`` if B2B reverse charge applies.
     """
 
     job_cost: float
@@ -97,10 +102,15 @@ class FeeCalculation:
     currency: str
     waived: bool = False
     waiver_reason: Optional[str] = None
+    tax_amount: float = 0.0
+    tax_rate: float = 0.0
+    tax_jurisdiction: Optional[str] = None
+    tax_type: Optional[str] = None
+    tax_reverse_charge: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
-        return {
+        d: Dict[str, Any] = {
             "job_cost": self.job_cost,
             "fee_amount": self.fee_amount,
             "fee_percent": self.fee_percent,
@@ -109,6 +119,15 @@ class FeeCalculation:
             "waived": self.waived,
             "waiver_reason": self.waiver_reason,
         }
+        # Include tax fields only when a jurisdiction was applied.
+        if self.tax_jurisdiction is not None:
+            d["tax_amount"] = self.tax_amount
+            d["tax_rate"] = self.tax_rate
+            d["tax_rate_percent"] = round(self.tax_rate * 100, 2)
+            d["tax_jurisdiction"] = self.tax_jurisdiction
+            d["tax_type"] = self.tax_type
+            d["tax_reverse_charge"] = self.tax_reverse_charge
+        return d
 
 
 @dataclass
@@ -155,17 +174,54 @@ class BillingLedger:
         self,
         job_cost: float,
         currency: str = "USD",
+        *,
+        jurisdiction: Optional[str] = None,
+        business_tax_id: Optional[str] = None,
     ) -> FeeCalculation:
         """Calculate the Kiln fee for an outsourced order.
 
         Args:
             job_cost: Raw cost from the manufacturing provider.
             currency: Currency of the job cost.
+            jurisdiction: Buyer's tax jurisdiction code (e.g. ``"US-CA"``, ``"DE"``).
+            business_tax_id: Buyer's business tax ID for B2B reverse charge.
 
         Returns:
-            A :class:`FeeCalculation` with all fee details.
+            A :class:`FeeCalculation` with all fee details (including tax if applicable).
         """
-        return self._calculate_fee_locked(job_cost, currency)
+        fc = self._calculate_fee_locked(job_cost, currency)
+        if jurisdiction and fc.fee_amount > 0:
+            fc = self._apply_tax(fc, jurisdiction, business_tax_id=business_tax_id)
+        return fc
+
+    def _apply_tax(
+        self,
+        fee_calc: FeeCalculation,
+        jurisdiction: str,
+        *,
+        business_tax_id: Optional[str] = None,
+    ) -> FeeCalculation:
+        """Apply tax to a FeeCalculation based on jurisdiction.
+
+        Mutates ``total_cost`` to include the tax amount.
+        """
+        from kiln.tax import TaxCalculator
+
+        calc = TaxCalculator()
+        result = calc.calculate_tax(
+            fee_calc.fee_amount, jurisdiction,
+            business_tax_id=business_tax_id,
+        )
+        fee_calc.tax_amount = result.tax_amount
+        fee_calc.tax_rate = result.effective_rate
+        fee_calc.tax_jurisdiction = result.jurisdiction_code
+        fee_calc.tax_type = result.tax_type.value
+        fee_calc.tax_reverse_charge = result.reverse_charge
+        # Update total to include tax.
+        fee_calc.total_cost = round(
+            fee_calc.job_cost + fee_calc.fee_amount + result.tax_amount, 2,
+        )
+        return fee_calc
 
     def _calculate_fee_locked(
         self,
@@ -341,6 +397,11 @@ class BillingLedger:
                 "currency": fee_calc.currency,
                 "waived": fee_calc.waived,
                 "waiver_reason": fee_calc.waiver_reason,
+                "tax_amount": fee_calc.tax_amount,
+                "tax_rate": fee_calc.tax_rate,
+                "tax_jurisdiction": fee_calc.tax_jurisdiction,
+                "tax_type": fee_calc.tax_type,
+                "tax_reverse_charge": fee_calc.tax_reverse_charge,
                 "payment_id": payment_id,
                 "payment_rail": payment_rail,
                 "payment_status": payment_status,
@@ -361,10 +422,11 @@ class BillingLedger:
                 self._charges.append(entry)
 
         logger.info(
-            "Recorded charge %s for job %s: fee=%.2f %s (waived=%s, payment=%s)",
+            "Recorded charge %s for job %s: fee=%.2f tax=%.2f %s (waived=%s, payment=%s)",
             charge_id,
             job_id,
             fee_calc.fee_amount,
+            fee_calc.tax_amount,
             fee_calc.currency,
             fee_calc.waived,
             payment_status,
@@ -380,8 +442,10 @@ class BillingLedger:
         payment_id: Optional[str] = None,
         payment_rail: Optional[str] = None,
         payment_status: str = "pending",
+        jurisdiction: Optional[str] = None,
+        business_tax_id: Optional[str] = None,
     ) -> tuple[FeeCalculation, str]:
-        """Atomically calculate fee and record charge.
+        """Atomically calculate fee (with tax) and record charge.
 
         Holds the lock for the entire calculate-then-record sequence to
         prevent race conditions where concurrent requests see stale
@@ -394,12 +458,18 @@ class BillingLedger:
             payment_id: Provider-specific payment ID.
             payment_rail: Payment rail used.
             payment_status: Status of the payment.
+            jurisdiction: Buyer's tax jurisdiction code.
+            business_tax_id: Buyer's business tax ID for B2B reverse charge.
 
         Returns:
             Tuple of ``(FeeCalculation, charge_id)``.
         """
         with self._lock:
             fee_calc = self._calculate_fee_locked(job_cost, currency)
+            if jurisdiction and fee_calc.fee_amount > 0:
+                fee_calc = self._apply_tax(
+                    fee_calc, jurisdiction, business_tax_id=business_tax_id,
+                )
             charge_id = self._record_charge_locked(
                 job_id, fee_calc,
                 payment_id=payment_id,
@@ -498,6 +568,11 @@ class BillingLedger:
                 currency=charge["currency"],
                 waived=charge["waived"],
                 waiver_reason=charge.get("waiver_reason"),
+                tax_amount=charge.get("tax_amount", 0.0),
+                tax_rate=charge.get("tax_rate", 0.0),
+                tax_jurisdiction=charge.get("tax_jurisdiction"),
+                tax_type=charge.get("tax_type"),
+                tax_reverse_charge=charge.get("tax_reverse_charge", False),
             )
 
         # In-memory fallback.
@@ -533,7 +608,7 @@ class BillingLedger:
         with self._lock:
             for entry in reversed(self._charges):
                 fc: FeeCalculation = entry["fee_calc"]
-                results.append({
+                charge_dict: Dict[str, Any] = {
                     "id": entry.get("id", ""),
                     "job_id": entry["job_id"],
                     "fee_amount": fc.fee_amount,
@@ -547,7 +622,14 @@ class BillingLedger:
                     "payment_rail": entry.get("payment_rail"),
                     "payment_status": entry.get("payment_status", "pending"),
                     "created_at": entry["timestamp"],
-                })
+                }
+                if fc.tax_jurisdiction is not None:
+                    charge_dict["tax_amount"] = fc.tax_amount
+                    charge_dict["tax_rate"] = fc.tax_rate
+                    charge_dict["tax_jurisdiction"] = fc.tax_jurisdiction
+                    charge_dict["tax_type"] = fc.tax_type
+                    charge_dict["tax_reverse_charge"] = fc.tax_reverse_charge
+                results.append(charge_dict)
                 if len(results) >= limit:
                     break
         return results

@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-02-12 · Version 1.1*
+*Last updated: 2026-02-12 · Version 1.2*
 
 ## What Kiln Is
 
@@ -58,6 +58,32 @@ infrastructure.
 **All local printing is free.** Kiln never charges fees for printing on your own
 printers, file management, slicing, status monitoring, or any other local
 operation.
+
+## Applicable Taxes
+
+Depending on your jurisdiction, applicable taxes (sales tax, VAT, GST, or JCT)
+may be added to the platform fee:
+
+- **United States**: Sales tax applies in states where Kiln has nexus or where
+  marketplace facilitator laws require collection (CA, TX, NY, WA, FL, IL, MA).
+- **European Union**: VAT is charged at the buyer's country rate (19–25%).
+  Businesses with a valid EU VAT ID may qualify for the reverse-charge
+  mechanism — no VAT is collected by Kiln.
+- **United Kingdom**: 20% VAT applies. B2B reverse charge available with a
+  valid UK VAT number.
+- **Canada**: Federal GST (5%) plus applicable provincial taxes (HST, PST, QST)
+  depending on province.
+- **Australia**: 10% GST. B2B reverse charge available for GST-registered buyers.
+- **Japan**: 10% JCT (consumption tax). B2B reverse charge available.
+
+Tax is calculated on the **platform fee only**, not on the manufacturing cost.
+The manufacturing provider is responsible for any taxes on their charges.
+
+You can preview the tax for any order using the ``tax_estimate`` tool before
+placing an order. Provide your jurisdiction code and, if applicable, your
+business tax ID to see if reverse charge applies.
+
+Kiln displays the full fee + tax breakdown before charging. No hidden fees.
 
 ## Payment & Billing
 

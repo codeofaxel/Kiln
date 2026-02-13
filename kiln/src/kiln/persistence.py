@@ -10,7 +10,9 @@ a :class:`StorageBackend` protocol so that the default SQLite implementation
 can be swapped for Postgres (or another engine) in multi-node deployments
 without touching the higher-level :class:`KilnDB` logic.
 
-Only stdlib modules are used (``sqlite3``, ``json``, ``os``, ``threading``).
+The default backend uses only stdlib modules (``sqlite3``, ``json``, ``os``,
+``threading``).  An optional :class:`PostgresBackend` is available when
+``psycopg2`` is installed (``pip install kiln3d[postgres]``).
 
 Example::
 
@@ -154,6 +156,274 @@ class SQLiteBackend:
         return self._conn.cursor()
 
 
+# ---------------------------------------------------------------------------
+# PostgreSQL backend (optional — requires psycopg2)
+# ---------------------------------------------------------------------------
+
+
+class _PgDictCursor:
+    """Thin wrapper around a ``psycopg2`` cursor that makes rows behave like
+    ``sqlite3.Row`` — i.e. indexable by column name via ``row["col"]``.
+
+    :class:`KilnDB` calls ``dict(row)`` everywhere, so each row must support
+    both integer indexing and key-based access.
+    """
+
+    def __init__(self, real_cursor: Any) -> None:
+        self._cur = real_cursor
+
+    # -- Passthrough properties --
+    @property
+    def lastrowid(self) -> Optional[int]:
+        return self._cur.lastrowid if hasattr(self._cur, "lastrowid") else None
+
+    @property
+    def rowcount(self) -> int:
+        return self._cur.rowcount
+
+    @property
+    def description(self) -> Any:
+        return self._cur.description
+
+    # -- Row helpers --
+
+    def _wrap_row(self, row: Any) -> Any:
+        """Wrap a raw tuple row into a dict-like object."""
+        if row is None or self._cur.description is None:
+            return row
+        cols = [d[0] for d in self._cur.description]
+        return _DictRow(cols, row)
+
+    def fetchone(self) -> Optional[Any]:
+        row = self._cur.fetchone()
+        return self._wrap_row(row)
+
+    def fetchall(self) -> List[Any]:
+        rows = self._cur.fetchall()
+        if not rows or self._cur.description is None:
+            return rows
+        cols = [d[0] for d in self._cur.description]
+        return [_DictRow(cols, r) for r in rows]
+
+
+class _DictRow:
+    """Lightweight row that supports both ``row["col"]`` and ``row[0]`` access,
+    plus ``dict(row)`` and iteration — matching ``sqlite3.Row`` behaviour.
+    """
+
+    __slots__ = ("_cols", "_values")
+
+    def __init__(self, cols: List[str], values: tuple) -> None:
+        self._cols = cols
+        self._values = values
+
+    def __getitem__(self, key: Any) -> Any:
+        if isinstance(key, int):
+            return self._values[key]
+        try:
+            idx = self._cols.index(key)
+        except ValueError:
+            raise KeyError(key) from None
+        return self._values[idx]
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def keys(self) -> List[str]:
+        return list(self._cols)
+
+    def values(self) -> tuple:
+        return self._values
+
+    def items(self):
+        return zip(self._cols, self._values)
+
+
+class PostgresBackend:
+    """Optional :class:`StorageBackend` implementation backed by ``psycopg2``.
+
+    Translates the SQLite SQL dialect used by :class:`KilnDB` into
+    PostgreSQL-compatible SQL on the fly so that the higher-level persistence
+    code does not need any conditional logic.
+
+    :param dsn: PostgreSQL connection string.  Falls back to the
+        ``KILN_POSTGRES_DSN`` environment variable when ``None``.
+    :raises RuntimeError: If ``psycopg2`` is not installed.
+    :raises ValueError: If no DSN is provided and the env var is unset.
+    """
+
+    def __init__(self, dsn: Optional[str] = None) -> None:
+        try:
+            import psycopg2  # noqa: F811
+        except ImportError:
+            raise RuntimeError(
+                "psycopg2 is required for PostgreSQL support: "
+                "pip install psycopg2-binary"
+            ) from None
+
+        self._dsn = dsn or os.environ.get("KILN_POSTGRES_DSN", "")
+        if not self._dsn:
+            raise ValueError(
+                "PostgreSQL DSN required — pass dsn= or set KILN_POSTGRES_DSN"
+            )
+
+        self._psycopg2 = psycopg2
+        self._conn = psycopg2.connect(self._dsn)
+        self._conn.autocommit = False
+
+    # -- SQL dialect translation helpers ------------------------------------
+
+    @staticmethod
+    def _translate_placeholders(sql: str) -> str:
+        """Convert SQLite ``?`` positional placeholders to Postgres ``%s``.
+
+        Skips ``?`` characters inside single-quoted string literals to avoid
+        corrupting embedded text values.
+        """
+        result: List[str] = []
+        in_string = False
+        for ch in sql:
+            if ch == "'" and not in_string:
+                in_string = True
+                result.append(ch)
+            elif ch == "'" and in_string:
+                in_string = False
+                result.append(ch)
+            elif ch == "?" and not in_string:
+                result.append("%s")
+            else:
+                result.append(ch)
+        return "".join(result)
+
+    @staticmethod
+    def _translate_ddl(sql: str) -> str:
+        """Translate SQLite DDL idioms to PostgreSQL equivalents."""
+        import re
+
+        # INTEGER PRIMARY KEY AUTOINCREMENT → SERIAL PRIMARY KEY
+        sql = re.sub(
+            r"INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT",
+            "SERIAL PRIMARY KEY",
+            sql,
+            flags=re.IGNORECASE,
+        )
+        # DATETIME DEFAULT CURRENT_TIMESTAMP → TIMESTAMP DEFAULT NOW()
+        sql = re.sub(
+            r"DATETIME\s+DEFAULT\s+CURRENT_TIMESTAMP",
+            "TIMESTAMP DEFAULT NOW()",
+            sql,
+            flags=re.IGNORECASE,
+        )
+        # INSERT OR REPLACE → Postgres upsert not needed at DDL level but
+        # some statements leak through executescript; leave for execute().
+        # INSERT OR IGNORE → handled in execute().
+        return sql
+
+    @staticmethod
+    def _translate_dml(sql: str) -> str:
+        """Translate SQLite DML idioms to PostgreSQL equivalents."""
+        import re
+
+        # INSERT OR REPLACE → INSERT ... ON CONFLICT DO UPDATE
+        # For tables using a single PRIMARY KEY, we extract the table name
+        # and column list to build a proper ON CONFLICT clause.
+        or_replace = re.match(
+            r"INSERT\s+OR\s+REPLACE\s+INTO\s+(\w+)\s*\(([^)]+)\)\s*VALUES\s*\((.+)\)",
+            sql,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if or_replace:
+            table = or_replace.group(1)
+            cols_str = or_replace.group(2)
+            vals_str = or_replace.group(3)
+            cols = [c.strip() for c in cols_str.split(",")]
+            # Build SET clause for all non-PK columns.
+            set_parts = [f"{c} = EXCLUDED.{c}" for c in cols[1:]]
+            # Use first column as the conflict target (it is the PK for all
+            # tables in the Kiln schema).
+            pk = cols[0]
+            sql = (
+                f"INSERT INTO {table} ({cols_str}) VALUES ({vals_str}) "
+                f"ON CONFLICT ({pk}) DO UPDATE SET {', '.join(set_parts)}"
+            )
+            return sql
+
+        # INSERT OR IGNORE → INSERT ... ON CONFLICT DO NOTHING
+        has_or_ignore = bool(
+            re.search(r"INSERT\s+OR\s+IGNORE\s+INTO", sql, re.IGNORECASE)
+        )
+        if has_or_ignore:
+            sql = re.sub(
+                r"INSERT\s+OR\s+IGNORE\s+INTO",
+                "INSERT INTO",
+                sql,
+                flags=re.IGNORECASE,
+            )
+            sql = sql.rstrip().rstrip(";")
+            sql += " ON CONFLICT DO NOTHING"
+        return sql
+
+    def _translate_sql(self, sql: str) -> str:
+        """Full translation pipeline for a single SQL statement."""
+        sql = self._translate_placeholders(sql)
+        sql = self._translate_dml(sql)
+        return sql
+
+    # -- StorageBackend interface ------------------------------------------
+
+    def execute(
+        self, sql: str, parameters: _SqlParams = (), /
+    ) -> _PgDictCursor:
+        translated = self._translate_sql(sql)
+        # Convert dict parameters with :name style to %(name)s for psycopg2.
+        if isinstance(parameters, dict):
+            import re
+
+            translated = re.sub(r":(\w+)", r"%(\1)s", translated)
+        cur = self._conn.cursor()
+        cur.execute(translated, parameters)
+        return _PgDictCursor(cur)
+
+    def executemany(
+        self, sql: str, seq_of_parameters: Sequence[_SqlParams], /
+    ) -> _PgDictCursor:
+        translated = self._translate_sql(sql)
+        if seq_of_parameters and isinstance(seq_of_parameters[0], dict):
+            import re
+
+            translated = re.sub(r":(\w+)", r"%(\1)s", translated)
+        cur = self._conn.cursor()
+        cur.executemany(translated, seq_of_parameters)
+        return _PgDictCursor(cur)
+
+    def executescript(self, sql_script: str, /) -> _PgDictCursor:
+        """Execute a multi-statement SQL script.
+
+        PostgreSQL does not have a native ``executescript`` — we translate DDL
+        idioms, split on ``;``, and execute each statement individually.
+        """
+        translated = self._translate_ddl(sql_script)
+        translated = self._translate_placeholders(translated)
+        cur = self._conn.cursor()
+        for stmt in translated.split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                cur.execute(stmt)
+        return _PgDictCursor(cur)
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def close(self) -> None:
+        self._conn.close()
+
+    def cursor(self) -> _PgDictCursor:
+        return _PgDictCursor(self._conn.cursor())
+
+
 class KilnDB:
     """Thread-safe persistence wrapper for Kiln.
 
@@ -166,8 +436,9 @@ class KilnDB:
             the value of ``KILN_DB_PATH`` or ``~/.kiln/kiln.db``.
             Ignored when *backend* is provided.
         backend: Optional pre-built :class:`StorageBackend`.  When ``None``
-            (the default), a :class:`SQLiteBackend` is created from
-            *db_path*.
+            (the default), auto-detects from ``KILN_POSTGRES_DSN`` env var.
+            If that var is set a :class:`PostgresBackend` is used; otherwise
+            a :class:`SQLiteBackend` is created from *db_path*.
     """
 
     def __init__(
@@ -177,13 +448,24 @@ class KilnDB:
         backend: Optional[StorageBackend] = None,
     ) -> None:
         self._db_path = db_path or os.environ.get("KILN_DB_PATH", _DEFAULT_DB_PATH)
+        self._is_postgres = False
 
         if backend is not None:
             self._conn: StorageBackend = backend
+            self._is_postgres = isinstance(backend, PostgresBackend)
+            logger.info(
+                "KilnDB using explicit %s backend",
+                "PostgreSQL" if self._is_postgres else type(backend).__name__,
+            )
+        elif os.environ.get("KILN_POSTGRES_DSN"):
+            self._conn = PostgresBackend()
+            self._is_postgres = True
+            logger.info("KilnDB using PostgreSQL backend (from KILN_POSTGRES_DSN)")
         else:
             # Ensure the parent directory exists for the SQLite file.
             os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
             self._conn = SQLiteBackend(self._db_path)
+            logger.info("KilnDB using SQLite backend (%s)", self._db_path)
 
         self._write_lock = threading.Lock()
 
@@ -197,8 +479,16 @@ class KilnDB:
 
     def _migrate_agent_memory(self) -> None:
         """Add version and expires_at columns to existing agent_memory tables."""
-        # Check existing columns
-        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(agent_memory)").fetchall()}
+        if self._is_postgres:
+            # Postgres: query information_schema for existing columns.
+            rows = self._conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'agent_memory'",
+            ).fetchall()
+            columns = {row[0] for row in rows}
+        else:
+            # SQLite: use PRAGMA table_info.
+            columns = {row[1] for row in self._conn.execute("PRAGMA table_info(agent_memory)").fetchall()}
         if "version" not in columns:
             self._conn.execute("ALTER TABLE agent_memory ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
         if "expires_at" not in columns:
@@ -211,9 +501,10 @@ class KilnDB:
         Sets the parent directory to mode ``0700`` and the database file to
         mode ``0600`` so that other users on a shared system cannot read
         printer credentials or job history.  Skipped on Windows where POSIX
-        chmod semantics do not apply.
+        chmod semantics do not apply, and on Postgres where there is no
+        local database file.
         """
-        if sys.platform == "win32":
+        if sys.platform == "win32" or self._is_postgres:
             return
 
         db_dir = os.path.dirname(self._db_path)
@@ -542,8 +833,10 @@ class KilnDB:
                 self._conn.execute(
                     "ALTER TABLE safety_audit_log ADD COLUMN hmac_signature TEXT"
                 )
-            except sqlite3.OperationalError:
-                pass  # Column already exists.
+            except (sqlite3.OperationalError, Exception):
+                # sqlite3.OperationalError on SQLite, various DB errors on
+                # Postgres — column already exists in both cases.
+                pass
 
             self._conn.commit()
 
@@ -1619,8 +1912,12 @@ class KilnDB:
                 )
                 self._conn.commit()
                 return cur.lastrowid  # type: ignore[return-value]
-            except sqlite3.IntegrityError:
-                raise ValueError(f"Outcome for job_id {outcome['job_id']!r} already recorded")
+            except (sqlite3.IntegrityError, Exception) as exc:
+                # sqlite3.IntegrityError on SQLite; psycopg2.IntegrityError
+                # (also a subclass of DB-API IntegrityError) on Postgres.
+                if "integrity" in type(exc).__name__.lower() or isinstance(exc, sqlite3.IntegrityError):
+                    raise ValueError(f"Outcome for job_id {outcome['job_id']!r} already recorded") from exc
+                raise
 
     def get_print_outcome(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Return the outcome record for *job_id*, or ``None``."""
