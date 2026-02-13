@@ -258,9 +258,9 @@ class EmergencyCoordinator:
 
         # Also pull from the registry if available.
         try:
-            from kiln.registry import PrinterRegistry as _Registry
+            from kiln.server import _registry as registry
 
-            _ = _Registry  # noqa: F841 — validates import availability
+            printer_ids.update(registry.list_names())
         except ImportError:
             pass
 
@@ -416,24 +416,78 @@ class EmergencyCoordinator:
     ) -> tuple[list[str], list[str]]:
         """Send FDM emergency G-code to a printer via its adapter.
 
-        Looks up the printer in the registry and sends the emergency
-        G-code sequence: M112 (emergency stop), M104 S0 (hotend off),
-        M140 S0 (bed off), M84 (steppers off).
+        Tries the adapter's hardware-level ``emergency_stop()`` first.
+        If that fails, falls back to sending G-code commands individually
+        via ``send_gcode()``.
 
         :returns: Tuple of (gcode_sent, actions_taken).
         :raises RuntimeError: If the printer is not found in the registry.
-        :raises kiln.printers.base.PrinterError: If G-code delivery fails.
+        :raises kiln.printers.base.PrinterError: If all delivery methods fail.
         """
-        from kiln.printers.base import PrinterAdapter
-
-        # Lazy import — the registry may not be initialised yet at
+        # Lazy imports — the registry may not be initialised yet at
         # module load time.
-        from kiln.registry import PrinterRegistry
+        from kiln.printers.base import PrinterError
 
-        _ = (PrinterAdapter, PrinterRegistry)  # noqa: F841
+        # Get the server's registry singleton.  If unavailable, we
+        # cannot reach the printer at all.
+        try:
+            from kiln.server import _registry as registry
+        except ImportError:
+            from kiln.registry import PrinterRegistry
+
+            registry = PrinterRegistry()
+
+        adapter = registry.get(printer_id)
 
         gcode = list(_FDM_EMERGENCY_GCODE)
         actions = list(_FDM_EMERGENCY_ACTIONS)
+
+        # Prefer the adapter's hardware-level emergency stop (M112 or
+        # firmware equivalent).  This is the fastest path to halt.
+        try:
+            result = adapter.emergency_stop()
+            if result.success:
+                logger.info(
+                    "Hardware emergency_stop() succeeded for %s",
+                    printer_id,
+                )
+                return gcode, actions
+            # If the adapter reports failure, fall through to G-code.
+            logger.warning(
+                "Hardware emergency_stop() reported failure for %s: %s "
+                "— falling back to G-code",
+                printer_id,
+                result.message,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Hardware emergency_stop() raised for %s: %s "
+                "— falling back to G-code",
+                printer_id,
+                exc,
+            )
+
+        # Fallback: send G-code commands individually so partial
+        # delivery still disables heaters even if a later command fails.
+        last_error: Optional[Exception] = None
+        for cmd in gcode:
+            try:
+                adapter.send_gcode([cmd])
+            except Exception as exc:
+                logger.error(
+                    "Failed to send G-code %r to %s: %s",
+                    cmd,
+                    printer_id,
+                    exc,
+                )
+                last_error = exc
+
+        if last_error is not None:
+            raise PrinterError(
+                f"Partial G-code delivery failure for {printer_id}",
+                cause=last_error,
+            )
+
         return gcode, actions
 
     def _emit_event(
@@ -444,9 +498,9 @@ class EmergencyCoordinator:
     ) -> None:
         """Best-effort event emission.  Never raises."""
         try:
-            from kiln.events import Event, EventType
+            from kiln.events import Event, EventBus, EventType
 
-            Event(
+            event = Event(
                 type=EventType.SAFETY_ESCALATED,
                 data={
                     "printer_id": printer_id,
@@ -456,8 +510,34 @@ class EmergencyCoordinator:
                 },
                 source=f"emergency:{printer_id}",
             )
+
+            # Try to use the server's shared event bus so subscribers
+            # (webhooks, scheduler, persistence) receive the event.
+            bus: Optional[EventBus] = None
+            try:
+                from kiln.server import _event_bus as server_bus
+
+                bus = server_bus
+            except ImportError:
+                pass
+
+            if bus is not None:
+                bus.publish(event)
+                logger.debug(
+                    "Emergency event published for %s", printer_id,
+                )
+            else:
+                logger.debug(
+                    "No event bus available — emergency event for %s "
+                    "not published",
+                    printer_id,
+                )
         except Exception:
-            pass
+            # Best-effort: never let event emission break the stop flow.
+            logger.debug(
+                "Failed to emit emergency event for %s", printer_id,
+                exc_info=True,
+            )
 
 
 # ---------------------------------------------------------------------------

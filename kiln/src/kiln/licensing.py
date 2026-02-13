@@ -32,8 +32,11 @@ Example::
 
 from __future__ import annotations
 
+import base64
 import enum
 import functools
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -58,6 +61,17 @@ _CACHE_TTL_SECONDS: float = 7 * 24 * 3600
 # Local cache file for offline validation fallback.
 _DEFAULT_LICENSE_PATH = Path.home() / ".kiln" / "license"
 _DEFAULT_CACHE_PATH = Path.home() / ".kiln" / "license_cache.json"
+
+# ---------------------------------------------------------------------------
+# Cryptographic signature validation
+# ---------------------------------------------------------------------------
+
+# Default HMAC verification key (can be overridden via KILN_LICENSE_PUBLIC_KEY env var).
+# This is a placeholder — production would use a real key provisioned during build/deploy.
+_DEFAULT_HMAC_KEY = "kiln-license-verification-key-v1"
+
+# Offline mode bypass: if set to "1", allow prefix-based keys even when signature fails.
+_OFFLINE_MODE_ENV_VAR = "KILN_LICENSE_OFFLINE"
 
 
 # ---------------------------------------------------------------------------
@@ -190,26 +204,144 @@ class LicenseManager:
 
         return ""
 
-    def _infer_tier_from_key(self, key: str) -> LicenseTier:
-        """Infer the license tier from the key prefix.
+    def _validate_key_signature(self, key: str) -> Optional[Dict[str, Any]]:
+        """Validate the cryptographic signature of a license key.
+
+        Expected format: kiln_{tier}_{payload}_{signature}
+        Where:
+            - tier = "pro" or "biz"
+            - payload = base64url-encoded JSON with {"tier", "email", "issued_at", "expires_at"}
+            - signature = HMAC-SHA256 of payload using verification key
+
+        Returns:
+            The decoded payload dict if valid, None otherwise.
+        """
+        if not key or not key.startswith("kiln_"):
+            return None
+
+        parts = key.split("_")
+        if len(parts) < 4:
+            # Not a signed key format
+            return None
+
+        tier_part = parts[1]  # "pro" or "biz"
+        payload_b64 = parts[2]
+        signature_b64 = parts[3]
+
+        # Get verification key
+        verification_key = os.environ.get("KILN_LICENSE_PUBLIC_KEY", _DEFAULT_HMAC_KEY)
+
+        try:
+            # Decode payload
+            # Use standard base64 first, fallback to urlsafe
+            try:
+                payload_bytes = base64.b64decode(payload_b64)
+            except Exception:
+                payload_bytes = base64.urlsafe_b64decode(payload_b64 + "==")  # Add padding
+
+            payload = json.loads(payload_bytes.decode("utf-8"))
+
+            # Verify signature
+            try:
+                signature = base64.b64decode(signature_b64)
+            except Exception:
+                signature = base64.urlsafe_b64decode(signature_b64 + "==")
+
+            expected_signature = hmac.new(
+                verification_key.encode("utf-8"),
+                payload_b64.encode("utf-8"),
+                hashlib.sha256
+            ).digest()
+
+            if not hmac.compare_digest(signature, expected_signature):
+                logger.warning("License key signature verification failed")
+                return None
+
+            # Check expiration
+            expires_at = payload.get("expires_at")
+            if expires_at and time.time() >= expires_at:
+                logger.warning("License key has expired")
+                return None
+
+            # Verify tier matches
+            payload_tier = payload.get("tier", "").lower()
+            if tier_part == "pro" and payload_tier != "pro":
+                logger.warning("License key tier mismatch: prefix=%s payload=%s", tier_part, payload_tier)
+                return None
+            if tier_part == "biz" and payload_tier != "business":
+                logger.warning("License key tier mismatch: prefix=%s payload=%s", tier_part, payload_tier)
+                return None
+
+            return payload
+
+        except (json.JSONDecodeError, ValueError, KeyError, TypeError) as exc:
+            logger.debug("License key signature validation failed: %s", exc)
+            return None
+
+    def _infer_tier_from_key(self, key: str) -> Tuple[LicenseTier, Optional[float]]:
+        """Infer the license tier from the key, validating signature if present.
 
         This provides instant, offline tier resolution without needing
         to contact any remote API.
+
+        Returns:
+            (tier, expires_at) tuple. expires_at is None for legacy keys or free tier.
         """
         if not key:
-            return LicenseTier.FREE
+            return LicenseTier.FREE, None
+
+        # Try cryptographic validation first
+        payload = self._validate_key_signature(key)
+        if payload:
+            tier_str = payload.get("tier", "").lower()
+            if tier_str == "business":
+                return LicenseTier.BUSINESS, payload.get("expires_at")
+            if tier_str == "pro":
+                return LicenseTier.PRO, payload.get("expires_at")
+            logger.warning("Unknown tier in validated payload: %s", tier_str)
+
+        # Fallback: legacy prefix-based validation
+        offline_mode = os.environ.get(_OFFLINE_MODE_ENV_VAR, "0") == "1"
+
         if key.startswith(_KEY_PREFIX_BUSINESS):
-            return LicenseTier.BUSINESS
+            if payload is None and not offline_mode:
+                logger.warning(
+                    "License key uses legacy prefix format. Signature validation failed. "
+                    "Set KILN_LICENSE_OFFLINE=1 to allow legacy keys, or upgrade to a signed key. "
+                    "Defaulting to FREE tier for security."
+                )
+                return LicenseTier.FREE, None
+            if payload is None and offline_mode:
+                logger.warning(
+                    "License key signature validation failed, but KILN_LICENSE_OFFLINE=1 is set. "
+                    "Allowing legacy prefix-based tier (BUSINESS). Consider upgrading to a signed key."
+                )
+            return LicenseTier.BUSINESS, None
+
         if key.startswith(_KEY_PREFIX_PRO):
-            return LicenseTier.PRO
+            if payload is None and not offline_mode:
+                logger.warning(
+                    "License key uses legacy prefix format. Signature validation failed. "
+                    "Set KILN_LICENSE_OFFLINE=1 to allow legacy keys, or upgrade to a signed key. "
+                    "Defaulting to FREE tier for security."
+                )
+                return LicenseTier.FREE, None
+            if payload is None and offline_mode:
+                logger.warning(
+                    "License key signature validation failed, but KILN_LICENSE_OFFLINE=1 is set. "
+                    "Allowing legacy prefix-based tier (PRO). Consider upgrading to a signed key."
+                )
+            return LicenseTier.PRO, None
+
         # Unknown prefix but non-empty key — check cache before defaulting.
         cached = self._read_cache()
         if cached and cached.get("key_hint") == key[-6:]:
             try:
-                return LicenseTier(cached["tier"])
+                return LicenseTier(cached["tier"]), cached.get("expires_at")
             except (KeyError, ValueError):
                 pass
-        return LicenseTier.FREE
+
+        return LicenseTier.FREE, None
 
     def _key_source(self) -> str:
         """Determine where the license key came from."""
@@ -269,8 +401,8 @@ class LicenseManager:
     def get_tier(self) -> LicenseTier:
         """Return the current license tier.
 
-        Resolution is instant and offline — uses key prefix detection
-        with cached remote validation as a fallback.
+        Resolution is instant and offline — uses cryptographic signature
+        validation with legacy prefix detection as a fallback.
         """
         if self._resolved is not None:
             if self._resolved.is_valid:
@@ -278,19 +410,20 @@ class LicenseManager:
             # License expired, fall back to free
             return LicenseTier.FREE
 
-        tier = self._infer_tier_from_key(self._raw_key)
+        tier, expires_at = self._infer_tier_from_key(self._raw_key)
         key_hint = self._raw_key[-6:] if self._raw_key else ""
 
         self._resolved = LicenseInfo(
             tier=tier,
             license_key_hint=key_hint,
             validated_at=time.time(),
+            expires_at=expires_at,
             source=self._key_source(),
         )
 
         # Update cache if we have a real key
         if self._raw_key:
-            self._write_cache(tier, key_hint)
+            self._write_cache(tier, key_hint, expires_at)
 
         return tier
 

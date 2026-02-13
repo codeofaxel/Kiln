@@ -1,20 +1,26 @@
 """Database backup and restore for Kiln.
 
 Provides functions to export the Kiln SQLite database with optional
-credential redaction, and to restore from a backup file.  Designed to
-be called from both the CLI and MCP tools.
+credential redaction, and to restore from a backup file.  Includes a
+:class:`BackupScheduler` for periodic automated backups via a daemon
+thread.  Designed to be called from both the CLI and MCP tools.
 
 Only stdlib modules are used.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import sqlite3
+import threading
 import time
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 _CREDENTIAL_COLUMNS: list[tuple[str, str]] = [

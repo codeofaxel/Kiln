@@ -148,7 +148,9 @@ _rate_limiter = _build_rate_limiter()
 class RestApiConfig:
     """Configuration for the REST API server."""
 
-    host: str = "0.0.0.0"
+    host: str = field(
+        default_factory=lambda: os.environ.get("KILN_REST_HOST", "127.0.0.1")
+    )
     port: int = 8420
     auth_token: str | None = None  # If set, require Bearer token
     cors_origins: list[str] = field(default_factory=list)
@@ -602,15 +604,15 @@ def run_rest_server(config: RestApiConfig | None = None) -> None:
 
     app = create_app(config)
 
-    # Warn when binding to a non-localhost address without authentication
+    # Refuse to bind to non-localhost without authentication
     _LOCALHOST_ADDRESSES = {"127.0.0.1", "localhost", "::1"}
     if config.host not in _LOCALHOST_ADDRESSES:
         auth_enabled = os.environ.get("KILN_AUTH_ENABLED", "").lower() in ("1", "true")
-        if not auth_enabled:
-            logger.critical(
-                "REST API binding to %s WITHOUT authentication. "
-                "Set KILN_AUTH_ENABLED=1 or restrict to localhost.",
-                config.host,
+        if not auth_enabled or not config.auth_token:
+            raise RuntimeError(
+                f"REST API cannot bind to {config.host} without authentication. "
+                "Either set KILN_AUTH_ENABLED=1 and KILN_AUTH_TOKEN=<token>, "
+                "or bind to localhost by setting KILN_REST_HOST=127.0.0.1"
             )
 
     logger.info(

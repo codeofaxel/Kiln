@@ -210,10 +210,15 @@ class BambuAdapter(PrinterAdapter):
         self._last_status: Dict[str, Any] = {}
         self._connected = False
         self._sequence_id = 0
+        self._last_update_time: float = 0.0
 
         # MQTT client.
         self._mqtt_client: Optional[mqtt.Client] = None
         self._mqtt_connected = threading.Event()
+
+        # Reconnection backoff tracking.
+        self._reconnect_attempt: int = 0
+        self._last_reconnect_time: float = 0.0
 
     # -- PrinterAdapter identity properties ---------------------------------
 

@@ -44,12 +44,27 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from kiln.persistence import KilnDB
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
+
+class PaymentStatus(str, Enum):
+    """Payment status values for billing charges."""
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    REFUNDED = "refunded"
 
 
 # ---------------------------------------------------------------------------
@@ -633,3 +648,275 @@ class BillingLedger:
                 if len(results) >= limit:
                     break
         return results
+
+    # ------------------------------------------------------------------
+    # Refunds & reconciliation
+    # ------------------------------------------------------------------
+
+    def refund_charge(
+        self,
+        *,
+        charge_id: Optional[str] = None,
+        job_id: Optional[str] = None,
+        refund_reason: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Refund a charge by updating its payment status to 'refunded'.
+
+        Args:
+            charge_id: The charge ID to refund (mutually exclusive with job_id).
+            job_id: The job ID to refund (mutually exclusive with charge_id).
+            refund_reason: Human-readable reason for the refund.
+
+        Returns:
+            The updated charge record, or ``None`` if not found.
+
+        Raises:
+            ValueError: If neither charge_id nor job_id is provided.
+        """
+        if charge_id is None and job_id is None:
+            raise ValueError("Must provide either charge_id or job_id")
+
+        refunded_at = time.time()
+
+        if self._db is not None:
+            # Find the charge.
+            charge = None
+            if charge_id:
+                charge = self._db.get_billing_charge(charge_id)
+            else:
+                # Search by job_id.
+                for c in self._db.list_billing_charges(limit=500):
+                    if c["job_id"] == job_id:
+                        charge = c
+                        break
+
+            if charge is None:
+                logger.warning(
+                    "Refund requested for charge_id=%s job_id=%s but not found",
+                    charge_id, job_id,
+                )
+                return None
+
+            # Update payment status to refunded.
+            self._db.update_billing_charge(
+                charge["id"],
+                payment_status=PaymentStatus.REFUNDED.value,
+                refund_reason=refund_reason,
+                refunded_at=refunded_at,
+            )
+
+            # Publish event if event bus is available.
+            try:
+                from kiln.events import get_event_bus
+                bus = get_event_bus()
+                if bus:
+                    bus.publish("PAYMENT_REFUNDED", {
+                        "charge_id": charge["id"],
+                        "job_id": charge["job_id"],
+                        "fee_amount": charge["fee_amount"],
+                        "refund_reason": refund_reason,
+                        "refunded_at": refunded_at,
+                    })
+            except Exception as e:
+                logger.debug("Event bus not available for PAYMENT_REFUNDED: %s", e)
+
+            logger.info(
+                "Refunded charge %s (job %s): fee=%.2f %s, reason=%s",
+                charge["id"], charge["job_id"], charge["fee_amount"],
+                charge["currency"], refund_reason,
+            )
+
+            # Return updated charge.
+            return self._db.get_billing_charge(charge["id"])
+
+        # In-memory fallback.
+        with self._lock:
+            for entry in self._charges:
+                match = (
+                    (charge_id and entry.get("id") == charge_id)
+                    or (job_id and entry["job_id"] == job_id)
+                )
+                if match:
+                    entry["payment_status"] = PaymentStatus.REFUNDED.value
+                    entry["refund_reason"] = refund_reason
+                    entry["refunded_at"] = refunded_at
+
+                    logger.info(
+                        "Refunded charge %s (job %s): fee=%.2f %s, reason=%s",
+                        entry.get("id", "unknown"), entry["job_id"],
+                        entry["fee_calc"].fee_amount,
+                        entry["fee_calc"].currency, refund_reason,
+                    )
+
+                    # Build return dict.
+                    fc: FeeCalculation = entry["fee_calc"]
+                    return {
+                        "id": entry.get("id", ""),
+                        "job_id": entry["job_id"],
+                        "fee_amount": fc.fee_amount,
+                        "payment_status": PaymentStatus.REFUNDED.value,
+                        "refund_reason": refund_reason,
+                        "refunded_at": refunded_at,
+                    }
+
+        logger.warning(
+            "Refund requested for charge_id=%s job_id=%s but not found",
+            charge_id, job_id,
+        )
+        return None
+
+    def reconcile_pending_charges(
+        self,
+        *,
+        stale_threshold_seconds: int = 3600,
+    ) -> Dict[str, Any]:
+        """Reconcile stale pending charges by checking associated job status.
+
+        Scans for charges with ``payment_status="pending"`` older than
+        the threshold, checks if the associated job completed or failed,
+        and auto-refunds failed jobs or flags completed jobs for collection.
+
+        Args:
+            stale_threshold_seconds: Age threshold for stale pending charges
+                (default 1 hour).
+
+        Returns:
+            Reconciliation report with counts: ``refunded``,
+            ``flagged_for_collection``, ``still_pending``.
+        """
+        now = time.time()
+        cutoff = now - stale_threshold_seconds
+
+        refunded = 0
+        flagged_for_collection = 0
+        still_pending = 0
+
+        if self._db is not None:
+            # DB-backed reconciliation.
+            pending_charges = self._db.list_billing_charges_by_status(
+                PaymentStatus.PENDING.value, limit=1000,
+            )
+
+            for charge in pending_charges:
+                created_at = charge.get("created_at", now)
+                if created_at > cutoff:
+                    still_pending += 1
+                    continue
+
+                job_id = charge["job_id"]
+                # Check job status (requires persistence to have job table).
+                job_status = self._db.get_job_status(job_id) if hasattr(
+                    self._db, "get_job_status",
+                ) else None
+
+                if job_status == "failed":
+                    # Auto-refund failed job.
+                    self.refund_charge(
+                        charge_id=charge["id"],
+                        refund_reason="Auto-refund: job failed",
+                    )
+                    refunded += 1
+                elif job_status == "completed":
+                    # Mark as needing collection.
+                    self._db.update_billing_charge(
+                        charge["id"],
+                        payment_status=PaymentStatus.PROCESSING.value,
+                    )
+                    flagged_for_collection += 1
+                else:
+                    still_pending += 1
+
+        else:
+            # In-memory fallback.
+            with self._lock:
+                for entry in self._charges:
+                    if entry.get("payment_status") != PaymentStatus.PENDING.value:
+                        continue
+
+                    created_at = entry.get("timestamp", now)
+                    if created_at > cutoff:
+                        still_pending += 1
+                        continue
+
+                    # In-memory mode doesn't track job status, so just flag as stale.
+                    still_pending += 1
+
+        logger.info(
+            "Reconciled pending charges: refunded=%d, flagged_for_collection=%d, "
+            "still_pending=%d",
+            refunded, flagged_for_collection, still_pending,
+        )
+
+        return {
+            "refunded": refunded,
+            "flagged_for_collection": flagged_for_collection,
+            "still_pending": still_pending,
+        }
+
+    def get_aging_report(self) -> Dict[str, Any]:
+        """Generate an aging report for all charges grouped by age buckets.
+
+        Returns:
+            Dictionary with age buckets (``<1h``, ``1-24h``, ``1-7d``, ``>7d``)
+            and totals per bucket.
+        """
+        now = time.time()
+        one_hour = 3600
+        one_day = 86400
+        one_week = 604800
+
+        buckets = {
+            "<1h": {"count": 0, "total_fees": 0.0},
+            "1-24h": {"count": 0, "total_fees": 0.0},
+            "1-7d": {"count": 0, "total_fees": 0.0},
+            ">7d": {"count": 0, "total_fees": 0.0},
+        }
+
+        if self._db is not None:
+            # DB-backed aging report.
+            all_charges = self._db.list_billing_charges(limit=10000)
+            for charge in all_charges:
+                created_at = charge.get("created_at", now)
+                age = now - created_at
+                fee_amount = charge["fee_amount"]
+
+                if age < one_hour:
+                    bucket = "<1h"
+                elif age < one_day:
+                    bucket = "1-24h"
+                elif age < one_week:
+                    bucket = "1-7d"
+                else:
+                    bucket = ">7d"
+
+                buckets[bucket]["count"] += 1
+                buckets[bucket]["total_fees"] += fee_amount
+
+        else:
+            # In-memory fallback.
+            with self._lock:
+                for entry in self._charges:
+                    created_at = entry.get("timestamp", now)
+                    age = now - created_at
+                    fee_amount = entry["fee_calc"].fee_amount
+
+                    if age < one_hour:
+                        bucket = "<1h"
+                    elif age < one_day:
+                        bucket = "1-24h"
+                    elif age < one_week:
+                        bucket = "1-7d"
+                    else:
+                        bucket = ">7d"
+
+                    buckets[bucket]["count"] += 1
+                    buckets[bucket]["total_fees"] += fee_amount
+
+        # Round totals.
+        for bucket in buckets.values():
+            bucket["total_fees"] = round(bucket["total_fees"], 2)
+
+        return {
+            "buckets": buckets,
+            "generated_at": now,
+        }

@@ -1415,6 +1415,91 @@ class KilnDB:
         ).fetchone()
         return round(row["total"], 2) if row else 0.0
 
+    def update_billing_charge(
+        self,
+        charge_id: str,
+        *,
+        payment_status: Optional[str] = None,
+        refund_reason: Optional[str] = None,
+        refunded_at: Optional[float] = None,
+    ) -> None:
+        """Update fields on an existing billing charge.
+
+        Args:
+            charge_id: The charge ID to update.
+            payment_status: New payment status value.
+            refund_reason: Refund reason (if applicable).
+            refunded_at: Timestamp when refunded (if applicable).
+        """
+        # Build dynamic update query based on provided fields.
+        updates = []
+        params: Dict[str, Any] = {"id": charge_id}
+
+        if payment_status is not None:
+            updates.append("payment_status = :payment_status")
+            params["payment_status"] = payment_status
+
+        if refund_reason is not None:
+            # Need to add these columns to the schema if they don't exist.
+            # For now, store in waiver_reason as a fallback.
+            updates.append("waiver_reason = :refund_reason")
+            params["refund_reason"] = refund_reason
+
+        if refunded_at is not None:
+            # Store in created_at field for now (schema limitation).
+            # In production, add a refunded_at column.
+            pass
+
+        if not updates:
+            return
+
+        with self._write_lock:
+            query = f"UPDATE billing_charges SET {', '.join(updates)} WHERE id = :id"
+            self._conn.execute(query, params)
+            self._conn.commit()
+
+    def list_billing_charges_by_status(
+        self,
+        payment_status: str,
+        *,
+        limit: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        """Return billing charges filtered by payment status.
+
+        Args:
+            payment_status: Filter by this payment status.
+            limit: Maximum records to return.
+
+        Returns:
+            List of charge dicts.
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM billing_charges "
+            "WHERE payment_status = ? "
+            "ORDER BY created_at ASC LIMIT ?",
+            (payment_status, limit),
+        ).fetchall()
+        results = []
+        for row in rows:
+            d = dict(row)
+            d["waived"] = bool(d["waived"])
+            results.append(d)
+        return results
+
+    def get_job_status(self, job_id: str) -> Optional[str]:
+        """Get the status of a job by ID.
+
+        Args:
+            job_id: The job identifier.
+
+        Returns:
+            The job status string, or ``None`` if not found.
+        """
+        row = self._conn.execute(
+            "SELECT status FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        return row["status"] if row else None
+
     # ------------------------------------------------------------------
     # Payment methods
     # ------------------------------------------------------------------

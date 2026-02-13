@@ -11,8 +11,10 @@ The adapter mirrors the retry and error-handling patterns established by
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -20,6 +22,15 @@ from urllib.parse import quote
 import requests
 from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
+
+# Optional: websocket-client for push-based state monitoring.
+try:
+    import websocket as _ws_module
+
+    _WS_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _ws_module = None  # type: ignore[assignment]
+    _WS_AVAILABLE = False
 
 from kiln.printers.base import (
     FirmwareComponent,
@@ -40,6 +51,13 @@ logger = logging.getLogger(__name__)
 
 # HTTP status codes eligible for automatic retry.
 _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({502, 503, 504})
+
+# Maximum age (in seconds) for push-cached state before falling back to REST.
+_PUSH_CACHE_MAX_AGE: float = 5.0
+
+# WebSocket reconnection backoff limits (seconds).
+_WS_BACKOFF_INITIAL: float = 1.0
+_WS_BACKOFF_MAX: float = 30.0
 
 # Mapping from Moonraker's ``klippy_state`` / ``state`` strings to the
 # canonical :class:`PrinterStatus` enum.  Moonraker reports the Klipper
@@ -136,6 +154,8 @@ class MoonrakerAdapter(PrinterAdapter):
         timeout: int = 30,
         retries: int = 3,
         verify_ssl: bool = True,
+        *,
+        enable_push: bool = False,
     ) -> None:
         if not host:
             raise ValueError("host must not be empty")
@@ -161,6 +181,19 @@ class MoonrakerAdapter(PrinterAdapter):
                 "http": _http_proxy,
                 "https": _https_proxy,
             }
+
+        # -- Push-based state monitoring (optional) -------------------------
+        self._push_enabled: bool = False
+        self._state_lock: threading.Lock = threading.Lock()
+        self._cached_state: Optional[PrinterState] = None
+        self._cached_state_time: float = 0.0
+        self._ws_connected: threading.Event = threading.Event()
+        self._ws_app: Optional[Any] = None
+        self._ws_thread: Optional[threading.Thread] = None
+        self._ws_shutdown: threading.Event = threading.Event()
+
+        if enable_push:
+            self._start_websocket()
 
     # -- PrinterAdapter identity properties ---------------------------------
 
