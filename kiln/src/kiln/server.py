@@ -4895,6 +4895,22 @@ def fulfillment_cancel(order_id: str) -> dict:
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
+@mcp.tool()
+def fulfillment_alerts() -> dict:
+    """Check for fulfillment order alerts (stalled, failed, cancelled orders).
+
+    Returns any active alerts from the background fulfillment monitor.
+    Alerts are generated when orders are cancelled/failed by the provider
+    or have been stuck in processing longer than the expected lead time.
+    """
+    try:
+        monitor = _get_fulfillment_monitor()
+        alerts = monitor.get_alerts()
+        return {"success": True, "alerts": alerts, "count": len(alerts)}
+    except Exception as exc:
+        return _error_dict(str(exc))
+
+
 # ---------------------------------------------------------------------------
 # Consumer workflow tools — for users without 3D printers
 # ---------------------------------------------------------------------------
