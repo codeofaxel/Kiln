@@ -1,9 +1,14 @@
-"""SQLite persistence layer for Kiln.
+"""Persistence layer for Kiln.
 
 Provides durable storage for jobs, events, printers, and settings so that
 state survives process restarts.  The database is created automatically at
 ``~/.kiln/kiln.db`` (override with the ``KILN_DB_PATH`` environment
 variable).
+
+The storage layer is backend-agnostic: all database operations flow through
+a :class:`StorageBackend` protocol so that the default SQLite implementation
+can be swapped for Postgres (or another engine) in multi-node deployments
+without touching the higher-level :class:`KilnDB` logic.
 
 Only stdlib modules are used (``sqlite3``, ``json``, ``os``, ``threading``).
 
@@ -27,7 +32,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol, Sequence, Union
 
 
 logger = logging.getLogger(__name__)
@@ -39,25 +44,147 @@ logger = logging.getLogger(__name__)
 _DEFAULT_DB_DIR = os.path.join(str(Path.home()), ".kiln")
 _DEFAULT_DB_PATH = os.path.join(_DEFAULT_DB_DIR, "kiln.db")
 
+# SQL parameter type accepted by both sqlite3 and typical DB-API adapters.
+_SqlParams = Union[Sequence[Any], Dict[str, Any]]
+
+
+# ---------------------------------------------------------------------------
+# Storage backend abstraction
+# ---------------------------------------------------------------------------
+
+
+class _CursorLike(Protocol):
+    """Minimal cursor interface used by :class:`KilnDB`.
+
+    Matches the subset of :pep:`249` (DB-API 2.0) that the persistence layer
+    actually relies on.  Both ``sqlite3.Cursor`` and any Postgres cursor
+    wrapper satisfy this naturally.
+    """
+
+    @property
+    def lastrowid(self) -> Optional[int]: ...
+
+    @property
+    def rowcount(self) -> int: ...
+
+    def fetchone(self) -> Optional[Any]: ...
+
+    def fetchall(self) -> List[Any]: ...
+
+
+class StorageBackend(Protocol):
+    """Protocol defining the database operations :class:`KilnDB` depends on.
+
+    The default implementation is :class:`SQLiteBackend`.  A future
+    ``PostgresBackend`` could implement this same protocol to support
+    multi-node / cloud deployments without changing any of the higher-level
+    persistence logic.
+
+    All methods mirror a subset of the :pep:`249` DB-API 2.0 connection
+    interface, keeping the contract small and easy to satisfy.
+    """
+
+    def execute(
+        self, sql: str, parameters: _SqlParams = ..., /
+    ) -> _CursorLike:
+        """Execute a single SQL statement and return a cursor-like object."""
+        ...
+
+    def executemany(
+        self, sql: str, seq_of_parameters: Sequence[_SqlParams], /
+    ) -> _CursorLike:
+        """Execute a SQL statement against all parameter sequences."""
+        ...
+
+    def executescript(self, sql_script: str, /) -> _CursorLike:
+        """Execute multiple SQL statements in one call (DDL bootstrap)."""
+        ...
+
+    def commit(self) -> None:
+        """Commit the current transaction."""
+        ...
+
+    def close(self) -> None:
+        """Close the underlying connection."""
+        ...
+
+    def cursor(self) -> _CursorLike:
+        """Return a new cursor object."""
+        ...
+
+
+class SQLiteBackend:
+    """Default :class:`StorageBackend` implementation backed by ``sqlite3``.
+
+    Wraps a ``sqlite3.Connection`` and exposes only the methods required by
+    the :class:`StorageBackend` protocol.  Construction mirrors the original
+    ``KilnDB`` setup (WAL mode, busy timeout, Row factory).
+    """
+
+    def __init__(self, db_path: str) -> None:
+        self._conn: sqlite3.Connection = sqlite3.connect(
+            db_path, check_same_thread=False,
+        )
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
+
+    # -- StorageBackend interface ------------------------------------------
+
+    def execute(
+        self, sql: str, parameters: _SqlParams = (), /
+    ) -> sqlite3.Cursor:
+        return self._conn.execute(sql, parameters)
+
+    def executemany(
+        self, sql: str, seq_of_parameters: Sequence[_SqlParams], /
+    ) -> sqlite3.Cursor:
+        return self._conn.executemany(sql, seq_of_parameters)
+
+    def executescript(self, sql_script: str, /) -> sqlite3.Cursor:
+        return self._conn.executescript(sql_script)
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def close(self) -> None:
+        self._conn.close()
+
+    def cursor(self) -> sqlite3.Cursor:
+        return self._conn.cursor()
+
 
 class KilnDB:
-    """Thread-safe SQLite wrapper for Kiln persistence.
+    """Thread-safe persistence wrapper for Kiln.
+
+    All database I/O is routed through a :class:`StorageBackend` instance,
+    making it possible to swap the underlying engine (SQLite, Postgres, etc.)
+    without altering any of the query logic.
 
     Parameters:
         db_path: Filesystem path for the SQLite database file.  Defaults to
             the value of ``KILN_DB_PATH`` or ``~/.kiln/kiln.db``.
+            Ignored when *backend* is provided.
+        backend: Optional pre-built :class:`StorageBackend`.  When ``None``
+            (the default), a :class:`SQLiteBackend` is created from
+            *db_path*.
     """
 
-    def __init__(self, db_path: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        db_path: Optional[str] = None,
+        *,
+        backend: Optional[StorageBackend] = None,
+    ) -> None:
         self._db_path = db_path or os.environ.get("KILN_DB_PATH", _DEFAULT_DB_PATH)
 
-        # Ensure the parent directory exists.
-        os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+        if backend is not None:
+            self._conn: StorageBackend = backend
+        else:
+            # Ensure the parent directory exists for the SQLite file.
+            os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
+            self._conn = SQLiteBackend(self._db_path)
 
-        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA busy_timeout=5000")
         self._write_lock = threading.Lock()
 
         self._ensure_schema()
@@ -70,13 +197,12 @@ class KilnDB:
 
     def _migrate_agent_memory(self) -> None:
         """Add version and expires_at columns to existing agent_memory tables."""
-        cur = self._conn.cursor()
         # Check existing columns
-        columns = {row[1] for row in cur.execute("PRAGMA table_info(agent_memory)").fetchall()}
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(agent_memory)").fetchall()}
         if "version" not in columns:
-            cur.execute("ALTER TABLE agent_memory ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
+            self._conn.execute("ALTER TABLE agent_memory ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
         if "expires_at" not in columns:
-            cur.execute("ALTER TABLE agent_memory ADD COLUMN expires_at REAL DEFAULT NULL")
+            self._conn.execute("ALTER TABLE agent_memory ADD COLUMN expires_at REAL DEFAULT NULL")
         self._conn.commit()
 
     def _enforce_permissions(self) -> None:
@@ -130,8 +256,7 @@ class KilnDB:
     def _ensure_schema(self) -> None:
         """Create tables if they do not already exist."""
         with self._write_lock:
-            cur = self._conn.cursor()
-            cur.executescript(
+            self._conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS jobs (
                     id              TEXT PRIMARY KEY,
@@ -414,7 +539,7 @@ class KilnDB:
 
             # Add hmac_signature column to safety_audit_log if missing.
             try:
-                cur.execute(
+                self._conn.execute(
                     "ALTER TABLE safety_audit_log ADD COLUMN hmac_signature TEXT"
                 )
             except sqlite3.OperationalError:

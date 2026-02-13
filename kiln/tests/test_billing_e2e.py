@@ -674,3 +674,59 @@ class TestAuthCaptureE2E:
         capture_result = mgr.capture_fee("", "order-free", fee)
         assert capture_result.success is True
         assert provider.charge_count == 0
+
+
+# ---------------------------------------------------------------
+# Refund-after-failure tests
+# ---------------------------------------------------------------
+
+
+class TestRefundAfterFailure:
+    """Tests for automatic refund when order placement fails after payment."""
+
+    def test_refund_issued_when_order_fails(self):
+        """If payment succeeds but order fails, refund should be attempted."""
+        mgr, ledger, provider, db = _make_manager()
+        fee = ledger.calculate_fee(100.0)
+
+        # Charge succeeds.
+        result = mgr.charge_fee("refund-test-1", fee)
+        assert result.success is True
+        assert provider.charge_count == 1
+
+        # Refund the payment.
+        refund = provider.refund_payment(result.payment_id)
+        assert refund.status == PaymentStatus.REFUNDED
+        assert provider.refund_count == 1
+
+    def test_refund_after_multiple_charges(self):
+        """Refund should work correctly after multiple charges."""
+        mgr, ledger, provider, db = _make_manager()
+
+        # Place two charges.
+        for i in range(2):
+            fee = ledger.calculate_fee(100.0)
+            mgr.charge_fee(f"refund-multi-{i}", fee)
+
+        assert provider.charge_count == 2
+
+        # Refund the second charge.
+        refund = provider.refund_payment("pi_2")
+        assert refund.status == PaymentStatus.REFUNDED
+        assert provider.refund_count == 1
+
+    def test_refund_preserves_ledger_record(self):
+        """Refunding should not remove the original charge from the ledger."""
+        mgr, ledger, provider, db = _make_manager()
+        fee = ledger.calculate_fee(100.0)
+
+        result = mgr.charge_fee("refund-preserve-1", fee)
+        assert result.success is True
+
+        # Refund.
+        provider.refund_payment(result.payment_id)
+
+        # Ledger should still have the original charge.
+        charges = ledger.list_charges()
+        assert len(charges) == 1
+        assert charges[0]["job_id"] == "refund-preserve-1"

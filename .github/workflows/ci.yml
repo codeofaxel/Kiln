@@ -23,9 +23,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install kiln with dev deps
+        # Lock file: kiln/requirements-lock.txt (pinned versions for reproducible builds)
+        # To enforce pinned versions, use: pip install -r kiln/requirements-lock.txt && pip install -e "./kiln[dev,bambu]" --no-deps
         run: pip install -e "./kiln[dev,bambu]"
 
       - name: Install octoprint-cli with dev deps
+        # Lock file: octoprint-cli/requirements-lock.txt (pinned versions for reproducible builds)
+        # To enforce pinned versions, use: pip install -r octoprint-cli/requirements-lock.txt && pip install -e "./octoprint-cli[dev]" --no-deps
         run: pip install -e "./octoprint-cli[dev]"
 
       - name: Install linter

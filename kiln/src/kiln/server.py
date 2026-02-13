@@ -839,29 +839,49 @@ def _get_billing_alert_mgr() -> BillingAlertManager:
 def _refund_after_order_failure(
     pay_result: Optional[Any],
     payment_hold_id: str,
-) -> None:
+) -> Optional[str]:
     """Best-effort refund/cancel after a failed order placement.
 
     If a completed charge exists (``pay_result``), attempts to refund it
     via the provider that processed it.  If only a hold exists
     (``payment_hold_id``), cancels the hold instead.  Failures are
-    logged but never raised — the caller already has an error to return.
+    logged at ERROR level and a PAYMENT_FAILED event is emitted so
+    BillingAlertManager can pick it up.
+
+    Returns:
+        A warning string if the refund failed and manual intervention
+        is required, or ``None`` if the refund succeeded.
     """
     if pay_result and getattr(pay_result, "payment_id", None):
+        payment_id = pay_result.payment_id
         try:
             mgr = _get_payment_mgr()
             rail_name = mgr.get_active_rail()
             provider = mgr.get_provider(rail_name)
             if provider:
-                provider.refund_payment(pay_result.payment_id)
+                provider.refund_payment(payment_id)
                 logger.info(
                     "Auto-refunded payment %s after order failure",
-                    pay_result.payment_id,
+                    payment_id,
                 )
-        except Exception as refund_exc:
+        except Exception as exc:
             logger.error(
-                "Failed to refund payment %s after order failure: %s",
-                pay_result.payment_id, refund_exc,
+                "CRITICAL: Failed to auto-refund payment %s after order failure. "
+                "Manual refund required. Error: %s",
+                payment_id, exc,
+            )
+            # Emit event for alert manager.
+            try:
+                _event_bus.publish(EventType.PAYMENT_FAILED, {
+                    "payment_id": payment_id,
+                    "error": f"Auto-refund failed: {exc}",
+                    "requires_manual_refund": True,
+                }, source="fulfillment")
+            except Exception:
+                pass
+            return (
+                f"WARNING: Automatic refund of payment {payment_id} failed. "
+                "Manual refund may be required."
             )
     elif payment_hold_id:
         try:
@@ -870,8 +890,26 @@ def _refund_after_order_failure(
             logger.info(
                 "Cancelled hold %s after order failure", payment_hold_id,
             )
-        except Exception:
-            logger.debug("Could not cancel hold %s", payment_hold_id)
+        except Exception as exc:
+            logger.error(
+                "CRITICAL: Failed to cancel hold %s after order failure. "
+                "Manual cancellation required. Error: %s",
+                payment_hold_id, exc,
+            )
+            # Emit event for alert manager.
+            try:
+                _event_bus.publish(EventType.PAYMENT_FAILED, {
+                    "payment_id": payment_hold_id,
+                    "error": f"Hold cancellation failed: {exc}",
+                    "requires_manual_refund": True,
+                }, source="fulfillment")
+            except Exception:
+                pass
+            return (
+                f"WARNING: Cancellation of payment hold {payment_hold_id} failed. "
+                "Manual cancellation may be required."
+            )
+    return None
 
 
 # Error codes that represent transient failures the caller may retry.
@@ -4868,8 +4906,13 @@ def fulfillment_order(
                             code="MISSING_PRICE",
                         )
                 else:
-                    if fee_calc:
-                        _billing.record_charge(quote_id, fee_calc)
+                    # No payment rails configured — atomically calculate
+                    # and record the fee to prevent free-tier race
+                    # conditions.
+                    if estimated_price > 0:
+                        fee_calc, _charge_id = _billing.calculate_and_record_fee(
+                            quote_id, estimated_price, currency=currency,
+                        )
             except PaymentError as pe:
                 # Payment failed — do NOT place the order.
                 return _error_dict(
@@ -4886,11 +4929,15 @@ def fulfillment_order(
             ))
         except (FulfillmentError, RuntimeError) as exc:
             # Order failed — refund the payment automatically.
-            _refund_after_order_failure(pay_result, payment_hold_id)
-            return _error_dict(
-                f"Order placement failed: {exc}. "
-                "Your payment has been refunded automatically.",
+            refund_warning = _refund_after_order_failure(
+                pay_result, payment_hold_id,
             )
+            msg = f"Order placement failed: {exc}. "
+            if refund_warning:
+                msg += refund_warning
+            else:
+                msg += "Your payment has been refunded automatically."
+            return _error_dict(msg)
 
         # 4. Build response.
         order_data = result.to_dict()

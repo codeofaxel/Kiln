@@ -26,7 +26,13 @@ from kiln.marketplaces.base import (
 from kiln.marketplaces.thingiverse import ThingiverseAdapter, _wrap_error
 from kiln.marketplaces.myminifactory import MyMiniFactoryAdapter
 from kiln.marketplaces.cults3d import Cults3DAdapter
-from kiln.marketplaces import MarketplaceRegistry
+from kiln.marketplaces import (
+    MarketplaceHealth,
+    MarketplaceHealthMonitor,
+    MarketplaceRegistry,
+    MarketplaceSearchResults,
+    MarketplaceStatus,
+)
 
 from kiln.thingiverse import (
     ThingDetail,
@@ -1188,8 +1194,9 @@ class TestMarketplaceRegistrySearchAll:
         registry.register(_make_stub_adapter("beta", "Beta", [s2]))
 
         results = registry.search_all("test")
-        assert len(results) == 2
-        ids = {r.id for r in results}
+        assert isinstance(results, MarketplaceSearchResults)
+        assert len(results.models) == 2
+        ids = {r.id for r in results.models}
         assert ids == {"1", "2"}
 
     def test_search_all_interleaves(self):
@@ -1206,9 +1213,9 @@ class TestMarketplaceRegistrySearchAll:
         registry.register(_make_stub_adapter("beta", "Beta", b_results))
 
         results = registry.search_all("test")
-        assert len(results) == 4
+        assert len(results.models) == 4
         # Results should be interleaved: one from each source alternating
-        sources = [r.source for r in results]
+        sources = [r.source for r in results.models]
         # Verify interleaving: no three consecutive from same source
         for i in range(len(sources) - 2):
             assert not (sources[i] == sources[i + 1] == sources[i + 2])
@@ -1222,8 +1229,9 @@ class TestMarketplaceRegistrySearchAll:
         ))
 
         results = registry.search_all("test")
-        assert len(results) == 1
-        assert results[0].id == "1"
+        assert len(results.models) == 1
+        assert results.models[0].id == "1"
+        assert "bad" in results.failed
 
     def test_search_all_handles_unexpected_exception(self):
         registry = MarketplaceRegistry()
@@ -1234,7 +1242,8 @@ class TestMarketplaceRegistrySearchAll:
         ))
 
         results = registry.search_all("test")
-        assert len(results) == 1
+        assert len(results.models) == 1
+        assert "bad" in results.failed
 
     def test_search_all_with_sources_filter(self):
         registry = MarketplaceRegistry()
@@ -1244,8 +1253,8 @@ class TestMarketplaceRegistrySearchAll:
         registry.register(_make_stub_adapter("beta", "Beta", [s2]))
 
         results = registry.search_all("test", sources=["alpha"])
-        assert len(results) == 1
-        assert results[0].source == "alpha"
+        assert len(results.models) == 1
+        assert results.models[0].source == "alpha"
 
     def test_search_all_with_empty_sources_filter(self):
         registry = MarketplaceRegistry()
@@ -1254,11 +1263,12 @@ class TestMarketplaceRegistrySearchAll:
         ]))
 
         results = registry.search_all("test", sources=["nonexistent"])
-        assert results == []
+        assert results.models == []
 
     def test_search_all_no_adapters(self):
         registry = MarketplaceRegistry()
-        assert registry.search_all("test") == []
+        results = registry.search_all("test")
+        assert results.models == []
 
     def test_search_all_all_adapters_fail(self):
         registry = MarketplaceRegistry()
@@ -1268,7 +1278,9 @@ class TestMarketplaceRegistrySearchAll:
         registry.register(_make_stub_adapter(
             "bad2", "Bad2", error=MarketplaceError("fail2"),
         ))
-        assert registry.search_all("test") == []
+        results = registry.search_all("test")
+        assert results.models == []
+        assert set(results.failed) == {"bad1", "bad2"}
 
     def test_search_all_passes_params(self):
         registry = MarketplaceRegistry()
@@ -1292,7 +1304,200 @@ class TestMarketplaceRegistrySearchAll:
         registry.register(_make_stub_adapter("beta", "Beta", b_results))
 
         results = registry.search_all("test")
-        assert len(results) == 6
+        assert len(results.models) == 6
         # Beta's single result should appear early (interleaved), not at the end
-        beta_indices = [i for i, r in enumerate(results) if r.source == "beta"]
+        beta_indices = [i for i, r in enumerate(results.models) if r.source == "beta"]
         assert beta_indices[0] <= 1  # Should be in the first round
+
+    def test_search_all_records_success(self):
+        """Successful searches update health monitor to HEALTHY."""
+        registry = MarketplaceRegistry()
+        s1 = ModelSummary(id="1", name="A", url="/a", creator="u", source="alpha")
+        registry.register(_make_stub_adapter("alpha", "Alpha", [s1]))
+
+        results = registry.search_all("test")
+        assert results.health["alpha"].health == MarketplaceHealth.HEALTHY
+        assert "alpha" in results.searched
+
+    def test_search_all_records_failure(self):
+        """Failed searches update health monitor toward DEGRADED/DOWN."""
+        registry = MarketplaceRegistry()
+        registry.register(_make_stub_adapter(
+            "bad", "Bad", error=MarketplaceError("oops"),
+        ))
+
+        results = registry.search_all("test")
+        assert results.health["bad"].health == MarketplaceHealth.DEGRADED
+        assert results.health["bad"].consecutive_failures == 1
+
+    def test_search_all_skips_down_marketplace(self):
+        """Marketplaces that are DOWN are skipped (circuit breaker)."""
+        registry = MarketplaceRegistry()
+        s1 = ModelSummary(id="1", name="A", url="/a", creator="u", source="good")
+        registry.register(_make_stub_adapter("good", "Good", [s1]))
+        bad_adapter = _make_stub_adapter(
+            "bad", "Bad", error=MarketplaceError("fail"),
+        )
+        registry.register(bad_adapter)
+
+        # Fail 3 times to trigger DOWN
+        for _ in range(3):
+            registry.search_all("test")
+
+        # Now "bad" should be skipped entirely
+        bad_adapter.search.reset_mock()
+        results = registry.search_all("test")
+        bad_adapter.search.assert_not_called()
+        assert "bad" in results.skipped
+        assert len(results.models) == 1
+        assert results.models[0].source == "good"
+
+    def test_search_all_down_marketplace_recovers_on_success(self):
+        """A DOWN marketplace recovers when manually recorded as healthy."""
+        registry = MarketplaceRegistry()
+        bad_adapter = _make_stub_adapter(
+            "flaky", "Flaky", error=MarketplaceError("fail"),
+        )
+        registry.register(bad_adapter)
+
+        # Drive to DOWN
+        for _ in range(3):
+            registry.search_all("test")
+
+        status = registry.health_monitor.get_status("flaky")
+        assert status.health == MarketplaceHealth.DOWN
+
+        # Simulate recovery
+        registry.health_monitor.record_success("flaky")
+        status = registry.health_monitor.get_status("flaky")
+        assert status.health == MarketplaceHealth.HEALTHY
+
+    def test_search_all_summary_includes_health(self):
+        """The summary string mentions marketplace health states."""
+        registry = MarketplaceRegistry()
+        s1 = ModelSummary(id="1", name="A", url="/a", creator="u", source="alpha")
+        registry.register(_make_stub_adapter("alpha", "Alpha", [s1]))
+
+        results = registry.search_all("test")
+        assert "alpha" in results.summary
+        assert "healthy" in results.summary.lower() or "Results from" in results.summary
+
+
+class TestMarketplaceHealthMonitor:
+    """MarketplaceHealthMonitor consecutive failure counting and circuit breaker."""
+
+    def test_initial_state_is_unknown(self):
+        monitor = MarketplaceHealthMonitor()
+        status = monitor.get_status("new")
+        assert status.health == MarketplaceHealth.UNKNOWN
+        assert status.consecutive_failures == 0
+
+    def test_record_success_sets_healthy(self):
+        monitor = MarketplaceHealthMonitor()
+        monitor.record_success("test", response_time_ms=42.0)
+        status = monitor.get_status("test")
+        assert status.health == MarketplaceHealth.HEALTHY
+        assert status.response_time_ms == 42.0
+        assert status.consecutive_failures == 0
+
+    def test_single_failure_sets_degraded(self):
+        monitor = MarketplaceHealthMonitor()
+        monitor.record_failure("test", error="timeout")
+        status = monitor.get_status("test")
+        assert status.health == MarketplaceHealth.DEGRADED
+        assert status.consecutive_failures == 1
+        assert status.error == "timeout"
+
+    def test_two_failures_still_degraded(self):
+        monitor = MarketplaceHealthMonitor()
+        monitor.record_failure("test", error="err1")
+        monitor.record_failure("test", error="err2")
+        status = monitor.get_status("test")
+        assert status.health == MarketplaceHealth.DEGRADED
+        assert status.consecutive_failures == 2
+
+    def test_three_failures_sets_down(self):
+        monitor = MarketplaceHealthMonitor()
+        for i in range(3):
+            monitor.record_failure("test", error=f"err{i}")
+        status = monitor.get_status("test")
+        assert status.health == MarketplaceHealth.DOWN
+        assert status.consecutive_failures == 3
+
+    def test_success_resets_failures(self):
+        monitor = MarketplaceHealthMonitor()
+        monitor.record_failure("test", error="err1")
+        monitor.record_failure("test", error="err2")
+        monitor.record_success("test")
+        status = monitor.get_status("test")
+        assert status.health == MarketplaceHealth.HEALTHY
+        assert status.consecutive_failures == 0
+
+    def test_is_available_for_healthy(self):
+        monitor = MarketplaceHealthMonitor()
+        monitor.record_success("test")
+        assert monitor.is_available("test") is True
+
+    def test_is_available_for_unknown(self):
+        monitor = MarketplaceHealthMonitor()
+        assert monitor.is_available("new") is True
+
+    def test_is_available_for_degraded(self):
+        monitor = MarketplaceHealthMonitor()
+        monitor.record_failure("test")
+        assert monitor.is_available("test") is True
+
+    def test_is_available_false_for_down(self):
+        monitor = MarketplaceHealthMonitor()
+        for _ in range(3):
+            monitor.record_failure("test")
+        assert monitor.is_available("test") is False
+
+    def test_get_all_statuses(self):
+        monitor = MarketplaceHealthMonitor()
+        monitor.record_success("a")
+        monitor.record_failure("b")
+        statuses = monitor.get_all_statuses()
+        assert len(statuses) == 2
+        names = {s.marketplace for s in statuses}
+        assert names == {"a", "b"}
+
+    def test_status_to_dict(self):
+        status = MarketplaceStatus(
+            marketplace="test",
+            health=MarketplaceHealth.DEGRADED,
+            consecutive_failures=2,
+            error="timeout",
+        )
+        d = status.to_dict()
+        assert d["marketplace"] == "test"
+        assert d["health"] == "degraded"
+        assert d["consecutive_failures"] == 2
+        assert d["error"] == "timeout"
+
+
+class TestMarketplaceRegistryHealth:
+    """MarketplaceRegistry.marketplace_health() method."""
+
+    def test_health_returns_all_connected(self):
+        registry = MarketplaceRegistry()
+        registry.register(_make_stub_adapter("a", "A"))
+        registry.register(_make_stub_adapter("b", "B"))
+        statuses = registry.marketplace_health()
+        assert len(statuses) == 2
+        names = {s.marketplace for s in statuses}
+        assert names == {"a", "b"}
+
+    def test_health_unknown_before_any_search(self):
+        registry = MarketplaceRegistry()
+        registry.register(_make_stub_adapter("a", "A"))
+        statuses = registry.marketplace_health()
+        assert statuses[0].health == MarketplaceHealth.UNKNOWN
+
+    def test_health_updates_after_search(self):
+        registry = MarketplaceRegistry()
+        s1 = ModelSummary(id="1", name="A", url="/a", creator="u", source="a")
+        registry.register(_make_stub_adapter("a", "A", [s1]))
+        registry.search_all("test")
+        statuses = registry.marketplace_health()
+        assert statuses[0].health == MarketplaceHealth.HEALTHY

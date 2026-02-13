@@ -134,3 +134,4 @@ timeline and issue an emergency patch.
 - **Security reports**: security@kiln3d.com
 - **General bugs**: [GitHub Issues](https://github.com/codeofaxel/Kiln/issues)
 - **Project documentation**: [docs/PROJECT_DOCS.md](docs/PROJECT_DOCS.md)
+- **Automated scanners**: [`.well-known/security.txt`](.well-known/security.txt) (RFC 9116)
