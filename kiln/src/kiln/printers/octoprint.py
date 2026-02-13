@@ -523,6 +523,99 @@ class OctoPrintAdapter(PrinterAdapter):
         )
         return PrintResult(success=True, message="Print resumed.")
 
+    def firmware_resume_print(
+        self,
+        *,
+        z_height_mm: float,
+        hotend_temp_c: float,
+        bed_temp_c: float,
+        file_name: str,
+        layer_number: Optional[int] = None,
+        fan_speed_pct: float = 100.0,
+        flow_rate_pct: float = 100.0,
+        prime_length_mm: float = 30.0,
+        z_clearance_mm: float = 2.0,
+    ) -> PrintResult:
+        """Send Marlin M413 power-loss recovery positioning G-code.
+
+        Generates and sends a G-code sequence that disables Marlin's built-in
+        power-loss recovery, homes X/Y (never Z -- the nozzle would crash into
+        the part), heats the bed and hotend, sets Z position without moving,
+        raises the nozzle by *z_clearance_mm*, primes the nozzle, and
+        configures fan speed and flow rate.
+
+        After this method returns, the printer is positioned and ready.  The
+        caller is responsible for starting the actual print file (e.g. a
+        re-sliced file starting at the target layer) via :meth:`start_print`.
+
+        :param z_height_mm: Z height to resume from, in millimetres (> 0).
+        :param hotend_temp_c: Hotend target temperature in Celsius (> 0, <= 300).
+        :param bed_temp_c: Bed target temperature in Celsius (>= 0, <= 130).
+        :param file_name: Original file name (included in the result message
+            for traceability; not sent to the printer).
+        :param layer_number: Optional layer number for the result message.
+        :param fan_speed_pct: Part-cooling fan speed as 0--100 % (default 100).
+        :param flow_rate_pct: Flow rate multiplier as a percentage (default 100).
+        :param prime_length_mm: Extrusion length to prime the nozzle (>= 0).
+        :param z_clearance_mm: Distance to raise nozzle above the part (> 0, <= 10).
+
+        :returns: :class:`PrintResult` indicating success.
+
+        :raises PrinterError: If any parameter is out of range or if G-code
+            delivery fails.
+        """
+        # -- parameter validation ------------------------------------------
+        if z_height_mm <= 0:
+            raise PrinterError(
+                f"z_height_mm must be > 0, got {z_height_mm}."
+            )
+        if hotend_temp_c <= 0:
+            raise PrinterError(
+                f"Hotend temperature must be > 0°C, got {hotend_temp_c}°C."
+            )
+        self._validate_temp(hotend_temp_c, 300.0, "Hotend")
+        self._validate_temp(bed_temp_c, 130.0, "Bed")
+        if prime_length_mm < 0:
+            raise PrinterError(
+                f"prime_length_mm must be >= 0, got {prime_length_mm}."
+            )
+        if z_clearance_mm <= 0 or z_clearance_mm > 10:
+            raise PrinterError(
+                f"z_clearance_mm must be > 0 and <= 10, got {z_clearance_mm}."
+            )
+
+        # -- build G-code sequence -----------------------------------------
+        fan_pwm = int(fan_speed_pct * 2.55)
+        commands = [
+            "M413 S0",                          # Disable Marlin power-loss recovery
+            "G28 X Y",                           # Home X/Y only (NEVER Z)
+            f"M140 S{bed_temp_c}",               # Start heating bed (non-blocking)
+            f"M104 S{hotend_temp_c}",            # Start heating hotend (non-blocking)
+            f"M190 S{bed_temp_c}",               # Wait for bed temp
+            f"M109 S{hotend_temp_c}",            # Wait for hotend temp
+            "G92 E0",                            # Reset extruder position
+            f"G92 Z{z_height_mm}",               # Set Z position without moving
+            "G91",                               # Relative positioning
+            f"G1 Z{z_clearance_mm} F300",        # Raise nozzle above part
+            "G90",                               # Absolute positioning
+            f"G1 E{prime_length_mm} F200",       # Prime nozzle
+            "G92 E0",                            # Reset extruder again
+            f"M106 S{fan_pwm}",                  # Set fan speed (0-255)
+            f"M221 S{int(flow_rate_pct)}",       # Set flow rate multiplier
+        ]
+
+        self.send_gcode(commands)
+
+        layer_info = f" at layer {layer_number}" if layer_number is not None else ""
+        return PrintResult(
+            success=True,
+            message=(
+                f"Firmware resume positioning complete for {file_name}{layer_info}. "
+                f"Z={z_height_mm}mm, hotend={hotend_temp_c}°C, bed={bed_temp_c}°C. "
+                f"Printer is positioned and ready — start the resume file via start_print."
+            ),
+        )
+
     # ------------------------------------------------------------------
     # PrinterAdapter -- temperature control
     # ------------------------------------------------------------------

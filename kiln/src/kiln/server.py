@@ -10133,6 +10133,90 @@ def plan_print_recovery(
 
 
 @mcp.tool()
+def firmware_resume_print(
+    printer_name: str,
+    job_id: str,
+    *,
+    z_height_mm: float,
+    hotend_temp_c: float,
+    bed_temp_c: float,
+    file_name: str,
+    layer_number: Optional[int] = None,
+    fan_speed_pct: float = 100.0,
+    flow_rate_pct: float = 100.0,
+    prime_length_mm: float = 30.0,
+    z_clearance_mm: float = 2.0,
+) -> dict:
+    """Execute firmware-level print resume for OctoPrint+Marlin printers.
+
+    After a power loss or failure, this tool positions the printer at the
+    last known checkpoint and prepares it to resume printing. Uses Marlin
+    M413 power-loss recovery protocol: homes X/Y (never Z), re-heats bed
+    then hotend, sets Z position from checkpoint, primes the nozzle, and
+    restores fan/flow settings.
+
+    The printer will be positioned and ready after this call. Use
+    start_print with a re-sliced file (starting at the target layer) or
+    let the printer resume from its own recovery buffer.
+
+    Only works with OctoPrint printers running Marlin firmware. Moonraker/Klipper
+    printers should use Klipper's SAVE_VARIABLE system instead (not yet supported).
+
+    Args:
+        printer_name: Name of the printer to resume on.
+        job_id: The failed job's identifier (for checkpoint lookup).
+        z_height_mm: Z height to resume from (from checkpoint).
+        hotend_temp_c: Hotend temperature to restore.
+        bed_temp_c: Bed temperature to restore.
+        file_name: Original file name (for logging/tracking).
+        layer_number: Layer number to resume from (informational).
+        fan_speed_pct: Fan speed to restore (0-100).
+        flow_rate_pct: Flow rate multiplier to restore (default 100).
+        prime_length_mm: Filament to extrude for nozzle priming (mm).
+        z_clearance_mm: How far above the part to raise the nozzle (mm).
+    """
+    try:
+        adapter = _get_adapter(printer_name)
+
+        # Verify this is an OctoPrint adapter (firmware resume is Marlin-specific)
+        if adapter.name != "octoprint":
+            return _error_dict(
+                f"Firmware resume is only supported on OctoPrint+Marlin printers, "
+                f"not {adapter.name}. For Klipper printers, use SAVE_VARIABLE.",
+                code="UNSUPPORTED_ADAPTER",
+            )
+
+        result = adapter.firmware_resume_print(
+            z_height_mm=z_height_mm,
+            hotend_temp_c=hotend_temp_c,
+            bed_temp_c=bed_temp_c,
+            file_name=file_name,
+            layer_number=layer_number,
+            fan_speed_pct=fan_speed_pct,
+            flow_rate_pct=flow_rate_pct,
+            prime_length_mm=prime_length_mm,
+            z_clearance_mm=z_clearance_mm,
+        )
+
+        # Log the recovery event
+        from kiln.recovery import get_recovery_manager, RecoveryStrategy
+        mgr = get_recovery_manager()
+        mgr.execute_recovery(job_id, RecoveryStrategy.RESUME_FROM_CHECKPOINT)
+
+        return {
+            "success": True,
+            "message": result.message,
+            "printer": printer_name,
+            "resumed_at_z": z_height_mm,
+            "resumed_at_layer": layer_number,
+            "file": file_name,
+        }
+    except Exception as exc:
+        logger.exception("Error in firmware_resume_print")
+        return _error_dict(str(exc), code="FIRMWARE_RESUME_ERROR")
+
+
+@mcp.tool()
 def check_printer_health(printer_name: str) -> dict:
     """Run a comprehensive health check on a printer.
 
