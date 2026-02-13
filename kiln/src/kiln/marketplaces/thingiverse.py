@@ -2,10 +2,17 @@
 
 Wraps :class:`kiln.thingiverse.ThingiverseClient` to implement the
 :class:`~kiln.marketplaces.base.MarketplaceAdapter` interface.
+
+.. deprecated::
+    MyMiniFactory acquired Thingiverse in February 2026.  The Thingiverse
+    API may be deprecated or merged into MyMiniFactory's API in the future.
+    Consider using the MyMiniFactory adapter as the primary marketplace
+    for this content.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import List, Optional
 
 from kiln.marketplaces.base import (
@@ -26,6 +33,17 @@ from kiln.thingiverse import (
     ThingiverseRateLimitError,
 )
 
+_logger = logging.getLogger(__name__)
+
+_DEPRECATION_WARNING = (
+    "MyMiniFactory acquired Thingiverse in February 2026.  The Thingiverse "
+    "API may be deprecated or merged into MyMiniFactory's API in the future.  "
+    "Consider using the MyMiniFactory adapter (KILN_MMF_API_KEY) as the "
+    "primary marketplace for this content."
+)
+
+_deprecation_warned = False
+
 
 def _wrap_error(exc: ThingiverseError) -> MarketplaceError:
     """Convert a Thingiverse-specific exception to a generic one."""
@@ -39,9 +57,19 @@ def _wrap_error(exc: ThingiverseError) -> MarketplaceError:
 
 
 class ThingiverseAdapter(MarketplaceAdapter):
-    """Marketplace adapter backed by the Thingiverse REST API."""
+    """Marketplace adapter backed by the Thingiverse REST API.
+
+    .. deprecated::
+        MyMiniFactory acquired Thingiverse in February 2026.  The
+        Thingiverse API may be deprecated or merged into MyMiniFactory's
+        API.  Prefer the MyMiniFactory adapter for new integrations.
+    """
 
     def __init__(self, client: ThingiverseClient) -> None:
+        global _deprecation_warned  # noqa: PLW0603
+        if not _deprecation_warned:
+            _logger.warning(_DEPRECATION_WARNING)
+            _deprecation_warned = True
         self._client = client
 
     @property

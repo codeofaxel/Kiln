@@ -56,7 +56,7 @@ Comprehensive reference for deploying Kiln as a hosted REST API service or local
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `KILN_THINGIVERSE_TOKEN` | No | `""` | Thingiverse API app token for model search/download |
+| `KILN_THINGIVERSE_TOKEN` | No | `""` | Thingiverse API app token for model search/download. *Deprecated — Thingiverse was acquired by MyMiniFactory (Feb 2026). Prefer `KILN_MMF_API_KEY`.* |
 | `KILN_MMF_API_KEY` | No | `""` | MyMiniFactory API key |
 | `KILN_CULTS3D_USERNAME` | No | `""` | Cults3D account username |
 | `KILN_CULTS3D_API_KEY` | No | `""` | Cults3D API key |

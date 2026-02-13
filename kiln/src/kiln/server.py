@@ -105,6 +105,7 @@ from kiln.heater_watchdog import HeaterWatchdog
 from kiln.backup import backup_database as _backup_db, BackupError
 from kiln.log_config import configure_logging as _configure_log_rotation
 from kiln.plugins import PluginManager, PluginContext
+from kiln.plugin_loader import register_all_plugins
 from kiln.fulfillment import (
     FulfillmentError,
     FulfillmentProvider,
@@ -233,6 +234,11 @@ _CONFIRM_MODE: bool = (
     os.environ.get("KILN_CONFIRM_MODE", "").lower() in ("1", "true", "yes")
 )
 _THINGIVERSE_TOKEN: str = os.environ.get("KILN_THINGIVERSE_TOKEN", "")
+_THINGIVERSE_DEPRECATION_NOTICE: str = (
+    "Thingiverse was acquired by MyMiniFactory in February 2026. "
+    "The API may be sunset. Consider using MyMiniFactory "
+    "(source: myminifactory) as the primary marketplace."
+)
 _MMF_API_KEY: str = os.environ.get("KILN_MMF_API_KEY", "")
 _CULTS3D_USERNAME: str = os.environ.get("KILN_CULTS3D_USERNAME", "")
 _CULTS3D_API_KEY: str = os.environ.get("KILN_CULTS3D_API_KEY", "")
@@ -920,6 +926,19 @@ _RETRYABLE_CODES = frozenset({
     "RATE_LIMIT",
 })
 
+# Per-check remediation hints shown when mandatory preflight blocks start_print.
+_PREFLIGHT_HINTS: Dict[str, str] = {
+    "printer_connected": "Check that the printer is powered on, connected to the network, and reachable at the configured host.",
+    "printer_idle": "Wait for the current job to finish or cancel it with cancel_print() before starting a new print.",
+    "no_errors": "Clear the error on the printer (power-cycle or acknowledge via the printer's UI) and retry.",
+    "temperatures_safe": "Wait for temperatures to cool to safe levels or adjust the target temps before printing.",
+    "filament_loaded": "Load filament into the printer and verify the runout sensor detects it.",
+    "material_match": "Swap the loaded filament to match the expected material, or omit the expected_material parameter.",
+    "material_compatible": "Use a validated material for this printer model, or set KILN_STRICT_MATERIAL_CHECK=false.",
+    "file_valid": "Check the G-code file for corruption or invalid commands. Re-slice if necessary.",
+    "file_on_printer": "Upload the file to the printer first using upload_file(), then retry start_print().",
+}
+
 
 # ---------------------------------------------------------------------------
 # Safety helpers
@@ -1469,18 +1488,54 @@ def start_print(file_name: str) -> dict:
     try:
         adapter = _get_adapter()
 
-        # -- Automatic pre-flight safety gate (mandatory, cannot be skipped) --
-        pf = preflight_check()
-        if not pf.get("ready", False):
-            _audit("start_print", "preflight_failed", details={
-                "file": file_name, "summary": pf.get("summary", ""),
-            })
-            result = _error_dict(
-                pf.get("summary", "Pre-flight checks failed"),
-                code="PREFLIGHT_FAILED",
+        # -- Automatic pre-flight safety gate ----------------------------------
+        # Mandatory by default.  Set KILN_SKIP_PREFLIGHT=1 to bypass (advanced
+        # users only — e.g. custom firmware that reports non-standard states).
+        skip_preflight = os.environ.get("KILN_SKIP_PREFLIGHT", "").strip() in (
+            "1", "true", "yes",
+        )
+        if skip_preflight:
+            logger.warning(
+                "KILN_SKIP_PREFLIGHT is set — skipping mandatory pre-flight "
+                "safety checks for start_print(%s). This is unsafe and should "
+                "only be used with custom firmware or during development.",
+                file_name,
             )
-            result["preflight"] = pf
-            return result
+            _audit("start_print", "preflight_skipped", details={"file": file_name})
+        else:
+            pf = preflight_check(remote_file=file_name)
+            if not pf.get("ready", False):
+                # Build a detailed remediation message from individual checks
+                failed = [
+                    c for c in pf.get("checks", [])
+                    if not c.get("passed", False)
+                ]
+                remediation_lines = []
+                for chk in failed:
+                    name = chk.get("name", "unknown")
+                    msg = chk.get("message", "check failed")
+                    hint = _PREFLIGHT_HINTS.get(name, "Investigate and resolve before retrying.")
+                    remediation_lines.append(f"  - {name}: {msg}. Fix: {hint}")
+
+                detail_text = "\n".join(remediation_lines) if remediation_lines else ""
+                summary = pf.get("summary", "Pre-flight checks failed")
+                full_message = (
+                    f"{summary}\n\nFailed checks:\n{detail_text}\n\n"
+                    "Resolve the issues above and retry. To bypass pre-flight "
+                    "checks (advanced users only), set KILN_SKIP_PREFLIGHT=1."
+                ) if detail_text else (
+                    f"{summary}\n\nTo bypass pre-flight checks (advanced users "
+                    "only), set KILN_SKIP_PREFLIGHT=1."
+                )
+
+                _audit("start_print", "preflight_failed", details={
+                    "file": file_name,
+                    "summary": summary,
+                    "failed_checks": [c.get("name") for c in failed],
+                })
+                result = _error_dict(full_message, code="PREFLIGHT_FAILED")
+                result["preflight"] = pf
+                return result
 
         result = adapter.start_print(file_name)
         _heater_watchdog.notify_print_started()
@@ -3442,7 +3497,7 @@ def search_all_models(
             sort=sort,
             sources=sources,
         )
-        return {
+        resp = {
             "success": True,
             "query": query,
             "models": [r.to_dict() for r in results.models],
@@ -3454,6 +3509,13 @@ def search_all_models(
             "failed": results.failed,
             "health_summary": results.summary,
         }
+        # Surface deprecation notice when Thingiverse results are included.
+        _tv_sources = results.searched or _marketplace_registry.connected
+        if "thingiverse" in _tv_sources:
+            resp["deprecation_notices"] = {
+                "thingiverse": _THINGIVERSE_DEPRECATION_NOTICE,
+            }
+        return resp
     except MarketplaceError as exc:
         return _error_dict(str(exc))
     except Exception as exc:
@@ -3791,6 +3853,7 @@ def search_models(
             "models": [r.to_dict() for r in results],
             "count": len(results),
             "page": page,
+            "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
         }
     except (ThingiverseError, RuntimeError) as exc:
         return _error_dict(str(exc))
@@ -3815,6 +3878,7 @@ def model_details(thing_id: int) -> dict:
         return {
             "success": True,
             "model": thing.to_dict(),
+            "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
         }
     except ThingiverseNotFoundError:
         return _error_dict(f"Model {thing_id} not found.", code="NOT_FOUND")
@@ -3843,6 +3907,7 @@ def model_files(thing_id: int) -> dict:
             "thing_id": thing_id,
             "files": [f.to_dict() for f in files],
             "count": len(files),
+            "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
         }
     except ThingiverseNotFoundError:
         return _error_dict(f"Model {thing_id} not found.", code="NOT_FOUND")
@@ -3929,7 +3994,7 @@ def download_model(
                         "error": str(exc),
                     })
 
-            return {
+            dl_resp = {
                 "success": len(downloaded) > 0,
                 "model_id": model_id,
                 "source": source,
@@ -3949,6 +4014,9 @@ def download_model(
                     f"from {source} to {dest_dir}"
                 ),
             }
+            if source == "thingiverse":
+                dl_resp["deprecation_notice"] = _THINGIVERSE_DEPRECATION_NOTICE
+            return dl_resp
 
         # Single-file download (legacy Thingiverse path)
         if file_id is None:
@@ -3969,6 +4037,7 @@ def download_model(
                 "with validate_generated_mesh before printing. Prefer "
                 "proven models with high download counts."
             ),
+            "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
             "message": f"Downloaded to {path}",
         }
     except (ThingiverseNotFoundError, MktNotFoundError):
@@ -9979,7 +10048,7 @@ def main() -> None:
     # Subscribe bed level manager to job events
     _bed_level_mgr.subscribe_events()
 
-    # Discover and activate plugins
+    # Discover and activate third-party plugins (entry-point based)
     _plugin_mgr.discover()
     _plugin_mgr.activate_all(PluginContext(
         event_bus=_event_bus,
@@ -9988,6 +10057,12 @@ def main() -> None:
         mcp=mcp,
         db=get_db(),
     ))
+
+    # Load internal tool plugins from kiln/plugins/.
+    # Tools are being migrated to kiln/plugins/ for modularity — each
+    # plugin module registers its own tools via the ToolPlugin protocol.
+    # See kiln/plugins/marketplace_tools.py for the migration pattern.
+    register_all_plugins(mcp, plugin_package="kiln.plugins")
 
     # Initialise cloud sync from saved config
     global _cloud_sync

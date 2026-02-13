@@ -607,14 +607,14 @@ Kiln includes adapters for discovering and downloading 3D models from popular ma
 
 | Marketplace | Status | Features |
 |---|---|---|
-| **Thingiverse** | Stable | Search, browse, download, categories |
+| **Thingiverse** | Deprecated | Search, browse, download, categories. *Acquired by MyMiniFactory (Feb 2026); prefer MyMiniFactory adapter for new integrations.* |
 | **MyMiniFactory** | Stable | Search, details, download |
 | **Cults3D** | Stable | Search, details (metadata-only, no direct download) |
 
 Configure credentials for the marketplaces you use:
 
 ```bash
-export KILN_THINGIVERSE_TOKEN=your_token       # Thingiverse
+export KILN_THINGIVERSE_TOKEN=your_token       # Thingiverse (deprecated — acquired by MyMiniFactory, Feb 2026)
 export KILN_MMF_API_KEY=your_key               # MyMiniFactory
 export KILN_CULTS3D_USERNAME=your_username      # Cults3D
 export KILN_CULTS3D_API_KEY=your_key            # Cults3D

@@ -601,7 +601,7 @@ Kiln provides a `MarketplaceAdapter` interface (mirroring the printer adapter pa
 
 | Marketplace | Protocol | Auth | Download Support |
 |---|---|---|---|
-| Thingiverse | HTTP REST | Bearer token | Yes |
+| Thingiverse | HTTP REST | Bearer token | Yes | *Deprecated — acquired by MyMiniFactory (Feb 2026). API may be sunset or merged. Prefer MyMiniFactory adapter for new integrations.* |
 | MyMiniFactory | HTTP REST v2 | API key (`?key=`) | Yes |
 | Cults3D | GraphQL | HTTP Basic | No (metadata-only) |
 
@@ -610,7 +610,7 @@ Kiln provides a `MarketplaceAdapter` interface (mirroring the printer adapter pa
 Set environment variables for each marketplace you want to enable:
 
 ```bash
-export KILN_THINGIVERSE_TOKEN=your_token       # https://www.thingiverse.com/apps/create
+export KILN_THINGIVERSE_TOKEN=your_token       # Deprecated — Thingiverse acquired by MyMiniFactory (Feb 2026)
 export KILN_MMF_API_KEY=your_key               # MyMiniFactory developer key
 export KILN_CULTS3D_USERNAME=your_username      # Cults3D account username
 export KILN_CULTS3D_API_KEY=your_key            # https://cults3d.com/en/api/keys
@@ -732,7 +732,7 @@ settings:
 | `KILN_PRINTER_API_KEY` | API key for OctoPrint |
 | `KILN_PRINTER_TYPE` | Backend type |
 | `KILN_SLICER_PATH` | Explicit path to slicer binary |
-| `KILN_THINGIVERSE_TOKEN` | Thingiverse API token |
+| `KILN_THINGIVERSE_TOKEN` | Thingiverse API token *(deprecated — acquired by MyMiniFactory, Feb 2026)* |
 | `KILN_MMF_API_KEY` | MyMiniFactory API key |
 | `KILN_CULTS3D_USERNAME` | Cults3D account username |
 | `KILN_CULTS3D_API_KEY` | Cults3D API key |

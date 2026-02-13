@@ -11,26 +11,17 @@ The adapter mirrors the retry and error-handling patterns established by
 
 from __future__ import annotations
 
-import json
+import json as _json
 import logging
 import os
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import quote
 
 import requests
 from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
-
-# Optional: websocket-client for push-based state monitoring.
-try:
-    import websocket as _ws_module
-
-    _WS_AVAILABLE = True
-except ImportError:  # pragma: no cover
-    _ws_module = None  # type: ignore[assignment]
-    _WS_AVAILABLE = False
 
 from kiln.printers.base import (
     FirmwareComponent,
@@ -47,17 +38,20 @@ from kiln.printers.base import (
     UploadResult,
 )
 
+# websocket-client is an optional dependency; the adapter works without it
+# but push monitoring requires it.
+try:
+    import websocket as _ws_mod  # websocket-client
+
+    _WS_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _ws_mod = None  # type: ignore[assignment]
+    _WS_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # HTTP status codes eligible for automatic retry.
 _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({502, 503, 504})
-
-# Maximum age (in seconds) for push-cached state before falling back to REST.
-_PUSH_CACHE_MAX_AGE: float = 5.0
-
-# WebSocket reconnection backoff limits (seconds).
-_WS_BACKOFF_INITIAL: float = 1.0
-_WS_BACKOFF_MAX: float = 30.0
 
 # Mapping from Moonraker's ``klippy_state`` / ``state`` strings to the
 # canonical :class:`PrinterStatus` enum.  Moonraker reports the Klipper
@@ -120,6 +114,212 @@ def _map_moonraker_state(state_string: str, print_state: Optional[str] = None) -
 
 
 # ---------------------------------------------------------------------------
+# WebSocket push monitor
+# ---------------------------------------------------------------------------
+
+_PUSH_MONITORING_ENABLED: bool = os.environ.get("KILN_PUSH_MONITORING", "0") == "1"
+
+# Maximum reconnect backoff in seconds.
+_MAX_RECONNECT_BACKOFF: float = 30.0
+
+
+class MoonrakerWebSocketMonitor:
+    """Push-based status monitor for Moonraker via its native WebSocket API.
+
+    Subscribes to ``print_stats``, ``heater_bed``, ``extruder``, and
+    ``display_status`` objects.  Incoming status updates are written to a
+    shared cache dict that :meth:`MoonrakerAdapter.get_state` can consult
+    to avoid an HTTP round-trip.
+
+    The monitor runs in a daemon thread and reconnects automatically with
+    exponential backoff (1 s -> 2 s -> 4 s -> ... -> 30 s max).
+
+    Args:
+        host: Moonraker base URL (``http://...`` or ``https://...``).
+        on_state_update: Optional callback fired on every status message.
+            Receives the full ``status`` dict from the Moonraker notification.
+    """
+
+    _SUBSCRIBE_OBJECTS: Dict[str, Optional[list[str]]] = {
+        "print_stats": None,
+        "heater_bed": None,
+        "extruder": None,
+        "display_status": None,
+    }
+
+    def __init__(
+        self,
+        host: str,
+        *,
+        on_state_update: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> None:
+        self._host: str = host.rstrip("/")
+        self._on_state_update = on_state_update
+
+        # Shared state cache -- written by the WS thread, read by the adapter.
+        self._cache: Dict[str, Any] = {}
+        self._cache_lock: threading.Lock = threading.Lock()
+        self._connected: bool = False
+
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event: threading.Event = threading.Event()
+        self._ws: Optional[Any] = None  # websocket.WebSocketApp instance
+        self._rpc_id: int = 0
+
+    # -- public API --------------------------------------------------------
+
+    @property
+    def connected(self) -> bool:
+        """Whether the WebSocket connection is currently alive."""
+        return self._connected
+
+    def get_cached_state(self) -> Optional[Dict[str, Any]]:
+        """Return the latest cached status dict, or ``None`` if empty."""
+        with self._cache_lock:
+            return dict(self._cache) if self._cache else None
+
+    def start(self) -> None:
+        """Start the background listener thread.
+
+        No-op if the thread is already running or if ``websocket-client``
+        is not installed.
+        """
+        if not _WS_AVAILABLE:
+            logger.warning(
+                "websocket-client not installed -- push monitoring unavailable. "
+                "Install with: pip install websocket-client"
+            )
+            return
+
+        if self._thread is not None and self._thread.is_alive():
+            return
+
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._run_loop,
+            name="moonraker-ws-monitor",
+            daemon=True,
+        )
+        self._thread.start()
+        logger.info("Moonraker WebSocket monitor started for %s", self._host)
+
+    def stop(self) -> None:
+        """Signal the background thread to shut down and wait for it."""
+        self._stop_event.set()
+        if self._ws is not None:
+            try:
+                self._ws.close()
+            except Exception:
+                pass
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
+            self._thread = None
+        self._connected = False
+        logger.info("Moonraker WebSocket monitor stopped")
+
+    # -- internal ----------------------------------------------------------
+
+    def _next_rpc_id(self) -> int:
+        self._rpc_id += 1
+        return self._rpc_id
+
+    def _ws_url(self) -> str:
+        """Convert the HTTP base URL to a WebSocket URL."""
+        url = self._host
+        if url.startswith("https://"):
+            url = "wss://" + url[len("https://"):]
+        elif url.startswith("http://"):
+            url = "ws://" + url[len("http://"):]
+        return f"{url}/websocket"
+
+    def _run_loop(self) -> None:
+        """Reconnecting event loop -- runs in the daemon thread."""
+        backoff: float = 1.0
+
+        while not self._stop_event.is_set():
+            try:
+                self._connect_and_listen()
+            except Exception:
+                logger.debug("Moonraker WS error", exc_info=True)
+
+            self._connected = False
+
+            if self._stop_event.is_set():
+                break
+
+            logger.debug(
+                "Moonraker WS reconnecting in %.1fs", backoff,
+            )
+            self._stop_event.wait(timeout=backoff)
+            backoff = min(backoff * 2, _MAX_RECONNECT_BACKOFF)
+
+    def _connect_and_listen(self) -> None:
+        """Open the WebSocket, subscribe, and block until it closes."""
+        ws_url = self._ws_url()
+        logger.debug("Connecting to Moonraker WS at %s", ws_url)
+
+        ws = _ws_mod.WebSocketApp(  # type: ignore[union-attr]
+            ws_url,
+            on_open=self._on_open,
+            on_message=self._on_message,
+            on_error=self._on_error,
+            on_close=self._on_close,
+        )
+        self._ws = ws
+        ws.run_forever(ping_interval=20, ping_timeout=10)
+
+    def _on_open(self, ws: Any) -> None:
+        self._connected = True
+        logger.info("Moonraker WS connected")
+
+        # Subscribe to printer objects for push updates.
+        subscribe_msg = _json.dumps({
+            "jsonrpc": "2.0",
+            "method": "printer.objects.subscribe",
+            "params": {"objects": self._SUBSCRIBE_OBJECTS},
+            "id": self._next_rpc_id(),
+        })
+        ws.send(subscribe_msg)
+
+    def _on_message(self, ws: Any, message: str) -> None:
+        try:
+            data = _json.loads(message)
+        except (ValueError, TypeError):
+            return
+
+        # Moonraker sends subscription updates as JSON-RPC notifications
+        # with method "notify_status_update".
+        method = data.get("method")
+        if method == "notify_status_update":
+            params = data.get("params", [])
+            if params and isinstance(params, list) and isinstance(params[0], dict):
+                status = params[0]
+                with self._cache_lock:
+                    self._cache.update(status)
+                if self._on_state_update:
+                    try:
+                        self._on_state_update(status)
+                    except Exception:
+                        logger.debug("on_state_update callback error", exc_info=True)
+            return
+
+        # The initial subscribe response also contains current state.
+        result = data.get("result")
+        if isinstance(result, dict) and "status" in result:
+            status = result["status"]
+            if isinstance(status, dict):
+                with self._cache_lock:
+                    self._cache.update(status)
+
+    def _on_error(self, ws: Any, error: Any) -> None:
+        logger.debug("Moonraker WS error: %s", error)
+
+    def _on_close(self, ws: Any, close_status_code: Any, close_msg: Any) -> None:
+        self._connected = False
+        logger.info("Moonraker WS closed (code=%s)", close_status_code)
+
+
+# ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
 
@@ -154,8 +354,6 @@ class MoonrakerAdapter(PrinterAdapter):
         timeout: int = 30,
         retries: int = 3,
         verify_ssl: bool = True,
-        *,
-        enable_push: bool = False,
     ) -> None:
         if not host:
             raise ValueError("host must not be empty")
@@ -182,18 +380,10 @@ class MoonrakerAdapter(PrinterAdapter):
                 "https": _https_proxy,
             }
 
-        # -- Push-based state monitoring (optional) -------------------------
-        self._push_enabled: bool = False
-        self._state_lock: threading.Lock = threading.Lock()
-        self._cached_state: Optional[PrinterState] = None
-        self._cached_state_time: float = 0.0
-        self._ws_connected: threading.Event = threading.Event()
-        self._ws_app: Optional[Any] = None
-        self._ws_thread: Optional[threading.Thread] = None
-        self._ws_shutdown: threading.Event = threading.Event()
-
-        if enable_push:
-            self._start_websocket()
+        # Push monitoring (WebSocket) -- disabled by default.
+        self._ws_monitor: Optional[MoonrakerWebSocketMonitor] = None
+        if _PUSH_MONITORING_ENABLED:
+            self.enable_push_monitoring()
 
     # -- PrinterAdapter identity properties ---------------------------------
 
@@ -217,6 +407,26 @@ class MoonrakerAdapter(PrinterAdapter):
             can_detect_filament=True,
             supported_extensions=(".gcode", ".gco", ".g"),
         )
+
+    # ------------------------------------------------------------------
+    # Push monitoring
+    # ------------------------------------------------------------------
+
+    def enable_push_monitoring(self) -> None:
+        """Start the WebSocket push monitor for real-time status updates.
+
+        Falls back gracefully if ``websocket-client`` is not installed.
+        """
+        if self._ws_monitor is not None:
+            return
+        self._ws_monitor = MoonrakerWebSocketMonitor(self._host)
+        self._ws_monitor.start()
+
+    def disable_push_monitoring(self) -> None:
+        """Stop the WebSocket push monitor and fall back to HTTP polling."""
+        if self._ws_monitor is not None:
+            self._ws_monitor.stop()
+            self._ws_monitor = None
 
     # ------------------------------------------------------------------
     # Internal HTTP helpers
@@ -361,7 +571,12 @@ class MoonrakerAdapter(PrinterAdapter):
     def get_state(self) -> PrinterState:
         """Retrieve the current printer state and temperatures.
 
-        Issues two Moonraker requests:
+        When push monitoring is active and the WebSocket is connected,
+        builds the state from the cached data to avoid an HTTP round-trip.
+        Falls back to HTTP polling if the cache is empty or the WebSocket
+        is disconnected.
+
+        Issues two Moonraker requests (HTTP fallback path):
         * ``GET /printer/info`` -- klippy state and connection info
         * ``GET /printer/objects/query?heater_bed&extruder&print_stats`` --
           temperatures and print state
@@ -372,7 +587,12 @@ class MoonrakerAdapter(PrinterAdapter):
         Raises:
             PrinterError: On unexpected (non-connection) errors.
         """
-        # -- klippy state --------------------------------------------------
+        # -- try push-based cache first ------------------------------------
+        cached = self._state_from_push_cache()
+        if cached is not None:
+            return cached
+
+        # -- HTTP fallback: klippy state -----------------------------------
         try:
             info = self._get_json("/printer/info")
         except PrinterError as exc:
@@ -435,6 +655,51 @@ class MoonrakerAdapter(PrinterAdapter):
         # Chamber (optional — only present if Klipper has a
         # [temperature_sensor chamber] section in printer.cfg).
         chamber = _safe_get(status, "temperature_sensor chamber", default={})
+        chamber_actual = chamber.get("temperature") if isinstance(chamber, dict) else None
+
+        return PrinterState(
+            connected=True,
+            state=mapped_status,
+            tool_temp_actual=tool_actual,
+            tool_temp_target=tool_target,
+            bed_temp_actual=bed_actual,
+            bed_temp_target=bed_target,
+            chamber_temp_actual=chamber_actual,
+        )
+
+    def _state_from_push_cache(self) -> Optional[PrinterState]:
+        """Build a :class:`PrinterState` from the WebSocket cache.
+
+        Returns ``None`` if push monitoring is inactive, disconnected,
+        or the cache is empty -- signalling the caller to fall back to HTTP.
+        """
+        if self._ws_monitor is None or not self._ws_monitor.connected:
+            return None
+
+        cached = self._ws_monitor.get_cached_state()
+        if not cached:
+            return None
+
+        # Extruder
+        extruder = cached.get("extruder", {})
+        tool_actual = extruder.get("temperature") if isinstance(extruder, dict) else None
+        tool_target = extruder.get("target") if isinstance(extruder, dict) else None
+
+        # Bed
+        bed = cached.get("heater_bed", {})
+        bed_actual = bed.get("temperature") if isinstance(bed, dict) else None
+        bed_target = bed.get("target") if isinstance(bed, dict) else None
+
+        # Print stats
+        print_stats = cached.get("print_stats", {})
+        print_state = print_stats.get("state") if isinstance(print_stats, dict) else None
+
+        # When using push cache, klippy must be "ready" (otherwise the
+        # subscription would not be active), so we default to "ready".
+        mapped_status = _map_moonraker_state("ready", print_state)
+
+        # Chamber
+        chamber = cached.get("temperature_sensor chamber", {})
         chamber_actual = chamber.get("temperature") if isinstance(chamber, dict) else None
 
         return PrinterState(

@@ -160,3 +160,306 @@ def _validate_sqlite(path: str) -> None:
             raise BackupError(f"SQLite integrity check failed for {path}")
     except sqlite3.DatabaseError as exc:
         raise BackupError(f"Not a valid SQLite database: {path} ({exc})") from exc
+
+
+# ---------------------------------------------------------------------------
+# Data models for scheduled backups
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ScheduledBackupResult:
+    """Outcome of a single scheduled backup cycle.
+
+    :param success: Whether the backup completed successfully.
+    :param path: Filesystem path to the backup file.
+    :param size_bytes: Size of the backup in bytes.
+    :param timestamp: ISO-formatted timestamp of the backup.
+    :param error: Error message if the backup failed.
+    """
+
+    success: bool
+    path: str = ""
+    size_bytes: int = 0
+    timestamp: str = ""
+    error: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class IntegrityResult:
+    """Outcome of a database integrity check.
+
+    :param ok: Whether the database passed the integrity check.
+    :param details: Raw output from ``PRAGMA integrity_check``.
+    """
+
+    ok: bool
+    details: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+# ---------------------------------------------------------------------------
+# Integrity verification
+# ---------------------------------------------------------------------------
+
+def verify_integrity(db_path: str) -> IntegrityResult:
+    """Verify SQLite database integrity using ``PRAGMA integrity_check``.
+
+    :param db_path: Path to the SQLite database file.
+    :returns: :class:`IntegrityResult` indicating pass or fail.
+    """
+    if not os.path.isfile(db_path):
+        return IntegrityResult(ok=False, details=f"File not found: {db_path}")
+
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            cursor = conn.execute("PRAGMA integrity_check")
+            rows = cursor.fetchall()
+            result_text = "; ".join(row[0] for row in rows)
+            is_ok = len(rows) == 1 and rows[0][0] == "ok"
+            return IntegrityResult(ok=is_ok, details=result_text)
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        return IntegrityResult(ok=False, details=f"SQLite error: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# VACUUM INTO snapshot helper
+# ---------------------------------------------------------------------------
+
+def _generate_backup_filename(db_path: str) -> str:
+    """Generate a timestamped backup filename from the source database name."""
+    base = Path(db_path).stem
+    now = time.time()
+    timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(now))
+    micros = int((now % 1) * 1_000_000)
+    return f"{base}_backup_{timestamp}_{micros:06d}.db"
+
+
+def _rotate_backups(backup_dir: str, *, keep: int = 5, prefix: str = "") -> list[str]:
+    """Delete old backups, keeping only the most recent *keep* files.
+
+    :param backup_dir: Directory containing backup files.
+    :param keep: Number of most recent backups to keep.
+    :param prefix: Only consider files starting with this prefix.
+    :returns: List of deleted file paths.
+    """
+    if not os.path.isdir(backup_dir):
+        return []
+
+    backups: list[str] = []
+    for entry in os.listdir(backup_dir):
+        if entry.endswith(".db") and "_backup_" in entry:
+            if prefix and not entry.startswith(prefix):
+                continue
+            backups.append(os.path.join(backup_dir, entry))
+
+    # Sort by modification time, newest first
+    backups.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+
+    deleted: list[str] = []
+    for old_backup in backups[keep:]:
+        try:
+            os.remove(old_backup)
+            deleted.append(old_backup)
+            logger.debug("Rotated old backup: %s", old_backup)
+        except OSError as exc:
+            logger.warning("Failed to delete old backup %s: %s", old_backup, exc)
+
+    return deleted
+
+
+def snapshot_database(
+    db_path: str,
+    backup_dir: str,
+    *,
+    keep: int = 5,
+) -> ScheduledBackupResult:
+    """Create a consistent snapshot of a SQLite database using ``VACUUM INTO``.
+
+    Unlike :func:`backup_database`, this does not redact credentials and uses
+    ``VACUUM INTO`` for a safe, lock-free snapshot.  Intended for use by the
+    :class:`BackupScheduler`.
+
+    :param db_path: Path to the source SQLite database.
+    :param backup_dir: Directory to store the backup.
+    :param keep: Number of most recent backups to retain.
+    :returns: :class:`ScheduledBackupResult` with the outcome.
+    """
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+
+    if not os.path.isfile(db_path):
+        return ScheduledBackupResult(
+            success=False,
+            timestamp=timestamp,
+            error=f"Source database not found: {db_path}",
+        )
+
+    try:
+        os.makedirs(backup_dir, exist_ok=True)
+    except OSError as exc:
+        return ScheduledBackupResult(
+            success=False,
+            timestamp=timestamp,
+            error=f"Cannot create backup directory: {exc}",
+        )
+
+    backup_filename = _generate_backup_filename(db_path)
+    backup_path = os.path.join(backup_dir, backup_filename)
+
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(f"VACUUM INTO '{backup_path}'")
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        return ScheduledBackupResult(
+            success=False,
+            path=backup_path,
+            timestamp=timestamp,
+            error=f"Backup failed: {exc}",
+        )
+
+    if not os.path.isfile(backup_path):
+        return ScheduledBackupResult(
+            success=False,
+            path=backup_path,
+            timestamp=timestamp,
+            error="Backup file was not created",
+        )
+
+    size_bytes = os.path.getsize(backup_path)
+
+    prefix = Path(db_path).stem
+    _rotate_backups(backup_dir, keep=keep, prefix=prefix)
+
+    logger.info(
+        "Scheduled backup created: %s (%d bytes)", backup_path, size_bytes
+    )
+
+    return ScheduledBackupResult(
+        success=True,
+        path=backup_path,
+        size_bytes=size_bytes,
+        timestamp=timestamp,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Auto-backup scheduling
+# ---------------------------------------------------------------------------
+
+_DEFAULT_INTERVAL: float = 3600.0
+_DEFAULT_KEEP: int = 5
+
+
+class BackupScheduler:
+    """Runs periodic database backups in a background daemon thread.
+
+    Uses ``VACUUM INTO`` for consistent snapshots and rotates old backups
+    by modification time.
+
+    Configuration is read from environment variables at construction time:
+
+    - ``KILN_BACKUP_INTERVAL`` — seconds between backups (default 3600).
+    - ``KILN_BACKUP_KEEP`` — number of backups to retain (default 5).
+
+    :param db_path: Path to the database to back up.
+    :param backup_dir: Directory to store backups.
+    :param interval_seconds: Seconds between backups.  Falls back to
+        ``KILN_BACKUP_INTERVAL`` env var, then the default (3600).
+    :param keep: Number of backups to retain.  Falls back to
+        ``KILN_BACKUP_KEEP`` env var, then the default (5).
+    """
+
+    def __init__(
+        self,
+        db_path: str,
+        backup_dir: str,
+        *,
+        interval_seconds: Optional[float] = None,
+        keep: Optional[int] = None,
+    ) -> None:
+        self._db_path = db_path
+        self._backup_dir = backup_dir
+
+        # Resolve interval: explicit arg > env var > default
+        if interval_seconds is not None:
+            self._interval = float(interval_seconds)
+        else:
+            env_interval = os.environ.get("KILN_BACKUP_INTERVAL")
+            self._interval = float(env_interval) if env_interval else _DEFAULT_INTERVAL
+
+        # Resolve keep: explicit arg > env var > default
+        if keep is not None:
+            self._keep = int(keep)
+        else:
+            env_keep = os.environ.get("KILN_BACKUP_KEEP")
+            self._keep = int(env_keep) if env_keep else _DEFAULT_KEEP
+
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    # -- Public lifecycle ----------------------------------------------------
+
+    def start(self) -> None:
+        """Start the background backup scheduler."""
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning("Backup scheduler already running")
+            return
+
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._run,
+            daemon=True,
+            name="kiln-backup-scheduler",
+        )
+        self._thread.start()
+        logger.info(
+            "Backup scheduler started (interval=%ds, keep=%d)",
+            self._interval, self._keep,
+        )
+
+    def stop(self) -> None:
+        """Stop the background backup scheduler."""
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
+            self._thread = None
+        logger.info("Backup scheduler stopped")
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the scheduler thread is currently active."""
+        return self._thread is not None and self._thread.is_alive()
+
+    # -- Internals -----------------------------------------------------------
+
+    def _run(self) -> None:
+        """Main scheduler loop — snapshot, then sleep until next cycle."""
+        while not self._stop_event.is_set():
+            try:
+                result = snapshot_database(
+                    self._db_path,
+                    self._backup_dir,
+                    keep=self._keep,
+                )
+                if result.success:
+                    logger.debug(
+                        "Scheduled backup completed: %s", result.path
+                    )
+                else:
+                    logger.warning(
+                        "Scheduled backup failed: %s", result.error
+                    )
+            except Exception:
+                logger.exception("Unexpected error in backup scheduler")
+
+            self._stop_event.wait(timeout=self._interval)

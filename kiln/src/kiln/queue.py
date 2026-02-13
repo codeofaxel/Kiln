@@ -39,58 +39,16 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-# ------------------------------------------------------------------
-# State transition validation
-# ------------------------------------------------------------------
-
-_VALID_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {}  # populated after JobStatus is defined
-
-
-class InvalidTransitionError(ValueError):
-    """Raised when attempting an invalid job status transition."""
-
-    def __init__(self, job_id: str, current_status: JobStatus, target_status: JobStatus) -> None:
-        super().__init__(
-            f"Invalid transition for job {job_id!r}: "
-            f"{current_status.value} → {target_status.value}"
-        )
-        self.job_id = job_id
-        self.current_status = current_status
-        self.target_status = target_status
-
-
 class JobStatus(enum.Enum):
     """Lifecycle states for a print job."""
 
     QUEUED = "queued"
     STARTING = "starting"
     PRINTING = "printing"
+    PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-
-
-# Populate transition table after JobStatus is defined
-_VALID_TRANSITIONS = {
-    JobStatus.QUEUED: frozenset({JobStatus.STARTING, JobStatus.PRINTING, JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}),
-    JobStatus.STARTING: frozenset({JobStatus.PRINTING, JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.QUEUED}),  # QUEUED for re-queue
-    JobStatus.PRINTING: frozenset({JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED}),
-    JobStatus.COMPLETED: frozenset(),  # terminal
-    JobStatus.FAILED: frozenset({JobStatus.QUEUED}),  # allow retry
-    JobStatus.CANCELLED: frozenset(),  # terminal
-}
-
-
-def get_valid_transitions(status: JobStatus) -> frozenset[JobStatus]:
-    """Return the set of valid target states from the given status.
-
-    Args:
-        status: The current job status.
-
-    Returns:
-        A frozenset of valid target statuses.
-    """
-    return _VALID_TRANSITIONS[status]
 
 
 @dataclass
@@ -138,6 +96,82 @@ class JobNotFoundError(KeyError):
         self.job_id = job_id
 
 
+class InvalidStateTransition(ValueError):
+    """Raised when a job transition violates the state machine."""
+
+    def __init__(
+        self, job_id: str, from_status: JobStatus, to_status: JobStatus
+    ) -> None:
+        super().__init__(
+            f"Invalid state transition for job {job_id!r}: "
+            f"{from_status.value} -> {to_status.value}"
+        )
+        self.job_id = job_id
+        self.from_status = from_status
+        self.to_status = to_status
+
+
+class JobStateMachine:
+    """Defines valid state transitions for the print job lifecycle.
+
+    Transitions are explicit — any transition not listed here is illegal
+    and will raise :class:`InvalidStateTransition`.
+    """
+
+    _TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
+        JobStatus.QUEUED: frozenset({
+            JobStatus.STARTING,
+            JobStatus.CANCELLED,
+            JobStatus.FAILED,
+        }),
+        JobStatus.STARTING: frozenset({
+            JobStatus.PRINTING,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+        }),
+        JobStatus.PRINTING: frozenset({
+            JobStatus.PAUSED,
+            JobStatus.COMPLETED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+        }),
+        JobStatus.PAUSED: frozenset({
+            JobStatus.PRINTING,
+            JobStatus.CANCELLED,
+            JobStatus.FAILED,
+        }),
+        # Terminal states — no outgoing transitions
+        JobStatus.COMPLETED: frozenset(),
+        JobStatus.FAILED: frozenset(),
+        JobStatus.CANCELLED: frozenset(),
+    }
+
+    @classmethod
+    def validate(
+        cls, job_id: str, from_status: JobStatus, to_status: JobStatus
+    ) -> None:
+        """Raise :class:`InvalidStateTransition` if the transition is illegal.
+
+        :param job_id: Used only for error messages.
+        :param from_status: Current job status.
+        :param to_status: Desired next status.
+        """
+        allowed = cls._TRANSITIONS.get(from_status, frozenset())
+        if to_status not in allowed:
+            raise InvalidStateTransition(job_id, from_status, to_status)
+
+    @classmethod
+    def allowed_transitions(cls, status: JobStatus) -> frozenset[JobStatus]:
+        """Return the set of states reachable from *status*."""
+        return cls._TRANSITIONS.get(status, frozenset())
+
+
+# Stuck job timeout — configurable via environment variable.
+_STUCK_JOB_TIMEOUT_MINUTES: int = int(
+    os.environ.get("KILN_STUCK_JOB_TIMEOUT_MINUTES", "30")
+)
+
+
 class PrintQueue:
     """Thread-safe print job queue with optional SQLite persistence.
 
@@ -149,10 +183,16 @@ class PrintQueue:
     to QUEUED since the printer state is unknown after a restart.
     """
 
-    def __init__(self, db_path: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        db_path: Optional[str] = None,
+        *,
+        event_bus: Optional[Any] = None,
+    ) -> None:
         self._jobs: Dict[str, PrintJob] = {}
         self._lock = threading.Lock()
         self._db: Optional[sqlite3.Connection] = None
+        self._event_bus: Optional[Any] = event_bus  # kiln.events.EventBus
 
         if db_path:
             resolved = os.path.expanduser(db_path)
@@ -222,8 +262,6 @@ class PrintQueue:
     def cancel(self, job_id: str) -> PrintJob:
         """Cancel a queued or running job.
 
-        Only jobs in QUEUED or PRINTING state can be cancelled.
-
         Args:
             job_id: The job to cancel.
 
@@ -232,11 +270,12 @@ class PrintQueue:
 
         Raises:
             JobNotFoundError: If the job doesn't exist.
-            InvalidTransitionError: If the transition is not allowed.
+            InvalidStateTransition: If the job cannot be cancelled from
+                its current state (e.g. already completed).
         """
         with self._lock:
             job = self._get(job_id)
-            self._validate_transition(job, JobStatus.CANCELLED)
+            JobStateMachine.validate(job.id, job.status, JobStatus.CANCELLED)
             job.status = JobStatus.CANCELLED
             job.completed_at = time.time()
         self._update_job_db(job)
@@ -250,11 +289,11 @@ class PrintQueue:
         """Mark a job as starting (being sent to the printer).
 
         Raises:
-            InvalidTransitionError: If the transition is not allowed.
+            InvalidStateTransition: If the job is not in QUEUED state.
         """
         with self._lock:
             job = self._get(job_id)
-            self._validate_transition(job, JobStatus.STARTING)
+            JobStateMachine.validate(job.id, job.status, JobStatus.STARTING)
             job.status = JobStatus.STARTING
             job.started_at = time.time()
         self._update_job_db(job)
@@ -264,11 +303,12 @@ class PrintQueue:
         """Mark a job as actively printing.
 
         Raises:
-            InvalidTransitionError: If the transition is not allowed.
+            InvalidStateTransition: If the job is not in STARTING or
+                PAUSED state.
         """
         with self._lock:
             job = self._get(job_id)
-            self._validate_transition(job, JobStatus.PRINTING)
+            JobStateMachine.validate(job.id, job.status, JobStatus.PRINTING)
             job.status = JobStatus.PRINTING
             if job.started_at is None:
                 job.started_at = time.time()
@@ -279,11 +319,11 @@ class PrintQueue:
         """Mark a job as successfully completed.
 
         Raises:
-            InvalidTransitionError: If the transition is not allowed.
+            InvalidStateTransition: If the job is not in PRINTING state.
         """
         with self._lock:
             job = self._get(job_id)
-            self._validate_transition(job, JobStatus.COMPLETED)
+            JobStateMachine.validate(job.id, job.status, JobStatus.COMPLETED)
             job.status = JobStatus.COMPLETED
             job.completed_at = time.time()
         self._update_job_db(job)
@@ -293,14 +333,28 @@ class PrintQueue:
         """Mark a job as failed with an error message.
 
         Raises:
-            InvalidTransitionError: If the transition is not allowed.
+            InvalidStateTransition: If the job is already in a terminal
+                state.
         """
         with self._lock:
             job = self._get(job_id)
-            self._validate_transition(job, JobStatus.FAILED)
+            JobStateMachine.validate(job.id, job.status, JobStatus.FAILED)
             job.status = JobStatus.FAILED
             job.completed_at = time.time()
             job.error = error
+        self._update_job_db(job)
+        return job
+
+    def mark_paused(self, job_id: str) -> PrintJob:
+        """Mark a job as paused.
+
+        Raises:
+            InvalidStateTransition: If the job is not in PRINTING state.
+        """
+        with self._lock:
+            job = self._get(job_id)
+            JobStateMachine.validate(job.id, job.status, JobStatus.PAUSED)
+            job.status = JobStatus.PAUSED
         self._update_job_db(job)
         return job
 
@@ -403,6 +457,77 @@ class PrintQueue:
             return counts
 
     # ------------------------------------------------------------------
+    # Stuck job detection
+    # ------------------------------------------------------------------
+
+    def check_stuck_jobs(
+        self, *, timeout_minutes: Optional[int] = None
+    ) -> List[PrintJob]:
+        """Scan for jobs stuck in STARTING or PRINTING and auto-fail them.
+
+        A job is considered stuck if it has been in STARTING or PRINTING
+        state for longer than *timeout_minutes* (default read from
+        ``KILN_STUCK_JOB_TIMEOUT_MINUTES``, falling back to 30).
+
+        Each auto-failed job is transitioned to FAILED with
+        ``error="stuck_timeout"`` and a :data:`JOB_STUCK_TIMEOUT` event
+        is published if an event bus is available.
+
+        Args:
+            timeout_minutes: Override the default timeout.
+
+        Returns:
+            List of jobs that were auto-failed.
+        """
+        timeout = timeout_minutes if timeout_minutes is not None else _STUCK_JOB_TIMEOUT_MINUTES
+        cutoff = time.time() - (timeout * 60)
+        failed_jobs: List[PrintJob] = []
+
+        with self._lock:
+            candidates = [
+                j for j in self._jobs.values()
+                if j.status in (JobStatus.STARTING, JobStatus.PRINTING)
+                and j.started_at is not None
+                and j.started_at < cutoff
+            ]
+
+        for job in candidates:
+            previous_status = job.status.value
+            previous_started_at = job.started_at
+            try:
+                self.mark_failed(job.id, "stuck_timeout")
+                failed_jobs.append(job)
+                logger.warning(
+                    "Auto-failed stuck job %s (was %s for %.0f min)",
+                    job.id,
+                    previous_status,
+                    (time.time() - (previous_started_at or 0)) / 60,
+                )
+                self._publish_stuck_timeout(job)
+            except (InvalidStateTransition, JobNotFoundError):
+                # Job was already transitioned by another thread — skip.
+                pass
+
+        return failed_jobs
+
+    def _publish_stuck_timeout(self, job: PrintJob) -> None:
+        """Publish a JOB_STUCK_TIMEOUT event if an event bus is wired."""
+        if self._event_bus is None:
+            return
+        try:
+            from kiln.events import Event, EventType
+
+            self._event_bus.publish(
+                Event(
+                    type=EventType.JOB_STUCK_TIMEOUT,
+                    data=job.to_dict(),
+                    source="queue",
+                )
+            )
+        except Exception:
+            logger.exception("Failed to publish stuck timeout event for job %s", job.id)
+
+    # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
@@ -411,20 +536,6 @@ class PrintQueue:
         if job_id not in self._jobs:
             raise JobNotFoundError(job_id)
         return self._jobs[job_id]
-
-    def _validate_transition(self, job: PrintJob, target_status: JobStatus) -> None:
-        """Validate that a state transition is allowed.
-
-        Args:
-            job: The job being transitioned.
-            target_status: The desired target status.
-
-        Raises:
-            InvalidTransitionError: If the transition is not allowed.
-        """
-        valid_targets = _VALID_TRANSITIONS[job.status]
-        if target_status not in valid_targets:
-            raise InvalidTransitionError(job.id, job.status, target_status)
 
     # ------------------------------------------------------------------
     # SQLite persistence helpers
@@ -476,13 +587,13 @@ class PrintQueue:
             """SELECT id, file_name, printer_name, status, submitted_by,
                       priority, created_at, started_at, completed_at, error, metadata
                FROM jobs
-               WHERE status IN ('queued', 'starting', 'printing')"""
+               WHERE status IN ('queued', 'starting', 'printing', 'paused')"""
         )
         recovered = 0
         for row in cursor.fetchall():
             status_str = row[3]
             # Reset in-flight jobs to QUEUED — printer state unknown after crash
-            if status_str in ("starting", "printing"):
+            if status_str in ("starting", "printing", "paused"):
                 status_str = "queued"
             job = PrintJob(
                 id=row[0],

@@ -1,5 +1,11 @@
 """Thingiverse API client for discovering and downloading 3D models.
 
+.. deprecated::
+    MyMiniFactory acquired Thingiverse in February 2026.  The Thingiverse
+    API may become unavailable or redirect to MyMiniFactory endpoints.
+    Consider using :class:`kiln.marketplaces.myminifactory.MyMiniFactoryAdapter`
+    instead.
+
 Provides a typed client that wraps the Thingiverse REST API so that
 AI agents can autonomously search for models, inspect their details,
 and download print-ready files.
@@ -16,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -151,6 +158,12 @@ class ThingiverseClient:
         base_url: str = _BASE_URL,
         session: requests.Session | None = None,
     ) -> None:
+        warnings.warn(
+            "ThingiverseClient is deprecated. MyMiniFactory acquired Thingiverse "
+            "in February 2026. Consider using the MyMiniFactory adapter instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._token = token or os.environ.get("KILN_THINGIVERSE_TOKEN", "")
         if not self._token:
             raise ThingiverseAuthError(

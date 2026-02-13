@@ -9,10 +9,12 @@ and error-handling patterns.
 
 from __future__ import annotations
 
+import json as _json
 import logging
 import os
+import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import quote
 
 import requests
@@ -33,6 +35,16 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+
+# websocket-client is an optional dependency; the adapter works without it
+# but push monitoring requires it.
+try:
+    import websocket as _ws_mod  # websocket-client
+
+    _WS_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _ws_mod = None  # type: ignore[assignment]
+    _WS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +100,191 @@ def _flatten_files(entries: List[Dict[str, Any]], prefix: str = "") -> List[Dict
         else:
             flat.append(entry)
     return flat
+
+
+# ---------------------------------------------------------------------------
+# SockJS push monitor
+# ---------------------------------------------------------------------------
+
+_PUSH_MONITORING_ENABLED: bool = os.environ.get("KILN_PUSH_MONITORING", "0") == "1"
+
+# Maximum reconnect backoff in seconds.
+_MAX_RECONNECT_BACKOFF: float = 30.0
+
+
+class OctoPrintSockJSMonitor:
+    """Push-based status monitor for OctoPrint via its SockJS WebSocket.
+
+    OctoPrint exposes a SockJS endpoint at ``/sockjs/websocket``.  After
+    the raw WebSocket is opened the client must send an auth message with
+    the API key.  The server then pushes ``current`` messages (containing
+    temperatures, state flags, and job progress) and ``event`` messages at
+    roughly 1 Hz.
+
+    The monitor runs in a daemon thread and reconnects automatically with
+    exponential backoff (1 s -> 2 s -> 4 s -> ... -> 30 s max).
+
+    Args:
+        host: OctoPrint base URL (``http://...`` or ``https://...``).
+        api_key: OctoPrint API key used for the SockJS auth handshake.
+        on_state_update: Optional callback fired on every ``current``
+            message.  Receives the parsed message dict.
+    """
+
+    def __init__(
+        self,
+        host: str,
+        api_key: str,
+        *,
+        on_state_update: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> None:
+        self._host: str = host.rstrip("/")
+        self._api_key: str = api_key
+        self._on_state_update = on_state_update
+
+        # Shared state cache -- written by the WS thread, read by the adapter.
+        self._cache: Dict[str, Any] = {}
+        self._cache_lock: threading.Lock = threading.Lock()
+        self._connected: bool = False
+
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event: threading.Event = threading.Event()
+        self._ws: Optional[Any] = None  # websocket.WebSocketApp instance
+
+    # -- public API --------------------------------------------------------
+
+    @property
+    def connected(self) -> bool:
+        """Whether the WebSocket connection is currently alive."""
+        return self._connected
+
+    def get_cached_state(self) -> Optional[Dict[str, Any]]:
+        """Return the latest cached ``current`` payload, or ``None``."""
+        with self._cache_lock:
+            return dict(self._cache) if self._cache else None
+
+    def start(self) -> None:
+        """Start the background listener thread.
+
+        No-op if the thread is already running or if ``websocket-client``
+        is not installed.
+        """
+        if not _WS_AVAILABLE:
+            logger.warning(
+                "websocket-client not installed -- push monitoring unavailable. "
+                "Install with: pip install websocket-client"
+            )
+            return
+
+        if self._thread is not None and self._thread.is_alive():
+            return
+
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._run_loop,
+            name="octoprint-sockjs-monitor",
+            daemon=True,
+        )
+        self._thread.start()
+        logger.info("OctoPrint SockJS monitor started for %s", self._host)
+
+    def stop(self) -> None:
+        """Signal the background thread to shut down and wait for it."""
+        self._stop_event.set()
+        if self._ws is not None:
+            try:
+                self._ws.close()
+            except Exception:
+                pass
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
+            self._thread = None
+        self._connected = False
+        logger.info("OctoPrint SockJS monitor stopped")
+
+    # -- internal ----------------------------------------------------------
+
+    def _ws_url(self) -> str:
+        """Convert the HTTP base URL to a SockJS WebSocket URL."""
+        url = self._host
+        if url.startswith("https://"):
+            url = "wss://" + url[len("https://"):]
+        elif url.startswith("http://"):
+            url = "ws://" + url[len("http://"):]
+        return f"{url}/sockjs/websocket"
+
+    def _run_loop(self) -> None:
+        """Reconnecting event loop -- runs in the daemon thread."""
+        backoff: float = 1.0
+
+        while not self._stop_event.is_set():
+            try:
+                self._connect_and_listen()
+            except Exception:
+                logger.debug("OctoPrint SockJS error", exc_info=True)
+
+            self._connected = False
+
+            if self._stop_event.is_set():
+                break
+
+            logger.debug(
+                "OctoPrint SockJS reconnecting in %.1fs", backoff,
+            )
+            self._stop_event.wait(timeout=backoff)
+            backoff = min(backoff * 2, _MAX_RECONNECT_BACKOFF)
+
+    def _connect_and_listen(self) -> None:
+        """Open the SockJS WebSocket, authenticate, and block until close."""
+        ws_url = self._ws_url()
+        logger.debug("Connecting to OctoPrint SockJS at %s", ws_url)
+
+        ws = _ws_mod.WebSocketApp(  # type: ignore[union-attr]
+            ws_url,
+            on_open=self._on_open,
+            on_message=self._on_message,
+            on_error=self._on_error,
+            on_close=self._on_close,
+        )
+        self._ws = ws
+        ws.run_forever(ping_interval=20, ping_timeout=10)
+
+    def _on_open(self, ws: Any) -> None:
+        self._connected = True
+        logger.info("OctoPrint SockJS connected")
+
+        # OctoPrint SockJS requires an auth message after connect.
+        auth_msg = _json.dumps({"auth": f"{self._api_key}"})
+        ws.send(auth_msg)
+
+    def _on_message(self, ws: Any, message: str) -> None:
+        try:
+            data = _json.loads(message)
+        except (ValueError, TypeError):
+            return
+
+        if not isinstance(data, dict):
+            return
+
+        # OctoPrint pushes ``current`` messages with full state snapshot
+        # and ``event`` messages for discrete events.
+        if "current" in data:
+            current = data["current"]
+            if isinstance(current, dict):
+                with self._cache_lock:
+                    self._cache.update(current)
+                if self._on_state_update:
+                    try:
+                        self._on_state_update(current)
+                    except Exception:
+                        logger.debug("on_state_update callback error", exc_info=True)
+
+    def _on_error(self, ws: Any, error: Any) -> None:
+        logger.debug("OctoPrint SockJS error: %s", error)
+
+    def _on_close(self, ws: Any, close_status_code: Any, close_msg: Any) -> None:
+        self._connected = False
+        logger.info("OctoPrint SockJS closed (code=%s)", close_status_code)
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +347,11 @@ class OctoPrintAdapter(PrinterAdapter):
                 "https": _https_proxy,
             }
 
+        # Push monitoring (SockJS) -- disabled by default.
+        self._sockjs_monitor: Optional[OctoPrintSockJSMonitor] = None
+        if _PUSH_MONITORING_ENABLED:
+            self.enable_push_monitoring()
+
     # -- PrinterAdapter identity properties ---------------------------------
 
     @property
@@ -172,6 +374,28 @@ class OctoPrintAdapter(PrinterAdapter):
             can_detect_filament=True,
             supported_extensions=(".gcode", ".gco", ".g"),
         )
+
+    # ------------------------------------------------------------------
+    # Push monitoring
+    # ------------------------------------------------------------------
+
+    def enable_push_monitoring(self) -> None:
+        """Start the SockJS push monitor for real-time status updates.
+
+        Falls back gracefully if ``websocket-client`` is not installed.
+        """
+        if self._sockjs_monitor is not None:
+            return
+        self._sockjs_monitor = OctoPrintSockJSMonitor(
+            self._host, self._api_key,
+        )
+        self._sockjs_monitor.start()
+
+    def disable_push_monitoring(self) -> None:
+        """Stop the SockJS push monitor and fall back to HTTP polling."""
+        if self._sockjs_monitor is not None:
+            self._sockjs_monitor.stop()
+            self._sockjs_monitor = None
 
     # ------------------------------------------------------------------
     # Internal HTTP helpers
@@ -299,12 +523,20 @@ class OctoPrintAdapter(PrinterAdapter):
     def get_state(self) -> PrinterState:
         """Retrieve the current printer state and temperatures.
 
-        Calls ``GET /api/printer`` and maps the OctoPrint response to a
-        :class:`PrinterState`.
+        When push monitoring is active and the SockJS connection is alive,
+        builds the state from cached push data to avoid an HTTP round-trip.
+        Falls back to ``GET /api/printer`` if the cache is empty or the
+        WebSocket is disconnected.
 
         Raises:
             PrinterError: On communication or parsing errors.
         """
+        # -- try push-based cache first ------------------------------------
+        cached = self._state_from_push_cache()
+        if cached is not None:
+            return cached
+
+        # -- HTTP fallback -------------------------------------------------
         try:
             payload = self._get_json("/api/printer")
         except PrinterError as exc:
@@ -338,6 +570,52 @@ class OctoPrintAdapter(PrinterAdapter):
             tool_temp_target=tool.get("target"),
             bed_temp_actual=bed.get("actual"),
             bed_temp_target=bed.get("target"),
+            chamber_temp_actual=chamber.get("actual") if isinstance(chamber, dict) else None,
+            chamber_temp_target=chamber.get("target") if isinstance(chamber, dict) else None,
+        )
+
+    def _state_from_push_cache(self) -> Optional[PrinterState]:
+        """Build a :class:`PrinterState` from the SockJS push cache.
+
+        Returns ``None`` if push monitoring is inactive, disconnected,
+        or the cache is empty -- signalling the caller to fall back to HTTP.
+
+        OctoPrint ``current`` messages include ``temps``, ``state``, and
+        ``job`` keys matching the REST API structure.
+        """
+        if self._sockjs_monitor is None or not self._sockjs_monitor.connected:
+            return None
+
+        cached = self._sockjs_monitor.get_cached_state()
+        if not cached:
+            return None
+
+        # OctoPrint ``current`` message layout:
+        #   temps: [{tool0: {actual, target}, bed: {actual, target}, ...}]
+        #   state: {flags: {...}, text: "..."}
+        temps_list = cached.get("temps", [])
+        temps: Dict[str, Any] = {}
+        if isinstance(temps_list, list) and temps_list:
+            temps = temps_list[-1] if isinstance(temps_list[-1], dict) else {}
+
+        tool = temps.get("tool0", {}) if isinstance(temps, dict) else {}
+        bed = temps.get("bed", {}) if isinstance(temps, dict) else {}
+        chamber = temps.get("chamber", {}) if isinstance(temps, dict) else {}
+
+        state_obj = cached.get("state", {})
+        flags = state_obj.get("flags", {}) if isinstance(state_obj, dict) else {}
+        if not isinstance(flags, dict):
+            flags = {}
+
+        status = _map_flags_to_status(flags)
+
+        return PrinterState(
+            connected=True,
+            state=status,
+            tool_temp_actual=tool.get("actual") if isinstance(tool, dict) else None,
+            tool_temp_target=tool.get("target") if isinstance(tool, dict) else None,
+            bed_temp_actual=bed.get("actual") if isinstance(bed, dict) else None,
+            bed_temp_target=bed.get("target") if isinstance(bed, dict) else None,
             chamber_temp_actual=chamber.get("actual") if isinstance(chamber, dict) else None,
             chamber_temp_target=chamber.get("target") if isinstance(chamber, dict) else None,
         )

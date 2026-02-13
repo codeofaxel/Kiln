@@ -28,6 +28,7 @@ import ssl
 import subprocess
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import paho.mqtt.client as mqtt
@@ -54,6 +55,57 @@ _MQTT_PORT = 8883
 _FTPS_PORT = 990
 _MQTT_USERNAME = "bblp"
 _FTPS_USERNAME = "bblp"
+
+# Backoff parameters for MQTT reconnection.
+_BACKOFF_INITIAL_DELAY: float = 1.0    # seconds
+_BACKOFF_MULTIPLIER: float = 2.0
+_BACKOFF_MAX_DELAY: float = 30.0       # seconds
+_STALE_STATE_MAX_AGE: float = 60.0     # seconds — max age before cached state is "too old"
+
+
+# ---------------------------------------------------------------------------
+# Backoff tracking
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _BackoffState:
+    """Tracks exponential backoff for MQTT reconnection attempts.
+
+    :param attempt_count: Number of consecutive failed connection attempts.
+    :param last_attempt_time: :func:`time.monotonic` timestamp of the last attempt.
+    :param next_retry_time: Earliest :func:`time.monotonic` timestamp at which
+        the next connection attempt is permitted.
+    """
+
+    attempt_count: int = 0
+    last_attempt_time: float = 0.0
+    next_retry_time: float = 0.0
+
+    def record_failure(self) -> None:
+        """Record a failed connection attempt and advance the backoff window."""
+        now = time.monotonic()
+        self.attempt_count += 1
+        self.last_attempt_time = now
+        delay = min(
+            _BACKOFF_INITIAL_DELAY * (_BACKOFF_MULTIPLIER ** (self.attempt_count - 1)),
+            _BACKOFF_MAX_DELAY,
+        )
+        self.next_retry_time = now + delay
+        logger.debug(
+            "MQTT backoff: attempt #%d, next retry in %.1fs",
+            self.attempt_count,
+            delay,
+        )
+
+    def record_success(self) -> None:
+        """Reset backoff state after a successful connection."""
+        self.attempt_count = 0
+        self.last_attempt_time = time.monotonic()
+        self.next_retry_time = 0.0
+
+    def in_cooldown(self) -> bool:
+        """Return ``True`` if the backoff cooldown period has not yet elapsed."""
+        return time.monotonic() < self.next_retry_time
 
 # Mapping from Bambu ``gcode_state`` strings to :class:`PrinterStatus`.
 _STATE_MAP: Dict[str, PrinterStatus] = {
@@ -208,17 +260,16 @@ class BambuAdapter(PrinterAdapter):
         # State cache -- updated by MQTT messages.
         self._state_lock = threading.Lock()
         self._last_status: Dict[str, Any] = {}
+        self._last_state_time: float = 0.0  # monotonic time of last accepted update
         self._connected = False
         self._sequence_id = 0
-        self._last_update_time: float = 0.0
 
         # MQTT client.
         self._mqtt_client: Optional[mqtt.Client] = None
         self._mqtt_connected = threading.Event()
 
-        # Reconnection backoff tracking.
-        self._reconnect_attempt: int = 0
-        self._last_reconnect_time: float = 0.0
+        # Exponential backoff for reconnection attempts.
+        self._backoff = _BackoffState()
 
     # -- PrinterAdapter identity properties ---------------------------------
 
@@ -258,14 +309,27 @@ class BambuAdapter(PrinterAdapter):
     def _ensure_mqtt(self) -> mqtt.Client:
         """Ensure the MQTT client is connected, creating it if needed.
 
+        Respects the exponential backoff schedule.  If the backoff cooldown
+        has not yet elapsed, raises :class:`PrinterError` immediately
+        instead of hammering the printer with connection attempts.
+
         Returns:
             The connected MQTT client.
 
         Raises:
-            PrinterError: If connection fails within the timeout.
+            PrinterError: If connection fails within the timeout or the
+                adapter is in a backoff cooldown period.
         """
         if self._mqtt_client is not None and self._mqtt_connected.is_set():
             return self._mqtt_client
+
+        # Respect backoff cooldown — don't spam reconnection attempts.
+        if self._backoff.in_cooldown():
+            raise PrinterError(
+                f"MQTT reconnection to {self._host} is in backoff cooldown "
+                f"(attempt #{self._backoff.attempt_count}, "
+                f"retry in {self._backoff.next_retry_time - time.monotonic():.1f}s)"
+            )
 
         # Tear down stale client that lost its connection.
         if self._mqtt_client is not None:
@@ -302,6 +366,7 @@ class BambuAdapter(PrinterAdapter):
             # Wait for the connection to be established.
             if not self._mqtt_connected.wait(timeout=self._timeout):
                 client.loop_stop()
+                self._backoff.record_failure()
                 raise PrinterError(
                     f"MQTT connection to {self._host}:{_MQTT_PORT} "
                     f"timed out after {self._timeout}s.\n"
@@ -314,11 +379,13 @@ class BambuAdapter(PrinterAdapter):
                 )
 
             self._mqtt_client = client
+            self._backoff.record_success()
             return client
 
         except PrinterError:
             raise
         except Exception as exc:
+            self._backoff.record_failure()
             raise PrinterError(
                 f"Failed to connect MQTT to {self._host}:{_MQTT_PORT}: {exc}",
                 cause=exc,
@@ -363,7 +430,12 @@ class BambuAdapter(PrinterAdapter):
         userdata: Any,
         msg: mqtt.MQTTMessage,
     ) -> None:
-        """MQTT on_message callback -- update cached state."""
+        """MQTT on_message callback -- update cached state.
+
+        Applies stale-update rejection: if the incoming message carries a
+        ``msg_timestamp`` (epoch seconds) that is older than the timestamp
+        of the last accepted update, the message is silently discarded.
+        """
         try:
             payload = json.loads(msg.payload)
         except (json.JSONDecodeError, UnicodeDecodeError):
@@ -375,8 +447,32 @@ class BambuAdapter(PrinterAdapter):
         if isinstance(print_data, dict):
             cmd = str(print_data.get("command", "")).lower()
             if cmd == "push_status":
+                # Stale-update rejection: discard messages with an older
+                # timestamp than the most recently accepted update.
+                msg_ts = print_data.get("msg_timestamp")
                 with self._state_lock:
+                    if msg_ts is not None:
+                        try:
+                            msg_ts_float = float(msg_ts)
+                        except (TypeError, ValueError):
+                            msg_ts_float = None
+                        if msg_ts_float is not None:
+                            last_ts = self._last_status.get("msg_timestamp")
+                            if last_ts is not None:
+                                try:
+                                    last_ts_float = float(last_ts)
+                                except (TypeError, ValueError):
+                                    last_ts_float = None
+                                if last_ts_float is not None and msg_ts_float < last_ts_float:
+                                    logger.debug(
+                                        "Discarding stale MQTT update "
+                                        "(msg_ts=%.0f < last_ts=%.0f)",
+                                        msg_ts_float,
+                                        last_ts_float,
+                                    )
+                                    return
                     self._last_status.update(print_data)
+                    self._last_state_time = time.monotonic()
 
     def _publish_command(
         self,
@@ -480,22 +576,8 @@ class BambuAdapter(PrinterAdapter):
     # PrinterAdapter -- state queries
     # ------------------------------------------------------------------
 
-    def get_state(self) -> PrinterState:
-        """Retrieve the current printer state and temperatures.
-
-        Uses the MQTT status cache, which is updated by periodic pushes
-        from the printer and explicit ``pushall`` requests.
-
-        Returns an OFFLINE state when MQTT is unreachable.
-        """
-        try:
-            status = self._get_cached_status()
-        except PrinterError:
-            return PrinterState(
-                connected=False,
-                state=PrinterStatus.OFFLINE,
-            )
-
+    def _build_state_from_cache(self, status: Dict[str, Any]) -> PrinterState:
+        """Convert a cached status dict into a :class:`PrinterState`."""
         gcode_state = status.get("gcode_state", "unknown")
         if not isinstance(gcode_state, str):
             gcode_state = "unknown"
@@ -513,6 +595,44 @@ class BambuAdapter(PrinterAdapter):
             bed_temp_target=status.get("bed_target_temper"),
             chamber_temp_actual=status.get("chamber_temper"),
         )
+
+    def get_state(self) -> PrinterState:
+        """Retrieve the current printer state and temperatures.
+
+        Uses the MQTT status cache, which is updated by periodic pushes
+        from the printer and explicit ``pushall`` requests.
+
+        During a backoff cooldown period, returns the last known state if
+        it is recent enough (< :data:`_STALE_STATE_MAX_AGE` seconds old),
+        otherwise returns OFFLINE without attempting reconnection.
+        """
+        # If we are in backoff cooldown, avoid the reconnect attempt.
+        if self._backoff.in_cooldown():
+            with self._state_lock:
+                age = time.monotonic() - self._last_state_time
+                if self._last_status and age < _STALE_STATE_MAX_AGE:
+                    logger.debug(
+                        "In backoff cooldown; returning cached state (%.1fs old)",
+                        age,
+                    )
+                    return self._build_state_from_cache(dict(self._last_status))
+            logger.debug(
+                "In backoff cooldown with no recent cached state; returning OFFLINE"
+            )
+            return PrinterState(
+                connected=False,
+                state=PrinterStatus.OFFLINE,
+            )
+
+        try:
+            status = self._get_cached_status()
+        except PrinterError:
+            return PrinterState(
+                connected=False,
+                state=PrinterStatus.OFFLINE,
+            )
+
+        return self._build_state_from_cache(status)
 
     def get_job(self) -> JobProgress:
         """Retrieve progress info for the active (or last) print job.
