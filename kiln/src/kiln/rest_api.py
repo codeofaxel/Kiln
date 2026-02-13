@@ -601,6 +601,18 @@ def run_rest_server(config: RestApiConfig | None = None) -> None:
         config = RestApiConfig()
 
     app = create_app(config)
+
+    # Warn when binding to a non-localhost address without authentication
+    _LOCALHOST_ADDRESSES = {"127.0.0.1", "localhost", "::1"}
+    if config.host not in _LOCALHOST_ADDRESSES:
+        auth_enabled = os.environ.get("KILN_AUTH_ENABLED", "").lower() in ("1", "true")
+        if not auth_enabled:
+            logger.critical(
+                "REST API binding to %s WITHOUT authentication. "
+                "Set KILN_AUTH_ENABLED=1 or restrict to localhost.",
+                config.host,
+            )
+
     logger.info(
         "Starting Kiln REST API on %s:%d (tier: %s)",
         config.host,

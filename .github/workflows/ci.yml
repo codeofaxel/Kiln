@@ -78,3 +78,20 @@ jobs:
             fi
           fi
         continue-on-error: true
+
+      - name: Generate SBOM (CycloneDX)
+        if: matrix.python-version == '3.12'
+        run: |
+          pip install cyclonedx-bom
+          cyclonedx-py environment --output-format json -o sbom.json
+          echo "SBOM generated: $(wc -c < sbom.json) bytes"
+        continue-on-error: true
+
+      - name: Upload SBOM artifact
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+          retention-days: 90
+        continue-on-error: true
