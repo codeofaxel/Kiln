@@ -165,6 +165,20 @@ class BillingLedger:
         Returns:
             A :class:`FeeCalculation` with all fee details.
         """
+        return self._calculate_fee_locked(job_cost, currency)
+
+    def _calculate_fee_locked(
+        self,
+        job_cost: float,
+        currency: str = "USD",
+    ) -> FeeCalculation:
+        """Core fee calculation logic.
+
+        May be called with or without ``self._lock`` held.  The public
+        :meth:`calculate_fee` delegates here for backward compatibility;
+        :meth:`calculate_and_record_fee` calls this while already
+        holding the lock.
+        """
         policy = self._policy
 
         # Zero or negative job cost -- no fee.
@@ -289,6 +303,29 @@ class BillingLedger:
         Returns:
             The generated charge ID.
         """
+        return self._record_charge_locked(
+            job_id, fee_calc,
+            payment_id=payment_id,
+            payment_rail=payment_rail,
+            payment_status=payment_status,
+        )
+
+    def _record_charge_locked(
+        self,
+        job_id: str,
+        fee_calc: FeeCalculation,
+        *,
+        payment_id: Optional[str] = None,
+        payment_rail: Optional[str] = None,
+        payment_status: str = "pending",
+    ) -> str:
+        """Core charge-recording logic.
+
+        May be called with or without ``self._lock`` held.  The public
+        :meth:`record_charge` delegates here for backward compatibility;
+        :meth:`calculate_and_record_fee` calls this while already
+        holding the lock.
+        """
         charge_id = secrets.token_hex(8)
         now = time.time()
 
@@ -333,6 +370,43 @@ class BillingLedger:
             payment_status,
         )
         return charge_id
+
+    def calculate_and_record_fee(
+        self,
+        job_id: str,
+        job_cost: float,
+        currency: str = "USD",
+        *,
+        payment_id: Optional[str] = None,
+        payment_rail: Optional[str] = None,
+        payment_status: str = "pending",
+    ) -> tuple[FeeCalculation, str]:
+        """Atomically calculate fee and record charge.
+
+        Holds the lock for the entire calculate-then-record sequence to
+        prevent race conditions where concurrent requests see stale
+        free-tier counts or monthly totals.
+
+        Args:
+            job_id: Unique identifier of the order.
+            job_cost: Raw cost from the manufacturing provider.
+            currency: Currency of the job cost.
+            payment_id: Provider-specific payment ID.
+            payment_rail: Payment rail used.
+            payment_status: Status of the payment.
+
+        Returns:
+            Tuple of ``(FeeCalculation, charge_id)``.
+        """
+        with self._lock:
+            fee_calc = self._calculate_fee_locked(job_cost, currency)
+            charge_id = self._record_charge_locked(
+                job_id, fee_calc,
+                payment_id=payment_id,
+                payment_rail=payment_rail,
+                payment_status=payment_status,
+            )
+        return fee_calc, charge_id
 
     # ------------------------------------------------------------------
     # Queries

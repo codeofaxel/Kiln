@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import threading
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -72,6 +73,7 @@ class PaymentManager:
         self._event_bus = event_bus
         self._ledger = ledger or BillingLedger(db=db)
         self._providers: Dict[str, PaymentProvider] = {}
+        self._charge_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Provider registration
@@ -157,19 +159,30 @@ class PaymentManager:
         fee_calc: FeeCalculation,
         *,
         rail: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> PaymentResult:
         """Collect a platform fee for an outsourced order.
 
-        1. Checks spend limits.
-        2. Sends the fee to the chosen provider.
-        3. Records the payment in SQLite.
-        4. Records the billing charge in the ledger.
-        5. Emits payment events.
+        The entire flow is serialized behind ``_charge_lock`` to prevent
+        concurrent double-charges for the same job.  An idempotency
+        check returns the cached result when a charge already exists for
+        the given ``job_id``.
+
+        1. Checks for existing charge (idempotency).
+        2. Checks spend limits.
+        3. Sends the fee to the chosen provider.
+        4. Records the payment in SQLite.
+        5. Records the billing charge in the ledger.
+        6. Emits payment events.
 
         Args:
             job_id: The fulfillment order/job ID.
             fee_calc: Pre-calculated fee from :class:`BillingLedger`.
             rail: Provider name override (defaults to active rail).
+            idempotency_key: Optional caller-supplied key.  Currently
+                the ``job_id`` itself provides idempotency; this param
+                is accepted for forward-compatibility with external
+                retry protocols.
 
         Returns:
             :class:`PaymentResult` from the provider.
@@ -178,145 +191,162 @@ class PaymentManager:
             PaymentError: If spend limits exceeded, no provider
                 available, or payment fails unrecoverably.
         """
-        # Waived fees need no payment.
-        if fee_calc.waived or fee_calc.fee_amount <= 0:
-            self._ledger.record_charge(
-                job_id, fee_calc,
-                payment_status="waived",
-            )
-            return PaymentResult(
-                success=True,
-                payment_id="",
-                status=PaymentStatus.COMPLETED,
-                amount=0.0,
-                currency=Currency.USD,
-                rail=PaymentRail.STRIPE,
+        with self._charge_lock:
+            # 0. Idempotency — return cached result if already charged.
+            existing = self._ledger.get_job_charges(job_id)
+            if existing is not None:
+                logger.info(
+                    "Charge already exists for job %s — returning cached result",
+                    job_id,
+                )
+                return PaymentResult(
+                    success=True,
+                    payment_id="",
+                    status=PaymentStatus.COMPLETED,
+                    amount=existing.fee_amount,
+                    currency=Currency(existing.currency),
+                    rail=PaymentRail.STRIPE,
+                )
+
+            # Waived fees need no payment.
+            if fee_calc.waived or fee_calc.fee_amount <= 0:
+                self._ledger.record_charge(
+                    job_id, fee_calc,
+                    payment_status="waived",
+                )
+                return PaymentResult(
+                    success=True,
+                    payment_id="",
+                    status=PaymentStatus.COMPLETED,
+                    amount=0.0,
+                    currency=Currency.USD,
+                    rail=PaymentRail.STRIPE,
+                )
+
+            # 1. Spend limits
+            ok, reason = self.check_spend_limits(fee_calc.fee_amount)
+            if not ok:
+                self._emit("SPEND_LIMIT_REACHED", {
+                    "job_id": job_id,
+                    "fee_amount": fee_calc.fee_amount,
+                    "reason": reason,
+                })
+                raise PaymentError(
+                    f"Spend limit exceeded: {reason}",
+                    code="SPEND_LIMIT",
+                )
+
+            # 2. Resolve provider
+            provider_name = rail or self.get_active_rail()
+            provider = self._providers.get(provider_name)
+            if provider is None:
+                raise PaymentError(
+                    f"Payment provider {provider_name!r} not registered.",
+                    code="NO_PROVIDER",
+                )
+
+            # 3. Build request
+            metadata: Dict[str, Any] = {}
+            if provider.name == "circle":
+                from kiln.wallets import get_ethereum_wallet, get_solana_wallet
+                if provider.rail in (PaymentRail.BASE, PaymentRail.ETHEREUM):
+                    metadata["destination_address"] = get_ethereum_wallet().address
+                else:
+                    metadata["destination_address"] = get_solana_wallet().address
+            request = PaymentRequest(
+                amount=fee_calc.fee_amount,
+                currency=_fee_currency(fee_calc, provider),
+                rail=provider.rail,
+                job_id=job_id,
+                description=f"Kiln platform fee for order {job_id}",
+                metadata=metadata,
             )
 
-        # 1. Spend limits
-        ok, reason = self.check_spend_limits(fee_calc.fee_amount)
-        if not ok:
-            self._emit("SPEND_LIMIT_REACHED", {
+            # 4. Emit initiated event
+            self._emit("PAYMENT_INITIATED", {
                 "job_id": job_id,
-                "fee_amount": fee_calc.fee_amount,
-                "reason": reason,
+                "amount": fee_calc.fee_amount,
+                "rail": provider.name,
             })
-            raise PaymentError(
-                f"Spend limit exceeded: {reason}",
-                code="SPEND_LIMIT",
-            )
 
-        # 2. Resolve provider
-        provider_name = rail or self.get_active_rail()
-        provider = self._providers.get(provider_name)
-        if provider is None:
-            raise PaymentError(
-                f"Payment provider {provider_name!r} not registered.",
-                code="NO_PROVIDER",
-            )
+            # 5. Execute payment
+            payment_id = secrets.token_hex(8)
+            try:
+                result = provider.create_payment(request)
+            except PaymentError:
+                # Record the failed attempt
+                self._persist_payment(
+                    payment_id, "", provider.name, provider.rail.value,
+                    fee_calc.fee_amount, fee_calc.currency,
+                    "failed", error="Payment error",
+                )
+                self._emit("PAYMENT_FAILED", {
+                    "job_id": job_id,
+                    "rail": provider.name,
+                })
+                raise
 
-        # 3. Build request
-        metadata: Dict[str, Any] = {}
-        if provider.name == "circle":
-            from kiln.wallets import get_ethereum_wallet, get_solana_wallet
-            if provider.rail in (PaymentRail.BASE, PaymentRail.ETHEREUM):
-                metadata["destination_address"] = get_ethereum_wallet().address
-            else:
-                metadata["destination_address"] = get_solana_wallet().address
-        request = PaymentRequest(
-            amount=fee_calc.fee_amount,
-            currency=_fee_currency(fee_calc, provider),
-            rail=provider.rail,
-            job_id=job_id,
-            description=f"Kiln platform fee for order {job_id}",
-            metadata=metadata,
-        )
-
-        # 4. Emit initiated event
-        self._emit("PAYMENT_INITIATED", {
-            "job_id": job_id,
-            "amount": fee_calc.fee_amount,
-            "rail": provider.name,
-        })
-
-        # 5. Execute payment
-        payment_id = secrets.token_hex(8)
-        try:
-            result = provider.create_payment(request)
-        except PaymentError:
-            # Record the failed attempt
+            # 6. Persist payment record
             self._persist_payment(
-                payment_id, "", provider.name, provider.rail.value,
-                fee_calc.fee_amount, fee_calc.currency,
-                "failed", error="Payment error",
+                payment_id, result.payment_id, provider.name,
+                result.rail.value, result.amount, result.currency.value,
+                result.status.value,
+                tx_hash=result.tx_hash,
+                error=result.error,
             )
-            self._emit("PAYMENT_FAILED", {
-                "job_id": job_id,
-                "rail": provider.name,
-            })
-            raise
 
-        # 6. Persist payment record
-        self._persist_payment(
-            payment_id, result.payment_id, provider.name,
-            result.rail.value, result.amount, result.currency.value,
-            result.status.value,
-            tx_hash=result.tx_hash,
-            error=result.error,
-        )
+            # 7. Record billing charge — if this fails, update payment with error
+            try:
+                charge_id = self._ledger.record_charge(
+                    job_id, fee_calc,
+                    payment_id=result.payment_id,
+                    payment_rail=provider.name,
+                    payment_status=result.status.value,
+                )
+            except Exception as exc:
+                logger.error(
+                    "Failed to record billing charge for payment %s: %s",
+                    payment_id, exc,
+                )
+                # Update payment record to reflect the billing failure
+                self._db.save_payment({
+                    "id": payment_id,
+                    "error": f"Payment succeeded but billing record failed: {type(exc).__name__}",
+                    "status": "billing_error",
+                    "updated_at": time.time(),
+                })
+                raise
 
-        # 7. Record billing charge — if this fails, update payment with error
-        try:
-            charge_id = self._ledger.record_charge(
-                job_id, fee_calc,
-                payment_id=result.payment_id,
-                payment_rail=provider.name,
-                payment_status=result.status.value,
-            )
-        except Exception as exc:
-            logger.error(
-                "Failed to record billing charge for payment %s: %s",
-                payment_id, exc,
-            )
-            # Update payment record to reflect the billing failure
-            self._db.save_payment({
-                "id": payment_id,
-                "error": f"Payment succeeded but billing record failed: {type(exc).__name__}",
-                "status": "billing_error",
-                "updated_at": time.time(),
-            })
-            raise
+            # 8. Emit outcome event
+            if result.success:
+                self._emit("PAYMENT_COMPLETED", {
+                    "job_id": job_id,
+                    "charge_id": charge_id,
+                    "payment_id": result.payment_id,
+                    "amount": result.amount,
+                    "rail": provider.name,
+                })
+            elif result.status == PaymentStatus.PROCESSING:
+                self._emit("PAYMENT_PROCESSING", {
+                    "job_id": job_id,
+                    "charge_id": charge_id,
+                    "payment_id": result.payment_id,
+                    "amount": result.amount,
+                    "rail": provider.name,
+                    "message": (
+                        "Payment initiated but not yet confirmed. "
+                        "Use check_payment_status to poll for completion."
+                    ),
+                })
+            else:
+                self._emit("PAYMENT_FAILED", {
+                    "job_id": job_id,
+                    "payment_id": result.payment_id,
+                    "error": result.error,
+                    "rail": provider.name,
+                })
 
-        # 8. Emit outcome event
-        if result.success:
-            self._emit("PAYMENT_COMPLETED", {
-                "job_id": job_id,
-                "charge_id": charge_id,
-                "payment_id": result.payment_id,
-                "amount": result.amount,
-                "rail": provider.name,
-            })
-        elif result.status == PaymentStatus.PROCESSING:
-            self._emit("PAYMENT_PROCESSING", {
-                "job_id": job_id,
-                "charge_id": charge_id,
-                "payment_id": result.payment_id,
-                "amount": result.amount,
-                "rail": provider.name,
-                "message": (
-                    "Payment initiated but not yet confirmed. "
-                    "Use check_payment_status to poll for completion."
-                ),
-            })
-        else:
-            self._emit("PAYMENT_FAILED", {
-                "job_id": job_id,
-                "payment_id": result.payment_id,
-                "error": result.error,
-                "rail": provider.name,
-            })
-
-        return result
+            return result
 
     # ------------------------------------------------------------------
     # Auth-and-capture flow
@@ -328,6 +358,7 @@ class PaymentManager:
         fee_calc: FeeCalculation,
         *,
         rail: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> PaymentResult:
         """Place a hold for the platform fee (quote-time).
 
@@ -335,90 +366,96 @@ class PaymentManager:
         If the provider doesn't support holds, falls back to a no-op
         (the fee will be collected at order time via :meth:`charge_fee`).
 
+        The entire flow is serialized behind ``_charge_lock`` to prevent
+        concurrent duplicate authorizations.
+
         Args:
             job_id: Quote or job identifier.
             fee_calc: Pre-calculated fee.
             rail: Provider name override.
+            idempotency_key: Optional caller-supplied key for
+                forward-compatibility with external retry protocols.
 
         Returns:
             :class:`PaymentResult` with ``AUTHORIZED`` status on success.
         """
-        if fee_calc.waived or fee_calc.fee_amount <= 0:
-            return PaymentResult(
-                success=True,
-                payment_id="",
-                status=PaymentStatus.COMPLETED,
-                amount=0.0,
-                currency=Currency.USD,
-                rail=PaymentRail.STRIPE,
-            )
+        with self._charge_lock:
+            if fee_calc.waived or fee_calc.fee_amount <= 0:
+                return PaymentResult(
+                    success=True,
+                    payment_id="",
+                    status=PaymentStatus.COMPLETED,
+                    amount=0.0,
+                    currency=Currency.USD,
+                    rail=PaymentRail.STRIPE,
+                )
 
-        ok, reason = self.check_spend_limits(fee_calc.fee_amount)
-        if not ok:
-            self._emit("SPEND_LIMIT_REACHED", {
-                "job_id": job_id,
-                "fee_amount": fee_calc.fee_amount,
-                "reason": reason,
-            })
-            raise PaymentError(
-                f"Spend limit exceeded: {reason}",
-                code="SPEND_LIMIT",
-            )
+            ok, reason = self.check_spend_limits(fee_calc.fee_amount)
+            if not ok:
+                self._emit("SPEND_LIMIT_REACHED", {
+                    "job_id": job_id,
+                    "fee_amount": fee_calc.fee_amount,
+                    "reason": reason,
+                })
+                raise PaymentError(
+                    f"Spend limit exceeded: {reason}",
+                    code="SPEND_LIMIT",
+                )
 
-        provider_name = rail or self.get_active_rail()
-        provider = self._providers.get(provider_name)
-        if provider is None:
-            raise PaymentError(
-                f"Payment provider {provider_name!r} not registered.",
-                code="NO_PROVIDER",
-            )
+            provider_name = rail or self.get_active_rail()
+            provider = self._providers.get(provider_name)
+            if provider is None:
+                raise PaymentError(
+                    f"Payment provider {provider_name!r} not registered.",
+                    code="NO_PROVIDER",
+                )
 
-        metadata: Dict[str, Any] = {}
-        if provider.name == "circle":
-            from kiln.wallets import get_ethereum_wallet, get_solana_wallet
-            if provider.rail in (PaymentRail.BASE, PaymentRail.ETHEREUM):
-                metadata["destination_address"] = get_ethereum_wallet().address
-            else:
-                metadata["destination_address"] = get_solana_wallet().address
-        request = PaymentRequest(
-            amount=fee_calc.fee_amount,
-            currency=_fee_currency(fee_calc, provider),
-            rail=provider.rail,
-            job_id=job_id,
-            description=f"Kiln fee hold for quote {job_id}",
-            metadata=metadata,
-        )
-
-        try:
-            result = provider.authorize_payment(request)
-        except NotImplementedError:
-            # Provider doesn't support holds — return a synthetic
-            # "authorized" result; charge_fee will do the real work later.
-            return PaymentResult(
-                success=True,
-                payment_id="",
-                status=PaymentStatus.AUTHORIZED,
+            metadata: Dict[str, Any] = {}
+            if provider.name == "circle":
+                from kiln.wallets import get_ethereum_wallet, get_solana_wallet
+                if provider.rail in (PaymentRail.BASE, PaymentRail.ETHEREUM):
+                    metadata["destination_address"] = get_ethereum_wallet().address
+                else:
+                    metadata["destination_address"] = get_solana_wallet().address
+            request = PaymentRequest(
                 amount=fee_calc.fee_amount,
                 currency=_fee_currency(fee_calc, provider),
                 rail=provider.rail,
+                job_id=job_id,
+                description=f"Kiln fee hold for quote {job_id}",
+                metadata=metadata,
             )
 
-        # Persist the authorization
-        payment_id = secrets.token_hex(8)
-        self._persist_payment(
-            payment_id, result.payment_id, provider.name,
-            result.rail.value, result.amount, result.currency.value,
-            result.status.value,
-        )
+            try:
+                result = provider.authorize_payment(request)
+            except NotImplementedError:
+                # Provider doesn't support holds — return a synthetic
+                # "authorized" result; charge_fee will do the real work later.
+                return PaymentResult(
+                    success=True,
+                    payment_id="",
+                    status=PaymentStatus.AUTHORIZED,
+                    amount=fee_calc.fee_amount,
+                    currency=_fee_currency(fee_calc, provider),
+                    rail=provider.rail,
+                )
 
-        self._emit("PAYMENT_INITIATED", {
-            "job_id": job_id,
-            "amount": fee_calc.fee_amount,
-            "rail": provider.name,
-            "type": "authorization",
-        })
+            # Persist the authorization
+            payment_id = secrets.token_hex(8)
+            self._persist_payment(
+                payment_id, result.payment_id, provider.name,
+                result.rail.value, result.amount, result.currency.value,
+                result.status.value,
+            )
 
-        return result
+            self._emit("PAYMENT_INITIATED", {
+                "job_id": job_id,
+                "amount": fee_calc.fee_amount,
+                "rail": provider.name,
+                "type": "authorization",
+            })
+
+            return result
 
     def capture_fee(
         self,

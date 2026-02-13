@@ -201,11 +201,31 @@ Kiln includes a multi-rail payment processing layer. A `PaymentProvider` abstrac
 
 ## 8. Security Considerations
 
-- **Network isolation.** Kiln communicates with printers over the local network only. No cloud relay.
-- **API key authentication.** Optional scope-based authentication gates MCP tools when enabled.
-- **Credential storage.** API keys and access codes are stored in `~/.kiln/config.yaml` with permission warnings for world-readable files.
-- **Input validation.** All file paths, G-code commands, and temperature values are validated before reaching printer hardware.
-- **Heater watchdog.** A background daemon monitors heater state and automatically cools down idle heaters after a configurable timeout (default 30 minutes, via `KILN_HEATER_TIMEOUT`). Prevents fire hazards from heaters left on when no print is active.
+Kiln controls physical hardware, processes untrusted agent output, and accepts network requests from external clients. The security model is organized into six layers, each addressing a distinct threat surface.
+
+### 8.1 Physical Safety Enforcement
+
+The most consequential class of vulnerability in a manufacturing protocol is one that causes physical damage. Kiln enforces safety invariants at three levels described in Section 2.3: G-code command validation, pre-flight checks before every print job, and hard temperature ceilings. Additionally, per-printer safety profiles (`data/safety_profiles.json`) define model-specific limits for 27 printer models — maximum hotend and bed temperatures, axis travel bounds, and maximum feedrates. These limits are loaded at startup and checked on every `set_temperature` and `send_gcode` call; requests exceeding them are rejected with a structured error before any command reaches the printer. A background heater watchdog monitors thermal state and automatically cools idle heaters after a configurable timeout (default 30 minutes, via `KILN_HEATER_TIMEOUT`) to prevent fire hazards.
+
+### 8.2 Authentication and Authorization
+
+Authentication is optional and disabled by default for local-only deployments. When enabled (`KILN_AUTH_ENABLED=1`), the `AuthManager` enforces API key verification on every MCP tool call and REST endpoint. Keys are SHA-256 hashed at rest and never stored in plaintext. Each key carries a set of scopes (`read`, `write`, `admin`) that gate access to tool categories — a read-scoped key cannot start prints or send G-code. The key lifecycle supports generation (with a `sk_kiln_` prefix), rotation with a configurable grace period (default 24 hours of dual-key validity), deprecation, and immediate revocation. When authentication is enabled without an explicit key, Kiln auto-generates a session key and logs it at startup, ensuring the system is never accidentally left unprotected.
+
+### 8.3 Network Security
+
+The REST API layer (`rest_api.py`) implements a sliding-window rate limiter that tracks per-client request timestamps and enforces configurable limits (default 60 requests/minute via `KILN_RATE_LIMIT`). Exceeded clients receive `429` responses with standard `Retry-After` and `X-RateLimit-Reset` headers. CORS origins are explicitly whitelisted — no wildcard origins are permitted. Webhook delivery includes SSRF prevention: before dispatching an event payload, `_validate_webhook_url` resolves the target hostname and checks the resulting IP against a block list of private and reserved networks (RFC 1918, link-local, loopback, and IPv6 equivalents). Webhook payloads are signed with HMAC-SHA256 when a secret is provided, allowing receivers to verify authenticity and integrity.
+
+### 8.4 Agent Safety
+
+Tool results returned from printer APIs may contain arbitrary strings that, if passed verbatim to an LLM, could constitute prompt injection. The `_sanitize_tool_output` function in the agent loop strips common injection patterns — phrases attempting to impersonate system messages, override instructions, or redefine the agent's role — and truncates output to a configurable maximum (default 50,000 characters) to prevent context-window flooding. A privacy mode (enabled by default via `KILN_LLM_PRIVACY_MODE`) redacts private IP addresses, port numbers, Bearer tokens, and Authorization headers from all tool results before they enter the LLM context, preventing unintentional leakage of network topology. Tool tiers further restrict exposure: weaker models receive only 15 essential tools, mid-tier models receive ~40, and only strong models (Claude, GPT-4) receive the full tool set — reducing the attack surface for models with less reliable function-calling behavior.
+
+### 8.5 Data Protection
+
+All SQL queries in the persistence layer use parameterized statements — no string interpolation touches query construction. The codebase contains no calls to `eval()` or `exec()`. The plugin system enforces an explicit allow-list: only plugins named in the user's configuration are loaded, preventing arbitrary code execution from unexpected entry points. Plugin hooks run inside fault-isolation wrappers so that exceptions in third-party code do not crash the host process or corrupt shared state. Credentials and API keys stored in `~/.kiln/config.yaml` are checked for file permissions at load time, with a warning emitted if the file is world-readable.
+
+### 8.6 Audit Trail
+
+Safety-critical operations are recorded through two mechanisms. The event bus persists all significant state changes — job transitions, printer status changes, temperature warnings — to SQLite, providing a queryable history of system behavior. A dedicated `safety_audit` tool reviews recent safety-relevant actions (guarded commands, emergency stops, temperature limit rejections) and surfaces them to agents or operators on demand. Together, these provide a tamper-evident record of every physical action the system has taken.
 
 ## 9. Closed-Loop Vision Monitoring
 

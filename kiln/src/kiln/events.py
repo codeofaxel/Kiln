@@ -106,9 +106,11 @@ class EventType(enum.Enum):
     FULFILLMENT_PROCESSING = "fulfillment.processing"
     FULFILLMENT_PRINTING = "fulfillment.printing"
     FULFILLMENT_SHIPPING = "fulfillment.shipping"
+    FULFILLMENT_SHIPPED = "fulfillment.shipped"
     FULFILLMENT_DELIVERED = "fulfillment.delivered"
     FULFILLMENT_CANCELLED = "fulfillment.cancelled"
     FULFILLMENT_FAILED = "fulfillment.failed"
+    FULFILLMENT_STALLED = "fulfillment.stalled"
 
     # Vision monitoring
     VISION_CHECK = "vision.check"

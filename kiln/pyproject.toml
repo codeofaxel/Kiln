@@ -44,6 +44,7 @@ stripe = ["stripe>=5.0"]
 payments = ["stripe>=5.0", "cryptography>=41.0"]
 dev = [
     "pytest>=7.0",
+    "pytest-cov>=4.0",
     "pytest-mock>=3.6",
     "responses>=0.20",
 ]

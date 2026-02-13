@@ -216,7 +216,7 @@ class KilnDB:
 
                 CREATE TABLE IF NOT EXISTS billing_charges (
                     id              TEXT PRIMARY KEY,
-                    job_id          TEXT NOT NULL,
+                    job_id          TEXT NOT NULL UNIQUE,
                     order_id        TEXT,
                     fee_amount      REAL NOT NULL,
                     fee_percent     REAL NOT NULL,
@@ -859,11 +859,11 @@ class KilnDB:
     # ------------------------------------------------------------------
 
     def save_billing_charge(self, charge: Dict[str, Any]) -> None:
-        """Insert or replace a billing charge record."""
+        """Insert a billing charge record, ignoring duplicates on job_id."""
         with self._write_lock:
             self._conn.execute(
                 """
-                INSERT OR REPLACE INTO billing_charges
+                INSERT OR IGNORE INTO billing_charges
                     (id, job_id, order_id, fee_amount, fee_percent,
                      job_cost, total_cost, currency, waived, waiver_reason,
                      payment_id, payment_rail, payment_status, created_at)
@@ -2140,6 +2140,28 @@ class KilnDB:
             cur = self._conn.execute(f"DELETE FROM snapshots{where}", params)
             self._conn.commit()
             return cur.rowcount
+
+    # ------------------------------------------------------------------
+    # Fulfillment order helpers
+    # ------------------------------------------------------------------
+
+    def list_active_fulfillment_orders(self) -> List[Dict[str, Any]]:
+        """Return fulfillment orders that are not yet delivered/failed/cancelled."""
+        rows = self._conn.execute(
+            "SELECT * FROM fulfillment_orders "
+            "WHERE status NOT IN ('delivered', 'completed', 'failed', 'cancelled', 'canceled') "
+            "ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_fulfillment_order_status(self, order_id: str, status: str) -> None:
+        """Update the status of a fulfillment order."""
+        with self._write_lock:
+            self._conn.execute(
+                "UPDATE fulfillment_orders SET status = ?, updated_at = ? WHERE order_id = ?",
+                (status, time.time(), order_id),
+            )
+            self._conn.commit()
 
     # ------------------------------------------------------------------
 

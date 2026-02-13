@@ -799,6 +799,44 @@ def _get_payment_mgr() -> PaymentManager:
     return _payment_mgr
 
 
+def _refund_after_order_failure(
+    pay_result: Optional[Any],
+    payment_hold_id: str,
+) -> None:
+    """Best-effort refund/cancel after a failed order placement.
+
+    If a completed charge exists (``pay_result``), attempts to refund it
+    via the provider that processed it.  If only a hold exists
+    (``payment_hold_id``), cancels the hold instead.  Failures are
+    logged but never raised — the caller already has an error to return.
+    """
+    if pay_result and getattr(pay_result, "payment_id", None):
+        try:
+            mgr = _get_payment_mgr()
+            rail_name = mgr.get_active_rail()
+            provider = mgr.get_provider(rail_name)
+            if provider:
+                provider.refund_payment(pay_result.payment_id)
+                logger.info(
+                    "Auto-refunded payment %s after order failure",
+                    pay_result.payment_id,
+                )
+        except Exception as refund_exc:
+            logger.error(
+                "Failed to refund payment %s after order failure: %s",
+                pay_result.payment_id, refund_exc,
+            )
+    elif payment_hold_id:
+        try:
+            mgr = _get_payment_mgr()
+            mgr.cancel_fee(payment_hold_id)
+            logger.info(
+                "Cancelled hold %s after order failure", payment_hold_id,
+            )
+        except Exception:
+            logger.debug("Could not cancel hold %s", payment_hold_id)
+
+
 # Error codes that represent transient failures the caller may retry.
 _RETRYABLE_CODES = frozenset({
     "ERROR",  # Generic printer / runtime errors are typically transient.
@@ -894,6 +932,27 @@ def _check_auth(scope: str) -> Optional[Dict[str, Any]]:
         result.get("error", "Authentication failed."),
         code="AUTH_ERROR",
     )
+
+
+def _check_billing_auth(scope: str = "print") -> Optional[Dict[str, Any]]:
+    """Check authentication for billable operations.
+
+    Unlike :func:`_check_auth`, this ALWAYS requires authentication for
+    operations that involve real money (fulfillment orders, payment
+    setup, etc.) — even when global auth is disabled.
+    """
+    if not _auth.enabled:
+        return {
+            "error": (
+                "Authentication required for paid operations. "
+                "Enable auth with KILN_AUTH_ENABLED=1 and set "
+                "KILN_AUTH_KEY=<your-key> before using fulfillment services. "
+                "See: kiln auth setup"
+            ),
+            "status": "error",
+            "code": "AUTH_REQUIRED",
+        }
+    return _check_auth(scope)
 
 
 # ---------------------------------------------------------------------------
@@ -1369,19 +1428,21 @@ def cancel_print() -> dict:
 
 
 @mcp.tool()
-def emergency_stop() -> dict:
-    """Perform an immediate emergency stop on the printer.
+def emergency_stop(printer_name: Optional[str] = None) -> dict:
+    """Trigger an emergency stop on one or all printers.
 
-    Sends a firmware-level halt (M112 or equivalent) that immediately
-    cuts power to heaters and stepper motors.  Unlike ``cancel_print``,
-    this does **not** allow a graceful cooldown — all motion ceases
-    instantly.
+    Sends M112 (emergency stop), turns off heaters, and disables steppers.
+    Unlike ``cancel_print``, this does **not** allow a graceful cooldown —
+    all motion ceases instantly.
 
     Use only in genuine safety emergencies (thermal runaway, collision,
     spaghetti failure threatening the hotend, etc.).
 
     WARNING: After an emergency stop the printer typically requires a
     power cycle or firmware restart before it can print again.
+
+    Args:
+        printer_name: Specific printer to stop. If None, stops ALL printers.
     """
     if err := _check_auth("print"):
         return err
@@ -1390,10 +1451,20 @@ def emergency_stop() -> dict:
     if conf := _check_confirmation("emergency_stop", {}):
         return conf
     try:
-        adapter = _get_adapter()
-        result = adapter.emergency_stop()
-        _audit("emergency_stop", "executed")
-        return result.to_dict()
+        from kiln.emergency import get_emergency_coordinator
+
+        coord = get_emergency_coordinator()
+        if printer_name:
+            result = coord.emergency_stop(printer_name)
+            _audit("emergency_stop", f"executed for {printer_name}")
+            return {"success": True, "emergency_stop": result.to_dict()}
+        else:
+            results = coord.emergency_stop_all()
+            _audit("emergency_stop", "executed for ALL printers")
+            return {
+                "success": True,
+                "emergency_stop": [r.to_dict() for r in results],
+            }
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(str(exc))
     except Exception as exc:
@@ -2755,6 +2826,8 @@ def billing_setup_url(rail: str = "stripe") -> dict:
     method setup.  After setup, Kiln automatically charges the platform
     fee on each outsourced manufacturing order.
     """
+    if err := _check_billing_auth("billing"):
+        return err
     try:
         mgr = _get_payment_mgr()
         url = mgr.get_setup_url(rail=rail)
@@ -2789,6 +2862,8 @@ def billing_status() -> dict:
     available payment rails, and fee policy.  More detailed than
     ``billing_summary`` — includes payment infrastructure state.
     """
+    if err := _check_billing_auth("billing"):
+        return err
     try:
         from kiln.cli.config import get_or_create_user_id
         user_id = get_or_create_user_id()
@@ -2812,6 +2887,8 @@ def billing_history(limit: int = 20) -> dict:
     Returns charge records including order cost, fee amount, payment
     rail, payment status, and timestamps.
     """
+    if err := _check_billing_auth("billing"):
+        return err
     try:
         mgr = _get_payment_mgr()
         charges = mgr.get_billing_history(limit=limit)
@@ -2861,6 +2938,72 @@ def check_payment_status(payment_id: str) -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in check_payment_status")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def refund_payment(payment_id: str, reason: str = "") -> dict:
+    """Request a refund for a completed payment.
+
+    Args:
+        payment_id: The payment ID from the original charge
+            (found in ``billing_history`` or the ``fulfillment_order`` response).
+        reason: Optional reason for the refund (for audit trail).
+
+    Refunds are processed through the original payment rail (Stripe or
+    Circle/USDC).  Stripe refunds are typically instant; USDC refunds
+    may take a few minutes to confirm on-chain.
+
+    Only completed payments can be refunded.  Authorized holds should
+    be released via the fulfillment cancellation flow instead.
+    """
+    if err := _check_billing_auth("admin"):
+        return err
+    try:
+        mgr = _get_payment_mgr()
+        # Try each provider until one recognises the payment_id.
+        for provider_name in mgr.available_rails:
+            provider = mgr.get_provider(provider_name)
+            if provider is None:
+                continue
+            try:
+                result = provider.refund_payment(payment_id)
+                # Emit refund event.
+                _event_bus.publish(
+                    EventType.PAYMENT_REFUNDED,
+                    {
+                        "payment_id": payment_id,
+                        "amount": result.amount,
+                        "rail": provider_name,
+                        "reason": reason,
+                        "status": result.status.value,
+                    },
+                    source="billing",
+                )
+                logger.info(
+                    "Refund processed: payment=%s amount=%.2f rail=%s reason=%s",
+                    payment_id, result.amount, provider_name, reason or "(none)",
+                )
+                return {
+                    "success": True,
+                    "refund": result.to_dict(),
+                    "message": (
+                        f"Refund of ${result.amount:.2f} initiated via {provider_name}. "
+                        "Stripe refunds are typically instant. "
+                        "USDC refunds may take a few minutes to confirm."
+                    ),
+                }
+            except PaymentError:
+                continue  # Not this provider's payment.
+            except Exception:
+                continue
+        return _error_dict(
+            f"Payment {payment_id!r} not found in any registered provider. "
+            "Verify the payment_id from billing_history.",
+            code="PAYMENT_NOT_FOUND",
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error in refund_payment")
+        return _error_dict(f"Refund failed: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4558,78 +4701,124 @@ def fulfillment_order(
     quote_id: str,
     shipping_option_id: str = "",
     payment_hold_id: str = "",
+    quoted_price: float = 0.0,
+    quoted_currency: str = "USD",
 ) -> dict:
     """Place a manufacturing order based on a previous quote.
+
+    Charges the platform fee BEFORE placing the order to prevent
+    unpaid orders.  If order placement fails after payment, the
+    charge is automatically refunded.
 
     Args:
         quote_id: Quote ID from ``fulfillment_quote``.
         shipping_option_id: Shipping option ID from the quote's
             ``shipping_options`` list.
         payment_hold_id: PaymentIntent ID from the quote's
-            ``payment_hold`` field (optional).  If provided, captures
-            the previously authorized hold instead of creating a new
-            charge.
+            ``payment_hold`` field.  If provided, the previously
+            authorized hold is captured before placing the order.
+            This is the preferred payment flow.
+        quoted_price: Total price returned by ``fulfillment_quote``
+            (used to calculate the fee when no ``payment_hold_id``
+            is provided).  Required when ``payment_hold_id`` is
+            empty and a payment rail is configured.
+        quoted_currency: Currency of ``quoted_price`` (default USD).
 
-    Places the order, then captures the fee hold (or creates a new
-    charge if no hold exists).  If the order fails after the hold is
-    captured, a refund is issued automatically.
-    Use ``fulfillment_order_status`` to track.
+    Use ``fulfillment_order_status`` to track progress after placing.
     """
-    if err := _check_auth("print"):
+    if err := _check_billing_auth("print"):
         return err
     try:
         provider = _get_fulfillment()
-        result = provider.place_order(OrderRequest(
-            quote_id=quote_id,
-            shipping_option_id=shipping_option_id,
-        ))
-        order_data = result.to_dict()
 
-        # Calculate and collect the platform fee.
-        if result.total_price and result.total_price > 0:
-            fee_calc = _billing.calculate_fee(
-                result.total_price, currency=result.currency,
-            )
-            order_data["kiln_fee"] = fee_calc.to_dict()
-            order_data["total_with_fee"] = fee_calc.total_cost
+        # 1. Determine the price and calculate the fee BEFORE placing.
+        estimated_price = quoted_price
+        currency = quoted_currency
+        pay_result = None
+        fee_calc = None
+
+        # 2. Charge / capture payment BEFORE placing the order.
+        if payment_hold_id or estimated_price > 0:
+            if estimated_price > 0:
+                fee_calc = _billing.calculate_fee(
+                    estimated_price, currency=currency,
+                )
 
             try:
                 mgr = _get_payment_mgr()
                 if mgr.available_rails:
                     if payment_hold_id:
                         # Capture the hold placed at quote time.
+                        if fee_calc is None:
+                            # Hold exists but no price given — capture
+                            # will use the amount from the original auth.
+                            fee_calc = _billing.calculate_fee(0.0)
                         pay_result = mgr.capture_fee(
-                            payment_hold_id, result.order_id, fee_calc,
+                            payment_hold_id, quote_id, fee_calc,
                         )
+                    elif fee_calc:
+                        # No hold — one-shot charge before order.
+                        pay_result = mgr.charge_fee(quote_id, fee_calc)
                     else:
-                        # No hold — one-shot charge.
-                        pay_result = mgr.charge_fee(result.order_id, fee_calc)
-                    order_data["payment"] = pay_result.to_dict()
+                        return _error_dict(
+                            "Cannot place order: no payment hold and no "
+                            "quoted_price provided.  Re-run fulfillment_quote "
+                            "to get pricing, then pass payment_hold_id or "
+                            "quoted_price.",
+                            code="MISSING_PRICE",
+                        )
                 else:
-                    _billing.record_charge(result.order_id, fee_calc)
-                    order_data["payment"] = {"status": "no_payment_method"}
+                    if fee_calc:
+                        _billing.record_charge(quote_id, fee_calc)
             except PaymentError as pe:
-                _billing.record_charge(
-                    result.order_id, fee_calc,
-                    payment_status="failed",
+                # Payment failed — do NOT place the order.
+                return _error_dict(
+                    f"Payment failed: {pe}. Order was NOT placed. "
+                    "Please update your payment method and try again.",
+                    code="PAYMENT_ERROR",
                 )
-                order_data["payment"] = {
-                    "status": "failed",
-                    "error": str(pe),
-                }
+
+        # 3. Place the order AFTER payment succeeds.
+        try:
+            result = provider.place_order(OrderRequest(
+                quote_id=quote_id,
+                shipping_option_id=shipping_option_id,
+            ))
+        except (FulfillmentError, RuntimeError) as exc:
+            # Order failed — refund the payment automatically.
+            _refund_after_order_failure(pay_result, payment_hold_id)
+            return _error_dict(
+                f"Order placement failed: {exc}. "
+                "Your payment has been refunded automatically.",
+            )
+
+        # 4. Build response.
+        order_data = result.to_dict()
+        if fee_calc:
+            order_data["kiln_fee"] = fee_calc.to_dict()
+            order_data["total_with_fee"] = fee_calc.total_cost
+        if pay_result:
+            order_data["payment"] = pay_result.to_dict()
+
+            # Re-link the charge to the real order_id if it differs
+            # from the quote_id we used for the initial charge.
+            if result.order_id and result.order_id != quote_id:
+                try:
+                    _billing.record_charge(
+                        result.order_id, fee_calc,
+                        payment_id=pay_result.payment_id,
+                        payment_rail=pay_result.rail.value,
+                        payment_status=pay_result.status.value,
+                    )
+                except Exception:
+                    logger.debug(
+                        "Could not link charge to order %s", result.order_id,
+                    )
+
         return {
             "success": True,
             "order": order_data,
         }
-    except (FulfillmentError, RuntimeError) as exc:
-        # If we had a hold and the order failed, release it.
-        if payment_hold_id:
-            try:
-                mgr = _get_payment_mgr()
-                mgr.cancel_fee(payment_hold_id)
-            except Exception:
-                logger.debug("Could not cancel hold %s", payment_hold_id)
-        return _error_dict(str(exc))
     except Exception as exc:
         logger.exception("Unexpected error in fulfillment_order")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
@@ -4668,7 +4857,7 @@ def fulfillment_cancel(order_id: str) -> dict:
 
     Only orders that have not yet shipped can be cancelled.
     """
-    if err := _check_auth("print"):
+    if err := _check_billing_auth("print"):
         return err
     try:
         provider = _get_fulfillment()
@@ -9612,30 +9801,6 @@ def plan_print_recovery(
     except Exception as exc:
         logger.exception("Error in plan_print_recovery")
         return _error_dict(str(exc), code="RECOVERY_ERROR")
-
-
-@mcp.tool()
-def emergency_stop(printer_name: Optional[str] = None) -> dict:
-    """Trigger an emergency stop on one or all printers.
-
-    Sends M112 (emergency stop), turns off heaters, and disables steppers.
-    Use this when a safety issue is detected.
-
-    Args:
-        printer_name: Specific printer to stop. If None, stops ALL printers.
-    """
-    try:
-        from kiln.emergency import get_emergency_coordinator
-
-        coord = get_emergency_coordinator()
-        if printer_name:
-            result = coord.emergency_stop(printer_name)
-        else:
-            result = coord.emergency_stop_all()
-        return {"success": True, "emergency_stop": result.to_dict()}
-    except Exception as exc:
-        logger.exception("Error in emergency_stop")
-        return _error_dict(str(exc), code="EMERGENCY_ERROR")
 
 
 @mcp.tool()

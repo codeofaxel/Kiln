@@ -38,7 +38,7 @@ jobs:
         run: cd octoprint-cli && ruff check src/
 
       - name: Run kiln tests
-        run: cd kiln && python -m pytest tests/ -v
+        run: cd kiln && python -m pytest tests/ -v --cov=kiln --cov-report=term-missing
 
       - name: Run octoprint-cli tests
-        run: cd octoprint-cli && python -m pytest tests/ -v
+        run: cd octoprint-cli && python -m pytest tests/ -v --cov=octoprint_cli --cov-report=term-missing

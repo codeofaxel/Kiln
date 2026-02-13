@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from typing import Optional
 
-_CURRENT_TERMS_VERSION = "1.0"
+_CURRENT_TERMS_VERSION = "1.1"
 
 _SETTINGS_KEY_VERSION = "terms_accepted_version"
 _SETTINGS_KEY_TIMESTAMP = "terms_accepted_at"
@@ -26,9 +26,13 @@ _TERMS_SUMMARY = """\
      reduce risk but do not eliminate it.
   4. Third-party content (marketplaces, fulfillment) is governed by
      those providers' own terms.
-  5. Kiln is provided "as is" without warranty of any kind.
+  5. Fulfillment orders incur a 5% platform fee (min $0.25, max $200).
+     Your first 5 orders each month are fee-free. Local printing is
+     always free.
+  6. Kiln is provided "as is" without warranty of any kind.
 
-  Full terms: https://github.com/kiln3d/kiln/blob/main/TERMS.md"""
+  Full terms: https://github.com/kiln3d/kiln/blob/main/TERMS.md
+  Privacy policy: https://github.com/kiln3d/kiln/blob/main/PRIVACY.md"""
 
 
 def get_accepted_version(*, db=None) -> Optional[str]:

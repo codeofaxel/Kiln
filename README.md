@@ -331,7 +331,7 @@ kiln rest --port 8420 --tier full
 pip install kiln3d[rest]
 ```
 
-Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (43 tools) for mid-range, **full** (124 tools) for Claude/GPT-4/Gemini.
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 186 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -348,9 +348,9 @@ octoprint-cli files
 octoprint-cli print myfile.gcode --confirm
 ```
 
-## MCP Tools
+## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes these tools to agents:
+The Kiln MCP server (`kiln serve`) exposes **186 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
 
 | Tool | Description |
 |------|-------------|
@@ -706,8 +706,8 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (3,650+ total)
-cd kiln && python3 -m pytest tests/ -v        # 3,415 tests (approximately)
+# Run tests (3,900+ total)
+cd kiln && python3 -m pytest tests/ -v        # 3,695 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
