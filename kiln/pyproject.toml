@@ -43,6 +43,7 @@ postgres = ["psycopg2-binary>=2.9"]
 rest = ["fastapi>=0.100", "uvicorn[standard]>=0.25"]
 stripe = ["stripe>=5.0"]
 payments = ["stripe>=5.0", "cryptography>=41.0"]
+serial = ["pyserial>=3.5"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
