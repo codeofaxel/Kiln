@@ -196,6 +196,18 @@ def probe_host(host: str, timeout: float = 3.0) -> List[DiscoveredPrinter]:
                             discovery_method="manual",
                         )
                     )
+            elif resp.status_code == 401 and printer_type == "prusaconnect":
+                # Prusa Link requires auth — 401 still means it's there
+                results.append(
+                    DiscoveredPrinter(
+                        host=host,
+                        port=port,
+                        printer_type=printer_type,
+                        name="PrusaLink",
+                        api_available=True,
+                        discovery_method="manual",
+                    )
+                )
         except (requests.ConnectionError, requests.Timeout, requests.JSONDecodeError, OSError):
             pass
 
@@ -309,6 +321,18 @@ def _try_http_probe(subnet: str, timeout: float) -> List[DiscoveredPrinter]:
                                 discovery_method="http_probe",
                             )
                         )
+                elif resp.status_code == 401 and printer_type == "prusaconnect":
+                    # Prusa Link requires auth — 401 still means it's there
+                    found.append(
+                        DiscoveredPrinter(
+                            host=host,
+                            port=port,
+                            printer_type=printer_type,
+                            name="PrusaLink",
+                            api_available=True,
+                            discovery_method="http_probe",
+                        )
+                    )
             except (
                 requests.ConnectionError,
                 requests.Timeout,

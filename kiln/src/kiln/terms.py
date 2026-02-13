@@ -31,8 +31,8 @@ _TERMS_SUMMARY = """\
      always free.
   6. Kiln is provided "as is" without warranty of any kind.
 
-  Full terms: https://github.com/kiln3d/kiln/blob/main/TERMS.md
-  Privacy policy: https://github.com/kiln3d/kiln/blob/main/PRIVACY.md"""
+  Full terms: https://github.com/codeofaxel/Kiln/blob/main/TERMS.md
+  Privacy policy: https://github.com/codeofaxel/Kiln/blob/main/PRIVACY.md"""
 
 
 def get_accepted_version(*, db=None) -> Optional[str]:

@@ -102,7 +102,7 @@ Order matters:
 
 ## 4. Code Recovery
 
-GitHub: `https://github.com/codeofaxel/Kiln.git` (BSL 1.1, converts to Apache 2.0 on 2030-02-12).
+GitHub: `https://github.com/codeofaxel/Kiln.git` (MIT License).
 
 ```bash
 git clone https://github.com/codeofaxel/Kiln.git && cd Kiln
@@ -169,6 +169,6 @@ If either person cannot restore the full system solo, fix the gap immediately.
 | Behavior spec | 3,900+ pytest tests |
 | Ops history | HMAC-signed audit logs |
 | Feature log | `.dev/COMPLETED_TASKS.md` |
-| Code access | BSL 1.1 -> Apache 2.0 (2030), public GitHub repo |
+| Code access | MIT License, public GitHub repo |
 
-If a maintainer is unavailable: the other has full access, `CLAUDE.md` enables onboarding, tests validate correctness, and the BSL -> Apache transition guarantees project continuity.
+If a maintainer is unavailable: the other has full access, `CLAUDE.md` enables onboarding, tests validate correctness, and the MIT license guarantees project continuity.

@@ -7,7 +7,7 @@ name = "kiln3d"
 version = "0.1.0"
 description = "Agentic infrastructure for physical fabrication via 3D printing"
 readme = "README.md"
-license = {text = "BSL-1.1"}
+license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
     {name = "Kiln Contributors"},
@@ -17,7 +17,7 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: Other/Proprietary License",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",

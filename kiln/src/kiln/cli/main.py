@@ -241,10 +241,10 @@ def discover(timeout: float, subnet: Optional[str], methods: tuple, json_mode: b
 @click.option(
     "--type", "printer_type",
     required=True,
-    type=click.Choice(["octoprint", "moonraker", "bambu"]),
+    type=click.Choice(["octoprint", "moonraker", "bambu", "prusaconnect"]),
     help="Printer backend type.",
 )
-@click.option("--api-key", default=None, help="API key (OctoPrint/Moonraker).")
+@click.option("--api-key", default=None, help="API key (OctoPrint/Moonraker/Prusa Link).")
 @click.option("--access-code", default=None, help="LAN access code (Bambu).")
 @click.option("--serial", default=None, help="Printer serial number (Bambu).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
@@ -668,15 +668,11 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
                 state = adapter.get_state()
                 _preflight_state = state
                 preflight_errors = []
-                if state.status.value in ("error", "offline"):
-                    preflight_errors.append(f"Printer is {state.status.value}")
-                if state.temperatures:
-                    tool_temp = state.temperatures.get("tool", {})
-                    bed_temp = state.temperatures.get("bed", {})
-                    actual_tool = tool_temp.get("actual", 0) if isinstance(tool_temp, dict) else 0
-                    actual_bed = bed_temp.get("actual", 0) if isinstance(bed_temp, dict) else 0
-                    if actual_tool > 50 and state.status.value == "idle":
-                        preflight_errors.append(f"Hotend is warm ({actual_tool:.0f}°C) but printer is idle")
+                if state.state.value in ("error", "offline"):
+                    preflight_errors.append(f"Printer is {state.state.value}")
+                if state.tool_temp_actual is not None:
+                    if state.tool_temp_actual > 50 and state.state.value == "idle":
+                        preflight_errors.append(f"Hotend is warm ({state.tool_temp_actual:.0f}°C) but printer is idle")
                 if preflight_errors:
                     msg = "Pre-flight check failed: " + "; ".join(preflight_errors)
                     click.echo(format_error(msg, code="PREFLIGHT_FAILED", json_mode=json_mode))
@@ -697,7 +693,7 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
                 "files": [os.path.basename(f) for f in expanded],
                 "local_upload_needed": [f for f in expanded if os.path.isfile(f)],
                 "preflight": "passed" if not skip_preflight else "skipped",
-                "printer_status": _preflight_state.status.value if _preflight_state else "unknown",
+                "printer_status": _preflight_state.state.value if _preflight_state else "unknown",
                 "action": "Would start printing" if len(expanded) == 1 else f"Would print {len(expanded)} files",
             }
             if json_mode:
@@ -2760,7 +2756,7 @@ _PRINTER_TYPE_LABELS = {
     "octoprint": "OctoPrint",
     "moonraker": "Moonraker (Klipper)",
     "bambu": "Bambu Lab",
-    "prusaconnect": "Prusa Connect",
+    "prusaconnect": "Prusa Link",
 }
 
 
@@ -2975,15 +2971,15 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     except PrinterError as exc:
         click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
         click.echo(
-            "  The printer was saved but may need correct credentials.\n"
-            "  Update with: kiln auth --name {name} --host {host} "
+            f"  The printer was saved but may need correct credentials.\n"
+            f"  Update with: kiln auth --name {name} --host {host} "
             f"--type {printer_type} --api-key <key>"
         )
     except Exception as exc:
         click.echo(click.style(f"  Connection test failed: {exc}", fg="yellow"))
         click.echo(
-            "  The printer was saved but may need correct credentials.\n"
-            "  Update with: kiln auth --name {name} --host {host} "
+            f"  The printer was saved but may need correct credentials.\n"
+            f"  Update with: kiln auth --name {name} --host {host} "
             f"--type {printer_type} --api-key <key>"
         )
 
@@ -3958,26 +3954,26 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
         })
     except ValueError as exc:
         checks.append({"name": "config", "ok": False, "detail": str(exc)})
-    except ValueError as exc:
-        checks.append({"name": "config", "ok": False, "detail": str(exc)})
     except Exception as exc:
         checks.append({"name": "config", "ok": False, "detail": str(exc)})
 
-    # 5. Printer reachable
+    # 5. Printer reachable (use adapter with auth, not raw HTTP)
     if printer_cfg:
         host = printer_cfg.get("host", "")
         if host:
             try:
-                url = host.rstrip("/") + "/"
-                req = urllib.request.Request(url, method="GET")
-                urllib.request.urlopen(req, timeout=5)
-                checks.append({"name": "printer_reachable", "ok": True, "detail": host})
+                adapter = _make_adapter(printer_cfg)
+                state = adapter.get_state()
+                if state.connected:
+                    checks.append({"name": "printer_reachable", "ok": True, "detail": f"{host} ({state.state.value})"})
+                else:
+                    checks.append({"name": "printer_reachable", "ok": False, "detail": f"{host} (offline)"})
             except Exception as exc:
                 logger.debug("Printer reachability check failed for %s: %s", host, exc)
                 checks.append({
                     "name": "printer_reachable",
                     "ok": False,
-                    "detail": f"cannot reach {host}",
+                    "detail": f"cannot reach {host}: {exc}",
                 })
     else:
         checks.append({

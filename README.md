@@ -790,4 +790,4 @@ Kiln is free, open-source software. If you find it useful, consider sending a ti
 
 ## License
 
-[Business Source License 1.1](LICENSE) — free for personal, internal business, educational, and research use. Commercial hosting requires a license. Converts to Apache 2.0 on 2030-02-12.
+[MIT License](LICENSE) — free for any use. See LICENSE for details.
