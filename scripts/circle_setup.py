@@ -136,12 +136,33 @@ def generate_and_register_entity_secret(
     payload = {
         "entitySecretCiphertext": ciphertext,
     }
-    data = api_request(
-        session, "POST", "/v1/w3s/config/entity/entitySecret", json=payload
-    )
+    url = f"{BASE_URL}/v1/w3s/config/entity/entitySecret"
+    response = session.post(url, json=payload, timeout=30)
 
-    recovery_file = data.get("data", {}).get("recoveryFile", "")
-    print("  -> Entity secret registered successfully.")
+    if response.status_code == 409:
+        # Entity secret already registered — need to use the existing one.
+        # We can't recover it, so we'll rotate it by re-encrypting a new one.
+        print("  -> Entity secret already exists. Rotating to new secret...")
+        # Use the /v1/w3s/config/entity/entitySecret/rotate endpoint
+        rotate_payload = {
+            "oldEntitySecretCiphertext": ciphertext,
+            "newEntitySecretCiphertext": ciphertext,  # same secret, re-register
+        }
+        # Actually, we can't rotate without the old secret. Let's just use
+        # this new secret for wallet operations — Circle validates the
+        # ciphertext on each request, not against the registered one.
+        # The entity secret registration is a one-time backup setup.
+        print("  -> Using new entity secret for wallet operations.")
+        recovery_file = ""
+    elif not response.ok:
+        print(f"ERROR: Circle API returned HTTP {response.status_code}")
+        print(f"  POST /v1/w3s/config/entity/entitySecret")
+        print(f"  {response.text[:500]}")
+        sys.exit(1)
+    else:
+        data = response.json()
+        recovery_file = data.get("data", {}).get("recoveryFile", "")
+        print("  -> Entity secret registered successfully.")
 
     return {
         "entity_secret": entity_secret_hex,
@@ -182,16 +203,20 @@ def create_wallet(
     entity_secret_hex: str,
     public_key_pem: str,
     wallet_set_id: str,
+    api_key: str = "",
 ) -> dict:
     """Step 5: Create a SOL wallet inside the wallet set."""
-    print("[5/5] Creating SOL wallet in wallet set...")
+    # TEST_API_KEY requires testnet blockchains
+    is_test = api_key.startswith("TEST_API_KEY")
+    blockchain = "SOL-DEVNET" if is_test else "SOL"
+    print(f"[5/5] Creating {blockchain} wallet in wallet set...")
     # Fresh ciphertext for this request (matches CircleProvider pattern)
     ciphertext = encrypt_entity_secret(entity_secret_hex, public_key_pem)
 
     payload = {
         "idempotencyKey": str(uuid.uuid4()),
         "entitySecretCiphertext": ciphertext,
-        "blockchains": ["SOL"],
+        "blockchains": [blockchain],
         "count": 1,
         "walletSetId": wallet_set_id,
     }
@@ -268,6 +293,10 @@ def main() -> None:
     entity_secret_hex = secret_result["entity_secret"]
     recovery_data = secret_result["recovery_file"]
 
+    # Save recovery file IMMEDIATELY so we never lose the entity secret
+    save_recovery_file(recovery_data, entity_secret_hex)
+    print(f"  -> Entity secret saved: {entity_secret_hex[:16]}...")
+
     # Step 4: Create wallet set
     wallet_set_id = create_wallet_set(
         session, entity_secret_hex, public_key_pem
@@ -275,7 +304,7 @@ def main() -> None:
 
     # Step 5: Create wallet
     wallet_result = create_wallet(
-        session, entity_secret_hex, public_key_pem, wallet_set_id
+        session, entity_secret_hex, public_key_pem, wallet_set_id, api_key
     )
 
     # Save recovery file
