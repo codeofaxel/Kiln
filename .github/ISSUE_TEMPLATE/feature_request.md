@@ -18,5 +18,5 @@ Any other approaches you've thought about.
 
 ## Context
 
-- **Printer/adapter** (if applicable): OctoPrint / Moonraker / Bambu Lab / Prusa Connect
+- **Printer/adapter** (if applicable): OctoPrint / Moonraker / Bambu Lab / Prusa Link
 - **Affects**: [ ] MCP tools / [ ] CLI / [ ] Core library / [ ] Other

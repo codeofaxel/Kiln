@@ -12,7 +12,7 @@ labels: bug
 
 ## Printer Setup
 
-- **Printer type**: [ ] OctoPrint / [ ] Moonraker / [ ] Bambu Lab / [ ] Prusa Connect
+- **Printer type**: [ ] OctoPrint / [ ] Moonraker / [ ] Bambu Lab / [ ] Prusa Link
 - **Printer model**: (e.g. Prusa MK4, Bambu A1 Mini, Voron 2.4)
 - **Firmware version**: (if known)
 - **Interface**: [ ] MCP server / [ ] CLI (`kiln` or `octoprint-cli`) / [ ] REST API

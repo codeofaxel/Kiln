@@ -90,7 +90,7 @@ Kiln implements defense in depth across five layers:
 - The Kiln MCP server (`kiln serve`)
 - The Kiln CLI (`kiln`)
 - The REST API server (`kiln rest`)
-- Printer adapters (OctoPrint, Moonraker, Bambu, Prusa Connect)
+- Printer adapters (OctoPrint, Moonraker, Bambu, Prusa Link)
 - Payment processing (Stripe, Circle)
 - Fulfillment service integrations (Craftcloud, Sculpteo)
 - 3DOS network gateway

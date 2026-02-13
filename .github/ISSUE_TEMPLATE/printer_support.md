@@ -24,7 +24,7 @@ Does this printer already work with an existing print server?
 
 - [ ] OctoPrint
 - [ ] Moonraker (Klipper)
-- [ ] Prusa Connect / Prusa Link
+- [ ] Prusa Link
 - [ ] Bambu Lab LAN mode
 - [ ] None / direct connection only
 - [ ] Other: ___

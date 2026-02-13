@@ -12,7 +12,7 @@ Kiln is agentic infrastructure for physical fabrication. It provides a unified i
 
 **Three ways to print:**
 
-- **🖨️ Your printers.** Control OctoPrint, Moonraker, Bambu Lab, or Prusa Connect machines on your LAN — or remotely via Bambu Cloud.
+- **🖨️ Your printers.** Control OctoPrint, Moonraker, Bambu Lab, or Prusa Link machines on your LAN — or remotely via Bambu Cloud.
 - **🏭 Fulfillment centers.** Outsource to Craftcloud (150+ services) or Sculpteo (75+ materials). No printer required — or use alongside local printers for overflow and specialty materials.
 - **🌐 Distributed network.** Send jobs to printers on the 3DOS peer-to-peer network, or register your own printer to earn revenue.
 
@@ -21,7 +21,7 @@ All three modes use the same MCP tools and CLI commands.
 **Key properties:**
 
 - **Local-first.** Local printer communication stays on your network. No cloud relay, no accounts, no telemetry.
-- **Adapter-based.** One interface covers OctoPrint, Moonraker, Bambu Lab, and Prusa Connect. New backends plug in without changing upstream consumers.
+- **Adapter-based.** One interface covers OctoPrint, Moonraker, Bambu Lab, and Prusa Link. New backends plug in without changing upstream consumers.
 - **Safety-enforced.** Pre-flight checks, G-code validation, and temperature limits are protocol-level — not optional.
 - **Agent-native.** Every operation returns structured JSON. Every error includes machine-readable status codes. `--json` on every CLI command.
 
@@ -32,7 +32,7 @@ All three modes use the same MCP tools and CLI commands.
 | OctoPrint | HTTP REST | Any OctoPrint-connected printer | Stable |
 | Moonraker | HTTP REST | Klipper-based (Voron, RatRig, etc.) | Stable |
 | Bambu Lab | MQTT/LAN | X1C, P1S, A1 | Stable |
-| Prusa Connect | HTTP REST | MK4, XL, Mini+ | Stable |
+| Prusa Link | HTTP REST | MK4, XL, Mini+ | Stable |
 
 ### Key Concepts
 
@@ -576,7 +576,7 @@ serial: "01P00A000000001"
 
 **Note:** Requires `paho-mqtt` package. Kiln gracefully handles its absence.
 
-### Prusa Connect
+### Prusa Link
 
 Communicates via Prusa Link REST API (`/api/v1/`). Requires a Prusa Link API key.
 
@@ -823,7 +823,7 @@ kiln/src/kiln/
         octoprint.py     # OctoPrint REST adapter
         moonraker.py     # Moonraker REST adapter
         bambu.py         # Bambu Lab MQTT adapter
-        prusaconnect.py  # Prusa Connect/Link adapter
+        prusaconnect.py  # Prusa Link adapter
     fulfillment/
         base.py          # Fulfillment adapter interface
         registry.py      # Provider registry and factory

@@ -35,12 +35,12 @@ printers:
     access_code: 12345678
     serial: 01S00C000000000
 
-  # Prusa Connect ────────────────────────────────────────────
-  # API key: Prusa Connect → Printer → Settings → API Key.
+  # Prusa Link ──────────────────────────────────────────────
+  # API key: Settings > Network > PrusaLink on the printer's LCD.
   prusa_mk4:
     type: prusaconnect
     host: http://192.168.1.80
-    api_key: your-prusa-connect-api-key
+    api_key: your-prusa-link-api-key
 
 # ──────────────────────────────────────────────────────────────
 # Global settings (all optional — these are the defaults).

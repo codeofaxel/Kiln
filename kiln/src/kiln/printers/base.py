@@ -1,6 +1,6 @@
 """Abstract printer adapter interface for the Kiln project.
 
-Every printer backend (OctoPrint, Klipper/Moonraker, Bambu, Prusa Connect,
+Every printer backend (OctoPrint, Klipper/Moonraker, Bambu, Prusa Link,
 etc.) must subclass :class:`PrinterAdapter` and implement every abstract
 method so that the rest of the Kiln stack can interact with any printer
 through a single, uniform API.

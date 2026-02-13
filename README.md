@@ -25,7 +25,7 @@ Kiln lets AI agents design, queue, and execute physical manufacturing jobs on re
 
 | Mode | What it is | You need |
 |------|-----------|----------|
-| **🖨️ Your printer** | Control OctoPrint, Moonraker, Bambu, or Prusa Connect printers on your LAN — or remotely via Bambu Cloud | A 3D printer |
+| **🖨️ Your printer** | Control OctoPrint, Moonraker, Bambu, or Prusa Link printers on your LAN — or remotely via Bambu Cloud | A 3D printer |
 | **🏭 Fulfillment centers** | Outsource to Craftcloud (150+ services), Sculpteo (75+ materials), or other providers. Kiln handles quoting, ordering, and tracking | Nothing — no printer required |
 | **🌐 Distributed network** | Send jobs to printers on the 3DOS peer-to-peer network, or register your own printer to earn revenue from incoming jobs | Nothing — or a printer to earn |
 
@@ -33,7 +33,7 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 
 ### Why Kiln?
 
-- **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Connect, direct USB. Manage a mixed fleet from one place.
+- **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link, direct USB. Manage a mixed fleet from one place.
 - **AI-native** — 186+ MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
 - **Search → Slice → Print** — Browse MyMiniFactory/Cults3D (and legacy Thingiverse), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
@@ -54,6 +54,7 @@ graph TD
     C --> E1["OctoPrint"]
     C --> E2["Moonraker"]
     C --> E3["Bambu"]
+    C --> E4["Prusa Link"]
 
     F --> F1["Craftcloud"]
     F --> F2["Sculpteo"]
@@ -73,6 +74,7 @@ graph TD
     style E1 fill:#2d2d44,stroke:#e94560,color:#fff
     style E2 fill:#2d2d44,stroke:#e94560,color:#fff
     style E3 fill:#2d2d44,stroke:#e94560,color:#fff
+    style E4 fill:#2d2d44,stroke:#e94560,color:#fff
     style F1 fill:#2d2d44,stroke:#27ae60,color:#fff
     style F2 fill:#2d2d44,stroke:#27ae60,color:#fff
     style N1 fill:#2d2d44,stroke:#f39c12,color:#fff
@@ -87,8 +89,21 @@ This monorepo contains two packages:
 
 | Package | Description | Entry Point |
 |---------|-------------|-------------|
-| **kiln** | CLI + MCP server for multi-printer control (OctoPrint, Moonraker, Bambu, Prusa Connect) | `kiln` or `python -m kiln` |
+| **kiln** | CLI + MCP server for multi-printer control (OctoPrint, Moonraker, Bambu, Prusa Link) | `kiln` or `python -m kiln` |
 | **octoprint-cli** | Lightweight standalone CLI for OctoPrint-only setups | `octoprint-cli` |
+
+## Prerequisites
+
+Before installing Kiln, you need your printer's network details:
+
+| Printer | Type | What You Need |
+|---------|------|---------------|
+| **Prusa MK4/XL/Mini+** | `prusaconnect` | IP address + API key (both in Settings > Network > PrusaLink on the printer's LCD) |
+| **OctoPrint** (any printer) | `octoprint` | OctoPrint URL + API key (Settings > API in OctoPrint web UI) |
+| **Klipper/Moonraker** | `moonraker` | Moonraker URL (usually `http://<ip>:7125`) |
+| **Bambu Lab** | `bambu` | IP address + LAN access code + serial number (all on the printer's LCD) |
+
+**Optional:** Install [PrusaSlicer](https://www.prusa3d.com/prusaslicer/) or OrcaSlicer to slice STL files directly from Kiln (`brew install --cask prusaslicer` on macOS).
 
 ## Quick Start
 
@@ -104,8 +119,12 @@ pip install -e ./kiln
 # Discover printers on your network
 kiln discover
 
-# Add a printer
+# Add your printer (pick your type from the Prerequisites table)
 kiln auth --name my-printer --host http://octopi.local --type octoprint --api-key YOUR_KEY
+# Other printer types:
+# kiln auth --name prusa --host http://192.168.1.100 --type prusaconnect --api-key YOUR_KEY
+# kiln auth --name klipper --host http://192.168.1.100:7125 --type moonraker
+# kiln auth --name bambu --host 192.168.1.100 --type bambu --api-key LAN_CODE --serial SERIAL
 
 # Check printer status
 kiln status
@@ -188,7 +207,7 @@ source ~/.kiln-venv/bin/activate
 
 git clone https://github.com/codeofaxel/Kiln.git
 cd Kiln
-pip install -e ./kiln            # includes all printer backends (OctoPrint, Moonraker, Bambu, Prusa Connect)
+pip install -e ./kiln            # includes all printer backends (OctoPrint, Moonraker, Bambu, Prusa Link)
 
 kiln verify
 ```
@@ -201,13 +220,18 @@ discovery (`kiln discover`) will not find printers on your home network. Instead
 connect directly by IP:
 
 ```bash
-# 1. Find your printer's IP (check your router or Moonraker/OctoPrint web UI)
+# 1. Find your printer's IP (check your router or the printer's LCD/web UI)
 # 2. Verify connectivity from WSL
-curl http://192.168.1.100:7125/server/info   # Moonraker (Klipper)
-curl http://192.168.1.100/api/version        # OctoPrint
+curl http://192.168.1.100:7125/server/info                              # Moonraker (Klipper)
+curl http://192.168.1.100/api/version                                   # OctoPrint
+curl -H "X-Api-Key: YOUR_KEY" http://192.168.1.100/api/v1/status       # Prusa Link
+# Bambu printers use MQTT — just ensure port 8883 is reachable:
+# nc -zv 192.168.1.100 8883
 
-# 3. Register the printer with Kiln
+# 3. Register the printer with Kiln (pick your type)
 kiln auth --name my-printer --host http://192.168.1.100:7125 --type moonraker
+# kiln auth --name prusa --host http://192.168.1.100 --type prusaconnect --api-key YOUR_KEY
+# kiln auth --name bambu --host 192.168.1.100 --type bambu --api-key LAN_CODE --serial SERIAL
 
 # 4. Check printer status
 kiln status
@@ -281,23 +305,37 @@ kiln agent [--model openai/gpt-4o]         # Interactive agent REPL (any LLM)
 
 The REST API can be deployed to Fly.io for production use — see `deploy.sh` for one-command deployment.
 
-```
-```
-
 Global option: `--printer <name>` to target a specific printer per-command.
 
 ### MCP Server
 
 ```bash
-# Start the MCP server
+# Start the MCP server (uses printer from ~/.kiln/config.yaml)
 kiln serve
 
-# Or with environment variables
-export KILN_PRINTER_HOST=http://octopi.local
-export KILN_PRINTER_API_KEY=your_api_key
-export KILN_PRINTER_TYPE=octoprint
+# Or override with environment variables
+export KILN_PRINTER_HOST=http://192.168.1.100    # Your printer's IP or hostname
+export KILN_PRINTER_API_KEY=your_api_key          # API key (OctoPrint/Moonraker/Prusa Link)
+export KILN_PRINTER_TYPE=prusaconnect             # octoprint | moonraker | bambu | prusaconnect
 kiln serve
 ```
+
+#### Claude Code Integration
+
+Add to your project's `.claude/settings.json` (or global `~/.claude/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "kiln": {
+      "command": "kiln",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+> **Note:** Claude Code uses your `~/.kiln/config.yaml` for printer credentials (set up via `kiln setup` or `kiln auth`). No env vars needed if you've already configured a printer.
 
 #### Claude Desktop Integration
 
@@ -310,14 +348,16 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
       "command": "python",
       "args": ["-m", "kiln", "serve"],
       "env": {
-        "KILN_PRINTER_HOST": "http://octopi.local",
+        "KILN_PRINTER_HOST": "http://192.168.1.100",
         "KILN_PRINTER_API_KEY": "your_key",
-        "KILN_PRINTER_TYPE": "octoprint"
+        "KILN_PRINTER_TYPE": "prusaconnect"
       }
     }
   }
 }
 ```
+
+> **Tip:** Replace `KILN_PRINTER_TYPE` with your backend: `octoprint`, `moonraker`, `bambu`, or `prusaconnect`. Or skip env vars entirely if you've already run `kiln setup`.
 
 ### Multi-Model Support (OpenRouter / Any LLM)
 
@@ -507,7 +547,7 @@ The Kiln MCP server (`kiln serve`) exposes **186 tools** to agents. Key tools ar
 | **OctoPrint** | Stable | Any OctoPrint-connected printer (Prusa, Ender, custom) |
 | **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
 | **Bambu** | Stable | Bambu Lab X1C, P1S, A1 (via LAN MQTT) |
-| **Prusa Connect** | Stable | Prusa MK4, XL, Mini+ (via Prusa Link REST API) |
+| **Prusa Link** | Stable | Prusa MK4, XL, Mini+ (local REST API — type: `prusaconnect`) |
 
 ## MCP Resources
 
@@ -527,7 +567,7 @@ The server also exposes read-only resources that agents can use for context:
 | Module | Description |
 |---|---|
 | `server.py` | MCP server with tools, resources, and subsystem wiring |
-| `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Bambu, Prusa Connect) |
+| `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Bambu, Prusa Link) |
 | `marketplaces/` | Model marketplace adapters (MyMiniFactory, Cults3D, Thingiverse — deprecated) |
 | `slicer.py` | Slicer integration (PrusaSlicer, OrcaSlicer) with auto-detection |
 | `registry.py` | Fleet registry for multi-printer management |
@@ -599,7 +639,7 @@ Kiln can automatically find printers on your local network:
 kiln discover
 ```
 
-Discovery uses mDNS/Bonjour and HTTP subnet probing to find OctoPrint, Moonraker, and Bambu printers.
+Discovery uses mDNS/Bonjour and HTTP subnet probing to find OctoPrint, Moonraker, Bambu, and Prusa Link printers.
 
 ## Model Marketplaces
 
@@ -648,7 +688,7 @@ kiln snapshot --save photo.jpg
 kiln snapshot --json
 ```
 
-Supported on OctoPrint, Moonraker, and Prusa Connect backends. Agents use the `printer_snapshot` MCP tool.
+Supported on OctoPrint, Moonraker, Prusa Link, and Bambu (requires `ffmpeg` for RTSP capture — see install note above). Agents use the `printer_snapshot` MCP tool.
 
 ## Fulfillment Services
 

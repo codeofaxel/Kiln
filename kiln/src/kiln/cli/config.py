@@ -37,7 +37,7 @@ def get_config_path() -> Path:
 def _normalize_host(host: str, printer_type: str = "octoprint") -> str:
     """Normalize *host* for the given printer type.
 
-    HTTP-based backends (OctoPrint, Moonraker, Prusa Connect) get an
+    HTTP-based backends (OctoPrint, Moonraker, Prusa Link) get an
     ``http://`` scheme prefix if missing.  MQTT/FTPS backends (Bambu)
     need a raw hostname/IP — no scheme is prepended.
     """

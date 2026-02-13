@@ -55,7 +55,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - OctoPrint REST adapter (full printer control)
 - Moonraker REST adapter for Klipper-based printers
 - Bambu Lab MQTT adapter for X1C, P1S, A1 over LAN
-- Prusa Connect REST adapter for MK4, XL, Mini+
+- Prusa Link REST adapter for MK4, XL, Mini+
 - MCP server with 79+ tools for AI agent printer control
 - CLI with 47+ commands and `--json` output on every command
 - Fleet management: multi-printer registry, fleet status

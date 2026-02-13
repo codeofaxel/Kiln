@@ -11,7 +11,7 @@ Comprehensive reference for deploying Kiln as a hosted REST API service or local
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `KILN_PRINTER_HOST` | Yes | `""` | Base URL of the printer server (e.g. `http://octopi.local`, `192.168.1.50`) |
-| `KILN_PRINTER_API_KEY` | Depends | `""` | API key for OctoPrint/Moonraker/Prusa Connect authentication |
+| `KILN_PRINTER_API_KEY` | Depends | `""` | API key for OctoPrint/Moonraker/Prusa Link authentication |
 | `KILN_PRINTER_TYPE` | No | `octoprint` | Printer backend: `octoprint`, `moonraker`, `bambu`, `prusaconnect` |
 | `KILN_PRINTER_SERIAL` | Bambu only | `""` | Bambu printer serial number (required when type is `bambu`) |
 | `KILN_PRINTER_ACCESS_CODE` | Bambu only | `""` | Bambu printer access code (required when type is `bambu`) |

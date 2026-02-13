@@ -81,7 +81,7 @@ _RECOVERY_PLANS: Dict[str, Dict[str, List[str]]] = {
         ],
         "prusa_connect": [
             "MMU detects runout",
-            "Pause print via Prusa Connect API",
+            "Pause print via Prusa Link API",
             "Fire webhook alert with job context",
             "Wait for filament reload via MMU",
             "Resume print",
@@ -118,7 +118,7 @@ _RECOVERY_PLANS: Dict[str, Dict[str, List[str]]] = {
         "prusa_connect": [
             "Prusa firmware saves position via M413 to EEPROM",
             "Wait for power restore",
-            "Prusa Connect reconnects",
+            "Prusa Link reconnects",
             "Firmware resumes from saved position",
             "Kiln re-syncs job tracking state",
         ],
@@ -191,7 +191,7 @@ _RECOVERY_PLANS: Dict[str, Dict[str, List[str]]] = {
         ],
         "prusa_connect": [
             "Prusa firmware thermal protection kills heaters",
-            "Prusa Connect reports error state",
+            "Prusa Link reports error state",
             "Kiln logs critical event",
             "Fire critical webhook alert",
             "Mark printer as error — requires physical inspection",
@@ -225,7 +225,7 @@ _RECOVERY_PLANS: Dict[str, Dict[str, List[str]]] = {
         ],
         "prusa_connect": [
             "Detect temperature anomaly (bed temp drop without target change)",
-            "Pause print via Prusa Connect API",
+            "Pause print via Prusa Link API",
             "Fire webhook alert with thermal data snapshot",
             "Wait for human inspection decision",
         ],

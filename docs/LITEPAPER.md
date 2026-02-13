@@ -12,7 +12,7 @@ Kiln is free, open-source infrastructure that lets AI agents control 3D printers
 
 ## The Problem
 
-3D printing is powerful, but the software side hasn't kept up. Every printer brand speaks a different language -- OctoPrint, Klipper, Bambu Lab, and Prusa Connect each have their own incompatible interfaces. Managing even a small fleet means juggling multiple dashboards, manually queuing jobs, and babysitting prints. Meanwhile, AI agents are increasingly capable of planning and executing multi-step physical tasks, but there's no safe, standardized way to connect them to real hardware.
+3D printing is powerful, but the software side hasn't kept up. Every printer brand speaks a different language -- OctoPrint, Klipper, Bambu Lab, and Prusa Link each have their own incompatible interfaces. Managing even a small fleet means juggling multiple dashboards, manually queuing jobs, and babysitting prints. Meanwhile, AI agents are increasingly capable of planning and executing multi-step physical tasks, but there's no safe, standardized way to connect them to real hardware.
 
 ## The Solution
 
@@ -20,7 +20,7 @@ Kiln acts as a universal translator between AI agents and 3D printers. One inter
 
 **Three ways to print.** Kiln gives agents three co-equal paths to turn a digital file into a physical object -- and they can mix and match within a single workflow:
 
-1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Bambu Lab, or Prusa Connect machines on your local network -- or remotely via Bambu Cloud. Your agent doesn't need to know which firmware a printer runs; Kiln handles the translation.
+1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Bambu Lab, or Prusa Link machines on your local network -- or remotely via Bambu Cloud. Your agent doesn't need to know which firmware a printer runs; Kiln handles the translation.
 
 2. **Fulfillment centers.** Send jobs to professional manufacturing services. Craftcloud aggregates quotes from over 150 print services worldwide across FDM, SLA, SLS, MJF, and metal (DMLS). Sculpteo provides direct access to 75+ materials with professional finishing. No printer required -- but printer owners use this too for overflow, specialty materials, or production-quality parts.
 
