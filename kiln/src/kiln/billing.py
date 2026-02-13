@@ -164,7 +164,7 @@ class BillingLedger:
         self._db = db
         # In-memory fallback when no db is provided.
         self._charges: List[Dict[str, Any]] = []
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Fee calculation

@@ -336,11 +336,9 @@ class TestBillingLedgerTaxIntegration:
 
     def test_calculate_and_record_fee_with_tax(self):
         ledger = BillingLedger(fee_policy=FeePolicy(free_tier_jobs=0))
-        # NOTE: calculate_and_record_fee deadlocks with in-memory ledger
-        # (threading.Lock is not reentrant, known issue). Use the separate
-        # calculate + record path instead.
-        fee = ledger.calculate_fee(100.0, jurisdiction="DE")
-        charge_id = ledger.record_charge("job-tax-1", fee, payment_status="completed")
+        fee, charge_id = ledger.calculate_and_record_fee(
+            "job-tax-1", 100.0, jurisdiction="DE",
+        )
 
         assert fee.tax_amount == pytest.approx(0.95)
         assert fee.tax_jurisdiction == "DE"
