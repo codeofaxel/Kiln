@@ -21,6 +21,16 @@
 
 Kiln lets AI agents design, queue, and execute physical manufacturing jobs on real 3D printers with zero human intervention. It exposes printer control through both a **CLI** and the **Model Context Protocol (MCP)**, making any MCP-compatible agent (Claude, GPT, custom) a first-class operator of your print farm.
 
+### Three ways to print
+
+| Mode | What it is | You need |
+|------|-----------|----------|
+| **🖨️ Your printer** | Control OctoPrint, Moonraker, Bambu, or Prusa Connect printers on your LAN — or remotely via Bambu Cloud | A 3D printer |
+| **🏭 Fulfillment centers** | Outsource to Craftcloud (150+ services), Sculpteo (75+ materials), or other providers. Kiln handles quoting, ordering, and tracking | Nothing — no printer required |
+| **🌐 Distributed network** | Send jobs to printers on the 3DOS peer-to-peer network, or register your own printer to earn revenue from incoming jobs | Nothing — or a printer to earn |
+
+All three modes use the same MCP tools and CLI commands. An agent can seamlessly fall back from a busy local printer to a fulfillment center, or route specialty materials to the 3DOS network — all in one workflow.
+
 ## Architecture
 
 ```mermaid
@@ -28,34 +38,39 @@ graph TD
     A["🤖 AI Agent<br/><sub>Claude · GPT · Custom</sub>"]
     A -->|"CLI or MCP"| B["⚙️ Kiln<br/><sub>CLI + MCP Server</sub>"]
 
-    B --> C["🖨️ PrinterAdapter"]
+    B --> C["🖨️ Your Printers"]
+    B --> F["🏭 Fulfillment"]
+    B --> N["🌐 3DOS Network"]
     B --> D["🛒 Marketplaces"]
 
-    C --> E["OctoPrint"]
-    C --> F["Moonraker"]
-    C --> G["Bambu"]
+    C --> E1["OctoPrint"]
+    C --> E2["Moonraker"]
+    C --> E3["Bambu"]
+
+    F --> F1["Craftcloud"]
+    F --> F2["Sculpteo"]
+
+    N --> N1["Remote Printers"]
 
     D --> H["Thingiverse"]
     D --> I["MyMiniFactory"]
     D --> J["Cults3D"]
 
-    E --> K["Prusa i3"]
-    F --> L["Voron"]
-    G --> M["Bambu X1C"]
-
     style A fill:#1a1a2e,stroke:#e94560,color:#fff
     style B fill:#16213e,stroke:#0f3460,color:#fff
-    style C fill:#0f3460,stroke:#533483,color:#fff
+    style C fill:#0f3460,stroke:#e94560,color:#fff
+    style F fill:#0f3460,stroke:#27ae60,color:#fff
+    style N fill:#0f3460,stroke:#f39c12,color:#fff
     style D fill:#0f3460,stroke:#533483,color:#fff
-    style E fill:#2d2d44,stroke:#e94560,color:#fff
-    style F fill:#2d2d44,stroke:#e94560,color:#fff
-    style G fill:#2d2d44,stroke:#e94560,color:#fff
+    style E1 fill:#2d2d44,stroke:#e94560,color:#fff
+    style E2 fill:#2d2d44,stroke:#e94560,color:#fff
+    style E3 fill:#2d2d44,stroke:#e94560,color:#fff
+    style F1 fill:#2d2d44,stroke:#27ae60,color:#fff
+    style F2 fill:#2d2d44,stroke:#27ae60,color:#fff
+    style N1 fill:#2d2d44,stroke:#f39c12,color:#fff
     style H fill:#2d2d44,stroke:#533483,color:#fff
     style I fill:#2d2d44,stroke:#533483,color:#fff
     style J fill:#2d2d44,stroke:#533483,color:#fff
-    style K fill:#1a1a2e,stroke:#444,color:#aaa
-    style L fill:#1a1a2e,stroke:#444,color:#aaa
-    style M fill:#1a1a2e,stroke:#444,color:#aaa
 ```
 
 ## Packages
@@ -629,7 +644,7 @@ Supported on OctoPrint, Moonraker, and Prusa Connect backends. Agents use the `p
 
 ## Fulfillment Services
 
-Outsource prints to external manufacturing services — **no 3D printer required**. Kiln handles the entire workflow from idea to delivered product:
+Print through external manufacturing services — **no 3D printer required**, or use alongside your own printers for overflow, specialty materials, or production runs. Kiln handles the entire workflow from idea to delivered product:
 
 ```bash
 # Get material recommendations for your use case

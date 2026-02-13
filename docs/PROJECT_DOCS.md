@@ -8,12 +8,20 @@
 
 ### Overview
 
-Kiln is agentic infrastructure for physical fabrication. It provides a unified interface for AI agents to control 3D printers, discover models, slice geometry, schedule jobs, and monitor prints — all through the Model Context Protocol (MCP) or a conventional CLI.
+Kiln is agentic infrastructure for physical fabrication. It provides a unified interface for AI agents to control 3D printers, outsource to manufacturing services, and route jobs across distributed printer networks — all through the Model Context Protocol (MCP) or a conventional CLI.
+
+**Three ways to print:**
+
+- **🖨️ Your printers.** Control OctoPrint, Moonraker, Bambu Lab, or Prusa Connect machines on your LAN — or remotely via Bambu Cloud.
+- **🏭 Fulfillment centers.** Outsource to Craftcloud (150+ services) or Sculpteo (75+ materials). No printer required — or use alongside local printers for overflow and specialty materials.
+- **🌐 Distributed network.** Send jobs to printers on the 3DOS peer-to-peer network, or register your own printer to earn revenue.
+
+All three modes use the same MCP tools and CLI commands.
 
 **Key properties:**
 
-- **Local-first.** All printer communication happens over your local network. No cloud relay, no accounts, no telemetry.
-- **Adapter-based.** One interface covers OctoPrint, Moonraker, and Bambu Lab printers. New backends plug in without changing upstream consumers.
+- **Local-first.** Local printer communication stays on your network. No cloud relay, no accounts, no telemetry.
+- **Adapter-based.** One interface covers OctoPrint, Moonraker, Bambu Lab, and Prusa Connect. New backends plug in without changing upstream consumers.
 - **Safety-enforced.** Pre-flight checks, G-code validation, and temperature limits are protocol-level — not optional.
 - **Agent-native.** Every operation returns structured JSON. Every error includes machine-readable status codes. `--json` on every CLI command.
 

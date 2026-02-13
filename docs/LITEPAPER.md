@@ -18,33 +18,37 @@ Kiln is free, open-source infrastructure that lets AI agents control 3D printers
 
 Kiln acts as a universal translator between AI agents and 3D printers. One interface, any printer, any AI.
 
-- **Unified printer control.** Kiln works with OctoPrint, Moonraker (Klipper), Bambu Lab, and Prusa Connect. Your agent doesn't need to know which firmware a printer runs -- Kiln handles the translation.
+**Three ways to print.** Kiln gives agents three co-equal paths to turn a digital file into a physical object -- and they can mix and match within a single workflow:
+
+1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Bambu Lab, or Prusa Connect machines on your local network -- or remotely via Bambu Cloud. Your agent doesn't need to know which firmware a printer runs; Kiln handles the translation.
+
+2. **Fulfillment centers.** Send jobs to professional manufacturing services. Craftcloud aggregates quotes from over 150 print services worldwide across FDM, SLA, SLS, MJF, and metal (DMLS). Sculpteo provides direct access to 75+ materials with professional finishing. No printer required -- but printer owners use this too for overflow, specialty materials, or production-quality parts.
+
+3. **Distributed network.** Route jobs to printers on the 3DOS peer-to-peer manufacturing network, or register your own printer to earn revenue from incoming jobs. Agents search the network by material, location, and machine type.
+
+An agent can start a PLA prototype on your desk printer, send the SLA version to Craftcloud, and route a batch of 50 units to the cheapest 3DOS printer with PETG -- all from the same conversation.
+
+**Beyond printing:**
 
 - **Full print workflow.** An agent can search for 3D models across Thingiverse, MyMiniFactory, and Cults3D; slice them into printer-ready files; upload to a printer; start, monitor, and cancel prints -- all without human intervention.
 
-- **Agent-designed models.** Agents aren't limited to downloading existing files. Kiln includes two model generation paths: cloud-based AI text-to-3D (via Meshy) that turns a natural-language description into a printable mesh, and local parametric generation (via OpenSCAD) where the agent writes code to produce precise, dimensionally accurate parts. Generated models are automatically validated for printability -- manifold checks, wall thickness, bounding box -- before they ever reach a slicer. An agent can go from "I need a 40mm fan duct with a 30-degree deflection" to a sliced, printing G-code file with no human in the loop.
+- **Agent-designed models.** Kiln includes two model generation paths: cloud-based AI text-to-3D (via Meshy) that turns a natural-language description into a printable mesh, and local parametric generation (via OpenSCAD) where the agent writes code to produce precise, dimensionally accurate parts. Generated models are automatically validated for printability -- manifold checks, wall thickness, bounding box -- before they ever reach a slicer. An agent can go from "I need a 40mm fan duct with a 30-degree deflection" to a sliced, printing G-code file with no human in the loop.
 
 - **Fleet management.** A priority job queue routes work across multiple printers, favoring the machine with the best track record for each material and file type. Batch production, scheduling, and cross-printer learning come built in.
 
 - **Vision monitoring.** During a print, the agent can analyze webcam snapshots using its own vision capabilities to detect failures early -- spaghetti, layer shifts, adhesion problems -- and decide whether to pause or cancel.
 
-- **Outsourced manufacturing.** When local printers can't handle a job -- wrong material, at capacity, or the user doesn't own a printer at all -- Kiln brokers the order out. Craftcloud aggregates quotes from over 150 print services worldwide across FDM, SLA, SLS, MJF, and metal (DMLS), so the agent can price-compare and pick the best option. Sculpteo provides direct access to 75+ materials with professional finishing. The agent handles the full lifecycle autonomously: upload the model, request quotes, place the order, and track shipping through delivery.
-
-- **3DOS distributed manufacturing.** Kiln integrates with the 3DOS peer-to-peer manufacturing network, and this is a two-way street. Users can register their own printers on the network to earn revenue from incoming jobs, and agents can search the network for available capacity when they need a material or machine type that isn't in the local fleet. Jobs are submitted, tracked, and managed through the same MCP tools the agent already uses for local printing.
-
 ## How It Works
 
-The flow is simple:
-
 ```
-You (or your agent) --> Kiln --> Your Printers
-                                 Craftcloud / Sculpteo
-                                 3DOS Network
+You (or your agent) --> Kiln --> 🖨️ Your Printers  (local or remote via Bambu Cloud)
+                                 🏭 Fulfillment     (Craftcloud · Sculpteo)
+                                 🌐 3DOS Network    (peer-to-peer printers worldwide)
 ```
 
 Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. For those who prefer a terminal, there's also a full command-line interface with over 50 commands and a REST API for custom integrations.
 
-All communication between Kiln and your printers happens over your local network. Your print data never leaves your machines.
+All three printing modes use the same interface. An agent doesn't need to know whether a job is printing on your desk, at a factory in Germany, or on someone's Bambu in Texas -- Kiln abstracts the routing. Communication with local printers stays on your network; fulfillment and network jobs use HTTPS to the respective provider APIs.
 
 ## Safety
 

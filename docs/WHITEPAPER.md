@@ -8,7 +8,7 @@
 
 ## Abstract
 
-We present Kiln, a protocol and reference implementation that enables autonomous AI agents to control physical manufacturing hardware — specifically 3D printers — through a unified adapter interface. Kiln bridges the gap between digital intelligence and physical fabrication by exposing printer operations, model discovery, slicing, job scheduling, and fleet management through the Model Context Protocol (MCP) and a conventional CLI. The system operates locally with zero cloud dependency, supports heterogeneous printer backends (OctoPrint, Moonraker, Bambu Lab), and enforces safety invariants at the protocol level to prevent physical damage. We describe the adapter abstraction that normalizes disparate printer APIs, the safety validation layer that gates all physical operations, and the scheduling architecture that enables multi-printer job dispatch.
+We present Kiln, a protocol and reference implementation that enables autonomous AI agents to control physical manufacturing hardware — specifically 3D printers — through a unified adapter interface. Kiln bridges the gap between digital intelligence and physical fabrication by exposing three co-equal manufacturing paths through a single interface: (1) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, and Prusa Connect adapters; (2) outsourced manufacturing through fulfillment providers such as Craftcloud and Sculpteo; and (3) distributed peer-to-peer manufacturing via the 3DOS network. All three modes are accessible through the Model Context Protocol (MCP) and a conventional CLI, allowing agents to seamlessly route jobs based on material availability, capacity, cost, or geographic proximity. The system enforces safety invariants at the protocol level to prevent physical damage. We describe the adapter abstraction that normalizes disparate printer APIs, the fulfillment and distributed manufacturing integrations, the safety validation layer, and the scheduling architecture that enables multi-printer job dispatch.
 
 ## 1. Introduction
 
@@ -33,29 +33,31 @@ Kiln solves both problems simultaneously:
 ### 2.1 System Overview
 
 ```
-                    +-----------+
-                    |  AI Agent |
-                    +-----------+
-                         |
-              MCP (stdio) or CLI
-                         |
-                    +-----------+
-                    |   Kiln    |
-                    |  Server   |
-                    +-----------+
-                    /     |     \
-           Adapter /  Adapter  | Adapter  \ Adapter
-                  /       |      |        \
-          +----------+ +--------+ +-------+ +-------------+
-          | OctoPrint| |Moonraker| | Bambu | |Prusa Connect|
-          +----------+ +--------+ +-------+ +-------------+
-               |           |          |           |
-           HTTP/REST    HTTP/REST   MQTT/LAN   HTTP/REST
-               |           |          |           |
-          [Printer]   [Printer]  [Printer]   [Printer]
+                         +-----------+
+                         |  AI Agent |
+                         +-----------+
+                              |
+                   MCP (stdio) or CLI
+                              |
+                         +-----------+
+                         |   Kiln    |
+                         |  Server   |
+                         +-----------+
+                        /      |      \
+              ---------/       |       \---------
+             /                 |                 \
+   [Your Printers]     [Fulfillment]     [3DOS Network]
+    /    |    \  \        /       \           |
+  OP   MR   BL   PC  Craftcloud  Sculpteo  Remote Printers
+   |    |    |    |      |          |           |
+  HTTP HTTP MQTT HTTP  HTTPS     HTTPS       HTTPS
+   |    |    |    |      |          |           |
+  🖨️   🖨️   🖨️   🖨️   150+ svcs  75+ mats   P2P fleet
+
+  OP = OctoPrint, MR = Moonraker, BL = Bambu Lab, PC = Prusa Connect
 ```
 
-The server is stateless with respect to printer communication — all state lives on the printers themselves. Kiln maintains local state only for job queuing, event history, and webhook registrations via SQLite.
+The three manufacturing paths are co-equal: an agent can print locally, outsource to a fulfillment center, or route to a peer-to-peer network printer — all through the same MCP tools and CLI commands. The server is stateless with respect to printer communication — all state lives on the printers themselves. Kiln maintains local state only for job queuing, event history, and webhook registrations via SQLite.
 
 ### 2.2 The Adapter Contract
 
