@@ -23,24 +23,39 @@ Kiln lets AI agents design, queue, and execute physical manufacturing jobs on re
 
 ## Architecture
 
-```
-AI Agent (Claude, GPT, custom)
-    |
-    | CLI or MCP (Model Context Protocol)
-    v
-+-------------------+
-|       Kiln        |  <-- CLI + MCP server for printer control
-+-------------------+
-    |           |            |
-    |   PrinterAdapter   Marketplaces (Thingiverse, MMF, Cults3D)
-    |        |               |
-    v        v               v
-+------------+  +------------+  +--------+
-| OctoPrint  |  | Moonraker  |  | Bambu  |
-+------------+  +------------+  +--------+
-    |                |              |
-    v                v              v
-  Prusa i3        Voron          Bambu X1C
+```mermaid
+graph TD
+    A["🤖 AI Agent<br/><sub>Claude · GPT · Custom</sub>"]
+    A -->|"CLI or MCP"| B["⚙️ Kiln<br/><sub>CLI + MCP Server</sub>"]
+
+    B --> C["🖨️ PrinterAdapter"]
+    B --> D["🛒 Marketplaces"]
+
+    C --> E["OctoPrint"]
+    C --> F["Moonraker"]
+    C --> G["Bambu"]
+
+    D --> H["Thingiverse"]
+    D --> I["MyMiniFactory"]
+    D --> J["Cults3D"]
+
+    E --> K["Prusa i3"]
+    F --> L["Voron"]
+    G --> M["Bambu X1C"]
+
+    style A fill:#1a1a2e,stroke:#e94560,color:#fff
+    style B fill:#16213e,stroke:#0f3460,color:#fff
+    style C fill:#0f3460,stroke:#533483,color:#fff
+    style D fill:#0f3460,stroke:#533483,color:#fff
+    style E fill:#2d2d44,stroke:#e94560,color:#fff
+    style F fill:#2d2d44,stroke:#e94560,color:#fff
+    style G fill:#2d2d44,stroke:#e94560,color:#fff
+    style H fill:#2d2d44,stroke:#533483,color:#fff
+    style I fill:#2d2d44,stroke:#533483,color:#fff
+    style J fill:#2d2d44,stroke:#533483,color:#fff
+    style K fill:#1a1a2e,stroke:#444,color:#aaa
+    style L fill:#1a1a2e,stroke:#444,color:#aaa
+    style M fill:#1a1a2e,stroke:#444,color:#aaa
 ```
 
 ## Packages
