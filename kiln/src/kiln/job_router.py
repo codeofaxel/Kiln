@@ -1,663 +1,599 @@
-"""Fleet-aware job router for FDM multi-printer environments.
+"""Smart job routing engine — picks the best printer for each job.
 
-Routes print jobs to the optimal printer in a fleet based on capabilities,
-current availability, material compatibility, and user preference for
-quality vs speed.  This is the compound play for Kiln -- the ability to
-automatically dispatch jobs across a heterogeneous printer fleet without
-the agent (or human) needing to manually pick a machine.
+Scores available printers based on material compatibility, availability,
+reliability, speed, and cost.  Priority weights shift dynamically based
+on the caller's quality/speed/cost preferences.
 
-The router integrates with the :mod:`kiln.registry` to query live printer
-state and with printer capability metadata to make informed decisions.
+Usage::
 
-Example::
+    from kiln.job_router import get_job_router, RoutingCriteria
 
-    router = JobRouter(registry)
-    req = JobRequirement(
-        file_path="benchy.gcode",
-        material="pla",
-        build_volume_needed=(120.0, 120.0, 120.0),
+    router = get_job_router()
+    result = router.route_job(
+        RoutingCriteria(material="PLA"),
+        available_printers=[{"printer_id": "voron", "printer_model": "Voron 2.4", ...}],
     )
-    result = router.route_job(req)
-    if result.feasible:
-        print(f"Best printer: {result.best_printer}")
+    print(result.recommended_printer.printer_id)
 """
 
 from __future__ import annotations
 
-import enum
 import logging
-from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-
 # ---------------------------------------------------------------------------
-# Enums
+# Validation constants
 # ---------------------------------------------------------------------------
 
-class QualityPreference(enum.Enum):
-    """User preference that biases printer selection."""
+_MAX_MATERIAL_LEN = 50
+_MIN_PRIORITY = 1
+_MAX_PRIORITY = 5
+_MAX_ALTERNATIVES = 4
+_MAX_SCORE = 100.0
 
-    SPEED = "speed"
-    QUALITY = "quality"
-    BALANCED = "balanced"
+# Base category weights (must sum to 1.0)
+_BASE_WEIGHT_MATERIAL = 0.30
+_BASE_WEIGHT_AVAILABILITY = 0.25
+_BASE_WEIGHT_RELIABILITY = 0.20
+_BASE_WEIGHT_SPEED = 0.15
+_BASE_WEIGHT_COST = 0.10
 
-
-class RoutingOutcome(enum.Enum):
-    """Classification of why a printer was selected or rejected."""
-
-    SELECTED = "selected"
-    REJECTED_NO_MATERIAL = "rejected_no_material"
-    REJECTED_BUILD_VOLUME = "rejected_build_volume"
-    REJECTED_OFFLINE = "rejected_offline"
-    REJECTED_BUSY = "rejected_busy"
-    REJECTED_NOZZLE = "rejected_nozzle"
-    NO_PRINTERS_AVAILABLE = "no_printers_available"
+# How much each priority point shifts weight (additive per point above 3)
+_PRIORITY_SHIFT = 0.03
 
 
 # ---------------------------------------------------------------------------
-# Scoring constants
+# Exceptions
 # ---------------------------------------------------------------------------
 
-# Points awarded for each criterion.  Higher total = better candidate.
-_SCORE_MATERIAL_MATCH = 40
-_SCORE_MATERIAL_COMPATIBLE = 15
-_SCORE_IDLE = 25
-_SCORE_QUALITY_PRINTER_QUALITY_JOB = 20
-_SCORE_SPEED_PRINTER_SPEED_JOB = 20
-_SCORE_BALANCED_BONUS = 10
-_SCORE_NOZZLE_EXACT = 10
-_SCORE_NOZZLE_COMPATIBLE = 5
-_SCORE_VOLUME_HEADROOM = 5  # build volume > 2x needed
 
-# Penalty scores (subtracted).
-_PENALTY_MATERIAL_SWAP = 10  # printer can use the material but isn't loaded
-_PENALTY_BUSY_QUEUE = 15  # printer has queued jobs
+class RoutingValidationError(ValueError):
+    """Raised when routing criteria fail input validation."""
 
 
 # ---------------------------------------------------------------------------
-# Printer metadata
+# Data model
 # ---------------------------------------------------------------------------
+
 
 @dataclass
-class PrinterProfile:
-    """Static capability metadata for a registered printer.
+class RoutingCriteria:
+    """Criteria for selecting the best printer for a job.
 
-    This is configuration data -- it describes what a printer *can* do,
-    not what it is doing right now.  Live state (idle/busy, temperatures)
-    comes from the :class:`~kiln.registry.PrinterRegistry`.
-
-    :param name: Registry name matching the key in
-        :class:`~kiln.registry.PrinterRegistry`.
-    :param build_volume: Usable build volume as ``(X, Y, Z)`` in mm.
-    :param supported_materials: Materials this printer can handle
-        (e.g. ``["pla", "petg", "tpu"]``).
-    :param loaded_material: Material currently loaded, if known.
-    :param nozzle_diameter: Installed nozzle size in mm.
-    :param quality_tier: ``"high"`` for fine-detail printers (e.g. Prusa,
-        Bambu X1C), ``"standard"`` for workhorses (e.g. Ender).
-    :param speed_tier: ``"fast"`` for high-speed printers (e.g. Bambu,
-        Voron), ``"standard"`` for typical Cartesian machines.
-    :param max_print_speed_mm_s: Advertised max speed for time estimates.
-    :param queued_jobs: Number of jobs already queued for this printer.
+    :param material: Filament material type (e.g. ``"PLA"``, ``"ABS"``).
+    :param file_hash: SHA-256 hex digest of the G-code file, if available.
+    :param estimated_print_time_s: Estimated duration in seconds.
+    :param quality_priority: 1-5 scale; higher boosts reliability + material weight.
+    :param speed_priority: 1-5 scale; higher boosts availability + speed weight.
+    :param cost_priority: 1-5 scale; higher boosts cost weight.
+    :param max_distance_km: Maximum acceptable distance, if location matters.
+    :param required_capabilities: Capabilities the printer must have
+        (e.g. ``["multi_material", "enclosure"]``).
     """
 
-    name: str
-    build_volume: Tuple[float, float, float] = (220.0, 220.0, 250.0)
-    supported_materials: List[str] = field(default_factory=lambda: ["pla", "petg"])
-    loaded_material: Optional[str] = None
-    nozzle_diameter: float = 0.4
-    quality_tier: str = "standard"
-    speed_tier: str = "standard"
-    max_print_speed_mm_s: float = 60.0
-    queued_jobs: int = 0
+    material: str
+    file_hash: str | None = None
+    estimated_print_time_s: float | None = None
+    quality_priority: int = 3
+    speed_priority: int = 3
+    cost_priority: int = 3
+    max_distance_km: float | None = None
+    required_capabilities: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
-        data = asdict(self)
-        return data
+        return {
+            "material": self.material,
+            "file_hash": self.file_hash,
+            "estimated_print_time_s": self.estimated_print_time_s,
+            "quality_priority": self.quality_priority,
+            "speed_priority": self.speed_priority,
+            "cost_priority": self.cost_priority,
+            "max_distance_km": self.max_distance_km,
+            "required_capabilities": list(self.required_capabilities),
+        }
 
-
-# ---------------------------------------------------------------------------
-# Job requirements
-# ---------------------------------------------------------------------------
-
-@dataclass
-class JobRequirement:
-    """Everything the router needs to know to pick a printer for a job.
-
-    :param file_path: Path to the G-code file (used for logging/tracking).
-    :param material: Required filament type (e.g. ``"pla"``, ``"abs"``,
-        ``"tpu"``).  Case-insensitive matching.
-    :param build_volume_needed: Minimum ``(X, Y, Z)`` bounding box in mm
-        that the print requires.  ``None`` skips volume checks.
-    :param nozzle_diameter: Required nozzle size in mm, or ``None`` for
-        any nozzle.
-    :param priority: Job priority (higher = more urgent).  Ties are broken
-        by score.
-    :param quality_preference: Bias the selection toward speed, quality,
-        or a balanced pick.
-    :param preferred_printer: Explicit printer name to prefer (soft
-        preference, not a hard constraint).
-    :param notes: Free-form notes for logging.
-    """
-
-    file_path: str
-    material: str = "pla"
-    build_volume_needed: Optional[Tuple[float, float, float]] = None
-    nozzle_diameter: Optional[float] = None
-    priority: int = 0
-    quality_preference: QualityPreference = QualityPreference.BALANCED
-    preferred_printer: Optional[str] = None
-    notes: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Return a JSON-serialisable dictionary."""
-        data = asdict(self)
-        data["quality_preference"] = self.quality_preference.value
-        return data
-
-
-# ---------------------------------------------------------------------------
-# Scoring result
-# ---------------------------------------------------------------------------
 
 @dataclass
 class PrinterScore:
-    """Score breakdown for a single printer evaluated against a job.
+    """Scored candidate for a routing decision.
 
-    :param printer_name: Registry name of the printer.
-    :param score: Total numeric score (higher = better fit).
-    :param reasons: Human-readable list of scoring rationale.
-    :param estimated_time_minutes: Rough print time estimate for this
-        printer, or ``None`` if indeterminate.
-    :param outcome: Why this printer was selected or rejected.
+    :param printer_id: Unique printer identifier.
+    :param printer_model: Printer model name.
+    :param score: Overall score from 0 to 100.
+    :param breakdown: Per-category scores keyed by category name.
+    :param available: Whether the printer is currently idle.
+    :param estimated_wait_s: Estimated seconds until the printer is free.
+    :param material_success_rate: Historical success rate for this material.
+    :param distance_km: Distance to the printer, if known.
     """
 
-    printer_name: str
-    score: float = 0.0
-    reasons: List[str] = field(default_factory=list)
-    estimated_time_minutes: Optional[float] = None
-    outcome: RoutingOutcome = RoutingOutcome.SELECTED
+    printer_id: str
+    printer_model: str
+    score: float
+    breakdown: dict[str, float]
+    available: bool
+    estimated_wait_s: float
+    material_success_rate: float | None = None
+    distance_km: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
-        data = asdict(self)
-        data["outcome"] = self.outcome.value
-        return data
+        return {
+            "printer_id": self.printer_id,
+            "printer_model": self.printer_model,
+            "score": round(self.score, 2),
+            "breakdown": {k: round(v, 2) for k, v in self.breakdown.items()},
+            "available": self.available,
+            "estimated_wait_s": round(self.estimated_wait_s, 2),
+            "material_success_rate": (
+                round(self.material_success_rate, 4)
+                if self.material_success_rate is not None
+                else None
+            ),
+            "distance_km": (
+                round(self.distance_km, 2)
+                if self.distance_km is not None
+                else None
+            ),
+        }
 
-
-# ---------------------------------------------------------------------------
-# Routing result
-# ---------------------------------------------------------------------------
 
 @dataclass
 class RoutingResult:
-    """Complete result of routing a job across the fleet.
+    """Result of a routing decision.
 
-    :param best_printer: Name of the recommended printer, or ``None`` if
-        no suitable printer was found.
-    :param scores: Per-printer score breakdown, sorted best-first.
-    :param feasible: ``True`` if at least one printer can handle the job.
-    :param warnings: Non-fatal advisory messages.
-    :param errors: Fatal issues that prevent routing.
+    :param recommended_printer: Highest-scoring candidate.
+    :param alternatives: Up to 4 next-best candidates, sorted by score.
+    :param criteria_used: The criteria that produced this result.
+    :param routing_time_ms: Wall-clock time to compute the result.
     """
 
-    best_printer: Optional[str] = None
-    scores: List[PrinterScore] = field(default_factory=list)
-    feasible: bool = True
-    warnings: List[str] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
+    recommended_printer: PrinterScore
+    alternatives: list[PrinterScore]
+    criteria_used: RoutingCriteria
+    routing_time_ms: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
-            "best_printer": self.best_printer,
-            "scores": [s.to_dict() for s in self.scores],
-            "feasible": self.feasible,
-            "warnings": self.warnings,
-            "errors": self.errors,
+            "recommended_printer": self.recommended_printer.to_dict(),
+            "alternatives": [a.to_dict() for a in self.alternatives],
+            "criteria_used": self.criteria_used.to_dict(),
+            "routing_time_ms": round(self.routing_time_ms, 2),
         }
 
 
 # ---------------------------------------------------------------------------
-# Singleton accessor
+# Core engine
 # ---------------------------------------------------------------------------
 
-_router_instance: Optional[JobRouter] = None
-
-
-def get_router() -> JobRouter:
-    """Return the lazily-initialised global :class:`JobRouter` singleton.
-
-    The router is created on first access.  It requires a
-    :class:`~kiln.registry.PrinterRegistry` which is obtained from the
-    global registry singleton.
-
-    :returns: The shared :class:`JobRouter` instance.
-    """
-    global _router_instance
-    if _router_instance is None:
-        from kiln.registry import PrinterRegistry
-
-        _router_instance = JobRouter(registry=PrinterRegistry())
-    return _router_instance
-
-
-# ---------------------------------------------------------------------------
-# Core router
-# ---------------------------------------------------------------------------
 
 class JobRouter:
-    """Routes print jobs to the optimal printer in a fleet.
+    """Scores and ranks printers for a given job based on weighted criteria.
 
-    The router evaluates every registered printer against the job
-    requirements, assigns a numeric score, and returns a ranked list.
-    Hard constraints (build volume, material support) are gate checks
-    that disqualify a printer entirely; soft criteria (loaded material,
-    speed/quality tier, availability) adjust the score.
+    Optionally integrates with the cross-printer learning engine for
+    material success-rate data.
 
-    Usage::
-
-        from kiln.registry import PrinterRegistry
-        from kiln.job_router import JobRouter, JobRequirement
-
-        registry = PrinterRegistry()
-        # ... register printers ...
-
-        router = JobRouter(registry=registry)
-        req = JobRequirement(
-            file_path="bracket.gcode",
-            material="petg",
-            build_volume_needed=(150.0, 150.0, 80.0),
-            quality_preference=QualityPreference.QUALITY,
-        )
-        result = router.route_job(req, profiles)
-        print(result.best_printer)  # e.g. "prusa-mk4"
-
-    :param registry: The printer registry to query for live state.
+    :param learning_engine: Optional :class:`CrossPrinterLearningEngine`.
+        If ``None``, material scoring falls back to a binary
+        supported/unsupported check.
     """
 
-    def __init__(self, *, registry: Any = None) -> None:
-        self._registry = registry
+    def __init__(
+        self,
+        *,
+        learning_engine: Any = None,
+    ) -> None:
+        self._learning_engine = learning_engine
 
-    # -- public API --------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def route_job(
         self,
-        requirement: JobRequirement,
-        profiles: List[PrinterProfile],
+        criteria: RoutingCriteria,
+        available_printers: list[dict[str, Any]],
     ) -> RoutingResult:
-        """Score every printer and return the best match for a job.
+        """Score all printers and return the best match plus alternatives.
 
-        :param requirement: The job's requirements.
-        :param profiles: Static capability profiles for each candidate
-            printer.  Only printers present in both the profiles list and
-            the registry are evaluated.
-        :returns: A :class:`RoutingResult` with ranked scores and the
-            recommended printer.
+        :param criteria: Job requirements and priority weights.
+        :param available_printers: List of printer info dicts.  Each dict
+            must contain at least ``"printer_id"`` and ``"printer_model"``.
+            Optional keys: ``"status"`` (str), ``"queue_depth"`` (int),
+            ``"supported_materials"`` (list[str]),
+            ``"capabilities"`` (list[str]), ``"success_rate"`` (float),
+            ``"estimated_wait_s"`` (float), ``"cost_per_hour"`` (float),
+            ``"distance_km"`` (float), ``"print_speed_factor"`` (float).
+        :returns: :class:`RoutingResult` with the recommended printer.
+        :raises RoutingValidationError: If inputs are invalid.
         """
-        result = RoutingResult()
+        self._validate_criteria(criteria)
+        self._validate_printers(available_printers)
 
-        if not profiles:
-            result.feasible = False
-            result.errors.append("No printer profiles provided.")
-            return result
+        start = time.monotonic()
 
-        scores: List[PrinterScore] = []
-        for profile in profiles:
-            ps = self.score_printer(requirement, profile)
-            scores.append(ps)
+        # Filter printers that don't meet hard constraints
+        candidates = self._filter_candidates(criteria, available_printers)
 
-        # Sort by score descending; ties broken by printer name for
-        # deterministic ordering.
-        scores.sort(key=lambda s: (-s.score, s.printer_name))
-        result.scores = scores
-
-        # Find the best *eligible* printer (outcome == SELECTED).
-        best = self.find_best_printer(scores)
-        if best is not None:
-            result.best_printer = best.printer_name
-        else:
-            result.feasible = False
-            rejection_reasons = set()
-            for s in scores:
-                if s.outcome != RoutingOutcome.SELECTED:
-                    rejection_reasons.add(s.outcome.value)
-            result.errors.append(
-                f"No printer can fulfil this job. Rejection reasons: "
-                f"{', '.join(sorted(rejection_reasons)) or 'unknown'}."
+        if not candidates:
+            raise RoutingValidationError(
+                "No printers match the required capabilities and constraints"
             )
 
-        # Advisory warnings.
-        selected_scores = [s for s in scores if s.outcome == RoutingOutcome.SELECTED]
-        if len(selected_scores) == 1 and result.feasible:
-            result.warnings.append(
-                f"Only one printer ({selected_scores[0].printer_name}) is "
-                f"eligible. No fallback available."
-            )
+        # Score each candidate
+        scores: list[PrinterScore] = []
+        for printer_info in candidates:
+            scores.append(self.score_printer(criteria, printer_info))
 
-        if result.best_printer and requirement.preferred_printer:
-            if result.best_printer != requirement.preferred_printer:
-                result.warnings.append(
-                    f"Preferred printer {requirement.preferred_printer!r} was "
-                    f"not the best match; routing to "
-                    f"{result.best_printer!r} instead."
-                )
+        # Sort descending by score, then by printer_id for determinism
+        scores.sort(key=lambda s: (-s.score, s.printer_id))
 
-        return result
+        elapsed_ms = (time.monotonic() - start) * 1000.0
+
+        return RoutingResult(
+            recommended_printer=scores[0],
+            alternatives=scores[1 : 1 + _MAX_ALTERNATIVES],
+            criteria_used=criteria,
+            routing_time_ms=elapsed_ms,
+        )
 
     def score_printer(
         self,
-        requirement: JobRequirement,
-        profile: PrinterProfile,
+        criteria: RoutingCriteria,
+        printer_info: dict[str, Any],
     ) -> PrinterScore:
-        """Evaluate a single printer against a job requirement.
+        """Compute the score for a single printer.
 
-        Gate checks (hard fails) are evaluated first.  If the printer
-        passes all gates, soft scoring criteria are applied additively.
+        Useful for debugging or presenting per-printer breakdowns.
 
-        :param requirement: The job's requirements.
-        :param profile: Static capability profile for the printer.
-        :returns: A :class:`PrinterScore` with breakdown.
+        :param criteria: Job requirements and priority weights.
+        :param printer_info: Printer info dict (see :meth:`route_job`).
+        :returns: :class:`PrinterScore` with breakdown.
         """
-        ps = PrinterScore(printer_name=profile.name)
-        req_material = requirement.material.lower()
+        weights = self._compute_weights(criteria)
 
-        # ---- gate: live state (offline / busy) ---------------------------
-        live_state = self._get_live_state(profile.name)
-        if live_state == "offline":
-            ps.outcome = RoutingOutcome.REJECTED_OFFLINE
-            ps.reasons.append("Printer is offline.")
-            ps.score = -1.0
-            return ps
+        material_score = self._score_material(criteria, printer_info)
+        availability_score = self._score_availability(printer_info)
+        reliability_score = self._score_reliability(printer_info)
+        speed_score = self._score_speed(criteria, printer_info)
+        cost_score = self._score_cost(printer_info)
 
-        # ---- gate: build volume ------------------------------------------
-        if requirement.build_volume_needed is not None:
-            if not self._volume_fits(requirement.build_volume_needed, profile.build_volume):
-                ps.outcome = RoutingOutcome.REJECTED_BUILD_VOLUME
-                ps.reasons.append(
-                    f"Build volume {profile.build_volume} is too small "
-                    f"for required {requirement.build_volume_needed}."
-                )
-                ps.score = -1.0
-                return ps
+        breakdown = {
+            "material": material_score,
+            "availability": availability_score,
+            "reliability": reliability_score,
+            "speed": speed_score,
+            "cost": cost_score,
+        }
 
-        # ---- gate: material support --------------------------------------
-        supported_lower = [m.lower() for m in profile.supported_materials]
-        if req_material not in supported_lower:
-            ps.outcome = RoutingOutcome.REJECTED_NO_MATERIAL
-            ps.reasons.append(
-                f"Printer does not support material {req_material!r}. "
-                f"Supported: {profile.supported_materials}."
-            )
-            ps.score = -1.0
-            return ps
-
-        # ---- gate: nozzle diameter ---------------------------------------
-        if requirement.nozzle_diameter is not None:
-            if abs(profile.nozzle_diameter - requirement.nozzle_diameter) > 0.05:
-                ps.outcome = RoutingOutcome.REJECTED_NOZZLE
-                ps.reasons.append(
-                    f"Nozzle {profile.nozzle_diameter} mm does not match "
-                    f"required {requirement.nozzle_diameter} mm."
-                )
-                ps.score = -1.0
-                return ps
-            elif abs(profile.nozzle_diameter - requirement.nozzle_diameter) < 0.001:
-                ps.score += _SCORE_NOZZLE_EXACT
-                ps.reasons.append(f"+{_SCORE_NOZZLE_EXACT}: exact nozzle match.")
-            else:
-                ps.score += _SCORE_NOZZLE_COMPATIBLE
-                ps.reasons.append(f"+{_SCORE_NOZZLE_COMPATIBLE}: nozzle within tolerance.")
-
-        # ---- soft: material loaded vs swap required ----------------------
-        loaded_lower = (profile.loaded_material or "").lower()
-        if loaded_lower == req_material:
-            ps.score += _SCORE_MATERIAL_MATCH
-            ps.reasons.append(
-                f"+{_SCORE_MATERIAL_MATCH}: material {req_material!r} already loaded."
-            )
-        else:
-            ps.score += _SCORE_MATERIAL_COMPATIBLE
-            ps.score -= _PENALTY_MATERIAL_SWAP
-            ps.reasons.append(
-                f"+{_SCORE_MATERIAL_COMPATIBLE} -{_PENALTY_MATERIAL_SWAP}: "
-                f"material supported but swap from "
-                f"{loaded_lower or 'unknown'!r} required."
-            )
-
-        # ---- soft: printer availability ----------------------------------
-        if live_state == "idle":
-            ps.score += _SCORE_IDLE
-            ps.reasons.append(f"+{_SCORE_IDLE}: printer is idle and ready.")
-        elif live_state == "busy":
-            # Not a hard rejection -- printer may finish soon.
-            ps.score -= _PENALTY_BUSY_QUEUE
-            ps.reasons.append(
-                f"-{_PENALTY_BUSY_QUEUE}: printer is currently busy."
-            )
-
-        # ---- soft: queued jobs backlog -----------------------------------
-        if profile.queued_jobs > 0:
-            penalty = profile.queued_jobs * _PENALTY_BUSY_QUEUE
-            ps.score -= penalty
-            ps.reasons.append(
-                f"-{penalty}: {profile.queued_jobs} job(s) already queued."
-            )
-
-        # ---- soft: quality / speed preference ----------------------------
-        pref_bonus = self._preference_bonus(
-            requirement.quality_preference, profile,
-        )
-        if pref_bonus > 0:
-            ps.score += pref_bonus
-            ps.reasons.append(
-                f"+{pref_bonus:.0f}: "
-                f"{requirement.quality_preference.value} preference "
-                f"aligns with printer capabilities."
-            )
-
-        # ---- soft: build volume headroom ---------------------------------
-        if requirement.build_volume_needed is not None:
-            ratio = self._volume_ratio(
-                requirement.build_volume_needed, profile.build_volume,
-            )
-            if ratio is not None and ratio >= 2.0:
-                ps.score += _SCORE_VOLUME_HEADROOM
-                ps.reasons.append(
-                    f"+{_SCORE_VOLUME_HEADROOM}: ample build volume headroom "
-                    f"({ratio:.1f}x)."
-                )
-
-        # ---- soft: preferred printer bonus --------------------------------
-        if (
-            requirement.preferred_printer
-            and requirement.preferred_printer == profile.name
-        ):
-            bonus = 15
-            ps.score += bonus
-            ps.reasons.append(f"+{bonus}: user-preferred printer.")
-
-        # ---- time estimate -----------------------------------------------
-        ps.estimated_time_minutes = self._estimate_print_time(
-            requirement, profile,
+        total = (
+            weights["material"] * material_score
+            + weights["availability"] * availability_score
+            + weights["reliability"] * reliability_score
+            + weights["speed"] * speed_score
+            + weights["cost"] * cost_score
         )
 
-        ps.outcome = RoutingOutcome.SELECTED
-        return ps
+        # Clamp to [0, 100]
+        total = max(0.0, min(_MAX_SCORE, total))
 
-    def find_best_printer(
+        status = printer_info.get("status", "idle")
+        available = status == "idle"
+        estimated_wait = float(printer_info.get("estimated_wait_s", 0.0))
+
+        # Pull material success rate from learning engine if available
+        material_success_rate = self._get_material_success_rate(
+            criteria.material, printer_info.get("printer_model", "")
+        )
+        # Fall back to printer-reported success_rate
+        if material_success_rate is None:
+            raw_rate = printer_info.get("success_rate")
+            if raw_rate is not None:
+                material_success_rate = float(raw_rate)
+
+        return PrinterScore(
+            printer_id=printer_info["printer_id"],
+            printer_model=printer_info.get("printer_model", "unknown"),
+            score=total,
+            breakdown=breakdown,
+            available=available,
+            estimated_wait_s=estimated_wait,
+            material_success_rate=material_success_rate,
+            distance_km=printer_info.get("distance_km"),
+        )
+
+    # ------------------------------------------------------------------
+    # Validation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_criteria(criteria: RoutingCriteria) -> None:
+        """Validate routing criteria fields.
+
+        :raises RoutingValidationError: On invalid input.
+        """
+        if not criteria.material or not isinstance(criteria.material, str):
+            raise RoutingValidationError("material must be a non-empty string")
+        if len(criteria.material) > _MAX_MATERIAL_LEN:
+            raise RoutingValidationError(
+                f"material must be at most {_MAX_MATERIAL_LEN} characters"
+            )
+
+        for name, value in [
+            ("quality_priority", criteria.quality_priority),
+            ("speed_priority", criteria.speed_priority),
+            ("cost_priority", criteria.cost_priority),
+        ]:
+            if not isinstance(value, int) or value < _MIN_PRIORITY or value > _MAX_PRIORITY:
+                raise RoutingValidationError(
+                    f"{name} must be an integer between "
+                    f"{_MIN_PRIORITY} and {_MAX_PRIORITY}"
+                )
+
+        if criteria.max_distance_km is not None:
+            if not isinstance(criteria.max_distance_km, (int, float)):
+                raise RoutingValidationError("max_distance_km must be a number")
+            if criteria.max_distance_km <= 0:
+                raise RoutingValidationError("max_distance_km must be > 0")
+
+    @staticmethod
+    def _validate_printers(printers: list[dict[str, Any]]) -> None:
+        """Validate the available printers list.
+
+        :raises RoutingValidationError: On invalid input.
+        """
+        if not printers:
+            raise RoutingValidationError("available_printers must be a non-empty list")
+        for idx, p in enumerate(printers):
+            if "printer_id" not in p:
+                raise RoutingValidationError(
+                    f"printer at index {idx} missing required key 'printer_id'"
+                )
+
+    # ------------------------------------------------------------------
+    # Filtering
+    # ------------------------------------------------------------------
+
+    def _filter_candidates(
         self,
-        scores: List[PrinterScore],
-    ) -> Optional[PrinterScore]:
-        """Return the highest-scoring eligible printer, or ``None``.
+        criteria: RoutingCriteria,
+        printers: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Remove printers that fail hard constraints."""
+        candidates: list[dict[str, Any]] = []
 
-        :param scores: Pre-computed scores (need not be sorted).
-        :returns: The best :class:`PrinterScore`, or ``None`` if all
-            printers were rejected.
+        for p in printers:
+            # Capability check
+            if criteria.required_capabilities:
+                printer_caps = set(p.get("capabilities", []))
+                if not set(criteria.required_capabilities).issubset(printer_caps):
+                    continue
+
+            # Distance check
+            if criteria.max_distance_km is not None:
+                dist = p.get("distance_km")
+                if dist is None or float(dist) > criteria.max_distance_km:
+                    continue
+
+            candidates.append(p)
+
+        return candidates
+
+    # ------------------------------------------------------------------
+    # Weight computation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compute_weights(criteria: RoutingCriteria) -> dict[str, float]:
+        """Adjust base weights based on priority sliders.
+
+        Each priority point above 3 adds ``_PRIORITY_SHIFT`` to the
+        associated categories and subtracts proportionally from the rest.
+        Points below 3 do the reverse.
         """
-        eligible = [
-            s for s in scores
-            if s.outcome == RoutingOutcome.SELECTED and s.score >= 0
-        ]
-        if not eligible:
+        w_material = _BASE_WEIGHT_MATERIAL
+        w_availability = _BASE_WEIGHT_AVAILABILITY
+        w_reliability = _BASE_WEIGHT_RELIABILITY
+        w_speed = _BASE_WEIGHT_SPEED
+        w_cost = _BASE_WEIGHT_COST
+
+        # Quality priority shifts material + reliability
+        q_delta = (criteria.quality_priority - 3) * _PRIORITY_SHIFT
+        w_material += q_delta
+        w_reliability += q_delta
+
+        # Speed priority shifts availability + speed
+        s_delta = (criteria.speed_priority - 3) * _PRIORITY_SHIFT
+        w_availability += s_delta
+        w_speed += s_delta
+
+        # Cost priority shifts cost
+        c_delta = (criteria.cost_priority - 3) * _PRIORITY_SHIFT
+        w_cost += c_delta
+
+        # Clamp all weights to a minimum of 0.01 to avoid zeroes
+        weights = {
+            "material": max(0.01, w_material),
+            "availability": max(0.01, w_availability),
+            "reliability": max(0.01, w_reliability),
+            "speed": max(0.01, w_speed),
+            "cost": max(0.01, w_cost),
+        }
+
+        # Normalize so they sum to 1.0
+        total = sum(weights.values())
+        return {k: v / total for k, v in weights.items()}
+
+    # ------------------------------------------------------------------
+    # Category scorers (each returns 0-100)
+    # ------------------------------------------------------------------
+
+    def _score_material(
+        self,
+        criteria: RoutingCriteria,
+        printer_info: dict[str, Any],
+    ) -> float:
+        """Score based on material compatibility and success history.
+
+        Returns 100 if the printer explicitly supports the material and has
+        a high success rate, 0 if it doesn't support it at all.
+        """
+        supported = printer_info.get("supported_materials", [])
+
+        # If no material list given, assume the printer supports everything
+        if not supported:
+            base = 70.0
+        elif criteria.material in supported:
+            base = 100.0
+        else:
+            return 0.0
+
+        # Refine with learning engine data if available
+        rate = self._get_material_success_rate(
+            criteria.material, printer_info.get("printer_model", "")
+        )
+        if rate is not None:
+            # Blend base compatibility with empirical success rate
+            return base * 0.4 + (rate * 100.0) * 0.6
+
+        return base
+
+    def _get_material_success_rate(
+        self,
+        material: str,
+        printer_model: str,
+    ) -> float | None:
+        """Query the learning engine for material success rate.
+
+        Returns ``None`` if no learning engine or no data available.
+        """
+        if self._learning_engine is None or not printer_model:
             return None
-        eligible.sort(key=lambda s: (-s.score, s.printer_name))
-        return eligible[0]
-
-    # -- internal helpers --------------------------------------------------
-
-    def _get_live_state(self, printer_name: str) -> str:
-        """Query the registry for the printer's live status.
-
-        Returns ``"idle"``, ``"busy"``, or ``"offline"``.  Swallows
-        exceptions and returns ``"offline"`` if the printer cannot be
-        reached.
-        """
-        if self._registry is None:
-            # No registry -- assume idle (useful for unit testing without
-            # a full registry).
-            return "idle"
 
         try:
-            adapter = self._registry.get(printer_name)
-            state = adapter.get_state()
+            insight = self._learning_engine.get_material_insights(material)
+            if insight.sample_count > 0:
+                return insight.success_rate
         except Exception:
-            return "offline"
+            logger.debug(
+                "Learning engine query failed for %s/%s", material, printer_model
+            )
 
-        from kiln.printers.base import PrinterStatus  # lazy import
-
-        if not state.connected:
-            return "offline"
-        if state.state == PrinterStatus.IDLE:
-            return "idle"
-        if state.state in (
-            PrinterStatus.PRINTING,
-            PrinterStatus.PAUSED,
-            PrinterStatus.BUSY,
-            PrinterStatus.CANCELLING,
-        ):
-            return "busy"
-        if state.state == PrinterStatus.ERROR:
-            return "offline"
-        return "idle"
+        return None
 
     @staticmethod
-    def _volume_fits(
-        needed: Tuple[float, float, float],
-        available: Tuple[float, float, float],
-    ) -> bool:
-        """Return ``True`` if the printer's build volume can contain the part.
+    def _score_availability(printer_info: dict[str, Any]) -> float:
+        """Score based on current status and queue depth.
 
-        Each axis of *needed* must be <= the corresponding axis of
-        *available*.
+        Idle printers with no queue get 100; busy printers with deep
+        queues approach 0.
         """
-        return (
-            needed[0] <= available[0]
-            and needed[1] <= available[1]
-            and needed[2] <= available[2]
-        )
+        status = printer_info.get("status", "idle")
+        queue_depth = int(printer_info.get("queue_depth", 0))
+
+        if status == "idle":
+            base = 100.0
+        elif status == "printing":
+            base = 50.0
+        elif status == "busy":
+            base = 30.0
+        elif status == "error" or status == "offline":
+            return 0.0
+        else:
+            base = 40.0
+
+        # Penalize queue depth: -10 per queued job, floor at 0
+        penalty = queue_depth * 10.0
+        return max(0.0, base - penalty)
 
     @staticmethod
-    def _volume_ratio(
-        needed: Tuple[float, float, float],
-        available: Tuple[float, float, float],
-    ) -> Optional[float]:
-        """Return the ratio of available volume to needed volume.
+    def _score_reliability(printer_info: dict[str, Any]) -> float:
+        """Score based on overall success rate.
 
-        Returns ``None`` if the needed volume is zero (avoids division by
-        zero).
+        Falls back to 50 (neutral) when no data is available.
         """
-        needed_vol = needed[0] * needed[1] * needed[2]
-        if needed_vol <= 0:
-            return None
-        available_vol = available[0] * available[1] * available[2]
-        return available_vol / needed_vol
+        rate = printer_info.get("success_rate")
+        if rate is None:
+            return 50.0
+        return float(rate) * 100.0
 
     @staticmethod
-    def _preference_bonus(
-        preference: QualityPreference,
-        profile: PrinterProfile,
+    def _score_speed(
+        criteria: RoutingCriteria,
+        printer_info: dict[str, Any],
     ) -> float:
-        """Score bonus/penalty based on quality preference vs printer tier.
+        """Score based on estimated wait time and speed factor.
 
-        :param preference: The job's quality preference.
-        :param profile: The printer's capability profile.
-        :returns: Points to add (can be negative).
+        Printers with lower wait times and higher speed factors score
+        higher.
         """
-        bonus = 0.0
-        reasons: List[str] = []
+        wait = float(printer_info.get("estimated_wait_s", 0.0))
+        speed_factor = float(printer_info.get("print_speed_factor", 1.0))
 
-        if preference == QualityPreference.QUALITY:
-            if profile.quality_tier == "high":
-                bonus += _SCORE_QUALITY_PRINTER_QUALITY_JOB
-            elif profile.speed_tier == "fast" and profile.quality_tier != "high":
-                # Fast printers are *capable* but not ideal for quality.
-                bonus += _SCORE_BALANCED_BONUS * 0.5
+        # Wait time penalty: lose 1 point per 60s of wait, cap at 50
+        wait_penalty = min(50.0, wait / 60.0)
 
-        elif preference == QualityPreference.SPEED:
-            if profile.speed_tier == "fast":
-                bonus += _SCORE_SPEED_PRINTER_SPEED_JOB
-            elif profile.quality_tier == "high" and profile.speed_tier != "fast":
-                bonus += _SCORE_BALANCED_BONUS * 0.5
+        # Speed bonus: speed_factor 1.0 = neutral (50), 2.0 = 100, 0.5 = 25
+        speed_base = min(100.0, speed_factor * 50.0)
 
-        elif preference == QualityPreference.BALANCED:
-            # Balanced jobs get a small bonus for printers that are good
-            # at either, with a larger bonus if they're good at both.
-            if profile.quality_tier == "high" and profile.speed_tier == "fast":
-                bonus += _SCORE_BALANCED_BONUS * 1.5
-            elif profile.quality_tier == "high" or profile.speed_tier == "fast":
-                bonus += _SCORE_BALANCED_BONUS
-
-        return bonus
+        return max(0.0, speed_base - wait_penalty)
 
     @staticmethod
-    def _estimate_print_time(
-        requirement: JobRequirement,
-        profile: PrinterProfile,
-    ) -> Optional[float]:
-        """Rough print time estimate in minutes.
+    def _score_cost(printer_info: dict[str, Any]) -> float:
+        """Score based on cost per hour.
 
-        This is a heuristic -- real estimates come from slicer output or
-        G-code analysis.  Here we use build volume as a proxy for part
-        size and scale by the printer's advertised speed.
-
-        :param requirement: The job's requirements.
-        :param profile: The printer's capability profile.
-        :returns: Estimated minutes, or ``None`` if volume data is missing.
+        Lower cost = higher score.  Without data, returns a neutral 50.
         """
-        if requirement.build_volume_needed is None:
-            return None
-
-        vol = requirement.build_volume_needed
-        part_volume_cm3 = (vol[0] * vol[1] * vol[2]) / 1_000.0  # mm^3 -> cm^3
-
-        # Heuristic: ~2 minutes per cm^3 at 60 mm/s baseline.
-        baseline_speed = 60.0
-        speed_factor = baseline_speed / max(profile.max_print_speed_mm_s, 1.0)
-
-        # Base time scaled by volume and speed.
-        base_minutes = part_volume_cm3 * 2.0 * speed_factor
-
-        # Clamp to a reasonable range.
-        return round(max(5.0, min(base_minutes, 4320.0)), 1)
+        cost = printer_info.get("cost_per_hour")
+        if cost is None:
+            return 50.0
+        cost_f = float(cost)
+        if cost_f <= 0:
+            return 100.0
+        # Inverse scoring: $1/hr = 100, $5/hr = 20, $10/hr = 10
+        return min(100.0, max(0.0, 100.0 / cost_f))
 
 
 # ---------------------------------------------------------------------------
-# Convenience helpers
+# Module-level singleton (lazy, thread-safe)
 # ---------------------------------------------------------------------------
 
-def route_job(
-    requirement: JobRequirement,
-    profiles: List[PrinterProfile],
-) -> RoutingResult:
-    """Module-level convenience that uses the global router singleton.
+_router: JobRouter | None = None
+_router_lock = threading.Lock()
 
-    :param requirement: The job's requirements.
-    :param profiles: Static capability profiles for each candidate printer.
-    :returns: A :class:`RoutingResult` with ranked scores and the
-        recommended printer.
+
+def get_job_router() -> JobRouter:
+    """Return the module-level :class:`JobRouter` singleton.
+
+    Thread-safe; the instance is created on first call.  Attempts to
+    attach the cross-printer learning engine if available.
     """
-    return get_router().route_job(requirement, profiles)
+    global _router
+    if _router is not None:
+        return _router
+    with _router_lock:
+        if _router is None:
+            learning = _try_get_learning_engine()
+            _router = JobRouter(learning_engine=learning)
+        return _router
+
+
+def _try_get_learning_engine() -> Any:
+    """Attempt to import and return the learning engine singleton.
+
+    Returns ``None`` if the module is unavailable or raises.
+    """
+    try:
+        from kiln.cross_printer_learning import get_learning_engine
+
+        return get_learning_engine()
+    except Exception:
+        logger.debug("Cross-printer learning engine not available")
+        return None
