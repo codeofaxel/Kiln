@@ -1121,16 +1121,16 @@ class TestBambuAdapterSnapshot:
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value=None)
     def test_get_snapshot_no_ffmpeg(self, mock_ffmpeg) -> None:
         adapter = _adapter()
-        result = adapter.get_snapshot()
-        assert result is None
+        with pytest.raises(PrinterError, match="ffmpeg is not installed"):
+            adapter.get_snapshot()
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
     @mock.patch("kiln.printers.bambu.subprocess.run")
     def test_get_snapshot_ffmpeg_timeout(self, mock_run, mock_ffmpeg) -> None:
         adapter = _adapter()
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=10)
-        result = adapter.get_snapshot()
-        assert result is None
+        with pytest.raises(PrinterError, match="RTSP stream timed out"):
+            adapter.get_snapshot()
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
     def test_capabilities_with_ffmpeg(self, mock_ffmpeg) -> None:

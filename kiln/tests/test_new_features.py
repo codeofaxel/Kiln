@@ -485,14 +485,15 @@ class TestAdapterSnapshot:
         adapter._session.get.assert_called_once()
 
     def test_octoprint_snapshot_failure(self):
-        """OctoPrint adapter returns None on webcam error."""
+        """OctoPrint adapter raises PrinterError on webcam error."""
+        from kiln.printers.base import PrinterError
         from kiln.printers.octoprint import OctoPrintAdapter
 
         adapter = OctoPrintAdapter(host="http://test.local", api_key="TESTKEY")
         adapter._session.get = MagicMock(side_effect=Exception("connection failed"))
 
-        result = adapter.get_snapshot()
-        assert result is None
+        with pytest.raises(PrinterError, match="connection failed"):
+            adapter.get_snapshot()
 
     def test_moonraker_snapshot_success(self):
         """Moonraker adapter discovers webcam and fetches snapshot."""
@@ -525,7 +526,8 @@ class TestAdapterSnapshot:
         assert result == b"\xff\xd8\xff\xe0jpeg"
 
     def test_moonraker_no_webcam(self):
-        """Moonraker adapter returns None when no webcams configured."""
+        """Moonraker adapter raises PrinterError when no webcams configured."""
+        from kiln.printers.base import PrinterError
         from kiln.printers.moonraker import MoonrakerAdapter
 
         adapter = MoonrakerAdapter(host="http://klipper.local")
@@ -534,8 +536,8 @@ class TestAdapterSnapshot:
             "result": {"webcams": []}
         })
 
-        result = adapter.get_snapshot()
-        assert result is None
+        with pytest.raises(PrinterError, match="No webcams configured"):
+            adapter.get_snapshot()
 
 
 # ---------------------------------------------------------------------------

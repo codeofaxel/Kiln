@@ -848,22 +848,23 @@ class BambuAdapter(PrinterAdapter):
 
     def _wait_for_print_start(
         self, timeout: float = 15.0, poll_interval: float = 1.0,
-    ) -> bool:
+    ) -> str:
         """Poll MQTT cache until printer enters a print-active state.
 
-        Returns ``True`` if the printer transitioned to an active state
-        within *timeout* seconds, ``False`` on timeout or error state.
+        Returns the state string that triggered the return (e.g.
+        ``"running"``, ``"prepare"``), ``"failed"`` on error state,
+        or ``"timeout"`` if no transition occurred.
         """
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             with self._state_lock:
                 state = str(self._last_status.get("gcode_state", "")).lower()
             if state in _PRINT_ACTIVE_STATES:
-                return True
+                return state
             if state == "failed":
-                return False
+                return "failed"
             time.sleep(poll_interval)
-        return False
+        return "timeout"
 
     def start_print(self, file_name: str) -> PrintResult:
         """Begin printing a file on the Bambu printer.
@@ -929,7 +930,8 @@ class BambuAdapter(PrinterAdapter):
 
         # Wait for MQTT confirmation unless already active.
         if not already_active:
-            if not self._wait_for_print_start():
+            result_state = self._wait_for_print_start()
+            if result_state in ("timeout", "failed"):
                 return PrintResult(
                     success=False,
                     message=(
@@ -938,6 +940,20 @@ class BambuAdapter(PrinterAdapter):
                         f"Check printer LCD for errors."
                     ),
                 )
+            if result_state == "running":
+                return PrintResult(
+                    success=True,
+                    message=f"Started printing {basename}. Printer confirmed running.",
+                )
+            # prepare / slicing / init — accepted but not yet running
+            return PrintResult(
+                success=True,
+                message=(
+                    f"Print command accepted for {basename}. Printer is "
+                    f"preparing (state: {result_state}). Use printer_status() "
+                    f"to monitor — print has not yet confirmed running."
+                ),
+            )
 
         return PrintResult(
             success=True,
@@ -1062,13 +1078,19 @@ class BambuAdapter(PrinterAdapter):
         """Capture a webcam snapshot via the RTSP stream.
 
         Uses ``ffmpeg`` to grab a single JPEG frame from the printer's
-        RTSP stream (``rtsps://<host>:322/streaming/live/1``).  Returns
-        ``None`` if ffmpeg is not installed or the camera is unreachable.
+        RTSP stream (``rtsps://<host>:322/streaming/live/1``).
+
+        Raises:
+            PrinterError: With a diagnostic message if ffmpeg is missing,
+                the RTSP stream times out, or ffmpeg fails.
         """
         ffmpeg = _find_ffmpeg()
         if not ffmpeg:
-            logger.debug("ffmpeg not found — cannot capture Bambu snapshot")
-            return None
+            raise PrinterError(
+                "Camera snapshot requires ffmpeg but ffmpeg is not installed. "
+                "Install it (e.g. 'brew install ffmpeg' or 'apt install ffmpeg') "
+                "to enable Bambu camera snapshots."
+            )
 
         stream_url = self.get_stream_url()
         if not stream_url:
@@ -1091,12 +1113,24 @@ class BambuAdapter(PrinterAdapter):
             )
             if result.returncode == 0 and result.stdout and len(result.stdout) > 100:
                 return result.stdout
-        except subprocess.TimeoutExpired:
-            logger.debug("ffmpeg snapshot timed out for %s", self._host)
+            raise PrinterError(
+                f"Camera snapshot failed: ffmpeg exited with code "
+                f"{result.returncode}. Check that the printer camera is "
+                f"enabled and the printer is reachable on the LAN."
+            )
+        except PrinterError:
+            raise
+        except subprocess.TimeoutExpired as exc:
+            raise PrinterError(
+                "Camera RTSP stream timed out after 10s. Check that the "
+                "printer camera is enabled and the printer is reachable "
+                "on the LAN."
+            ) from exc
         except Exception as exc:
-            logger.debug("ffmpeg snapshot failed for %s: %s", self._host, exc)
-
-        return None
+            raise PrinterError(
+                f"Camera snapshot failed: {exc}. Check camera and network "
+                f"connectivity."
+            ) from exc
 
     def get_stream_url(self) -> Optional[str]:
         """Return the RTSP stream URL for the Bambu printer's camera.

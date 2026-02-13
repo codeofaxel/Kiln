@@ -1000,8 +1000,9 @@ class OctoPrintAdapter(PrinterAdapter):
         Attempts ``GET /webcam/?action=snapshot`` which is the standard
         mjpg-streamer endpoint exposed by OctoPrint.
 
-        Returns:
-            Raw JPEG image bytes, or ``None`` if the webcam is not available.
+        Raises:
+            PrinterError: With a diagnostic message on connection or
+                HTTP errors.
         """
         try:
             response = self._session.get(
@@ -1010,9 +1011,33 @@ class OctoPrintAdapter(PrinterAdapter):
             )
             if response.ok and response.content:
                 return response.content
-        except Exception:
-            logger.debug("Webcam snapshot failed", exc_info=True)
-        return None
+            if not response.ok:
+                raise PrinterError(
+                    f"Webcam snapshot failed (HTTP {response.status_code}). "
+                    f"Check that mjpg-streamer is running and the webcam is "
+                    f"configured in OctoPrint."
+                )
+            return None
+        except PrinterError:
+            raise
+        except Timeout as exc:
+            raise PrinterError(
+                "Webcam snapshot timed out after 10s. Check that the webcam "
+                "is connected and mjpg-streamer is running."
+            ) from exc
+        except ReqConnectionError as exc:
+            raise PrinterError(
+                "Webcam snapshot failed: could not connect. Check that the "
+                "webcam is configured in OctoPrint and the printer is online."
+            ) from exc
+        except RequestException as exc:
+            raise PrinterError(
+                f"Webcam snapshot failed: {exc}"
+            ) from exc
+        except Exception as exc:
+            raise PrinterError(
+                f"Webcam snapshot failed unexpectedly: {exc}"
+            ) from exc
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- webcam streaming

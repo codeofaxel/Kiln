@@ -1031,14 +1031,18 @@ class MoonrakerAdapter(PrinterAdapter):
         Discovers the webcam snapshot URL via
         ``GET /server/webcams/list`` and then fetches the image.
 
-        Returns:
-            Raw JPEG/PNG image bytes, or ``None`` if no webcam is configured.
+        Raises:
+            PrinterError: With a diagnostic message if no webcams are
+                configured or the snapshot request fails.
         """
         try:
             payload = self._get_json("/server/webcams/list")
             webcams = _safe_get(payload, "result", "webcams", default=[])
             if not isinstance(webcams, list) or not webcams:
-                return None
+                raise PrinterError(
+                    "No webcams configured in Moonraker. Add a webcam via "
+                    "Moonraker's webcam configuration."
+                )
 
             # Use the first webcam's snapshot_url
             cam = webcams[0]
@@ -1049,7 +1053,10 @@ class MoonrakerAdapter(PrinterAdapter):
                 if stream_url:
                     snapshot_url = stream_url.replace("/stream", "/?action=snapshot")
                 else:
-                    return None
+                    raise PrinterError(
+                        "Webcam found in Moonraker but no snapshot URL configured. "
+                        "Check your webcam configuration."
+                    )
 
             # If the URL is relative, prepend the host
             if snapshot_url.startswith("/"):
@@ -1058,9 +1065,32 @@ class MoonrakerAdapter(PrinterAdapter):
             response = self._session.get(snapshot_url, timeout=10)
             if response.ok and response.content:
                 return response.content
-        except Exception:
-            logger.debug("Webcam snapshot failed", exc_info=True)
-        return None
+            if not response.ok:
+                raise PrinterError(
+                    f"Webcam snapshot failed (HTTP {response.status_code}). "
+                    f"Check that the webcam service is running."
+                )
+            return None
+        except PrinterError:
+            raise
+        except Timeout as exc:
+            raise PrinterError(
+                "Webcam snapshot timed out after 10s. Check that the webcam "
+                "service is running and accessible."
+            ) from exc
+        except ReqConnectionError as exc:
+            raise PrinterError(
+                "Webcam snapshot failed: could not connect. Check that the "
+                "webcam is configured and the printer is online."
+            ) from exc
+        except RequestException as exc:
+            raise PrinterError(
+                f"Webcam snapshot failed: {exc}"
+            ) from exc
+        except Exception as exc:
+            raise PrinterError(
+                f"Webcam snapshot failed unexpectedly: {exc}"
+            ) from exc
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- webcam streaming

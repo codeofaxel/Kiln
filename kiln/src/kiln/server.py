@@ -4273,8 +4273,7 @@ def printer_snapshot(
         save_path: Optional path to save the image file.  If omitted, the
             image is returned as a base64-encoded string.
 
-    Supports OctoPrint and Moonraker webcams.  Bambu printers do not
-    expose a webcam API over LAN.
+    Supports OctoPrint, Moonraker, and Bambu (via RTSP/ffmpeg) webcams.
     """
     try:
         if printer_name:
