@@ -1227,10 +1227,10 @@ def printer_status() -> dict:
             "capabilities": caps.to_dict(),
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to get printer status: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct.")
     except Exception as exc:
         logger.exception("Unexpected error in printer_status")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in printer_status: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -1260,10 +1260,10 @@ def printer_files() -> dict:
             "count": len(files),
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to list printer files: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct.")
     except Exception as exc:
         logger.exception("Unexpected error in printer_files")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in printer_files: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -1358,12 +1358,12 @@ def upload_file(file_path: str) -> dict:
             resp["warnings"] = scan_warnings
         return resp
     except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+        return _error_dict(f"Failed to upload file: {exc}", code="FILE_NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to upload file: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct.")
     except Exception as exc:
         logger.exception("Unexpected error in upload_file")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in upload_file: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -1391,12 +1391,12 @@ def upload_file_confirm(token: str) -> dict:
         result = adapter.upload_file(file_path)
         return result.to_dict()
     except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+        return _error_dict(f"Failed to confirm upload: {exc}", code="FILE_NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to confirm upload: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct.")
     except Exception as exc:
         logger.exception("Unexpected error in upload_file_confirm")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in upload_file_confirm: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -1458,10 +1458,10 @@ def analyze_print_file(filename: str) -> dict:
             "has_metadata": bool(metadata_dict),
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to analyze print file: {exc}. Use printer_files() to list available files.")
     except Exception as exc:
         logger.exception("Unexpected error in analyze_print_file")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in analyze_print_file: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -1479,16 +1479,16 @@ def delete_file(file_path: str) -> dict:
         adapter = _get_adapter()
         ok = adapter.delete_file(file_path)
         if not ok:
-            return _error_dict(f"Failed to delete {file_path}.")
+            return _error_dict(f"Failed to delete {file_path}. The printer may have rejected the request. Use printer_files() to verify the file exists.")
         return {
             "success": True,
             "message": f"Deleted {file_path}.",
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to delete {file_path}: {exc}. Use printer_files() to verify the file exists.")
     except Exception as exc:
         logger.exception("Unexpected error in delete_file")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in delete_file: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -1565,10 +1565,10 @@ def start_print(file_name: str) -> dict:
         _audit("start_print", "executed", details={"file": file_name})
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to start print: {exc}. Check that the printer is online and idle. Use printer_files() to verify the file exists.")
     except Exception as exc:
         logger.exception("Unexpected error in start_print")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in start_print: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -1594,10 +1594,10 @@ def cancel_print() -> dict:
         _audit("cancel_print", "executed")
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to cancel print: {exc}. Check that a print is currently active.")
     except Exception as exc:
         logger.exception("Unexpected error in cancel_print")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in cancel_print: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -1639,10 +1639,10 @@ def emergency_stop(printer_name: Optional[str] = None) -> dict:
                 "emergency_stop": [r.to_dict() for r in results],
             }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to execute emergency stop: {exc}. Check that the printer is online.")
     except Exception as exc:
         logger.exception("Unexpected error in emergency_stop")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in emergency_stop: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -1661,10 +1661,10 @@ def pause_print() -> dict:
         result = adapter.pause_print()
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to pause print: {exc}. Check that a print is currently active.")
     except Exception as exc:
         logger.exception("Unexpected error in pause_print")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in pause_print: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -1683,10 +1683,10 @@ def resume_print() -> dict:
         result = adapter.resume_print()
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to resume print: {exc}. Check that the printer is in a paused state.")
     except Exception as exc:
         logger.exception("Unexpected error in resume_print")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in resume_print: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -1831,10 +1831,10 @@ def set_temperature(
         })
         return results
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to set temperature: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct.")
     except Exception as exc:
         logger.exception("Unexpected error in set_temperature")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in set_temperature: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -2151,10 +2151,10 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
         return result
 
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to run preflight check: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct.")
     except Exception as exc:
         logger.exception("Unexpected error in preflight_check")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in preflight_check: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -2268,10 +2268,10 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
         return result
 
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to send G-code: {exc}. Check that the printer is online and connected.")
     except Exception as exc:
         logger.exception("Unexpected error in send_gcode")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in send_gcode: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -2347,7 +2347,7 @@ def safety_audit(
         }
     except Exception as exc:
         logger.exception("Unexpected error in safety_audit")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in safety_audit: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -2490,7 +2490,7 @@ def safety_status() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in safety_status")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in safety_status: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -2537,7 +2537,7 @@ def fleet_status() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in fleet_status")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in fleet_status: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -2594,7 +2594,7 @@ def fleet_analytics() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in fleet_analytics")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in fleet_analytics: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -2709,7 +2709,7 @@ def register_printer(
         return result
     except Exception as exc:
         logger.exception("Unexpected error in register_printer")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in register_printer: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -2737,7 +2737,7 @@ def discover_printers(timeout: float = 5.0) -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in discover_printers")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in discover_printers: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -2776,7 +2776,7 @@ def recent_events(limit: int = 20, *, type: Optional[str] = None) -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in recent_events")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in recent_events: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -2811,7 +2811,7 @@ def billing_summary() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in billing_summary")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in billing_summary: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -2848,10 +2848,10 @@ def billing_setup_url(rail: str = "stripe") -> dict:
             ),
         }
     except PaymentError as exc:
-        return _error_dict(str(exc), code=getattr(exc, "code", "PAYMENT_ERROR"))
+        return _error_dict(f"Failed to generate billing setup URL: {exc}", code=getattr(exc, "code", "PAYMENT_ERROR"))
     except Exception as exc:
         logger.exception("Unexpected error in billing_setup_url")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in billing_setup_url: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -2872,7 +2872,7 @@ def billing_status() -> dict:
         return {"success": True, **data}
     except Exception as exc:
         logger.exception("Unexpected error in billing_status")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in billing_status: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -2895,7 +2895,7 @@ def billing_history(limit: int = 20) -> dict:
         return {"success": True, "charges": charges, "count": len(charges)}
     except Exception as exc:
         logger.exception("Unexpected error in billing_history")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in billing_history: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -2921,7 +2921,7 @@ def billing_invoice(charge_id: str = "", job_id: str = "") -> dict:
             charges = _billing.list_charges(limit=500)
             charge = next((c for c in charges if c.get("job_id") == job_id), None)
         else:
-            return _error_dict("Provide either charge_id or job_id.")
+            return _error_dict("billing_invoice requires either charge_id (from billing_history) or job_id (from fulfillment_order) to look up the charge.")
 
         if charge is None:
             return _error_dict("Charge not found.", code="NOT_FOUND")
@@ -2934,7 +2934,7 @@ def billing_invoice(charge_id: str = "", job_id: str = "") -> dict:
         }
     except Exception as exc:
         logger.exception("Error generating invoice")
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to generate invoice: {exc}")
 
 
 @mcp.tool()
@@ -2973,7 +2973,7 @@ def billing_export(format: str = "csv", limit: int = 100) -> dict:
             }
     except Exception as exc:
         logger.exception("Error exporting billing data")
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to export billing data: {exc}")
 
 
 @mcp.tool()
@@ -3016,7 +3016,7 @@ def check_payment_status(payment_id: str) -> dict:
         )
     except Exception as exc:
         logger.exception("Unexpected error in check_payment_status")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in check_payment_status: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -3134,7 +3134,7 @@ def billing_check_setup() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in billing_check_setup")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in billing_check_setup: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -3153,7 +3153,7 @@ def billing_alerts() -> dict:
         }
     except Exception as exc:
         logger.exception("Error checking billing alerts")
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to check billing alerts: {exc}")
 
 
 @mcp.tool()
@@ -3192,7 +3192,7 @@ def billing_delete_data(confirm: str = "") -> dict:
         }
     except Exception as exc:
         logger.exception("Error deleting billing data")
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to delete billing data: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -3272,10 +3272,10 @@ def search_all_models(
             }
         return resp
     except MarketplaceError as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to search models: {exc}. Check marketplace credentials are configured.")
     except Exception as exc:
         logger.exception("Unexpected error in search_all_models")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in search_all_models: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -3390,7 +3390,7 @@ def get_autonomy_level() -> dict:
         return {"success": True, **cfg.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in get_autonomy_level")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in get_autonomy_level: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -3432,7 +3432,7 @@ def set_autonomy_level(level: int) -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in set_autonomy_level")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in set_autonomy_level: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -3467,7 +3467,7 @@ def check_autonomy(
         return {"success": True, **result}
     except Exception as exc:
         logger.exception("Unexpected error in check_autonomy")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in check_autonomy: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -3573,7 +3573,7 @@ def marketplace_info() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in marketplace_info")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in marketplace_info: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -3612,10 +3612,10 @@ def search_models(
             "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
         }
     except (ThingiverseError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to search Thingiverse: {exc}. Check that KILN_THINGIVERSE_TOKEN is set.")
     except Exception as exc:
         logger.exception("Unexpected error in search_models")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in search_models: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -3639,10 +3639,10 @@ def model_details(thing_id: int) -> dict:
     except ThingiverseNotFoundError:
         return _error_dict(f"Model {thing_id} not found.", code="NOT_FOUND")
     except (ThingiverseError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to get model details: {exc}. Check that KILN_THINGIVERSE_TOKEN is set.")
     except Exception as exc:
         logger.exception("Unexpected error in model_details")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in model_details: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -3668,10 +3668,10 @@ def model_files(thing_id: int) -> dict:
     except ThingiverseNotFoundError:
         return _error_dict(f"Model {thing_id} not found.", code="NOT_FOUND")
     except (ThingiverseError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to list model files: {exc}. Check that KILN_THINGIVERSE_TOKEN is set.")
     except Exception as exc:
         logger.exception("Unexpected error in model_files")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in model_files: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -3802,10 +3802,10 @@ def download_model(
             code="NOT_FOUND",
         )
     except (ThingiverseError, MarketplaceError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to download model: {exc}. Check marketplace credentials and that the model/file ID is correct.")
     except Exception as exc:
         logger.exception("Unexpected error in download_model")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in download_model: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4020,10 +4020,10 @@ def download_and_upload(
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (ThingiverseError, MarketplaceError, PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to download and upload model: {exc}. Check marketplace credentials and printer connection.")
     except Exception as exc:
         logger.exception("Unexpected error in download_and_upload")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in download_and_upload: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4070,10 +4070,10 @@ def browse_models(
             "page": page,
         }
     except (ThingiverseError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to browse models: {exc}. Check that KILN_THINGIVERSE_TOKEN is set.")
     except Exception as exc:
         logger.exception("Unexpected error in browse_models")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in browse_models: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4092,10 +4092,10 @@ def list_model_categories() -> dict:
             "count": len(cats),
         }
     except (ThingiverseError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to list categories: {exc}. Check that KILN_THINGIVERSE_TOKEN is set.")
     except Exception as exc:
         logger.exception("Unexpected error in list_model_categories")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in list_model_categories: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -4159,14 +4159,14 @@ def slice_model(
 
         return response
     except SlicerNotFoundError as exc:
-        return _error_dict(str(exc), code="SLICER_NOT_FOUND")
+        return _error_dict(f"Failed to slice model: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.", code="SLICER_NOT_FOUND")
     except SlicerError as exc:
-        return _error_dict(str(exc), code="SLICER_ERROR")
+        return _error_dict(f"Failed to slice model: {exc}", code="SLICER_ERROR")
     except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+        return _error_dict(f"Failed to slice model: {exc}", code="FILE_NOT_FOUND")
     except Exception as exc:
         logger.exception("Unexpected error in slice_model")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in slice_model: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4185,10 +4185,10 @@ def find_slicer_tool() -> dict:
             **info.to_dict(),
         }
     except SlicerNotFoundError as exc:
-        return _error_dict(str(exc), code="SLICER_NOT_FOUND")
+        return _error_dict(f"Failed to find slicer: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.", code="SLICER_NOT_FOUND")
     except Exception as exc:
         logger.exception("Unexpected error in find_slicer_tool")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in find_slicer_tool: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4244,16 +4244,16 @@ def slice_and_print(
             "message": f"Sliced, uploaded, and started printing {os.path.basename(input_path)}.",
         }
     except SlicerNotFoundError as exc:
-        return _error_dict(str(exc), code="SLICER_NOT_FOUND")
+        return _error_dict(f"Failed to slice and print: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.", code="SLICER_NOT_FOUND")
     except SlicerError as exc:
-        return _error_dict(str(exc), code="SLICER_ERROR")
+        return _error_dict(f"Failed to slice and print: {exc}", code="SLICER_ERROR")
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError, FileNotFoundError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to slice and print: {exc}. Check the input file and printer connection.")
     except Exception as exc:
         logger.exception("Unexpected error in slice_and_print")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in slice_and_print: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -4319,10 +4319,10 @@ def printer_snapshot(
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to capture snapshot: {exc}. Check that the printer has a webcam configured.")
     except Exception as exc:
         logger.exception("Unexpected error in printer_snapshot")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in printer_snapshot: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -4356,10 +4356,10 @@ def estimate_cost(
         )
         return {"success": True, "estimate": estimate.to_dict()}
     except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+        return _error_dict(f"Failed to estimate cost: {exc}", code="FILE_NOT_FOUND")
     except Exception as exc:
         logger.exception("Unexpected error in estimate_cost")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in estimate_cost: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4409,7 +4409,7 @@ def set_material(
         return {"success": True, "material": mat.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in set_material")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in set_material: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4428,7 +4428,7 @@ def get_material(printer_name: str | None = None) -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in get_material")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in get_material: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4454,7 +4454,7 @@ def check_material_match(
         return {"success": True, "match": True}
     except Exception as exc:
         logger.exception("Unexpected error in check_material_match")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in check_material_match: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4468,7 +4468,7 @@ def list_spools() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in list_spools")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in list_spools: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4496,7 +4496,7 @@ def add_spool(
         return {"success": True, "spool": spool.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in add_spool")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in add_spool: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4513,7 +4513,7 @@ def remove_spool(spool_id: str) -> dict:
         return _error_dict(f"Spool {spool_id!r} not found.", code="NOT_FOUND")
     except Exception as exc:
         logger.exception("Unexpected error in remove_spool")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in remove_spool: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -4534,7 +4534,7 @@ def bed_level_status(printer_name: str | None = None) -> dict:
         return {"success": True, "status": status.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in bed_level_status")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in bed_level_status: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4560,10 +4560,10 @@ def trigger_bed_level(printer_name: str | None = None) -> dict:
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to trigger bed leveling: {exc}. Check that the printer is online and idle.")
     except Exception as exc:
         logger.exception("Unexpected error in trigger_bed_level")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in trigger_bed_level: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4595,7 +4595,7 @@ def set_leveling_policy(
         return {"success": True, "policy": policy.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in set_leveling_policy")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in set_leveling_policy: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -4651,10 +4651,10 @@ def webcam_stream(
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to manage webcam stream: {exc}. Check that the printer has a webcam configured.")
     except Exception as exc:
         logger.exception("Unexpected error in webcam_stream")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in webcam_stream: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -4682,7 +4682,7 @@ def cloud_sync_now() -> dict:
         return {"success": True, **result}
     except Exception as exc:
         logger.exception("Unexpected error in cloud_sync_now")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in cloud_sync_now: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4713,7 +4713,7 @@ def cloud_sync_configure(
         return {"success": True, "config": config.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in cloud_sync_configure")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in cloud_sync_configure: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -4769,10 +4769,10 @@ def fulfillment_materials() -> dict:
             "count": len(materials),
         }
     except (FulfillmentError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to list fulfillment materials: {exc}. Check that KILN_CRAFTCLOUD_API_KEY is set.")
     except Exception as exc:
         logger.exception("Unexpected error in fulfillment_materials")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in fulfillment_materials: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -4839,12 +4839,12 @@ def fulfillment_quote(
             "quote": quote_data,
         }
     except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+        return _error_dict(f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND")
     except (FulfillmentError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to get fulfillment quote: {exc}. Check that KILN_CRAFTCLOUD_API_KEY is set.")
     except Exception as exc:
         logger.exception("Unexpected error in fulfillment_quote")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in fulfillment_quote: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -5061,7 +5061,7 @@ def fulfillment_order(
         }
     except Exception as exc:
         logger.exception("Unexpected error in fulfillment_order")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in fulfillment_order: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -5081,10 +5081,10 @@ def fulfillment_order_status(order_id: str) -> dict:
             "order": result.to_dict(),
         }
     except (FulfillmentError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to check order status: {exc}. Verify the order_id is correct.")
     except Exception as exc:
         logger.exception("Unexpected error in fulfillment_order_status")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in fulfillment_order_status: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -5107,10 +5107,10 @@ def fulfillment_cancel(order_id: str) -> dict:
             "order": result.to_dict(),
         }
     except (FulfillmentError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to cancel order: {exc}. The order may have already shipped.")
     except Exception as exc:
         logger.exception("Unexpected error in fulfillment_cancel")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in fulfillment_cancel: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -5126,7 +5126,7 @@ def fulfillment_alerts() -> dict:
         alerts = monitor.get_alerts()
         return {"success": True, "alerts": alerts, "count": len(alerts)}
     except Exception as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to check fulfillment alerts: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -5295,7 +5295,7 @@ def register_webhook(
         }
     except Exception as exc:
         logger.exception("Unexpected error in register_webhook")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in register_webhook: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -5323,7 +5323,7 @@ def list_webhooks() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in list_webhooks")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in list_webhooks: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -5350,7 +5350,7 @@ def delete_webhook(endpoint_id: str) -> dict:
         )
     except Exception as exc:
         logger.exception("Unexpected error in delete_webhook")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in delete_webhook: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -5472,10 +5472,10 @@ def await_print_completion(
                 }
 
         except (PrinterError, RuntimeError) as exc:
-            return _error_dict(str(exc))
+            return _error_dict(f"Failed to poll print status: {exc}. Check that the printer is online.")
         except Exception as exc:
             logger.exception("Unexpected error in await_print_completion")
-            return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+            return _error_dict(f"Unexpected error in await_print_completion: {exc}", code="INTERNAL_ERROR")
 
         time.sleep(poll_interval)
 
@@ -5714,7 +5714,7 @@ def analyze_print_failure(job_id: str) -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in analyze_print_failure")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in analyze_print_failure: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -5894,10 +5894,10 @@ def validate_print_quality(
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to validate print quality: {exc}. Check that the printer is online.")
     except Exception as exc:
         logger.exception("Unexpected error in validate_print_quality")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in validate_print_quality: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.resource("kiln://status")
@@ -6217,12 +6217,12 @@ def generate_model(
             "message": f"Generation job submitted to {gen.display_name}.",
         }
     except GenerationAuthError as exc:
-        return _error_dict(str(exc), code="AUTH_ERROR")
+        return _error_dict(f"Failed to generate model (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR")
     except GenerationError as exc:
-        return _error_dict(str(exc), code=exc.code or "GENERATION_ERROR")
+        return _error_dict(f"Failed to generate model: {exc}", code=exc.code or "GENERATION_ERROR")
     except Exception as exc:
         logger.exception("Unexpected error in generate_model")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in generate_model: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -6246,12 +6246,12 @@ def generation_status(
             "job": job.to_dict(),
         }
     except GenerationAuthError as exc:
-        return _error_dict(str(exc), code="AUTH_ERROR")
+        return _error_dict(f"Failed to check generation status (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR")
     except GenerationError as exc:
-        return _error_dict(str(exc), code=exc.code or "GENERATION_ERROR")
+        return _error_dict(f"Failed to check generation status: {exc}", code=exc.code or "GENERATION_ERROR")
     except Exception as exc:
         logger.exception("Unexpected error in generation_status")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in generation_status: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -6326,12 +6326,12 @@ def download_generated_model(
             "message": f"Model downloaded to {result.local_path}.",
         }
     except GenerationAuthError as exc:
-        return _error_dict(str(exc), code="AUTH_ERROR")
+        return _error_dict(f"Failed to download generated model (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR")
     except GenerationError as exc:
-        return _error_dict(str(exc), code=exc.code or "GENERATION_ERROR")
+        return _error_dict(f"Failed to download generated model: {exc}", code=exc.code or "GENERATION_ERROR")
     except Exception as exc:
         logger.exception("Unexpected error in download_generated_model")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in download_generated_model: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -6408,12 +6408,12 @@ def await_generation(
             time.sleep(poll_interval)
 
     except GenerationAuthError as exc:
-        return _error_dict(str(exc), code="AUTH_ERROR")
+        return _error_dict(f"Failed to await generation (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR")
     except GenerationError as exc:
-        return _error_dict(str(exc), code=exc.code or "GENERATION_ERROR")
+        return _error_dict(f"Failed to await generation: {exc}", code=exc.code or "GENERATION_ERROR")
     except Exception as exc:
         logger.exception("Unexpected error in await_generation")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in await_generation: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -6592,18 +6592,18 @@ def generate_and_print(
 
         return resp
     except GenerationAuthError as exc:
-        return _error_dict(str(exc), code="AUTH_ERROR")
+        return _error_dict(f"Failed to generate and print (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR")
     except GenerationError as exc:
-        return _error_dict(str(exc), code=exc.code or "GENERATION_ERROR")
+        return _error_dict(f"Failed to generate and print: {exc}", code=exc.code or "GENERATION_ERROR")
     except PrinterNotFoundError:
         return _error_dict(
             f"Printer {printer_name!r} not found.", code="NOT_FOUND"
         )
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to generate and print: {exc}. Check printer connection and slicer availability.")
     except Exception as exc:
         logger.exception("Unexpected error in generate_and_print")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in generate_and_print: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -6627,7 +6627,7 @@ def validate_generated_mesh(file_path: str) -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in validate_generated_mesh")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in validate_generated_mesh: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -6676,10 +6676,10 @@ def firmware_status() -> dict:
             ],
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to get firmware status: {exc}. Check that the printer is online.")
     except Exception as exc:
         logger.exception("Unexpected error in firmware_status")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in firmware_status: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -6713,10 +6713,10 @@ def update_firmware(component: str | None = None) -> dict:
             "component": result.component,
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to update firmware: {exc}. Ensure the printer is idle and online.")
     except Exception as exc:
         logger.exception("Unexpected error in update_firmware")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in update_firmware: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -6745,10 +6745,10 @@ def rollback_firmware(component: str) -> dict:
             "component": result.component,
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to rollback firmware: {exc}. Check firmware_status for available rollback versions.")
     except Exception as exc:
         logger.exception("Unexpected error in rollback_firmware")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in rollback_firmware: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -6781,7 +6781,7 @@ def print_history(
         return {"success": True, "records": records, "count": len(records)}
     except Exception as exc:
         logger.exception("Unexpected error in print_history")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in print_history: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -6798,7 +6798,7 @@ def printer_stats(printer_name: str) -> dict:
         return {"success": True, **stats}
     except Exception as exc:
         logger.exception("Unexpected error in printer_stats")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in printer_stats: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -6827,7 +6827,7 @@ def annotate_print(job_id: str, notes: str) -> dict:
         return {"success": True, "job_id": job_id, "notes": notes}
     except Exception as exc:
         logger.exception("Unexpected error in annotate_print")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in annotate_print: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -7028,10 +7028,10 @@ def monitor_print_vision(
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to run vision monitoring: {exc}. Check that the printer is online and has a webcam.")
     except Exception as exc:
         logger.exception("Unexpected error in monitor_print_vision")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in monitor_print_vision: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -7521,10 +7521,10 @@ def watch_print(
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to start print watcher: {exc}. Check that the printer is online.")
     except Exception as exc:
         logger.exception("Unexpected error in watch_print")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in watch_print: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -7672,10 +7672,10 @@ def start_monitored_print(
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(str(exc))
+        return _error_dict(f"Failed to start monitored print: {exc}. Check that the printer is online and idle.")
     except Exception as exc:
         logger.exception("Unexpected error in start_monitored_print")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in start_monitored_print: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -7748,7 +7748,7 @@ def list_safety_profiles() -> dict:
         return {"success": True, "count": len(profiles), "profiles": profiles}
     except Exception as exc:
         logger.exception("Unexpected error in list_safety_profiles")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in list_safety_profiles: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -7775,7 +7775,7 @@ def get_safety_profile(printer_id: str) -> dict:
         )
     except Exception as exc:
         logger.exception("Unexpected error in get_safety_profile")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in get_safety_profile: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -7812,10 +7812,10 @@ def add_safety_profile(printer_model: str, profile: dict) -> dict:
             "message": "Community safety profile saved successfully.",
         }
     except ValueError as exc:
-        return _error_dict(str(exc), code="VALIDATION_ERROR")
+        return _error_dict(f"Failed to add safety profile: {exc}", code="VALIDATION_ERROR")
     except Exception as exc:
         logger.exception("Unexpected error in add_safety_profile")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in add_safety_profile: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -7842,7 +7842,7 @@ def export_safety_profile(printer_model: str) -> dict:
         )
     except Exception as exc:
         logger.exception("Unexpected error in export_safety_profile")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in export_safety_profile: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -7886,7 +7886,7 @@ def validate_gcode_safe(
         }
     except Exception as exc:
         logger.exception("Unexpected error in validate_gcode_safe")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in validate_gcode_safe: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -7924,7 +7924,7 @@ def list_slicer_profiles_tool() -> dict:
         return {"success": True, "count": len(profiles), "profiles": profiles}
     except Exception as exc:
         logger.exception("Unexpected error in list_slicer_profiles_tool")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in list_slicer_profiles_tool: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -7969,7 +7969,7 @@ def get_slicer_profile_tool(printer_id: str) -> dict:
         )
     except Exception as exc:
         logger.exception("Unexpected error in get_slicer_profile_tool")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in get_slicer_profile_tool: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -8001,7 +8001,7 @@ def get_printer_intelligence(printer_id: str) -> dict:
         )
     except Exception as exc:
         logger.exception("Unexpected error in get_printer_intelligence")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in get_printer_intelligence: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -8048,7 +8048,7 @@ def get_material_recommendation(
         )
     except Exception as exc:
         logger.exception("Unexpected error in get_material_recommendation")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in get_material_recommendation: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -8086,7 +8086,7 @@ def troubleshoot_printer(
         )
     except Exception as exc:
         logger.exception("Unexpected error in troubleshoot_printer")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in troubleshoot_printer: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -8142,7 +8142,7 @@ def run_quick_print(
         return {"success": result.success, **result.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in run_quick_print")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in run_quick_print: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -8170,7 +8170,7 @@ def run_calibrate(
         return {"success": result.success, **result.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in run_calibrate")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in run_calibrate: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -8204,7 +8204,7 @@ def run_benchmark(
         return {"success": result.success, **result.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in run_benchmark")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in run_benchmark: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -8395,12 +8395,12 @@ def cache_model(
         )
         return {"success": True, "entry": entry.to_dict()}
     except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="NOT_FOUND")
+        return _error_dict(f"Failed to cache model: {exc}", code="NOT_FOUND")
     except (ValueError, _json.JSONDecodeError) as exc:
-        return _error_dict(str(exc), code="VALIDATION_ERROR")
+        return _error_dict(f"Failed to cache model: {exc}", code="VALIDATION_ERROR")
     except Exception as exc:
         logger.exception("Unexpected error in cache_model")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in cache_model: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -8433,7 +8433,7 @@ def search_cached_models(
         }
     except Exception as exc:
         logger.exception("Unexpected error in search_cached_models")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in search_cached_models: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -8456,7 +8456,7 @@ def get_cached_model(cache_id: str) -> dict:
         return {"success": True, "entry": entry.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in get_cached_model")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in get_cached_model: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -8480,7 +8480,7 @@ def list_cached_models(limit: int = 50, offset: int = 0) -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in list_cached_models")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in list_cached_models: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -8503,7 +8503,7 @@ def delete_cached_model(cache_id: str) -> dict:
         return {"success": True, "cache_id": cache_id}
     except Exception as exc:
         logger.exception("Unexpected error in delete_cached_model")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in delete_cached_model: {exc}", code="INTERNAL_ERROR")
 
 
 
@@ -8545,10 +8545,10 @@ def backup_database(
             "redacted": redact,
         }
     except BackupError as exc:
-        return _error_dict(str(exc), code="BACKUP_ERROR")
+        return _error_dict(f"Failed to back up database: {exc}", code="BACKUP_ERROR")
     except Exception as exc:
         logger.exception("Unexpected error in backup_database")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in backup_database: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -8576,7 +8576,7 @@ def verify_audit_integrity() -> dict:
         }
     except Exception as exc:
         logger.exception("Unexpected error in verify_audit_integrity")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in verify_audit_integrity: {exc}", code="INTERNAL_ERROR")
 
 
 
@@ -8602,7 +8602,7 @@ def list_trusted_printers() -> dict:
         return {"success": True, "trusted_printers": trusted, "count": len(trusted)}
     except Exception as exc:
         logger.exception("Unexpected error in list_trusted_printers")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in list_trusted_printers: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -8623,10 +8623,10 @@ def trust_printer(host: str) -> dict:
         add_trusted_printer(host)
         return {"success": True, "host": host}
     except ValueError as exc:
-        return _error_dict(str(exc), code="VALIDATION_ERROR")
+        return _error_dict(f"Failed to trust printer: {exc}", code="VALIDATION_ERROR")
     except Exception as exc:
         logger.exception("Unexpected error in trust_printer")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in trust_printer: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -8644,10 +8644,10 @@ def untrust_printer(host: str) -> dict:
         remove_trusted_printer(host)
         return {"success": True, "host": host}
     except ValueError as exc:
-        return _error_dict(str(exc), code="NOT_FOUND")
+        return _error_dict(f"Failed to untrust printer: {exc}", code="NOT_FOUND")
     except Exception as exc:
         logger.exception("Unexpected error in untrust_printer")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+        return _error_dict(f"Unexpected error in untrust_printer: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -8855,7 +8855,7 @@ def find_material_substitute(
         }
     except Exception as exc:
         logger.exception("Error in find_material_substitute")
-        return _error_dict(str(exc), code="SUBSTITUTION_ERROR")
+        return _error_dict(f"Failed to find material substitutes: {exc}", code="SUBSTITUTION_ERROR")
 
 
 @mcp.tool()
@@ -8874,7 +8874,7 @@ def get_best_material_substitute(material: str) -> dict:
         return {"success": True, "material": material, "substitute": sub.to_dict()}
     except Exception as exc:
         logger.exception("Error in get_best_material_substitute")
-        return _error_dict(str(exc), code="SUBSTITUTION_ERROR")
+        return _error_dict(f"Failed to get best material substitute: {exc}", code="SUBSTITUTION_ERROR")
 
 
 @mcp.tool()
@@ -8894,7 +8894,7 @@ def extract_file_metadata(file_path: str) -> dict:
         return {"success": True, "metadata": meta.to_dict()}
     except Exception as exc:
         logger.exception("Error in extract_file_metadata")
-        return _error_dict(str(exc), code="FILE_METADATA_ERROR")
+        return _error_dict(f"Failed to extract file metadata: {exc}", code="FILE_METADATA_ERROR")
 
 
 @mcp.tool()
@@ -8938,7 +8938,7 @@ def save_print_checkpoint(
         return {"success": True, "checkpoint": cp.to_dict()}
     except Exception as exc:
         logger.exception("Error in save_print_checkpoint")
-        return _error_dict(str(exc), code="CHECKPOINT_ERROR")
+        return _error_dict(f"Failed to save print checkpoint: {exc}", code="CHECKPOINT_ERROR")
 
 
 @mcp.tool()
@@ -8971,7 +8971,7 @@ def plan_print_recovery(
         return {"success": True, "recommendation": rec.to_dict()}
     except Exception as exc:
         logger.exception("Error in plan_print_recovery")
-        return _error_dict(str(exc), code="RECOVERY_ERROR")
+        return _error_dict(f"Failed to plan print recovery: {exc}", code="RECOVERY_ERROR")
 
 
 @mcp.tool()
@@ -9055,7 +9055,7 @@ def firmware_resume_print(
         }
     except Exception as exc:
         logger.exception("Error in firmware_resume_print")
-        return _error_dict(str(exc), code="FIRMWARE_RESUME_ERROR")
+        return _error_dict(f"Failed to resume print via firmware: {exc}", code="FIRMWARE_RESUME_ERROR")
 
 
 @mcp.tool()
@@ -9076,7 +9076,7 @@ def check_printer_health(printer_name: str) -> dict:
         return {"success": True, "health_report": report.to_dict()}
     except Exception as exc:
         logger.exception("Error in check_printer_health")
-        return _error_dict(str(exc), code="HEALTH_CHECK_ERROR")
+        return _error_dict(f"Failed to check printer health: {exc}", code="HEALTH_CHECK_ERROR")
 
 
 @mcp.tool()
@@ -9099,7 +9099,7 @@ def start_printer_health_monitoring(
         return {"success": True, "printer": printer_name, "interval_seconds": interval_seconds}
     except Exception as exc:
         logger.exception("Error in start_printer_health_monitoring")
-        return _error_dict(str(exc), code="MONITORING_ERROR")
+        return _error_dict(f"Failed to start health monitoring: {exc}", code="MONITORING_ERROR")
 
 
 @mcp.tool()
@@ -9117,7 +9117,7 @@ def stop_printer_health_monitoring(printer_name: str) -> dict:
         return {"success": True, "printer": printer_name, "monitoring": "stopped"}
     except Exception as exc:
         logger.exception("Error in stop_printer_health_monitoring")
-        return _error_dict(str(exc), code="MONITORING_ERROR")
+        return _error_dict(f"Failed to stop health monitoring: {exc}", code="MONITORING_ERROR")
 
 
 @mcp.tool()
@@ -9152,7 +9152,7 @@ def estimate_print_progress(
         return {"success": True, "progress": estimate.to_dict()}
     except Exception as exc:
         logger.exception("Error in estimate_print_progress")
-        return _error_dict(str(exc), code="PROGRESS_ERROR")
+        return _error_dict(f"Failed to estimate print progress: {exc}", code="PROGRESS_ERROR")
 
 
 @mcp.tool()
@@ -9187,7 +9187,7 @@ def route_print_job(
         return {"success": True, "routing": result.to_dict()}
     except Exception as exc:
         logger.exception("Error in route_print_job")
-        return _error_dict(str(exc), code="ROUTING_ERROR")
+        return _error_dict(f"Failed to route print job: {exc}", code="ROUTING_ERROR")
 
 
 @mcp.tool()
@@ -9222,7 +9222,7 @@ def fleet_submit_job(
         return {"success": True, "job": job.to_dict()}
     except Exception as exc:
         logger.exception("Error in fleet_submit_job")
-        return _error_dict(str(exc), code="FLEET_ERROR")
+        return _error_dict(f"Failed to submit fleet job: {exc}", code="FLEET_ERROR")
 
 
 @mcp.tool()
@@ -9242,7 +9242,7 @@ def fleet_job_status(job_id: str) -> dict:
         return {"success": True, "job": job.to_dict()}
     except Exception as exc:
         logger.exception("Error in fleet_job_status")
-        return _error_dict(str(exc), code="FLEET_ERROR")
+        return _error_dict(f"Failed to get fleet job status: {exc}", code="FLEET_ERROR")
 
 
 @mcp.tool()
@@ -9259,7 +9259,7 @@ def fleet_utilization() -> dict:
         return {"success": True, "utilization": util}
     except Exception as exc:
         logger.exception("Error in fleet_utilization")
-        return _error_dict(str(exc), code="FLEET_ERROR")
+        return _error_dict(f"Failed to get fleet utilization: {exc}", code="FLEET_ERROR")
 
 
 @mcp.tool()
@@ -9284,7 +9284,7 @@ def cache_design(
         return {"success": True, "cached_design": entry.to_dict()}
     except Exception as exc:
         logger.exception("Error in cache_design")
-        return _error_dict(str(exc), code="CACHE_ERROR")
+        return _error_dict(f"Failed to cache design: {exc}", code="CACHE_ERROR")
 
 
 @mcp.tool()
@@ -9311,7 +9311,7 @@ def list_cached_designs(
         }
     except Exception as exc:
         logger.exception("Error in list_cached_designs")
-        return _error_dict(str(exc), code="CACHE_ERROR")
+        return _error_dict(f"Failed to list cached designs: {exc}", code="CACHE_ERROR")
 
 
 @mcp.tool()
@@ -9331,7 +9331,7 @@ def get_cached_design(design_id: str) -> dict:
         return {"success": True, "design": entry.to_dict()}
     except Exception as exc:
         logger.exception("Error in get_cached_design")
-        return _error_dict(str(exc), code="CACHE_ERROR")
+        return _error_dict(f"Failed to get cached design: {exc}", code="CACHE_ERROR")
 
 
 @mcp.tool()
@@ -9366,7 +9366,7 @@ def store_credential(
         return {"success": True, "credential": cred.to_dict()}
     except Exception as exc:
         logger.exception("Error in store_credential")
-        return _error_dict(str(exc), code="CREDENTIAL_ERROR")
+        return _error_dict(f"Failed to store credential: {exc}", code="CREDENTIAL_ERROR")
 
 
 @mcp.tool()
@@ -9384,7 +9384,7 @@ def list_credentials() -> dict:
         }
     except Exception as exc:
         logger.exception("Error in list_credentials")
-        return _error_dict(str(exc), code="CREDENTIAL_ERROR")
+        return _error_dict(f"Failed to list credentials: {exc}", code="CREDENTIAL_ERROR")
 
 
 @mcp.tool()
@@ -9401,7 +9401,7 @@ def retrieve_credential(credential_id: str) -> dict:
         return {"success": True, "credential_id": credential_id, "value": value}
     except Exception as exc:
         logger.exception("Error in retrieve_credential")
-        return _error_dict(str(exc), code="CREDENTIAL_ERROR")
+        return _error_dict(f"Failed to retrieve credential: {exc}", code="CREDENTIAL_ERROR")
 
 
 @mcp.tool()
@@ -9421,7 +9421,7 @@ def analyze_print_snapshot(file_path: str) -> dict:
         return {"success": True, "analysis": result.to_dict()}
     except Exception as exc:
         logger.exception("Error in analyze_print_snapshot")
-        return _error_dict(str(exc), code="SNAPSHOT_ERROR")
+        return _error_dict(f"Failed to analyze snapshot: {exc}", code="SNAPSHOT_ERROR")
 
 
 @mcp.tool()
@@ -9453,7 +9453,7 @@ def acquire_printer_lock(
         return {"success": True, "printer": printer_name, "holder": holder, "locked": True}
     except Exception as exc:
         logger.exception("Error in acquire_printer_lock")
-        return _error_dict(str(exc), code="LOCK_ERROR")
+        return _error_dict(f"Failed to acquire printer lock: {exc}", code="LOCK_ERROR")
 
 
 @mcp.tool()
@@ -9472,7 +9472,7 @@ def release_printer_lock(printer_name: str, *, holder: str = "agent") -> dict:
         return {"success": True, "printer": printer_name, "released": released}
     except Exception as exc:
         logger.exception("Error in release_printer_lock")
-        return _error_dict(str(exc), code="LOCK_ERROR")
+        return _error_dict(f"Failed to release printer lock: {exc}", code="LOCK_ERROR")
 
 
 @mcp.tool()
@@ -9501,7 +9501,7 @@ def get_fulfillment_quote_cached(
         return {"success": True, "quote": quote.to_dict()}
     except Exception as exc:
         logger.exception("Error in get_fulfillment_quote_cached")
-        return _error_dict(str(exc), code="QUOTE_CACHE_ERROR")
+        return _error_dict(f"Failed to get cached quote: {exc}", code="QUOTE_CACHE_ERROR")
 
 
 @mcp.tool()
@@ -9519,7 +9519,7 @@ def check_firmware_status(printer_name: str) -> dict:
         return {"success": True, "firmware": info.to_dict()}
     except Exception as exc:
         logger.exception("Error in check_firmware_status")
-        return _error_dict(str(exc), code="FIRMWARE_ERROR")
+        return _error_dict(f"Failed to check firmware status: {exc}", code="FIRMWARE_ERROR")
 
 
 @mcp.tool()
@@ -9542,7 +9542,7 @@ def update_printer_firmware(
         return {"success": True, "update": result.to_dict()}
     except Exception as exc:
         logger.exception("Error in update_printer_firmware")
-        return _error_dict(str(exc), code="FIRMWARE_ERROR")
+        return _error_dict(f"Failed to update printer firmware: {exc}", code="FIRMWARE_ERROR")
 
 
 @mcp.tool()
@@ -9565,7 +9565,7 @@ def rollback_printer_firmware(
         return {"success": True, "rollback": result.to_dict()}
     except Exception as exc:
         logger.exception("Error in rollback_printer_firmware")
-        return _error_dict(str(exc), code="FIRMWARE_ERROR")
+        return _error_dict(f"Failed to rollback printer firmware: {exc}", code="FIRMWARE_ERROR")
 
 
 # ---------------------------------------------------------------------------
@@ -9657,7 +9657,7 @@ def list_snapshots(
         }
     except Exception as exc:
         logger.exception("Error in list_snapshots")
-        return _error_dict(str(exc), code="INTERNAL_ERROR")
+        return _error_dict(f"Failed to list snapshots: {exc}", code="INTERNAL_ERROR")
 
 
 if __name__ == "__main__":

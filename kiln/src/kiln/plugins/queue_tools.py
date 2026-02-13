@@ -100,7 +100,11 @@ class _QueueToolsPlugin:
                 }
             except Exception as exc:
                 _logger.exception("Unexpected error in submit_job")
-                return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+                return _error_dict(
+                    f"Failed to submit job for '{file_name}': {exc}. "
+                    "Verify the file exists on the printer with 'printer_files()'.",
+                    code="INTERNAL_ERROR",
+                )
 
         @mcp.tool()
         def job_status(job_id: str) -> dict:
@@ -172,7 +176,10 @@ class _QueueToolsPlugin:
             except JobNotFoundError:
                 return _error_dict(f"Job not found: {job_id!r}", code="NOT_FOUND")
             except ValueError as exc:
-                return _error_dict(str(exc), code="INVALID_STATE")
+                return _error_dict(
+                    f"Cannot cancel job {job_id!r}: {exc}. Only jobs in QUEUED or PRINTING state can be cancelled.",
+                    code="INVALID_STATE",
+                )
             except Exception as exc:
                 _logger.exception("Unexpected error in cancel_job")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")

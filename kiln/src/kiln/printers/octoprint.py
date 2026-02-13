@@ -443,9 +443,12 @@ class OctoPrintAdapter(PrinterAdapter):
 
                 # Non-retryable HTTP error -- raise immediately.
                 if response.status_code not in _RETRYABLE_STATUS_CODES:
+                    body = response.text[:300]
+                    if len(response.text) > 300:
+                        body += " (truncated)"
                     raise PrinterError(
                         f"OctoPrint returned HTTP {response.status_code} "
-                        f"for {method} {path}: {response.text[:300]}",
+                        f"for {method} {path}: {body}",
                     )
 
                 # Retryable HTTP status -- fall through to backoff.
@@ -457,7 +460,8 @@ class OctoPrintAdapter(PrinterAdapter):
 
             except Timeout as exc:
                 last_exc = PrinterError(
-                    f"Request to {url} timed out after {self._timeout}s "
+                    f"{method} {path} timed out after {self._timeout}s. "
+                    f"Printer may be offline or overloaded. "
                     f"(attempt {attempt + 1}/{self._retries})",
                     cause=exc,
                 )
@@ -1147,7 +1151,11 @@ class OctoPrintAdapter(PrinterAdapter):
         except PrinterError:
             raise
         except Exception as exc:
-            logger.debug("Failed to check printer state before firmware update: %s", exc)
+            raise PrinterError(
+                f"Cannot verify printer is idle before firmware update: {exc}. "
+                "Aborting for safety.",
+                cause=exc,
+            ) from exc
 
         # Build the update targets
         if component:

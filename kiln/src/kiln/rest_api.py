@@ -309,7 +309,7 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
                 return JSONResponse(
                     {
                         "success": False,
-                        "error": "Rate limit exceeded. Try again later.",
+                        "error": f"Rate limit exceeded ({_rate_limiter.limit} requests/min). Retry after {retry_after}s.",
                     },
                     status_code=429,
                     headers={
@@ -409,17 +409,23 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
         # Parse body with size limit (may be empty for no-param tools)
         raw = await request.body()
         if len(raw) > 1_048_576:  # 1 MB
+            actual_kb = len(raw) / 1024
             return JSONResponse(
-                {"success": False, "error": "Request body too large (max 1MB)."},
+                {"success": False, "error": f"Request body too large ({actual_kb:.1f}KB, max 1024.0KB)."},
                 status_code=413,
             )
 
         if raw:
             try:
                 body = _json.loads(raw)
-            except Exception:
+            except _json.JSONDecodeError as exc:
                 return JSONResponse(
-                    {"success": False, "error": "Invalid JSON."},
+                    {"success": False, "error": f"Invalid JSON: {exc.msg} (line {exc.lineno}, column {exc.colno})."},
+                    status_code=400,
+                )
+            except Exception as exc:
+                return JSONResponse(
+                    {"success": False, "error": f"Invalid JSON: {exc}"},
                     status_code=400,
                 )
         else:
@@ -454,10 +460,10 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
                 status_code=400,
                 detail=f"Invalid parameters: {exc}",
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Tool execution failed: %s", tool_name)
             return JSONResponse(
-                {"success": False, "error": "Internal tool execution error."},
+                {"success": False, "error": f"Tool '{tool_name}' execution failed: {type(exc).__name__}"},
                 status_code=500,
             )
 
@@ -518,10 +524,10 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
                 None, lambda: run_agent_loop(prompt, agent_config)
             )
             return result.to_dict()
-        except Exception:
+        except Exception as exc:
             logger.exception("Agent loop error")
             return JSONResponse(
-                {"success": False, "error": "Internal agent execution error."},
+                {"success": False, "error": f"Agent execution failed: {type(exc).__name__}: {exc}"},
                 status_code=500,
             )
 
@@ -537,7 +543,7 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
         if not webhook_secret:
             logger.warning("Stripe webhook received but KILN_STRIPE_WEBHOOK_SECRET not set")
             return JSONResponse(
-                {"error": "Webhook secret not configured"},
+                {"success": False, "error": "Webhook secret not configured. Set KILN_STRIPE_WEBHOOK_SECRET environment variable."},
                 status_code=400,
             )
 
@@ -545,7 +551,7 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
             import stripe as _stripe_mod  # type: ignore[import-untyped]
         except ImportError:
             return JSONResponse(
-                {"error": "stripe package not installed"},
+                {"success": False, "error": "stripe package not installed. Install with: pip install kiln3d[payments]"},
                 status_code=500,
             )
 
@@ -553,10 +559,10 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
             event = _stripe_mod.Webhook.construct_event(
                 raw_body, sig_header, webhook_secret,
             )
-        except ValueError:
-            return JSONResponse({"error": "Invalid payload"}, status_code=400)
+        except ValueError as exc:
+            return JSONResponse({"success": False, "error": f"Invalid payload: {exc}"}, status_code=400)
         except _stripe_mod.error.SignatureVerificationError:
-            return JSONResponse({"error": "Invalid signature"}, status_code=400)
+            return JSONResponse({"success": False, "error": "Invalid signature. Verify KILN_STRIPE_WEBHOOK_SECRET matches your Stripe Dashboard webhook signing secret."}, status_code=400)
 
         if event["type"] == "setup_intent.succeeded":
             si = event["data"]["object"]

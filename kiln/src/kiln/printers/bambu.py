@@ -368,9 +368,9 @@ class BambuAdapter(PrinterAdapter):
                 client.loop_stop()
                 self._backoff.record_failure()
                 raise PrinterError(
-                    f"MQTT connection to {self._host}:{_MQTT_PORT} "
-                    f"timed out after {self._timeout}s.\n"
-                    "  Check:\n"
+                    f"MQTT connection to {self._host} timed out after "
+                    f"{self._timeout}s. Check network connectivity and access code.\n"
+                    "  Checklist:\n"
                     "  1) Printer is powered on and on the same network\n"
                     "  2) LAN Access Code is correct (printer → Settings → Network)\n"
                     "  3) LAN Mode is enabled on the printer\n"

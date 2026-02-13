@@ -474,9 +474,12 @@ class MoonrakerAdapter(PrinterAdapter):
 
                 # Non-retryable HTTP error -- raise immediately.
                 if response.status_code not in _RETRYABLE_STATUS_CODES:
+                    body = response.text[:300]
+                    if len(response.text) > 300:
+                        body += " (truncated)"
                     raise PrinterError(
                         f"Moonraker returned HTTP {response.status_code} "
-                        f"for {method} {path}: {response.text[:300]}",
+                        f"for {method} {path}: {body}",
                     )
 
                 # Retryable HTTP status -- fall through to backoff.
@@ -488,7 +491,8 @@ class MoonrakerAdapter(PrinterAdapter):
 
             except Timeout as exc:
                 last_exc = PrinterError(
-                    f"Request to {url} timed out after {self._timeout}s "
+                    f"{method} {path} timed out after {self._timeout}s. "
+                    f"Printer may be offline or overloaded. "
                     f"(attempt {attempt + 1}/{self._retries})",
                     cause=exc,
                 )

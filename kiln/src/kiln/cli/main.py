@@ -209,10 +209,16 @@ def discover(timeout: float, subnet: Optional[str], methods: tuple, json_mode: b
             methods=method_list,
         )
     except OSError as exc:
-        click.echo(format_error(str(exc), code="DISCOVERY_ERROR", json_mode=json_mode))
+        click.echo(format_error(
+            f"Network discovery failed: {exc}. Check network connectivity and try 'kiln discover --method http_probe'.",
+            code="DISCOVERY_ERROR", json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), code="DISCOVERY_ERROR", json_mode=json_mode))
+        click.echo(format_error(
+            f"Network discovery failed: {exc}. Check network connectivity and try 'kiln discover --method http_probe'.",
+            code="DISCOVERY_ERROR", json_mode=json_mode,
+        ))
         sys.exit(1)
 
     click.echo(format_discovered([p.to_dict() for p in found], json_mode=json_mode))
@@ -269,10 +275,16 @@ def auth(
         }
         click.echo(format_response("success", data=data, json_mode=json_mode))
     except OSError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to save printer credentials: {exc}. Check file permissions on ~/.kiln/",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to save printer credentials: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -305,10 +317,16 @@ def status(ctx: click.Context, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to get printer status: {exc}. Verify the printer is online and credentials are correct.",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to get printer status: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -329,10 +347,16 @@ def files(ctx: click.Context, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to list printer files: {exc}. Verify the printer is online.",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to list printer files: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -354,10 +378,16 @@ def upload(ctx: click.Context, file_path: str, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to upload file '{file_path}': {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to upload file '{file_path}': {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -690,7 +720,7 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
                 upload_result = adapter.upload_file(f)
                 if not upload_result.success:
                     click.echo(format_error(
-                        upload_result.message or "Upload failed",
+                        upload_result.message or f"Upload failed for '{f}' — check printer storage and connectivity",
                         code="UPLOAD_FAILED",
                         json_mode=json_mode,
                     ))
@@ -712,7 +742,10 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
     except click.ClickException:
         raise
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Print operation failed: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -733,10 +766,16 @@ def cancel(ctx: click.Context, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to cancel print: {exc}. Is a print currently running?",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to cancel print: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -752,10 +791,16 @@ def pause(ctx: click.Context, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to pause print: {exc}. Is a print currently running?",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to pause print: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -771,10 +816,16 @@ def resume(ctx: click.Context, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to resume print: {exc}. Is the print currently paused?",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to resume print: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -832,10 +883,16 @@ def temp(ctx: click.Context, tool_temp: Optional[float], bed_temp: Optional[floa
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to set temperature: {exc}. Verify the printer is online and idle.",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to set temperature: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -887,10 +944,16 @@ def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to send G-code: {exc}. Verify the printer is online and ready.",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to send G-code: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -1214,10 +1277,16 @@ def history(limit: int, filter_status: Optional[str], json_mode: bool) -> None:
         click.echo(format_history(jobs, json_mode=json_mode))
 
     except OSError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to read print history: {exc}. Check database at ~/.kiln/kiln.db",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to read print history: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -1263,10 +1332,16 @@ def order_materials(json_mode: bool) -> None:
     except click.ClickException:
         raise
     except FulfillmentError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to list fulfillment materials: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to list fulfillment materials: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -1305,10 +1380,16 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
         click.echo(format_error(str(exc), code="FILE_NOT_FOUND", json_mode=json_mode))
         sys.exit(1)
     except FulfillmentError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Quote request failed: {exc}. Verify the material ID with 'kiln order materials'.",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Quote request failed: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -1358,10 +1439,16 @@ def order_place(quote_id: str, shipping_id: str, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except FulfillmentError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to place order: {exc}. Verify the quote ID from 'kiln order quote'.",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to place order: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -1377,10 +1464,16 @@ def order_status(order_id: str, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except FulfillmentError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to get order status for {order_id!r}: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to get order status for {order_id!r}: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -1396,10 +1489,16 @@ def order_cancel(order_id: str, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except FulfillmentError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to cancel order {order_id!r}: {exc}. The order may no longer be cancellable.",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to cancel order {order_id!r}: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -1699,10 +1798,16 @@ def fleet_status_cmd(json_mode: bool) -> None:
 
         click.echo(format_fleet_status(result.get("printers", []), json_mode=json_mode))
     except PrinterError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Fleet status check failed: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Fleet status check failed: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -1745,10 +1850,16 @@ def fleet_register_cmd(
 
         click.echo(format_response("success", data=result, json_mode=json_mode))
     except PrinterError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to register printer '{name}': {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to register printer '{name}': {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -1795,10 +1906,16 @@ def queue_submit_cmd(file: str, printer: Optional[str], priority: int, json_mode
 
         click.echo(format_response("success", data=result, json_mode=json_mode))
     except ValueError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to submit job for '{file}': {exc}. Use 'kiln files' to list available files.",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to submit job for '{file}': {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -1824,10 +1941,16 @@ def queue_status_cmd(job_id: str, json_mode: bool) -> None:
 
         click.echo(format_job_detail(result.get("job", {}), json_mode=json_mode))
     except ValueError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to get job status for {job_id!r}: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to get job status for {job_id!r}: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -1860,10 +1983,16 @@ def queue_list_cmd(filter_status: Optional[str], limit: int, json_mode: bool) ->
         else:
             click.echo(format_queue_summary(result, json_mode=json_mode))
     except ValueError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to list queue: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to list queue: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -1889,10 +2018,16 @@ def queue_cancel_cmd(job_id: str, json_mode: bool) -> None:
 
         click.echo(format_response("success", data=result, json_mode=json_mode))
     except ValueError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to cancel job {job_id!r}: {exc}. Only queued or running jobs can be cancelled.",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
+        click.echo(format_error(
+            f"Failed to cancel job {job_id!r}: {exc}",
+            json_mode=json_mode,
+        ))
         sys.exit(1)
 
 
@@ -3617,7 +3752,8 @@ def firmware_status_cmd(ctx: click.Context, json_mode: bool) -> None:
         status = adapter.get_firmware_status()
         if status is None:
             click.echo(format_error(
-                "Could not retrieve firmware status.",
+                "Could not retrieve firmware status. The printer may not support firmware queries, "
+                "or the connection timed out. Try 'kiln status' to verify connectivity.",
                 json_mode=json_mode,
             ))
             sys.exit(1)
