@@ -204,6 +204,7 @@ def slice_file(
     output_dir: Optional[str] = None,
     output_name: Optional[str] = None,
     profile: Optional[str] = None,
+    printer_preset: Optional[str] = None,
     slicer_path: Optional[str] = None,
     extra_args: Optional[List[str]] = None,
     timeout: int = 300,
@@ -217,6 +218,8 @@ def slice_file(
         output_name: Override the output file name.  Defaults to the
             input file's stem with ``.gcode`` extension.
         profile: Path to a slicer profile/config file (.ini or .json).
+        printer_preset: Optional slicer printer preset name (primarily
+            for PrusaSlicer), e.g. ``"Original Prusa MINI & MINI+"``.
         slicer_path: Explicit slicer binary path.  Auto-detected if omitted.
         extra_args: Additional CLI arguments to pass to the slicer.
         timeout: Maximum slicing time in seconds (default 300).
@@ -273,6 +276,11 @@ def slice_file(
         if not os.path.isfile(profile):
             raise SlicerError(f"Profile file not found: {profile}")
         cmd.extend(["--load", profile])
+
+    # PrusaSlicer preset selection helps enforce printer-specific machine
+    # metadata/start G-code (e.g. model compatibility checks).
+    if printer_preset and "prusa" in slicer.name.lower():
+        cmd.extend(["--printer", printer_preset])
 
     if extra_args:
         cmd.extend(extra_args)

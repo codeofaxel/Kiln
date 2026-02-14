@@ -334,6 +334,46 @@ class TestSlice:
         mock_adapter.upload_file.assert_called_once()
         mock_adapter.start_print.assert_called_once()
 
+    def test_slice_with_explicit_printer_id_uses_bundled_profile(self, runner, tmp_path):
+        stl = tmp_path / "mini.stl"
+        stl.write_text("solid\nendsolid\n")
+        mock_result = MagicMock()
+        mock_result.message = "Sliced"
+        mock_result.output_path = str(tmp_path / "mini.gcode")
+        mock_result.to_dict.return_value = {"output_path": mock_result.output_path}
+
+        with patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/prusa_mini.ini"), \
+             patch("kiln.slicer.slice_file", return_value=mock_result) as mock_slice:
+            result = runner.invoke(cli, ["slice", str(stl), "--printer-id", "prusa_mini", "--json"])
+
+        assert result.exit_code == 0
+        mock_slice.assert_called_once_with(
+            str(stl),
+            output_dir=None,
+            output_name=None,
+            profile="/tmp/prusa_mini.ini",
+            printer_preset="Original Prusa MINI & MINI+",
+            slicer_path=None,
+        )
+
+    def test_slice_uses_autodetected_prusa_profile(self, runner, tmp_path):
+        stl = tmp_path / "auto.stl"
+        stl.write_text("solid\nendsolid\n")
+        mock_result = MagicMock()
+        mock_result.message = "Sliced"
+        mock_result.output_path = str(tmp_path / "auto.gcode")
+        mock_result.to_dict.return_value = {"output_path": mock_result.output_path}
+
+        with patch("kiln.cli.main._autodetect_printer_profile_id", return_value="prusa_mini"), \
+             patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/prusa_mini.ini"), \
+             patch("kiln.slicer.slice_file", return_value=mock_result) as mock_slice:
+            result = runner.invoke(cli, ["slice", str(stl), "--json"])
+
+        assert result.exit_code == 0
+        kwargs = mock_slice.call_args.kwargs
+        assert kwargs["profile"] == "/tmp/prusa_mini.ini"
+        assert kwargs["printer_preset"] == "Original Prusa MINI & MINI+"
+
 
 # ---------------------------------------------------------------------------
 # material subcommands

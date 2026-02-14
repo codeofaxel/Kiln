@@ -136,6 +136,78 @@ def _get_adapter_from_ctx(ctx: click.Context):
     return _make_adapter(cfg)
 
 
+def _map_printer_hint_to_profile_id(raw: Optional[str]) -> Optional[str]:
+    """Map free-form printer model hints to bundled slicer profile IDs."""
+    if not raw:
+        return None
+    hint = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    if not hint:
+        return None
+
+    if "mini" in hint:
+        return "prusa_mini"
+    if "mk4" in hint:
+        return "prusa_mk4"
+    if "mk3" in hint:
+        return "prusa_mk3s"
+    if "prusa_xl" in hint or hint.endswith("_xl") or hint == "xl" or "prusa" in hint and "xl" in hint:
+        return "prusa_xl"
+    if "ender3" in hint:
+        return "ender3"
+    if hint in {"klipper", "moonraker"}:
+        return "klipper_generic"
+
+    return None
+
+
+def _prusaslicer_preset_for_profile(profile_id: Optional[str]) -> Optional[str]:
+    """Return a PrusaSlicer preset name for a known profile ID."""
+    if profile_id == "prusa_mini":
+        return "Original Prusa MINI & MINI+"
+    if profile_id == "prusa_mk3s":
+        return "Original Prusa i3 MK3S & MK3S+"
+    if profile_id == "prusa_mk4":
+        return "Original Prusa MK4"
+    if profile_id == "prusa_xl":
+        return "Original Prusa XL"
+    return None
+
+
+def _autodetect_printer_profile_id(ctx: click.Context) -> Optional[str]:
+    """Best-effort profile auto-detection from env, config, and backend APIs."""
+    env_model = os.environ.get("KILN_PRINTER_MODEL")
+    mapped = _map_printer_hint_to_profile_id(env_model)
+    if mapped:
+        return mapped
+
+    try:
+        cfg = load_printer_config(ctx.obj.get("printer"))
+    except Exception:
+        return None
+
+    for key in ("printer_id", "printer_model", "model", "profile"):
+        mapped = _map_printer_hint_to_profile_id(str(cfg.get(key, "") or ""))
+        if mapped:
+            return mapped
+
+    ptype = str(cfg.get("type", "")).strip().lower()
+    if ptype != "prusaconnect":
+        return None
+
+    # Prusa Link usually exposes printer identity under /api/v1/info.
+    try:
+        adapter = _make_adapter(cfg)
+        info = adapter._get_json("/api/v1/info")  # type: ignore[attr-defined]
+        for key in ("hostname", "printer_name", "name", "model", "type"):
+            mapped = _map_printer_hint_to_profile_id(str(info.get(key, "") or ""))
+            if mapped:
+                return mapped
+    except Exception as exc:
+        logger.debug("Prusa profile autodetection failed: %s", exc)
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # CLI group
 # ---------------------------------------------------------------------------
@@ -1003,6 +1075,7 @@ def remove(name: str) -> None:
 @click.option("--output-dir", "-o", default=None, help="Output directory (default: system temp dir).")
 @click.option("--output-name", default=None, help="Override output file name.")
 @click.option("--profile", "-P", default=None, type=click.Path(), help="Slicer profile file (.ini/.json).")
+@click.option("--printer-id", default=None, help="Printer model ID for bundled profile auto-selection (e.g. prusa_mini).")
 @click.option("--slicer", default=None, help="Explicit path to slicer binary.")
 @click.option("--print-after", is_flag=True, help="Upload and start printing after slicing.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
@@ -1013,6 +1086,7 @@ def slice(
     output_dir: Optional[str],
     output_name: Optional[str],
     profile: Optional[str],
+    printer_id: Optional[str],
     slicer: Optional[str],
     print_after: bool,
     json_mode: bool,
@@ -1025,24 +1099,46 @@ def slice(
     With --print-after, the sliced G-code is uploaded and printing starts
     immediately.
     """
-    from kiln.slicer import SlicerError, SlicerNotFoundError, find_slicer, slice_file
+    from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
+    from kiln.slicer_profiles import resolve_slicer_profile
 
     try:
+        effective_printer_id = _map_printer_hint_to_profile_id(printer_id) or _autodetect_printer_profile_id(ctx)
+        effective_profile = profile
+        if effective_profile is None and effective_printer_id:
+            try:
+                effective_profile = resolve_slicer_profile(effective_printer_id)
+            except Exception as exc:
+                logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
+
+        printer_preset = _prusaslicer_preset_for_profile(effective_printer_id)
         result = slice_file(
             input_file,
             output_dir=output_dir,
             output_name=output_name,
-            profile=profile,
+            profile=effective_profile,
+            printer_preset=printer_preset,
             slicer_path=slicer,
         )
 
         if not print_after:
             if json_mode:
                 import json as _json
-                click.echo(_json.dumps({"status": "success", "data": result.to_dict()}, indent=2))
+                payload = result.to_dict()
+                if effective_printer_id:
+                    payload["printer_id"] = effective_printer_id
+                if effective_profile:
+                    payload["profile_path"] = effective_profile
+                if printer_preset:
+                    payload["printer_preset"] = printer_preset
+                click.echo(_json.dumps({"status": "success", "data": payload}, indent=2))
             else:
                 click.echo(result.message)
                 click.echo(f"Output: {result.output_path}")
+                if effective_printer_id:
+                    click.echo(f"Profile: {effective_printer_id}")
+                if printer_preset:
+                    click.echo(f"Printer preset: {printer_preset}")
             return
 
         # --print-after: upload and start
