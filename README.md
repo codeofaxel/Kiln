@@ -33,11 +33,11 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 
 ### Why Kiln?
 
-- **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link, direct USB. Manage a mixed fleet from one place.
-- **AI-native** — 186+ MCP tools built for AI agents. Not a web UI with an API bolted on.
+- **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link. Manage a mixed fleet from one place.
+- **AI-native** — 160+ MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
 - **Search → Slice → Print** — Browse MyMiniFactory/Cults3D (and legacy Thingiverse), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
-- **Safety at scale** — 27 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs.
+- **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs.
 
 ## Architecture
 
@@ -124,7 +124,7 @@ kiln auth --name my-printer --host http://octopi.local --type octoprint --api-ke
 # Other printer types:
 # kiln auth --name prusa --host http://192.168.1.100 --type prusaconnect --api-key YOUR_KEY
 # kiln auth --name klipper --host http://192.168.1.100:7125 --type moonraker
-# kiln auth --name bambu --host 192.168.1.100 --type bambu --api-key LAN_CODE --serial SERIAL
+# kiln auth --name bambu --host 192.168.1.100 --type bambu --access-code LAN_CODE --serial SERIAL
 
 # Check printer status
 kiln status
@@ -231,7 +231,7 @@ curl -H "X-Api-Key: YOUR_KEY" http://192.168.1.100/api/v1/status       # Prusa L
 # 3. Register the printer with Kiln (pick your type)
 kiln auth --name my-printer --host http://192.168.1.100:7125 --type moonraker
 # kiln auth --name prusa --host http://192.168.1.100 --type prusaconnect --api-key YOUR_KEY
-# kiln auth --name bambu --host 192.168.1.100 --type bambu --api-key LAN_CODE --serial SERIAL
+# kiln auth --name bambu --host 192.168.1.100 --type bambu --access-code LAN_CODE --serial SERIAL
 
 # 4. Check printer status
 kiln status
@@ -379,7 +379,7 @@ kiln rest --port 8420 --tier full
 pip install kiln3d[rest]
 ```
 
-Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 186 tools are available via MCP (`kiln serve`).
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 162 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -398,7 +398,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **186 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **162 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
 
 | Tool | Description |
 |------|-------------|
@@ -478,7 +478,7 @@ The Kiln MCP server (`kiln serve`) exposes **186 tools** to agents. Key tools ar
 | `save_agent_note` | Save a persistent note/preference that survives across sessions |
 | `get_agent_context` | Retrieve all stored agent memory for context |
 | `delete_agent_note` | Remove a stored note or preference |
-| `list_safety_profiles` | List all bundled printer safety profiles (26 models) |
+| `list_safety_profiles` | List all bundled printer safety profiles (28 models) |
 | `get_safety_profile` | Get temperature/feedrate/flow limits for a specific printer |
 | `validate_gcode_safe` | Validate G-code against printer-specific safety limits |
 | `list_slicer_profiles_tool` | List all bundled slicer profiles with recommended settings |
@@ -589,7 +589,7 @@ The server also exposes read-only resources that agents can use for context:
 | `cloud_sync.py` | Cloud sync for printer configs and job history |
 | `plugins.py` | Plugin system with entry-point discovery |
 | `gcode.py` | G-code safety validator with per-printer limits |
-| `safety_profiles.py` | Bundled safety database (26 printer models, temps/feedrates/flow) |
+| `safety_profiles.py` | Bundled safety database (28 printer models, temps/feedrates/flow) |
 | `slicer_profiles.py` | Bundled slicer profiles (auto-generates .ini files per printer) |
 | `printer_intelligence.py` | Printer knowledge base (firmware quirks, materials, failure modes) |
 | `pipelines.py` | Pre-validated print pipelines (quick_print, calibrate, benchmark) |
@@ -604,7 +604,7 @@ The server also exposes read-only resources that agents can use for context:
 | `heater_watchdog.py` | Auto-cooldown watchdog for idle heaters |
 | `licensing.py` | License tier management (Free/Pro/Business, offline-first) |
 | `wallets.py` | Crypto wallet configuration (Solana/Ethereum for donations and fees) |
-| `cli/` | Click CLI with 50+ subcommands and JSON output |
+| `cli/` | Click CLI with 80+ subcommands and JSON output |
 
 ## Authentication (Optional)
 
@@ -619,7 +619,7 @@ export KILN_AUTH_KEY=your_secret_key
 export KILN_MCP_AUTH_TOKEN=your_secret_key
 ```
 
-Scopes: `print`, `files`, `queue`, `temperature`, `admin`. Read-only tools (status, list) never require auth.
+Scopes: `read`, `write`, `admin`. Read-only tools (status, list) never require auth.
 
 ## Webhooks
 
@@ -754,9 +754,9 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (3,900+ total)
-cd kiln && python3 -m pytest tests/ -v        # 3,695 tests
-cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
+# Run tests (5,200+ total)
+cd kiln && python3 -m pytest tests/ -v        # 5,004 tests
+cd ../octoprint-cli && python3 -m pytest tests/ -v  # 223 tests
 ```
 
 ## Revenue Model

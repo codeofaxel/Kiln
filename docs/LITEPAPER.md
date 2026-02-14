@@ -46,7 +46,7 @@ You (or your agent) --> Kiln --> 🖨️ Your Printers  (local or remote via Bam
                                  🌐 3DOS Network    (peer-to-peer printers worldwide)
 ```
 
-Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. For those who prefer a terminal, there's also a full command-line interface with over 50 commands and a REST API for custom integrations.
+Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. For those who prefer a terminal, there's also a full command-line interface with over 80 commands and a REST API for custom integrations.
 
 All three printing modes use the same interface. An agent doesn't need to know whether a job is printing on your desk, at a factory in Germany, or on someone's Bambu in Texas -- Kiln abstracts the routing. Communication with local printers stays on your network; fulfillment and network jobs use HTTPS to the respective provider APIs.
 

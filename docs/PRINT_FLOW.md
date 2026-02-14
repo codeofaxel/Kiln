@@ -21,7 +21,7 @@ flowchart TD
 
     %% ── Slice if needed ──
     LOCAL_FILE --> IS_GCODE{".gcode already?"}
-    IS_GCODE -- "No (.stl/.3mf)" --> SLICER["Slice in PrusaSlicer / Cura / OrcaSlicer\n<i>outside Kiln</i>"]
+    IS_GCODE -- "No (.stl/.3mf)" --> SLICER["slice_model() or kiln slice\n<i>PrusaSlicer / OrcaSlicer</i>"]
     SLICER --> GCODE_FILE[/".gcode file ready"/]
     IS_GCODE -- "Yes" --> GCODE_FILE
 
@@ -82,7 +82,8 @@ flowchart TD
     class HAS_DESIGN,IS_GCODE,PRINTER_READY,PREFLIGHT_OK,START_PRINT,STILL_PRINTING,ERROR,HANDLE_ERROR decision
     class LOCAL_FILE,GCODE_FILE file
     class START,PRINTING,COMPLETE,CANCELLED,PROGRESS,EVENTS state
-    class SLICER,FIX,SCHEDULER external
+    class SLICER tool
+    class FIX,SCHEDULER external
 ```
 
 ## Flow Summary
@@ -90,7 +91,7 @@ flowchart TD
 | Phase | Kiln Tools Used | Notes |
 |-------|----------------|-------|
 | **Find a design** | `search_models`, `model_details`, `model_files`, `download_model` | MyMiniFactory / marketplace integration; most users start here |
-| **Slice** | *(external)* | PrusaSlicer, Cura, OrcaSlicer — Kiln handles .gcode |
+| **Slice** | `slice_model`, `kiln slice` | Built-in PrusaSlicer / OrcaSlicer integration with bundled profiles |
 | **Setup printer** | `kiln discover`, `kiln auth` | One-time; saved to `~/.kiln/config.yaml` |
 | **Preflight** | `preflight_check` | Validates state, temps, errors before printing |
 | **Upload** | `kiln upload` / `upload_file` | Sends .gcode to printer storage |

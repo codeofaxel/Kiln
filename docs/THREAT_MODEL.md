@@ -9,7 +9,7 @@ This threat model covers the following components of the Kiln system:
 
 | Component | Interface | Transport |
 |---|---|---|
-| MCP Server (`kiln serve`) | 186 MCP tools via FastMCP | stdio (local) |
+| MCP Server (`kiln serve`) | 162 MCP tools via FastMCP | stdio (local) |
 | REST API (`kiln rest`) | HTTP endpoints via FastAPI/uvicorn | TCP (local or network) |
 | CLI (`kiln`, `octoprint-cli`) | Click commands | Local process |
 | Printer Adapters | OctoPrint (HTTP), Moonraker (HTTP), Bambu Lab (MQTT/FTPS), Prusa Link (HTTP) | LAN or WAN |
@@ -152,7 +152,7 @@ This threat model covers the following components of the Kiln system:
 | ID | Threat | Component | Description |
 |---|---|---|---|
 | E-1 | Tool tier bypass | Tool Tiering | Tool tiers are enforced by configuration — the server selectively exposes tools based on the `KILN_TOOL_TIER` setting. However, this is a server-side configuration, not a per-request authorization check. If the server is configured for `full` tier, all connected agents receive all tools regardless of model capability. There is no runtime verification that the calling model matches the configured tier. |
-| E-2 | Auth scope escalation | AuthManager | API keys carry scopes (`read`, `write`, `admin`). Scope enforcement is implemented per-tool in the MCP server. A missing scope check on any single tool among 186 would constitute a privilege escalation vulnerability. The large tool surface area increases the probability of inconsistent enforcement. |
+| E-2 | Auth scope escalation | AuthManager | API keys carry scopes (`read`, `write`, `admin`). Scope enforcement is implemented per-tool in the MCP server. A missing scope check on any single tool among 162 would constitute a privilege escalation vulnerability. The large tool surface area increases the probability of inconsistent enforcement. |
 | E-3 | Plugin privilege escalation | Plugin System | Plugins execute in-process with the same privileges as the Kiln server. A plugin can access the `AuthManager`, `PaymentManager`, `KilnDB`, and all printer adapters. The allow-list controls which plugins load, but loaded plugins have no sandbox or capability restriction. |
 | E-4 | Local filesystem to full access | Persistence | An attacker with write access to `~/.kiln/kiln.db` can insert API keys directly into the database, bypassing the `AuthManager.create_key()` flow. Since keys are stored as SHA-256 hashes, the attacker can compute the hash of a known key and insert it with `admin` scope. |
 | E-5 | Environment variable manipulation | Server Config | Many security-critical behaviors are controlled by environment variables: `KILN_AUTH_ENABLED`, `KILN_RATE_LIMIT` (set to `0` to disable), `KILN_LLM_PRIVACY_MODE`, and `KILN_TOOL_TIER`. A process that can modify the environment of the Kiln server process can disable authentication, rate limiting, privacy mode, and tool restrictions. |
@@ -168,7 +168,7 @@ This threat model covers the following components of the Kiln system:
 | S-4 | Webhook source spoofing | Medium | Low | HMAC-SHA256 signatures when secret configured | Low — mitigated when secrets are used |
 | S-5 | Printer impersonation (LAN) | High | Low | Bambu: TLS used but no cert verification. OctoPrint/Moonraker: verify_ssl default true | Medium — Bambu adapter has no server authentication |
 | T-1 | G-code injection via tool results | High | Low | `_sanitize_tool_output()` deny-list, output truncation | Medium — deny-list cannot guarantee completeness |
-| T-2 | G-code command injection via agent | Critical | Medium | G-code validator blocklist, temperature ceilings, per-printer safety profiles (27 models) | Medium — blocklist approach cannot cover all firmware-specific commands |
+| T-2 | G-code command injection via agent | Critical | Medium | G-code validator blocklist, temperature ceilings, per-printer safety profiles (28 models) | Medium — blocklist approach cannot cover all firmware-specific commands |
 | T-3 | Webhook payload modification | Medium | Low | HMAC-SHA256 when secret configured; HTTP URLs permitted | Medium — unsigned webhooks are vulnerable |
 | T-4 | SQLite database tampering | High | Low | Filesystem permissions (not enforced, only warned) | Medium — no integrity protection beyond filesystem |
 | T-5 | Audit log tampering | High | Low | Per-row HMAC signatures, `verify_audit_log()` | Medium — row deletion is undetectable |
@@ -192,7 +192,7 @@ This threat model covers the following components of the Kiln system:
 | D-5 | Printer connection exhaustion | Medium | Low | None at Kiln layer; printers have their own limits | Medium — could crash embedded printer servers |
 | D-6 | Large file upload | Medium | Low | None | Medium — no file size enforcement |
 | E-1 | Tool tier bypass | Medium | Low | Server-side configuration | Low — requires server reconfiguration |
-| E-2 | Auth scope escalation | High | Medium | Per-tool scope checks; 186 tools to audit | High — large surface area for missed checks |
+| E-2 | Auth scope escalation | High | Medium | Per-tool scope checks; 162 tools to audit | High — large surface area for missed checks |
 | E-3 | Plugin privilege escalation | High | Low | Allow-list; fault isolation for exceptions | Medium — no capability sandbox |
 | E-4 | DB write to full access | High | Low | Filesystem permissions | Medium — trivial if FS access obtained |
 | E-5 | Env var manipulation | Critical | Low | None — standard process model | Medium — OS-level process isolation is only defense |
@@ -204,7 +204,7 @@ The following are known gaps that have not been addressed in the current impleme
 
 1. **No formal penetration test.** The security model has not been validated by an external security firm. All mitigations are self-assessed.
 
-2. **No fuzz testing of MCP tools.** The 186 MCP tool handlers have not been subjected to automated fuzz testing for input validation edge cases, malformed JSON, or type confusion.
+2. **No fuzz testing of MCP tools.** The 162 MCP tool handlers have not been subjected to automated fuzz testing for input validation edge cases, malformed JSON, or type confusion.
 
 3. **No mTLS or certificate pinning for printer connections.** The Bambu adapter explicitly disables TLS certificate verification. OctoPrint and Moonraker connections rely on system CA stores. No certificate pinning is implemented for any adapter.
 
@@ -212,7 +212,7 @@ The following are known gaps that have not been addressed in the current impleme
 
 5. **Auth disabled by default.** The security model assumes local-only deployment when auth is off. No warning is emitted when the REST API binds to `0.0.0.0` (all interfaces) without authentication enabled.
 
-6. **No per-tool scope audit.** With 186 MCP tools, there is no automated verification that every tool correctly enforces its required auth scope. Manual review is the current approach.
+6. **No per-tool scope audit.** With 162 MCP tools, there is no automated verification that every tool correctly enforces its required auth scope. Manual review is the current approach.
 
 7. **Audit log does not detect deletion.** The HMAC scheme signs individual rows but does not chain hashes. An attacker with database access can delete audit entries without detection. A Merkle tree or hash chain would address this.
 

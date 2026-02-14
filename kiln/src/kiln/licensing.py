@@ -66,10 +66,6 @@ _DEFAULT_CACHE_PATH = Path.home() / ".kiln" / "license_cache.json"
 # Cryptographic signature validation
 # ---------------------------------------------------------------------------
 
-# Default HMAC verification key (can be overridden via KILN_LICENSE_PUBLIC_KEY env var).
-# This is a placeholder — production would use a real key provisioned during build/deploy.
-_DEFAULT_HMAC_KEY = "kiln-license-verification-key-v1"
-
 # Offline mode bypass: if set to "1", allow prefix-based keys even when signature fails.
 _OFFLINE_MODE_ENV_VAR = "KILN_LICENSE_OFFLINE"
 
@@ -228,8 +224,13 @@ class LicenseManager:
         payload_b64 = parts[2]
         signature_b64 = parts[3]
 
-        # Get verification key
-        verification_key = os.environ.get("KILN_LICENSE_PUBLIC_KEY", _DEFAULT_HMAC_KEY)
+        # Get verification key — must be set via env var; no default shipped in source.
+        verification_key = os.environ.get("KILN_LICENSE_PUBLIC_KEY", "").strip()
+        if not verification_key:
+            logger.debug(
+                "KILN_LICENSE_PUBLIC_KEY not set — signature verification unavailable"
+            )
+            return None
 
         try:
             # Decode payload

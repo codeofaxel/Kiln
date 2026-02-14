@@ -145,8 +145,8 @@ Save printer credentials to `~/.kiln/config.yaml`.
 |---|---|---|
 | `--name` | Yes | Friendly name for this printer |
 | `--host` | Yes | Printer URL (e.g., `http://octopi.local`) |
-| `--type` | Yes | Backend: `octoprint`, `moonraker`, `bambu` |
-| `--api-key` | OctoPrint | OctoPrint API key |
+| `--type` | Yes | Backend: `octoprint`, `moonraker`, `bambu`, `prusaconnect` |
+| `--api-key` | OctoPrint, Prusa Link | OctoPrint or Prusa Link API key |
 | `--access-code` | Bambu | Bambu Lab access code |
 | `--serial` | Bambu | Bambu Lab serial number |
 
@@ -249,7 +249,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **186 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **162 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
 
 #### Printer Control
 
@@ -674,7 +674,7 @@ export KILN_AUTH_ENABLED=1
 export KILN_AUTH_KEY=your_secret_key
 ```
 
-**Scopes:** `print`, `files`, `queue`, `temperature`, `admin`.
+**Scopes:** `read`, `write`, `admin`.
 
 Read-only tools (`printer_status`, `printer_files`, `fleet_status`) never require authentication.
 
@@ -759,8 +759,8 @@ pip install -e "./octoprint-cli[dev]"
 ### Running Tests
 
 ```bash
-cd kiln && python3 -m pytest tests/ -v    # 3,695 tests
-cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
+cd kiln && python3 -m pytest tests/ -v    # 5,004 tests
+cd ../octoprint-cli && python3 -m pytest tests/ -v  # 223 tests
 ```
 
 ### Adding a New Printer Adapter
@@ -790,7 +790,7 @@ kiln/src/kiln/
     auth.py              # API key authentication
     billing.py           # Fee tracking
     gcode.py             # G-code safety validator (per-printer limits)
-    safety_profiles.py   # Bundled safety database (26 printer models)
+    safety_profiles.py   # Bundled safety database (28 printer models)
     slicer_profiles.py   # Bundled slicer profiles (auto .ini generation)
     printer_intelligence.py  # Printer knowledge base (quirks, materials, fixes)
     pipelines.py         # Pre-validated print pipelines (quick_print, calibrate, benchmark)

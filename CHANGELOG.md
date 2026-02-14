@@ -61,7 +61,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Fleet management: multi-printer registry, fleet status
 - Priority job queue with background dispatch and auto-retry with exponential backoff
 - Mandatory preflight checks before print jobs
-- G-code safety validation with per-printer limits (26 printer safety profiles)
+- G-code safety validation with per-printer limits (28 printer safety profiles)
 - Bundled slicer profiles for 14 printer models (PrusaSlicer/OrcaSlicer)
 - Printer intelligence database (firmware quirks, material compatibility, failure modes)
 - Pre-validated pipelines: quick_print, calibrate, benchmark
