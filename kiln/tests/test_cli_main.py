@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -493,6 +494,62 @@ class TestAuth:
         assert data["data"]["diagnostics"]["profile_id"] == "prusa_mini"
         assert mock_save.call_count == 2
         assert mock_save.call_args_list[1].kwargs["printer_model"] == "prusa_mini"
+
+    def test_auth_prusa_returns_error_when_diagnostics_fail(self, runner):
+        diag = {
+            "ok": False,
+            "checks": [{"name": "api_status", "ok": False}],
+        }
+        with patch("kiln.cli.main.save_printer", return_value=Path("/tmp/config.yaml")) as mock_save, \
+             patch("kiln.cli.main.load_printer_config", return_value={
+                 "type": "prusaconnect",
+                 "host": "http://192.168.0.44",
+                 "api_key": "abc123",
+             }), \
+             patch("kiln.cli.main._run_prusa_diagnostics", return_value=diag):
+            result = runner.invoke(cli, [
+                "auth",
+                "--name", "prusa-mini",
+                "--host", "http://192.168.0.44",
+                "--type", "prusaconnect",
+                "--api-key", "abc123",
+                "--json",
+            ])
+
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert data["status"] == "error"
+        assert data["error"]["code"] == "PRUSA_DIAGNOSTICS_FAILED"
+        assert data["data"]["config_path"] == "/tmp/config.yaml"
+        assert mock_save.call_count == 1
+
+
+class TestPrusaProfileDetection:
+    def test_map_printer_hint_does_not_assume_generic_mini(self):
+        from kiln.cli.main import _map_printer_hint_to_profile_id
+
+        assert _map_printer_hint_to_profile_id("mini") is None
+        assert _map_printer_hint_to_profile_id("PrusaMINI") == "prusa_mini"
+
+    def test_autodetect_profile_falls_back_to_api_version(self):
+        from kiln.cli.main import _autodetect_printer_profile_id
+
+        adapter = MagicMock()
+        adapter._get_json.side_effect = [
+            Exception("no /api/v1/info"),
+            {"hostname": "PrusaMINI"},
+        ]
+        ctx = click.Context(cli)
+        ctx.obj = {"printer": "prusa-mini"}
+
+        with patch("kiln.cli.main.load_printer_config", return_value={
+            "type": "prusaconnect",
+            "host": "http://192.168.0.44",
+            "api_key": "abc123",
+        }), patch("kiln.cli.main._make_adapter", return_value=adapter):
+            profile = _autodetect_printer_profile_id(ctx)
+
+        assert profile == "prusa_mini"
 
 
 class TestDoctorPrusa:

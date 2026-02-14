@@ -179,10 +179,19 @@ class PrusaConnectAdapter(PrinterAdapter):
                             f"--type prusaconnect --api-key <YOUR_KEY>",
                         )
                     if response.status_code == 403:
+                        endpoint_hint = (
+                            " This endpoint is under /api/v1/files; if status/cancel work but "
+                            "files/print fail, verify the storage root/path and use the API "
+                            "filename (often 8.3) shown by 'kiln files'."
+                            if path.startswith("/api/v1/files/")
+                            else ""
+                        )
                         raise PrinterError(
-                            f"Access forbidden (HTTP 403) for Prusa Link at {self._host}. "
-                            f"Your API key may lack required permissions. Check the key in "
-                            f"Settings > Network > PrusaLink on your printer's LCD.",
+                            f"Access forbidden (HTTP 403) for Prusa Link at {self._host} "
+                            f"on {method} {path}. Your API key may lack required permissions, "
+                            f"or this firmware may reject the requested operation/path. "
+                            f"Check the key in Settings > Network > PrusaLink on your printer's "
+                            f"LCD.{endpoint_hint}",
                         )
                     if response.status_code == 404:
                         raise PrinterError(
@@ -219,7 +228,7 @@ class PrusaConnectAdapter(PrinterAdapter):
                 last_exc = PrinterError(
                     f"Could not connect to Prusa Link at {self._host} "
                     f"(attempt {attempt + 1}/{self._retries}). "
-                    f"Check: (1) printer is powered on and connected to WiFi, "
+                    f"Check: (1) printer is powered on and connected to LAN (Ethernet or Wi-Fi), "
                     f"(2) IP address is correct (find it on the printer's LCD under "
                     f"Settings > Network), (3) Prusa Link is enabled.",
                     cause=exc,

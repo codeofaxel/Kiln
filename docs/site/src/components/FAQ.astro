@@ -9,6 +9,10 @@ const faqs = [
     a: 'WSL 2 uses NAT networking, which blocks mDNS discovery. Connect to your printer by IP address instead:<br><code>kiln auth --name my-printer --host http://192.168.1.x:port --type octoprint</code>',
   },
   {
+    q: 'Can I use Ethernet instead of Wi-Fi?',
+    a: 'Yes. Kiln works over LAN IP, so Ethernet-only printers are fully supported. If discovery does not find your printer, register it directly by IP:<br><code>kiln auth --name my-printer --host http://192.168.1.x:port --type prusaconnect --api-key YOUR_KEY</code>',
+  },
+  {
     q: 'PrusaSlicer not found',
     a: 'Kiln auto-detects PrusaSlicer and OrcaSlicer on your PATH and in standard macOS app bundle locations. If it is installed in a non-standard location, set the path explicitly:<br><code>export KILN_SLICER_PATH=/path/to/prusa-slicer</code>',
   },

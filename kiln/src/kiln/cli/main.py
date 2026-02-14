@@ -143,8 +143,13 @@ def _map_printer_hint_to_profile_id(raw: Optional[str]) -> Optional[str]:
     hint = raw.strip().lower().replace("-", "_").replace(" ", "_")
     if not hint:
         return None
+    hint_compact = hint.replace("_", "")
 
-    if "mini" in hint:
+    if (
+        hint in {"prusa_mini", "prusamini"}
+        or hint_compact.startswith("prusamini")
+        or ("prusa" in hint and "mini" in hint)
+    ):
         return "prusa_mini"
     if "mk4" in hint:
         return "prusa_mk4"
@@ -152,12 +157,43 @@ def _map_printer_hint_to_profile_id(raw: Optional[str]) -> Optional[str]:
         return "prusa_mk3s"
     if "prusa_xl" in hint or hint.endswith("_xl") or hint == "xl" or "prusa" in hint and "xl" in hint:
         return "prusa_xl"
-    if "ender3" in hint:
+    if "ender3" in hint_compact:
         return "ender3"
     if hint in {"klipper", "moonraker"}:
         return "klipper_generic"
 
     return None
+
+
+def _extract_model_hints(payload: Dict[str, Any]) -> List[str]:
+    """Extract candidate model strings from backend payloads."""
+    hints: List[str] = []
+    keys = ("hostname", "printer_name", "name", "model", "type")
+    seen: set[str] = set()
+
+    def _add(value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        cleaned = value.strip()
+        if not cleaned:
+            return
+        key = cleaned.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        hints.append(cleaned)
+
+    for key in keys:
+        _add(payload.get(key))
+
+    for parent in ("printer", "device", "system"):
+        obj = payload.get(parent)
+        if not isinstance(obj, dict):
+            continue
+        for key in keys:
+            _add(obj.get(key))
+
+    return hints
 
 
 def _prusaslicer_preset_for_profile(profile_id: Optional[str]) -> Optional[str]:
@@ -194,14 +230,20 @@ def _autodetect_printer_profile_id(ctx: click.Context) -> Optional[str]:
     if ptype != "prusaconnect":
         return None
 
-    # Prusa Link usually exposes printer identity under /api/v1/info.
+    # Prusa Link usually exposes printer identity under /api/v1/info,
+    # but older/newer builds may only provide hints via /api/version.
     try:
         adapter = _make_adapter(cfg)
-        info = adapter._get_json("/api/v1/info")  # type: ignore[attr-defined]
-        for key in ("hostname", "printer_name", "name", "model", "type"):
-            mapped = _map_printer_hint_to_profile_id(str(info.get(key, "") or ""))
-            if mapped:
-                return mapped
+        for endpoint in ("/api/v1/info", "/api/version"):
+            try:
+                info = adapter._get_json(endpoint)  # type: ignore[attr-defined]
+            except Exception as exc:
+                logger.debug("Prusa autodetect endpoint %s failed: %s", endpoint, exc)
+                continue
+            for hint in _extract_model_hints(info):
+                mapped = _map_printer_hint_to_profile_id(hint)
+                if mapped:
+                    return mapped
     except Exception as exc:
         logger.debug("Prusa profile autodetection failed: %s", exc)
 
@@ -250,31 +292,51 @@ def _run_prusa_diagnostics(cfg: Dict[str, Any]) -> Dict[str, Any]:
         checks.append({"name": "api_status", "ok": False, "detail": str(exc)})
         status_ok = False
 
-    # Model hint from info endpoint
+    # Model hint from info/version endpoints
     model_hint: Optional[str] = None
     info_ok = False
-    try:
-        info = adapter._get_json("/api/v1/info")  # type: ignore[attr-defined]
-        for key in ("hostname", "printer_name", "name", "model", "type"):
-            val = info.get(key)
-            if isinstance(val, str) and val.strip():
-                model_hint = val.strip()
-                break
-        mapped = _map_printer_hint_to_profile_id(model_hint)
-        summary["model_hint"] = model_hint
-        summary["profile_id"] = mapped
+    info_endpoint: Optional[str] = None
+    last_info_error: Optional[Exception] = None
+    for endpoint in ("/api/v1/info", "/api/version"):
+        try:
+            payload = adapter._get_json(endpoint)  # type: ignore[attr-defined]
+        except Exception as exc:
+            last_info_error = exc
+            continue
+
+        info_ok = True
+        info_endpoint = endpoint
+        hints = _extract_model_hints(payload)
+        if hints:
+            model_hint = hints[0]
+            for hint in hints:
+                mapped = _map_printer_hint_to_profile_id(hint)
+                if mapped:
+                    summary["model_hint"] = hint
+                    summary["profile_id"] = mapped
+                    break
+            else:
+                summary["model_hint"] = model_hint
+        if summary.get("profile_id"):
+            break
+
+    if info_ok:
         checks.append({
             "name": "api_info",
             "ok": True,
             "detail": (
-                f"/api/v1/info reachable (model='{model_hint}', profile='{mapped}')"
-                if model_hint
-                else "/api/v1/info reachable (model unknown)"
+                f"{info_endpoint} reachable (model='{summary.get('model_hint')}', "
+                f"profile='{summary.get('profile_id')}')"
+                if summary.get("model_hint")
+                else f"{info_endpoint} reachable (model unknown)"
             ),
         })
-        info_ok = True
-    except Exception as exc:
-        checks.append({"name": "api_info", "ok": False, "detail": str(exc)})
+    else:
+        checks.append({
+            "name": "api_info",
+            "ok": False,
+            "detail": str(last_info_error) if last_info_error else "No model endpoint reachable",
+        })
 
     # Storage roots
     root_ok = False
@@ -406,8 +468,8 @@ def discover(timeout: float, subnet: Optional[str], methods: tuple, json_mode: b
 
     if not json_mode and not found:
         click.echo(
-            "\nTip: Bambu printers don't advertise via mDNS. "
-            "Use 'kiln auth' with the IP address."
+            "\nTip: Discovery may miss printers on some networks. "
+            "Use 'kiln auth' with the printer IP (works for Ethernet and Wi-Fi)."
         )
 
 
@@ -476,6 +538,30 @@ def auth(
         }
         if prusa_diagnostics is not None:
             data["diagnostics"] = prusa_diagnostics
+
+        if printer_type == "prusaconnect" and prusa_diagnostics is not None and not prusa_diagnostics.get("ok", False):
+            checks = prusa_diagnostics.get("checks", [])
+            failed_checks = [
+                c.get("name", "unknown")
+                for c in checks
+                if isinstance(c, dict) and not c.get("ok", False) and not c.get("warn", False)
+            ]
+            failed_summary = ", ".join(failed_checks) if failed_checks else "connectivity checks"
+            message = (
+                "Saved printer credentials, but Prusa connectivity diagnostics failed "
+                f"({failed_summary}). Run 'kiln doctor-prusa --json' for details."
+            )
+            if json_mode:
+                click.echo(format_response(
+                    "error",
+                    data=data,
+                    error={"code": "PRUSA_DIAGNOSTICS_FAILED", "message": message},
+                    json_mode=True,
+                ))
+            else:
+                click.echo(format_error(message, code="PRUSA_DIAGNOSTICS_FAILED", json_mode=False))
+            sys.exit(1)
+
         click.echo(format_response("success", data=data, json_mode=json_mode))
         if not json_mode and prusa_diagnostics is not None:
             profile_id = prusa_diagnostics.get("profile_id")
@@ -3023,7 +3109,7 @@ _PRINTER_TYPE_LABELS = {
 def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     """Interactive guided setup for your first printer.
 
-    Scans the local network for printers, lets you pick one (or enter
+    Scans the local LAN for printers, lets you pick one (or enter
     details manually), saves credentials, and verifies the connection.
     """
     from kiln.cli.config import get_config_path
@@ -3074,7 +3160,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     # -- Discovery ---------------------------------------------------------
     discovered = []
     if not skip_discovery:
-        click.echo("  Scanning network for printers...")
+        click.echo("  Scanning LAN for printers...")
         try:
             from kiln.cli.discovery import discover_printers
             discovered = discover_printers(timeout=discovery_timeout)
@@ -3097,10 +3183,10 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                 )
             click.echo()
         else:
-            click.echo("  No printers found on the network.\n")
+            click.echo("  No printers found on the LAN.\n")
             click.echo(
-                "  Tip: Bambu printers don't advertise via mDNS.\n"
-                "       Enter the IP address manually.\n"
+                "  Tip: Discovery can miss printers on some setups (WSL/VLAN/etc).\n"
+                "       Enter the printer IP manually — Ethernet and Wi-Fi both work.\n"
             )
 
     # -- Selection ---------------------------------------------------------

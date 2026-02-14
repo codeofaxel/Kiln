@@ -89,6 +89,27 @@ class TestProperties:
 
 
 # ---------------------------------------------------------------------------
+# request errors
+# ---------------------------------------------------------------------------
+
+
+class TestRequestErrors:
+    def test_403_file_endpoint_includes_path_hint(self):
+        a = _adapter()
+        forbidden = _mock_response(status_code=403, ok=False)
+        forbidden.text = "Forbidden"
+
+        with patch.object(a._session, "request", return_value=forbidden):
+            with pytest.raises(PrinterError) as exc_info:
+                a._request("POST", "/api/v1/files/usb/WHISTL~1.GCO")
+
+        message = str(exc_info.value)
+        assert "HTTP 403" in message
+        assert "/api/v1/files/usb/WHISTL~1.GCO" in message
+        assert "8.3" in message
+
+
+# ---------------------------------------------------------------------------
 # get_state
 # ---------------------------------------------------------------------------
 

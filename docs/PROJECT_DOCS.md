@@ -88,7 +88,8 @@ Requirements: Python 3.10+, pip.
 kiln discover
 ```
 
-Scans your local network using mDNS for OctoPrint and Moonraker instances. Bambu printers must be added manually (they don't advertise via mDNS).
+Scans your local LAN (Ethernet or Wi-Fi) using mDNS and HTTP probing.
+If discovery does not find your printer, add it directly by IP with `kiln auth`.
 
 ### Add a Printer
 
@@ -99,8 +100,25 @@ kiln auth --name ender3 --host http://octopi.local --type octoprint --api-key YO
 # Moonraker
 kiln auth --name voron --host http://voron.local:7125 --type moonraker
 
+# Prusa Link
+kiln auth --name prusa-mini --host http://192.168.1.44 --type prusaconnect --api-key YOUR_KEY
+
 # Bambu Lab
 kiln auth --name x1c --host 192.168.1.100 --type bambu --access-code 12345678 --serial 01P00A000000001
+```
+
+### Ethernet-Only Setup (No Wi-Fi)
+
+Kiln works the same over Ethernet and Wi-Fi because it talks to printer APIs over LAN IP.
+
+```bash
+# Verify endpoint from your host:
+curl http://192.168.1.44/api/v1/status                  # Prusa Link
+curl http://192.168.1.50:7125/server/info               # Moonraker
+curl http://192.168.1.60/api/version                    # OctoPrint
+
+# Register directly by IP (no discovery required):
+kiln auth --name printer --host http://192.168.1.44 --type prusaconnect --api-key YOUR_KEY
 ```
 
 ### First Print
@@ -136,7 +154,8 @@ Auto-detects PrusaSlicer or OrcaSlicer, slices to G-code, uploads, and starts pr
 ### Commands
 
 #### `kiln discover`
-Scan the local network for printers via mDNS and HTTP probing.
+Scan the local LAN for printers via mDNS and HTTP probing.
+If no printers are found, use `kiln auth --host <ip>` to register directly.
 
 #### `kiln auth`
 Save printer credentials to `~/.kiln/config.yaml`.

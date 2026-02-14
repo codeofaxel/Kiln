@@ -4196,11 +4196,72 @@ def list_model_categories() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
+    """Map free-form model hints to bundled slicer profile IDs."""
+    if not raw:
+        return None
+    hint = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    if not hint:
+        return None
+    hint_compact = hint.replace("_", "")
+
+    if (
+        hint in {"prusa_mini", "prusamini"}
+        or hint_compact.startswith("prusamini")
+        or ("prusa" in hint and "mini" in hint)
+    ):
+        return "prusa_mini"
+    if "mk4" in hint:
+        return "prusa_mk4"
+    if "mk3" in hint:
+        return "prusa_mk3s"
+    if "prusa_xl" in hint or hint.endswith("_xl") or hint == "xl" or ("prusa" in hint and "xl" in hint):
+        return "prusa_xl"
+    if "ender3" in hint_compact:
+        return "ender3"
+    if hint in {"klipper", "moonraker"}:
+        return "klipper_generic"
+    return None
+
+
+def _prusaslicer_preset_for_profile(profile_id: str | None) -> str | None:
+    """Return PrusaSlicer preset name for a bundled profile ID."""
+    if profile_id == "prusa_mini":
+        return "Original Prusa MINI & MINI+"
+    if profile_id == "prusa_mk3s":
+        return "Original Prusa i3 MK3S & MK3S+"
+    if profile_id == "prusa_mk4":
+        return "Original Prusa MK4"
+    if profile_id == "prusa_xl":
+        return "Original Prusa XL"
+    return None
+
+
+def _resolve_slice_profile_context(
+    profile: str | None,
+    printer_id: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    """Resolve effective profile path and Prusa preset for slicing."""
+    effective_printer_id = (
+        _map_printer_hint_to_profile_id(printer_id)
+        or _map_printer_hint_to_profile_id(_PRINTER_MODEL)
+    )
+    effective_profile = profile
+    if effective_profile is None and effective_printer_id:
+        try:
+            effective_profile = resolve_slicer_profile(effective_printer_id)
+        except Exception as exc:
+            logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
+    printer_preset = _prusaslicer_preset_for_profile(effective_printer_id)
+    return effective_printer_id, effective_profile, printer_preset
+
+
 @mcp.tool()
 def slice_model(
     input_path: str,
     output_dir: str | None = None,
     profile: str | None = None,
+    printer_id: str | None = None,
     slicer_path: str | None = None,
 ) -> dict:
     """Slice a 3D model (STL/3MF/STEP) to G-code using PrusaSlicer or OrcaSlicer.
@@ -4210,6 +4271,8 @@ def slice_model(
         output_dir: Directory for the output G-code.  Defaults to
             the system temp directory.
         profile: Path to a slicer profile/config file (.ini or .json).
+        printer_id: Optional printer model ID for bundled profile
+            auto-selection (e.g. ``"prusa_mini"``).
         slicer_path: Explicit path to the slicer binary.  Auto-detected
             if omitted.
 
@@ -4220,21 +4283,32 @@ def slice_model(
     try:
         from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
 
+        effective_printer_id, effective_profile, printer_preset = _resolve_slice_profile_context(
+            profile=profile,
+            printer_id=printer_id,
+        )
         result = slice_file(
             input_path,
             output_dir=output_dir,
-            profile=profile,
+            profile=effective_profile,
+            printer_preset=printer_preset,
             slicer_path=slicer_path,
         )
         response: Dict[str, Any] = {
             "success": True,
             **result.to_dict(),
         }
+        if effective_printer_id:
+            response["printer_id"] = effective_printer_id
+        if effective_profile:
+            response["profile_path"] = effective_profile
+        if printer_preset:
+            response["printer_preset"] = printer_preset
 
         # Cross-check slicer profile against printer safety limits
-        if _PRINTER_MODEL and profile:
+        if _PRINTER_MODEL and effective_profile:
             # Extract profile_id from the profile path or use printer model
-            _profile_id = os.path.basename(profile).split("_")[0] if profile else None
+            _profile_id = effective_printer_id or os.path.basename(effective_profile).split("_")[0]
             if _profile_id:
                 validation = validate_profile_for_printer(_profile_id, _PRINTER_MODEL)
                 if validation["warnings"] or validation["errors"]:
@@ -4289,6 +4363,7 @@ def slice_and_print(
     input_path: str,
     printer_name: str | None = None,
     profile: str | None = None,
+    printer_id: str | None = None,
 ) -> dict:
     """Slice a 3D model and immediately upload + print it in one step.
 
@@ -4296,6 +4371,8 @@ def slice_and_print(
         input_path: Path to the 3D model file (STL, 3MF, STEP, etc.).
         printer_name: Target printer name.  Omit for the default printer.
         profile: Path to a slicer profile/config file.
+        printer_id: Optional printer model ID for bundled profile
+            auto-selection (e.g. ``"prusa_mini"``).
 
     Combines ``slice_model``, ``upload_file``, and ``start_print`` into
     a single action.
@@ -4305,7 +4382,15 @@ def slice_and_print(
     try:
         from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
 
-        result = slice_file(input_path, profile=profile)
+        effective_printer_id, effective_profile, printer_preset = _resolve_slice_profile_context(
+            profile=profile,
+            printer_id=printer_id,
+        )
+        result = slice_file(
+            input_path,
+            profile=effective_profile,
+            printer_preset=printer_preset,
+        )
 
         if printer_name:
             adapter = _registry.get(printer_name)
@@ -4334,6 +4419,9 @@ def slice_and_print(
             "slice": result.to_dict(),
             "upload": upload.to_dict(),
             "print": print_result.to_dict(),
+            "printer_id": effective_printer_id,
+            "profile_path": effective_profile,
+            "printer_preset": printer_preset,
             "message": f"Sliced, uploaded, and started printing {os.path.basename(input_path)}.",
         }
     except SlicerNotFoundError as exc:
@@ -6515,6 +6603,7 @@ def generate_and_print(
     style: str | None = None,
     printer_name: str | None = None,
     profile: str | None = None,
+    printer_id: str | None = None,
     timeout: int = 600,
 ) -> dict:
     """Full pipeline: generate a model, validate, slice, and upload (preview).
@@ -6534,6 +6623,8 @@ def generate_and_print(
         style: Optional style hint for cloud providers.
         printer_name: Target printer.  Omit for the default printer.
         profile: Slicer profile path.
+        printer_id: Optional printer model ID for bundled profile
+            auto-selection (e.g. ``"prusa_mini"``).
         timeout: Max seconds to wait for generation (default 600).
     """
     if err := _check_auth("print"):
@@ -6595,7 +6686,15 @@ def generate_and_print(
         # Step 5: Slice
         from kiln.slicer import slice_file
 
-        slice_result = slice_file(result.local_path, profile=profile)
+        effective_printer_id, effective_profile, printer_preset = _resolve_slice_profile_context(
+            profile=profile,
+            printer_id=printer_id,
+        )
+        slice_result = slice_file(
+            result.local_path,
+            profile=effective_profile,
+            printer_preset=printer_preset,
+        )
 
         # Step 6: Upload (but do NOT auto-start — require explicit start_print)
         if printer_name:
@@ -6649,6 +6748,9 @@ def generate_and_print(
             "slice": slice_result.to_dict(),
             "upload": upload.to_dict(),
             "file_name": file_name,
+            "printer_id": effective_printer_id,
+            "profile_path": effective_profile,
+            "printer_preset": printer_preset,
             "validation": gen_validation,
             "dimensions": gen_dimensions,
             "experimental": True,

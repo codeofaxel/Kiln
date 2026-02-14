@@ -272,15 +272,15 @@ def slice_file(
         "--output", out_file,
     ]
 
-    if profile:
-        if not os.path.isfile(profile):
-            raise SlicerError(f"Profile file not found: {profile}")
-        cmd.extend(["--load", profile])
-
     # PrusaSlicer preset selection helps enforce printer-specific machine
     # metadata/start G-code (e.g. model compatibility checks).
     if printer_preset and "prusa" in slicer.name.lower():
         cmd.extend(["--printer", printer_preset])
+
+    if profile:
+        if not os.path.isfile(profile):
+            raise SlicerError(f"Profile file not found: {profile}")
+        cmd.extend(["--load", profile])
 
     if extra_args:
         cmd.extend(extra_args)

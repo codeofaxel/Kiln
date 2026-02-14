@@ -64,7 +64,7 @@ Notes: The adapter communicates exclusively over local LAN -- it does not use th
 | Tested with | Prusa Link 2.0+ (firmware on MK4, MK3.9, XL, Mini+) |
 | API version | Prusa Link HTTP API v1 (`/api/v1/`) |
 | Authentication | `X-Api-Key` header |
-| Protocol | HTTP |
+| Protocol | HTTP over LAN (Ethernet or Wi-Fi) |
 | Features | Partial (state, upload, print start/pause/resume/cancel, file listing, webcam snapshot) |
 
 **Limitations:**

@@ -269,6 +269,37 @@ class TestSliceFile:
         assert "--printer" in cmd
         assert "Original Prusa MINI & MINI+" in cmd
 
+    def test_prusa_printer_preset_precedes_profile_load(self, tmp_path):
+        """When both are set, --printer should be emitted before --load."""
+        stl = tmp_path / "mini_profile.stl"
+        stl.write_bytes(b"solid test\nendsolid test\n")
+        out_dir = tmp_path / "output"
+        expected_out = out_dir / "mini_profile.gcode"
+        profile = tmp_path / "profile.ini"
+        profile.write_text("[print]\nlayer_height=0.2\n")
+
+        mock_run = MagicMock()
+        mock_run.returncode = 0
+        mock_run.stdout = ""
+        mock_run.stderr = ""
+
+        with patch("kiln.slicer.find_slicer") as mock_find:
+            mock_find.return_value = SlicerInfo(
+                path="/usr/bin/prusa-slicer", name="prusa-slicer"
+            )
+            with patch("subprocess.run", return_value=mock_run) as mock_subprocess:
+                out_dir.mkdir()
+                expected_out.write_text("; gcode")
+                slice_file(
+                    str(stl),
+                    output_dir=str(out_dir),
+                    profile=str(profile),
+                    printer_preset="Original Prusa MINI & MINI+",
+                )
+
+        cmd = mock_subprocess.call_args.args[0]
+        assert cmd.index("--printer") < cmd.index("--load")
+
     def test_orca_ignores_printer_preset_flag(self, tmp_path):
         """Orca slicer invocations should not receive Prusa-only --printer flag."""
         stl = tmp_path / "orca.stl"

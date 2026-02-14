@@ -94,7 +94,7 @@ This monorepo contains two packages:
 
 ## Prerequisites
 
-Before installing Kiln, you need your printer's network details:
+Before installing Kiln, you need your printer's LAN details (Ethernet or Wi-Fi):
 
 | Printer | Type | What You Need |
 |---------|------|---------------|
@@ -102,6 +102,8 @@ Before installing Kiln, you need your printer's network details:
 | **OctoPrint** (any printer) | `octoprint` | OctoPrint URL + API key (Settings > API in OctoPrint web UI) |
 | **Klipper/Moonraker** | `moonraker` | Moonraker URL (usually `http://<ip>:7125`) |
 | **Bambu Lab** | `bambu` | IP address + LAN access code + serial number (all on the printer's LCD) |
+
+Kiln only needs IP reachability on your local LAN. Ethernet-only printers are fully supported.
 
 **Optional:** Install [PrusaSlicer](https://www.prusa3d.com/prusaslicer/) or OrcaSlicer to slice STL files directly from Kiln (`brew install --cask prusaslicer` on macOS).
 
@@ -116,7 +118,7 @@ git clone https://github.com/codeofaxel/Kiln.git ~/.kiln/src && ~/.kiln/src/inst
 # Or install manually from a local clone
 pip install -e ./kiln
 
-# Discover printers on your network
+# Discover printers on your network (mDNS + HTTP probe)
 kiln discover
 
 # Add your printer (pick your type from the Prerequisites table)
@@ -125,6 +127,7 @@ kiln auth --name my-printer --host http://octopi.local --type octoprint --api-ke
 # kiln auth --name prusa --host http://192.168.1.100 --type prusaconnect --api-key YOUR_KEY
 # kiln auth --name klipper --host http://192.168.1.100:7125 --type moonraker
 # kiln auth --name bambu --host 192.168.1.100 --type bambu --access-code LAN_CODE --serial SERIAL
+# If discovery misses your printer (common on WSL/VLANs), connect directly by IP with kiln auth.
 
 # Check printer status
 kiln status
@@ -150,6 +153,22 @@ kiln history --status completed
 
 # All commands support --json for agent consumption
 kiln status --json
+```
+
+### Ethernet-Only Printers (No Wi-Fi)
+
+Kiln works the same over Ethernet and Wi-Fi because it talks to printer APIs over LAN IP.
+
+```bash
+# 1. Connect printer and host to the same router/switch
+# 2. Find printer IP from the printer UI or your router DHCP client list
+# 3. Verify the printer endpoint responds:
+curl http://<printer-ip>/api/version                    # OctoPrint
+curl http://<printer-ip>:7125/server/info               # Moonraker
+curl -H "X-Api-Key: YOUR_KEY" http://<printer-ip>/api/v1/status   # Prusa Link
+
+# 4. Register directly by IP (no discovery required)
+kiln auth --name my-printer --host http://<printer-ip> --type prusaconnect --api-key YOUR_KEY
 ```
 
 ### Linux / WSL 2
@@ -217,7 +236,7 @@ kiln verify
 
 **WSL 2 networking note:** WSL 2 uses a virtual network (NAT), so mDNS printer
 discovery (`kiln discover`) will not find printers on your home network. Instead,
-connect directly by IP:
+connect directly by IP (same flow for Ethernet-only printers):
 
 ```bash
 # 1. Find your printer's IP (check your router or the printer's LCD/web UI)
@@ -255,8 +274,9 @@ Without `ffmpeg`, Bambu printers will work normally but `can_snapshot` will be `
 ### CLI Commands
 
 ```
-kiln discover                              # Scan network for printers (mDNS)
+kiln discover                              # Scan LAN for printers (mDNS + HTTP probe)
 kiln auth --name N --host H --type T       # Save printer credentials
+kiln doctor-prusa [--json]                 # Prusa Link diagnostics (endpoints + storage roots)
 kiln status [--json]                       # Printer state + job progress
 kiln files [--json]                        # List files on printer
 kiln upload <file> [--json]                # Upload G-code file
@@ -640,6 +660,7 @@ kiln discover
 ```
 
 Discovery uses mDNS/Bonjour and HTTP subnet probing to find OctoPrint, Moonraker, Bambu, and Prusa Link printers.
+If discovery returns no results, register printers directly by IP with `kiln auth` (works for both Ethernet and Wi-Fi LAN setups).
 
 ## Model Marketplaces
 
