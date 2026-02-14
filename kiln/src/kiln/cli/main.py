@@ -3665,7 +3665,7 @@ def serve() -> None:
 @click.option("--port", default=8420, type=int, help="Port number.")
 @click.option(
     "--auth-token", default=None,
-    help="Bearer token for authentication (optional).",
+    help="Bearer token for REST auth (defaults to KILN_API_AUTH_TOKEN env var).",
 )
 @click.option(
     "--tier", default="full",
@@ -3681,8 +3681,19 @@ def rest(host: str, port: int, auth_token: Optional[str], tier: str) -> None:
     """
     from kiln.rest_api import run_rest_server, RestApiConfig
 
+    resolved_auth_token = auth_token
+    if resolved_auth_token is None:
+        resolved_auth_token = (
+            os.environ.get("KILN_API_AUTH_TOKEN")
+            or os.environ.get("KILN_AUTH_TOKEN")
+            or None
+        )
+
     config = RestApiConfig(
-        host=host, port=port, auth_token=auth_token, tool_tier=tier,
+        host=host,
+        port=port,
+        auth_token=resolved_auth_token,
+        tool_tier=tier,
     )
     click.echo(f"Starting Kiln REST API on {host}:{port} (tier: {tier})")
     run_rest_server(config)

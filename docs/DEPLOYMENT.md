@@ -10,11 +10,14 @@ Comprehensive reference for deploying Kiln as a hosted REST API service or local
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `KILN_PRINTER_HOST` | Yes | `""` | Base URL of the printer server (e.g. `http://octopi.local`, `192.168.1.50`) |
+| `KILN_PRINTER_HOST` | Yes | `""` | Base URL of the printer server (e.g. `http://octopi.local`, `http://192.168.1.50`). Works for both Ethernet and Wi-Fi LAN printers |
 | `KILN_PRINTER_API_KEY` | Depends | `""` | API key for OctoPrint/Moonraker/Prusa Link authentication |
 | `KILN_PRINTER_TYPE` | No | `octoprint` | Printer backend: `octoprint`, `moonraker`, `bambu`, `prusaconnect` |
 | `KILN_PRINTER_SERIAL` | Bambu only | `""` | Bambu printer serial number (required when type is `bambu`) |
 | `KILN_PRINTER_ACCESS_CODE` | Bambu only | `""` | Bambu printer access code (required when type is `bambu`) |
+| `KILN_BAMBU_TLS_MODE` | Bambu only | `pin` | Bambu TLS policy: `pin` (TOFU pinning), `ca` (strict CA/hostname verification), or `insecure` (legacy no cert verification) |
+| `KILN_BAMBU_TLS_FINGERPRINT` | Bambu only | `""` | Optional explicit SHA-256 certificate fingerprint pin |
+| `KILN_BAMBU_TLS_PIN_FILE` | Bambu only | `~/.kiln/bambu_tls_pins.json` | Location of persisted TOFU certificate pins |
 | `KILN_PRINTER_MODEL` | No | `""` | Printer model name for auto-loading safety/slicer profiles |
 | `KILN_PRINTER` | No | `""` | Named printer from `~/.kiln/config.yaml` (CLI flag equivalent) |
 
@@ -23,9 +26,9 @@ Comprehensive reference for deploying Kiln as a hosted REST API service or local
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `KILN_AUTH_ENABLED` | No | `false` | Enable API key authentication (`1`, `true`, `yes`) |
-| `KILN_AUTH_KEY` | No | auto-generated | API key for client authentication. Auto-generated session key if auth is enabled but no key is set |
+| `KILN_AUTH_KEY` | No | auto-generated | API key for client authentication. If omitted while auth is enabled, Kiln creates an ephemeral session key (value is not logged) |
 | `KILN_MCP_AUTH_TOKEN` | No | `""` | Bearer token for MCP transport-level auth |
-| `KILN_API_AUTH_TOKEN` | No | `""` | REST API bearer token (checked at credential audit) |
+| `KILN_API_AUTH_TOKEN` | Yes for hosted REST | `""` | REST API bearer token. Required when binding REST to non-localhost addresses |
 
 ### Storage & Database
 
@@ -149,8 +152,7 @@ KILN_PRINTER_API_KEY=CHANGE_ME_your_octoprint_api_key
 KILN_PRINTER_TYPE=octoprint
 
 # === Recommended: Security ===
-KILN_AUTH_ENABLED=true
-KILN_AUTH_KEY=CHANGE_ME_generate_a_strong_random_key
+KILN_API_AUTH_TOKEN=CHANGE_ME_generate_a_strong_random_key
 
 # === Optional: Database persistence ===
 KILN_DB_PATH=/data/kiln.db
@@ -197,16 +199,15 @@ docker run -d \
   kiln
 ```
 
-### Hosted REST API (Dockerfile.hosted)
+### Hosted REST API (Dockerfile.api)
 
 For deploying Kiln as an HTTP REST API service (no MCP transport):
 
 ```bash
-cd kiln
-docker build -f Dockerfile.hosted -t kiln-hosted .
+docker build -f Dockerfile.api -t kiln-hosted .
 docker run -d \
   --name kiln-hosted \
-  -p 8420:8420 \
+  -p 8080:8080 \
   -v kiln-data:/data \
   --env-file .env \
   --restart unless-stopped \
@@ -217,8 +218,8 @@ Key differences from standard Docker:
 - Installs `kiln[rest]` (includes FastAPI + uvicorn)
 - Runs as non-root `kiln` user
 - Persistent volume at `/data` for SQLite DB and license cache
-- Exposes port 8420 (REST API default)
-- Runs `kiln rest --host 0.0.0.0 --port $PORT`
+- Exposes port 8080 (hosted REST default)
+- Runs `kiln rest --host 0.0.0.0 --port 8080`
 - Built-in healthcheck on `/api/health`
 
 ### Docker Compose
@@ -241,11 +242,11 @@ Kiln can be deployed on Railway using the hosted Dockerfile:
 
 1. **Create a new Railway project** and connect your Git repository.
 
-2. **Set the Dockerfile path** to `kiln/Dockerfile.hosted` in your Railway service settings.
+2. **Set the Dockerfile path** to `Dockerfile.api` in your Railway service settings.
 
 3. **Configure environment variables** in the Railway dashboard:
    - All `KILN_*` variables from the table above
-   - Railway auto-sets `PORT`; the hosted Dockerfile respects this via `$PORT`
+   - Include `KILN_API_AUTH_TOKEN` (required for hosted REST on non-localhost binds)
 
 4. **Persistent storage**: Attach a Railway volume mounted at `/data` to persist the SQLite database and license cache across deploys.
 
@@ -253,10 +254,9 @@ Kiln can be deployed on Railway using the hosted Dockerfile:
 
 6. **Recommended Railway variables**:
    ```
+   KILN_API_AUTH_TOKEN=change-me-long-random-token
    KILN_PRINTER_HOST=http://your-printer-ip
    KILN_PRINTER_API_KEY=your-api-key
-   KILN_AUTH_ENABLED=true
-   KILN_AUTH_KEY=your-strong-random-key
    KILN_DB_PATH=/data/kiln.db
    KILN_LOG_FORMAT=json
    KILN_RATE_LIMIT=60
@@ -269,7 +269,7 @@ Kiln can be deployed on Railway using the hosted Dockerfile:
 ### Health Endpoint
 
 ```bash
-curl http://localhost:8420/api/health
+curl http://localhost:8080/api/health
 # Expected: {"status": "ok", "version": "0.1.0"}
 ```
 
@@ -277,10 +277,10 @@ curl http://localhost:8420/api/health
 
 ```bash
 # Should return 401 if auth is enabled
-curl http://localhost:8420/api/tools
+curl http://localhost:8080/api/tools
 
 # Should return 200 with tool list
-curl -H "Authorization: Bearer YOUR_AUTH_KEY" http://localhost:8420/api/tools
+curl -H "Authorization: Bearer YOUR_AUTH_KEY" http://localhost:8080/api/tools
 ```
 
 ### Verify Printer Connectivity
@@ -289,7 +289,7 @@ curl -H "Authorization: Bearer YOUR_AUTH_KEY" http://localhost:8420/api/tools
 curl -X POST \
   -H "Authorization: Bearer YOUR_AUTH_KEY" \
   -H "Content-Type: application/json" \
-  http://localhost:8420/api/tools/printer_status
+  http://localhost:8080/api/tools/printer_status
 ```
 
 ### Check Rate Limiting
@@ -316,12 +316,12 @@ docker inspect --format='{{json .State.Health}}' kiln-hosted
 
 ## Security Checklist
 
-- [ ] Set `KILN_AUTH_ENABLED=true` and provide a strong `KILN_AUTH_KEY`
+- [ ] Set a strong `KILN_API_AUTH_TOKEN` for hosted REST deployments
 - [ ] Use `KILN_LOG_FORMAT=json` for production logging
 - [ ] Set `KILN_RATE_LIMIT` to an appropriate value
 - [ ] Ensure config files have `0600` permissions (automatic on Linux/macOS)
 - [ ] Mount `/data` as a persistent volume for database durability
-- [ ] Run the container as non-root (Dockerfile.hosted does this automatically)
+- [ ] Run the container as non-root (Dockerfile.api does this automatically)
 - [ ] Never commit `.env` files or API keys to version control
 - [ ] Set `KILN_LLM_PRIVACY_MODE=1` (default) to redact secrets from LLM context
 - [ ] Set `KILN_CONFIRM_MODE=true` for hosted deployments to require confirmation for destructive operations

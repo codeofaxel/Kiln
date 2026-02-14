@@ -1339,6 +1339,51 @@ class TestRegisterPrinter:
         assert result["success"] is False
         assert result["error"]["code"] == "INVALID_ARGS"
 
+    def test_bambu_verify_ssl_flag_maps_to_tls_mode(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+        calls = []
+
+        class _DummyBambu:
+            name = "bambu"
+
+        def _fake_bambu_ctor(*, host, access_code, serial, tls_mode="pin"):
+            calls.append(
+                {
+                    "host": host,
+                    "access_code": access_code,
+                    "serial": serial,
+                    "tls_mode": tls_mode,
+                }
+            )
+            return _DummyBambu()
+
+        monkeypatch.setattr(mod, "BambuAdapter", _fake_bambu_ctor)
+
+        result_pin = register_printer(
+            name="bambu-pin",
+            printer_type="bambu",
+            host="192.168.1.100",
+            api_key="12345678",
+            serial="01P00A000000001",
+            verify_ssl=True,
+        )
+        result_insecure = register_printer(
+            name="bambu-insecure",
+            printer_type="bambu",
+            host="192.168.1.100",
+            api_key="12345678",
+            serial="01P00A000000001",
+            verify_ssl=False,
+        )
+
+        assert result_pin["success"] is True
+        assert result_insecure["success"] is True
+        assert calls[0]["tls_mode"] == "pin"
+        assert calls[1]["tls_mode"] == "insecure"
+
     def test_unsupported_type(self, monkeypatch):
         import kiln.server as mod
 

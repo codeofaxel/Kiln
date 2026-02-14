@@ -195,6 +195,11 @@ class PluginManager:
         # Only load plugins explicitly allowed in config
         _allowed = os.environ.get("KILN_ALLOWED_PLUGINS", "").split(",")
         _allowed = {p.strip() for p in _allowed if p.strip()}
+        if not _allowed and group_eps:
+            logger.warning(
+                "KILN_ALLOWED_PLUGINS is not set; loading all discovered third-party "
+                "plugins. Set an explicit allow-list in production."
+            )
 
         for ep in group_eps:
             if _allowed and ep.name not in _allowed:

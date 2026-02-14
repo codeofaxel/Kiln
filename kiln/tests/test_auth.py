@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import time
 from unittest import mock
@@ -32,6 +33,15 @@ class TestAuthManagerDefaults:
             # The auto-generated key should be verifiable
             result = mgr.verify(mgr.generated_key)
             assert result.id == "env"
+
+    def test_auto_generated_key_not_logged_in_plaintext(self, caplog):
+        """Startup warning must not leak the generated key value."""
+        with mock.patch.dict(os.environ, {"KILN_AUTH_ENABLED": "1"}, clear=True):
+            with caplog.at_level(logging.WARNING):
+                mgr = AuthManager()
+        assert mgr.generated_key is not None
+        assert "Auto-generated ephemeral session key" in caplog.text
+        assert mgr.generated_key not in caplog.text
 
     def test_no_auto_generated_key_when_env_key_set(self):
         """When KILN_AUTH_KEY is set, no key is auto-generated."""

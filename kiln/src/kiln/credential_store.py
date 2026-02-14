@@ -1,9 +1,12 @@
 """Encrypted credential storage for the Kiln multi-printer system.
 
 Provides at-rest encryption for API keys, webhook secrets, and other
-sensitive credentials using PBKDF2 key derivation and XOR stream
-encryption.  Only stdlib modules are used (``hashlib``, ``os``,
-``base64``, ``sqlite3``, ``threading``).
+sensitive credentials using PBKDF2 key derivation plus authenticated
+encryption (AES-GCM via ``cryptography``).
+
+Migration note:
+Legacy PBKDF2+XOR credentials are still readable. They are migrated to
+AES-GCM transparently on retrieval and during master-key rotation.
 
 The master key is sourced from (in order):
 
@@ -40,6 +43,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+try:
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+except Exception:  # pragma: no cover - guarded in runtime checks
+    AESGCM = None  # type: ignore[assignment]
+    InvalidTag = Exception  # type: ignore[assignment,misc]
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -48,9 +58,11 @@ logger = logging.getLogger(__name__)
 
 _PBKDF2_ITERATIONS = 100_000
 _SALT_LENGTH = 32
+_NONCE_LENGTH = 12  # AES-GCM standard nonce size
 _DEFAULT_DB_DIR = os.path.join(str(Path.home()), ".kiln")
 _DEFAULT_DB_PATH = os.path.join(_DEFAULT_DB_DIR, "credentials.db")
 _DEFAULT_MASTER_KEY_PATH = os.path.join(_DEFAULT_DB_DIR, "master.key")
+_ENC_VERSION_PREFIX = "v2:"
 
 
 # ---------------------------------------------------------------------------
@@ -261,30 +273,24 @@ class CredentialStore:
             dklen=32,
         )
 
-    def _encrypt(self, plaintext: str, salt: bytes) -> bytes:
-        """Encrypt *plaintext* using XOR with a PBKDF2-derived key stream.
+    @staticmethod
+    def _require_aead() -> None:
+        """Ensure AES-GCM support is available."""
+        if AESGCM is None:
+            raise CredentialStoreError(
+                "CredentialStore requires the 'cryptography' package for AES-GCM "
+                "encryption. Install with: pip install cryptography"
+            )
 
-        The derived key is repeated (cycled) to match the plaintext
-        length, then XOR'd byte-by-byte with the UTF-8 encoded
-        plaintext.
-
-        :param plaintext: The secret value to encrypt.
-        :param salt: Salt bytes for key derivation.
-        :returns: Ciphertext bytes.
-        """
+    def _encrypt_legacy(self, plaintext: str, salt: bytes) -> bytes:
+        """Legacy PBKDF2+XOR encryption (kept for migration)."""
         key = self._derive_key(salt)
         pt_bytes = plaintext.encode("utf-8")
         key_stream = (key * ((len(pt_bytes) // len(key)) + 1))[:len(pt_bytes)]
         return bytes(a ^ b for a, b in zip(pt_bytes, key_stream))
 
-    def _decrypt(self, ciphertext: bytes, salt: bytes) -> str:
-        """Decrypt *ciphertext* produced by :meth:`_encrypt`.
-
-        :param ciphertext: Encrypted bytes.
-        :param salt: The same salt used during encryption.
-        :returns: Decrypted plaintext string.
-        :raises CredentialStoreError: If decryption produces invalid UTF-8.
-        """
+    def _decrypt_legacy(self, ciphertext: bytes, salt: bytes) -> str:
+        """Decrypt legacy PBKDF2+XOR ciphertext."""
         key = self._derive_key(salt)
         key_stream = (key * ((len(ciphertext) // len(key)) + 1))[:len(ciphertext)]
         pt_bytes = bytes(a ^ b for a, b in zip(ciphertext, key_stream))
@@ -294,6 +300,62 @@ class CredentialStore:
             raise CredentialStoreError(
                 "Decryption failed — likely wrong master key"
             ) from exc
+
+    def _encrypt(self, plaintext: str, salt: bytes) -> bytes:
+        """Encrypt plaintext with AES-GCM.
+
+        Stored payload format is ``nonce || ciphertext_and_tag``.
+        """
+        self._require_aead()
+        key = self._derive_key(salt)
+        nonce = os.urandom(_NONCE_LENGTH)
+        ct = AESGCM(key).encrypt(nonce, plaintext.encode("utf-8"), None)
+        return nonce + ct
+
+    def _decrypt(self, ciphertext: bytes, salt: bytes) -> str:
+        """Decrypt AES-GCM ciphertext produced by :meth:`_encrypt`.
+
+        :param ciphertext: Encrypted bytes.
+        :param salt: The same salt used during encryption.
+        :returns: Decrypted plaintext string.
+        :raises CredentialStoreError: On authentication failure or decoding error.
+        """
+        self._require_aead()
+        if len(ciphertext) < _NONCE_LENGTH + 16:
+            raise CredentialStoreError("Decryption failed — malformed ciphertext")
+        nonce = ciphertext[:_NONCE_LENGTH]
+        body = ciphertext[_NONCE_LENGTH:]
+        key = self._derive_key(salt)
+        try:
+            pt_bytes = AESGCM(key).decrypt(nonce, body, None)
+        except InvalidTag as exc:
+            raise CredentialStoreError(
+                "Decryption failed — wrong master key or corrupted credential"
+            ) from exc
+        try:
+            return pt_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise CredentialStoreError(
+                "Decryption failed — invalid plaintext encoding"
+            ) from exc
+
+    @staticmethod
+    def _is_aead_encoded(encrypted_value: str) -> bool:
+        """Return True if *encrypted_value* uses the v2 encoding prefix."""
+        return encrypted_value.startswith(_ENC_VERSION_PREFIX)
+
+    @staticmethod
+    def _encode_aead_payload(payload: bytes) -> str:
+        """Encode raw AES-GCM payload bytes for DB storage."""
+        return _ENC_VERSION_PREFIX + base64.b64encode(payload).decode("ascii")
+
+    @staticmethod
+    def _decode_stored_payload(encrypted_value: str) -> tuple[bytes, bool]:
+        """Decode stored encrypted value to bytes + version marker."""
+        if encrypted_value.startswith(_ENC_VERSION_PREFIX):
+            b64 = encrypted_value[len(_ENC_VERSION_PREFIX):]
+            return base64.b64decode(b64), True
+        return base64.b64decode(encrypted_value), False
 
     # ------------------------------------------------------------------
     # Public API
@@ -318,7 +380,7 @@ class CredentialStore:
         salt = os.urandom(_SALT_LENGTH)
         ciphertext = self._encrypt(value, salt)
 
-        enc_b64 = base64.b64encode(ciphertext).decode("ascii")
+        enc_b64 = self._encode_aead_payload(ciphertext)
         salt_b64 = base64.b64encode(salt).decode("ascii")
         created_at = time.time()
 
@@ -369,9 +431,32 @@ class CredentialStore:
                 f"Credential {credential_id!r} not found"
             )
 
-        ciphertext = base64.b64decode(row["encrypted_value"])
+        encrypted_value = row["encrypted_value"]
+        ciphertext, is_v2 = self._decode_stored_payload(encrypted_value)
         salt = base64.b64decode(row["salt"])
-        return self._decrypt(ciphertext, salt)
+
+        if is_v2:
+            return self._decrypt(ciphertext, salt)
+
+        # Legacy row: decrypt via old scheme, then migrate in place to AEAD.
+        plaintext = self._decrypt_legacy(ciphertext, salt)
+        self._migrate_legacy_row(credential_id, plaintext)
+        return plaintext
+
+    def _migrate_legacy_row(self, credential_id: str, plaintext: str) -> None:
+        """Re-encrypt a legacy row with AES-GCM and persist it."""
+        new_salt = os.urandom(_SALT_LENGTH)
+        new_payload = self._encrypt(plaintext, new_salt)
+        enc_b64 = self._encode_aead_payload(new_payload)
+        salt_b64 = base64.b64encode(new_salt).decode("ascii")
+
+        with self._write_lock:
+            self._conn.execute(
+                "UPDATE credentials SET encrypted_value = ?, salt = ? "
+                "WHERE credential_id = ?",
+                (enc_b64, salt_b64, credential_id),
+            )
+            self._conn.commit()
 
     def delete(self, credential_id: str) -> bool:
         """Delete a credential by ID.
@@ -429,13 +514,17 @@ class CredentialStore:
         re_encrypted: List[tuple[str, str, str]] = []
 
         for row in rows:
-            ciphertext = base64.b64decode(row["encrypted_value"])
+            ciphertext, is_v2 = self._decode_stored_payload(row["encrypted_value"])
             old_salt = base64.b64decode(row["salt"])
 
-            # Decrypt with old key.
-            plaintext = self._decrypt(ciphertext, old_salt)
+            # Decrypt with old key, handling mixed legacy/v2 rows.
+            plaintext = (
+                self._decrypt(ciphertext, old_salt)
+                if is_v2
+                else self._decrypt_legacy(ciphertext, old_salt)
+            )
 
-            # Encrypt with new key.
+            # Encrypt with new key (always v2).
             new_salt = os.urandom(_SALT_LENGTH)
             # Temporarily swap master key for encryption.
             self._master_key = new_master_key
@@ -443,7 +532,7 @@ class CredentialStore:
             self._master_key = old_key  # Restore in case of error.
 
             re_encrypted.append((
-                base64.b64encode(new_ciphertext).decode("ascii"),
+                self._encode_aead_payload(new_ciphertext),
                 base64.b64encode(new_salt).decode("ascii"),
                 row["credential_id"],
             ))

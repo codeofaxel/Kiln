@@ -6,6 +6,7 @@ MQTT and FTPS responses so the test suite runs without a real Bambu printer.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -78,6 +79,12 @@ def adapter_with_mqtt() -> BambuAdapter:
     return adapter
 
 
+@pytest.fixture(autouse=True)
+def _pin_store_env(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use a writable temporary pin-store path for every test."""
+    monkeypatch.setenv("KILN_BAMBU_TLS_PIN_FILE", str(tmp_path / "bambu_tls_pins.json"))
+
+
 @pytest.fixture
 def mock_ftp_class() -> mock.MagicMock:
     """Create a mock _ImplicitFTP_TLS class that returns a configured mock instance."""
@@ -89,6 +96,10 @@ def mock_ftp_class() -> mock.MagicMock:
     mock_ftp.storbinary = mock.MagicMock()
     mock_ftp.delete = mock.MagicMock()
     mock_ftp.quit = mock.MagicMock()
+    mock_ftp.close = mock.MagicMock()
+    mock_sock = mock.MagicMock()
+    mock_sock.getpeercert.return_value = b"fake-cert-der"
+    mock_ftp.sock = mock_sock
     return mock_ftp
 
 
@@ -120,6 +131,28 @@ class TestBambuAdapterInit:
     def test_timeout_stored(self) -> None:
         adapter = _adapter(timeout=15)
         assert adapter._timeout == 15
+
+    def test_default_tls_mode_is_pin(self) -> None:
+        adapter = _adapter()
+        assert adapter._tls_mode == "pin"
+
+    def test_invalid_tls_mode_raises(self) -> None:
+        with pytest.raises(ValueError, match="tls_mode must be one of"):
+            BambuAdapter(
+                host=HOST,
+                access_code=ACCESS_CODE,
+                serial=SERIAL,
+                tls_mode="bogus",
+            )
+
+    def test_invalid_tls_fingerprint_raises(self) -> None:
+        with pytest.raises(ValueError, match="tls_fingerprint must be a SHA-256 fingerprint"):
+            BambuAdapter(
+                host=HOST,
+                access_code=ACCESS_CODE,
+                serial=SERIAL,
+                tls_fingerprint="short",
+            )
 
     def test_topics_constructed_from_serial(self) -> None:
         adapter = _adapter()
@@ -633,9 +666,16 @@ class TestBambuAdapterUploadFile:
     def test_permission_error(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock, tmp_path: Any) -> None:
         test_file = tmp_path / "locked.3mf"
         test_file.write_text("content")
+        real_open = open
+
+        def selective_open(path, *args, **kwargs):
+            candidate = os.path.abspath(os.fspath(path))
+            if candidate == os.path.abspath(str(test_file)):
+                raise PermissionError("no read")
+            return real_open(path, *args, **kwargs)
 
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
-            with mock.patch("builtins.open", side_effect=PermissionError("no read")):
+            with mock.patch("builtins.open", side_effect=selective_open):
                 with pytest.raises(PrinterError, match="Permission denied"):
                     adapter_with_mqtt.upload_file(str(test_file))
 
@@ -1087,6 +1127,44 @@ class TestBambuAdapterFTPSInternals:
             mock_ftp_cls.return_value.connect.side_effect = Exception("Connection failed")
             with pytest.raises(PrinterError, match="FTPS connection"):
                 adapter._ftp_connect()
+
+    def test_ftp_connect_pins_cert_on_first_use(
+        self, mock_ftp_class: mock.MagicMock, tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        pin_file = tmp_path / "pins.json"
+        monkeypatch.setenv("KILN_BAMBU_TLS_PIN_FILE", str(pin_file))
+        adapter = _adapter()
+        mock_ftp_class.sock.getpeercert.return_value = b"cert-a"
+
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            adapter._ftp_connect()
+
+        assert pin_file.exists()
+        pins = json.loads(pin_file.read_text(encoding="utf-8"))
+        assert pins.get(HOST.lower()) == hashlib.sha256(b"cert-a").hexdigest()
+
+    def test_ftp_connect_rejects_pin_mismatch(
+        self, mock_ftp_class: mock.MagicMock, tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        pin_file = tmp_path / "pins.json"
+        pins = {HOST.lower(): hashlib.sha256(b"cert-a").hexdigest()}
+        pin_file.write_text(json.dumps(pins), encoding="utf-8")
+        monkeypatch.setenv("KILN_BAMBU_TLS_PIN_FILE", str(pin_file))
+        adapter = _adapter()
+        mock_ftp_class.sock.getpeercert.return_value = b"cert-b"
+
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            with pytest.raises(PrinterError, match="pin mismatch"):
+                adapter._ftp_connect()
+
+    def test_ftp_connect_insecure_mode_skips_cert_checks(
+        self, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        adapter = _adapter(tls_mode="insecure")
+        mock_ftp_class.sock.getpeercert.return_value = None
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            ftp = adapter._ftp_connect()
+        assert ftp is mock_ftp_class
 
 
 # ---------------------------------------------------------------------------

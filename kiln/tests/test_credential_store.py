@@ -17,7 +17,9 @@ Coverage areas:
 
 from __future__ import annotations
 
+import base64
 import os
+import secrets
 import threading
 import time
 from unittest import mock
@@ -44,6 +46,41 @@ def _make_store(tmp_path, *, master_key="test-master-key-abc123"):
     """Create a CredentialStore backed by a temp directory."""
     db_path = str(tmp_path / "credentials.db")
     return CredentialStore(master_key=master_key, db_path=db_path)
+
+
+def _insert_legacy_row(
+    store: CredentialStore,
+    *,
+    plaintext: str,
+    credential_type: CredentialType = CredentialType.API_KEY,
+    label: str = "legacy",
+) -> str:
+    """Insert a legacy PBKDF2+XOR credential row directly into the DB."""
+    credential_id = secrets.token_hex(16)
+    salt = os.urandom(32)
+    ciphertext = store._encrypt_legacy(plaintext, salt)
+    enc_b64 = base64.b64encode(ciphertext).decode("ascii")
+    salt_b64 = base64.b64encode(salt).decode("ascii")
+    created_at = time.time()
+    with store._write_lock:
+        store._conn.execute(
+            """
+            INSERT INTO credentials
+                (credential_id, credential_type, encrypted_value,
+                 salt, created_at, label)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                credential_id,
+                credential_type.value,
+                enc_b64,
+                salt_b64,
+                created_at,
+                label,
+            ),
+        )
+        store._conn.commit()
+    return credential_id
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +402,21 @@ class TestRotateMasterKey:
         assert store._master_key == "the-new-key"
         store.close()
 
+    def test_rotate_migrates_legacy_rows_to_v2(self, tmp_path):
+        store = _make_store(tmp_path)
+        cred_id = _insert_legacy_row(store, plaintext="legacy-secret")
+        count = store.rotate_master_key("new-master")
+        assert count == 1
+        assert store.retrieve(cred_id) == "legacy-secret"
+        with store._write_lock:
+            row = store._conn.execute(
+                "SELECT encrypted_value FROM credentials WHERE credential_id = ?",
+                (cred_id,),
+            ).fetchone()
+        assert row is not None
+        assert row["encrypted_value"].startswith("v2:")
+        store.close()
+
 
 # ---------------------------------------------------------------------------
 # 7. Encryption correctness
@@ -374,12 +426,15 @@ class TestRotateMasterKey:
 class TestEncryption:
     """Encryption determinism and correctness properties."""
 
-    def test_same_plaintext_same_salt_same_key_is_deterministic(self, tmp_path):
+    def test_same_plaintext_same_salt_same_key_uses_random_nonce(self, tmp_path):
         store = _make_store(tmp_path)
         salt = b"\x01" * 32
         ct1 = store._encrypt("hello", salt)
         ct2 = store._encrypt("hello", salt)
-        assert ct1 == ct2
+        # AES-GCM uses a random nonce, so ciphertext should differ.
+        assert ct1 != ct2
+        assert store._decrypt(ct1, salt) == "hello"
+        assert store._decrypt(ct2, salt) == "hello"
 
     def test_different_salts_produce_different_ciphertext(self, tmp_path):
         store = _make_store(tmp_path)
@@ -410,7 +465,7 @@ class TestEncryption:
         store_a.close()
 
         store_b = CredentialStore(master_key="wrong-key", db_path=db_path)
-        with pytest.raises(CredentialStoreError, match="wrong master key"):
+        with pytest.raises(CredentialStoreError, match="wrong master key|corrupted"):
             store_b.retrieve(cred.credential_id)
         store_b.close()
 
@@ -418,7 +473,7 @@ class TestEncryption:
         store = _make_store(tmp_path)
         salt = os.urandom(32)
         ciphertext = store._encrypt("", salt)
-        assert ciphertext == b""
+        assert ciphertext != b""
         assert store._decrypt(ciphertext, salt) == ""
 
     def test_key_derivation_deterministic(self, tmp_path):
@@ -428,6 +483,25 @@ class TestEncryption:
         key2 = store._derive_key(salt)
         assert key1 == key2
         assert len(key1) == 32
+
+    def test_store_uses_v2_prefix(self, tmp_path):
+        store = _make_store(tmp_path)
+        cred = store.store(CredentialType.API_KEY, "new-format")
+        assert cred.encrypted_value.startswith("v2:")
+        store.close()
+
+    def test_retrieve_legacy_row_auto_migrates_to_v2(self, tmp_path):
+        store = _make_store(tmp_path)
+        cred_id = _insert_legacy_row(store, plaintext="legacy-value")
+        assert store.retrieve(cred_id) == "legacy-value"
+        with store._write_lock:
+            row = store._conn.execute(
+                "SELECT encrypted_value FROM credentials WHERE credential_id = ?",
+                (cred_id,),
+            ).fetchone()
+        assert row is not None
+        assert row["encrypted_value"].startswith("v2:")
+        store.close()
 
 
 # ---------------------------------------------------------------------------

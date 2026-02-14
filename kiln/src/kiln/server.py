@@ -972,7 +972,7 @@ _SECRET_ENV_VARS = (
     "KILN_PRINTER_API_KEY", "KILN_THINGIVERSE_TOKEN", "KILN_MMF_API_KEY",
     "KILN_CULTS3D_API_KEY", "KILN_MESHY_API_KEY", "KILN_CRAFTCLOUD_API_KEY",
     "KILN_PRINTER_ACCESS_CODE", "KILN_CIRCLE_API_KEY", "KILN_STRIPE_API_KEY",
-    "KILN_STRIPE_WEBHOOK_SECRET", "KILN_API_AUTH_TOKEN",
+    "KILN_STRIPE_WEBHOOK_SECRET", "KILN_API_AUTH_TOKEN", "KILN_AUTH_TOKEN",
 )
 
 
@@ -2623,6 +2623,8 @@ def register_printer(
         serial: Printer serial number (required for Bambu printers).
         verify_ssl: Whether to verify SSL certificates (default True).
             Set to False for printers using self-signed certificates.
+            For Bambu, True maps to TLS pin mode and False maps to
+            insecure mode.
 
     Once registered the printer appears in ``fleet_status()`` and can be
     targeted by ``submit_job()``.
@@ -2683,7 +2685,12 @@ def register_printer(
                     "serial is required for Bambu printers.",
                     code="INVALID_ARGS",
                 )
-            adapter = BambuAdapter(host=host, access_code=api_key, serial=serial)
+            adapter = BambuAdapter(
+                host=host,
+                access_code=api_key,
+                serial=serial,
+                tls_mode="pin" if verify_ssl else "insecure",
+            )
         elif printer_type == "prusaconnect":
             adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
         elif printer_type == "serial":

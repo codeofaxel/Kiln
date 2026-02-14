@@ -55,7 +55,7 @@ Notes: The adapter queries `/printer/info` for klippy state and `/printer/object
 | Bambu Lab A1 | Full support, sends uppercase state values |
 | Bambu Lab A1 Mini | Full support, sends uppercase state values |
 
-Notes: The adapter communicates exclusively over local LAN -- it does not use the Bambu Cloud API. Printer must have LAN Mode enabled. File management uses implicit FTPS with TLS session reuse. The A1 and A1 Mini send uppercase state values (e.g. `RUNNING` instead of `running`), which the adapter normalizes. Webcam access attempts an HTTP snapshot endpoint and also provides the RTSP stream URL (`rtsps://<host>:322/streaming/live/1`).
+Notes: The adapter communicates exclusively over local LAN -- it does not use the Bambu Cloud API. Printer must have LAN Mode enabled. File management uses implicit FTPS with TLS session reuse. TLS defaults to certificate pinning (`KILN_BAMBU_TLS_MODE=pin`) with first-use pin capture in `~/.kiln/bambu_tls_pins.json`; `ca` and `insecure` modes are also available for stricter/legacy behavior. The A1 and A1 Mini send uppercase state values (e.g. `RUNNING` instead of `running`), which the adapter normalizes. Webcam access attempts an HTTP snapshot endpoint and also provides the RTSP stream URL (`rtsps://<host>:322/streaming/live/1`).
 
 ### Prusa Link (PrusaConnect)
 

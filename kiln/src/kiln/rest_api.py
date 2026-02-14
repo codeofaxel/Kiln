@@ -47,6 +47,20 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Environment helpers
+# ---------------------------------------------------------------------------
+
+
+def _rest_auth_token_from_env() -> str | None:
+    """Resolve REST bearer token from environment variables."""
+    token = (
+        os.environ.get("KILN_API_AUTH_TOKEN", "")
+        or os.environ.get("KILN_AUTH_TOKEN", "")
+    ).strip()
+    return token or None
+
+
+# ---------------------------------------------------------------------------
 # Rate limiter
 # ---------------------------------------------------------------------------
 
@@ -152,7 +166,7 @@ class RestApiConfig:
         default_factory=lambda: os.environ.get("KILN_REST_HOST", "127.0.0.1")
     )
     port: int = 8420
-    auth_token: str | None = None  # If set, require Bearer token
+    auth_token: str | None = field(default_factory=_rest_auth_token_from_env)
     cors_origins: list[str] = field(default_factory=list)
     tool_tier: str = "full"  # Which tools to expose
 
@@ -655,11 +669,10 @@ def run_rest_server(config: RestApiConfig | None = None) -> None:
     # Refuse to bind to non-localhost without authentication
     _LOCALHOST_ADDRESSES = {"127.0.0.1", "localhost", "::1"}
     if config.host not in _LOCALHOST_ADDRESSES:
-        auth_enabled = os.environ.get("KILN_AUTH_ENABLED", "").lower() in ("1", "true")
-        if not auth_enabled or not config.auth_token:
+        if not config.auth_token:
             raise RuntimeError(
                 f"REST API cannot bind to {config.host} without authentication. "
-                "Either set KILN_AUTH_ENABLED=1 and KILN_AUTH_TOKEN=<token>, "
+                "Set KILN_API_AUTH_TOKEN=<token> (or pass --auth-token), "
                 "or bind to localhost by setting KILN_REST_HOST=127.0.0.1"
             )
 

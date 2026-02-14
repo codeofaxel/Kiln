@@ -261,6 +261,21 @@ If PrusaSlicer is not in your PATH, set it explicitly:
 export KILN_SLICER_PATH=/path/to/prusa-slicer
 ```
 
+**Bambu TLS security defaults:** Kiln now uses certificate pinning (`pin` mode) for Bambu by default.
+On first successful connection, the printer certificate fingerprint is pinned (TOFU) in
+`~/.kiln/bambu_tls_pins.json`. Advanced overrides:
+
+```bash
+# Strict CA/hostname validation (usually fails on stock self-signed printers)
+export KILN_BAMBU_TLS_MODE=ca
+
+# Legacy behavior (no certificate validation) - use only on trusted LANs
+export KILN_BAMBU_TLS_MODE=insecure
+
+# Optional explicit pin (SHA-256 fingerprint, hex with or without colons)
+export KILN_BAMBU_TLS_FINGERPRINT=0123abcd...
+```
+
 **Bambu webcam snapshots** require `ffmpeg` for RTSP frame capture. Install it if you want vision monitoring on Bambu printers:
 ```bash
 # macOS
@@ -319,7 +334,7 @@ kiln network list                          # List your registered network printe
 kiln network update <id> --available       # Update printer availability
 kiln setup                                 # Interactive printer setup wizard
 kiln serve                                 # Start MCP server
-kiln rest [--port 8420] [--tier full]      # Start REST API server
+kiln rest [--port 8420] [--tier full] [--auth-token TOKEN]  # Start REST API server
 kiln agent [--model openai/gpt-4o]         # Interactive agent REPL (any LLM)
 ```
 
@@ -391,6 +406,7 @@ kiln agent --model anthropic/claude-sonnet-4
 kiln agent --model meta-llama/llama-3.1-70b-instruct --tier essential
 
 # REST API mode — any HTTP client can call Kiln tools
+export KILN_API_AUTH_TOKEN=CHANGE_ME_long_random_token
 kiln rest --port 8420 --tier full
 # POST http://localhost:8420/api/tools/printer_status
 # GET  http://localhost:8420/api/tools
@@ -398,6 +414,8 @@ kiln rest --port 8420 --tier full
 # Install with REST API support
 pip install kiln3d[rest]
 ```
+
+When binding REST to non-localhost addresses (for hosted deployments), set `KILN_API_AUTH_TOKEN` or pass `--auth-token`.
 
 Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 162 tools are available via MCP (`kiln serve`).
 

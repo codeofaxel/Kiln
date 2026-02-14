@@ -26,9 +26,23 @@ class TestRestApiConfig:
         cfg = RestApiConfig()
         assert cfg.port == 8420
 
-    def test_default_auth_token_is_none(self):
+    def test_default_auth_token_is_none(self, monkeypatch):
+        monkeypatch.delenv("KILN_API_AUTH_TOKEN", raising=False)
+        monkeypatch.delenv("KILN_AUTH_TOKEN", raising=False)
         cfg = RestApiConfig()
         assert cfg.auth_token is None
+
+    def test_default_auth_token_from_kiln_api_auth_token(self, monkeypatch):
+        monkeypatch.setenv("KILN_API_AUTH_TOKEN", "api-token-123")
+        monkeypatch.delenv("KILN_AUTH_TOKEN", raising=False)
+        cfg = RestApiConfig()
+        assert cfg.auth_token == "api-token-123"
+
+    def test_default_auth_token_falls_back_to_legacy_env(self, monkeypatch):
+        monkeypatch.delenv("KILN_API_AUTH_TOKEN", raising=False)
+        monkeypatch.setenv("KILN_AUTH_TOKEN", "legacy-token-123")
+        cfg = RestApiConfig()
+        assert cfg.auth_token == "legacy-token-123"
 
     def test_default_cors_origins(self):
         cfg = RestApiConfig()
@@ -416,4 +430,37 @@ class TestRunRestServer:
             run_rest_server(config)
             mock_run.assert_called_once_with(
                 mock_app, host="127.0.0.1", port=9999
+            )
+
+    @mock.patch("kiln.rest_api.create_app")
+    def test_run_rest_server_rejects_non_localhost_without_auth(self, mock_create_app):
+        try:
+            import uvicorn  # noqa: F401
+        except ImportError:
+            pytest.skip("uvicorn not installed")
+
+        mock_create_app.return_value = mock.MagicMock()
+        from kiln.rest_api import run_rest_server
+
+        config = RestApiConfig(host="0.0.0.0", port=9999, auth_token=None)
+        with pytest.raises(RuntimeError, match="KILN_API_AUTH_TOKEN"):
+            run_rest_server(config)
+
+    @mock.patch("kiln.rest_api.create_app")
+    def test_run_rest_server_allows_non_localhost_with_auth(self, mock_create_app):
+        try:
+            import uvicorn
+        except ImportError:
+            pytest.skip("uvicorn not installed")
+
+        mock_app = mock.MagicMock()
+        mock_create_app.return_value = mock_app
+
+        with mock.patch("uvicorn.run") as mock_run:
+            from kiln.rest_api import run_rest_server
+
+            config = RestApiConfig(host="0.0.0.0", port=9999, auth_token="secret-token")
+            run_rest_server(config)
+            mock_run.assert_called_once_with(
+                mock_app, host="0.0.0.0", port=9999
             )

@@ -19,6 +19,8 @@ the OctoPrint and Moonraker adapters.
 from __future__ import annotations
 
 import ftplib
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -26,9 +28,11 @@ import shutil
 import socket
 import ssl
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import paho.mqtt.client as mqtt
@@ -55,6 +59,15 @@ _MQTT_PORT = 8883
 _FTPS_PORT = 990
 _MQTT_USERNAME = "bblp"
 _FTPS_USERNAME = "bblp"
+_TLS_MODE_PIN = "pin"
+_TLS_MODE_CA = "ca"
+_TLS_MODE_INSECURE = "insecure"
+_VALID_TLS_MODES = {_TLS_MODE_PIN, _TLS_MODE_CA, _TLS_MODE_INSECURE}
+_DEFAULT_TLS_MODE = _TLS_MODE_PIN
+_DEFAULT_BAMBU_PIN_FILE = os.path.join(str(Path.home()), ".kiln", "bambu_tls_pins.json")
+_TLS_PIN_FILE_ENV = "KILN_BAMBU_TLS_PIN_FILE"
+_TLS_MODE_ENV = "KILN_BAMBU_TLS_MODE"
+_TLS_FINGERPRINT_ENV = "KILN_BAMBU_TLS_FINGERPRINT"
 
 # Backoff parameters for MQTT reconnection.
 _BACKOFF_INITIAL_DELAY: float = 1.0    # seconds
@@ -126,6 +139,11 @@ _STATE_MAP: Dict[str, PrinterStatus] = {
 _PRINT_ACTIVE_STATES: frozenset[str] = frozenset({
     "running", "prepare", "slicing", "init",
 })
+
+
+def _normalize_fingerprint(value: str) -> str:
+    """Normalize a SHA-256 fingerprint string to lowercase hex."""
+    return "".join(ch for ch in value.lower() if ch in "0123456789abcdef")
 
 
 def _find_ffmpeg() -> Optional[str]:
@@ -219,6 +237,11 @@ class BambuAdapter(PrinterAdapter):
         serial: Printer serial number (used in MQTT topics).  Found on the
             printer's LCD under Device Info.
         timeout: Timeout in seconds for MQTT operations and FTP connections.
+        tls_mode: TLS verification mode: ``"pin"`` (default, TOFU pinning),
+            ``"ca"`` (strict CA/hostname validation), or ``"insecure"``
+            (legacy behavior, disables certificate validation).
+        tls_fingerprint: Optional SHA-256 fingerprint to pin explicitly
+            (hex, with or without ``:`` separators).
 
     Raises:
         ValueError: If *host*, *access_code*, or *serial* are empty.
@@ -240,6 +263,8 @@ class BambuAdapter(PrinterAdapter):
         access_code: str,
         serial: str,
         timeout: int = 10,
+        tls_mode: Optional[str] = None,
+        tls_fingerprint: Optional[str] = None,
     ) -> None:
         if not host:
             raise ValueError("host must not be empty")
@@ -252,6 +277,23 @@ class BambuAdapter(PrinterAdapter):
         self._access_code = access_code
         self._serial = serial
         self._timeout = timeout
+        configured_tls_mode = (tls_mode or os.environ.get(_TLS_MODE_ENV, _DEFAULT_TLS_MODE)).strip().lower()
+        if configured_tls_mode not in _VALID_TLS_MODES:
+            raise ValueError(
+                f"tls_mode must be one of {sorted(_VALID_TLS_MODES)}, got {configured_tls_mode!r}"
+            )
+        self._tls_mode = configured_tls_mode
+        configured_fp = tls_fingerprint or os.environ.get(_TLS_FINGERPRINT_ENV, "")
+        self._tls_fingerprint = _normalize_fingerprint(configured_fp)
+        if configured_fp and not self._tls_fingerprint:
+            raise ValueError(
+                f"tls_fingerprint must be a SHA-256 fingerprint (64 hex chars), got {configured_fp!r}"
+            )
+        if self._tls_fingerprint and len(self._tls_fingerprint) != 64:
+            raise ValueError(
+                f"tls_fingerprint must be a SHA-256 fingerprint (64 hex chars), got {configured_fp!r}"
+            )
+        self._pin_store_path = os.environ.get(_TLS_PIN_FILE_ENV, _DEFAULT_BAMBU_PIN_FILE)
 
         # MQTT topic names.
         self._topic_report = f"device/{serial}/report"
@@ -270,6 +312,124 @@ class BambuAdapter(PrinterAdapter):
 
         # Exponential backoff for reconnection attempts.
         self._backoff = _BackoffState()
+        self._pin_lock = threading.Lock()
+
+    @staticmethod
+    def _host_key(host: str) -> str:
+        """Return canonical key for pin-store lookups."""
+        return host.strip().lower()
+
+    def _build_tls_context(self) -> ssl.SSLContext:
+        """Build SSL context according to configured TLS mode."""
+        ctx = ssl.create_default_context()
+        if self._tls_mode == _TLS_MODE_CA:
+            ctx.check_hostname = True
+            ctx.verify_mode = ssl.CERT_REQUIRED
+        else:
+            # Pin mode verifies identity via fingerprint; insecure disables checks.
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+
+    def _load_pins(self) -> Dict[str, str]:
+        """Load persisted host->fingerprint pins from disk."""
+        path = self._pin_store_path
+        if not os.path.isfile(path):
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except Exception as exc:
+            logger.warning("Failed to read Bambu TLS pin store %s: %s", path, exc)
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        pins: Dict[str, str] = {}
+        for host, fp in raw.items():
+            host_key = self._host_key(str(host))
+            normalized = _normalize_fingerprint(str(fp))
+            if len(normalized) == 64:
+                pins[host_key] = normalized
+        return pins
+
+    def _save_pins(self, pins: Dict[str, str]) -> None:
+        """Persist host->fingerprint pins to disk with restrictive perms."""
+        path = self._pin_store_path
+        pin_dir = os.path.dirname(path)
+        if pin_dir:
+            os.makedirs(pin_dir, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(pins, fh, indent=2, sort_keys=True)
+        if sys.platform != "win32":
+            try:
+                if pin_dir:
+                    os.chmod(pin_dir, 0o700)
+            except OSError:
+                pass
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _extract_socket_cert(sock_obj: Any) -> Optional[bytes]:
+        """Return peer certificate in DER format from an SSL socket-like object."""
+        if sock_obj is None or not hasattr(sock_obj, "getpeercert"):
+            return None
+        try:
+            cert = sock_obj.getpeercert(binary_form=True)
+            if isinstance(cert, (bytes, bytearray)):
+                return bytes(cert)
+        except Exception:
+            return None
+        return None
+
+    def _enforce_pin_policy(self, actual_fp: str, *, transport: str) -> None:
+        """Validate certificate fingerprint against explicit or TOFU pin."""
+        if self._tls_fingerprint:
+            if not hmac.compare_digest(actual_fp, self._tls_fingerprint):
+                raise PrinterError(
+                    f"{transport} TLS fingerprint mismatch for {self._host}. "
+                    "Set KILN_BAMBU_TLS_FINGERPRINT to the correct value or "
+                    "temporarily set KILN_BAMBU_TLS_MODE=insecure to bypass."
+                )
+            return
+
+        if self._tls_mode != _TLS_MODE_PIN:
+            return
+
+        host_key = self._host_key(self._host)
+        with self._pin_lock:
+            pins = self._load_pins()
+            expected = pins.get(host_key)
+            if expected:
+                if not hmac.compare_digest(actual_fp, expected):
+                    raise PrinterError(
+                        f"{transport} TLS pin mismatch for {self._host}. "
+                        "The presented certificate changed from the pinned value. "
+                        "If this is expected, remove or update the pin in "
+                        f"{self._pin_store_path}."
+                    )
+                return
+
+            pins[host_key] = actual_fp
+            self._save_pins(pins)
+            logger.warning(
+                "Pinned Bambu TLS certificate for %s (SHA256=%s..., mode=pin).",
+                self._host,
+                actual_fp[:12],
+            )
+
+    def _validate_peer_certificate(self, cert_bytes: Optional[bytes], *, transport: str) -> None:
+        """Validate peer certificate according to TLS mode and pin policy."""
+        if self._tls_mode == _TLS_MODE_INSECURE:
+            return
+        if not cert_bytes:
+            raise PrinterError(
+                f"{transport} TLS handshake for {self._host} did not expose a peer certificate."
+            )
+        actual_fp = hashlib.sha256(cert_bytes).hexdigest()
+        self._enforce_pin_policy(actual_fp, transport=transport)
 
     # -- PrinterAdapter identity properties ---------------------------------
 
@@ -349,10 +509,7 @@ class BambuAdapter(PrinterAdapter):
             )
             client.username_pw_set(_MQTT_USERNAME, self._access_code)
 
-            # TLS -- Bambu uses self-signed certs.
-            tls_context = ssl.create_default_context()
-            tls_context.check_hostname = False
-            tls_context.verify_mode = ssl.CERT_NONE
+            tls_context = self._build_tls_context()
             client.tls_set_context(tls_context)
 
             client.on_connect = self._on_connect
@@ -377,6 +534,26 @@ class BambuAdapter(PrinterAdapter):
                     "  4) Port 8883 is not blocked by a firewall\n"
                     "  Try: kiln verify"
                 )
+
+            # Certificate policy check (pin/explicit fingerprint) after TLS handshake.
+            mqtt_sock = None
+            try:
+                mqtt_sock = client.socket()
+            except Exception:
+                mqtt_sock = None
+            try:
+                self._validate_peer_certificate(
+                    self._extract_socket_cert(mqtt_sock),
+                    transport="MQTT",
+                )
+            except PrinterError:
+                try:
+                    client.loop_stop()
+                    client.disconnect()
+                except Exception:
+                    pass
+                self._backoff.record_failure()
+                raise
 
             self._mqtt_client = client
             self._backoff.record_success()
@@ -556,17 +733,25 @@ class BambuAdapter(PrinterAdapter):
         Raises:
             PrinterError: If connection fails.
         """
+        ftp: Optional[ftplib.FTP_TLS] = None
         try:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+            ctx = self._build_tls_context()
 
             ftp = _ImplicitFTP_TLS(context=ctx)
             ftp.connect(self._host, _FTPS_PORT, timeout=self._timeout)
             ftp.login(_FTPS_USERNAME, self._access_code)
             ftp.prot_p()  # Enable data channel encryption.
+            self._validate_peer_certificate(
+                self._extract_socket_cert(getattr(ftp, "sock", None)),
+                transport="FTPS",
+            )
             return ftp
         except Exception as exc:
+            if ftp is not None:
+                try:
+                    ftp.close()
+                except Exception:
+                    pass
             raise PrinterError(
                 f"FTPS connection to {self._host}:{_FTPS_PORT} failed: {exc}",
                 cause=exc,

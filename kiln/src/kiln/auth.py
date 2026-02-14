@@ -6,7 +6,7 @@ in the SQLite database.
 
 Authentication is disabled by default. Set KILN_AUTH_ENABLED=1 and
 KILN_AUTH_KEY=<your-key> to enable. When enabled without an explicit
-key, a random session key is auto-generated and logged at startup.
+key, a random session key is auto-generated for the process.
 
 Keys can also be managed programmatically:
 
@@ -104,8 +104,8 @@ class AuthManager:
             self._env_key_hash = self._hash_key(self._generated_key)
             logger.warning(
                 "Auth enabled but no KILN_AUTH_KEY set. "
-                "Auto-generated session key: %s",
-                self._generated_key,
+                "Auto-generated ephemeral session key for this process. "
+                "Set KILN_AUTH_KEY explicitly for stable, recoverable auth.",
             )
 
     @property

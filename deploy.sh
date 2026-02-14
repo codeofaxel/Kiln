@@ -77,6 +77,7 @@ fi
 # Only set the secrets the API actually needs.
 SECRETS_ARGS=()
 SECRETS_NEEDED=(
+    KILN_API_AUTH_TOKEN
     KILN_STRIPE_SECRET_KEY
     KILN_STRIPE_WEBHOOK_SECRET
     KILN_CIRCLE_API_KEY
@@ -100,6 +101,12 @@ else
     echo "    fly secrets set KILN_STRIPE_SECRET_KEY=sk_live_... --app $APP_NAME"
 fi
 echo ""
+
+if ! grep -Eq '^KILN_API_AUTH_TOKEN=.+$' "$ENV_FILE"; then
+    red "WARNING: KILN_API_AUTH_TOKEN is missing in .env."
+    echo "  Hosted REST on 0.0.0.0 will fail startup without this token."
+    echo ""
+fi
 
 # ---------- 5. Deploy ----------
 blue "Deploying $APP_NAME (this takes 1-3 minutes)..."
