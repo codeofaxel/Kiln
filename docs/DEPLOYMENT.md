@@ -29,6 +29,10 @@ Comprehensive reference for deploying Kiln as a hosted REST API service or local
 | `KILN_AUTH_KEY` | No | auto-generated | API key for client authentication. If omitted while auth is enabled, Kiln creates an ephemeral session key (value is not logged) |
 | `KILN_MCP_AUTH_TOKEN` | No | `""` | Bearer token for MCP transport-level auth |
 | `KILN_API_AUTH_TOKEN` | Yes for hosted REST | `""` | REST API bearer token. Required when binding REST to non-localhost addresses |
+| `KILN_WEBHOOK_ALLOW_REDIRECTS` | No | `false` | Allow webhook HTTP redirects. Disabled by default for SSRF safety |
+| `KILN_WEBHOOK_MAX_REDIRECTS` | No | `3` | Max redirect hops when redirects are enabled (capped at 10) |
+| `KILN_PLUGIN_POLICY` | No | `strict` | Third-party plugin policy: `strict` (default deny) or `permissive` |
+| `KILN_ALLOWED_PLUGINS` | No | `""` | Comma-separated plugin entry-point names allowed under strict policy |
 
 ### Storage & Database
 

@@ -1055,8 +1055,8 @@ class TestQueueCLI:
         data = json.loads(result.output)
         assert data["status"] == "success"
 
-    def test_queue_requires_license(self, runner, tmp_path):
-        """kiln queue submit requires Pro license."""
+    def test_queue_submit_available_on_free_tier(self, runner, tmp_path):
+        """kiln queue submit is available on Free tier (subject to queue cap)."""
         from kiln.licensing import LicenseManager
 
         mgr = LicenseManager(
@@ -1066,5 +1066,4 @@ class TestQueueCLI:
         with patch("kiln.licensing._manager", mgr), \
              patch.dict("os.environ", {}, clear=True):
             result = runner.invoke(cli, ["queue", "submit", "test.gcode"])
-        assert result.exit_code != 0
-        assert "Free tier" in result.output or "upgrade" in result.output.lower()
+        assert result.exit_code == 0

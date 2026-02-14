@@ -18,6 +18,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+_PLUGIN_POLICY_STRICT = "strict"
+_PLUGIN_POLICY_PERMISSIVE = "permissive"
 
 
 # ---------------------------------------------------------------------------
@@ -192,21 +194,63 @@ class PluginManager:
             logger.debug("No plugins found", exc_info=True)
             return []
 
-        # Only load plugins explicitly allowed in config
+        # Plugin policy:
+        # - strict (default): load only explicitly allow-listed plugins.
+        # - permissive: load all discovered plugins unless an allow-list is set.
+        policy = os.environ.get("KILN_PLUGIN_POLICY", _PLUGIN_POLICY_STRICT).strip().lower()
+        if policy not in {_PLUGIN_POLICY_STRICT, _PLUGIN_POLICY_PERMISSIVE}:
+            logger.warning(
+                "Invalid KILN_PLUGIN_POLICY=%r; using %r.",
+                policy,
+                _PLUGIN_POLICY_STRICT,
+            )
+            policy = _PLUGIN_POLICY_STRICT
+
+        # Explicit allow-list (always honored when provided).
         _allowed = os.environ.get("KILN_ALLOWED_PLUGINS", "").split(",")
         _allowed = {p.strip() for p in _allowed if p.strip()}
-        if not _allowed and group_eps:
+
+        if policy == _PLUGIN_POLICY_STRICT and not _allowed and group_eps:
+            logger.warning(
+                "KILN_PLUGIN_POLICY=strict with no KILN_ALLOWED_PLUGINS; "
+                "all discovered third-party plugins are blocked by default."
+            )
+        elif policy == _PLUGIN_POLICY_PERMISSIVE and not _allowed and group_eps:
             logger.warning(
                 "KILN_ALLOWED_PLUGINS is not set; loading all discovered third-party "
-                "plugins. Set an explicit allow-list in production."
+                "plugins because KILN_PLUGIN_POLICY=permissive. "
+                "Set an explicit allow-list in production."
             )
 
         for ep in group_eps:
-            if _allowed and ep.name not in _allowed:
+            blocked = False
+            blocked_reason = ""
+            if policy == _PLUGIN_POLICY_STRICT and not _allowed:
+                blocked = True
+                blocked_reason = (
+                    "Blocked by strict plugin policy. "
+                    "Set KILN_ALLOWED_PLUGINS=<name> to allow this plugin."
+                )
+            elif _allowed and ep.name not in _allowed:
+                blocked = True
+                blocked_reason = (
+                    "Plugin not in KILN_ALLOWED_PLUGINS allow-list. "
+                    f"Set KILN_ALLOWED_PLUGINS={ep.name} to enable it."
+                )
+
+            if blocked:
+                blocked_info = PluginInfo(
+                    name=ep.name,
+                    version="blocked",
+                    error=blocked_reason,
+                )
+                with self._lock:
+                    self._infos[ep.name] = blocked_info
+                infos.append(blocked_info)
                 logger.warning(
-                    "Plugin %s not in KILN_ALLOWED_PLUGINS allow-list, skipping. "
-                    "Set KILN_ALLOWED_PLUGINS=%s to enable it.",
-                    ep.name, ep.name,
+                    "Plugin %s blocked by policy: %s",
+                    ep.name,
+                    blocked_reason,
                 )
                 continue
 

@@ -669,6 +669,10 @@ register_webhook(url="https://example.com/hook", events=["job.completed", "print
 
 Payloads are signed with HMAC-SHA256 when a secret is provided.
 
+Security defaults:
+- Webhook redirects are blocked by default (`KILN_WEBHOOK_ALLOW_REDIRECTS=0`).
+- If redirects are enabled, each hop is SSRF-validated and HTTPS→HTTP downgrade is blocked.
+
 ## Printer Discovery
 
 Kiln can automatically find printers on your local network:
@@ -679,6 +683,21 @@ kiln discover
 
 Discovery uses mDNS/Bonjour and HTTP subnet probing to find OctoPrint, Moonraker, Bambu, and Prusa Link printers.
 If discovery returns no results, register printers directly by IP with `kiln auth` (works for both Ethernet and Wi-Fi LAN setups).
+
+## Third-Party Plugins
+
+Third-party entry-point plugins are **default-deny** in production (`KILN_PLUGIN_POLICY=strict`).
+Allow only specific plugins with:
+
+```bash
+export KILN_ALLOWED_PLUGINS=my_plugin,other_plugin
+```
+
+For temporary migration compatibility, permissive mode can be enabled:
+
+```bash
+export KILN_PLUGIN_POLICY=permissive
+```
 
 ## Model Marketplaces
 

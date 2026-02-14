@@ -1237,6 +1237,11 @@ class TestFleetStatus:
         names = [p["name"] for p in result["printers"]]
         assert "printer-1" in names
         assert "printer-2" in names
+        assert result["connected_count"] == 2
+        assert result["disconnected_count"] == 0
+        assert result["state_counts"]["idle"] == 1
+        assert result["state_counts"]["printing"] == 1
+        assert "printer-2" in result["busy_printers"]
 
 
 # ---------------------------------------------------------------------------
@@ -1582,6 +1587,8 @@ class TestQueueSummary:
         assert result["active"] == 0
         assert result["next_job"] is None
         assert result["recent_jobs"] == []
+        assert "registered_printers" in result
+        assert result["dispatch_blocked"] is False
 
     def test_with_queued_jobs(self, monkeypatch):
         import kiln.server as mod
@@ -1600,6 +1607,7 @@ class TestQueueSummary:
         assert result["next_job"] is not None
         assert result["next_job"]["file_name"] == "b.gcode"
         assert len(result["recent_jobs"]) == 2
+        assert result["dispatch_blocked"] in (True, False)
 
     def test_with_mixed_statuses(self, monkeypatch):
         import kiln.server as mod
@@ -1619,6 +1627,20 @@ class TestQueueSummary:
         assert result["active"] == 1
         assert "queued" in result["counts"]
         assert "printing" in result["counts"]
+
+    def test_dispatch_blocked_when_jobs_queued_and_no_printers(self, monkeypatch):
+        import kiln.server as mod
+
+        fresh_queue = PrintQueue()
+        fresh_registry = PrinterRegistry()
+        monkeypatch.setattr(mod, "_queue", fresh_queue)
+        monkeypatch.setattr(mod, "_registry", fresh_registry)
+
+        fresh_queue.submit(file_name="queued.gcode", submitted_by="test")
+        result = queue_summary()
+        assert result["success"] is True
+        assert result["dispatch_blocked"] is True
+        assert "no printers are registered" in (result["dispatch_block_reason"] or "").lower()
 
 
 # ---------------------------------------------------------------------------

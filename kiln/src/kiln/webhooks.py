@@ -26,6 +26,7 @@ import hmac
 import ipaddress
 import json
 import logging
+import os
 import queue
 import socket
 import threading
@@ -52,6 +53,28 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
 ]
+_REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
+_MAX_REDIRECT_HOPS_DEFAULT = 3
+
+
+def _env_truthy(name: str, default: bool = False) -> bool:
+    """Parse a boolean environment variable."""
+    raw = os.environ.get(name, "").strip().lower()
+    if raw == "":
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _get_webhook_redirect_policy() -> tuple[bool, int]:
+    """Return (allow_redirects, max_hops) policy from environment."""
+    allow = _env_truthy("KILN_WEBHOOK_ALLOW_REDIRECTS", default=False)
+    raw_hops = os.environ.get("KILN_WEBHOOK_MAX_REDIRECTS", str(_MAX_REDIRECT_HOPS_DEFAULT)).strip()
+    try:
+        max_hops = int(raw_hops)
+    except ValueError:
+        max_hops = _MAX_REDIRECT_HOPS_DEFAULT
+    max_hops = max(0, min(max_hops, 10))
+    return allow, max_hops
 
 
 def _validate_webhook_url(url: str) -> Tuple[bool, str]:
@@ -79,6 +102,10 @@ def _validate_webhook_url(url: str) -> Tuple[bool, str]:
     hostname = parsed.hostname
     if not hostname:
         return False, "URL has no hostname"
+
+    # -- Embedded credentials are not allowed --
+    if parsed.username or parsed.password:
+        return False, "Webhook URLs must not include embedded credentials"
 
     # -- Explicit localhost block --
     if hostname.lower() in ("localhost",):
@@ -455,8 +482,54 @@ class WebhookManager:
     def _default_send(
         url: str, payload: str, headers: Dict[str, str], timeout: float
     ) -> int:
-        """Default HTTP sender using requests."""
+        """Default HTTP sender using requests with SSRF-safe redirect handling."""
         import requests
 
-        resp = requests.post(url, data=payload, headers=headers, timeout=timeout)
-        return resp.status_code
+        allow_redirects, max_hops = _get_webhook_redirect_policy()
+        current_url = url
+        hops = 0
+
+        while True:
+            # Revalidate every outbound URL to defend against DNS rebinding and redirect pivots.
+            valid, reason = _validate_webhook_url(current_url)
+            if not valid:
+                raise RuntimeError(
+                    f"Webhook delivery blocked by URL validation for {current_url!r}: {reason}"
+                )
+
+            resp = requests.post(
+                current_url,
+                data=payload,
+                headers=headers,
+                timeout=timeout,
+                allow_redirects=False,
+            )
+
+            if resp.status_code not in _REDIRECT_STATUS_CODES:
+                return resp.status_code
+
+            if not allow_redirects:
+                raise RuntimeError(
+                    "Webhook redirect blocked by policy. "
+                    "Set KILN_WEBHOOK_ALLOW_REDIRECTS=1 to allow redirects "
+                    "with per-hop SSRF validation."
+                )
+            if hops >= max_hops:
+                raise RuntimeError(
+                    f"Webhook redirect limit exceeded (max {max_hops} hops)."
+                )
+
+            location = resp.headers.get("Location", "")
+            if not location:
+                return resp.status_code
+
+            next_url = urllib.parse.urljoin(current_url, location)
+            current_scheme = urllib.parse.urlparse(current_url).scheme.lower()
+            next_scheme = urllib.parse.urlparse(next_url).scheme.lower()
+            if current_scheme == "https" and next_scheme == "http":
+                raise RuntimeError(
+                    "Webhook redirect blocked: HTTPS to HTTP downgrade is not allowed."
+                )
+
+            current_url = next_url
+            hops += 1

@@ -128,14 +128,28 @@ def queue_summary() -> dict:
         summary = _srv._queue.summary()
         next_job = _srv._queue.next_job()
         recent = _srv._queue.list_jobs(limit=10)
+        pending = _srv._queue.pending_count()
+        active = _srv._queue.active_count()
+        total = _srv._queue.total_count
+        registered_printers = _srv._registry.count
+        dispatch_blocked = pending > 0 and active == 0 and registered_printers == 0
+        dispatch_block_reason = (
+            "Jobs are queued but no printers are registered. "
+            "Register at least one printer with register_printer()."
+            if dispatch_blocked
+            else None
+        )
         return {
             "success": True,
             "counts": summary,
-            "pending": _srv._queue.pending_count(),
-            "active": _srv._queue.active_count(),
-            "total": _srv._queue.total_count,
+            "pending": pending,
+            "active": active,
+            "total": total,
             "next_job": next_job.to_dict() if next_job else None,
             "recent_jobs": [j.to_dict() for j in recent],
+            "registered_printers": registered_printers,
+            "dispatch_blocked": dispatch_blocked,
+            "dispatch_block_reason": dispatch_block_reason,
         }
     except Exception as exc:
         _logger.exception("Unexpected error in queue_summary")

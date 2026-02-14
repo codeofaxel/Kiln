@@ -217,7 +217,8 @@ class TestPluginManagerDiscovery:
         assert result == []
 
     @patch("kiln.plugins.importlib.metadata.entry_points")
-    def test_discover_with_plugin(self, mock_eps):
+    def test_discover_with_plugin(self, mock_eps, monkeypatch):
+        monkeypatch.setenv("KILN_PLUGIN_POLICY", "permissive")
         ep = MagicMock()
         ep.name = "sample"
         ep.load.return_value = SamplePlugin
@@ -232,7 +233,8 @@ class TestPluginManagerDiscovery:
         assert result[0].version == "1.0.0"
 
     @patch("kiln.plugins.importlib.metadata.entry_points")
-    def test_discover_bad_entry_point(self, mock_eps):
+    def test_discover_bad_entry_point(self, mock_eps, monkeypatch):
+        monkeypatch.setenv("KILN_PLUGIN_POLICY", "permissive")
         ep = MagicMock()
         ep.name = "bad"
         ep.load.side_effect = ImportError("not found")
@@ -245,7 +247,8 @@ class TestPluginManagerDiscovery:
         assert result[0].error is not None
 
     @patch("kiln.plugins.importlib.metadata.entry_points")
-    def test_discover_non_plugin_class(self, mock_eps):
+    def test_discover_non_plugin_class(self, mock_eps, monkeypatch):
+        monkeypatch.setenv("KILN_PLUGIN_POLICY", "permissive")
         ep = MagicMock()
         ep.name = "notaplugin"
         ep.load.return_value = str  # not a KilnPlugin subclass
@@ -255,6 +258,37 @@ class TestPluginManagerDiscovery:
         mgr = PluginManager()
         result = mgr.discover()
         assert len(result) == 0  # skipped
+
+    @patch("kiln.plugins.importlib.metadata.entry_points")
+    def test_discover_strict_default_blocks_unallowlisted(self, mock_eps, monkeypatch):
+        monkeypatch.delenv("KILN_PLUGIN_POLICY", raising=False)
+        monkeypatch.delenv("KILN_ALLOWED_PLUGINS", raising=False)
+        ep = MagicMock()
+        ep.name = "sample"
+        ep.load.return_value = SamplePlugin
+        mock_eps.return_value = {"kiln.plugins": [ep]}
+
+        mgr = PluginManager()
+        result = mgr.discover()
+        assert len(result) == 1
+        assert result[0].name == "sample"
+        assert result[0].version == "blocked"
+        assert result[0].error is not None
+
+    @patch("kiln.plugins.importlib.metadata.entry_points")
+    def test_discover_strict_with_allowlist_loads_plugin(self, mock_eps, monkeypatch):
+        monkeypatch.setenv("KILN_PLUGIN_POLICY", "strict")
+        monkeypatch.setenv("KILN_ALLOWED_PLUGINS", "sample")
+        ep = MagicMock()
+        ep.name = "sample"
+        ep.load.return_value = SamplePlugin
+        mock_eps.return_value = {"kiln.plugins": [ep]}
+
+        mgr = PluginManager()
+        result = mgr.discover()
+        assert len(result) == 1
+        assert result[0].name == "sample-plugin"
+        assert result[0].version == "1.0.0"
 
 
 # ---------------------------------------------------------------------------

@@ -2529,11 +2529,35 @@ def fleet_status() -> dict:
 
         status = _registry.get_fleet_status()
         idle = _registry.get_idle_printers()
+        connected_count = sum(1 for p in status if p.get("connected"))
+        disconnected_count = len(status) - connected_count
+
+        state_counts: dict[str, int] = {}
+        for p in status:
+            state = str(p.get("state", "unknown"))
+            state_counts[state] = state_counts.get(state, 0) + 1
+
+        offline_printers = [
+            p.get("name", "")
+            for p in status
+            if (not p.get("connected")) or str(p.get("state", "")).lower() == "offline"
+        ]
+        busy_states = {"printing", "busy", "starting", "cancelling", "paused"}
+        busy_printers = [
+            p.get("name", "")
+            for p in status
+            if str(p.get("state", "")).lower() in busy_states
+        ]
         return {
             "success": True,
             "printers": status,
             "count": len(status),
             "idle_printers": idle,
+            "connected_count": connected_count,
+            "disconnected_count": disconnected_count,
+            "state_counts": state_counts,
+            "offline_printers": [n for n in offline_printers if n],
+            "busy_printers": [n for n in busy_printers if n],
         }
     except Exception as exc:
         logger.exception("Unexpected error in fleet_status")

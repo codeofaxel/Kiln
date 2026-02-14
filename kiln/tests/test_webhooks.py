@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import socket
 import threading
 import time
 from unittest.mock import MagicMock
@@ -1043,12 +1044,24 @@ class TestValidateWebhookUrl:
         from kiln.webhooks import _validate_webhook_url as real_fn
         monkeypatch.setattr("kiln.webhooks._validate_webhook_url", real_fn)
 
-    def test_valid_https_url(self):
+    def test_valid_https_url(self, monkeypatch):
+        monkeypatch.setattr(
+            "kiln.webhooks.socket.getaddrinfo",
+            lambda _host, port, proto=socket.IPPROTO_TCP: [
+                (socket.AF_INET, socket.SOCK_STREAM, proto, "", ("93.184.216.34", port))
+            ],
+        )
         valid, reason = _validate_webhook_url("https://example.com/hook")
         assert valid is True
         assert reason == ""
 
-    def test_valid_http_url(self):
+    def test_valid_http_url(self, monkeypatch):
+        monkeypatch.setattr(
+            "kiln.webhooks.socket.getaddrinfo",
+            lambda _host, port, proto=socket.IPPROTO_TCP: [
+                (socket.AF_INET, socket.SOCK_STREAM, proto, "", ("93.184.216.34", port))
+            ],
+        )
         valid, reason = _validate_webhook_url("http://example.com/hook")
         assert valid is True
         assert reason == ""
@@ -1117,6 +1130,11 @@ class TestValidateWebhookUrl:
         assert valid is False
         assert "hostname" in reason.lower()
 
+    def test_rejects_embedded_credentials(self):
+        valid, reason = _validate_webhook_url("https://user:pass@example.com/hook")
+        assert valid is False
+        assert "credentials" in reason.lower()
+
     def test_rejects_unresolvable_hostname(self):
         valid, reason = _validate_webhook_url("https://this-domain-does-not-exist-9999.example/hook")
         assert valid is False
@@ -1126,6 +1144,91 @@ class TestValidateWebhookUrl:
         result = _validate_webhook_url("https://example.com")
         assert isinstance(result, tuple)
         assert len(result) == 2
+
+
+# ---------------------------------------------------------------------------
+# _default_send redirect hardening
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultSendRedirectPolicy:
+    """Tests for redirect handling and per-hop validation in _default_send."""
+
+    @pytest.fixture(autouse=True)
+    def _restore_real_validation(self, monkeypatch):
+        from kiln.webhooks import _validate_webhook_url as real_fn
+        monkeypatch.setattr("kiln.webhooks._validate_webhook_url", real_fn)
+
+    def _mock_response(self, status_code: int, location: str | None = None):
+        resp = MagicMock()
+        resp.status_code = status_code
+        headers = {}
+        if location is not None:
+            headers["Location"] = location
+        resp.headers = headers
+        return resp
+
+    def test_redirect_blocked_by_default(self, monkeypatch):
+        monkeypatch.delenv("KILN_WEBHOOK_ALLOW_REDIRECTS", raising=False)
+        monkeypatch.setattr(
+            "requests.post",
+            MagicMock(return_value=self._mock_response(302, "https://example.com/next")),
+        )
+        with pytest.raises(RuntimeError, match="redirect blocked by policy"):
+            WebhookManager._default_send(
+                "https://example.com/hook",
+                payload="{}",
+                headers={"Content-Type": "application/json"},
+                timeout=1.0,
+            )
+
+    def test_redirect_allowed_revalidates_each_hop(self, monkeypatch):
+        monkeypatch.setenv("KILN_WEBHOOK_ALLOW_REDIRECTS", "1")
+        monkeypatch.setenv("KILN_WEBHOOK_MAX_REDIRECTS", "3")
+        validate = MagicMock(return_value=(True, ""))
+        monkeypatch.setattr("kiln.webhooks._validate_webhook_url", validate)
+        monkeypatch.setattr(
+            "requests.post",
+            MagicMock(side_effect=[
+                self._mock_response(302, "https://example.com/next"),
+                self._mock_response(200),
+            ]),
+        )
+        code = WebhookManager._default_send(
+            "https://example.com/hook",
+            payload="{}",
+            headers={"Content-Type": "application/json"},
+            timeout=1.0,
+        )
+        assert code == 200
+        assert validate.call_count == 2
+
+    def test_redirect_blocks_https_to_http_downgrade(self, monkeypatch):
+        monkeypatch.setenv("KILN_WEBHOOK_ALLOW_REDIRECTS", "1")
+        monkeypatch.setattr(
+            "requests.post",
+            MagicMock(return_value=self._mock_response(302, "http://example.com/next")),
+        )
+        with pytest.raises(RuntimeError, match="downgrade"):
+            WebhookManager._default_send(
+                "https://example.com/hook",
+                payload="{}",
+                headers={"Content-Type": "application/json"},
+                timeout=1.0,
+            )
+
+    def test_runtime_url_validation_failure_blocks_delivery(self, monkeypatch):
+        monkeypatch.setattr(
+            "kiln.webhooks._validate_webhook_url",
+            MagicMock(return_value=(False, "blocked for test")),
+        )
+        with pytest.raises(RuntimeError, match="blocked for test"):
+            WebhookManager._default_send(
+                "https://example.com/hook",
+                payload="{}",
+                headers={"Content-Type": "application/json"},
+                timeout=1.0,
+            )
 
 
 # ---------------------------------------------------------------------------
