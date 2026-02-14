@@ -668,11 +668,14 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
                 state = adapter.get_state()
                 _preflight_state = state
                 preflight_errors = []
+                preflight_warnings = []
                 if state.state.value in ("error", "offline"):
                     preflight_errors.append(f"Printer is {state.state.value}")
                 if state.tool_temp_actual is not None:
                     if state.tool_temp_actual > 50 and state.state.value == "idle":
-                        preflight_errors.append(f"Hotend is warm ({state.tool_temp_actual:.0f}°C) but printer is idle")
+                        preflight_warnings.append(
+                            f"Hotend is already warm ({state.tool_temp_actual:.0f}°C) while idle"
+                        )
                 if preflight_errors:
                     msg = "Pre-flight check failed: " + "; ".join(preflight_errors)
                     click.echo(format_error(msg, code="PREFLIGHT_FAILED", json_mode=json_mode))
@@ -680,6 +683,8 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
                         click.echo("Use --skip-preflight to bypass.")
                     sys.exit(1)
                 if not json_mode:
+                    for warning in preflight_warnings:
+                        click.echo(f"Pre-flight advisory: {warning}")
                     click.echo("Pre-flight ✓")
             except Exception as exc:
                 logger.debug("Preflight check itself failed: %s", exc)  # Don't block printing if preflight itself fails

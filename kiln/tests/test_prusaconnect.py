@@ -223,6 +223,7 @@ class TestListFiles:
         assert files[0].name == "benchy.gcode"
         assert files[0].size_bytes == 123456
         assert files[1].name == "test.gcode"
+        assert files[0].path == "benchy.gcode"
 
     def test_list_files_with_folders(self):
         a = _adapter()
@@ -242,10 +243,63 @@ class TestListFiles:
         assert "models/inner.gcode" in paths
         assert "top.gcode" in paths
 
+    def test_list_files_maps_display_name_to_api_path(self):
+        a = _adapter()
+        usb_resp = _mock_response(json_data={
+            "children": [
+                {
+                    "display_name": "Whistle_200um_MINI_PLA_32m.gcode",
+                    "name": "WHISTL~1.GCO",
+                    "type": "PRINT_FILE",
+                    "size": 12345,
+                },
+            ],
+        })
+        local_404 = _mock_response(status_code=404, ok=False)
+        local_404.text = "Not Found"
+
+        with patch.object(a._session, "request", side_effect=[usb_resp, local_404]):
+            files = a.list_files()
+
+        assert len(files) == 1
+        assert files[0].name == "Whistle_200um_MINI_PLA_32m.gcode"
+        assert files[0].path == "WHISTL~1.GCO"
+
+    def test_list_files_falls_back_to_local_when_usb_unavailable(self):
+        a = _adapter()
+        usb_404 = _mock_response(status_code=404, ok=False)
+        usb_404.text = "Not Found"
+        local_resp = _mock_response(json_data={
+            "children": [
+                {"display_name": "test.gcode", "name": "TEST~1.GCO", "type": "PRINT_FILE", "size": 789},
+            ],
+        })
+
+        with patch.object(a._session, "request", side_effect=[usb_404, local_resp]) as mock_request:
+            files = a.list_files()
+
+        assert len(files) == 1
+        assert files[0].path == "TEST~1.GCO"
+        assert "/api/v1/files/usb" in mock_request.call_args_list[0].args[1]
+        assert "/api/v1/files/local" in mock_request.call_args_list[1].args[1]
+
+    def test_list_files_raises_when_no_supported_storage_endpoint(self):
+        a = _adapter()
+        usb_404 = _mock_response(status_code=404, ok=False)
+        usb_404.text = "Not Found"
+        local_403 = _mock_response(status_code=403, ok=False)
+        local_403.text = "Forbidden"
+
+        with patch.object(a._session, "request", side_effect=[usb_404, local_403]):
+            with pytest.raises(PrinterError, match="Unable to list files from Prusa Link storage roots"):
+                a.list_files()
+
     def test_list_files_empty(self):
         a = _adapter()
-        resp = _mock_response(json_data={"children": []})
-        with patch.object(a._session, "request", return_value=resp):
+        usb_resp = _mock_response(json_data={"children": []})
+        local_404 = _mock_response(status_code=404, ok=False)
+        local_404.text = "Not Found"
+        with patch.object(a._session, "request", side_effect=[usb_resp, local_404]):
             files = a.list_files()
 
         assert files == []
@@ -269,6 +323,21 @@ class TestUploadFile:
         assert result.success is True
         assert result.file_name == "model.gcode"
 
+    def test_upload_falls_back_to_local_when_usb_forbidden(self, tmp_path):
+        gcode = tmp_path / "model.gcode"
+        gcode.write_text("; test gcode")
+
+        a = _adapter()
+        usb_403 = _mock_response(status_code=403, ok=False)
+        usb_403.text = "Forbidden"
+        local_201 = _mock_response(status_code=201)
+        with patch.object(a._session, "request", side_effect=[usb_403, local_201]) as mock_request:
+            result = a.upload_file(str(gcode))
+
+        assert result.success is True
+        assert "/api/v1/files/usb/model.gcode" in mock_request.call_args_list[0].args[1]
+        assert "/api/v1/files/local/model.gcode" in mock_request.call_args_list[1].args[1]
+
     def test_upload_file_not_found(self):
         a = _adapter()
         with pytest.raises(FileNotFoundError, match="not found"):
@@ -283,11 +352,64 @@ class TestUploadFile:
 class TestPrintControl:
     def test_start_print(self):
         a = _adapter()
-        resp = _mock_response(status_code=204)
-        with patch.object(a._session, "request", return_value=resp):
+        usb_list = _mock_response(json_data={
+            "children": [
+                {"display_name": "benchy.gcode", "name": "BENCHY.GCO", "type": "PRINT_FILE", "size": 123},
+            ],
+        })
+        local_404 = _mock_response(status_code=404, ok=False)
+        local_404.text = "Not Found"
+        start_resp = _mock_response(status_code=204)
+        with patch.object(a._session, "request", side_effect=[usb_list, local_404, start_resp]) as mock_request:
             result = a.start_print("benchy.gcode")
 
         assert result.success is True
+        assert "/api/v1/files/usb/BENCHY.GCO" in mock_request.call_args_list[2].args[1]
+
+    def test_start_print_resolves_display_name_to_short_name(self):
+        a = _adapter()
+        usb_list = _mock_response(json_data={
+            "children": [
+                {
+                    "display_name": "Whistle_200um_MINI_PLA_32m.gcode",
+                    "name": "WHISTL~1.GCO",
+                    "type": "PRINT_FILE",
+                    "size": 12345,
+                },
+            ],
+        })
+        local_404 = _mock_response(status_code=404, ok=False)
+        local_404.text = "Not Found"
+        start_resp = _mock_response(status_code=204)
+        with patch.object(a._session, "request", side_effect=[usb_list, local_404, start_resp]) as mock_request:
+            result = a.start_print("Whistle_200um_MINI_PLA_32m.gcode")
+
+        assert result.success is True
+        assert "/api/v1/files/usb/WHISTL~1.GCO" in mock_request.call_args_list[2].args[1]
+
+    def test_start_print_falls_back_to_local_when_usb_forbidden(self):
+        a = _adapter()
+        usb_404 = _mock_response(status_code=404, ok=False)
+        usb_404.text = "Not Found"
+        local_list = _mock_response(json_data={
+            "children": [
+                {"display_name": "benchy.gcode", "name": "BENCHY.GCO", "type": "PRINT_FILE", "size": 100},
+            ],
+        })
+        usb_403 = _mock_response(status_code=403, ok=False)
+        usb_403.text = "Forbidden"
+        local_start = _mock_response(status_code=204)
+
+        with patch.object(
+            a._session,
+            "request",
+            side_effect=[usb_404, local_list, usb_403, local_start],
+        ) as mock_request:
+            result = a.start_print("benchy.gcode")
+
+        assert result.success is True
+        assert "/api/v1/files/usb/BENCHY.GCO" in mock_request.call_args_list[2].args[1]
+        assert "/api/v1/files/local/BENCHY.GCO" in mock_request.call_args_list[3].args[1]
 
     def test_cancel_print(self):
         a = _adapter()

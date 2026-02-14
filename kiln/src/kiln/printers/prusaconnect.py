@@ -41,6 +41,8 @@ from kiln.printers.base import (
 logger = logging.getLogger(__name__)
 
 _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({502, 503, 504})
+_FILE_ROOTS: tuple[str, ...] = ("usb", "local")
+_FILE_ROOT_FALLBACK_HTTP_CODES: tuple[int, ...] = (403, 404)
 
 # Prusa Link printer states → PrinterStatus
 _STATE_MAP: Dict[str, PrinterStatus] = {
@@ -262,6 +264,74 @@ class PrusaConnectAdapter(PrinterAdapter):
         except PrinterError:
             return None
 
+    @staticmethod
+    def _is_http_error(exc: PrinterError, status_code: int) -> bool:
+        return f"HTTP {status_code}" in str(exc)
+
+    @classmethod
+    def _is_storage_fallback_error(cls, exc: PrinterError) -> bool:
+        return any(
+            cls._is_http_error(exc, code)
+            for code in _FILE_ROOT_FALLBACK_HTTP_CODES
+        )
+
+    def _iter_file_roots(self, preferred: Optional[str] = None) -> List[str]:
+        roots = list(_FILE_ROOTS)
+        if preferred and preferred in roots:
+            return [preferred, *[r for r in roots if r != preferred]]
+        return roots
+
+    def _split_storage_root(self, file_path: str) -> tuple[Optional[str], str]:
+        clean = file_path.strip().lstrip("/")
+        for root in _FILE_ROOTS:
+            prefix = f"{root}/"
+            if clean.lower().startswith(prefix):
+                return root, clean[len(prefix):]
+        return None, clean
+
+    def _resolve_print_path(self, requested: str) -> str:
+        """Resolve a user-provided file identifier to a Prusa API path.
+
+        Prusa Link can expose user-facing long display names (``display_name``)
+        while some firmware paths are 8.3 short names (``name``). This resolver
+        maps display names to API-safe paths when possible.
+        """
+        _, normalized = self._split_storage_root(requested)
+        if not normalized:
+            raise PrinterError("File name must not be empty.")
+
+        try:
+            files = self.list_files()
+        except PrinterError as exc:
+            logger.debug(
+                "Could not resolve file path via list_files(); using raw input %r: %s",
+                requested,
+                exc,
+            )
+            return normalized
+
+        lookup = normalized.lower()
+        for candidate in files:
+            if candidate.path.lower() == lookup or candidate.name.lower() == lookup:
+                return candidate.path
+
+        basename = lookup.rsplit("/", 1)[-1]
+        basename_matches = [
+            candidate
+            for candidate in files
+            if candidate.name.lower() == basename
+            or candidate.path.rsplit("/", 1)[-1].lower() == basename
+        ]
+        if len(basename_matches) == 1:
+            return basename_matches[0].path
+        if len(basename_matches) > 1:
+            options = ", ".join(sorted({c.path for c in basename_matches})[:5])
+            raise PrinterError(
+                f"Multiple files match '{requested}'. Use one of: {options}",
+            )
+
+        return normalized
+
     # ------------------------------------------------------------------
     # PrinterAdapter -- state queries
     # ------------------------------------------------------------------
@@ -342,22 +412,50 @@ class PrusaConnectAdapter(PrinterAdapter):
         )
 
     def list_files(self) -> List[PrinterFile]:
-        """Return a list of G-code files on the printer's local storage.
+        """Return a list of G-code files across supported Prusa storage roots.
 
-        Calls ``GET /api/v1/files/local`` for the root directory listing.
+        Tries ``/api/v1/files/usb`` first, then falls back to ``/api/v1/files/local``.
         """
-        try:
-            data = self._get_json("/api/v1/files/local")
-        except PrinterError:
-            return []
-
-        children = data.get("children", [])
-        if not isinstance(children, list):
-            return []
-
         results: List[PrinterFile] = []
-        self._collect_files(children, results, prefix="")
-        return results
+        successful_roots = 0
+        fallback_errors: List[tuple[str, PrinterError]] = []
+
+        for root in _FILE_ROOTS:
+            try:
+                data = self._get_json(f"/api/v1/files/{root}")
+            except PrinterError as exc:
+                if self._is_storage_fallback_error(exc):
+                    fallback_errors.append((root, exc))
+                    logger.debug(
+                        "Skipping unavailable Prusa storage root '%s': %s",
+                        root,
+                        exc,
+                    )
+                    continue
+                raise
+
+            successful_roots += 1
+            children = data.get("children", [])
+            if isinstance(children, list):
+                self._collect_files(children, results, prefix="")
+
+        if successful_roots == 0 and fallback_errors:
+            roots = ", ".join(root for root, _ in fallback_errors)
+            detail = "; ".join(str(exc) for _, exc in fallback_errors)
+            raise PrinterError(
+                f"Unable to list files from Prusa Link storage roots ({roots}). {detail}",
+            )
+
+        deduped: List[PrinterFile] = []
+        seen_paths: set[str] = set()
+        for entry in results:
+            key = entry.path.lower()
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            deduped.append(entry)
+
+        return deduped
 
     def _collect_files(
         self,
@@ -370,20 +468,27 @@ class PrusaConnectAdapter(PrinterAdapter):
             if not isinstance(entry, dict):
                 continue
 
-            name = entry.get("display_name") or entry.get("name", "")
+            display_name = str(entry.get("display_name") or entry.get("name") or "")
+            api_name = str(entry.get("name") or display_name)
             entry_type = entry.get("type", "")
+            raw_path = entry.get("path")
+            if isinstance(raw_path, str) and raw_path.strip():
+                api_path = raw_path.strip("/")
+            else:
+                api_path = f"{prefix}{api_name}" if prefix else api_name
 
             if entry_type == "FOLDER":
                 children = entry.get("children", [])
                 if isinstance(children, list):
-                    folder_prefix = f"{prefix}{name}/" if prefix else f"{name}/"
+                    folder_prefix = f"{api_path}/" if api_path else prefix
                     self._collect_files(children, results, prefix=folder_prefix)
             else:
-                path = f"{prefix}{name}" if prefix else name
+                if not api_path:
+                    continue
                 results.append(
                     PrinterFile(
-                        name=name,
-                        path=path,
+                        name=display_name or api_name,
+                        path=api_path,
                         size_bytes=entry.get("size"),
                         date=entry.get("m_timestamp"),
                     )
@@ -396,7 +501,7 @@ class PrusaConnectAdapter(PrinterAdapter):
     def upload_file(self, file_path: str) -> UploadResult:
         """Upload a local G-code file to the printer via Prusa Link.
 
-        Calls ``PUT /api/v1/files/local/<filename>`` with binary body.
+        Attempts ``PUT /api/v1/files/usb/<filename>`` first, then ``local``.
 
         Args:
             file_path: Absolute or relative path to the local file.
@@ -408,25 +513,41 @@ class PrusaConnectAdapter(PrinterAdapter):
         filename = os.path.basename(abs_path)
         file_size = os.path.getsize(abs_path)
         encoded_name = quote(filename, safe="")
+        upload_headers = {
+            "Content-Type": "application/octet-stream",
+            "Content-Length": str(file_size),
+            "Print-After-Upload": "?0",
+            "Overwrite": "?1",
+        }
 
-        try:
-            with open(abs_path, "rb") as fh:
-                self._request(
-                    "PUT",
-                    f"/api/v1/files/local/{encoded_name}",
-                    data=fh,
-                    headers={
-                        "Content-Type": "application/octet-stream",
-                        "Content-Length": str(file_size),
-                        "Print-After-Upload": "?0",
-                        "Overwrite": "?1",
-                    },
-                )
-        except PermissionError as exc:
+        last_fallback_error: Optional[PrinterError] = None
+
+        for root in _FILE_ROOTS:
+            try:
+                with open(abs_path, "rb") as fh:
+                    self._request(
+                        "PUT",
+                        f"/api/v1/files/{root}/{encoded_name}",
+                        data=fh,
+                        headers=upload_headers,
+                    )
+                break
+            except PermissionError as exc:
+                raise PrinterError(
+                    f"Permission denied reading file: {abs_path}",
+                    cause=exc,
+                ) from exc
+            except PrinterError as exc:
+                if self._is_storage_fallback_error(exc):
+                    last_fallback_error = exc
+                    continue
+                raise
+        else:
+            root_list = ", ".join(_FILE_ROOTS)
+            detail = f" Last error: {last_fallback_error}" if last_fallback_error else ""
             raise PrinterError(
-                f"Permission denied reading file: {abs_path}",
-                cause=exc,
-            ) from exc
+                f"Failed to upload {filename} to Prusa storage roots ({root_list}).{detail}",
+            )
 
         return UploadResult(
             success=True,
@@ -441,13 +562,35 @@ class PrusaConnectAdapter(PrinterAdapter):
     def start_print(self, file_name: str) -> PrintResult:
         """Begin printing a file on the printer.
 
-        Calls ``POST /api/v1/files/local/<file_name>`` to start the print.
+        Resolves display names to API-safe file paths, then attempts
+        ``POST /api/v1/files/usb/<file_path>`` first, falling back to ``local``.
         """
-        encoded = quote(file_name, safe="/")
-        self._request("POST", f"/api/v1/files/local/{encoded}")
+        preferred_root, _ = self._split_storage_root(file_name)
+        resolved_path = self._resolve_print_path(file_name)
+        encoded = quote(resolved_path, safe="/")
+
+        roots = self._iter_file_roots(preferred=preferred_root)
+        last_fallback_error: Optional[PrinterError] = None
+        for root in roots:
+            try:
+                self._request("POST", f"/api/v1/files/{root}/{encoded}")
+                break
+            except PrinterError as exc:
+                if self._is_storage_fallback_error(exc):
+                    last_fallback_error = exc
+                    continue
+                raise
+        else:
+            root_list = ", ".join(roots)
+            detail = f" Last error: {last_fallback_error}" if last_fallback_error else ""
+            raise PrinterError(
+                f"Failed to start print for '{file_name}' from Prusa storage roots "
+                f"({root_list}). The file may require its API path/8.3 name.{detail}",
+            )
+
         return PrintResult(
             success=True,
-            message=f"Started printing {file_name}.",
+            message=f"Started printing {resolved_path}.",
         )
 
     def cancel_print(self) -> PrintResult:
@@ -545,11 +688,30 @@ class PrusaConnectAdapter(PrinterAdapter):
     def delete_file(self, file_path: str) -> bool:
         """Delete a G-code file from the printer's local storage.
 
-        Calls ``DELETE /api/v1/files/local/<file_path>``.
+        Attempts deletion on ``usb`` first (or requested root), then ``local``.
         """
-        encoded = quote(file_path, safe="/")
-        self._request("DELETE", f"/api/v1/files/local/{encoded}")
-        return True
+        preferred_root, normalized_path = self._split_storage_root(file_path)
+        if not normalized_path:
+            raise PrinterError("File path must not be empty.")
+
+        encoded = quote(normalized_path, safe="/")
+        roots = self._iter_file_roots(preferred=preferred_root)
+        last_fallback_error: Optional[PrinterError] = None
+        for root in roots:
+            try:
+                self._request("DELETE", f"/api/v1/files/{root}/{encoded}")
+                return True
+            except PrinterError as exc:
+                if self._is_storage_fallback_error(exc):
+                    last_fallback_error = exc
+                    continue
+                raise
+
+        root_list = ", ".join(roots)
+        detail = f" Last error: {last_fallback_error}" if last_fallback_error else ""
+        raise PrinterError(
+            f"Failed to delete '{file_path}' from Prusa storage roots ({root_list}).{detail}",
+        )
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- webcam snapshot

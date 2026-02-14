@@ -225,6 +225,21 @@ class TestPrint:
         assert result.exit_code != 0
         mock_adapter.start_print.assert_not_called()
 
+    def test_print_allows_warm_hotend_when_idle(self, runner, mock_adapter, config_file):
+        mock_adapter.get_state.return_value = PrinterState(
+            state=PrinterStatus.IDLE,
+            connected=True,
+            tool_temp_actual=170.0,
+            tool_temp_target=170.0,
+            bed_temp_actual=22.0,
+            bed_temp_target=0.0,
+        )
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3:
+            result = runner.invoke(cli, ["print", "test.gcode", "--json"])
+        assert result.exit_code == 0
+        mock_adapter.start_print.assert_called_once_with("test.gcode")
+
 
 # ---------------------------------------------------------------------------
 # preflight
