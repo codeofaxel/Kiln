@@ -213,6 +213,53 @@ class StripeProvider(PaymentProvider):
                 code="STRIPE_SETUP_ERROR",
             ) from exc
 
+    # -- Checkout Session ------------------------------------------------------
+
+    def create_checkout_session(
+        self,
+        price_id: str,
+        *,
+        success_url: str = "https://kiln3d.com/pro/success?session_id={CHECKOUT_SESSION_ID}",
+        cancel_url: str = "https://kiln3d.com/pricing",
+        customer_email: Optional[str] = None,
+        metadata: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, str]:
+        """Create a Stripe Checkout Session for a one-time license purchase.
+
+        :param price_id: Stripe Price ID (``price_...``) for the tier.
+        :param success_url: Redirect URL after successful payment.
+        :param cancel_url: Redirect URL if user cancels.
+        :param customer_email: Pre-fill the checkout email field.
+        :param metadata: Extra metadata to attach to the session.
+        :returns: Dict with ``session_id`` and ``checkout_url``.
+        :raises PaymentError: On Stripe API errors.
+        """
+        stripe = self._import_stripe()
+
+        try:
+            session = stripe.checkout.Session.create(
+                mode="payment",
+                line_items=[{"price": price_id, "quantity": 1}],
+                success_url=success_url,
+                cancel_url=cancel_url,
+                customer_email=customer_email,
+                metadata=metadata or {},
+            )
+
+            logger.info(
+                "Created Checkout Session %s for price %s",
+                session.id,
+                price_id,
+            )
+
+            return {"session_id": session.id, "checkout_url": session.url}
+
+        except stripe.error.StripeError as exc:
+            raise PaymentError(
+                f"Failed to create checkout session: {exc}",
+                code="STRIPE_CHECKOUT_ERROR",
+            ) from exc
+
     # -- PaymentProvider methods -----------------------------------------------
 
     def create_payment(self, request: PaymentRequest) -> PaymentResult:

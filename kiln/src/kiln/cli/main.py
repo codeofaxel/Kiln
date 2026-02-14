@@ -4050,13 +4050,76 @@ cli.add_command(verify, name="doctor")
     "--key", "-k", default=None,
     help="License key to activate. If omitted, opens the upgrade page.",
 )
+@click.option(
+    "--session", "-s", default=None,
+    help="Stripe Checkout Session ID to retrieve and activate the license key.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def upgrade(ctx: click.Context, key: Optional[str], json_mode: bool) -> None:
+def upgrade(ctx: click.Context, key: Optional[str], session: Optional[str], json_mode: bool) -> None:
     """Activate a Kiln Pro or Business license, or view current tier."""
     from kiln.licensing import LicenseTier, get_license_manager
 
     mgr = get_license_manager()
+
+    if session:
+        try:
+            import stripe  # type: ignore[import-untyped]
+        except ImportError:
+            click.echo(format_error(
+                "stripe package not installed. Install with: pip install kiln3d[payments]",
+                code="MISSING_DEPENDENCY", json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        stripe.api_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
+        if not stripe.api_key:
+            click.echo(format_error(
+                "KILN_STRIPE_SECRET_KEY not set. Cannot retrieve session.",
+                code="CONFIG_MISSING", json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        try:
+            checkout_session = stripe.checkout.Session.retrieve(session)
+        except stripe.error.StripeError as exc:
+            click.echo(format_error(
+                f"Failed to retrieve Stripe session: {exc}",
+                code="STRIPE_ERROR", json_mode=json_mode,
+            ))
+            sys.exit(1)
+
+        license_key = (checkout_session.metadata or {}).get("license_key", "")
+        if not license_key:
+            if getattr(checkout_session, "payment_status", "") != "paid":
+                click.echo(format_error(
+                    "Payment not completed. Complete payment first, then retry.",
+                    code="PAYMENT_PENDING", json_mode=json_mode,
+                ))
+            else:
+                click.echo(format_error(
+                    "License key not found on session. The webhook may not have "
+                    "processed yet — wait a moment and retry.",
+                    code="KEY_NOT_READY", json_mode=json_mode,
+                ))
+            sys.exit(1)
+
+        # Activate the key (reuse existing activation path)
+        try:
+            info = mgr.activate_license(license_key)
+            data = info.to_dict()
+            if json_mode:
+                import json as _json
+                click.echo(_json.dumps({"success": True, **data}, indent=2))
+            else:
+                click.echo(f"  ✓ License activated: Kiln {info.tier.value.title()}")
+                if info.license_key_hint:
+                    click.echo(f"    Key: ...{info.license_key_hint}")
+                click.echo(f"    Source: {info.source}")
+        except Exception as exc:
+            click.echo(format_error(str(exc), code="LICENSE_ERROR", json_mode=json_mode))
+            sys.exit(1)
+        return
 
     if key:
         # Activate the provided license key

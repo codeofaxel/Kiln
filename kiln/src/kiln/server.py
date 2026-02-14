@@ -3196,6 +3196,99 @@ def billing_delete_data(confirm: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# License tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def license_status() -> dict:
+    """Get the current license tier, validity, and key details.
+
+    Returns the active tier (free/pro/business), whether the license is
+    valid, expiration date, and how it was resolved (env/file/default).
+    No authentication required.
+    """
+    try:
+        from kiln.licensing import get_license_manager
+        info = get_license_manager().get_info()
+        return {"success": True, **info.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in license_status")
+        return _error_dict(f"Unexpected error in license_status: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def activate_license(key: str) -> dict:
+    """Activate a Kiln Pro or Business license key.
+
+    Writes the key to ``~/.kiln/license`` and returns the resolved
+    tier info.  Use ``license_status`` to check the current tier first.
+
+    Args:
+        key: License key string (format: ``kiln_pro_...`` or ``kiln_biz_...``).
+    """
+    if not key or not key.strip():
+        return _error_dict("License key is required.", code="INVALID_INPUT")
+    try:
+        from kiln.licensing import get_license_manager
+        info = get_license_manager().activate_license(key.strip())
+        return {"success": True, **info.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in activate_license")
+        return _error_dict(f"Failed to activate license: {exc}", code="LICENSE_ERROR")
+
+
+@mcp.tool()
+def get_upgrade_url(tier: str = "pro", email: str = "") -> dict:
+    """Get a Stripe Checkout URL to purchase a Kiln Pro or Business license.
+
+    Opens a payment page.  After completing payment, the license key can
+    be retrieved with ``kiln upgrade --session <session_id>`` in the CLI.
+
+    Args:
+        tier: ``"pro"`` or ``"business"``.
+        email: Pre-fill the checkout email field (optional).
+    """
+    tier_lower = tier.lower().strip()
+    if tier_lower not in ("pro", "business"):
+        return _error_dict(f"Invalid tier: {tier!r}. Use 'pro' or 'business'.", code="INVALID_INPUT")
+
+    price_env = "KILN_STRIPE_PRICE_PRO" if tier_lower == "pro" else "KILN_STRIPE_PRICE_BUSINESS"
+    price_id = os.environ.get(price_env, "")
+    if not price_id:
+        return _error_dict(
+            f"Stripe price not configured. Set {price_env} environment variable.",
+            code="CONFIG_MISSING",
+        )
+
+    stripe_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
+    if not stripe_key:
+        return _error_dict("Stripe not configured. Set KILN_STRIPE_SECRET_KEY.", code="CONFIG_MISSING")
+
+    try:
+        from kiln.payments.stripe_provider import StripeProvider
+        provider = StripeProvider(secret_key=stripe_key)
+        result = provider.create_checkout_session(
+            price_id=price_id,
+            customer_email=email or None,
+            metadata={"tier": tier_lower},
+        )
+        return {
+            "success": True,
+            "checkout_url": result["checkout_url"],
+            "session_id": result["session_id"],
+            "tier": tier_lower,
+            "next_step": (
+                "Open checkout_url in a browser to complete payment. "
+                "After payment, run 'kiln upgrade --session <session_id>' to activate."
+            ),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in get_upgrade_url")
+        return _error_dict(f"Failed to create checkout: {exc}", code="PAYMENT_ERROR")
+
+
+# ---------------------------------------------------------------------------
 # Tax + donation tools — moved to plugins/consumer_tools.py
 # ---------------------------------------------------------------------------
 

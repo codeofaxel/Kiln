@@ -582,6 +582,48 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
                 except Exception:
                     logger.exception("Failed to persist payment method from webhook")
 
+        elif event["type"] == "checkout.session.completed":
+            session_obj = event["data"]["object"]
+            if session_obj.get("payment_status") != "paid":
+                # Async payment not yet complete — wait for async webhook
+                return {"received": True}
+
+            customer_email = session_obj.get("customer_details", {}).get("email", "")
+            session_metadata = session_obj.get("metadata", {})
+            tier_str = session_metadata.get("tier", "pro")
+
+            from kiln.licensing import LicenseTier, generate_license_key
+
+            tier = LicenseTier.BUSINESS if tier_str == "business" else LicenseTier.PRO
+
+            try:
+                license_key = generate_license_key(tier=tier, email=customer_email)
+            except ValueError as exc:
+                logger.error("License key generation failed: %s", exc)
+                return JSONResponse(
+                    {"success": False, "error": f"License signing key not configured: {exc}"},
+                    status_code=500,
+                )
+
+            # Store the key on the Stripe session metadata for later retrieval
+            try:
+                _stripe_mod.api_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
+                _stripe_mod.checkout.Session.modify(
+                    session_obj["id"],
+                    metadata={**session_metadata, "license_key": license_key},
+                )
+                logger.info(
+                    "License key generated for session %s (%s, %s)",
+                    session_obj["id"],
+                    customer_email,
+                    tier_str,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to store license key on Stripe session %s",
+                    session_obj["id"],
+                )
+
         return {"received": True}
 
     return app

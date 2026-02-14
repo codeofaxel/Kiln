@@ -132,6 +132,9 @@ READ_ONLY_TOOLS: Set[str] = {
     "billing_check_setup",
     "billing_alerts",
 
+    # License read-only
+    "license_status",
+
     # Marketplace read-only (searches / metadata)
     "search_all_models",
     "marketplace_info",
@@ -246,6 +249,10 @@ KNOWN_UNSCOPED_MUTATING_TOOLS: Set[str] = {
     # Printer locking
     "acquire_printer_lock",
     "release_printer_lock",
+
+    # License management
+    "activate_license",
+    "get_upgrade_url",
 
     # Firmware update (duplicate of scoped versions)
     "update_printer_firmware",

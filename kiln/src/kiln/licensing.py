@@ -580,6 +580,61 @@ FEATURE_TIERS: Dict[str, LicenseTier] = {
 }
 
 # ---------------------------------------------------------------------------
+# Key generation
+# ---------------------------------------------------------------------------
+
+
+def generate_license_key(
+    tier: LicenseTier,
+    email: str,
+    *,
+    signing_key: Optional[str] = None,
+    ttl_seconds: int = 365 * 24 * 3600,
+) -> str:
+    """Generate a cryptographically signed license key.
+
+    :param tier: License tier (PRO or BUSINESS).
+    :param email: Buyer's email address.
+    :param signing_key: HMAC secret. Falls back to ``KILN_LICENSE_PUBLIC_KEY``.
+    :param ttl_seconds: Key validity duration in seconds (default 1 year).
+    :returns: Signed key string ``kiln_{tier}_{payload_b64}_{signature_b64}``.
+    :raises ValueError: If tier is FREE or signing key is missing.
+    """
+    if tier is LicenseTier.FREE:
+        raise ValueError("Cannot generate a license key for the FREE tier")
+
+    if signing_key is None:
+        signing_key = os.environ.get("KILN_LICENSE_PUBLIC_KEY", "").strip()
+    if not signing_key:
+        raise ValueError(
+            "Signing key is required: pass signing_key or set KILN_LICENSE_PUBLIC_KEY"
+        )
+
+    now = time.time()
+    payload = {
+        "tier": tier.value,
+        "email": email,
+        "issued_at": now,
+        "expires_at": now + ttl_seconds,
+    }
+
+    payload_b64 = base64.b64encode(
+        json.dumps(payload).encode("utf-8")
+    ).rstrip(b"=").decode("ascii")
+
+    signature = hmac.new(
+        signing_key.encode("utf-8"),
+        payload_b64.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+
+    signature_b64 = base64.b64encode(signature).rstrip(b"=").decode("ascii")
+
+    prefix = "pro" if tier is LicenseTier.PRO else "biz"
+    return f"kiln_{prefix}_{payload_b64}_{signature_b64}"
+
+
+# ---------------------------------------------------------------------------
 # Free-tier resource limits
 # ---------------------------------------------------------------------------
 
