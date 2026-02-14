@@ -464,6 +464,67 @@ class TestAuth:
         data = json.loads(result.output)
         assert data["data"]["type"] == "bambu"
 
+    def test_auth_prusa_runs_diagnostics_and_persists_model(self, runner):
+        diag = {
+            "ok": True,
+            "profile_id": "prusa_mini",
+            "file_count": 16,
+            "checks": [{"name": "storage_usb", "ok": True}],
+        }
+        with patch("kiln.cli.main.save_printer", return_value=Path("/tmp/config.yaml")) as mock_save, \
+             patch("kiln.cli.main.load_printer_config", return_value={
+                 "type": "prusaconnect",
+                 "host": "http://192.168.0.44",
+                 "api_key": "abc123",
+             }), \
+             patch("kiln.cli.main._run_prusa_diagnostics", return_value=diag):
+            result = runner.invoke(cli, [
+                "auth",
+                "--name", "prusa-mini",
+                "--host", "http://192.168.0.44",
+                "--type", "prusaconnect",
+                "--api-key", "abc123",
+                "--json",
+            ])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["status"] == "success"
+        assert data["data"]["diagnostics"]["profile_id"] == "prusa_mini"
+        assert mock_save.call_count == 2
+        assert mock_save.call_args_list[1].kwargs["printer_model"] == "prusa_mini"
+
+
+class TestDoctorPrusa:
+    def test_doctor_prusa_json_success(self, runner):
+        with patch("kiln.cli.main.load_printer_config", return_value={
+            "type": "prusaconnect",
+            "host": "http://192.168.0.44",
+            "api_key": "abc123",
+        }), patch("kiln.cli.main._run_prusa_diagnostics", return_value={
+            "ok": True,
+            "checks": [{"name": "api_status", "ok": True, "detail": "ok"}],
+            "profile_id": "prusa_mini",
+            "file_count": 12,
+        }):
+            result = runner.invoke(cli, ["doctor-prusa", "--json"])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["status"] == "success"
+        assert data["data"]["profile_id"] == "prusa_mini"
+
+    def test_doctor_prusa_wrong_backend(self, runner):
+        with patch("kiln.cli.main.load_printer_config", return_value={
+            "type": "moonraker",
+            "host": "http://test.local",
+        }):
+            result = runner.invoke(cli, ["doctor-prusa", "--json"])
+
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert data["status"] == "error"
+
 
 # ---------------------------------------------------------------------------
 # discover

@@ -15,7 +15,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import click
 
@@ -208,6 +208,115 @@ def _autodetect_printer_profile_id(ctx: click.Context) -> Optional[str]:
     return None
 
 
+def _run_prusa_diagnostics(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Run non-destructive diagnostics for a Prusa Link printer config."""
+    checks: List[Dict[str, Any]] = []
+    summary: Dict[str, Any] = {
+        "host": cfg.get("host", ""),
+        "type": cfg.get("type", ""),
+        "checks": checks,
+        "model_hint": None,
+        "profile_id": None,
+        "storage_roots": {},
+        "file_count": None,
+        "ok": False,
+    }
+
+    if str(cfg.get("type", "")).lower() != "prusaconnect":
+        checks.append({
+            "name": "backend",
+            "ok": False,
+            "detail": "Active printer is not type 'prusaconnect'.",
+        })
+        return summary
+
+    try:
+        adapter = _make_adapter(cfg)
+    except Exception as exc:
+        checks.append({"name": "adapter", "ok": False, "detail": str(exc)})
+        return summary
+
+    # Basic status endpoint
+    try:
+        status = adapter._get_json("/api/v1/status")  # type: ignore[attr-defined]
+        printer_state = (status.get("printer") or {}).get("state")
+        checks.append({
+            "name": "api_status",
+            "ok": True,
+            "detail": f"/api/v1/status reachable (state={printer_state or 'unknown'})",
+        })
+        status_ok = True
+    except Exception as exc:
+        checks.append({"name": "api_status", "ok": False, "detail": str(exc)})
+        status_ok = False
+
+    # Model hint from info endpoint
+    model_hint: Optional[str] = None
+    info_ok = False
+    try:
+        info = adapter._get_json("/api/v1/info")  # type: ignore[attr-defined]
+        for key in ("hostname", "printer_name", "name", "model", "type"):
+            val = info.get(key)
+            if isinstance(val, str) and val.strip():
+                model_hint = val.strip()
+                break
+        mapped = _map_printer_hint_to_profile_id(model_hint)
+        summary["model_hint"] = model_hint
+        summary["profile_id"] = mapped
+        checks.append({
+            "name": "api_info",
+            "ok": True,
+            "detail": (
+                f"/api/v1/info reachable (model='{model_hint}', profile='{mapped}')"
+                if model_hint
+                else "/api/v1/info reachable (model unknown)"
+            ),
+        })
+        info_ok = True
+    except Exception as exc:
+        checks.append({"name": "api_info", "ok": False, "detail": str(exc)})
+
+    # Storage roots
+    root_ok = False
+    for root in ("usb", "local"):
+        try:
+            payload = adapter._get_json(f"/api/v1/files/{root}")  # type: ignore[attr-defined]
+            children = payload.get("children", [])
+            count = len(children) if isinstance(children, list) else 0
+            summary["storage_roots"][root] = {"ok": True, "entries": count}
+            checks.append({
+                "name": f"storage_{root}",
+                "ok": True,
+                "detail": f"/api/v1/files/{root} reachable ({count} top-level entries)",
+            })
+            root_ok = True
+        except Exception as exc:
+            summary["storage_roots"][root] = {"ok": False, "error": str(exc)}
+            checks.append({
+                "name": f"storage_{root}",
+                "ok": False,
+                "detail": str(exc),
+                "warn": True,
+            })
+
+    # Unified list-files + path-resolution check
+    try:
+        files = adapter.list_files()
+        summary["file_count"] = len(files)
+        detail = f"{len(files)} file(s) visible via Kiln adapter"
+        if files:
+            sample = files[0]
+            detail += f"; sample: name='{sample.name}' path='{sample.path}'"
+        checks.append({"name": "adapter_files", "ok": True, "detail": detail})
+    except Exception as exc:
+        checks.append({"name": "adapter_files", "ok": False, "detail": str(exc)})
+
+    summary["ok"] = status_ok and root_ok
+    # api_info/model detection is advisory; not required for core connectivity.
+    summary["model_detected"] = info_ok and bool(summary.get("profile_id"))
+    return summary
+
+
 # ---------------------------------------------------------------------------
 # CLI group
 # ---------------------------------------------------------------------------
@@ -339,13 +448,54 @@ def auth(
             access_code=access_code,
             serial=serial,
         )
+        prusa_diagnostics: Optional[Dict[str, Any]] = None
+        if printer_type == "prusaconnect":
+            try:
+                cfg = load_printer_config(name)
+                prusa_diagnostics = _run_prusa_diagnostics(cfg)
+                detected_profile = prusa_diagnostics.get("profile_id")
+                if isinstance(detected_profile, str) and detected_profile:
+                    # Persist detected model profile for better slicing defaults.
+                    save_printer(
+                        name,
+                        printer_type,
+                        host,
+                        api_key=api_key,
+                        access_code=access_code,
+                        serial=serial,
+                        printer_model=detected_profile,
+                    )
+            except Exception as exc:
+                logger.debug("Prusa diagnostics after auth failed: %s", exc)
+
         data = {
             "name": name,
             "type": printer_type,
             "host": host,
             "config_path": str(path),
         }
+        if prusa_diagnostics is not None:
+            data["diagnostics"] = prusa_diagnostics
         click.echo(format_response("success", data=data, json_mode=json_mode))
+        if not json_mode and prusa_diagnostics is not None:
+            profile_id = prusa_diagnostics.get("profile_id")
+            file_count = prusa_diagnostics.get("file_count")
+            checks = prusa_diagnostics.get("checks", [])
+            root_ok = any(
+                c.get("name", "").startswith("storage_") and c.get("ok")
+                for c in checks
+                if isinstance(c, dict)
+            )
+            if profile_id:
+                click.echo(f"Detected printer profile: {profile_id}")
+            elif prusa_diagnostics.get("model_hint"):
+                click.echo(f"Detected model hint: {prusa_diagnostics.get('model_hint')}")
+            if file_count is not None:
+                click.echo(f"Files visible through Kiln: {file_count}")
+            if not root_ok:
+                click.echo("Storage roots not reachable yet. Verify API key and run: kiln doctor-prusa")
+            else:
+                click.echo("Prusa connectivity check passed. Run: kiln doctor-prusa for full diagnostics.")
     except OSError as exc:
         click.echo(format_error(
             f"Failed to save printer credentials: {exc}. Check file permissions on ~/.kiln/",
@@ -3992,6 +4142,49 @@ def firmware_rollback_cmd(ctx: click.Context, component: str, json_mode: bool) -
 # ---------------------------------------------------------------------------
 
 
+@cli.command("doctor-prusa")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def doctor_prusa(ctx: click.Context, json_mode: bool) -> None:
+    """Run focused diagnostics for Prusa Link connectivity and storage."""
+    import json as _json
+
+    try:
+        cfg = load_printer_config(ctx.obj.get("printer"))
+    except ValueError as exc:
+        click.echo(format_error(str(exc), code="CONFIG_ERROR", json_mode=json_mode))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), code="CONFIG_ERROR", json_mode=json_mode))
+        sys.exit(1)
+
+    if str(cfg.get("type", "")).strip().lower() != "prusaconnect":
+        click.echo(format_error(
+            "Active printer is not Prusa Link. Set one with --printer or run: kiln auth --type prusaconnect ...",
+            code="WRONG_PRINTER_TYPE",
+            json_mode=json_mode,
+        ))
+        sys.exit(1)
+
+    result = _run_prusa_diagnostics(cfg)
+    if json_mode:
+        click.echo(_json.dumps({"status": "success" if result.get("ok") else "error", "data": result}, indent=2))
+    else:
+        click.echo("Prusa Link diagnostics:")
+        for check in result.get("checks", []):
+            if not isinstance(check, dict):
+                continue
+            icon = "✓" if check.get("ok") else ("⚠" if check.get("warn") else "✗")
+            click.echo(f"  {icon} {check.get('name')}: {check.get('detail')}")
+        if result.get("profile_id"):
+            click.echo(f"\nDetected profile: {result['profile_id']}")
+        if result.get("file_count") is not None:
+            click.echo(f"Files visible: {result['file_count']}")
+
+    if not result.get("ok"):
+        sys.exit(1)
+
+
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
@@ -4075,6 +4268,31 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
                     "name": "printer_reachable",
                     "ok": False,
                     "detail": f"cannot reach {host}: {exc}",
+                })
+
+        # Prusa-specific diagnostics for first-run clarity.
+        if str(printer_cfg.get("type", "")).strip().lower() == "prusaconnect":
+            try:
+                prusa_diag = _run_prusa_diagnostics(printer_cfg)
+                checks.append({
+                    "name": "prusa_storage",
+                    "ok": bool(prusa_diag.get("ok")),
+                    "detail": (
+                        f"roots checked: usb/local; files={prusa_diag.get('file_count')}"
+                    ),
+                })
+                if prusa_diag.get("profile_id"):
+                    checks.append({
+                        "name": "prusa_model",
+                        "ok": True,
+                        "detail": f"detected profile {prusa_diag.get('profile_id')}",
+                    })
+            except Exception as exc:
+                logger.debug("Prusa verify diagnostics failed: %s", exc)
+                checks.append({
+                    "name": "prusa_storage",
+                    "ok": False,
+                    "detail": str(exc),
                 })
     else:
         checks.append({

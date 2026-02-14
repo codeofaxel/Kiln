@@ -335,6 +335,7 @@ def save_printer(
     api_key: str | None = None,
     access_code: str | None = None,
     serial: str | None = None,
+    printer_model: str | None = None,
     set_active: bool = True,
     config_path: Path | None = None,
 ) -> Path:
@@ -368,6 +369,8 @@ def save_printer(
     elif printer_type == "prusaconnect":
         if api_key:
             entry["api_key"] = api_key
+        if printer_model:
+            entry["printer_model"] = printer_model
     elif printer_type == "serial":
         # For serial printers, 'host' stores the serial port path.
         pass
