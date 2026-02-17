@@ -30,7 +30,7 @@ from kiln.fulfillment.craftcloud import CraftcloudProvider
 
 def _mock_response(
     status_code: int = 200,
-    json_data: Optional[Dict[str, Any]] = None,
+    json_data: Optional[Any] = None,
     ok: bool = True,
 ) -> MagicMock:
     """Create a mock requests.Response."""
@@ -162,6 +162,27 @@ class TestProperties:
 
 
 class TestListMaterials:
+    def test_list_materials_material_catalog_material_config_id(self):
+        p = _provider()
+        resp = _mock_response(json_data=[
+            {
+                "materialConfigId": "mc-pla-white",
+                "displayName": "PLA White",
+                "technology": "FDM",
+                "color": "white",
+                "pricePerCm3": 0.15,
+            },
+        ])
+        with patch.object(p._session, "request", return_value=resp) as mock_req:
+            materials = p.list_materials()
+
+        assert len(materials) == 1
+        assert materials[0].id == "mc-pla-white"
+        assert materials[0].name == "PLA White"
+        assert materials[0].technology == "FDM"
+        first_url = mock_req.call_args_list[0].args[1]
+        assert "material-catalog" in first_url
+
     def test_list_materials(self):
         p = _provider()
         resp = _mock_response(json_data={
@@ -179,6 +200,20 @@ class TestListMaterials:
         assert materials[0].id == "pla-white"
         assert materials[0].technology == "FDM"
         assert materials[1].name == "Resin Grey"
+
+    def test_list_materials_fallback_legacy_when_catalog_fails(self):
+        p = _provider()
+        catalog_error = _mock_response(status_code=500, ok=False, json_data={"error": "down"})
+        legacy_resp = _mock_response(json_data={
+            "materials": [
+                {"id": "legacy-pla", "name": "Legacy PLA", "technology": "FDM"},
+            ],
+        })
+        with patch.object(p._session, "request", side_effect=[catalog_error, legacy_resp]):
+            materials = p.list_materials()
+
+        assert len(materials) == 1
+        assert materials[0].id == "legacy-pla"
 
     def test_list_materials_empty(self):
         p = _provider()
@@ -202,6 +237,62 @@ class TestListMaterials:
 
 
 class TestGetQuote:
+    def test_get_quote_uses_material_config_id_payload(self, tmp_path):
+        model = tmp_path / "model.stl"
+        model.write_text("solid model")
+
+        p = _provider()
+        upload_resp = _mock_response(json_data={"uploadId": "u-789"})
+        quote_resp = _mock_response(json_data={
+            "quoteId": "q-123",
+            "materialName": "PLA White",
+            "quantity": 2,
+            "unitPrice": 5.50,
+            "totalPrice": 11.00,
+        })
+        with patch.object(p._session, "request", side_effect=[upload_resp, quote_resp]) as mock_req:
+            quote = p.get_quote(QuoteRequest(
+                file_path=str(model),
+                material_id="mc-pla-white",
+                quantity=2,
+            ))
+
+        quote_call = mock_req.call_args_list[1]
+        payload = quote_call.kwargs.get("json") or quote_call[1].get("json")
+        assert payload["materialConfigId"] == "mc-pla-white"
+        assert payload["shippingCountry"] == "US"
+        assert quote.quote_id == "q-123"
+
+    def test_get_quote_fallback_to_legacy_payload(self, tmp_path):
+        model = tmp_path / "model.stl"
+        model.write_text("solid model")
+
+        p = _provider()
+        upload_resp = _mock_response(json_data={"upload_id": "u-789"})
+        bad_resp = _mock_response(status_code=400, ok=False, json_data={"error": "bad payload"})
+        good_resp = _mock_response(json_data={
+            "quote_id": "q-legacy",
+            "material": "PLA White",
+            "quantity": 1,
+            "unit_price": 6.0,
+            "total_price": 6.0,
+        })
+        with patch.object(
+            p._session,
+            "request",
+            side_effect=[upload_resp, bad_resp, good_resp],
+        ) as mock_req:
+            quote = p.get_quote(QuoteRequest(
+                file_path=str(model),
+                material_id="mc-pla-white",
+            ))
+
+        primary_payload = mock_req.call_args_list[1].kwargs.get("json")
+        fallback_payload = mock_req.call_args_list[2].kwargs.get("json")
+        assert "materialConfigId" in primary_payload
+        assert "material_id" in fallback_payload
+        assert quote.quote_id == "q-legacy"
+
     def test_get_quote_success(self, tmp_path):
         model = tmp_path / "model.stl"
         model.write_text("solid model")
@@ -310,7 +401,8 @@ class TestPlaceOrder:
         # Verify the payload included shipping_address
         call_kwargs = mock_req.call_args
         payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
-        assert payload["shipping_address"]["city"] == "NYC"
+        shipping = payload.get("shippingAddress") or payload.get("shipping_address")
+        assert shipping["city"] == "NYC"
 
 
 # ---------------------------------------------------------------------------

@@ -792,6 +792,11 @@ Configure your fulfillment provider:
 ```bash
 # Option 1: Auto-detect from API key (Craftcloud is default)
 export KILN_CRAFTCLOUD_API_KEY=your_key
+export KILN_CRAFTCLOUD_BASE_URL=https://api.craftcloud3d.com
+export KILN_CRAFTCLOUD_MATERIAL_CATALOG_URL=http://customer-api.craftcloud3d.com/material-catalog
+
+# Craftcloud staging (for testing)
+export KILN_CRAFTCLOUD_BASE_URL=https://api-stg.craftcloud3d.com
 
 # Option 2: Sculpteo
 export KILN_SCULPTEO_API_KEY=your_key

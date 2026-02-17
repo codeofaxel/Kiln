@@ -74,7 +74,8 @@ Comprehensive reference for deploying Kiln as a hosted REST API service or local
 |---|---|---|---|
 | `KILN_FULFILLMENT_PROVIDER` | No | auto-detect | Explicit fulfillment provider: `craftcloud`, `sculpteo` |
 | `KILN_CRAFTCLOUD_API_KEY` | No | `""` | Craftcloud API key |
-| `KILN_CRAFTCLOUD_BASE_URL` | No | Craftcloud default | Override Craftcloud API base URL |
+| `KILN_CRAFTCLOUD_BASE_URL` | No | `https://api.craftcloud3d.com` | Override Craftcloud API base URL (staging: `https://api-stg.craftcloud3d.com`) |
+| `KILN_CRAFTCLOUD_MATERIAL_CATALOG_URL` | No | `http://customer-api.craftcloud3d.com/material-catalog` | Craftcloud material catalog endpoint (used to retrieve `materialConfigId`s) |
 | `KILN_SCULPTEO_API_KEY` | No | `""` | Sculpteo API key |
 | `KILN_SCULPTEO_BASE_URL` | No | Sculpteo default | Override Sculpteo API base URL |
 
@@ -179,6 +180,9 @@ KILN_RATE_LIMIT=60
 
 # === Optional: Fulfillment (outsourced manufacturing) ===
 # KILN_CRAFTCLOUD_API_KEY=CHANGE_ME
+# KILN_CRAFTCLOUD_BASE_URL=https://api.craftcloud3d.com
+# KILN_CRAFTCLOUD_MATERIAL_CATALOG_URL=http://customer-api.craftcloud3d.com/material-catalog
+# KILN_CRAFTCLOUD_BASE_URL=https://api-stg.craftcloud3d.com   # staging
 # KILN_STRIPE_SECRET_KEY=sk_live_CHANGE_ME
 
 # === Optional: LLM privacy (enabled by default) ===
