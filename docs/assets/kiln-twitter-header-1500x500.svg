@@ -30,7 +30,7 @@
   <line x1="654" y1="248" x2="846" y2="248" stroke="#FF6B2B" stroke-width="4.5" stroke-linecap="round"/>
 
   <!-- Tagline text -->
-  <text x="750" y="380" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="22" font-weight="300" fill="#888888" text-anchor="middle" letter-spacing="0.15em">AI-POWERED 3D PRINTER CONTROL</text>
+  <text x="750" y="380" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="22" font-weight="300" fill="#888888" text-anchor="middle" letter-spacing="0.15em">Let's build.</text>
 
   <!-- Subtle bottom accent line -->
   <line x1="680" y1="410" x2="820" y2="410" stroke="#FF6B2B" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/>
