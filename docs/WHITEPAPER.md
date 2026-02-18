@@ -227,6 +227,8 @@ All SQL queries in the persistence layer use parameterized statements — no str
 
 Safety-critical operations are recorded through two mechanisms. The event bus persists all significant state changes — job transitions, printer status changes, temperature warnings — to SQLite, providing a queryable history of system behavior. A dedicated `safety_audit` tool reviews recent safety-relevant actions (guarded commands, emergency stops, temperature limit rejections) and surfaces them to agents or operators on demand. Together, these provide a tamper-evident record of every physical action the system has taken.
 
+Each server process is assigned a unique session UUID at startup. Every tool call, G-code command, safety check, and blocked attempt is tagged with this session ID. The `get_session_log` tool returns the complete ordered record of what an agent issued during a session — enabling full replay and post-hoc accountability. Session logs are HMAC-SHA256 signed to detect tampering.
+
 ## 9. Agent-Delegated Vision Monitoring
 
 ### 9.1 Design Philosophy

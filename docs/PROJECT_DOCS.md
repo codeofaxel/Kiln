@@ -420,6 +420,7 @@ Kiln exposes **197 MCP tools** in total. The most commonly used tools are docume
 | Tool | Input | Output |
 |---|---|---|
 | `safety_audit` | — | Safety compliance report |
+| `get_session_log` | `session_id?` | Full tool call history for an agent session (defaults to current session) |
 | `safety_settings` | — | Current safety/auto-print settings |
 | `safety_status` | — | Comprehensive safety status |
 
