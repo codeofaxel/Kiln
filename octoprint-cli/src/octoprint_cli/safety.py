@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from octoprint_cli.output import format_bytes, format_time
 
@@ -20,7 +20,7 @@ _LARGE_FILE_THRESHOLD = 500 * 1024 * 1024  # 500 MB
 # ------------------------------------------------------------------
 
 
-def check_printer_ready(client: Any) -> Dict[str, Any]:
+def check_printer_ready(client: Any) -> dict[str, Any]:
     """Verify the printer is connected, operational, idle, and error-free.
 
     Args:
@@ -30,8 +30,8 @@ def check_printer_ready(client: Any) -> Dict[str, Any]:
         A dict with keys ``ready`` (bool), ``checks`` (list of individual
         check results), and ``errors`` (list of error messages).
     """
-    checks: List[Dict[str, Any]] = []
-    errors: List[str] = []
+    checks: list[dict[str, Any]] = []
+    errors: list[str] = []
 
     # -- Check 1: printer connected --
     conn_result = client.get_connection()
@@ -56,11 +56,13 @@ def check_printer_ready(client: Any) -> Dict[str, Any]:
 
         # Operational
         is_operational = bool(flags.get("operational", False))
-        checks.append({
-            "name": "printer_operational",
-            "passed": is_operational,
-            "message": f"Printer state: {state_text}",
-        })
+        checks.append(
+            {
+                "name": "printer_operational",
+                "passed": is_operational,
+                "message": f"Printer state: {state_text}",
+            }
+        )
         if not is_operational:
             errors.append(f"Printer is not operational (state: {state_text})")
 
@@ -68,11 +70,13 @@ def check_printer_ready(client: Any) -> Dict[str, Any]:
         is_printing = bool(flags.get("printing", False)) or bool(flags.get("pausing", False))
         not_printing = not is_printing
         printing_msg = "No active print job" if not_printing else f"Printer is currently printing (state: {state_text})"
-        checks.append({
-            "name": "not_printing",
-            "passed": not_printing,
-            "message": printing_msg,
-        })
+        checks.append(
+            {
+                "name": "not_printing",
+                "passed": not_printing,
+                "message": printing_msg,
+            }
+        )
         if not not_printing:
             errors.append(f"Printer is busy (state: {state_text})")
 
@@ -80,11 +84,13 @@ def check_printer_ready(client: Any) -> Dict[str, Any]:
         has_error = bool(flags.get("error", False)) or bool(flags.get("closedOrError", False))
         no_error = not has_error
         error_msg = "No printer errors detected" if no_error else f"Printer reports an error (state: {state_text})"
-        checks.append({
-            "name": "no_errors",
-            "passed": no_error,
-            "message": error_msg,
-        })
+        checks.append(
+            {
+                "name": "no_errors",
+                "passed": no_error,
+                "message": error_msg,
+            }
+        )
         if not no_error:
             errors.append(f"Printer error detected (state: {state_text})")
     else:
@@ -101,7 +107,7 @@ def check_temperatures(
     client: Any,
     max_tool_temp: float = 260,
     max_bed_temp: float = 110,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Check that current and target temperatures are within safe limits.
 
     Args:
@@ -113,10 +119,10 @@ def check_temperatures(
         A dict with keys ``safe`` (bool), ``tool`` and ``bed`` temperature
         info, and ``warnings`` (list of strings).
     """
-    warnings: List[str] = []
+    warnings: list[str] = []
 
-    tool_info: Dict[str, Optional[float]] = {"actual": 0.0, "target": 0.0}
-    bed_info: Dict[str, Optional[float]] = {"actual": 0.0, "target": 0.0}
+    tool_info: dict[str, float | None] = {"actual": 0.0, "target": 0.0}
+    bed_info: dict[str, float | None] = {"actual": 0.0, "target": 0.0}
 
     printer_result = client.get_printer_state()
     if not printer_result["success"]:
@@ -147,43 +153,25 @@ def check_temperatures(
 
     # Check tool temperature limits.
     if tool_actual > max_tool_temp:
-        warnings.append(
-            f"Tool temperature ({tool_actual:.1f}C) exceeds safe maximum "
-            f"({max_tool_temp:.0f}C)"
-        )
+        warnings.append(f"Tool temperature ({tool_actual:.1f}C) exceeds safe maximum ({max_tool_temp:.0f}C)")
         safe = False
     if tool_target > max_tool_temp:
-        warnings.append(
-            f"Tool target temperature ({tool_target:.1f}C) exceeds safe maximum "
-            f"({max_tool_temp:.0f}C)"
-        )
+        warnings.append(f"Tool target temperature ({tool_target:.1f}C) exceeds safe maximum ({max_tool_temp:.0f}C)")
         safe = False
 
     # Check bed temperature limits.
     if bed_actual > max_bed_temp:
-        warnings.append(
-            f"Bed temperature ({bed_actual:.1f}C) exceeds safe maximum "
-            f"({max_bed_temp:.0f}C)"
-        )
+        warnings.append(f"Bed temperature ({bed_actual:.1f}C) exceeds safe maximum ({max_bed_temp:.0f}C)")
         safe = False
     if bed_target > max_bed_temp:
-        warnings.append(
-            f"Bed target temperature ({bed_target:.1f}C) exceeds safe maximum "
-            f"({max_bed_temp:.0f}C)"
-        )
+        warnings.append(f"Bed target temperature ({bed_target:.1f}C) exceeds safe maximum ({max_bed_temp:.0f}C)")
         safe = False
 
     # Warn if tool is heated but bed isn't (or vice versa).
     if tool_target > 0 and bed_target == 0:
-        warnings.append(
-            "Tool temperature is set but bed temperature is not. "
-            "Most prints require both."
-        )
+        warnings.append("Tool temperature is set but bed temperature is not. Most prints require both.")
     if bed_target > 0 and tool_target == 0:
-        warnings.append(
-            "Bed temperature is set but tool temperature is not. "
-            "Most prints require both."
-        )
+        warnings.append("Bed temperature is set but tool temperature is not. Most prints require both.")
 
     return {
         "safe": safe,
@@ -193,7 +181,7 @@ def check_temperatures(
     }
 
 
-def validate_file(file_path: str) -> Dict[str, Any]:
+def validate_file(file_path: str) -> dict[str, Any]:
     """Validate a local G-code file before upload.
 
     Checks that the file exists, is readable, has a recognised extension,
@@ -206,9 +194,9 @@ def validate_file(file_path: str) -> Dict[str, Any]:
         A dict with keys ``valid`` (bool), ``errors``, ``warnings``, and
         ``info`` (size and extension metadata).
     """
-    errors: List[str] = []
-    warnings: List[str] = []
-    info: Dict[str, Any] = {"size_bytes": 0, "size_human": "0 B", "extension": ""}
+    errors: list[str] = []
+    warnings: list[str] = []
+    info: dict[str, Any] = {"size_bytes": 0, "size_human": "0 B", "extension": ""}
 
     path = Path(file_path)
 
@@ -237,10 +225,7 @@ def validate_file(file_path: str) -> Dict[str, Any]:
     ext = path.suffix.lower()
     info["extension"] = ext
     if ext not in _GCODE_EXTENSIONS:
-        errors.append(
-            f"Unsupported file extension '{ext}'. "
-            f"Expected one of: {', '.join(sorted(_GCODE_EXTENSIONS))}"
-        )
+        errors.append(f"Unsupported file extension '{ext}'. Expected one of: {', '.join(sorted(_GCODE_EXTENSIONS))}")
 
     # Size checks.
     try:
@@ -256,14 +241,10 @@ def validate_file(file_path: str) -> Dict[str, Any]:
         errors.append("File is empty (0 bytes)")
     elif size >= _MAX_FILE_SIZE:
         errors.append(
-            f"File is too large ({format_bytes(size)}). "
-            f"Maximum allowed size is {format_bytes(_MAX_FILE_SIZE)}."
+            f"File is too large ({format_bytes(size)}). Maximum allowed size is {format_bytes(_MAX_FILE_SIZE)}."
         )
     elif size >= _LARGE_FILE_THRESHOLD:
-        warnings.append(
-            f"File is very large ({format_bytes(size)}). "
-            "Upload and slicing analysis may take a while."
-        )
+        warnings.append(f"File is very large ({format_bytes(size)}). Upload and slicing analysis may take a while.")
 
     valid = len(errors) == 0
     return {"valid": valid, "errors": errors, "warnings": warnings, "info": info}
@@ -273,7 +254,7 @@ def estimate_resources(
     client: Any,
     file_path_on_server: str,
     location: str = "local",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Retrieve estimated print time and filament usage from OctoPrint.
 
     OctoPrint performs file analysis asynchronously after upload, so this
@@ -288,7 +269,7 @@ def estimate_resources(
         A dict with ``available`` (bool), ``estimated_print_time``,
         ``estimated_print_time_seconds``, and ``filament`` usage info.
     """
-    default_result: Dict[str, Any] = {
+    default_result: dict[str, Any] = {
         "estimated_print_time": "Unknown",
         "estimated_print_time_seconds": None,
         "filament": {"length_mm": None, "volume_cm3": None},
@@ -339,7 +320,7 @@ def estimate_resources(
 # ------------------------------------------------------------------
 
 
-def check_can_cancel(client: Any) -> Dict[str, Any]:
+def check_can_cancel(client: Any) -> dict[str, Any]:
     """Determine whether there is an active job that can be cancelled.
 
     Args:
@@ -385,10 +366,10 @@ def check_can_cancel(client: Any) -> Dict[str, Any]:
 
 def preflight_check(
     client: Any,
-    file_path: Optional[str] = None,
-    file_on_server: Optional[str] = None,
+    file_path: str | None = None,
+    file_on_server: str | None = None,
     location: str = "local",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run all safety checks and return a combined report.
 
     Args:
@@ -405,11 +386,11 @@ def preflight_check(
     printer = check_printer_ready(client)
     temperatures = check_temperatures(client)
 
-    file_result: Optional[Dict[str, Any]] = None
+    file_result: dict[str, Any] | None = None
     if file_path is not None:
         file_result = validate_file(file_path)
 
-    resources_result: Optional[Dict[str, Any]] = None
+    resources_result: dict[str, Any] | None = None
     if file_on_server is not None:
         resources_result = estimate_resources(client, file_on_server, location)
 
@@ -419,7 +400,7 @@ def preflight_check(
         ready = False
 
     # Build a one-line summary.
-    issues: List[str] = []
+    issues: list[str] = []
     if not printer["ready"]:
         issues.append("printer not ready")
     if not temperatures["safe"]:
@@ -432,7 +413,7 @@ def preflight_check(
     else:
         summary = "Pre-flight checks failed: " + "; ".join(issues) + "."
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "ready": ready,
         "printer": printer,
         "temperatures": temperatures,

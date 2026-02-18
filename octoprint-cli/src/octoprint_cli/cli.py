@@ -11,11 +11,12 @@ Usage:
     octoprint-cli preflight [<file_path>] [--json]
     octoprint-cli init
 """
+
 from __future__ import annotations
 
 import json
 import sys
-from typing import Any, Dict, Optional
+from typing import Any
 
 import click
 
@@ -24,7 +25,6 @@ from octoprint_cli.config import init_config, load_config, validate_config
 from octoprint_cli.exit_codes import (
     FILE_ERROR,
     OTHER_ERROR,
-    PRINTER_BUSY,
     PRINTER_OFFLINE,
     SUCCESS,
     exit_code_for,
@@ -42,10 +42,10 @@ from octoprint_cli.safety import (
     validate_file,
 )
 
-
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _emit(output: str, exit_code: int = SUCCESS) -> None:
     """Print output and exit with the given code."""
@@ -57,7 +57,7 @@ def _emit_error(
     code: str,
     message: str,
     json_mode: bool,
-    exit_code: Optional[int] = None,
+    exit_code: int | None = None,
 ) -> None:
     """Emit a structured error and exit."""
     if exit_code is None:
@@ -85,7 +85,7 @@ def _make_client(host: str, api_key: str, json_mode: bool) -> OctoPrintClient:
 
 
 def _handle_api_error(
-    result: Dict[str, Any],
+    result: dict[str, Any],
     json_mode: bool,
 ) -> None:
     """If the API result is an error, emit and exit. Otherwise return."""
@@ -98,12 +98,13 @@ def _handle_api_error(
 # CLI group
 # ------------------------------------------------------------------
 
+
 @click.group()
 @click.option("--host", envvar="OCTOPRINT_HOST", default=None, help="OctoPrint server URL.")
 @click.option("--api-key", envvar="OCTOPRINT_API_KEY", default=None, help="OctoPrint API key.")
 @click.version_option(package_name="octoprint-cli")
 @click.pass_context
-def cli(ctx: click.Context, host: Optional[str], api_key: Optional[str]) -> None:
+def cli(ctx: click.Context, host: str | None, api_key: str | None) -> None:
     """Agent-friendly CLI for OctoPrint 3D printer management."""
     ctx.ensure_object(dict)
     ctx.obj["host"] = host
@@ -113,6 +114,7 @@ def cli(ctx: click.Context, host: Optional[str], api_key: Optional[str]) -> None
 # ------------------------------------------------------------------
 # status
 # ------------------------------------------------------------------
+
 
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, default=False, help="Output as JSON.")
@@ -130,14 +132,19 @@ def status(ctx: click.Context, json_mode: bool) -> None:
         # If it's a 409 (not connected), report that clearly
         if error.get("http_status") == 409 or error["code"] == "CONFLICT":
             if json_mode:
-                output = json.dumps({
-                    "status": "error",
-                    "data": {"state": "Disconnected", "temperature": None, "job": None},
-                    "error": {"code": "PRINTER_DISCONNECTED", "message": "Printer is not connected to OctoPrint."},
-                }, indent=2)
+                output = json.dumps(
+                    {
+                        "status": "error",
+                        "data": {"state": "Disconnected", "temperature": None, "job": None},
+                        "error": {"code": "PRINTER_DISCONNECTED", "message": "Printer is not connected to OctoPrint."},
+                    },
+                    indent=2,
+                )
                 _emit(output, PRINTER_OFFLINE)
             else:
-                _emit_error("PRINTER_DISCONNECTED", "Printer is not connected to OctoPrint.", json_mode, PRINTER_OFFLINE)
+                _emit_error(
+                    "PRINTER_DISCONNECTED", "Printer is not connected to OctoPrint.", json_mode, PRINTER_OFFLINE
+                )
         _handle_api_error(printer_result, json_mode)
 
     printer_data = printer_result.get("data")
@@ -150,6 +157,7 @@ def status(ctx: click.Context, json_mode: bool) -> None:
 # ------------------------------------------------------------------
 # files
 # ------------------------------------------------------------------
+
 
 @cli.command()
 @click.option("--location", default="local", help="Storage location (local/sdcard).")
@@ -168,6 +176,7 @@ def files(ctx: click.Context, location: str, json_mode: bool) -> None:
 # ------------------------------------------------------------------
 # upload
 # ------------------------------------------------------------------
+
 
 @cli.command()
 @click.argument("file_path", type=click.Path(exists=True))
@@ -213,6 +222,7 @@ def upload(
 # print
 # ------------------------------------------------------------------
 
+
 @cli.command(name="print")
 @click.argument("file_path", type=click.Path(exists=True))
 @click.option("--confirm", is_flag=True, default=False, help="Required flag to confirm print start.")
@@ -235,8 +245,7 @@ def print_cmd(
     if not confirm:
         _emit_error(
             "CONFIRMATION_REQUIRED",
-            "The --confirm flag is required to start a print. "
-            "This prevents accidental prints in autonomous workflows.",
+            "The --confirm flag is required to start a print. This prevents accidental prints in autonomous workflows.",
             json_mode,
             OTHER_ERROR,
         )
@@ -250,11 +259,15 @@ def print_cmd(
             state = (job_result["data"] or {}).get("state", "")
             if state.lower() in ("printing", "pausing", "paused"):
                 if json_mode:
-                    output = format_response("success", data={
-                        "action": "skipped",
-                        "message": f"Printer is already {state}. Skipped.",
-                        "current_state": state,
-                    }, json_mode=True)
+                    output = format_response(
+                        "success",
+                        data={
+                            "action": "skipped",
+                            "message": f"Printer is already {state}. Skipped.",
+                            "current_state": state,
+                        },
+                        json_mode=True,
+                    )
                 else:
                     output = f"Printer is already {state}. Skipped (--skip-if-printing)."
                 _emit(output, SUCCESS)
@@ -264,10 +277,15 @@ def print_cmd(
         preflight = preflight_check(client, file_path=file_path)
         if not preflight["ready"]:
             if json_mode:
-                output = format_response("error", data=preflight, error={
-                    "code": "PREFLIGHT_FAILED",
-                    "message": preflight["summary"],
-                }, json_mode=True)
+                output = format_response(
+                    "error",
+                    data=preflight,
+                    error={
+                        "code": "PREFLIGHT_FAILED",
+                        "message": preflight["summary"],
+                    },
+                    json_mode=True,
+                )
                 _emit(output, OTHER_ERROR)
             else:
                 _emit_error("PREFLIGHT_FAILED", preflight["summary"], json_mode)
@@ -288,6 +306,7 @@ def print_cmd(
 # ------------------------------------------------------------------
 # cancel
 # ------------------------------------------------------------------
+
 
 @cli.command()
 @click.option("--confirm", is_flag=True, default=False, help="Required flag to confirm cancellation.")
@@ -329,6 +348,7 @@ def cancel(ctx: click.Context, confirm: bool, json_mode: bool) -> None:
 # pause
 # ------------------------------------------------------------------
 
+
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, default=False, help="Output as JSON.")
 @click.pass_context
@@ -345,6 +365,7 @@ def pause(ctx: click.Context, json_mode: bool) -> None:
 # ------------------------------------------------------------------
 # resume
 # ------------------------------------------------------------------
+
 
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, default=False, help="Output as JSON.")
@@ -363,11 +384,12 @@ def resume(ctx: click.Context, json_mode: bool) -> None:
 # preflight
 # ------------------------------------------------------------------
 
+
 @cli.command()
 @click.argument("file_path", required=False, type=click.Path(), default=None)
 @click.option("--json", "json_mode", is_flag=True, default=False, help="Output as JSON.")
 @click.pass_context
-def preflight(ctx: click.Context, file_path: Optional[str], json_mode: bool) -> None:
+def preflight(ctx: click.Context, file_path: str | None, json_mode: bool) -> None:
     """Run pre-flight safety checks.
 
     Optionally pass a local G-code file path to include file validation.
@@ -407,6 +429,7 @@ def preflight(ctx: click.Context, file_path: Optional[str], json_mode: bool) -> 
 # init
 # ------------------------------------------------------------------
 
+
 @cli.command()
 @click.option("--host", prompt="OctoPrint host URL", help="OctoPrint server URL.")
 @click.option("--api-key", prompt="OctoPrint API key", help="OctoPrint API key.")
@@ -420,6 +443,7 @@ def init(host: str, api_key: str) -> None:
 # connect / disconnect
 # ------------------------------------------------------------------
 
+
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, default=False, help="Output as JSON.")
 @click.pass_context
@@ -430,7 +454,9 @@ def connect(ctx: click.Context, json_mode: bool) -> None:
     _handle_api_error(result, json_mode)
 
     if json_mode:
-        output = format_response("success", data={"action": "connect", "message": "Connection command sent."}, json_mode=True)
+        output = format_response(
+            "success", data={"action": "connect", "message": "Connection command sent."}, json_mode=True
+        )
     else:
         output = "Connection command sent to printer."
     _emit(output, SUCCESS)
@@ -446,7 +472,9 @@ def disconnect(ctx: click.Context, json_mode: bool) -> None:
     _handle_api_error(result, json_mode)
 
     if json_mode:
-        output = format_response("success", data={"action": "disconnect", "message": "Disconnect command sent."}, json_mode=True)
+        output = format_response(
+            "success", data={"action": "disconnect", "message": "Disconnect command sent."}, json_mode=True
+        )
     else:
         output = "Disconnect command sent to printer."
     _emit(output, SUCCESS)
@@ -455,6 +483,7 @@ def disconnect(ctx: click.Context, json_mode: bool) -> None:
 # ------------------------------------------------------------------
 # gcode
 # ------------------------------------------------------------------
+
 
 @cli.command()
 @click.argument("commands", nargs=-1, required=True)
@@ -471,11 +500,15 @@ def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
     _handle_api_error(result, json_mode)
 
     if json_mode:
-        output = format_response("success", data={
-            "action": "gcode",
-            "commands": list(commands),
-            "message": f"Sent {len(commands)} command(s).",
-        }, json_mode=True)
+        output = format_response(
+            "success",
+            data={
+                "action": "gcode",
+                "commands": list(commands),
+                "message": f"Sent {len(commands)} command(s).",
+            },
+            json_mode=True,
+        )
     else:
         output = f"Sent {len(commands)} G-code command(s): {', '.join(commands)}"
     _emit(output, SUCCESS)
@@ -485,6 +518,7 @@ def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
 # temp
 # ------------------------------------------------------------------
 
+
 @cli.command()
 @click.option("--tool", "tool_temp", type=float, default=None, help="Set tool/hotend target temp (C).")
 @click.option("--bed", "bed_temp", type=float, default=None, help="Set bed target temp (C).")
@@ -493,8 +527,8 @@ def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
 @click.pass_context
 def temp(
     ctx: click.Context,
-    tool_temp: Optional[float],
-    bed_temp: Optional[float],
+    tool_temp: float | None,
+    bed_temp: float | None,
     off: bool,
     json_mode: bool,
 ) -> None:
@@ -523,11 +557,15 @@ def temp(
     if actions_taken:
         msg = "Temperature targets set: " + ", ".join(actions_taken)
         if json_mode:
-            output = format_response("success", data={
-                "action": "set_temperature",
-                "targets": {"tool0": tool_temp, "bed": bed_temp},
-                "message": msg,
-            }, json_mode=True)
+            output = format_response(
+                "success",
+                data={
+                    "action": "set_temperature",
+                    "targets": {"tool0": tool_temp, "bed": bed_temp},
+                    "message": msg,
+                },
+                json_mode=True,
+            )
         else:
             output = msg
         _emit(output, SUCCESS)
@@ -541,6 +579,7 @@ def temp(
         output = format_response("success", data={"temperature": temp_data}, json_mode=True)
     else:
         from octoprint_cli.output import format_temp
+
         tool0 = temp_data.get("tool0", {})
         bed = temp_data.get("bed", {})
         output = (

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -59,7 +59,7 @@ class OctoPrintClient:
         return f"{self.host}{path}"
 
     @staticmethod
-    def _success(data: Any = None) -> Dict[str, Any]:
+    def _success(data: Any = None) -> dict[str, Any]:
         """Return a standardized success response.
 
         Args:
@@ -72,8 +72,8 @@ class OctoPrintClient:
     def _error(
         code: str,
         message: str,
-        http_status: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        http_status: int | None = None,
+    ) -> dict[str, Any]:
         """Return a standardized error response.
 
         Args:
@@ -92,7 +92,7 @@ class OctoPrintClient:
             },
         }
 
-    def _classify_http_error(self, response: requests.Response) -> Dict[str, Any]:
+    def _classify_http_error(self, response: requests.Response) -> dict[str, Any]:
         """Map an HTTP error response to a standardized error dict.
 
         Args:
@@ -110,7 +110,7 @@ class OctoPrintClient:
         except (ValueError, AttributeError):
             detail = response.text or response.reason
 
-        mapping: Dict[int, str] = {
+        mapping: dict[int, str] = {
             403: "AUTH_ERROR",
             404: "NOT_FOUND",
             409: "CONFLICT",
@@ -124,13 +124,10 @@ class OctoPrintClient:
         else:
             code = "HTTP_ERROR"
 
-        human_messages: Dict[str, str] = {
+        human_messages: dict[str, str] = {
             "AUTH_ERROR": "Authentication failed. Check your API key.",
             "NOT_FOUND": "The requested resource was not found.",
-            "CONFLICT": (
-                "Conflict: the printer may not be in the correct state "
-                "for this operation."
-            ),
+            "CONFLICT": ("Conflict: the printer may not be in the correct state for this operation."),
             "UNSUPPORTED_FILE_TYPE": "The file type is not supported by OctoPrint.",
             "SERVER_ERROR": f"OctoPrint server error ({status}): {detail}",
         }
@@ -143,11 +140,11 @@ class OctoPrintClient:
         self,
         method: str,
         path: str,
-        json: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        files: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Execute an HTTP request with exponential-backoff retry logic.
 
         Retries are attempted for :class:`ConnectionError`,
@@ -165,7 +162,7 @@ class OctoPrintClient:
             A standardized response dictionary.
         """
         url = self._url(path)
-        last_error: Optional[Dict[str, Any]] = None
+        last_error: dict[str, Any] | None = None
 
         for attempt in range(self.retries):
             try:
@@ -199,18 +196,12 @@ class OctoPrintClient:
             except Timeout:
                 last_error = self._error(
                     "TIMEOUT",
-                    (
-                        f"Request to {url} timed out after "
-                        f"{self.timeout}s (attempt {attempt + 1}/{self.retries})."
-                    ),
+                    (f"Request to {url} timed out after {self.timeout}s (attempt {attempt + 1}/{self.retries})."),
                 )
             except ConnectionError:
                 last_error = self._error(
                     "CONNECTION_ERROR",
-                    (
-                        f"Could not connect to OctoPrint at {self.host} "
-                        f"(attempt {attempt + 1}/{self.retries})."
-                    ),
+                    (f"Could not connect to OctoPrint at {self.host} (attempt {attempt + 1}/{self.retries})."),
                 )
             except RequestException as exc:
                 # Catch-all for other request errors (InvalidURL, etc.)
@@ -231,7 +222,7 @@ class OctoPrintClient:
     # Connection
     # ------------------------------------------------------------------
 
-    def get_connection(self) -> Dict[str, Any]:
+    def get_connection(self) -> dict[str, Any]:
         """Get the current connection state of the printer.
 
         Calls ``GET /api/connection``.
@@ -246,7 +237,7 @@ class OctoPrintClient:
     # Printer
     # ------------------------------------------------------------------
 
-    def get_printer_state(self) -> Dict[str, Any]:
+    def get_printer_state(self) -> dict[str, Any]:
         """Get the full printer state including temperatures and flags.
 
         Calls ``GET /api/printer``.
@@ -261,7 +252,7 @@ class OctoPrintClient:
     # Job
     # ------------------------------------------------------------------
 
-    def get_job(self) -> Dict[str, Any]:
+    def get_job(self) -> dict[str, Any]:
         """Get information about the current print job.
 
         Calls ``GET /api/job``.
@@ -272,7 +263,7 @@ class OctoPrintClient:
         """
         return self._request("GET", "/api/job")
 
-    def start_job(self) -> Dict[str, Any]:
+    def start_job(self) -> dict[str, Any]:
         """Start the currently loaded print job.
 
         Calls ``POST /api/job`` with ``{"command": "start"}``.
@@ -282,7 +273,7 @@ class OctoPrintClient:
         """
         return self._request("POST", "/api/job", json={"command": "start"})
 
-    def cancel_job(self) -> Dict[str, Any]:
+    def cancel_job(self) -> dict[str, Any]:
         """Cancel the current print job.
 
         Calls ``POST /api/job`` with ``{"command": "cancel"}``.
@@ -292,7 +283,7 @@ class OctoPrintClient:
         """
         return self._request("POST", "/api/job", json={"command": "cancel"})
 
-    def pause_job(self, action: str = "toggle") -> Dict[str, Any]:
+    def pause_job(self, action: str = "toggle") -> dict[str, Any]:
         """Pause, resume, or toggle the current print job.
 
         Calls ``POST /api/job`` with ``{"command": "pause", "action": ...}``.
@@ -318,7 +309,7 @@ class OctoPrintClient:
         self,
         location: str = "local",
         recursive: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """List files stored on the printer.
 
         Calls ``GET /api/files/{location}``.
@@ -331,7 +322,7 @@ class OctoPrintClient:
         Returns:
             Standardized response with a list of file and folder entries.
         """
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         if recursive:
             params["recursive"] = "true"
         return self._request(
@@ -340,7 +331,7 @@ class OctoPrintClient:
             params=params,
         )
 
-    def get_file_info(self, location: str, path: str) -> Dict[str, Any]:
+    def get_file_info(self, location: str, path: str) -> dict[str, Any]:
         """Get detailed information about a specific file.
 
         Calls ``GET /api/files/{location}/{path}``.
@@ -364,7 +355,7 @@ class OctoPrintClient:
         location: str = "local",
         select: bool = False,
         print_after: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Upload a file to OctoPrint.
 
         Calls ``POST /api/files/{location}`` with a multipart file upload.
@@ -396,7 +387,7 @@ class OctoPrintClient:
         try:
             with open(abs_path, "rb") as fh:
                 files = {"file": (filename, fh, "application/octet-stream")}
-                form_data: Dict[str, str] = {}
+                form_data: dict[str, str] = {}
                 if select:
                     form_data["select"] = "true"
                 if print_after:
@@ -419,7 +410,7 @@ class OctoPrintClient:
         location: str,
         path: str,
         print_after: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Select a file on the printer for printing.
 
         Calls ``POST /api/files/{location}/{path}`` with the ``select``
@@ -444,7 +435,7 @@ class OctoPrintClient:
     # Printer tool / bed temperature
     # ------------------------------------------------------------------
 
-    def set_tool_temp(self, targets: Dict[str, int]) -> Dict[str, Any]:
+    def set_tool_temp(self, targets: dict[str, int]) -> dict[str, Any]:
         """Set target temperatures for printer tool(s) (hotend).
 
         Calls ``POST /api/printer/tool``.
@@ -462,7 +453,7 @@ class OctoPrintClient:
             json={"command": "target", "targets": targets},
         )
 
-    def set_bed_temp(self, target: int) -> Dict[str, Any]:
+    def set_bed_temp(self, target: int) -> dict[str, Any]:
         """Set the target temperature for the heated bed.
 
         Calls ``POST /api/printer/bed``.
@@ -484,7 +475,7 @@ class OctoPrintClient:
     # G-code commands
     # ------------------------------------------------------------------
 
-    def send_gcode(self, commands: Union[str, List[str]]) -> Dict[str, Any]:
+    def send_gcode(self, commands: str | list[str]) -> dict[str, Any]:
         """Send one or more G-code commands to the printer.
 
         Calls ``POST /api/printer/command``.

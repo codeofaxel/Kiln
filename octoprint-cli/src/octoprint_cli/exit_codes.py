@@ -3,6 +3,7 @@
 These codes allow autonomous agents to programmatically determine
 the category of failure without parsing error messages.
 """
+
 from __future__ import annotations
 
 # Success

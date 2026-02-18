@@ -3,13 +3,14 @@
 Provides both JSON (machine-parseable) and human-readable (Rich) output
 for all CLI responses.
 """
+
 from __future__ import annotations
 
 import json
 import math
 from datetime import datetime
 from io import StringIO
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 try:
     from rich.console import Console
@@ -26,7 +27,8 @@ except ImportError:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def format_time(seconds: Optional[Union[int, float]]) -> str:
+
+def format_time(seconds: int | float | None) -> str:
     """Convert seconds to a human-readable 'Xh Ym Zs' string."""
     if seconds is None or seconds < 0:
         return "N/A"
@@ -42,7 +44,7 @@ def format_time(seconds: Optional[Union[int, float]]) -> str:
     return " ".join(parts)
 
 
-def format_bytes(size_bytes: Optional[Union[int, float]]) -> str:
+def format_bytes(size_bytes: int | float | None) -> str:
     """Convert a byte count to a human-readable string (e.g. '1.2 MB')."""
     if size_bytes is None or size_bytes < 0:
         return "N/A"
@@ -50,15 +52,15 @@ def format_bytes(size_bytes: Optional[Union[int, float]]) -> str:
         return "0 B"
     units = ("B", "KB", "MB", "GB", "TB")
     exponent = min(int(math.log(size_bytes, 1024)), len(units) - 1)
-    value = size_bytes / (1024 ** exponent)
+    value = size_bytes / (1024**exponent)
     if exponent == 0:
         return f"{int(value)} B"
     return f"{value:.1f} {units[exponent]}"
 
 
 def format_temp(
-    actual: Optional[float],
-    target: Optional[float],
+    actual: float | None,
+    target: float | None,
 ) -> str:
     """Format a temperature reading like '214.8\u00b0C / 220.0\u00b0C'."""
     actual_str = f"{actual:.1f}\u00b0C" if actual is not None else "N/A"
@@ -66,7 +68,7 @@ def format_temp(
     return f"{actual_str} / {target_str}"
 
 
-def progress_bar(completion: Optional[float], width: int = 20) -> str:
+def progress_bar(completion: float | None, width: int = 20) -> str:
     """Return an ASCII progress bar like '[########............] 42.3%'.
 
     *completion* is expected as a percentage (0-100).
@@ -84,6 +86,7 @@ def progress_bar(completion: Optional[float], width: int = 20) -> str:
 # Internal Rich rendering helpers
 # ---------------------------------------------------------------------------
 
+
 def _render_to_string(renderable: Any) -> str:
     """Render a Rich object to a plain string (with ANSI codes)."""
     if not RICH_AVAILABLE:
@@ -98,10 +101,11 @@ def _render_to_string(renderable: Any) -> str:
 # format_response
 # ---------------------------------------------------------------------------
 
+
 def format_response(
     status: str,
-    data: Optional[Dict[str, Any]] = None,
-    error: Optional[Dict[str, Any]] = None,
+    data: dict[str, Any] | None = None,
+    error: dict[str, Any] | None = None,
     json_mode: bool = False,
 ) -> str:
     """Build a generic API response envelope.
@@ -118,7 +122,7 @@ def format_response(
         When *True* return a JSON string; otherwise a Rich-formatted string.
     """
     if json_mode:
-        envelope: Dict[str, Any] = {
+        envelope: dict[str, Any] = {
             "status": status,
             "data": data,
             "error": error,
@@ -156,10 +160,11 @@ def format_response(
 # format_printer_status
 # ---------------------------------------------------------------------------
 
+
 def _extract_temp(
-    temp_data: Optional[Dict[str, Any]],
+    temp_data: dict[str, Any] | None,
     key: str,
-) -> tuple[Optional[float], Optional[float]]:
+) -> tuple[float | None, float | None]:
     """Return (actual, target) from OctoPrint temperature payload."""
     if not temp_data or key not in temp_data:
         return None, None
@@ -168,8 +173,8 @@ def _extract_temp(
 
 
 def format_printer_status(
-    printer_data: Optional[Dict[str, Any]],
-    job_data: Optional[Dict[str, Any]],
+    printer_data: dict[str, Any] | None,
+    job_data: dict[str, Any] | None,
     json_mode: bool = False,
 ) -> str:
     """Format combined printer + job status.
@@ -206,7 +211,7 @@ def format_printer_status(
     file_name = file_info.get("name")
 
     if json_mode:
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "state": state_text,
             "temperature": {
                 "tool0": {"actual": tool0_actual, "target": tool0_target},
@@ -264,12 +269,13 @@ def format_printer_status(
 # format_file_list
 # ---------------------------------------------------------------------------
 
+
 def _flatten_files(
-    entries: List[Dict[str, Any]],
+    entries: list[dict[str, Any]],
     prefix: str = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Recursively flatten OctoPrint's nested file/folder structure."""
-    flat: list[Dict[str, Any]] = []
+    flat: list[dict[str, Any]] = []
     for entry in entries:
         if entry.get("type") == "folder":
             children = entry.get("children", [])
@@ -287,7 +293,7 @@ def _flatten_files(
 
 
 def format_file_list(
-    files_data: Optional[Dict[str, Any]],
+    files_data: dict[str, Any] | None,
     json_mode: bool = False,
 ) -> str:
     """Format an OctoPrint file listing.
@@ -306,12 +312,14 @@ def format_file_list(
     if json_mode:
         items = []
         for f in flat:
-            items.append({
-                "name": f.get("display_name", f.get("name")),
-                "size": f.get("size"),
-                "date": f.get("date"),
-                "type": f.get("type", "file"),
-            })
+            items.append(
+                {
+                    "name": f.get("display_name", f.get("name")),
+                    "size": f.get("size"),
+                    "date": f.get("date"),
+                    "type": f.get("type", "file"),
+                }
+            )
         return json.dumps(
             {"status": "success", "data": {"files": items}},
             indent=2,
@@ -338,9 +346,7 @@ def format_file_list(
             raw_date = f.get("date")
             if raw_date is not None:
                 try:
-                    date_str = datetime.fromtimestamp(raw_date).strftime(
-                        "%Y-%m-%d %H:%M"
-                    )
+                    date_str = datetime.fromtimestamp(raw_date).strftime("%Y-%m-%d %H:%M")
                 except (OSError, ValueError, TypeError):
                     date_str = str(raw_date)
             else:
@@ -359,9 +365,7 @@ def format_file_list(
         raw_date = f.get("date")
         if raw_date is not None:
             try:
-                date_str = datetime.fromtimestamp(raw_date).strftime(
-                    "%Y-%m-%d %H:%M"
-                )
+                date_str = datetime.fromtimestamp(raw_date).strftime("%Y-%m-%d %H:%M")
             except (OSError, ValueError, TypeError):
                 date_str = str(raw_date)
         else:
@@ -375,8 +379,9 @@ def format_file_list(
 # format_upload_result
 # ---------------------------------------------------------------------------
 
+
 def format_upload_result(
-    upload_data: Optional[Dict[str, Any]],
+    upload_data: dict[str, Any] | None,
     json_mode: bool = False,
 ) -> str:
     """Format the result of a file upload.
@@ -418,9 +423,10 @@ def format_upload_result(
 # format_job_action
 # ---------------------------------------------------------------------------
 
+
 def format_job_action(
     action: str,
-    result_data: Optional[Dict[str, Any]],
+    result_data: dict[str, Any] | None,
     json_mode: bool = False,
 ) -> str:
     """Format the result of a print/cancel/pause/resume action.

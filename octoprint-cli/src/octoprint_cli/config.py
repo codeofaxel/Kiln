@@ -3,11 +3,10 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Dict, Optional, Tuple
 
 import yaml
 
-DEFAULTS: Dict[str, object] = {
+DEFAULTS: dict[str, object] = {
     "host": "http://octopi.local",
     "api_key": "",
     "timeout": 30,
@@ -28,7 +27,7 @@ def _normalize_host(host: str) -> str:
     return host.rstrip("/")
 
 
-def _load_config_file(config_path: Path) -> Dict[str, object]:
+def _load_config_file(config_path: Path) -> dict[str, object]:
     """Read and parse a YAML config file, returning an empty dict on any failure."""
     if not config_path.is_file():
         return {}
@@ -43,10 +42,10 @@ def _load_config_file(config_path: Path) -> Dict[str, object]:
 
 
 def load_config(
-    host: Optional[str] = None,
-    api_key: Optional[str] = None,
-    config_path: Optional[str] = None,
-) -> Dict[str, object]:
+    host: str | None = None,
+    api_key: str | None = None,
+    config_path: str | None = None,
+) -> dict[str, object]:
     """Resolve configuration using a three-tier precedence hierarchy.
 
     Priority (highest first):
@@ -57,7 +56,7 @@ def load_config(
     Returns a dict with keys ``host``, ``api_key``, ``timeout``, and ``retries``.
     """
     # --- Layer 3: start with built-in defaults ---
-    config: Dict[str, object] = dict(DEFAULTS)
+    config: dict[str, object] = dict(DEFAULTS)
 
     # --- Layer 3 (cont.): merge config file on top of defaults ---
     path = Path(config_path) if config_path else get_default_config_path()
@@ -111,7 +110,7 @@ def init_config(host: str, api_key: str) -> Path:
     return config_path
 
 
-def validate_config(config: Dict[str, object]) -> Tuple[bool, Optional[str]]:
+def validate_config(config: dict[str, object]) -> tuple[bool, str | None]:
     """Validate a resolved configuration dict.
 
     Returns ``(True, None)`` when the config is valid, or
