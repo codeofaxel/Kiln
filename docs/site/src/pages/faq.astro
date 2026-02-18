@@ -21,7 +21,7 @@ const sections: Section[] = [
       },
       {
         q: "How is Kiln different from just using OctoPrint or Moonraker?",
-        a: "OctoPrint and Moonraker are great printer management interfaces built for humans. Kiln sits on top of them (and Bambu Lab, and Prusa Link) to provide a unified, AI-friendly interface. It adds safety guardrails, a job queue, fleet management, slicing integration, and a standardized protocol — things you need when an autonomous agent is in the loop, not a person clicking buttons."
+        a: "OctoPrint and Moonraker are great printer management interfaces built for humans. Kiln sits on top of them (and Bambu Lab, Elegoo, and Prusa Link) to provide a unified, AI-friendly interface. It adds safety guardrails, a job queue, fleet management, slicing integration, and a standardized protocol — things you need when an autonomous agent is in the loop, not a person clicking buttons."
       },
       {
         q: "Is Kiln free?",
@@ -38,7 +38,7 @@ const sections: Section[] = [
     items: [
       {
         q: "What printers does Kiln support?",
-        a: "Kiln supports printers running OctoPrint, Moonraker (Klipper), Bambu Lab (X1C, P1S, P1P, A1, A1 Mini), and Prusa Link (MK4, MK3.9, Mini, XL). If your printer runs one of these, Kiln can control it. Safety profiles cover 28+ printer models with per-model temperature and speed limits."
+        a: "Kiln supports printers running OctoPrint, Moonraker (Klipper), Bambu Lab (X1C, P1S, P1P, A1, A1 Mini), Elegoo (Centauri Carbon, Saturn, Mars via SDCP; Neptune 4 and OrangeStorm Giga via Moonraker), and Prusa Link (MK4, MK3.9, Mini, XL). If your printer runs one of these, Kiln can control it. Safety profiles cover 30+ printer models with per-model temperature and speed limits."
       },
       {
         q: "How do I install Kiln?",
@@ -63,7 +63,7 @@ const sections: Section[] = [
     items: [
       {
         q: "Can the AI damage my printer?",
-        a: "Kiln is built around the principle that AI should never have unchecked access to hardware. Every print operation passes through a safety layer that enforces per-printer temperature limits, validates G-code commands, runs pre-flight checks before prints, and blocks dangerous operations. Safety profiles cover 28+ printer models with manufacturer-specified limits."
+        a: "Kiln is built around the principle that AI should never have unchecked access to hardware. Every print operation passes through a safety layer that enforces per-printer temperature limits, validates G-code commands, runs pre-flight checks before prints, and blocks dangerous operations. Safety profiles cover 30+ printer models with manufacturer-specified limits."
       },
       {
         q: "What safety guardrails are in place?",
@@ -92,7 +92,7 @@ const sections: Section[] = [
       },
       {
         q: "Can I order prints from external services through Kiln?",
-        a: "Yes. Kiln supports outsourced manufacturing through fulfillment providers like Craftcloud and Sculpteo, as well as distributed peer-to-peer manufacturing via the 3DOS network. Your AI agent can compare quotes, select materials, and place orders through the same interface used for local printing."
+        a: "Yes. Kiln supports outsourced manufacturing through fulfillment providers like Craftcloud and Sculpteo. Your AI agent can compare quotes, select materials, and place orders through the same interface used for local printing. Distributed peer-to-peer manufacturing networks are on the roadmap."
       },
       {
         q: "Does Kiln support model marketplaces?",
@@ -117,7 +117,7 @@ const sections: Section[] = [
       },
       {
         q: "Can I build my own printer adapter?",
-        a: "Yes. Kiln uses an abstract adapter interface (<code>PrinterAdapter</code>) that any new printer backend can implement. If your printer has a REST, MQTT, or serial API, you can write an adapter that normalizes it to Kiln's standard interface. See the existing adapters (OctoPrint, Moonraker, Bambu, Prusa Link) as reference implementations."
+        a: "Yes. Kiln uses an abstract adapter interface (<code>PrinterAdapter</code>) that any new printer backend can implement. If your printer has a REST, MQTT, WebSocket, or serial API, you can write an adapter that normalizes it to Kiln's standard interface. See the existing adapters (OctoPrint, Moonraker, Bambu, Elegoo, Prusa Link) as reference implementations."
       },
       {
         q: "How do I contribute?",

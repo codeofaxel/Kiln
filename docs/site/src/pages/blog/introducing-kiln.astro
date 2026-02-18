@@ -24,7 +24,7 @@ import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
 <h2>The gap between AI and the physical world</h2>
 
 <p>
-  AI agents have gotten remarkably good at digital tasks — writing code, analyzing data, drafting documents. But when it comes to making physical things, they hit a wall. There's no standardized way for an AI to talk to a 3D printer. Every printer brand speaks a different protocol. OctoPrint, Klipper, Bambu Lab, and Prusa Link are all islands with their own APIs, their own quirks, and their own failure modes.
+  AI agents have gotten remarkably good at digital tasks — writing code, analyzing data, drafting documents. But when it comes to making physical things, they hit a wall. There's no standardized way for an AI to talk to a 3D printer. Every printer brand speaks a different protocol. OctoPrint, Klipper, Bambu Lab, Elegoo, and Prusa Link are all islands with their own APIs, their own quirks, and their own failure modes.
 </p>
 
 <p>
@@ -32,7 +32,7 @@ import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
 </p>
 
 <p>
-  I built Kiln because this problem frustrated me personally. I have printers. I use AI agents constantly. The two should work together, and the infrastructure to make that happen safely didn't exist. So I built it.
+  I built Kiln because I wanted AI agents to be able to bring ideas — theirs and yours — into the physical world. The infrastructure to make that happen safely didn't exist. So I built it.
 </p>
 
 <h2>What Kiln does</h2>
@@ -44,7 +44,7 @@ import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
 <h3>One interface, any printer</h3>
 
 <p>
-  Kiln supports <strong>OctoPrint</strong>, <strong>Moonraker</strong> (Klipper), <strong>Bambu Lab</strong> (X1C, P1S, P1P, A1, A1 Mini), and <strong>Prusa Link</strong> (MK4, MK3.9, Mini, XL). Your agent doesn't need to know which firmware a printer runs. It calls <code>get_printer_status</code> and gets a consistent response, whether the printer behind it is a $200 Ender running OctoPrint or a $1,500 Bambu X1 Carbon.
+  Kiln supports <strong>OctoPrint</strong>, <strong>Moonraker</strong> (Klipper), <strong>Bambu Lab</strong> (X1C, P1S, P1P, A1, A1 Mini), <strong>Elegoo</strong> (Centauri Carbon, Saturn, Mars), and <strong>Prusa Link</strong> (MK4, MK3.9, Mini, XL). Your agent doesn't need to know which firmware a printer runs. It calls <code>get_printer_status</code> and gets a consistent response, whether the printer behind it is a $200 Ender running OctoPrint or a $1,500 Bambu X1 Carbon.
 </p>
 
 <h3>Three ways to manufacture</h3>
@@ -56,11 +56,11 @@ import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
 <ol>
   <li><strong>Your printers.</strong> Direct control over machines on your local network. Upload, slice, print, monitor — all through the agent.</li>
   <li><strong>Fulfillment centers.</strong> Outsource to Craftcloud (150+ print services) or Sculpteo (75+ materials). No printer required. The agent handles quoting, ordering, and tracking.</li>
-  <li><strong>Distributed network.</strong> Route jobs to printers on the 3DOS peer-to-peer network, or register your own printer to earn revenue from incoming jobs.</li>
+  <li><strong>Distributed networks.</strong> Decentralized peer-to-peer manufacturing networks are on the roadmap — route jobs to printers worldwide or register your own to earn revenue. <em>Coming soon.</em></li>
 </ol>
 
 <p>
-  All three use the same interface. An agent can prototype locally, send the production run to Craftcloud, and route overflow to 3DOS — all in one conversation. If your local printer is busy, the agent can automatically reroute to the next best option.
+  All paths use the same interface. An agent can prototype locally and send the production run to Craftcloud — in one conversation. If your local printer is busy, the agent can automatically reroute to a fulfillment provider.
 </p>
 
 <h3>Full workflow, not just printer control</h3>
@@ -120,15 +120,15 @@ import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
 </p>
 
 <ul>
-  <li><strong>4 printer adapters</strong> — OctoPrint, Moonraker, Bambu Lab, Prusa Link</li>
+  <li><strong>5 printer adapters</strong> — OctoPrint, Moonraker, Bambu Lab, Elegoo, Prusa Link</li>
   <li><strong>197 MCP tools</strong> for AI agent integration</li>
   <li><strong>88 CLI commands</strong> for terminal-first workflows</li>
   <li><strong>REST API</strong> for custom integrations</li>
-  <li><strong>28 safety profiles</strong> covering popular printer models</li>
+  <li><strong>30 safety profiles</strong> covering popular printer models</li>
   <li><strong>5,000+ tests</strong> across the full codebase</li>
   <li><strong>Slicing integration</strong> with PrusaSlicer and OrcaSlicer</li>
   <li><strong>Fulfillment</strong> through Craftcloud and Sculpteo</li>
-  <li><strong>3DOS network</strong> integration for distributed manufacturing</li>
+  <li><strong>Distributed manufacturing</strong> via decentralized printer networks <em>(coming soon)</em></li>
   <li><strong>Marketplace adapters</strong> for MyMiniFactory and Cults3D</li>
   <li><strong>Model generation</strong> via Meshy (cloud AI) and OpenSCAD (local parametric)</li>
 </ul>
@@ -162,7 +162,8 @@ import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
 </p>
 
 <ul>
-  <li><strong>More printer adapters.</strong> Elegoo, AnkerMake, and other platforms as demand warrants.</li>
+  <li><strong>Distributed manufacturing networks.</strong> Peer-to-peer printer networks that let you route jobs worldwide or earn revenue from your own machines.</li>
+  <li><strong>More printer adapters.</strong> AnkerMake and other platforms as demand warrants.</li>
   <li><strong>Plugin system.</strong> Let the community extend Kiln with custom tools, adapters, and integrations without forking.</li>
   <li><strong>Smarter fleet routing.</strong> ML-based job assignment that considers printer history, material performance, and estimated completion time.</li>
   <li><strong>Better failure recovery.</strong> Automatic mid-print recovery strategies — pause, adjust, and resume instead of just canceling.</li>
