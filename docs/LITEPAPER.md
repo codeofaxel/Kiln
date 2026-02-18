@@ -22,11 +22,11 @@ Kiln acts as a universal translator between AI agents and 3D printers. One inter
 
 1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Bambu Lab, or Prusa Link machines on your local network -- or remotely via Bambu Cloud. Your agent doesn't need to know which firmware a printer runs; Kiln handles the translation.
 
-2. **Fulfillment centers.** Send jobs to professional manufacturing services. Craftcloud aggregates quotes from over 150 print services worldwide across FDM, SLA, SLS, MJF, and metal (DMLS). Sculpteo provides direct access to 75+ materials with professional finishing. No printer required -- but printer owners use this too for overflow, specialty materials, or production-quality parts.
+2. **Fulfillment centers.** *(API access required — in partner onboarding.)* Send jobs to professional manufacturing services. Craftcloud aggregates quotes from over 150 print services worldwide across FDM, SLA, SLS, MJF, and metal (DMLS). Sculpteo provides direct access to 75+ materials with professional finishing. No printer required -- but printer owners use this too for overflow, specialty materials, or production-quality parts.
 
-3. **Distributed network.** Route jobs to printers on the 3DOS peer-to-peer manufacturing network, or register your own printer to earn revenue from incoming jobs. Agents search the network by material, location, and machine type.
+3. **Distributed network.** *(Coming soon.)* Route jobs to decentralized peer-to-peer printer networks, or register your own printer to earn revenue from incoming jobs. Agents search the network by material, location, and machine type.
 
-An agent can start a PLA prototype on your desk printer, send the SLA version to Craftcloud, and route a batch of 50 units to the cheapest 3DOS printer with PETG -- all from the same conversation.
+An agent can start a PLA prototype on your desk printer, send the SLA version to Craftcloud, and route overflow to a distributed printer network -- all from the same conversation.
 
 **Beyond printing:**
 
@@ -43,7 +43,7 @@ An agent can start a PLA prototype on your desk printer, send the SLA version to
 ```
 You (or your agent) --> Kiln --> 🖨️ Your Printers  (local or remote via Bambu Cloud)
                                  🏭 Fulfillment     (Craftcloud · Sculpteo)
-                                 🌐 3DOS Network    (peer-to-peer printers worldwide)
+                                 🌐 Distributed Network (coming soon)
 ```
 
 Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. For those who prefer a terminal, there's also a full command-line interface with over 80 commands and a REST API for custom integrations.

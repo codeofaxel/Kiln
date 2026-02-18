@@ -26,7 +26,7 @@ Kiln lets AI agents design, queue, and execute physical manufacturing jobs on re
 | Mode | What it is | You need |
 |------|-----------|----------|
 | **🖨️ Your printer** | Control OctoPrint, Moonraker, Bambu, or Prusa Link printers on your LAN — or remotely via Bambu Cloud | A 3D printer |
-| **🏭 Fulfillment centers** | Outsource to Craftcloud (150+ services), Sculpteo (75+ materials), or other providers. Kiln handles quoting, ordering, and tracking | Nothing — no printer required |
+| **🏭 Fulfillment centers** *(API access required)* | Outsource to Craftcloud (150+ services), Sculpteo (75+ materials), or other providers. Kiln handles quoting, ordering, and tracking | Nothing — no printer required |
 | **🌐 Distributed network** *(coming soon)* | Route jobs to decentralized peer-to-peer printer networks, or register your own printer to earn revenue | Nothing — or a printer to earn |
 
 All three modes use the same MCP tools and CLI commands. An agent can seamlessly fall back from a busy local printer to a fulfillment center — all in one workflow.
@@ -790,7 +790,7 @@ kiln order history
 kiln order countries
 ```
 
-Configure your fulfillment provider:
+Configure your fulfillment provider (requires API access from Craftcloud/Sculpteo — see [Getting Access](#getting-access)):
 
 ```bash
 # Option 1: Auto-detect from API key (Craftcloud is default)

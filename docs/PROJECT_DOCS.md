@@ -13,7 +13,7 @@ Kiln is agentic infrastructure for physical fabrication. It provides a unified i
 **Three ways to print:**
 
 - **🖨️ Your printers.** Control OctoPrint, Moonraker, Bambu Lab, or Prusa Link machines on your LAN — or remotely via Bambu Cloud.
-- **🏭 Fulfillment centers.** Outsource to Craftcloud (150+ services) or Sculpteo (75+ materials). No printer required — or use alongside local printers for overflow and specialty materials.
+- **🏭 Fulfillment centers.** *(API access required — in partner onboarding with Craftcloud and Sculpteo.)* Outsource to Craftcloud (150+ services) or Sculpteo (75+ materials). No printer required — or use alongside local printers for overflow and specialty materials.
 - **🌐 Distributed network.** *(Coming soon.)* Route jobs to decentralized peer-to-peer printer networks, or register your own printer to earn revenue.
 
 All three modes use the same MCP tools and CLI commands.
