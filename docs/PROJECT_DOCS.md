@@ -846,7 +846,7 @@ kiln/src/kiln/
     fulfillment/
         base.py          # Fulfillment adapter interface
         registry.py      # Provider registry and factory
-        craftcloud.py    # Craftcloud API client
+        craftcloud.py    # Craftcloud v5 API client (upload → price → cart → order)
         sculpteo.py      # Sculpteo partner API client
     marketplaces/
         base.py          # Marketplace adapter interface
