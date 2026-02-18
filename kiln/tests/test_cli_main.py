@@ -1063,7 +1063,9 @@ class TestQueueCLI:
             license_path=tmp_path / "license",
             cache_path=tmp_path / "cache.json",
         )
+        mock_result = {"success": True, "job_id": "test-job-123", "position": 1}
         with patch("kiln.licensing._manager", mgr), \
-             patch.dict("os.environ", {}, clear=True):
+             patch.dict("os.environ", {}, clear=True), \
+             patch("kiln.plugins.queue_tools.submit_job", return_value=mock_result):
             result = runner.invoke(cli, ["queue", "submit", "test.gcode"])
         assert result.exit_code == 0
