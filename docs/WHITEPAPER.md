@@ -8,13 +8,13 @@
 
 ## Abstract
 
-We present Kiln, a protocol and reference implementation that enables autonomous AI agents to control physical manufacturing hardware — specifically 3D printers — through a unified adapter interface. Kiln bridges the gap between digital intelligence and physical fabrication by exposing three co-equal manufacturing paths through a single interface: (1) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, and Prusa Link adapters; (2) outsourced manufacturing through fulfillment providers such as Craftcloud and Sculpteo; and (3) distributed peer-to-peer manufacturing via decentralized printer networks (coming soon). All three modes are accessible through the Model Context Protocol (MCP) and a conventional CLI, allowing agents to seamlessly route jobs based on material availability, capacity, cost, or geographic proximity. The system enforces safety invariants at the protocol level to prevent physical damage. We describe the adapter abstraction that normalizes disparate printer APIs, the fulfillment and distributed manufacturing integrations, the safety validation layer, and the scheduling architecture that enables multi-printer job dispatch.
+We present Kiln, a protocol and reference implementation that enables autonomous AI agents to control physical manufacturing hardware — specifically 3D printers — through a unified adapter interface. Kiln bridges the gap between digital intelligence and physical fabrication by exposing three co-equal manufacturing paths through a single interface: (1) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link adapters; (2) outsourced manufacturing through fulfillment providers such as Craftcloud and Sculpteo; and (3) distributed peer-to-peer manufacturing via decentralized printer networks (coming soon). All three modes are accessible through the Model Context Protocol (MCP) and a conventional CLI, allowing agents to seamlessly route jobs based on material availability, capacity, cost, or geographic proximity. The system enforces safety invariants at the protocol level to prevent physical damage. We describe the adapter abstraction that normalizes disparate printer APIs, the fulfillment and distributed manufacturing integrations, the safety validation layer, and the scheduling architecture that enables multi-printer job dispatch.
 
 ## 1. Introduction
 
 ### 1.1 The Problem
 
-3D printing has matured as a manufacturing technology, but the control interface has not. Every printer ecosystem — OctoPrint, Klipper/Moonraker, Bambu Lab — exposes its own REST, WebSocket, or MQTT API with incompatible data formats, authentication schemes, and state models. An agent (or human) who wants to operate a mixed fleet must write and maintain integrations for each backend independently.
+3D printing has matured as a manufacturing technology, but the control interface has not. Every printer ecosystem — OctoPrint, Klipper/Moonraker, Bambu Lab, Elegoo — exposes its own REST, WebSocket, or MQTT API with incompatible data formats, authentication schemes, and state models. An agent (or human) who wants to operate a mixed fleet must write and maintain integrations for each backend independently.
 
 Meanwhile, AI agents have become capable enough to plan and execute multi-step physical tasks: selecting a design, choosing materials, slicing geometry, scheduling jobs, and monitoring prints. But no protocol exists to give these agents safe, structured access to printer hardware.
 
@@ -22,7 +22,7 @@ Meanwhile, AI agents have become capable enough to plan and execute multi-step p
 
 Kiln solves both problems simultaneously:
 
-1. **Unified Adapter Layer.** A single `PrinterAdapter` abstract interface normalizes OctoPrint, Moonraker, Bambu Lab, and Prusa Link APIs into consistent Python dataclasses. Adding a new backend requires implementing ~12 methods; all upstream consumers (CLI, MCP server, scheduler) work automatically.
+1. **Unified Adapter Layer.** A single `PrinterAdapter` abstract interface normalizes OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link APIs into consistent Python dataclasses. Adding a new backend requires implementing ~12 methods; all upstream consumers (CLI, MCP server, scheduler) work automatically.
 
 2. **Agent-Native Interface.** Every operation is exposed as a typed MCP tool with structured JSON input/output, making Kiln a first-class tool for any MCP-compatible agent (Claude, GPT, custom). The same operations are available via CLI with `--json` flags for scripting.
 
@@ -78,7 +78,7 @@ Every printer backend implements `PrinterAdapter`, an abstract base class defini
 | `get_stream_url()` | Returns the upstream MJPEG stream URL (optional) |
 | `get_bed_mesh()` | Returns bed mesh probing data (optional) |
 
-Each method returns typed dataclasses — never raw dicts or API-specific JSON. State is normalized to a `PrinterStatus` enum (`IDLE`, `PRINTING`, `PAUSED`, `ERROR`, `OFFLINE`). This normalization is critical: OctoPrint encodes state as a set of boolean flags, Moonraker uses string identifiers, Bambu uses numeric codes, and Prusa Link uses nine string states. The adapter translates all of these into a single enum.
+Each method returns typed dataclasses — never raw dicts or API-specific JSON. State is normalized to a `PrinterStatus` enum (`IDLE`, `PRINTING`, `PAUSED`, `ERROR`, `OFFLINE`). This normalization is critical: OctoPrint encodes state as a set of boolean flags, Moonraker uses string identifiers, Bambu uses numeric codes, Elegoo uses SDCP numeric status codes over WebSocket, and Prusa Link uses nine string states. The adapter translates all of these into a single enum.
 
 ### 2.3 Safety Layer
 

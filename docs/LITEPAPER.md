@@ -12,7 +12,7 @@ Kiln is free, open-source infrastructure that lets AI agents control 3D printers
 
 ## The Problem
 
-3D printing is powerful, but the software side hasn't kept up. Every printer brand speaks a different language -- OctoPrint, Klipper, Bambu Lab, and Prusa Link each have their own incompatible interfaces. Managing even a small fleet means juggling multiple dashboards, manually queuing jobs, and babysitting prints. Meanwhile, AI agents are increasingly capable of planning and executing multi-step physical tasks, but there's no safe, standardized way to connect them to real hardware.
+3D printing is powerful, but the software side hasn't kept up. Every printer brand speaks a different language -- OctoPrint, Klipper, Bambu Lab, Elegoo, and Prusa Link each have their own incompatible interfaces. Managing even a small fleet means juggling multiple dashboards, manually queuing jobs, and babysitting prints. Meanwhile, AI agents are increasingly capable of planning and executing multi-step physical tasks, but there's no safe, standardized way to connect them to real hardware.
 
 ## The Solution
 
@@ -20,7 +20,7 @@ Kiln acts as a universal translator between AI agents and 3D printers. One inter
 
 **Three ways to print.** Kiln gives agents three co-equal paths to turn a digital file into a physical object -- and they can mix and match within a single workflow:
 
-1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Bambu Lab, or Prusa Link machines on your local network -- or remotely via Bambu Cloud. Your agent doesn't need to know which firmware a printer runs; Kiln handles the translation.
+1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Bambu Lab, Elegoo (Centauri Carbon, Saturn, Mars via SDCP; Neptune 4 and OrangeStorm Giga via Moonraker), or Prusa Link machines on your local network -- or remotely via Bambu Cloud. Your agent doesn't need to know which firmware a printer runs; Kiln handles the translation.
 
 2. **Fulfillment centers.** *(API access required — in partner onboarding.)* Send jobs to professional manufacturing services. Craftcloud aggregates quotes from over 150 print services worldwide across FDM, SLA, SLS, MJF, and metal (DMLS). Sculpteo provides direct access to 75+ materials with professional finishing. No printer required -- but printer owners use this too for overflow, specialty materials, or production-quality parts.
 
@@ -48,7 +48,7 @@ You (or your agent) --> Kiln --> 🖨️ Your Printers  (local or remote via Bam
 
 Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. For those who prefer a terminal, there's also a full command-line interface with over 80 commands and a REST API for custom integrations.
 
-All three printing modes use the same interface. An agent doesn't need to know whether a job is printing on your desk, at a factory in Germany, or on someone's Bambu in Texas -- Kiln abstracts the routing. Communication with local printers stays on your network; fulfillment and network jobs use HTTPS to the respective provider APIs.
+All three printing modes use the same interface. An agent doesn't need to know whether a job is printing on your desk, at a factory in Germany, or on someone's Bambu or Elegoo in Texas -- Kiln abstracts the routing. Communication with local printers stays on your network; fulfillment and network jobs use HTTPS to the respective provider APIs.
 
 ## Safety
 
