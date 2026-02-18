@@ -508,12 +508,12 @@ def discover(timeout: float, subnet: str | None, methods: tuple, json_mode: bool
     "--type",
     "printer_type",
     required=True,
-    type=click.Choice(["octoprint", "moonraker", "bambu", "prusaconnect"]),
+    type=click.Choice(["octoprint", "moonraker", "bambu", "elegoo", "prusaconnect"]),
     help="Printer backend type.",
 )
 @click.option("--api-key", default=None, help="API key (OctoPrint/Moonraker/Prusa Link).")
 @click.option("--access-code", default=None, help="LAN access code (Bambu).")
-@click.option("--serial", default=None, help="Printer serial number (Bambu).")
+@click.option("--serial", default=None, help="Printer serial number (Bambu) or mainboard ID (Elegoo).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def auth(
     name: str,
@@ -2335,10 +2335,10 @@ def fleet_status_cmd(json_mode: bool) -> None:
 
 @fleet.command("register")
 @click.argument("name")
-@click.argument("printer_type", type=click.Choice(["octoprint", "moonraker", "bambu", "prusaconnect"]))
+@click.argument("printer_type", type=click.Choice(["octoprint", "moonraker", "bambu", "elegoo", "prusaconnect"]))
 @click.argument("host")
 @click.option("--api-key", default=None, help="API key or LAN access code.")
-@click.option("--serial", default=None, help="Printer serial (required for Bambu).")
+@click.option("--serial", default=None, help="Printer serial (Bambu) or mainboard ID (Elegoo).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def fleet_register_cmd(
     name: str,
@@ -3412,6 +3412,7 @@ _PRINTER_TYPE_LABELS = {
     "octoprint": "OctoPrint",
     "moonraker": "Moonraker (Klipper)",
     "bambu": "Bambu Lab",
+    "elegoo": "Elegoo (SDCP)",
     "prusaconnect": "Prusa Link",
 }
 
@@ -3537,7 +3538,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         if printer_type == "unknown":
             printer_type = click.prompt(
                 "  Printer type could not be auto-detected. Select type",
-                type=click.Choice(["octoprint", "moonraker", "bambu", "prusaconnect"]),
+                type=click.Choice(["octoprint", "moonraker", "bambu", "elegoo", "prusaconnect"]),
             )
         suggested_name = (selected.name or printer_type).lower().replace(" ", "-").replace(".", "-")
     else:
@@ -3560,7 +3561,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                 click.echo("  Could not auto-detect printer type.")
                 printer_type = click.prompt(
                     "  Select printer type",
-                    type=click.Choice(["octoprint", "moonraker", "bambu", "prusaconnect"]),
+                    type=click.Choice(["octoprint", "moonraker", "bambu", "elegoo", "prusaconnect"]),
                 )
                 suggested_name = printer_type
         except Exception as exc:
@@ -3568,7 +3569,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
             click.echo("  Probe failed. Enter type manually.")
             printer_type = click.prompt(
                 "  Select printer type",
-                type=click.Choice(["octoprint", "moonraker", "bambu", "prusaconnect"]),
+                type=click.Choice(["octoprint", "moonraker", "bambu", "elegoo", "prusaconnect"]),
             )
             suggested_name = printer_type
 
@@ -3593,6 +3594,15 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     elif printer_type == "bambu":
         access_code = click.prompt("  LAN access code (from printer screen)")
         serial = click.prompt("  Printer serial number")
+    elif printer_type == "elegoo":
+        click.echo("  Elegoo SDCP printers require no authentication.")
+        serial = click.prompt(
+            "  Mainboard ID (optional, auto-discovered if blank)",
+            default="",
+            show_default=False,
+        )
+        if not serial:
+            serial = None
 
     # -- Save --------------------------------------------------------------
     click.echo()

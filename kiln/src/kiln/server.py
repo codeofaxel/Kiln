@@ -146,6 +146,7 @@ from kiln.printer_intelligence import (
 )
 from kiln.printers import (
     BambuAdapter,
+    ElegooAdapter,
     MoonrakerAdapter,
     OctoPrintAdapter,
     PrinterAdapter,
@@ -354,6 +355,14 @@ def _get_adapter() -> PrinterAdapter:
                 "KILN_PRINTER_SERIAL environment variable is not set.  Set it to your Bambu printer's serial number."
             )
         _adapter = BambuAdapter(host=host, access_code=api_key, serial=serial)
+    elif printer_type == "elegoo":
+        if ElegooAdapter is None:
+            raise RuntimeError(
+                "Elegoo SDCP support requires websocket-client.  "
+                "Install it with: pip install 'kiln[elegoo]' or pip install websocket-client"
+            )
+        mainboard_id = os.environ.get("KILN_PRINTER_MAINBOARD_ID", "")
+        _adapter = ElegooAdapter(host=host, mainboard_id=mainboard_id)
     elif printer_type == "prusaconnect":
         _adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
     elif printer_type == "serial":
@@ -368,7 +377,7 @@ def _get_adapter() -> PrinterAdapter:
     else:
         raise RuntimeError(
             f"Unsupported printer type: {printer_type!r}.  "
-            f"Supported types are 'octoprint', 'moonraker', 'bambu', 'prusaconnect', and 'serial'."
+            f"Supported types are 'octoprint', 'moonraker', 'bambu', 'elegoo', 'prusaconnect', and 'serial'."
         )
 
     # Propagate safety profile to adapter for defense-in-depth temp limits.
@@ -2686,7 +2695,7 @@ def register_printer(
     Args:
         name: Unique human-readable name (e.g. "voron-350", "bambu-x1c").
         printer_type: Backend type -- "octoprint", "moonraker", "bambu",
-            "prusaconnect", or "serial".
+            "elegoo", "prusaconnect", or "serial".
         host: Base URL or IP address of the printer.  For serial printers,
             this is the port path (e.g. "/dev/ttyUSB0", "COM3").
         api_key: API key (required for OctoPrint and Bambu, optional for
@@ -2761,6 +2770,17 @@ def register_printer(
                 serial=serial,
                 tls_mode="pin" if verify_ssl else "insecure",
             )
+        elif printer_type == "elegoo":
+            if ElegooAdapter is None:
+                return _error_dict(
+                    "Elegoo SDCP support requires websocket-client.  "
+                    "Install it with: pip install websocket-client",
+                    code="MISSING_DEPENDENCY",
+                )
+            adapter = ElegooAdapter(
+                host=host,
+                mainboard_id=serial or "",
+            )
         elif printer_type == "prusaconnect":
             adapter = PrusaConnectAdapter(host=host, api_key=api_key or None)
         elif printer_type == "serial":
@@ -2771,7 +2791,7 @@ def register_printer(
         else:
             return _error_dict(
                 f"Unsupported printer_type: {printer_type!r}. "
-                "Supported: 'octoprint', 'moonraker', 'bambu', 'prusaconnect', 'serial'.",
+                "Supported: 'octoprint', 'moonraker', 'bambu', 'elegoo', 'prusaconnect', 'serial'.",
                 code="INVALID_ARGS",
             )
 
@@ -2794,7 +2814,7 @@ def discover_printers(timeout: float = 5.0) -> dict:
     """Scan the local network for 3D printers.
 
     Uses mDNS/Bonjour and HTTP subnet probing to find OctoPrint,
-    Moonraker, and Bambu Lab printers on the local network.
+    Moonraker, Bambu Lab, and Elegoo printers on the local network.
 
     Args:
         timeout: Maximum scan duration in seconds (default 5).
@@ -6348,7 +6368,7 @@ def fleet_workflow() -> str:
     return (
         "To manage a fleet of printers:\n\n"
         "1. Call `fleet_status` to see all registered printers and their states\n"
-        "2. Use `register_printer` to add new printers (octoprint, moonraker, bambu, prusaconnect, or serial)\n"
+        "2. Use `register_printer` to add new printers (octoprint, moonraker, bambu, elegoo, prusaconnect, or serial)\n"
         "3. Submit jobs with `submit_job` — the scheduler auto-dispatches to idle printers\n"
         "4. Monitor via `queue_summary` and `job_status`\n"
         "5. Check `recent_events` for lifecycle updates\n\n"

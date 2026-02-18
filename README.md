@@ -27,9 +27,9 @@ Kiln lets AI agents design, queue, and execute physical manufacturing jobs on re
 |------|-----------|----------|
 | **🖨️ Your printer** | Control OctoPrint, Moonraker, Bambu, or Prusa Link printers on your LAN — or remotely via Bambu Cloud | A 3D printer |
 | **🏭 Fulfillment centers** | Outsource to Craftcloud (150+ services), Sculpteo (75+ materials), or other providers. Kiln handles quoting, ordering, and tracking | Nothing — no printer required |
-| **🌐 Distributed network** | Send jobs to printers on the 3DOS peer-to-peer network, or register your own printer to earn revenue from incoming jobs | Nothing — or a printer to earn |
+| **🌐 Distributed network** *(coming soon)* | Route jobs to decentralized peer-to-peer printer networks, or register your own printer to earn revenue | Nothing — or a printer to earn |
 
-All three modes use the same MCP tools and CLI commands. An agent can seamlessly fall back from a busy local printer to a fulfillment center, or route specialty materials to the 3DOS network — all in one workflow.
+All three modes use the same MCP tools and CLI commands. An agent can seamlessly fall back from a busy local printer to a fulfillment center — all in one workflow.
 
 ### Why Kiln?
 
@@ -48,13 +48,14 @@ graph TD
 
     B --> C["🖨️ Your Printers"]
     B --> F["🏭 Fulfillment"]
-    B --> N["🌐 3DOS Network"]
+    B --> N["🌐 Distributed Network<br/><sub>(coming soon)</sub>"]
     B --> D["🛒 Marketplaces"]
 
     C --> E1["OctoPrint"]
     C --> E2["Moonraker"]
     C --> E3["Bambu"]
     C --> E4["Prusa Link"]
+    C --> E5["Elegoo"]
 
     F --> F1["Craftcloud"]
     F --> F2["Sculpteo"]
@@ -89,7 +90,7 @@ This monorepo contains two packages:
 
 | Package | Description | Entry Point |
 |---------|-------------|-------------|
-| **kiln** | CLI + MCP server for multi-printer control (OctoPrint, Moonraker, Bambu, Prusa Link) | `kiln` or `python -m kiln` |
+| **kiln** | CLI + MCP server for multi-printer control (OctoPrint, Moonraker, Bambu, Elegoo, Prusa Link) | `kiln` or `python -m kiln` |
 | **octoprint-cli** | Lightweight standalone CLI for OctoPrint-only setups | `octoprint-cli` |
 
 ## Prerequisites
@@ -102,6 +103,7 @@ Before installing Kiln, you need your printer's LAN details (Ethernet or Wi-Fi):
 | **OctoPrint** (any printer) | `octoprint` | OctoPrint URL + API key (Settings > API in OctoPrint web UI) |
 | **Klipper/Moonraker** | `moonraker` | Moonraker URL (usually `http://<ip>:7125`) |
 | **Bambu Lab** | `bambu` | IP address + LAN access code + serial number (all on the printer's LCD) |
+| **Elegoo** (SDCP printers) | `elegoo` | IP address only — no authentication required. For Neptune 4/OrangeStorm Giga, use `moonraker` instead. |
 
 Kiln only needs IP reachability on your local LAN. Ethernet-only printers are fully supported.
 
@@ -226,7 +228,7 @@ source ~/.kiln-venv/bin/activate
 
 git clone https://github.com/codeofaxel/Kiln.git
 cd Kiln
-pip install -e ./kiln            # includes all printer backends (OctoPrint, Moonraker, Bambu, Prusa Link)
+pip install -e ./kiln            # includes all printer backends (OctoPrint, Moonraker, Bambu, Elegoo, Prusa Link)
 
 kiln verify
 ```
@@ -326,12 +328,12 @@ kiln generate-download <job_id> -o ./models --json      # Download generated mod
 kiln firmware status --json                # Check for firmware updates
 kiln firmware update [--component klipper] # Apply firmware updates
 kiln firmware rollback <component>         # Roll back firmware
-kiln network register --name N --location L # Register printer on 3DOS network
-kiln network find --material PLA           # Find network printers by material
-kiln network submit URL --material PLA     # Submit job to 3DOS network
-kiln network status <job_id>               # Check network job status
-kiln network list                          # List your registered network printers
-kiln network update <id> --available       # Update printer availability
+kiln network register --name N --location L # Register printer on distributed network (coming soon)
+kiln network find --material PLA           # Find network printers by material (coming soon)
+kiln network submit URL --material PLA     # Submit job to distributed network (coming soon)
+kiln network status <job_id>               # Check network job status (coming soon)
+kiln network list                          # List your registered network printers (coming soon)
+kiln network update <id> --available       # Update printer availability (coming soon)
 kiln setup                                 # Interactive printer setup wizard
 kiln serve                                 # Start MCP server
 kiln rest [--port 8420] [--tier full] [--auth-token TOKEN]  # Start REST API server
@@ -534,12 +536,12 @@ The Kiln MCP server (`kiln serve`) exposes **197 tools** to agents. Key tools ar
 | `get_printer_insights` | Query cross-printer learning: success rates, failure breakdown, material stats |
 | `suggest_printer_for_job` | Rank printers by historical success for a file/material combination |
 | `recommend_settings` | Recommend print settings (temps, speed, slicer profile) from historical successes |
-| `network_register_printer` | Register a local printer on the 3DOS distributed manufacturing network |
-| `network_update_printer` | Update a printer's availability on the 3DOS network |
-| `network_list_printers` | List printers registered by this account on the 3DOS network |
-| `network_find_printers` | Search for available printers on the 3DOS network by material/location |
-| `network_submit_job` | Submit a print job to the 3DOS distributed manufacturing network |
-| `network_job_status` | Check the status of a job on the 3DOS network |
+| `network_register_printer` | Register a local printer on a distributed manufacturing network *(coming soon)* |
+| `network_update_printer` | Update a printer's availability on the distributed network *(coming soon)* |
+| `network_list_printers` | List printers registered by this account on the distributed network *(coming soon)* |
+| `network_find_printers` | Search for available printers on the distributed network by material/location *(coming soon)* |
+| `network_submit_job` | Submit a print job to a distributed manufacturing network *(coming soon)* |
+| `network_job_status` | Check the status of a job on the distributed network *(coming soon)* |
 | `billing_status` | Get billing status, fee policy, and payment methods |
 | `billing_summary` | Aggregated billing summary |
 | `billing_history` | Recent billing charges and payment outcomes |
@@ -586,6 +588,7 @@ The Kiln MCP server (`kiln serve`) exposes **197 tools** to agents. Key tools ar
 | **Moonraker** | Stable | Klipper-based printers (Voron, Ratrig, etc.) |
 | **Bambu** | Stable | Bambu Lab X1C, P1S, A1 (via LAN MQTT) |
 | **Prusa Link** | Stable | Prusa MK4, XL, Mini+ (local REST API — type: `prusaconnect`) |
+| **Elegoo** | Stable | Centauri Carbon, Saturn, Mars series (via LAN WebSocket/SDCP). Neptune 4/OrangeStorm Giga use Moonraker. |
 
 ## MCP Resources
 
@@ -605,7 +608,7 @@ The server also exposes read-only resources that agents can use for context:
 | Module | Description |
 |---|---|
 | `server.py` | MCP server with tools, resources, and subsystem wiring |
-| `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Bambu, Prusa Link) |
+| `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Bambu, Elegoo, Prusa Link) |
 | `marketplaces/` | Model marketplace adapters (MyMiniFactory, Cults3D, Thingiverse — deprecated) |
 | `slicer.py` | Slicer integration (PrusaSlicer, OrcaSlicer) with auto-detection |
 | `registry.py` | Fleet registry for multi-printer management |
@@ -615,7 +618,7 @@ The server also exposes read-only resources that agents can use for context:
 | `persistence.py` | SQLite storage for jobs, events, and settings |
 | `webhooks.py` | Event-driven webhook delivery with HMAC signing |
 | `auth.py` | Optional API key authentication with scope-based access |
-| `billing.py` | Fee tracking for 3DOS network-routed jobs |
+| `billing.py` | Fee tracking for fulfillment and network-routed jobs |
 | `discovery.py` | Network printer discovery (mDNS + HTTP probe) |
 | `generation/` | Text-to-model generation providers (Meshy AI, OpenSCAD) with mesh validation |
 | `consumer.py` | Consumer workflow for non-printer users (address validation, material recommendations, timeline/price estimation, onboarding) |
@@ -638,7 +641,7 @@ The server also exposes read-only resources that agents can use for context:
 | `rest_api.py` | REST API wrapper (FastAPI) exposing all MCP tools as HTTP endpoints |
 | `data/` | Bundled JSON databases (safety profiles, slicer profiles, printer intelligence) |
 | `payments/` | Payment processing (Stripe, Circle USDC, crypto rails) |
-| `gateway/` | 3DOS distributed manufacturing network gateway |
+| `gateway/` | Distributed manufacturing network gateway *(coming soon)* |
 | `heater_watchdog.py` | Auto-cooldown watchdog for idle heaters |
 | `licensing.py` | License tier management (Free/Pro/Business, offline-first) |
 | `wallets.py` | Crypto wallet configuration (Solana/Ethereum for donations and fees) |

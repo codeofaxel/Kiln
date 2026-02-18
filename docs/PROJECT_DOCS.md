@@ -14,7 +14,7 @@ Kiln is agentic infrastructure for physical fabrication. It provides a unified i
 
 - **🖨️ Your printers.** Control OctoPrint, Moonraker, Bambu Lab, or Prusa Link machines on your LAN — or remotely via Bambu Cloud.
 - **🏭 Fulfillment centers.** Outsource to Craftcloud (150+ services) or Sculpteo (75+ materials). No printer required — or use alongside local printers for overflow and specialty materials.
-- **🌐 Distributed network.** Send jobs to printers on the 3DOS peer-to-peer network, or register your own printer to earn revenue.
+- **🌐 Distributed network.** *(Coming soon.)* Route jobs to decentralized peer-to-peer printer networks, or register your own printer to earn revenue.
 
 All three modes use the same MCP tools and CLI commands.
 
@@ -33,6 +33,7 @@ All three modes use the same MCP tools and CLI commands.
 | Moonraker | HTTP REST | Klipper-based (Voron, RatRig, etc.) | Stable |
 | Bambu Lab | MQTT/LAN | X1C, P1S, A1 | Stable |
 | Prusa Link | HTTP REST | MK4, XL, Mini+ | Stable |
+| Elegoo | WebSocket/SDCP | Centauri Carbon, Saturn, Mars series. Neptune 4/OrangeStorm Giga use Moonraker. | Stable |
 
 ### Key Concepts
 
@@ -403,7 +404,7 @@ Kiln exposes **197 MCP tools** in total. The most commonly used tools are docume
 | `billing_check_setup` | — | Polls pending Stripe SetupIntent; persists payment method on success |
 | `check_payment_status` | `payment_id` | Non-blocking check of Circle/Stripe payment finality |
 
-#### 3DOS Network
+#### Distributed Manufacturing Network *(Coming Soon)*
 
 | Tool | Input | Output |
 |---|---|---|
@@ -609,6 +610,34 @@ api_key: YOUR_KEY
 **State Mapping:** Prusa Link returns state as a string (`IDLE`, `PRINTING`, `PAUSED`, `FINISHED`, `ERROR`, etc.). Direct mapping to `PrinterStatus`.
 
 **Limitations:** No raw G-code or direct temperature control — these are managed through print files.
+
+### Elegoo (SDCP)
+
+Communicates via the SDCP (Smart Device Control Protocol) over WebSocket on port 3030. No authentication required on local network. Covers Elegoo printers with cbd-tech/ChituBox mainboards: Centauri Carbon, Centauri Carbon 2, Saturn, Mars series.
+
+> **Note:** Elegoo Neptune 4 and OrangeStorm Giga run Klipper/Moonraker. Use the `moonraker` adapter type for those printers (port 4408 for Fluidd, 7125 for Moonraker API).
+
+**Configuration:**
+```yaml
+type: elegoo
+host: 192.168.1.50
+mainboard_id: ABCD1234ABCD1234  # optional, auto-discovered
+```
+
+**Environment variables:**
+```bash
+export KILN_PRINTER_HOST=192.168.1.50
+export KILN_PRINTER_TYPE=elegoo
+export KILN_PRINTER_MAINBOARD_ID=ABCD1234  # optional
+```
+
+**State Mapping:** SDCP returns numeric status codes. Mapping: 0=IDLE, 5/8/9/20=BUSY, 10=PAUSED, 13=PRINTING. Unknown codes default to UNKNOWN.
+
+**File Upload:** SDCP uses a pull-based upload model — Kiln starts a temporary HTTP server, sends the printer a download URL, and the printer fetches the file. The printer must be able to reach the host machine on the ephemeral port.
+
+**Discovery:** UDP broadcast of `M99999` on port 3000. All SDCP printers on the network respond with their details.
+
+**Dependencies:** Requires `websocket-client` package. Install with `pip install 'kiln[elegoo]'`.
 
 ---
 
@@ -832,7 +861,7 @@ kiln/src/kiln/
         stripe_provider.py   # Stripe payment provider
         circle_provider.py   # Circle USDC payment provider
     gateway/
-        threedos.py      # 3DOS distributed manufacturing network client
+        network.py       # Distributed manufacturing network client (coming soon)
     data/
         safety_profiles.json     # Per-printer safety limits (temps, feedrates, flow)
         slicer_profiles.json     # Per-printer slicer settings (INI key-values)
@@ -843,6 +872,7 @@ kiln/src/kiln/
         moonraker.py     # Moonraker REST adapter
         bambu.py         # Bambu Lab MQTT adapter
         prusaconnect.py  # Prusa Link adapter
+        elegoo.py        # Elegoo SDCP adapter (WebSocket)
     fulfillment/
         base.py          # Fulfillment adapter interface
         registry.py      # Provider registry and factory

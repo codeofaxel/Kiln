@@ -299,6 +299,36 @@
     ],
     "notes": "Klipper-based. All-metal hotend. High-speed capable."
   },
+  "elegoo_centauri_carbon": {
+    "display_name": "Elegoo Centauri Carbon / Carbon 2",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 110.0,
+    "max_chamber_temp": 70.0,
+    "max_feedrate": 30000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 35.0,
+    "build_volume": [
+      256,
+      256,
+      256
+    ],
+    "notes": "High-speed CoreXY with SDCP protocol. Enclosed, active chamber heating. All-metal hotend."
+  },
+  "elegoo_orangestorm_giga": {
+    "display_name": "Elegoo OrangeStorm Giga",
+    "max_hotend_temp": 300.0,
+    "max_bed_temp": 110.0,
+    "max_chamber_temp": null,
+    "max_feedrate": 20000.0,
+    "min_safe_z": 0.0,
+    "max_volumetric_flow": 25.0,
+    "build_volume": [
+      800,
+      800,
+      1000
+    ],
+    "notes": "Large-format Klipper printer. Uses Moonraker adapter. All-metal hotend."
+  },
   "anker_m5": {
     "display_name": "AnkerMake M5 / M5C",
     "max_hotend_temp": 300.0,

@@ -672,6 +672,99 @@
     },
     "failure_modes": []
   },
+  "elegoo_centauri_carbon": {
+    "display_name": "Elegoo Centauri Carbon / Carbon 2",
+    "firmware": "sdcp",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": true,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Open enclosure door for PLA. High-speed capable."
+      },
+      "PETG": {
+        "hotend": 240,
+        "bed": 80,
+        "fan": 50,
+        "notes": "Enclosed environment works well. All-metal hotend."
+      },
+      "ABS": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 0,
+        "notes": "Enclosed chamber. Active chamber heating available."
+      },
+      "TPU": {
+        "hotend": 220,
+        "bed": 50,
+        "fan": 50,
+        "notes": "Direct drive. Print at 30-40mm/s for best results."
+      },
+      "ASA": {
+        "hotend": 260,
+        "bed": 100,
+        "fan": 30,
+        "notes": "Enclosed chamber ideal for ASA. Similar to ABS settings."
+      }
+    },
+    "quirks": [
+      "Uses SDCP protocol \u2014 communicates via WebSocket on port 3030.",
+      "No authentication required on LAN.",
+      "File upload works via HTTP pull \u2014 printer fetches from a URL you provide.",
+      "Camera stream available via SDCP enable command.",
+      "Centauri Carbon 2 runs its own MQTT broker on port 1883 (max 4 connections)."
+    ],
+    "calibration": {
+      "first_steps": "Run auto-level and vibration compensation from touchscreen. Input shaping pre-configured."
+    },
+    "failure_modes": [
+      {
+        "symptom": "WebSocket connection refused on port 3030",
+        "cause": "Printer firmware may not support SDCP or is in a different network mode",
+        "fix": "Ensure printer firmware is up to date. Check printer is on same subnet. Try UDP discovery (M99999 on port 3000)."
+      },
+      {
+        "symptom": "Upload command succeeds but printer never downloads the file",
+        "cause": "Printer cannot reach the local HTTP server (firewall, different subnet)",
+        "fix": "Ensure no firewall blocks the ephemeral port. Verify printer and host are on same network segment."
+      }
+    ]
+  },
+  "elegoo_orangestorm_giga": {
+    "display_name": "Elegoo OrangeStorm Giga",
+    "firmware": "klipper",
+    "extruder_type": "direct_drive",
+    "hotend_type": "all_metal",
+    "has_enclosure": false,
+    "has_abl": true,
+    "materials": {
+      "PLA": {
+        "hotend": 210,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Large-format printing. Standard PLA settings."
+      },
+      "PETG": {
+        "hotend": 235,
+        "bed": 80,
+        "fan": 50,
+        "notes": "All-metal hotend. Good for large structural parts."
+      }
+    },
+    "quirks": [
+      "800x800x1000mm build volume \u2014 one of the largest consumer FDM printers.",
+      "Klipper firmware with Moonraker \u2014 use moonraker adapter type, not elegoo.",
+      "Quad-Z lead screws \u2014 ensure all four are properly leveled."
+    ],
+    "calibration": {
+      "first_steps": "Run mesh bed leveling. Verify all four Z-axes are level. Input shaping calibration recommended."
+    },
+    "failure_modes": []
+  },
   "qidi_x_plus3": {
     "display_name": "QIDI X-Plus 3 / X-Max 3",
     "firmware": "klipper",

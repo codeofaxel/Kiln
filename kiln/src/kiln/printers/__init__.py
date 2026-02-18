@@ -29,6 +29,11 @@ try:
 except ImportError:
     BambuAdapter = None  # type: ignore[assignment,misc]
 
+try:
+    from kiln.printers.elegoo import ElegooAdapter
+except ImportError:
+    ElegooAdapter = None  # type: ignore[assignment,misc]
+
 from kiln.printers.moonraker import MoonrakerAdapter
 from kiln.printers.octoprint import OctoPrintAdapter
 from kiln.printers.prusaconnect import PrusaConnectAdapter
@@ -38,6 +43,7 @@ __all__ = [
     "BambuAdapter",
     "DeviceAdapter",
     "DeviceType",
+    "ElegooAdapter",
     "FirmwareComponent",
     "FirmwareStatus",
     "FirmwareUpdateResult",

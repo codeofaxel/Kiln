@@ -52,8 +52,8 @@ def _normalize_host(host: str, printer_type: str = "octoprint") -> str:
     need a raw hostname/IP — no scheme is prepended.
     """
     host = host.strip()
-    if printer_type == "bambu":
-        # Strip any accidental scheme — MQTT/FTPS need raw host.
+    if printer_type in ("bambu", "elegoo"):
+        # Strip any accidental scheme — MQTT/FTPS/WebSocket need raw host.
         host = re.sub(r"^https?://", "", host, flags=re.IGNORECASE)
         return host.rstrip("/")
     if printer_type == "serial":
@@ -94,8 +94,8 @@ def _validate_printer_url(url: str, *, printer_type: str = "octoprint") -> tuple
     if not cleaned:
         return "", ["URL is empty after normalization"]
 
-    # Bambu printers use raw hostnames -- skip HTTP scheme checks.
-    if printer_type == "bambu":
+    # Bambu and Elegoo printers use raw hostnames -- skip HTTP scheme checks.
+    if printer_type in ("bambu", "elegoo"):
         # Basic hostname sanity check
         if " " in cleaned:
             warnings.append(f"Hostname contains spaces: {cleaned!r}")
@@ -363,6 +363,10 @@ def save_printer(
             entry["access_code"] = access_code
         if serial:
             entry["serial"] = serial
+    elif printer_type == "elegoo":
+        # Elegoo SDCP uses no auth; optional mainboard_id for identification.
+        if serial:
+            entry["mainboard_id"] = serial
     elif printer_type == "prusaconnect":
         if api_key:
             entry["api_key"] = api_key
@@ -467,7 +471,7 @@ def validate_printer_config(cfg: dict[str, Any]) -> tuple[bool, str | None]:
     Returns ``(True, None)`` or ``(False, error_message)``.
     """
     ptype = cfg.get("type", "")
-    if ptype not in ("octoprint", "moonraker", "bambu", "prusaconnect", "serial"):
+    if ptype not in ("octoprint", "moonraker", "bambu", "elegoo", "prusaconnect", "serial"):
         return False, f"Unknown printer type: {ptype!r}"
 
     host = cfg.get("host", "")

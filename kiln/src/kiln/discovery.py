@@ -59,9 +59,11 @@ _PROBE_TARGETS = [
     (5000, "/api/version", "text", "octoprint"),  # common OctoPrint port
     (7125, "/server/info", "klippy_state", "moonraker"),
     (80, "/server/info", "klippy_state", "moonraker"),
+    (4408, "/server/info", "klippy_state", "moonraker"),  # Elegoo Neptune 4 / OrangeStorm Giga Fluidd port
     (80, "/api/v1/status", "printer", "prusaconnect"),  # PrusaLink on default port
     (8080, "/api/v1/status", "printer", "prusaconnect"),  # PrusaLink alternate port
     (8883, None, None, "bambu"),  # Bambu MQTT port (no HTTP probe)
+    (3030, None, None, "elegoo"),  # Elegoo SDCP WebSocket port (no HTTP probe)
 ]
 
 # mDNS service types to browse
