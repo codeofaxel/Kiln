@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from dataclasses import asdict, dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class LevelingPolicy:
@@ -31,15 +32,13 @@ class LevelingPolicy:
     auto_before_first_print: bool = True
     gcode_command: str = "G29"  # or "BED_MESH_CALIBRATE" for Klipper
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> LevelingPolicy:
+    def from_dict(cls, data: dict[str, Any]) -> LevelingPolicy:
         """Create a policy from a dict (e.g. from settings)."""
-        return cls(**{
-            k: data[k] for k in cls.__dataclass_fields__ if k in data
-        })
+        return cls(**{k: data[k] for k in cls.__dataclass_fields__ if k in data})
 
 
 @dataclass
@@ -47,15 +46,15 @@ class LevelingStatus:
     """Current bed leveling state for a printer."""
 
     printer_name: str
-    last_leveled_at: Optional[float] = None
+    last_leveled_at: float | None = None
     prints_since_level: int = 0
     needs_leveling: bool = False
-    trigger_reason: Optional[str] = None
-    policy: Optional[LevelingPolicy] = None
-    mesh_point_count: Optional[int] = None
-    mesh_variance: Optional[float] = None
+    trigger_reason: str | None = None
+    policy: LevelingPolicy | None = None
+    mesh_point_count: int | None = None
+    mesh_variance: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         if self.policy:
             d["policy"] = self.policy.to_dict()
@@ -65,6 +64,7 @@ class LevelingStatus:
 # ---------------------------------------------------------------------------
 # Bed level manager
 # ---------------------------------------------------------------------------
+
 
 class BedLevelManager:
     """Manages bed leveling policies and triggers.
@@ -89,14 +89,15 @@ class BedLevelManager:
         self._registry = registry
         self._lock = threading.Lock()
         # In-memory policy + counter storage (keyed by printer_name)
-        self._policies: Dict[str, LevelingPolicy] = {}
-        self._prints_since: Dict[str, int] = {}
+        self._policies: dict[str, LevelingPolicy] = {}
+        self._prints_since: dict[str, int] = {}
 
     def subscribe_events(self) -> None:
         """Subscribe to job completion events on the event bus."""
         if self._bus is None:
             return
         from kiln.events import EventType
+
         self._bus.subscribe(EventType.JOB_COMPLETED, self._on_job_completed)
 
     def _on_job_completed(self, event: Any) -> None:
@@ -105,13 +106,12 @@ class BedLevelManager:
         if not printer_name:
             return
         with self._lock:
-            self._prints_since[printer_name] = (
-                self._prints_since.get(printer_name, 0) + 1
-            )
+            self._prints_since[printer_name] = self._prints_since.get(printer_name, 0) + 1
         # Check if leveling is now needed
         status = self.check_needed(printer_name)
         if status.needs_leveling and self._bus is not None:
             from kiln.events import EventType
+
             self._bus.publish(
                 EventType.LEVELING_NEEDED,
                 data=status.to_dict(),
@@ -121,7 +121,9 @@ class BedLevelManager:
     # -- policy management ----------------------------------------------
 
     def set_policy(
-        self, printer_name: str, policy: LevelingPolicy,
+        self,
+        printer_name: str,
+        policy: LevelingPolicy,
     ) -> None:
         """Set the leveling policy for a printer."""
         with self._lock:
@@ -129,6 +131,7 @@ class BedLevelManager:
         # Persist via settings table
         if self._db is not None:
             import json
+
             self._db.set_setting(
                 f"leveling_policy:{printer_name}",
                 json.dumps(policy.to_dict()),
@@ -144,6 +147,7 @@ class BedLevelManager:
         # Try loading from DB
         if self._db is not None:
             import json
+
             raw = self._db.get_setting(f"leveling_policy:{printer_name}")
             if raw:
                 try:
@@ -211,23 +215,16 @@ class BedLevelManager:
             reason = "No leveling history found (first print)"
 
         # Check prints threshold
-        if (not needs
-                and prints_since >= policy.max_prints_between_levels):
+        if not needs and prints_since >= policy.max_prints_between_levels:
             needs = True
-            reason = (
-                f"Prints since last level ({prints_since}) >= "
-                f"threshold ({policy.max_prints_between_levels})"
-            )
+            reason = f"Prints since last level ({prints_since}) >= threshold ({policy.max_prints_between_levels})"
 
         # Check time threshold
         if not needs and last_leveled_at is not None:
             hours_since = (time.time() - last_leveled_at) / 3600.0
             if hours_since >= policy.max_hours_between_levels:
                 needs = True
-                reason = (
-                    f"Hours since last level ({hours_since:.1f}) >= "
-                    f"threshold ({policy.max_hours_between_levels})"
-                )
+                reason = f"Hours since last level ({hours_since:.1f}) >= threshold ({policy.max_hours_between_levels})"
 
         return LevelingStatus(
             printer_name=printer_name,
@@ -247,7 +244,7 @@ class BedLevelManager:
         printer_name: str,
         adapter: Any,
         triggered_by: str = "manual",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Send a bed leveling command to the printer.
 
         Args:
@@ -265,6 +262,7 @@ class BedLevelManager:
 
         if self._bus is not None:
             from kiln.events import EventType
+
             self._bus.publish(
                 EventType.LEVELING_TRIGGERED,
                 data={
@@ -276,7 +274,7 @@ class BedLevelManager:
             )
 
         try:
-            result = adapter.send_gcode([command])
+            adapter.send_gcode([command])
             completed_at = time.time()
 
             # Try to get mesh data after leveling
@@ -286,15 +284,17 @@ class BedLevelManager:
 
             # Record in DB
             if self._db is not None:
-                self._db.save_leveling({
-                    "printer_name": printer_name,
-                    "triggered_by": triggered_by,
-                    "started_at": started_at,
-                    "completed_at": completed_at,
-                    "success": True,
-                    "mesh_data": mesh_data,
-                    "trigger_reason": triggered_by,
-                })
+                self._db.save_leveling(
+                    {
+                        "printer_name": printer_name,
+                        "triggered_by": triggered_by,
+                        "started_at": started_at,
+                        "completed_at": completed_at,
+                        "success": True,
+                        "mesh_data": mesh_data,
+                        "trigger_reason": triggered_by,
+                    }
+                )
 
             # Reset counter
             with self._lock:
@@ -302,6 +302,7 @@ class BedLevelManager:
 
             if self._bus is not None:
                 from kiln.events import EventType
+
                 self._bus.publish(
                     EventType.LEVELING_COMPLETED,
                     data={
@@ -321,18 +322,21 @@ class BedLevelManager:
         except Exception as exc:
             logger.error("Bed leveling failed on %s: %s", printer_name, exc)
             if self._db is not None:
-                self._db.save_leveling({
-                    "printer_name": printer_name,
-                    "triggered_by": triggered_by,
-                    "started_at": started_at,
-                    "completed_at": time.time(),
-                    "success": False,
-                    "mesh_data": None,
-                    "trigger_reason": str(exc),
-                })
+                self._db.save_leveling(
+                    {
+                        "printer_name": printer_name,
+                        "triggered_by": triggered_by,
+                        "started_at": started_at,
+                        "completed_at": time.time(),
+                        "success": False,
+                        "mesh_data": None,
+                        "trigger_reason": str(exc),
+                    }
+                )
 
             if self._bus is not None:
                 from kiln.events import EventType
+
                 self._bus.publish(
                     EventType.LEVELING_FAILED,
                     data={

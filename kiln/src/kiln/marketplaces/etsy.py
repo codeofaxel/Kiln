@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 
@@ -59,8 +59,7 @@ class EtsyAdapter(MarketplaceAdapter):
         self._api_key = api_key or os.environ.get("KILN_ETSY_API_KEY", "")
         if not self._api_key:
             raise MarketplaceAuthError(
-                "Etsy API key is required.  Set KILN_ETSY_API_KEY "
-                "or pass api_key= to EtsyAdapter."
+                "Etsy API key is required.  Set KILN_ETSY_API_KEY or pass api_key= to EtsyAdapter."
             )
         self._base_url = base_url.rstrip("/")
         self._session = session or requests.Session()
@@ -80,7 +79,7 @@ class EtsyAdapter(MarketplaceAdapter):
         method: str,
         path: str,
         *,
-        params: Dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
         timeout: int = _REQUEST_TIMEOUT,
     ) -> Any:
         """Make an authenticated API request and return parsed JSON."""
@@ -92,7 +91,11 @@ class EtsyAdapter(MarketplaceAdapter):
 
         try:
             resp = self._session.request(
-                method, url, params=params, headers=headers, timeout=timeout,
+                method,
+                url,
+                params=params,
+                headers=headers,
+                timeout=timeout,
             )
         except requests.ConnectionError as exc:
             raise MarketplaceError(
@@ -110,7 +113,8 @@ class EtsyAdapter(MarketplaceAdapter):
             )
         if resp.status_code == 404:
             raise MarketplaceNotFoundError(
-                f"Resource not found: {path}", status_code=404,
+                f"Resource not found: {path}",
+                status_code=404,
             )
         if resp.status_code == 429:
             raise MarketplaceRateLimitError(
@@ -134,7 +138,7 @@ class EtsyAdapter(MarketplaceAdapter):
         page: int = 1,
         per_page: int = 20,
         sort: str = "relevant",
-    ) -> List[ModelSummary]:
+    ) -> list[ModelSummary]:
         sort_map = {
             "relevant": "relevancy",
             "popular": "most_relevant",
@@ -144,12 +148,16 @@ class EtsyAdapter(MarketplaceAdapter):
         search_query = f"{query} STL 3D print digital download"
         offset = (page - 1) * per_page
 
-        data = self._request("GET", "/application/listings/active", params={
-            "keywords": search_query,
-            "limit": min(per_page, 100),
-            "offset": offset,
-            "sort_on": sort_map.get(sort, "relevancy"),
-        })
+        data = self._request(
+            "GET",
+            "/application/listings/active",
+            params={
+                "keywords": search_query,
+                "limit": min(per_page, 100),
+                "offset": offset,
+                "sort_on": sort_map.get(sort, "relevancy"),
+            },
+        )
         items = data.get("results", []) if isinstance(data, dict) else []
         return [self._parse_summary(item) for item in items if isinstance(item, dict)]
 
@@ -157,7 +165,7 @@ class EtsyAdapter(MarketplaceAdapter):
         data = self._request("GET", f"/application/listings/{model_id}")
         return self._parse_detail(data)
 
-    def get_files(self, model_id: str) -> List[ModelFile]:
+    def get_files(self, model_id: str) -> list[ModelFile]:
         data = self._request("GET", f"/application/listings/{model_id}/files")
         items = data.get("results", []) if isinstance(data, dict) else []
         return [self._parse_file(f) for f in items if isinstance(f, dict)]
@@ -173,8 +181,7 @@ class EtsyAdapter(MarketplaceAdapter):
         download_url = meta.get("url", meta.get("download_url", ""))
         if not download_url:
             raise MarketplaceError(
-                f"No download URL for Etsy file {file_id}.  "
-                "Etsy may require OAuth for digital file downloads.",
+                f"No download URL for Etsy file {file_id}.  Etsy may require OAuth for digital file downloads.",
             )
 
         name = file_name or meta.get("filename", f"file_{file_id}")
@@ -198,7 +205,7 @@ class EtsyAdapter(MarketplaceAdapter):
     # -- parsing helpers ---------------------------------------------------
 
     @staticmethod
-    def _parse_summary(data: Dict[str, Any]) -> ModelSummary:
+    def _parse_summary(data: dict[str, Any]) -> ModelSummary:
         tags = data.get("tags", []) or []
         is_digital = data.get("is_digital", False)
 
@@ -215,7 +222,7 @@ class EtsyAdapter(MarketplaceAdapter):
         creator = shop.get("shop_name", data.get("shop_name", ""))
 
         images = data.get("images", []) or []
-        thumbnail: Optional[str] = None
+        thumbnail: str | None = None
         if images and isinstance(images[0], dict):
             thumbnail = images[0].get("url_570xN", images[0].get("url_170x135"))
 
@@ -240,7 +247,7 @@ class EtsyAdapter(MarketplaceAdapter):
         )
 
     @staticmethod
-    def _parse_detail(data: Dict[str, Any]) -> ModelDetail:
+    def _parse_detail(data: dict[str, Any]) -> ModelDetail:
         tags = data.get("tags", []) or []
         is_digital = data.get("is_digital", False)
 
@@ -256,17 +263,15 @@ class EtsyAdapter(MarketplaceAdapter):
         creator = shop.get("shop_name", data.get("shop_name", ""))
 
         images = data.get("images", []) or []
-        thumbnail: Optional[str] = None
+        thumbnail: str | None = None
         if images and isinstance(images[0], dict):
             thumbnail = images[0].get("url_570xN", images[0].get("url_170x135"))
 
         category_path = data.get("taxonomy_path", []) or []
-        category: Optional[str] = None
+        category: str | None = None
         if category_path:
             last = category_path[-1]
-            category = last if isinstance(last, str) else (
-                last.get("name", "") if isinstance(last, dict) else None
-            )
+            category = last if isinstance(last, str) else (last.get("name", "") if isinstance(last, dict) else None)
 
         return ModelDetail(
             id=str(data.get("listing_id", data.get("id", ""))),
@@ -288,7 +293,7 @@ class EtsyAdapter(MarketplaceAdapter):
         )
 
     @staticmethod
-    def _parse_file(data: Dict[str, Any]) -> ModelFile:
+    def _parse_file(data: dict[str, Any]) -> ModelFile:
         filename = data.get("filename", data.get("name", ""))
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         return ModelFile(

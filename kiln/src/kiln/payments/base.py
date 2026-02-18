@@ -10,7 +10,7 @@ from __future__ import annotations
 import enum
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class PaymentStatus(enum.Enum):
@@ -45,10 +45,10 @@ class PaymentRail(enum.Enum):
     """Payment network / rail."""
 
     STRIPE = "stripe"
-    CIRCLE = "circle"          # USDC via Circle APIs
-    ETHEREUM = "ethereum"      # On-chain ETH/ERC-20
-    BASE = "base"              # On-chain Base L2
-    SOLANA = "solana"          # On-chain SOL/SPL
+    CIRCLE = "circle"  # USDC via Circle APIs
+    ETHEREUM = "ethereum"  # On-chain ETH/ERC-20
+    BASE = "base"  # On-chain Base L2
+    SOLANA = "solana"  # On-chain SOL/SPL
 
 
 @dataclass
@@ -60,9 +60,9 @@ class PaymentRequest:
     rail: PaymentRail
     job_id: str
     description: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["currency"] = self.currency.value
         data["rail"] = self.rail.value
@@ -79,10 +79,10 @@ class PaymentResult:
     amount: float
     currency: Currency
     rail: PaymentRail
-    tx_hash: Optional[str] = None  # blockchain transaction hash
-    error: Optional[str] = None
+    tx_hash: str | None = None  # blockchain transaction hash
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["status"] = self.status.value
         data["currency"] = self.currency.value
@@ -91,15 +91,14 @@ class PaymentResult:
 
 
 BILLING_SUPPORT_SUFFIX = (
-    " For help, run 'billing_status' to check your account, "
-    "or open an issue at https://github.com/Kiln3D/kiln/issues."
+    " For help, run 'billing_status' to check your account, or open an issue at https://github.com/Kiln3D/kiln/issues."
 )
 
 
 class PaymentError(Exception):
     """Base exception for payment-related errors."""
 
-    def __init__(self, message: str, *, code: Optional[str] = None) -> None:
+    def __init__(self, message: str, *, code: str | None = None) -> None:
         super().__init__(message)
         self.code = code
 
@@ -192,9 +191,7 @@ class PaymentProvider(ABC):
             PaymentError: If the hold cannot be placed.
             NotImplementedError: If the provider doesn't support holds.
         """
-        raise NotImplementedError(
-            f"{self.name} does not support auth-and-capture."
-        )
+        raise NotImplementedError(f"{self.name} does not support auth-and-capture.")
 
     def capture_payment(self, payment_id: str) -> PaymentResult:
         """Capture a previously authorized payment.
@@ -209,9 +206,7 @@ class PaymentProvider(ABC):
             PaymentError: If capture fails.
             NotImplementedError: If the provider doesn't support holds.
         """
-        raise NotImplementedError(
-            f"{self.name} does not support auth-and-capture."
-        )
+        raise NotImplementedError(f"{self.name} does not support auth-and-capture.")
 
     def cancel_payment(self, payment_id: str) -> PaymentResult:
         """Release a previously authorized hold without charging.
@@ -226,6 +221,4 @@ class PaymentProvider(ABC):
             PaymentError: If cancellation fails.
             NotImplementedError: If the provider doesn't support holds.
         """
-        raise NotImplementedError(
-            f"{self.name} does not support auth-and-capture."
-        )
+        raise NotImplementedError(f"{self.name} does not support auth-and-capture.")

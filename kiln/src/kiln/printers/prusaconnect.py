@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -45,7 +45,7 @@ _FILE_ROOTS: tuple[str, ...] = ("usb", "local")
 _FILE_ROOT_FALLBACK_HTTP_CODES: tuple[int, ...] = (403, 404)
 
 # Prusa Link printer states → PrinterStatus
-_STATE_MAP: Dict[str, PrinterStatus] = {
+_STATE_MAP: dict[str, PrinterStatus] = {
     "IDLE": PrinterStatus.IDLE,
     "BUSY": PrinterStatus.BUSY,
     "PRINTING": PrinterStatus.PRINTING,
@@ -62,6 +62,7 @@ _STATE_MAP: Dict[str, PrinterStatus] = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
     """Walk nested dicts safely, returning *default* on any miss."""
     current = data
@@ -75,6 +76,7 @@ def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
+
 
 class PrusaConnectAdapter(PrinterAdapter):
     """Concrete :class:`PrinterAdapter` backed by the Prusa Link HTTP API.
@@ -94,7 +96,7 @@ class PrusaConnectAdapter(PrinterAdapter):
     def __init__(
         self,
         host: str,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         timeout: int = 30,
         retries: int = 3,
     ) -> None:
@@ -102,7 +104,7 @@ class PrusaConnectAdapter(PrinterAdapter):
             raise ValueError("host must not be empty")
 
         self._host: str = host.rstrip("/")
-        self._api_key: Optional[str] = api_key or None
+        self._api_key: str | None = api_key or None
         self._timeout: int = timeout
         self._retries: int = max(retries, 1)
 
@@ -145,14 +147,14 @@ class PrusaConnectAdapter(PrinterAdapter):
         method: str,
         path: str,
         *,
-        json: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
-        data: Optional[Any] = None,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        data: Any | None = None,
     ) -> requests.Response:
         """Execute an HTTP request with exponential-backoff retry logic."""
         url = self._url(path)
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
 
         for attempt in range(self._retries):
             try:
@@ -205,8 +207,7 @@ class PrusaConnectAdapter(PrinterAdapter):
                             f"with another operation. Wait a moment and try again.",
                         )
                     raise PrinterError(
-                        f"Prusa Link returned HTTP {response.status_code} "
-                        f"for {method} {path}: {response.text[:300]}",
+                        f"Prusa Link returned HTTP {response.status_code} for {method} {path}: {response.text[:300]}",
                     )
 
                 last_exc = PrinterError(
@@ -243,14 +244,18 @@ class PrusaConnectAdapter(PrinterAdapter):
                 backoff = 2**attempt
                 logger.debug(
                     "Retrying %s %s in %ds (attempt %d/%d)",
-                    method, path, backoff, attempt + 1, self._retries,
+                    method,
+                    path,
+                    backoff,
+                    attempt + 1,
+                    self._retries,
                 )
                 time.sleep(backoff)
 
         assert last_exc is not None
         raise last_exc
 
-    def _get_json(self, path: str, **kwargs: Any) -> Dict[str, Any]:
+    def _get_json(self, path: str, **kwargs: Any) -> dict[str, Any]:
         """GET *path* and return the parsed JSON body."""
         response = self._request("GET", path, **kwargs)
         try:
@@ -265,7 +270,7 @@ class PrusaConnectAdapter(PrinterAdapter):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _get_active_job_id(self) -> Optional[int]:
+    def _get_active_job_id(self) -> int | None:
         """Return the active job ID, or None if no job is running."""
         try:
             data = self._get_json("/api/v1/status")
@@ -279,23 +284,20 @@ class PrusaConnectAdapter(PrinterAdapter):
 
     @classmethod
     def _is_storage_fallback_error(cls, exc: PrinterError) -> bool:
-        return any(
-            cls._is_http_error(exc, code)
-            for code in _FILE_ROOT_FALLBACK_HTTP_CODES
-        )
+        return any(cls._is_http_error(exc, code) for code in _FILE_ROOT_FALLBACK_HTTP_CODES)
 
-    def _iter_file_roots(self, preferred: Optional[str] = None) -> List[str]:
+    def _iter_file_roots(self, preferred: str | None = None) -> list[str]:
         roots = list(_FILE_ROOTS)
         if preferred and preferred in roots:
             return [preferred, *[r for r in roots if r != preferred]]
         return roots
 
-    def _split_storage_root(self, file_path: str) -> tuple[Optional[str], str]:
+    def _split_storage_root(self, file_path: str) -> tuple[str | None, str]:
         clean = file_path.strip().lstrip("/")
         for root in _FILE_ROOTS:
             prefix = f"{root}/"
             if clean.lower().startswith(prefix):
-                return root, clean[len(prefix):]
+                return root, clean[len(prefix) :]
         return None, clean
 
     def _resolve_print_path(self, requested: str) -> str:
@@ -328,8 +330,7 @@ class PrusaConnectAdapter(PrinterAdapter):
         basename_matches = [
             candidate
             for candidate in files
-            if candidate.name.lower() == basename
-            or candidate.path.rsplit("/", 1)[-1].lower() == basename
+            if candidate.name.lower() == basename or candidate.path.rsplit("/", 1)[-1].lower() == basename
         ]
         if len(basename_matches) == 1:
             return basename_matches[0].path
@@ -398,15 +399,15 @@ class PrusaConnectAdapter(PrinterAdapter):
             return JobProgress()
 
         progress = job.get("progress")
-        completion: Optional[float] = None
+        completion: float | None = None
         if progress is not None:
             completion = round(float(progress), 2)
 
         time_printing = job.get("time_printing")
         time_remaining = job.get("time_remaining")
 
-        print_time_seconds: Optional[int] = None
-        print_time_left_seconds: Optional[int] = None
+        print_time_seconds: int | None = None
+        print_time_left_seconds: int | None = None
 
         if time_printing is not None:
             print_time_seconds = int(time_printing)
@@ -420,14 +421,14 @@ class PrusaConnectAdapter(PrinterAdapter):
             print_time_left_seconds=print_time_left_seconds,
         )
 
-    def list_files(self) -> List[PrinterFile]:
+    def list_files(self) -> list[PrinterFile]:
         """Return a list of G-code files across supported Prusa storage roots.
 
         Tries ``/api/v1/files/usb`` first, then falls back to ``/api/v1/files/local``.
         """
-        results: List[PrinterFile] = []
+        results: list[PrinterFile] = []
         successful_roots = 0
-        fallback_errors: List[tuple[str, PrinterError]] = []
+        fallback_errors: list[tuple[str, PrinterError]] = []
 
         for root in _FILE_ROOTS:
             try:
@@ -455,7 +456,7 @@ class PrusaConnectAdapter(PrinterAdapter):
                 f"Unable to list files from Prusa Link storage roots ({roots}). {detail}",
             )
 
-        deduped: List[PrinterFile] = []
+        deduped: list[PrinterFile] = []
         seen_paths: set[str] = set()
         for entry in results:
             key = entry.path.lower()
@@ -468,8 +469,8 @@ class PrusaConnectAdapter(PrinterAdapter):
 
     def _collect_files(
         self,
-        entries: List[Any],
-        results: List[PrinterFile],
+        entries: list[Any],
+        results: list[PrinterFile],
         prefix: str,
     ) -> None:
         """Recursively collect files from a directory listing."""
@@ -529,7 +530,7 @@ class PrusaConnectAdapter(PrinterAdapter):
             "Overwrite": "?1",
         }
 
-        last_fallback_error: Optional[PrinterError] = None
+        last_fallback_error: PrinterError | None = None
 
         for root in _FILE_ROOTS:
             try:
@@ -579,7 +580,7 @@ class PrusaConnectAdapter(PrinterAdapter):
         encoded = quote(resolved_path, safe="/")
 
         roots = self._iter_file_roots(preferred=preferred_root)
-        last_fallback_error: Optional[PrinterError] = None
+        last_fallback_error: PrinterError | None = None
         for root in roots:
             try:
                 self._request("POST", f"/api/v1/files/{root}/{encoded}")
@@ -626,7 +627,7 @@ class PrusaConnectAdapter(PrinterAdapter):
             raise PrinterError(
                 "Emergency stop failed — Prusa Link does not support "
                 "raw G-code commands.  Power off the printer manually."
-            )
+            ) from None
 
     def pause_print(self) -> PrintResult:
         """Pause the currently running print job.
@@ -680,7 +681,7 @@ class PrusaConnectAdapter(PrinterAdapter):
     # PrinterAdapter -- G-code
     # ------------------------------------------------------------------
 
-    def send_gcode(self, commands: List[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> bool:
         """Not supported by Prusa Link.
 
         Prusa Link does not expose a raw G-code endpoint.
@@ -705,7 +706,7 @@ class PrusaConnectAdapter(PrinterAdapter):
 
         encoded = quote(normalized_path, safe="/")
         roots = self._iter_file_roots(preferred=preferred_root)
-        last_fallback_error: Optional[PrinterError] = None
+        last_fallback_error: PrinterError | None = None
         for root in roots:
             try:
                 self._request("DELETE", f"/api/v1/files/{root}/{encoded}")
@@ -726,7 +727,7 @@ class PrusaConnectAdapter(PrinterAdapter):
     # PrinterAdapter -- webcam snapshot
     # ------------------------------------------------------------------
 
-    def get_snapshot(self) -> Optional[bytes]:
+    def get_snapshot(self) -> bytes | None:
         """Capture a webcam snapshot from Prusa Link.
 
         Calls ``GET /api/v1/cameras/snap`` for the default camera.

@@ -19,9 +19,9 @@ from __future__ import annotations
 import logging
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 from requests.exceptions import ConnectionError as ReqConnectionError
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_BASE_URLS: Dict[str, str] = {
+_BASE_URLS: dict[str, str] = {
     "sandbox": "https://api-sandbox.circle.com/v1",
     "production": "https://api.circle.com/v1",
 }
@@ -45,6 +45,7 @@ _SOLANA_ADDRESS_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
+
 
 class CirclePaymentStatus(str, Enum):
     """Payment lifecycle states for Circle transfers."""
@@ -64,14 +65,14 @@ class BlockchainNetwork(str, Enum):
 
 
 # Map Circle API status strings to our enum.
-_STATUS_MAP: Dict[str, CirclePaymentStatus] = {
+_STATUS_MAP: dict[str, CirclePaymentStatus] = {
     "complete": CirclePaymentStatus.COMPLETED,
     "pending": CirclePaymentStatus.PROCESSING,
     "failed": CirclePaymentStatus.FAILED,
 }
 
 # Map our network enum to Circle's chain identifiers.
-_NETWORK_TO_CHAIN: Dict[BlockchainNetwork, str] = {
+_NETWORK_TO_CHAIN: dict[BlockchainNetwork, str] = {
     BlockchainNetwork.SOLANA: "SOL",
     BlockchainNetwork.BASE: "ETH-BASE",
 }
@@ -81,6 +82,7 @@ _NETWORK_TO_CHAIN: Dict[BlockchainNetwork, str] = {
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class CirclePaymentError(Exception):
     """Exception raised for Circle payment failures.
 
@@ -88,7 +90,7 @@ class CirclePaymentError(Exception):
     :param code: Machine-readable error code (e.g. ``"TIMEOUT"``).
     """
 
-    def __init__(self, message: str, *, code: Optional[str] = None) -> None:
+    def __init__(self, message: str, *, code: str | None = None) -> None:
         super().__init__(message)
         self.code = code
 
@@ -96,6 +98,7 @@ class CirclePaymentError(Exception):
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class PaymentResult:
@@ -114,13 +117,13 @@ class PaymentResult:
     payment_id: str
     status: CirclePaymentStatus
     amount: float
-    network: Optional[BlockchainNetwork] = None
-    tx_hash: Optional[str] = None
-    error: Optional[str] = None
+    network: BlockchainNetwork | None = None
+    tx_hash: str | None = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
-        d: Dict[str, Any] = {
+        d: dict[str, Any] = {
             "success": self.success,
             "payment_id": self.payment_id,
             "status": self.status.value,
@@ -153,13 +156,13 @@ class RefundResult:
     original_payment_id: str
     status: CirclePaymentStatus
     amount: float
-    network: Optional[BlockchainNetwork] = None
-    tx_hash: Optional[str] = None
-    error: Optional[str] = None
+    network: BlockchainNetwork | None = None
+    tx_hash: str | None = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
-        d: Dict[str, Any] = {
+        d: dict[str, Any] = {
             "success": self.success,
             "refund_id": self.refund_id,
             "original_payment_id": self.original_payment_id,
@@ -188,10 +191,10 @@ class PaymentSummary:
     payment_id: str
     status: CirclePaymentStatus
     amount: float
-    network: Optional[BlockchainNetwork] = None
-    created_at: Optional[str] = None
+    network: BlockchainNetwork | None = None
+    created_at: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "payment_id": self.payment_id,
@@ -206,10 +209,11 @@ class PaymentSummary:
 # Address validation
 # ---------------------------------------------------------------------------
 
+
 def validate_blockchain_address(
     address: str,
     network: BlockchainNetwork,
-) -> Optional[str]:
+) -> str | None:
     """Validate a blockchain address format.
 
     :param address: The address string to validate.
@@ -225,18 +229,15 @@ def validate_blockchain_address(
                 f"Invalid Ethereum/Base address: expected 42-character "
                 f"hex string starting with 0x, got {len(address)} chars"
             )
-    elif network == BlockchainNetwork.SOLANA:
-        if not _SOLANA_ADDRESS_RE.match(address):
-            return (
-                f"Invalid Solana address: expected 32-44 character "
-                f"base58 string, got {len(address)} chars"
-            )
+    elif network == BlockchainNetwork.SOLANA and not _SOLANA_ADDRESS_RE.match(address):
+        return f"Invalid Solana address: expected 32-44 character base58 string, got {len(address)} chars"
     return None
 
 
 # ---------------------------------------------------------------------------
 # Circle provider
 # ---------------------------------------------------------------------------
+
 
 class CircleProvider:
     """USDC payment provider backed by the Circle Transfers API.
@@ -264,23 +265,17 @@ class CircleProvider:
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        environment: Optional[str] = None,
-        default_network: Optional[str] = None,
+        api_key: str | None = None,
+        environment: str | None = None,
+        default_network: str | None = None,
     ) -> None:
         self._api_key = api_key or os.environ.get("KILN_CIRCLE_API_KEY", "")
         if not self._api_key:
-            raise ValueError(
-                "Circle API key required. "
-                "Set KILN_CIRCLE_API_KEY or pass api_key=."
-            )
+            raise ValueError("Circle API key required. Set KILN_CIRCLE_API_KEY or pass api_key=.")
 
         env = environment or os.environ.get("KILN_CIRCLE_ENVIRONMENT", "sandbox")
         if env not in _BASE_URLS:
-            raise ValueError(
-                f"Invalid Circle environment {env!r}. "
-                f"Must be one of: {', '.join(sorted(_BASE_URLS))}."
-            )
+            raise ValueError(f"Invalid Circle environment {env!r}. Must be one of: {', '.join(sorted(_BASE_URLS))}.")
         self._environment = env
         self._base_url = _BASE_URLS[env]
 
@@ -289,16 +284,17 @@ class CircleProvider:
             self._default_network = BlockchainNetwork(net)
         except ValueError:
             raise ValueError(
-                f"Invalid default network {net!r}. "
-                f"Must be one of: {', '.join(n.value for n in BlockchainNetwork)}."
-            )
+                f"Invalid default network {net!r}. Must be one of: {', '.join(n.value for n in BlockchainNetwork)}."
+            ) from None
 
         self._session = requests.Session()
-        self._session.headers.update({
-            "Authorization": f"Bearer {self._api_key}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        })
+        self._session.headers.update(
+            {
+                "Authorization": f"Bearer {self._api_key}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            }
+        )
 
     # -- Properties -----------------------------------------------------------
 
@@ -322,7 +318,7 @@ class CircleProvider:
         method: str,
         path: str,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Execute an authenticated HTTP request to the Circle API.
 
         :param method: HTTP method (``GET``, ``POST``, etc.).
@@ -338,8 +334,7 @@ class CircleProvider:
 
             if not response.ok:
                 raise CirclePaymentError(
-                    f"Circle API returned HTTP {response.status_code} "
-                    f"for {method} {path}: {response.text[:300]}",
+                    f"Circle API returned HTTP {response.status_code} for {method} {path}: {response.text[:300]}",
                     code=f"HTTP_{response.status_code}",
                 )
 
@@ -366,12 +361,12 @@ class CircleProvider:
                 code="REQUEST_ERROR",
             ) from exc
 
-    def _resolve_chain(self, network: Optional[BlockchainNetwork] = None) -> str:
+    def _resolve_chain(self, network: BlockchainNetwork | None = None) -> str:
         """Map a :class:`BlockchainNetwork` to a Circle chain identifier."""
         net = network or self._default_network
         return _NETWORK_TO_CHAIN.get(net, "SOL")
 
-    def _resolve_network(self, network: Optional[str] = None) -> BlockchainNetwork:
+    def _resolve_network(self, network: str | None = None) -> BlockchainNetwork:
         """Resolve a network string or fall back to the default."""
         if network is None:
             return self._default_network
@@ -379,10 +374,9 @@ class CircleProvider:
             return BlockchainNetwork(network)
         except ValueError:
             raise CirclePaymentError(
-                f"Unsupported network {network!r}. "
-                f"Must be one of: {', '.join(n.value for n in BlockchainNetwork)}.",
+                f"Unsupported network {network!r}. Must be one of: {', '.join(n.value for n in BlockchainNetwork)}.",
                 code="INVALID_NETWORK",
-            )
+            ) from None
 
     # -- Public API -----------------------------------------------------------
 
@@ -391,9 +385,9 @@ class CircleProvider:
         amount: float,
         destination_address: str,
         *,
-        job_id: Optional[str] = None,
-        network: Optional[str] = None,
-        description: Optional[str] = None,
+        job_id: str | None = None,
+        network: str | None = None,
+        description: str | None = None,
     ) -> PaymentResult:
         """Create a USDC transfer via the Circle API.
 
@@ -434,7 +428,7 @@ class CircleProvider:
                 error=addr_error,
             )
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "source": {
                 "type": "wallet",
                 "id": "master",
@@ -475,7 +469,8 @@ class CircleProvider:
 
         initial_status_str = transfer.get("status", "pending")
         mapped_status = _STATUS_MAP.get(
-            initial_status_str, CirclePaymentStatus.PROCESSING,
+            initial_status_str,
+            CirclePaymentStatus.PROCESSING,
         )
 
         logger.info(
@@ -550,7 +545,7 @@ class CircleProvider:
         destination = original.get("destination", {})
 
         # Source is always the master wallet for refunds.
-        refund_source: Dict[str, Any] = {"type": "wallet", "id": "master"}
+        refund_source: dict[str, Any] = {"type": "wallet", "id": "master"}
 
         # Determine refund destination based on original transfer direction.
         source_type = source.get("type", "")
@@ -558,7 +553,7 @@ class CircleProvider:
 
         if source_type == "blockchain":
             # Inbound blockchain transfer -> refund to original sender.
-            refund_destination: Dict[str, Any] = {
+            refund_destination: dict[str, Any] = {
                 "type": "blockchain",
                 "chain": source.get("chain", self._resolve_chain()),
                 "address": source.get("address", ""),
@@ -566,8 +561,7 @@ class CircleProvider:
         elif source_type == "wallet" and dest_type == "blockchain":
             # Outbound payout -> refund back to same blockchain address.
             logger.warning(
-                "Refunding outbound payout %s: sending back to same "
-                "destination address %s",
+                "Refunding outbound payout %s: sending back to same destination address %s",
                 payment_id,
                 destination.get("address", "unknown"),
             )
@@ -583,7 +577,7 @@ class CircleProvider:
                 "id": source.get("id", "master"),
             }
 
-        refund_payload: Dict[str, Any] = {
+        refund_payload: dict[str, Any] = {
             "source": refund_source,
             "destination": refund_destination,
             "amount": amount_info,
@@ -604,19 +598,18 @@ class CircleProvider:
         refund_amount = float(amount_info.get("amount", 0))
         if refund_amount <= 0:
             raise CirclePaymentError(
-                f"Circle refund returned zero amount for payment {payment_id}. "
-                "Refund may not have been processed.",
+                f"Circle refund returned zero amount for payment {payment_id}. Refund may not have been processed.",
                 code="ZERO_REFUND_AMOUNT",
             )
 
         refund_status_str = refund.get("status", "pending")
         refund_status = _STATUS_MAP.get(
-            refund_status_str, CirclePaymentStatus.PROCESSING,
+            refund_status_str,
+            CirclePaymentStatus.PROCESSING,
         )
         if refund_status_str not in _STATUS_MAP:
             logger.warning(
-                "Unknown Circle refund status %r for payment %s "
-                "-- defaulting to PROCESSING",
+                "Unknown Circle refund status %r for payment %s -- defaulting to PROCESSING",
                 refund_status_str,
                 payment_id,
             )
@@ -639,9 +632,9 @@ class CircleProvider:
         self,
         *,
         limit: int = 25,
-        page_before: Optional[str] = None,
-        page_after: Optional[str] = None,
-    ) -> List[PaymentSummary]:
+        page_before: str | None = None,
+        page_after: str | None = None,
+    ) -> list[PaymentSummary]:
         """List recent USDC transfers from the Circle API.
 
         :param limit: Maximum number of transfers to return (1-100).
@@ -650,7 +643,7 @@ class CircleProvider:
         :returns: List of payment summaries.
         :raises CirclePaymentError: If the API call fails.
         """
-        params: Dict[str, Any] = {"pageSize": min(max(limit, 1), 100)}
+        params: dict[str, Any] = {"pageSize": min(max(limit, 1), 100)}
         if page_before:
             params["pageBefore"] = page_before
         if page_after:
@@ -662,7 +655,7 @@ class CircleProvider:
         if not isinstance(transfers, list):
             transfers = []
 
-        results: List[PaymentSummary] = []
+        results: list[PaymentSummary] = []
         for t in transfers:
             amount_info = t.get("amount", {})
             status_str = t.get("status", "pending")
@@ -672,17 +665,19 @@ class CircleProvider:
             chain = dest.get("chain", "")
             network = self._chain_to_network(chain)
 
-            results.append(PaymentSummary(
-                payment_id=str(t.get("id", "")),
-                status=_STATUS_MAP.get(status_str, CirclePaymentStatus.PENDING),
-                amount=float(amount_info.get("amount", 0)),
-                network=network,
-                created_at=t.get("createDate"),
-            ))
+            results.append(
+                PaymentSummary(
+                    payment_id=str(t.get("id", "")),
+                    status=_STATUS_MAP.get(status_str, CirclePaymentStatus.PENDING),
+                    amount=float(amount_info.get("amount", 0)),
+                    network=network,
+                    created_at=t.get("createDate"),
+                )
+            )
 
         return results
 
-    def _chain_to_network(self, chain: str) -> Optional[BlockchainNetwork]:
+    def _chain_to_network(self, chain: str) -> BlockchainNetwork | None:
         """Reverse-map a Circle chain identifier to a :class:`BlockchainNetwork`."""
         for net, chain_id in _NETWORK_TO_CHAIN.items():
             if chain_id == chain:
@@ -690,7 +685,4 @@ class CircleProvider:
         return None
 
     def __repr__(self) -> str:
-        return (
-            f"<CircleProvider environment={self._environment!r} "
-            f"default_network={self._default_network.value!r}>"
-        )
+        return f"<CircleProvider environment={self._environment!r} default_network={self._default_network.value!r}>"

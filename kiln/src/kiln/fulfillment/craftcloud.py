@@ -1,27 +1,40 @@
 """Craftcloud by All3DP fulfillment adapter.
 
 Implements :class:`~kiln.fulfillment.base.FulfillmentProvider` using the
-`Craftcloud API <https://craftcloud3d.com>`_.  Craftcloud is a 3D printing
-price comparison service that aggregates quotes from 150+ print services.
+`Craftcloud v5 API <https://api.craftcloud3d.com/docs>`_.  Craftcloud is a 3D
+printing price comparison service that aggregates quotes from 150+ print
+services.
 
-The adapter uploads a model file, retrieves quotes across multiple materials
-and vendors, and can place orders with shipping.
+The adapter follows the v5 flow:
+
+1. Upload model → ``POST /v5/model``
+2. Poll until parsed → ``GET /v5/model/{modelId}`` (200 = ready, 206 = parsing)
+3. Request prices → ``POST /v5/price`` (async)
+4. Poll prices → ``GET /v5/price/{priceId}`` until ``allComplete`` is true
+5. Create cart → ``POST /v5/cart`` (select quote + shipping)
+6. Place order → ``POST /v5/order`` (cart + shipping/billing address)
+7. Track order → ``GET /v5/order/{orderId}/status``
 
 Environment variables
 ---------------------
 ``KILN_CRAFTCLOUD_API_KEY``
-    API key for authenticating with the Craftcloud API.
+    API key for authenticating with the Craftcloud API (partner endpoints).
 ``KILN_CRAFTCLOUD_BASE_URL``
     Base URL of the Craftcloud API (defaults to production).
 ``KILN_CRAFTCLOUD_MATERIAL_CATALOG_URL``
     URL for Craftcloud's material catalog endpoint (materialConfigIds).
+``KILN_CRAFTCLOUD_POLL_INTERVAL``
+    Seconds between price polling requests (default 2).
+``KILN_CRAFTCLOUD_MAX_POLL_ATTEMPTS``
+    Maximum polling attempts before timeout (default 60).
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any
 from urllib.parse import quote as url_quote
 
 import requests
@@ -44,23 +57,23 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "https://api.craftcloud3d.com"
 _DEFAULT_MATERIAL_CATALOG_URL = "http://customer-api.craftcloud3d.com/material-catalog"
+_DEFAULT_POLL_INTERVAL = 2.0
+_DEFAULT_MAX_POLL_ATTEMPTS = 60
 
-_STATUS_MAP: Dict[str, OrderStatus] = {
-    "pending": OrderStatus.SUBMITTED,
-    "submitted": OrderStatus.SUBMITTED,
-    "confirmed": OrderStatus.PROCESSING,
-    "processing": OrderStatus.PROCESSING,
-    "printing": OrderStatus.PRINTING,
+# Craftcloud v5 order status types → internal OrderStatus.
+_STATUS_MAP: dict[str, OrderStatus] = {
+    "ordered": OrderStatus.SUBMITTED,
+    "in_production": OrderStatus.PRINTING,
     "shipped": OrderStatus.SHIPPING,
-    "delivered": OrderStatus.DELIVERED,
+    "received": OrderStatus.DELIVERED,
+    "blocked": OrderStatus.PROCESSING,
     "cancelled": OrderStatus.CANCELLED,
     "canceled": OrderStatus.CANCELLED,
-    "failed": OrderStatus.FAILED,
 }
 
 
 class CraftcloudProvider(FulfillmentProvider):
-    """Concrete :class:`FulfillmentProvider` backed by the Craftcloud API.
+    """Concrete :class:`FulfillmentProvider` backed by the Craftcloud v5 API.
 
     Args:
         api_key: Craftcloud API key.  If not provided, reads from
@@ -69,6 +82,8 @@ class CraftcloudProvider(FulfillmentProvider):
         material_catalog_url: URL for material catalog retrieval
             (materialConfigIds).
         timeout: Per-request timeout in seconds.
+        poll_interval: Seconds between async price polling requests.
+        max_poll_attempts: Maximum polling iterations before giving up.
 
     Raises:
         ValueError: If no API key is available.
@@ -76,18 +91,16 @@ class CraftcloudProvider(FulfillmentProvider):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        material_catalog_url: Optional[str] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        material_catalog_url: str | None = None,
         timeout: int = 60,
+        *,
+        poll_interval: float | None = None,
+        max_poll_attempts: int | None = None,
     ) -> None:
         self._api_key = api_key or os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
-        configured_base_url = (
-            base_url
-            or os.environ.get("KILN_CRAFTCLOUD_BASE_URL", _DEFAULT_BASE_URL)
-        ).rstrip("/")
-        self._base_urls = self._build_base_url_candidates(configured_base_url)
-        self._base_url = self._base_urls[0]
+        self._base_url = (base_url or os.environ.get("KILN_CRAFTCLOUD_BASE_URL", _DEFAULT_BASE_URL)).rstrip("/")
         self._material_catalog_url = (
             material_catalog_url
             or os.environ.get(
@@ -96,19 +109,27 @@ class CraftcloudProvider(FulfillmentProvider):
             )
         ).rstrip("/")
         self._timeout = timeout
+        self._poll_interval = (
+            poll_interval
+            if poll_interval is not None
+            else float(os.environ.get("KILN_CRAFTCLOUD_POLL_INTERVAL", _DEFAULT_POLL_INTERVAL))
+        )
+        self._max_poll_attempts = (
+            max_poll_attempts
+            if max_poll_attempts is not None
+            else int(os.environ.get("KILN_CRAFTCLOUD_MAX_POLL_ATTEMPTS", _DEFAULT_MAX_POLL_ATTEMPTS))
+        )
 
         if not self._api_key:
-            raise ValueError(
-                "Craftcloud API key required. "
-                "Set KILN_CRAFTCLOUD_API_KEY or pass api_key."
-            )
+            raise ValueError("Craftcloud API key required. Set KILN_CRAFTCLOUD_API_KEY or pass api_key.")
 
         self._session = requests.Session()
-        self._session.headers.update({
-            "Authorization": f"Bearer {self._api_key}",
-            "X-API-Key": self._api_key,
-            "Accept": "application/json",
-        })
+        self._session.headers.update(
+            {
+                "Accept": "application/json",
+                "X-API-Key": self._api_key,
+            }
+        )
 
     # -- FulfillmentProvider identity ----------------------------------------
 
@@ -121,22 +142,10 @@ class CraftcloudProvider(FulfillmentProvider):
         return "Craftcloud by All3DP"
 
     @property
-    def supported_technologies(self) -> List[str]:
+    def supported_technologies(self) -> list[str]:
         return ["FDM", "SLA", "SLS", "MJF", "DMLS", "PolyJet"]
 
-    # -- Internal HTTP helpers -----------------------------------------------
-
-    @staticmethod
-    def _build_base_url_candidates(base_url: str) -> List[str]:
-        """Return base URLs to try (host + host/v1 or vice versa)."""
-        candidates = [base_url]
-        if base_url.endswith("/v1"):
-            alt = base_url[:-3].rstrip("/")
-        else:
-            alt = f"{base_url}/v1"
-        if alt and alt not in candidates:
-            candidates.append(alt)
-        return candidates
+    # -- Internal helpers ----------------------------------------------------
 
     @staticmethod
     def _to_text(value: Any) -> str:
@@ -145,7 +154,7 @@ class CraftcloudProvider(FulfillmentProvider):
         if isinstance(value, (int, float)):
             return str(value)
         if isinstance(value, dict):
-            for key in ("name", "label", "displayName", "display_name", "value", "id"):
+            for key in ("name", "label", "displayName", "value", "id"):
                 text = value.get(key)
                 if isinstance(text, str) and text.strip():
                     return text.strip()
@@ -160,7 +169,7 @@ class CraftcloudProvider(FulfillmentProvider):
         return ""
 
     @staticmethod
-    def _to_float(value: Any) -> Optional[float]:
+    def _to_float(value: Any) -> float | None:
         if value is None or value == "":
             return None
         try:
@@ -169,7 +178,7 @@ class CraftcloudProvider(FulfillmentProvider):
             return None
 
     @staticmethod
-    def _to_int(value: Any) -> Optional[int]:
+    def _to_int(value: Any) -> int | None:
         if value is None or value == "":
             return None
         try:
@@ -177,606 +186,715 @@ class CraftcloudProvider(FulfillmentProvider):
         except (TypeError, ValueError):
             return None
 
-    def _url(self, path: str, *, base_url: Optional[str] = None) -> str:
-        return f"{base_url or self._base_url}{path}"
+    # -- HTTP layer ----------------------------------------------------------
 
     def _request(
         self,
         method: str,
         path: str,
         *,
-        json: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        data: Optional[Any] = None,
-        files: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Execute an authenticated HTTP request to the Craftcloud API."""
-        for idx, base_url in enumerate(self._base_urls):
-            url = self._url(path, base_url=base_url)
-            try:
-                response = self._session.request(
-                    method,
-                    url,
-                    json=json,
-                    params=params,
-                    data=data,
-                    files=files,
-                    timeout=self._timeout,
-                )
-                if response.ok:
-                    # Persist the first working base URL for subsequent requests.
-                    if idx != 0:
-                        self._base_urls = [base_url] + [
-                            candidate for candidate in self._base_urls if candidate != base_url
-                        ]
-                        self._base_url = self._base_urls[0]
-                    try:
-                        return response.json()
-                    except ValueError:
-                        return {"status": "ok"}
-
-                # Some Craftcloud deployments expose endpoints at /v1 and others
-                # at the host root; retry 404s with the alternate base URL.
-                if response.status_code == 404 and idx < len(self._base_urls) - 1:
-                    logger.debug(
-                        "Craftcloud returned 404 for %s %s; retrying with %s",
-                        method,
-                        url,
-                        self._base_urls[idx + 1],
-                    )
-                    continue
-                raise FulfillmentError(
-                    f"Craftcloud API returned HTTP {response.status_code} "
-                    f"for {method} {path}: {response.text[:300]}",
-                    code=f"HTTP_{response.status_code}",
-                )
-
-            except Timeout as exc:
-                raise FulfillmentError(
-                    f"Request to Craftcloud timed out after {self._timeout}s",
-                    code="TIMEOUT",
-                ) from exc
-            except ReqConnectionError as exc:
-                raise FulfillmentError(
-                    f"Could not connect to Craftcloud API at {base_url}",
-                    code="CONNECTION_ERROR",
-                ) from exc
-            except RequestException as exc:
-                raise FulfillmentError(
-                    f"Request error for {method} {path}: {exc}",
-                    code="REQUEST_ERROR",
-                ) from exc
-
-        raise FulfillmentError(
-            f"Could not resolve Craftcloud endpoint for {method} {path}",
-            code="ENDPOINT_NOT_FOUND",
-        )
-
-    def _request_material_catalog(self) -> Any:
-        """Retrieve Craftcloud material catalog payload."""
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        data: Any | None = None,
+        files: dict[str, Any] | None = None,
+    ) -> Any:
+        """Execute an HTTP request to the Craftcloud v5 API."""
+        url = f"{self._base_url}{path}"
         try:
             response = self._session.request(
-                "GET",
-                self._material_catalog_url,
+                method,
+                url,
+                json=json,
+                params=params,
+                data=data,
+                files=files,
                 timeout=self._timeout,
             )
+            if response.ok:
+                try:
+                    return response.json()
+                except ValueError:
+                    return {"status": "ok"}
+
+            raise FulfillmentError(
+                f"Craftcloud API returned HTTP {response.status_code} for {method} {path}: {response.text[:500]}",
+                code=f"HTTP_{response.status_code}",
+            )
+
+        except Timeout as exc:
+            raise FulfillmentError(
+                f"Request to Craftcloud timed out after {self._timeout}s",
+                code="TIMEOUT",
+            ) from exc
+        except ReqConnectionError as exc:
+            raise FulfillmentError(
+                f"Could not connect to Craftcloud API at {self._base_url}",
+                code="CONNECTION_ERROR",
+            ) from exc
+        except RequestException as exc:
+            raise FulfillmentError(
+                f"Request error for {method} {path}: {exc}",
+                code="REQUEST_ERROR",
+            ) from exc
+
+    def _request_external(self, method: str, url: str) -> Any:
+        """HTTP request to a non-v5 URL (e.g. material catalog)."""
+        try:
+            response = self._session.request(method, url, timeout=self._timeout)
             if not response.ok:
                 raise FulfillmentError(
-                    f"Craftcloud material catalog returned HTTP {response.status_code}: "
-                    f"{response.text[:300]}",
+                    f"Craftcloud returned HTTP {response.status_code} for {method} {url}: {response.text[:300]}",
                     code=f"HTTP_{response.status_code}",
                 )
             return response.json()
         except ValueError as exc:
             raise FulfillmentError(
-                "Craftcloud material catalog returned invalid JSON.",
+                f"Invalid JSON from {url}",
                 code="INVALID_RESPONSE",
             ) from exc
         except Timeout as exc:
             raise FulfillmentError(
-                f"Material catalog request timed out after {self._timeout}s",
+                f"Request to {url} timed out after {self._timeout}s",
                 code="TIMEOUT",
             ) from exc
         except ReqConnectionError as exc:
             raise FulfillmentError(
-                f"Could not connect to Craftcloud material catalog at "
-                f"{self._material_catalog_url}",
+                f"Could not connect to {url}",
                 code="CONNECTION_ERROR",
             ) from exc
         except RequestException as exc:
             raise FulfillmentError(
-                f"Request error for material catalog: {exc}",
+                f"Request error for {url}: {exc}",
                 code="REQUEST_ERROR",
             ) from exc
 
+    # -- v5 upload + model polling -------------------------------------------
+
+    def _upload_model(self, file_path: str) -> str:
+        """Upload a model file and return the modelId.
+
+        Calls ``POST /v5/model`` then polls ``GET /v5/model/{modelId}``
+        until parsing is complete (HTTP 200; 206 means still parsing).
+        """
+        filename = os.path.basename(file_path)
+        try:
+            with open(file_path, "rb") as fh:
+                result = self._request(
+                    "POST",
+                    "/v5/model",
+                    files={"file": (filename, fh, "application/octet-stream")},
+                )
+        except PermissionError as exc:
+            raise FulfillmentError(
+                f"Permission denied reading file: {file_path}",
+                code="PERMISSION_ERROR",
+            ) from exc
+
+        # Response is an array of model objects.
+        models: list[dict[str, Any]]
+        if isinstance(result, list):
+            models = result
+        elif isinstance(result, dict):
+            models = result.get("models", result.get("data", [result]))
+            if not isinstance(models, list):
+                models = [result]
+        else:
+            raise FulfillmentError(
+                "Craftcloud model upload returned unexpected response type.",
+                code="UPLOAD_ERROR",
+            )
+
+        if not models:
+            raise FulfillmentError(
+                "Craftcloud model upload returned empty model list.",
+                code="UPLOAD_ERROR",
+            )
+
+        model_id = models[0].get("modelId") or models[0].get("id", "")
+        if not model_id:
+            raise FulfillmentError(
+                f"Craftcloud model upload response missing modelId. Keys: {list(models[0].keys())}",
+                code="UPLOAD_ERROR",
+            )
+
+        # Poll until model parsing is complete (200 = done, 206 = parsing).
+        for attempt in range(self._max_poll_attempts):
+            url = f"{self._base_url}/v5/model/{url_quote(str(model_id), safe='')}"
+            try:
+                resp = self._session.get(url, timeout=self._timeout)
+            except RequestException as exc:
+                raise FulfillmentError(
+                    f"Error polling model {model_id}: {exc}",
+                    code="MODEL_POLL_ERROR",
+                ) from exc
+
+            if resp.status_code == 200:
+                return str(model_id)
+            if resp.status_code == 206:
+                logger.debug(
+                    "Model %s still parsing (attempt %d/%d)",
+                    model_id,
+                    attempt + 1,
+                    self._max_poll_attempts,
+                )
+                time.sleep(self._poll_interval)
+                continue
+
+            raise FulfillmentError(
+                f"Unexpected status {resp.status_code} polling model {model_id}: {resp.text[:300]}",
+                code=f"HTTP_{resp.status_code}",
+            )
+
+        raise FulfillmentError(
+            f"Model {model_id} did not finish parsing after "
+            f"{self._max_poll_attempts} attempts "
+            f"({self._max_poll_attempts * self._poll_interval:.0f}s).",
+            code="MODEL_PARSE_TIMEOUT",
+        )
+
+    # -- v5 pricing ----------------------------------------------------------
+
+    def _request_prices(
+        self,
+        model_id: str,
+        *,
+        quantity: int = 1,
+        currency: str = "USD",
+        country_code: str = "US",
+        material_config_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Request prices and poll until all vendors respond.
+
+        Calls ``POST /v5/price`` then polls ``GET /v5/price/{priceId}``
+        until ``allComplete`` is true.
+        """
+        payload: dict[str, Any] = {
+            "currency": currency,
+            "countryCode": country_code,
+            "models": [
+                {
+                    "modelId": model_id,
+                    "quantity": quantity,
+                    "scale": 1,
+                },
+            ],
+        }
+        if material_config_ids:
+            payload["materialConfigIds"] = material_config_ids
+
+        price_response = self._request("POST", "/v5/price", json=payload)
+        price_id = ""
+        if isinstance(price_response, dict):
+            price_id = price_response.get("priceId", "")
+        if not price_id:
+            raise FulfillmentError(
+                f"Craftcloud price request did not return a priceId. Response: {price_response}",
+                code="PRICE_REQUEST_ERROR",
+            )
+
+        # Poll for results.
+        for attempt in range(self._max_poll_attempts):
+            data = self._request(
+                "GET",
+                f"/v5/price/{url_quote(str(price_id), safe='')}",
+            )
+            if not isinstance(data, dict):
+                raise FulfillmentError(
+                    f"Unexpected price poll response type: {type(data).__name__}",
+                    code="INVALID_RESPONSE",
+                )
+
+            if data.get("allComplete", False):
+                return data
+
+            logger.debug(
+                "Prices not complete for %s (attempt %d/%d)",
+                price_id,
+                attempt + 1,
+                self._max_poll_attempts,
+            )
+            time.sleep(self._poll_interval)
+
+        raise FulfillmentError(
+            f"Price request {price_id} did not complete after "
+            f"{self._max_poll_attempts} attempts "
+            f"({self._max_poll_attempts * self._poll_interval:.0f}s).",
+            code="PRICE_POLL_TIMEOUT",
+        )
+
+    # -- v5 cart + order -----------------------------------------------------
+
+    def _create_cart(
+        self,
+        quote_ids: list[str],
+        shipping_ids: list[str],
+        *,
+        currency: str = "USD",
+    ) -> str:
+        """Create a cart from selected quotes and shipping options."""
+        payload: dict[str, Any] = {
+            "quotes": quote_ids,
+            "shippingIds": shipping_ids,
+            "currency": currency,
+        }
+        result = self._request("POST", "/v5/cart", json=payload)
+        if not isinstance(result, dict):
+            raise FulfillmentError(
+                "Craftcloud cart creation returned unexpected response.",
+                code="CART_ERROR",
+            )
+
+        cart_id = result.get("cartId") or result.get("id", "")
+        if not cart_id:
+            raise FulfillmentError(
+                f"Craftcloud cart response missing cartId. Keys: {list(result.keys())}",
+                code="CART_ERROR",
+            )
+        return str(cart_id)
+
+    @staticmethod
+    def _build_user_payload(shipping_address: dict[str, str]) -> dict[str, Any]:
+        """Build the ``user`` object for ``POST /v5/order``.
+
+        Maps from Kiln's flat address dict to Craftcloud's nested
+        ``user.shipping`` / ``user.billing`` schema with camelCase fields.
+        """
+        shipping = {
+            "firstName": shipping_address.get("first_name", shipping_address.get("firstName", "")),
+            "lastName": shipping_address.get("last_name", shipping_address.get("lastName", "")),
+            "address": shipping_address.get("street", shipping_address.get("address", "")),
+            "addressLine2": shipping_address.get("street2", shipping_address.get("addressLine2")) or None,
+            "city": shipping_address.get("city", ""),
+            "zipCode": shipping_address.get(
+                "postal_code", shipping_address.get("zipCode", shipping_address.get("zip", ""))
+            ),
+            "stateCode": shipping_address.get("state", shipping_address.get("stateCode")) or None,
+            "countryCode": shipping_address.get("country", shipping_address.get("countryCode", "US")),
+            "companyName": shipping_address.get("company", shipping_address.get("companyName")) or None,
+            "phoneNumber": shipping_address.get("phone", shipping_address.get("phoneNumber", "")),
+        }
+
+        billing = {
+            **shipping,
+            "isCompany": bool(shipping.get("companyName")),
+            "vatId": shipping_address.get("vat_id", shipping_address.get("vatId")) or None,
+        }
+
+        email_addr = shipping_address.get("email", "") or shipping_address.get("emailAddress", "")
+
+        return {
+            "emailAddress": email_addr,
+            "shipping": shipping,
+            "billing": billing,
+        }
+
+    # -- Material catalog parsing --------------------------------------------
+
     @classmethod
-    def _extract_material_records(cls, payload: Any) -> List[Dict[str, Any]]:
-        if isinstance(payload, list):
-            return [item for item in payload if isinstance(item, dict)]
+    def _parse_material_catalog(cls, payload: Any) -> list[Material]:
+        """Parse the customer-api material catalog response.
+
+        The catalog has the structure::
+
+            {
+                "materialStructure": [
+                    {
+                        "name": "Nylon",
+                        "materials": [
+                            {
+                                "technology": "SLS",
+                                "finishGroups": [
+                                    {
+                                        "name": "Standard",
+                                        "materialConfigs": [
+                                            {
+                                                "id": "<materialConfigId>",
+                                                "name": "SLS Nylon PA12 ...",
+                                                "color": "White",
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ],
+                        "printingMethods": [
+                            {"minWallThickness": 0.8}
+                        ]
+                    }
+                ]
+            }
+        """
         if not isinstance(payload, dict):
             return []
 
-        candidate_keys = (
-            "materials",
-            "materialCatalog",
-            "material_catalog",
-            "data",
-            "results",
-            "items",
-        )
-        for key in candidate_keys:
-            value = payload.get(key)
-            if isinstance(value, list):
-                return [item for item in value if isinstance(item, dict)]
-            if isinstance(value, dict):
-                nested = cls._extract_material_records(value)
-                if nested:
-                    return nested
-
-        if any(
-            key in payload
-            for key in ("materialConfigId", "material_config_id", "materialId", "id")
-        ):
-            return [payload]
-
-        for value in payload.values():
-            if isinstance(value, list):
-                rows = [item for item in value if isinstance(item, dict)]
-                if rows:
-                    return rows
-        return []
-
-    @classmethod
-    def _material_from_catalog_record(cls, record: Dict[str, Any]) -> Optional[Material]:
-        material_block = record.get("material")
-        material_data = material_block if isinstance(material_block, dict) else {}
-
-        material_id = cls._coalesce_text(
-            record.get("materialConfigId"),
-            record.get("material_config_id"),
-            record.get("materialId"),
-            record.get("material_id"),
-            record.get("id"),
-        )
-        if not material_id:
-            return None
-
-        name = cls._coalesce_text(
-            record.get("displayName"),
-            record.get("display_name"),
-            record.get("name"),
-            record.get("materialName"),
-            record.get("material_name"),
-            material_data.get("name"),
-            material_data.get("displayName"),
-            material_data.get("label"),
-            material_id,
-        )
-
-        technology = cls._coalesce_text(
-            record.get("technology"),
-            record.get("technologyName"),
-            record.get("technology_name"),
-            material_data.get("technology"),
-            material_data.get("technologyName"),
-        )
-        color = cls._coalesce_text(
-            record.get("color"),
-            record.get("colorName"),
-            record.get("color_name"),
-            material_data.get("color"),
-        )
-        finish = cls._coalesce_text(
-            record.get("finish"),
-            record.get("finishName"),
-            record.get("finish_name"),
-            record.get("finishing"),
-            record.get("finishingName"),
-            record.get("finishing_name"),
-            material_data.get("finish"),
-            material_data.get("finishing"),
-        )
-        min_wall_mm = cls._to_float(
-            record.get("minWallThickness")
-            or record.get("min_wall_thickness")
-            or material_data.get("minWallThickness")
-            or material_data.get("min_wall_thickness")
-        )
-        price_per_cm3 = cls._to_float(
-            record.get("pricePerCm3")
-            or record.get("price_per_cm3")
-            or record.get("pricePerCubicCm")
-            or record.get("price_per_cubic_cm")
-            or material_data.get("pricePerCm3")
-            or material_data.get("price_per_cm3")
-        )
-        currency = cls._coalesce_text(
-            record.get("currency"),
-            material_data.get("currency"),
-            "USD",
-        )
-
-        return Material(
-            id=material_id,
-            name=name or material_id,
-            technology=technology,
-            color=color,
-            finish=finish,
-            min_wall_mm=min_wall_mm,
-            price_per_cm3=price_per_cm3,
-            currency=currency,
-        )
-
-    def _list_materials_legacy(self) -> List[Material]:
-        data = self._request("GET", "/materials")
-        materials_raw = data.get("materials", data.get("data", []))
-        if not isinstance(materials_raw, list):
+        material_groups = payload.get("materialStructure", [])
+        if not isinstance(material_groups, list):
             return []
 
-        results: List[Material] = []
-        for row in materials_raw:
-            if not isinstance(row, dict):
+        results: list[Material] = []
+        for group in material_groups:
+            if not isinstance(group, dict):
                 continue
-            results.append(Material(
-                id=str(row.get("id", "")),
-                name=row.get("name", ""),
-                technology=row.get("technology", ""),
-                color=row.get("color", ""),
-                finish=row.get("finish", ""),
-                min_wall_mm=row.get("min_wall_thickness"),
-                price_per_cm3=row.get("price_per_cm3"),
-                currency=row.get("currency", "USD"),
-            ))
-        return results
 
-    def _request_with_payload_fallback(
-        self,
-        path: str,
-        *,
-        primary_payload: Dict[str, Any],
-        fallback_payload: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        try:
-            return self._request("POST", path, json=primary_payload)
-        except FulfillmentError as exc:
-            if primary_payload == fallback_payload:
-                raise
-            if not exc.code or not exc.code.startswith("HTTP_4"):
-                raise
-            logger.info(
-                "Retrying Craftcloud %s with legacy payload schema after %s",
-                path,
-                exc.code,
-            )
-            return self._request("POST", path, json=fallback_payload)
+            # Extract min wall thickness from printing methods.
+            printing_methods = group.get("printingMethods", [])
+            min_wall_mm: float | None = None
+            if isinstance(printing_methods, list):
+                for pm in printing_methods:
+                    if isinstance(pm, dict):
+                        wall = cls._to_float(pm.get("minWallThickness"))
+                        if wall is not None and (min_wall_mm is None or wall < min_wall_mm):
+                            min_wall_mm = wall
+
+            materials_list = group.get("materials", [])
+            if not isinstance(materials_list, list):
+                continue
+
+            for material in materials_list:
+                if not isinstance(material, dict):
+                    continue
+
+                technology = material.get("technology", "")
+                finish_groups = material.get("finishGroups", [])
+                if not isinstance(finish_groups, list):
+                    continue
+
+                for fg in finish_groups:
+                    if not isinstance(fg, dict):
+                        continue
+
+                    finish_name = fg.get("name", "")
+                    configs = fg.get("materialConfigs", [])
+                    if not isinstance(configs, list):
+                        continue
+
+                    for config in configs:
+                        if not isinstance(config, dict):
+                            continue
+
+                        config_id = config.get("id", "")
+                        if not config_id:
+                            continue
+
+                        results.append(
+                            Material(
+                                id=str(config_id),
+                                name=config.get("name", "") or str(config_id),
+                                technology=str(technology),
+                                color=config.get("color", ""),
+                                finish=str(finish_name),
+                                min_wall_mm=min_wall_mm,
+                                currency="USD",
+                            )
+                        )
+
+        return results
 
     # -- FulfillmentProvider methods -----------------------------------------
 
-    def list_materials(self) -> List[Material]:
-        """Return available materials from Craftcloud.
+    def list_materials(self) -> list[Material]:
+        """Return available materials from the Craftcloud catalog.
 
-        Fetches the material catalog endpoint for materialConfigIds.
-        Falls back to legacy ``GET /materials`` if needed.
+        Fetches the material catalog at
+        ``customer-api.craftcloud3d.com/material-catalog`` and extracts
+        all materialConfigId entries.
         """
         try:
-            catalog_payload = self._request_material_catalog()
-            records = self._extract_material_records(catalog_payload)
-            materials: List[Material] = []
-            for record in records:
-                material = self._material_from_catalog_record(record)
-                if material is not None:
-                    materials.append(material)
+            catalog_payload = self._request_external("GET", self._material_catalog_url)
+            materials = self._parse_material_catalog(catalog_payload)
             if materials:
                 return materials
-            logger.warning(
-                "Craftcloud material catalog returned no parseable records; "
-                "falling back to legacy /materials endpoint."
+            logger.warning("Craftcloud material catalog returned no parseable materials.")
+            raise FulfillmentError(
+                "Craftcloud material catalog returned no materials. The catalog format may have changed.",
+                code="EMPTY_CATALOG",
             )
-        except FulfillmentError as exc:
-            logger.warning(
-                "Failed to read Craftcloud material catalog (%s); "
-                "falling back to legacy /materials endpoint.",
-                exc,
-            )
-
-        try:
-            return self._list_materials_legacy()
         except FulfillmentError:
             raise
         except Exception as exc:
-            raise FulfillmentError(f"Failed to list materials: {exc}") from exc
+            raise FulfillmentError(
+                f"Failed to list materials: {exc}",
+                code="CATALOG_ERROR",
+            ) from exc
 
     def get_quote(self, request: QuoteRequest) -> Quote:
-        """Upload a model file and get a manufacturing quote.
+        """Upload a model file and get manufacturing quotes.
 
-        Steps:
-        1. Upload the file via ``POST /uploads``
-        2. Request a quote via ``POST /quotes`` referencing the upload
+        Follows the Craftcloud v5 flow:
+
+        1. Upload file → ``POST /v5/model``
+        2. Poll model parsing → ``GET /v5/model/{modelId}``
+        3. Request prices → ``POST /v5/price``
+        4. Poll prices → ``GET /v5/price/{priceId}``
+        5. Return the cheapest matching quote with shipping options.
         """
         abs_path = os.path.abspath(request.file_path)
         if not os.path.isfile(abs_path):
             raise FileNotFoundError(f"Model file not found: {abs_path}")
 
-        # Step 1: Upload file
-        filename = os.path.basename(abs_path)
-        try:
-            with open(abs_path, "rb") as fh:
-                upload_data = self._request(
-                    "POST",
-                    "/uploads",
-                    files={"file": (filename, fh, "application/octet-stream")},
-                )
-        except PermissionError as exc:
-            raise FulfillmentError(
-                f"Permission denied reading file: {abs_path}",
-                code="PERMISSION_ERROR",
-            ) from exc
+        # Step 1-2: Upload and wait for model parsing.
+        model_id = self._upload_model(abs_path)
 
-        upload_id = self._coalesce_text(
-            upload_data.get("uploadId"),
-            upload_data.get("upload_id"),
-            upload_data.get("id"),
-        )
-        if not upload_id:
-            raise FulfillmentError(
-                "Craftcloud did not return an upload ID.",
-                code="UPLOAD_ERROR",
-            )
-
-        quote_payload = {
-            "uploadId": upload_id,
-            "materialConfigId": request.material_id,
-            "quantity": request.quantity,
-            "shippingCountry": request.shipping_country,
-        }
-        legacy_quote_payload = {
-            "upload_id": upload_id,
-            "material_id": request.material_id,
-            "quantity": request.quantity,
-            "shipping_country": request.shipping_country,
-        }
-        if request.notes:
-            quote_payload["notes"] = request.notes
-            legacy_quote_payload["notes"] = request.notes
-
-        data = self._request_with_payload_fallback(
-            "/quotes",
-            primary_payload=quote_payload,
-            fallback_payload=legacy_quote_payload,
+        # Step 3-4: Request and poll prices.
+        material_filter = [request.material_id] if request.material_id else None
+        price_data = self._request_prices(
+            model_id,
+            quantity=request.quantity,
+            currency="USD",
+            country_code=request.shipping_country,
+            material_config_ids=material_filter,
         )
 
-        # Parse shipping options
-        shipping_raw = data.get("shipping_options", data.get("shippingOptions", []))
-        shipping_rows: List[Dict[str, Any]]
-        if isinstance(shipping_raw, list):
-            shipping_rows = [item for item in shipping_raw if isinstance(item, dict)]
-        elif isinstance(shipping_raw, dict):
-            shipping_rows = [
-                item for item in shipping_raw.values() if isinstance(item, dict)
-            ]
-        else:
-            shipping_rows = []
-
-        shipping: List[ShippingOption] = []
-        for row in shipping_rows:
-            ship_price = self._to_float(
-                row.get("price")
-                or row.get("shipping_price")
-                or row.get("shippingPrice")
+        # Parse quotes — find the cheapest for the requested material.
+        quotes_raw = price_data.get("quotes", [])
+        if not isinstance(quotes_raw, list) or not quotes_raw:
+            raise FulfillmentError(
+                "Craftcloud returned no quotes for this model/material. "
+                "Try a different material or check that the model is printable. "
+                f"Response keys: {list(price_data.keys())}",
+                code="NO_QUOTES",
             )
-            if ship_price is None:
-                logger.warning(
-                    "Craftcloud shipping option %r missing price field — skipping",
-                    self._coalesce_text(
-                        row.get("name"),
-                        row.get("label"),
-                        row.get("service"),
-                        "unknown",
-                    ),
-                )
+
+        best_quote: dict[str, Any] | None = None
+        for q in quotes_raw:
+            if not isinstance(q, dict):
                 continue
-            shipping.append(ShippingOption(
-                id=self._coalesce_text(
-                    row.get("id"),
-                    row.get("shippingOptionId"),
-                    row.get("shipping_option_id"),
-                ),
-                name=self._coalesce_text(
-                    row.get("name"),
-                    row.get("label"),
-                    row.get("service"),
-                ),
-                price=ship_price,
-                currency=self._coalesce_text(
-                    row.get("currency"),
-                    data.get("currency"),
-                    "USD",
-                ),
-                estimated_days=self._to_int(
-                    row.get("estimated_days") or row.get("estimatedDays")
-                ),
-            ))
+            if request.material_id and q.get("materialConfigId") != request.material_id:
+                continue
+            price = self._to_float(q.get("price"))
+            if price is None or price <= 0:
+                continue
+            if best_quote is None or (price < (self._to_float(best_quote.get("price")) or float("inf"))):
+                best_quote = q
 
-        quote_id = self._coalesce_text(
-            data.get("quote_id"),
-            data.get("quoteId"),
-            data.get("id"),
-        )
+        if best_quote is None:
+            raise FulfillmentError(
+                "No valid priced quotes returned. The material may not be "
+                f"available for this model. Quotes checked: {len(quotes_raw)}",
+                code="NO_VALID_QUOTES",
+            )
+
+        # Parse shipping options for this quote's vendor.
+        vendor_id = best_quote.get("vendorId", "")
+        shippings_raw = price_data.get("shippings", [])
+        shipping_options: list[ShippingOption] = []
+        if isinstance(shippings_raw, list):
+            for s in shippings_raw:
+                if not isinstance(s, dict):
+                    continue
+                if s.get("vendorId") != vendor_id:
+                    continue
+                ship_price = self._to_float(s.get("price"))
+                if ship_price is None:
+                    continue
+                # deliveryTime format: "3-5" or "3" — take the high end.
+                delivery_time = s.get("deliveryTime", "")
+                estimated_days: int | None = None
+                if isinstance(delivery_time, str) and delivery_time:
+                    parts = delivery_time.split("-")
+                    estimated_days = self._to_int(parts[-1])
+
+                shipping_options.append(
+                    ShippingOption(
+                        id=s.get("shippingId", s.get("id", "")),
+                        name=self._coalesce_text(
+                            s.get("name"),
+                            s.get("carrier"),
+                            s.get("type", ""),
+                        ),
+                        price=ship_price,
+                        currency=s.get("currency", "USD"),
+                        estimated_days=estimated_days,
+                    )
+                )
+
+        quote_id = best_quote.get("quoteId", "")
         if not quote_id:
             raise FulfillmentError(
-                "Craftcloud quote response missing quote ID. "
-                f"Response keys: {list(data.keys())}",
+                f"Craftcloud quote missing quoteId. Quote keys: {list(best_quote.keys())}",
                 code="MISSING_QUOTE_ID",
             )
 
-        quantity = self._to_int(data.get("quantity")) or request.quantity
-        unit_price = self._to_float(
-            data.get("unit_price")
-            or data.get("unitPrice")
-            or data.get("price_per_unit")
-            or data.get("pricePerUnit")
-        ) or 0.0
-        total_price = self._to_float(
-            data.get("total_price")
-            or data.get("totalPrice")
-            or data.get("price")
-        ) or 0.0
-        if unit_price <= 0 and total_price > 0 and quantity > 0:
-            unit_price = total_price / quantity
-        if total_price <= 0 and unit_price > 0:
-            total_price = unit_price * quantity
+        unit_price = self._to_float(best_quote.get("price")) or 0.0
+        quantity = self._to_int(best_quote.get("quantity")) or request.quantity
+        total_price = unit_price * quantity
+        lead_time = self._to_int(best_quote.get("productionTimeSlow"))
 
-        if unit_price <= 0 and total_price <= 0:
-            logger.warning(
-                "Craftcloud returned $0 pricing — API field names may have changed. "
-                "Response keys: %s",
-                list(data.keys()),
-            )
-            raise FulfillmentError(
-                "Craftcloud returned zero pricing. This likely means the API "
-                "response format has changed. Contact support or check API docs. "
-                f"Response keys: {list(data.keys())}",
-                code="ZERO_PRICE",
-            )
+        expires_at = self._to_float(price_data.get("expiresAt"))
+        # Craftcloud sends milliseconds; convert to seconds.
+        if expires_at and expires_at > 1e12:
+            expires_at = expires_at / 1000.0
 
         return Quote(
             quote_id=quote_id,
             provider=self.name,
             material=self._coalesce_text(
-                data.get("material"),
-                data.get("materialName"),
-                data.get("material_name"),
+                best_quote.get("materialConfigId"),
                 request.material_id,
             ),
             quantity=quantity,
             unit_price=unit_price,
             total_price=total_price,
-            currency=self._coalesce_text(data.get("currency"), "USD"),
-            lead_time_days=self._to_int(
-                data.get("lead_time_days")
-                or data.get("leadTimeDays")
-                or data.get("lead_time")
-                or data.get("leadTime")
-            ),
-            shipping_options=shipping,
-            expires_at=self._to_float(data.get("expires_at") or data.get("expiresAt")),
-            raw=data,
+            currency=best_quote.get("currency", "USD"),
+            lead_time_days=lead_time,
+            shipping_options=shipping_options,
+            expires_at=expires_at,
+            raw=price_data,
         )
 
     def place_order(self, request: OrderRequest) -> OrderResult:
         """Place an order based on a previously obtained quote.
 
-        Calls ``POST /orders`` with the quote ID and shipping details.
+        Follows the Craftcloud v5 flow:
+
+        1. Create cart → ``POST /v5/cart`` with quoteId + shippingId
+        2. Place order → ``POST /v5/order`` with cartId + user info
         """
-        payload: Dict[str, Any] = {
-            "quoteId": request.quote_id,
-        }
-        legacy_payload: Dict[str, Any] = {
-            "quote_id": request.quote_id,
-        }
-        if request.shipping_option_id:
-            payload["shippingOptionId"] = request.shipping_option_id
-            legacy_payload["shipping_option_id"] = request.shipping_option_id
-        if request.shipping_address:
-            payload["shippingAddress"] = request.shipping_address
-            legacy_payload["shipping_address"] = request.shipping_address
-        if request.notes:
-            payload["notes"] = request.notes
-            legacy_payload["notes"] = request.notes
-
-        data = self._request_with_payload_fallback(
-            "/orders",
-            primary_payload=payload,
-            fallback_payload=legacy_payload,
-        )
-
-        status_str = self._coalesce_text(data.get("status"), "submitted").lower()
-        mapped_status = _STATUS_MAP.get(status_str)
-        if mapped_status is None:
-            logger.warning(
-                "Unknown Craftcloud order status %r — defaulting to SUBMITTED. "
-                "The API may have added new statuses.",
-                status_str,
+        if not request.quote_id:
+            raise FulfillmentError(
+                "quote_id is required to place an order.",
+                code="MISSING_QUOTE_ID",
             )
-            mapped_status = OrderStatus.SUBMITTED
 
-        order_id = self._coalesce_text(
-            data.get("order_id"),
-            data.get("orderId"),
-            data.get("id"),
+        shipping_ids: list[str] = []
+        if request.shipping_option_id:
+            shipping_ids = [request.shipping_option_id]
+
+        # Step 1: Create cart.
+        cart_id = self._create_cart(
+            quote_ids=[request.quote_id],
+            shipping_ids=shipping_ids,
         )
+
+        # Step 2: Place order.
+        order_payload: dict[str, Any] = {"cartId": cart_id}
+        if request.shipping_address:
+            order_payload["user"] = self._build_user_payload(
+                request.shipping_address,
+            )
+
+        data = self._request("POST", "/v5/order", json=order_payload)
+        if not isinstance(data, dict):
+            raise FulfillmentError(
+                "Craftcloud order response was not a JSON object.",
+                code="INVALID_RESPONSE",
+            )
+
+        order_id = data.get("orderId", data.get("id", ""))
         if not order_id:
             raise FulfillmentError(
-                "Craftcloud order response missing order ID. "
-                f"Response keys: {list(data.keys())}",
+                f"Craftcloud order response missing orderId. Keys: {list(data.keys())}",
                 code="MISSING_ORDER_ID",
             )
 
+        # Extract total from amounts if available.
+        amounts = data.get("amounts", {})
+        total_data = amounts.get("total", {}) if isinstance(amounts, dict) else {}
+        total_price = (
+            self._to_float(total_data.get("totalGrossPrice") or total_data.get("totalNetPrice"))
+            if isinstance(total_data, dict)
+            else None
+        )
+        currency = total_data.get("currency", "USD") if isinstance(total_data, dict) else "USD"
+
         return OrderResult(
             success=True,
-            order_id=order_id,
-            status=mapped_status,
+            order_id=str(order_id),
+            status=OrderStatus.SUBMITTED,
             provider=self.name,
-            tracking_url=self._coalesce_text(
-                data.get("tracking_url"),
-                data.get("trackingUrl"),
-            ) or None,
-            tracking_number=self._coalesce_text(
-                data.get("tracking_number"),
-                data.get("trackingNumber"),
-            ) or None,
-            estimated_delivery=self._coalesce_text(
-                data.get("estimated_delivery"),
-                data.get("estimatedDelivery"),
-            ) or None,
-            total_price=self._to_float(data.get("total_price") or data.get("totalPrice")),
-            currency=self._coalesce_text(data.get("currency"), "USD"),
+            total_price=total_price,
+            currency=currency,
         )
 
     def get_order_status(self, order_id: str) -> OrderResult:
         """Check the status of an existing order.
 
-        Calls ``GET /orders/<order_id>``.
+        Calls ``GET /v5/order/{orderId}/status``.
         """
-        data = self._request("GET", f"/orders/{url_quote(order_id, safe='')}")
-
-        status_str = self._coalesce_text(data.get("status"), "submitted").lower()
-        mapped_status = _STATUS_MAP.get(status_str)
-        if mapped_status is None:
-            logger.warning(
-                "Unknown Craftcloud order status %r for order %s — defaulting to SUBMITTED",
-                status_str, order_id,
+        safe_id = url_quote(order_id, safe="")
+        data = self._request("GET", f"/v5/order/{safe_id}/status")
+        if not isinstance(data, dict):
+            raise FulfillmentError(
+                "Craftcloud order status response was not a JSON object.",
+                code="INVALID_RESPONSE",
             )
-            mapped_status = OrderStatus.SUBMITTED
+
+        # Response: {orderNumber, status: [{vendorId, cancelled,
+        #   orderStatus: [{type, date}]}], estDeliveryTime}
+        mapped_status = OrderStatus.SUBMITTED
+        tracking_url: str | None = None
+        tracking_number: str | None = None
+
+        status_entries = data.get("status", [])
+        if isinstance(status_entries, list):
+            for entry in status_entries:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("cancelled"):
+                    mapped_status = OrderStatus.CANCELLED
+                    break
+                order_statuses = entry.get("orderStatus", [])
+                if isinstance(order_statuses, list) and order_statuses:
+                    latest = order_statuses[-1]
+                    if isinstance(latest, dict):
+                        status_type = latest.get("type", "")
+                        if status_type in _STATUS_MAP:
+                            mapped_status = _STATUS_MAP[status_type]
+                tracking_url = tracking_url or entry.get("trackingUrl") or None
+                tracking_number = tracking_number or entry.get("trackingNumber") or None
+
+        estimated_delivery = data.get("estDeliveryTime")
+        if estimated_delivery is not None:
+            estimated_delivery = str(estimated_delivery)
 
         return OrderResult(
             success=True,
             order_id=order_id,
             status=mapped_status,
             provider=self.name,
-            tracking_url=self._coalesce_text(
-                data.get("tracking_url"),
-                data.get("trackingUrl"),
-            ) or None,
-            tracking_number=self._coalesce_text(
-                data.get("tracking_number"),
-                data.get("trackingNumber"),
-            ) or None,
-            estimated_delivery=self._coalesce_text(
-                data.get("estimated_delivery"),
-                data.get("estimatedDelivery"),
-            ) or None,
-            total_price=self._to_float(data.get("total_price") or data.get("totalPrice")),
-            currency=self._coalesce_text(data.get("currency"), "USD"),
+            tracking_url=tracking_url,
+            tracking_number=tracking_number,
+            estimated_delivery=estimated_delivery,
         )
 
     def cancel_order(self, order_id: str) -> OrderResult:
         """Cancel an existing order.
 
-        Calls ``POST /orders/<order_id>/cancel``.
+        Calls ``PATCH /v5/order/{orderId}/status`` with cancelled status
+        for each vendor.  May fail if already in production.
         """
-        data = self._request(
-            "POST", f"/orders/{url_quote(order_id, safe='')}/cancel"
+        safe_id = url_quote(order_id, safe="")
+
+        # Get current status to find vendor IDs.
+        status_data = self._request("GET", f"/v5/order/{safe_id}/status")
+        if not isinstance(status_data, dict):
+            raise FulfillmentError(
+                "Cannot cancel: failed to read order status.",
+                code="CANCEL_ERROR",
+            )
+
+        vendor_updates: list[dict[str, Any]] = []
+        status_entries = status_data.get("status", [])
+        if isinstance(status_entries, list):
+            for entry in status_entries:
+                if isinstance(entry, dict) and entry.get("vendorId"):
+                    vendor_updates.append(
+                        {
+                            "vendorId": entry["vendorId"],
+                            "status": "cancelled",
+                        }
+                    )
+
+        if not vendor_updates:
+            raise FulfillmentError(
+                "Cannot cancel: no vendor entries found in order status.",
+                code="CANCEL_ERROR",
+            )
+
+        self._request(
+            "PATCH",
+            f"/v5/order/{safe_id}/status",
+            json=vendor_updates,
         )
 
         return OrderResult(
@@ -784,13 +902,7 @@ class CraftcloudProvider(FulfillmentProvider):
             order_id=order_id,
             status=OrderStatus.CANCELLED,
             provider=self.name,
-            total_price=self._to_float(data.get("total_price") or data.get("totalPrice")),
-            currency=self._coalesce_text(data.get("currency"), "USD"),
         )
 
     def __repr__(self) -> str:
-        return (
-            "<CraftcloudProvider "
-            f"base_url={self._base_url!r} "
-            f"material_catalog_url={self._material_catalog_url!r}>"
-        )
+        return f"<CraftcloudProvider base_url={self._base_url!r} material_catalog_url={self._material_catalog_url!r}>"

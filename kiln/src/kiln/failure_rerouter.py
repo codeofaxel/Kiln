@@ -34,7 +34,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +45,12 @@ logger = logging.getLogger(__name__)
 
 # Failure types that must NEVER be auto-rerouted.  These indicate physical
 # hazards requiring hands-on inspection before any printer resumes work.
-_EXCLUDED_FAILURE_TYPES_DEFAULT: frozenset[str] = frozenset({
-    "thermal_runaway",
-    "bed_adhesion_failure",
-})
+_EXCLUDED_FAILURE_TYPES_DEFAULT: frozenset[str] = frozenset(
+    {
+        "thermal_runaway",
+        "bed_adhesion_failure",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -77,13 +79,13 @@ class RerouteDecision:
     original_job_id: str
     failure_type: str
     should_reroute: bool
-    target_printer_id: Optional[str] = None
+    target_printer_id: str | None = None
     reason: str = ""
     estimated_time_saved_s: float = 0.0
     estimated_waste_pct: float = 0.0
     rerouted_at: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "original_printer_id": self.original_printer_id,
@@ -116,7 +118,7 @@ class ReroutePolicy:
     auto_reroute_enabled: bool = True
     max_reroute_attempts: int = 2
     min_progress_for_restart_pct: float = 10.0
-    excluded_failure_types: List[str] = field(
+    excluded_failure_types: list[str] = field(
         default_factory=lambda: list(_EXCLUDED_FAILURE_TYPES_DEFAULT),
     )
     cooldown_s: float = 300.0
@@ -137,15 +139,15 @@ class FailureRerouter:
         ``None``.
     """
 
-    def __init__(self, *, policy: Optional[ReroutePolicy] = None) -> None:
+    def __init__(self, *, policy: ReroutePolicy | None = None) -> None:
         self._policy = policy or ReroutePolicy()
         self._lock = threading.Lock()
         # job_id -> number of reroute attempts
-        self._attempt_counts: Dict[str, int] = {}
+        self._attempt_counts: dict[str, int] = {}
         # job_id -> timestamp of last reroute
-        self._last_reroute_times: Dict[str, float] = {}
+        self._last_reroute_times: dict[str, float] = {}
         # job_id -> list of decisions (all, including non-reroutes)
-        self._history: Dict[str, List[RerouteDecision]] = {}
+        self._history: dict[str, list[RerouteDecision]] = {}
         # Aggregate counters for stats
         self._total_reroutes: int = 0
         self._successful_reroutes: int = 0
@@ -159,7 +161,7 @@ class FailureRerouter:
         printer_id: str,
         failure_type: str,
         progress_pct: float,
-        available_printers: List[str],
+        available_printers: list[str],
     ) -> RerouteDecision:
         """Decide whether a failed job should be rerouted to another printer.
 
@@ -249,10 +251,7 @@ class FailureRerouter:
                 original_job_id=job_id,
                 failure_type=failure_type,
                 should_reroute=False,
-                reason=(
-                    f"Max reroute attempts ({self._policy.max_reroute_attempts}) "
-                    "exceeded"
-                ),
+                reason=(f"Max reroute attempts ({self._policy.max_reroute_attempts}) exceeded"),
                 estimated_waste_pct=progress_pct,
                 rerouted_at=now,
             )
@@ -270,10 +269,7 @@ class FailureRerouter:
                 original_job_id=job_id,
                 failure_type=failure_type,
                 should_reroute=False,
-                reason=(
-                    f"Cooldown active — {remaining:.0f}s remaining before "
-                    "next reroute allowed"
-                ),
+                reason=(f"Cooldown active — {remaining:.0f}s remaining before next reroute allowed"),
                 estimated_waste_pct=progress_pct,
                 rerouted_at=now,
             )
@@ -306,7 +302,7 @@ class FailureRerouter:
 
     def _select_best_printer(
         self,
-        alternatives: List[str],
+        alternatives: list[str],
         failure_type: str,
     ) -> str:
         """Choose the best alternative printer from the available list.
@@ -339,7 +335,7 @@ class FailureRerouter:
 
     # -- execution ---------------------------------------------------------
 
-    def execute_reroute(self, decision: RerouteDecision) -> Dict[str, Any]:
+    def execute_reroute(self, decision: RerouteDecision) -> dict[str, Any]:
         """Record a reroute execution and update internal counters.
 
         :param decision: A reroute decision with ``should_reroute=True``.
@@ -347,14 +343,10 @@ class FailureRerouter:
         :raises ValueError: If the decision does not approve a reroute.
         """
         if not decision.should_reroute:
-            raise ValueError(
-                "Cannot execute reroute: decision.should_reroute is False"
-            )
+            raise ValueError("Cannot execute reroute: decision.should_reroute is False")
 
         with self._lock:
-            self._attempt_counts[decision.original_job_id] = (
-                self._attempt_counts.get(decision.original_job_id, 0) + 1
-            )
+            self._attempt_counts[decision.original_job_id] = self._attempt_counts.get(decision.original_job_id, 0) + 1
             self._last_reroute_times[decision.original_job_id] = time.time()
             self._total_reroutes += 1
             self._successful_reroutes += 1
@@ -380,7 +372,7 @@ class FailureRerouter:
 
     # -- history & stats ---------------------------------------------------
 
-    def get_reroute_history(self, job_id: str) -> List[RerouteDecision]:
+    def get_reroute_history(self, job_id: str) -> list[RerouteDecision]:
         """Return all reroute decisions for a job.
 
         :param job_id: The job to look up.
@@ -389,7 +381,7 @@ class FailureRerouter:
         with self._lock:
             return list(self._history.get(job_id, []))
 
-    def get_reroute_stats(self) -> Dict[str, Any]:
+    def get_reroute_stats(self) -> dict[str, Any]:
         """Return aggregate reroute statistics.
 
         :returns: Dict with ``total_reroutes``, ``successful_reroutes``,
@@ -415,9 +407,7 @@ class FailureRerouter:
     def _record_decision(self, decision: RerouteDecision) -> None:
         """Store a decision in the history and log it."""
         with self._lock:
-            self._history.setdefault(decision.original_job_id, []).append(
-                decision
-            )
+            self._history.setdefault(decision.original_job_id, []).append(decision)
         logger.info(
             "Reroute decision: job=%s printer=%s failure=%s reroute=%s reason=%s",
             decision.original_job_id,
@@ -432,7 +422,7 @@ class FailureRerouter:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_rerouter: Optional[FailureRerouter] = None
+_rerouter: FailureRerouter | None = None
 _rerouter_lock = threading.Lock()
 
 

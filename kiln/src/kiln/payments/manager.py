@@ -16,7 +16,7 @@ import logging
 import secrets
 import threading
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from kiln.billing import BillingLedger, FeeCalculation, SpendLimits
 from kiln.payments.base import (
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Map config rail strings to PaymentRail enum values.
-_RAIL_NAMES: Dict[str, PaymentRail] = {
+_RAIL_NAMES: dict[str, PaymentRail] = {
     "stripe": PaymentRail.STRIPE,
     "circle": PaymentRail.CIRCLE,
     "solana": PaymentRail.SOLANA,
@@ -65,15 +65,15 @@ class PaymentManager:
     def __init__(
         self,
         db: KilnDB,
-        config: Optional[Dict[str, Any]] = None,
-        event_bus: Optional[EventBus] = None,
-        ledger: Optional[BillingLedger] = None,
+        config: dict[str, Any] | None = None,
+        event_bus: EventBus | None = None,
+        ledger: BillingLedger | None = None,
     ) -> None:
         self._db = db
         self._config = config or {}
         self._event_bus = event_bus
         self._ledger = ledger or BillingLedger(db=db)
-        self._providers: Dict[str, PaymentProvider] = {}
+        self._providers: dict[str, PaymentProvider] = {}
         self._charge_lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -89,12 +89,12 @@ class PaymentManager:
         self._providers[provider.name] = provider
         logger.info("Registered payment provider: %s", provider.name)
 
-    def get_provider(self, name: str) -> Optional[PaymentProvider]:
+    def get_provider(self, name: str) -> PaymentProvider | None:
         """Return a registered provider by name, or ``None``."""
         return self._providers.get(name)
 
     @property
-    def available_rails(self) -> List[str]:
+    def available_rails(self) -> list[str]:
         """Return names of all registered providers."""
         return list(self._providers.keys())
 
@@ -129,8 +129,7 @@ class PaymentManager:
         raise PaymentError(
             "No payment method configured. "
             "Set up a payment method first: use 'billing_setup_url' to get a "
-            "Stripe setup link, or configure Circle USDC with 'kiln billing setup'."
-            + BILLING_SUPPORT_SUFFIX,
+            "Stripe setup link, or configure Circle USDC with 'kiln billing setup'." + BILLING_SUPPORT_SUFFIX,
             code="NO_PROVIDER",
         )
 
@@ -161,8 +160,8 @@ class PaymentManager:
         job_id: str,
         fee_calc: FeeCalculation,
         *,
-        rail: Optional[str] = None,
-        idempotency_key: Optional[str] = None,
+        rail: str | None = None,
+        idempotency_key: str | None = None,
     ) -> PaymentResult:
         """Collect a platform fee for an outsourced order.
 
@@ -214,7 +213,8 @@ class PaymentManager:
             # Waived fees need no payment.
             if fee_calc.waived or fee_calc.fee_amount <= 0:
                 self._ledger.record_charge(
-                    job_id, fee_calc,
+                    job_id,
+                    fee_calc,
                     payment_status="waived",
                 )
                 return PaymentResult(
@@ -229,15 +229,17 @@ class PaymentManager:
             # 1. Spend limits
             ok, reason = self.check_spend_limits(fee_calc.fee_amount)
             if not ok:
-                self._emit("SPEND_LIMIT_REACHED", {
-                    "job_id": job_id,
-                    "fee_amount": fee_calc.fee_amount,
-                    "reason": reason,
-                })
+                self._emit(
+                    "SPEND_LIMIT_REACHED",
+                    {
+                        "job_id": job_id,
+                        "fee_amount": fee_calc.fee_amount,
+                        "reason": reason,
+                    },
+                )
                 raise PaymentError(
                     f"Spend limit exceeded: {reason}. "
-                    "Adjust your limits in billing settings or wait until next month."
-                    + BILLING_SUPPORT_SUFFIX,
+                    "Adjust your limits in billing settings or wait until next month." + BILLING_SUPPORT_SUFFIX,
                     code="SPEND_LIMIT",
                 )
 
@@ -248,15 +250,15 @@ class PaymentManager:
                 raise PaymentError(
                     f"Payment provider {provider_name!r} not registered. "
                     "Use 'billing_setup_url' to set up Stripe, or configure "
-                    "Circle USDC with 'kiln billing setup'."
-                    + BILLING_SUPPORT_SUFFIX,
+                    "Circle USDC with 'kiln billing setup'." + BILLING_SUPPORT_SUFFIX,
                     code="NO_PROVIDER",
                 )
 
             # 3. Build request
-            metadata: Dict[str, Any] = {}
+            metadata: dict[str, Any] = {}
             if provider.name == "circle":
                 from kiln.wallets import get_ethereum_wallet, get_solana_wallet
+
                 if provider.rail in (PaymentRail.BASE, PaymentRail.ETHEREUM):
                     metadata["destination_address"] = get_ethereum_wallet().address
                 else:
@@ -271,11 +273,14 @@ class PaymentManager:
             )
 
             # 4. Emit initiated event
-            self._emit("PAYMENT_INITIATED", {
-                "job_id": job_id,
-                "amount": fee_calc.fee_amount,
-                "rail": provider.name,
-            })
+            self._emit(
+                "PAYMENT_INITIATED",
+                {
+                    "job_id": job_id,
+                    "amount": fee_calc.fee_amount,
+                    "rail": provider.name,
+                },
+            )
 
             # 5. Execute payment
             payment_id = secrets.token_hex(8)
@@ -284,20 +289,32 @@ class PaymentManager:
             except PaymentError:
                 # Record the failed attempt
                 self._persist_payment(
-                    payment_id, "", provider.name, provider.rail.value,
-                    fee_calc.fee_amount, fee_calc.currency,
-                    "failed", error="Payment error",
+                    payment_id,
+                    "",
+                    provider.name,
+                    provider.rail.value,
+                    fee_calc.fee_amount,
+                    fee_calc.currency,
+                    "failed",
+                    error="Payment error",
                 )
-                self._emit("PAYMENT_FAILED", {
-                    "job_id": job_id,
-                    "rail": provider.name,
-                })
+                self._emit(
+                    "PAYMENT_FAILED",
+                    {
+                        "job_id": job_id,
+                        "rail": provider.name,
+                    },
+                )
                 raise
 
             # 6. Persist payment record
             self._persist_payment(
-                payment_id, result.payment_id, provider.name,
-                result.rail.value, result.amount, result.currency.value,
+                payment_id,
+                result.payment_id,
+                provider.name,
+                result.rail.value,
+                result.amount,
+                result.currency.value,
                 result.status.value,
                 tx_hash=result.tx_hash,
                 error=result.error,
@@ -306,7 +323,8 @@ class PaymentManager:
             # 7. Record billing charge — if this fails, update payment with error
             try:
                 charge_id = self._ledger.record_charge(
-                    job_id, fee_calc,
+                    job_id,
+                    fee_calc,
                     payment_id=result.payment_id,
                     payment_rail=provider.name,
                     payment_status=result.status.value,
@@ -314,45 +332,56 @@ class PaymentManager:
             except Exception as exc:
                 logger.error(
                     "Failed to record billing charge for payment %s: %s",
-                    payment_id, exc,
+                    payment_id,
+                    exc,
                 )
                 # Update payment record to reflect the billing failure
-                self._db.save_payment({
-                    "id": payment_id,
-                    "error": f"Payment succeeded but billing record failed: {type(exc).__name__}",
-                    "status": "billing_error",
-                    "updated_at": time.time(),
-                })
+                self._db.save_payment(
+                    {
+                        "id": payment_id,
+                        "error": f"Payment succeeded but billing record failed: {type(exc).__name__}",
+                        "status": "billing_error",
+                        "updated_at": time.time(),
+                    }
+                )
                 raise
 
             # 8. Emit outcome event
             if result.success:
-                self._emit("PAYMENT_COMPLETED", {
-                    "job_id": job_id,
-                    "charge_id": charge_id,
-                    "payment_id": result.payment_id,
-                    "amount": result.amount,
-                    "rail": provider.name,
-                })
+                self._emit(
+                    "PAYMENT_COMPLETED",
+                    {
+                        "job_id": job_id,
+                        "charge_id": charge_id,
+                        "payment_id": result.payment_id,
+                        "amount": result.amount,
+                        "rail": provider.name,
+                    },
+                )
             elif result.status == PaymentStatus.PROCESSING:
-                self._emit("PAYMENT_PROCESSING", {
-                    "job_id": job_id,
-                    "charge_id": charge_id,
-                    "payment_id": result.payment_id,
-                    "amount": result.amount,
-                    "rail": provider.name,
-                    "message": (
-                        "Payment initiated but not yet confirmed. "
-                        "Use check_payment_status to poll for completion."
-                    ),
-                })
+                self._emit(
+                    "PAYMENT_PROCESSING",
+                    {
+                        "job_id": job_id,
+                        "charge_id": charge_id,
+                        "payment_id": result.payment_id,
+                        "amount": result.amount,
+                        "rail": provider.name,
+                        "message": (
+                            "Payment initiated but not yet confirmed. Use check_payment_status to poll for completion."
+                        ),
+                    },
+                )
             else:
-                self._emit("PAYMENT_FAILED", {
-                    "job_id": job_id,
-                    "payment_id": result.payment_id,
-                    "error": result.error,
-                    "rail": provider.name,
-                })
+                self._emit(
+                    "PAYMENT_FAILED",
+                    {
+                        "job_id": job_id,
+                        "payment_id": result.payment_id,
+                        "error": result.error,
+                        "rail": provider.name,
+                    },
+                )
 
             return result
 
@@ -365,8 +394,8 @@ class PaymentManager:
         job_id: str,
         fee_calc: FeeCalculation,
         *,
-        rail: Optional[str] = None,
-        idempotency_key: Optional[str] = None,
+        rail: str | None = None,
+        idempotency_key: str | None = None,
     ) -> PaymentResult:
         """Place a hold for the platform fee (quote-time).
 
@@ -400,15 +429,17 @@ class PaymentManager:
 
             ok, reason = self.check_spend_limits(fee_calc.fee_amount)
             if not ok:
-                self._emit("SPEND_LIMIT_REACHED", {
-                    "job_id": job_id,
-                    "fee_amount": fee_calc.fee_amount,
-                    "reason": reason,
-                })
+                self._emit(
+                    "SPEND_LIMIT_REACHED",
+                    {
+                        "job_id": job_id,
+                        "fee_amount": fee_calc.fee_amount,
+                        "reason": reason,
+                    },
+                )
                 raise PaymentError(
                     f"Spend limit exceeded: {reason}. "
-                    "Adjust your limits in billing settings or wait until next month."
-                    + BILLING_SUPPORT_SUFFIX,
+                    "Adjust your limits in billing settings or wait until next month." + BILLING_SUPPORT_SUFFIX,
                     code="SPEND_LIMIT",
                 )
 
@@ -418,14 +449,14 @@ class PaymentManager:
                 raise PaymentError(
                     f"Payment provider {provider_name!r} not registered. "
                     "Use 'billing_setup_url' to set up Stripe, or configure "
-                    "Circle USDC with 'kiln billing setup'."
-                    + BILLING_SUPPORT_SUFFIX,
+                    "Circle USDC with 'kiln billing setup'." + BILLING_SUPPORT_SUFFIX,
                     code="NO_PROVIDER",
                 )
 
-            metadata: Dict[str, Any] = {}
+            metadata: dict[str, Any] = {}
             if provider.name == "circle":
                 from kiln.wallets import get_ethereum_wallet, get_solana_wallet
+
                 if provider.rail in (PaymentRail.BASE, PaymentRail.ETHEREUM):
                     metadata["destination_address"] = get_ethereum_wallet().address
                 else:
@@ -456,17 +487,24 @@ class PaymentManager:
             # Persist the authorization
             payment_id = secrets.token_hex(8)
             self._persist_payment(
-                payment_id, result.payment_id, provider.name,
-                result.rail.value, result.amount, result.currency.value,
+                payment_id,
+                result.payment_id,
+                provider.name,
+                result.rail.value,
+                result.amount,
+                result.currency.value,
                 result.status.value,
             )
 
-            self._emit("PAYMENT_INITIATED", {
-                "job_id": job_id,
-                "amount": fee_calc.fee_amount,
-                "rail": provider.name,
-                "type": "authorization",
-            })
+            self._emit(
+                "PAYMENT_INITIATED",
+                {
+                    "job_id": job_id,
+                    "amount": fee_calc.fee_amount,
+                    "rail": provider.name,
+                    "type": "authorization",
+                },
+            )
 
             return result
 
@@ -476,7 +514,7 @@ class PaymentManager:
         job_id: str,
         fee_calc: FeeCalculation,
         *,
-        rail: Optional[str] = None,
+        rail: str | None = None,
     ) -> PaymentResult:
         """Capture a previously authorized hold (order-time).
 
@@ -512,7 +550,8 @@ class PaymentManager:
 
         # Record billing charge with the captured payment.
         charge_id = self._ledger.record_charge(
-            job_id, fee_calc,
+            job_id,
+            fee_calc,
             payment_id=result.payment_id,
             payment_rail=provider.name,
             payment_status=result.status.value,
@@ -520,17 +559,21 @@ class PaymentManager:
 
         # Update persisted payment status.
         self._db.update_payment_status(
-            payment_id, result.status.value,
+            payment_id,
+            result.status.value,
         )
 
         if result.success:
-            self._emit("PAYMENT_COMPLETED", {
-                "job_id": job_id,
-                "charge_id": charge_id,
-                "payment_id": result.payment_id,
-                "amount": result.amount,
-                "rail": provider.name,
-            })
+            self._emit(
+                "PAYMENT_COMPLETED",
+                {
+                    "job_id": job_id,
+                    "charge_id": charge_id,
+                    "payment_id": result.payment_id,
+                    "amount": result.amount,
+                    "rail": provider.name,
+                },
+            )
 
         return result
 
@@ -538,7 +581,7 @@ class PaymentManager:
         self,
         payment_id: str,
         *,
-        rail: Optional[str] = None,
+        rail: str | None = None,
     ) -> PaymentResult:
         """Release a hold without charging (cancellation).
 
@@ -580,7 +623,8 @@ class PaymentManager:
             )
 
         self._db.update_payment_status(
-            payment_id, result.status.value,
+            payment_id,
+            result.status.value,
         )
 
         return result
@@ -610,8 +654,7 @@ class PaymentManager:
             )
         if not hasattr(provider, "create_setup_url"):
             raise PaymentError(
-                f"Provider {rail!r} does not support setup URLs. "
-                "Use the provider's dashboard to add a payment method.",
+                f"Provider {rail!r} does not support setup URLs. Use the provider's dashboard to add a payment method.",
                 code="NO_SETUP_URL",
             )
         return provider.create_setup_url()
@@ -620,7 +663,7 @@ class PaymentManager:
     # Status helpers
     # ------------------------------------------------------------------
 
-    def get_billing_status(self, user_id: str) -> Dict[str, Any]:
+    def get_billing_status(self, user_id: str) -> dict[str, Any]:
         """Return enriched billing status for a user.
 
         Combines fee policy, monthly spend, payment methods, and
@@ -672,8 +715,9 @@ class PaymentManager:
         }
 
     def get_billing_history(
-        self, limit: int = 20,
-    ) -> List[Dict[str, Any]]:
+        self,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
         """Return recent billing charges with payment outcomes."""
         return self._ledger.list_charges(limit=limit)
 
@@ -691,31 +735,34 @@ class PaymentManager:
         currency: str,
         status: str,
         *,
-        tx_hash: Optional[str] = None,
-        error: Optional[str] = None,
+        tx_hash: str | None = None,
+        error: str | None = None,
     ) -> None:
         """Write a payment transaction to the ``payments`` table."""
         now = time.time()
-        self._db.save_payment({
-            "id": internal_id,
-            "charge_id": "",  # filled in after charge is recorded
-            "provider_id": provider_id,
-            "rail": rail,
-            "amount": amount,
-            "currency": currency,
-            "status": status,
-            "tx_hash": tx_hash,
-            "error": error,
-            "created_at": now,
-            "updated_at": now,
-        })
+        self._db.save_payment(
+            {
+                "id": internal_id,
+                "charge_id": "",  # filled in after charge is recorded
+                "provider_id": provider_id,
+                "rail": rail,
+                "amount": amount,
+                "currency": currency,
+                "status": status,
+                "tx_hash": tx_hash,
+                "error": error,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
 
-    def _emit(self, event_name: str, data: Dict[str, Any]) -> None:
+    def _emit(self, event_name: str, data: dict[str, Any]) -> None:
         """Emit a payment event if an event bus is available."""
         if self._event_bus is None:
             return
         try:
             from kiln.events import EventType
+
             event_type = EventType[event_name]
             self._event_bus.publish(event_type, data, source="payments")
         except KeyError:
@@ -736,8 +783,7 @@ def _fee_currency(
         return Currency(fee_calc.currency)
     except ValueError:
         logger.warning(
-            "Currency %r not recognized — falling back to provider default. "
-            "Supported currencies: %s",
+            "Currency %r not recognized — falling back to provider default. Supported currencies: %s",
             fee_calc.currency,
             [c.value for c in provider.supported_currencies] if provider.supported_currencies else ["USD"],
         )

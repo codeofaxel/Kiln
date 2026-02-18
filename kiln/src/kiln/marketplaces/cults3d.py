@@ -17,7 +17,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 
@@ -93,10 +93,10 @@ class Cults3DAdapter(MarketplaceAdapter):
     def _query(
         self,
         graphql: str,
-        variables: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+        variables: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Execute a GraphQL query and return the ``data`` dict."""
-        payload: Dict[str, Any] = {"query": graphql}
+        payload: dict[str, Any] = {"query": graphql}
         if variables:
             payload["variables"] = variables
 
@@ -121,7 +121,8 @@ class Cults3DAdapter(MarketplaceAdapter):
 
         if resp.status_code == 401:
             raise MarketplaceAuthError(
-                "Invalid Cults3D credentials.", status_code=401,
+                "Invalid Cults3D credentials.",
+                status_code=401,
             )
         if resp.status_code == 429:
             raise MarketplaceRateLimitError(
@@ -151,7 +152,7 @@ class Cults3DAdapter(MarketplaceAdapter):
         page: int = 1,
         per_page: int = 20,
         sort: str = "relevant",
-    ) -> List[ModelSummary]:
+    ) -> list[ModelSummary]:
         offset = (page - 1) * per_page
         limit = min(per_page, 100)
 
@@ -175,11 +176,14 @@ class Cults3DAdapter(MarketplaceAdapter):
           }
         }
         """
-        data = self._query(gql, {
-            "query": query,
-            "limit": limit,
-            "offset": offset,
-        })
+        data = self._query(
+            gql,
+            {
+                "query": query,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
         batch = data.get("creationsSearchBatch", {})
         results = batch.get("results", [])
         return [self._parse_summary(item) for item in results if isinstance(item, dict)]
@@ -214,7 +218,7 @@ class Cults3DAdapter(MarketplaceAdapter):
             )
         return self._parse_detail(creation)
 
-    def get_files(self, model_id: str) -> List[ModelFile]:
+    def get_files(self, model_id: str) -> list[ModelFile]:
         gql = """
         query($id: ID!) {
           creation(identifier: $id) {
@@ -229,16 +233,12 @@ class Cults3DAdapter(MarketplaceAdapter):
                 f"Model {model_id} not found on Cults3D.",
             )
         blueprints = creation.get("blueprints", [])
-        return [
-            self._parse_blueprint(i, bp)
-            for i, bp in enumerate(blueprints)
-            if isinstance(bp, dict)
-        ]
+        return [self._parse_blueprint(i, bp) for i, bp in enumerate(blueprints) if isinstance(bp, dict)]
 
     # -- parsing helpers ---------------------------------------------------
 
     @staticmethod
-    def _parse_summary(data: Dict[str, Any]) -> ModelSummary:
+    def _parse_summary(data: dict[str, Any]) -> ModelSummary:
         price = data.get("price", {}) or {}
         price_cents = price.get("cents", 0) or 0
         is_free = price_cents == 0
@@ -269,7 +269,7 @@ class Cults3DAdapter(MarketplaceAdapter):
         )
 
     @staticmethod
-    def _parse_detail(data: Dict[str, Any]) -> ModelDetail:
+    def _parse_detail(data: dict[str, Any]) -> ModelDetail:
         price = data.get("price", {}) or {}
         price_cents = price.get("cents", 0) or 0
 
@@ -313,7 +313,7 @@ class Cults3DAdapter(MarketplaceAdapter):
         )
 
     @staticmethod
-    def _parse_blueprint(index: int, data: Dict[str, Any]) -> ModelFile:
+    def _parse_blueprint(index: int, data: dict[str, Any]) -> ModelFile:
         file_url = data.get("fileUrl", "")
         # Try to extract filename from URL
         name = ""

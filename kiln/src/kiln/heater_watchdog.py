@@ -12,7 +12,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +56,12 @@ class HeaterWatchdog:
         self._poll_interval = poll_interval
         self._event_bus = event_bus
         self._running = False
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
         # Timestamp of last intentional heater activation (set_temperature call
         # or print start).  None means no heater activity tracked yet.
-        self._last_heater_activity: Optional[float] = None
+        self._last_heater_activity: float | None = None
 
         # When a print is active, the watchdog should not intervene.
         self._print_active = False
@@ -167,8 +166,7 @@ class HeaterWatchdog:
 
         # Heaters are on and idle timeout exceeded — cool down.
         logger.warning(
-            "Heater watchdog: auto-cooldown after %.0f min idle "
-            "(tool_target=%.0f°C, bed_target=%.0f°C)",
+            "Heater watchdog: auto-cooldown after %.0f min idle (tool_target=%.0f°C, bed_target=%.0f°C)",
             elapsed / 60.0,
             tool_target,
             bed_target,
@@ -195,6 +193,7 @@ class HeaterWatchdog:
         if self._event_bus is not None:
             try:
                 from kiln.events import EventType
+
                 self._event_bus.publish(
                     EventType.TEMPERATURE_WARNING,
                     {

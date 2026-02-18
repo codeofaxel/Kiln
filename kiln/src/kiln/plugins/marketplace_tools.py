@@ -51,13 +51,12 @@ class _MarketplaceToolsPlugin:
             this to verify marketplace access before searching or
             downloading models.
             """
-            from kiln.marketplaces import MarketplaceRegistry
 
             # Import server internals lazily to avoid circular imports
             try:
                 from kiln.server import (
-                    _marketplace_registry,
                     _init_marketplace_registry,
+                    _marketplace_registry,
                 )
             except ImportError:
                 return {
@@ -78,20 +77,14 @@ class _MarketplaceToolsPlugin:
                 sources = {
                     "thingiverse": bool(os.environ.get("KILN_THINGIVERSE_TOKEN")),
                     "myminifactory": bool(os.environ.get("KILN_MMF_API_KEY")),
-                    "cults3d": bool(
-                        os.environ.get("KILN_CULTS3D_USERNAME")
-                        and os.environ.get("KILN_CULTS3D_API_KEY")
-                    ),
+                    "cults3d": bool(os.environ.get("KILN_CULTS3D_USERNAME") and os.environ.get("KILN_CULTS3D_API_KEY")),
                 }
 
                 return {
                     "success": True,
                     "connected_count": _marketplace_registry.count,
                     "connected": _marketplace_registry.connected,
-                    "credentials_configured": {
-                        name: configured
-                        for name, configured in sources.items()
-                    },
+                    "credentials_configured": {name: configured for name, configured in sources.items()},
                     "message": (
                         f"{_marketplace_registry.count} marketplace(s) connected"
                         if _marketplace_registry.count > 0
@@ -121,8 +114,8 @@ class _MarketplaceToolsPlugin:
             """
             try:
                 from kiln.server import (
-                    _marketplace_registry,
                     _init_marketplace_registry,
+                    _marketplace_registry,
                 )
             except ImportError:
                 return {
@@ -164,10 +157,7 @@ class _MarketplaceToolsPlugin:
                     "failed": results.failed,
                     "skipped": results.skipped,
                     "summary": results.summary,
-                    "message": (
-                        f"Probed {len(results.searched)} marketplace(s). "
-                        f"{len(results.failed)} failure(s)."
-                    ),
+                    "message": (f"Probed {len(results.searched)} marketplace(s). {len(results.failed)} failure(s)."),
                 }
             except Exception as exc:
                 _logger.exception("Error in marketplace_diagnostics")

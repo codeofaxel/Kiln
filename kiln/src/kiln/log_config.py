@@ -14,27 +14,18 @@ import os
 import re
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional
-
 
 _DEFAULT_LOG_DIR = os.path.join(str(Path.home()), ".kiln", "logs")
 
 # Patterns that match sensitive values in log messages.
 _SCRUB_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r'(api_key["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE),
-     r'\1***REDACTED***'),
-    (re.compile(r'(token["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE),
-     r'\1***REDACTED***'),
-    (re.compile(r'(password["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE),
-     r'\1***REDACTED***'),
-    (re.compile(r'(access_code["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE),
-     r'\1***REDACTED***'),
-    (re.compile(r'(Authorization:\s*Bearer\s+)(\S+)', re.IGNORECASE),
-     r'\1***REDACTED***'),
-    (re.compile(r'(Authorization:\s*Basic\s+)(\S+)', re.IGNORECASE),
-     r'\1***REDACTED***'),
-    (re.compile(r'(secret["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE),
-     r'\1***REDACTED***'),
+    (re.compile(r'(api_key["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE), r"\1***REDACTED***"),
+    (re.compile(r'(token["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE), r"\1***REDACTED***"),
+    (re.compile(r'(password["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE), r"\1***REDACTED***"),
+    (re.compile(r'(access_code["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE), r"\1***REDACTED***"),
+    (re.compile(r"(Authorization:\s*Bearer\s+)(\S+)", re.IGNORECASE), r"\1***REDACTED***"),
+    (re.compile(r"(Authorization:\s*Basic\s+)(\S+)", re.IGNORECASE), r"\1***REDACTED***"),
+    (re.compile(r'(secret["\x27]?\s*[:=]\s*["\x27]?)([^"\x27\s,}{\]]+)', re.IGNORECASE), r"\1***REDACTED***"),
 ]
 
 
@@ -51,15 +42,9 @@ class ScrubFilter(logging.Filter):
             record.msg = _scrub(record.msg)
         if record.args:
             if isinstance(record.args, dict):
-                record.args = {
-                    k: _scrub(v) if isinstance(v, str) else v
-                    for k, v in record.args.items()
-                }
+                record.args = {k: _scrub(v) if isinstance(v, str) else v for k, v in record.args.items()}
             elif isinstance(record.args, tuple):
-                record.args = tuple(
-                    _scrub(a) if isinstance(a, str) else a
-                    for a in record.args
-                )
+                record.args = tuple(_scrub(a) if isinstance(a, str) else a for a in record.args)
         return True
 
 
@@ -71,11 +56,11 @@ def _scrub(text: str) -> str:
 
 
 def configure_logging(
-    log_dir: Optional[str] = None,
+    log_dir: str | None = None,
     *,
     max_bytes: int = 10_000_000,
     backup_count: int = 5,
-    level: Optional[str] = None,
+    level: str | None = None,
 ) -> None:
     """Configure logging with rotation and sensitive data scrubbing.
 
@@ -100,9 +85,7 @@ def configure_logging(
     root.setLevel(log_level)
 
     # Add rotating file handler if not already present.
-    has_rotating = any(
-        isinstance(h, RotatingFileHandler) for h in root.handlers
-    )
+    has_rotating = any(isinstance(h, RotatingFileHandler) for h in root.handlers)
     if not has_rotating:
         file_handler = RotatingFileHandler(
             log_path,

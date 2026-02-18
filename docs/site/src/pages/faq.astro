@@ -1,0 +1,338 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+interface FAQ {
+  q: string;
+  a: string;
+}
+
+interface Section {
+  title: string;
+  items: FAQ[];
+}
+
+const sections: Section[] = [
+  {
+    title: "General",
+    items: [
+      {
+        q: "What is Kiln?",
+        a: "Kiln is open-source infrastructure that lets AI agents safely control 3D printers. It exposes your printer through the Model Context Protocol (MCP), so any compatible AI agent — like Claude, GPT, or a custom agent — can start prints, monitor progress, manage queues, and more. Think of it as the bridge between conversational AI and physical manufacturing."
+      },
+      {
+        q: "How is Kiln different from just using OctoPrint or Moonraker?",
+        a: "OctoPrint and Moonraker are great printer management interfaces built for humans. Kiln sits on top of them (and Bambu Lab, and Prusa Link) to provide a unified, AI-friendly interface. It adds safety guardrails, a job queue, fleet management, slicing integration, and a standardized protocol — things you need when an autonomous agent is in the loop, not a person clicking buttons."
+      },
+      {
+        q: "Is Kiln free?",
+        a: "Local printing is free forever — unlimited prints on up to 2 printers, no strings attached. Paid tiers add fleet management, larger queues, priority support, and access to outsourced manufacturing through fulfillment providers. See the <a href='/pricing'>pricing page</a> for details."
+      },
+      {
+        q: "Is Kiln open source?",
+        a: "Yes. Kiln is fully open source under the MIT license. You can self-host, modify, and contribute. The source code is on <a href='https://github.com/codeofaxel/Kiln' target='_blank' rel='noopener'>GitHub</a>."
+      },
+    ]
+  },
+  {
+    title: "Getting Started",
+    items: [
+      {
+        q: "What printers does Kiln support?",
+        a: "Kiln supports printers running OctoPrint, Moonraker (Klipper), Bambu Lab (X1C, P1S, P1P, A1, A1 Mini), and Prusa Link (MK4, MK3.9, Mini, XL). If your printer runs one of these, Kiln can control it. Safety profiles cover 28+ printer models with per-model temperature and speed limits."
+      },
+      {
+        q: "How do I install Kiln?",
+        a: "Install via pip: <code>pip install kiln3d</code>, then run <code>kiln</code> to start the MCP server. Point your AI agent at the server and you're ready to go. Full instructions are on the <a href='/install'>install page</a>."
+      },
+      {
+        q: "What AI agents work with Kiln?",
+        a: "Any AI agent that supports the Model Context Protocol (MCP) can use Kiln — including Claude (via Claude Desktop or Claude Code), custom agents built with the OpenAI API, and any MCP-compatible client. Kiln also provides a REST API and CLI for non-MCP integrations."
+      },
+      {
+        q: "What is MCP? Do I need to understand it?",
+        a: "MCP (Model Context Protocol) is an open standard for connecting AI agents to external tools and data sources. You don't need to understand MCP internals to use Kiln — just configure your AI agent to connect to the Kiln MCP server. If you're building custom agents, the <a href='/whitepaper'>whitepaper</a> covers the protocol details."
+      },
+      {
+        q: "Can I use Kiln without AI, just as a CLI or API?",
+        a: "Yes. Kiln includes a full command-line interface (88 commands) and a REST API. You can manage printers, queue jobs, slice files, and run print operations entirely from the terminal or your own scripts — no AI agent required."
+      },
+    ]
+  },
+  {
+    title: "Safety & Privacy",
+    items: [
+      {
+        q: "Can the AI damage my printer?",
+        a: "Kiln is built around the principle that AI should never have unchecked access to hardware. Every print operation passes through a safety layer that enforces per-printer temperature limits, validates G-code commands, runs pre-flight checks before prints, and blocks dangerous operations. Safety profiles cover 28+ printer models with manufacturer-specified limits."
+      },
+      {
+        q: "What safety guardrails are in place?",
+        a: "Kiln enforces multiple layers: per-printer temperature and speed limits from a validated safety profile database, G-code command validation that blocks unsafe operations (raw heater commands, dangerous moves), mandatory pre-flight checks before every print, and structured error handling that never silently fails. The <a href='/whitepaper'>whitepaper</a> covers the full safety architecture."
+      },
+      {
+        q: "Does Kiln send my data to the cloud?",
+        a: "No. Kiln runs entirely on your local machine. Your printer data, G-code files, and print history stay on your network. The only external connections are ones you explicitly configure — like fulfillment providers or marketplace integrations."
+      },
+      {
+        q: "Can I restrict which tools the AI agent can access?",
+        a: "Yes. Kiln supports tool tiers (essential, standard, full) that control which MCP tools are exposed to the agent. You can restrict agents to read-only monitoring, allow standard print operations, or grant full access including fleet management and raw G-code — depending on your trust level."
+      },
+    ]
+  },
+  {
+    title: "Features & Capabilities",
+    items: [
+      {
+        q: "Can I run multiple printers?",
+        a: "Yes. Kiln includes a fleet registry and job queue that support multiple printers. The free tier supports up to 2 printers; paid tiers support unlimited printers with priority scheduling across your fleet."
+      },
+      {
+        q: "Does Kiln handle slicing?",
+        a: "Yes. Kiln integrates with PrusaSlicer and OrcaSlicer for local slicing, with bundled slicer profiles optimized per printer model. You can also use pre-sliced G-code files. The AI agent can trigger slicing, adjust settings, and go from STL to print in a single conversation."
+      },
+      {
+        q: "Can I order prints from external services through Kiln?",
+        a: "Yes. Kiln supports outsourced manufacturing through fulfillment providers like Craftcloud and Sculpteo, as well as distributed peer-to-peer manufacturing via the 3DOS network. Your AI agent can compare quotes, select materials, and place orders through the same interface used for local printing."
+      },
+      {
+        q: "Does Kiln support model marketplaces?",
+        a: "Yes. Kiln includes adapters for Thingiverse, MyMiniFactory, and Cults3D. Your AI agent can search for models, download files, and send them to your printer — all in one workflow."
+      },
+      {
+        q: "Can I automate recurring prints or batch jobs?",
+        a: "Yes. Kiln includes a priority job queue with scheduling, so you can queue up multiple prints with different priorities. The scheduler dispatches jobs automatically as printers become available, and you can build fully automated pipelines using the pre-validated print pipeline system (quick_print, calibrate, benchmark)."
+      },
+    ]
+  },
+  {
+    title: "Technical",
+    items: [
+      {
+        q: "What's the difference between the litepaper and whitepaper?",
+        a: "The <a href='/litepaper'>litepaper</a> is a non-technical overview — it explains what Kiln does, why it exists, and who it's for, without diving into implementation details. The <a href='/whitepaper'>whitepaper</a> is the full technical document covering protocol design, architecture, adapter interfaces, safety models, and system internals."
+      },
+      {
+        q: "What language is Kiln written in?",
+        a: "Python. Kiln is distributed as two pip-installable packages: <code>kiln3d</code> (the MCP server) and <code>octoprint-cli</code> (standalone CLI tool). Both use modern Python with full type hints, dataclasses, and async support."
+      },
+      {
+        q: "Can I build my own printer adapter?",
+        a: "Yes. Kiln uses an abstract adapter interface (<code>PrinterAdapter</code>) that any new printer backend can implement. If your printer has a REST, MQTT, or serial API, you can write an adapter that normalizes it to Kiln's standard interface. See the existing adapters (OctoPrint, Moonraker, Bambu, Prusa Link) as reference implementations."
+      },
+      {
+        q: "How do I contribute?",
+        a: "Fork the repo, create a branch, and submit a pull request. Kiln uses pytest for testing (5,000+ tests), Ruff for linting, and follows strict patterns documented in the contributing guide. Issues and feature requests are welcome on <a href='https://github.com/codeofaxel/Kiln' target='_blank' rel='noopener'>GitHub</a>."
+      },
+    ]
+  },
+];
+---
+
+<BaseLayout title="FAQ — Kiln" description="Frequently asked questions about Kiln, the open-source AI-powered 3D printing infrastructure." current="faq">
+  <section class="faq-hero">
+    <div class="container">
+      <h1>Frequently Asked Questions</h1>
+      <p class="lead">Everything you need to know about Kiln. Can't find your answer? <a href="https://github.com/codeofaxel/Kiln/issues" target="_blank" rel="noopener">Open an issue</a> on GitHub.</p>
+    </div>
+  </section>
+
+  <section class="faq-body">
+    <div class="container">
+      {sections.map((section) => (
+        <div class="faq-section">
+          <h2 class="section-title">{section.title}</h2>
+          <div class="faq-list">
+            {section.items.map((item) => (
+              <details class="faq-item">
+                <summary class="faq-question">
+                  <span>{item.q}</span>
+                  <svg class="faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </summary>
+                <div class="faq-answer" set:html={item.a} />
+              </details>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  /* ── Hero ── */
+  .faq-hero {
+    padding: 80px 0 48px;
+    text-align: center;
+  }
+
+  .faq-hero h1 {
+    font-size: 40px;
+    font-weight: 700;
+    margin-bottom: 16px;
+  }
+
+  .faq-hero .lead {
+    font-size: 17px;
+    color: var(--text-muted);
+    max-width: 560px;
+    margin: 0 auto;
+    line-height: 1.6;
+  }
+
+  .faq-hero .lead a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: rgba(255, 107, 43, 0.3);
+    text-underline-offset: 3px;
+  }
+
+  .faq-hero .lead a:hover {
+    text-decoration-color: var(--accent);
+  }
+
+  /* ── Body ── */
+  .faq-body {
+    padding: 0 0 96px;
+  }
+
+  .faq-body .container {
+    max-width: 800px;
+  }
+
+  /* ── Sections ── */
+  .faq-section {
+    margin-bottom: 48px;
+  }
+
+  .faq-section:last-child {
+    margin-bottom: 0;
+  }
+
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ── FAQ Items ── */
+  .faq-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .faq-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: border-color 0.15s ease;
+  }
+
+  .faq-item:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .faq-item[open] {
+    border-color: rgba(255, 107, 43, 0.2);
+  }
+
+  .faq-question {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 20px;
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text);
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+  }
+
+  .faq-question::-webkit-details-marker {
+    display: none;
+  }
+
+  .faq-question::marker {
+    content: '';
+  }
+
+  .faq-chevron {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    transition: transform 0.2s ease, color 0.15s ease;
+  }
+
+  .faq-item[open] .faq-chevron {
+    transform: rotate(180deg);
+    color: var(--accent);
+  }
+
+  .faq-answer {
+    padding: 0 20px 20px;
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--text-muted);
+  }
+
+  .faq-answer :global(a) {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: rgba(255, 107, 43, 0.3);
+    text-underline-offset: 3px;
+  }
+
+  .faq-answer :global(a:hover) {
+    text-decoration-color: var(--accent);
+  }
+
+  .faq-answer :global(code) {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    border-radius: 4px;
+    color: #ccc;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .faq-hero {
+      padding: 56px 0 32px;
+    }
+
+    .faq-hero h1 {
+      font-size: 28px;
+    }
+
+    .faq-question {
+      font-size: 15px;
+      padding: 16px;
+    }
+
+    .faq-answer {
+      padding: 0 16px 16px;
+      font-size: 14px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .faq-hero h1 {
+      font-size: 24px;
+    }
+
+    .faq-hero .lead {
+      font-size: 15px;
+    }
+  }
+</style>

@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import TypeVar
 
-from kiln.printers.base import PrinterAdapter, PrinterState, PrinterStatus
+from kiln.printers.base import PrinterAdapter, PrinterStatus
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +48,9 @@ class PrinterRegistry:
     """
 
     def __init__(self) -> None:
-        self._printers: Dict[str, PrinterAdapter] = {}
+        self._printers: dict[str, PrinterAdapter] = {}
         self._lock = threading.Lock()
-        self._printer_locks: Dict[str, threading.Lock] = {}
+        self._printer_locks: dict[str, threading.Lock] = {}
 
     # ------------------------------------------------------------------
     # Registration
@@ -95,12 +96,12 @@ class PrinterRegistry:
                 raise PrinterNotFoundError(name)
             return self._printers[name]
 
-    def list_names(self) -> List[str]:
+    def list_names(self) -> list[str]:
         """Return a sorted list of all registered printer names."""
         with self._lock:
             return sorted(self._printers.keys())
 
-    def list_all(self) -> Dict[str, PrinterAdapter]:
+    def list_all(self) -> dict[str, PrinterAdapter]:
         """Return a shallow copy of the full name->adapter mapping."""
         with self._lock:
             return dict(self._printers)
@@ -121,10 +122,10 @@ class PrinterRegistry:
 
     def _query_printers_parallel(
         self,
-        printers: Dict[str, PrinterAdapter],
+        printers: dict[str, PrinterAdapter],
         query_fn: Callable[[str, PrinterAdapter], _T],
         error_fn: Callable[[str, PrinterAdapter, Exception], _T],
-    ) -> List[_T]:
+    ) -> list[_T]:
         """Query all printers in parallel using a thread pool.
 
         Args:
@@ -141,12 +142,11 @@ class PrinterRegistry:
             return []
 
         max_workers = min(len(printers), 20)
-        results: List[_T] = []
+        results: list[_T] = []
 
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             future_to_name = {
-                pool.submit(query_fn, name, adapter): (name, adapter)
-                for name, adapter in printers.items()
+                pool.submit(query_fn, name, adapter): (name, adapter) for name, adapter in printers.items()
             }
             for future in as_completed(future_to_name, timeout=_FLEET_QUERY_TIMEOUT + 5):
                 name, adapter = future_to_name[future]
@@ -161,7 +161,7 @@ class PrinterRegistry:
     # Fleet queries
     # ------------------------------------------------------------------
 
-    def get_fleet_status(self) -> List[Dict]:
+    def get_fleet_status(self) -> list[dict]:
         """Query every printer and return a list of status snapshots.
 
         Each entry contains the printer name, backend type, and current
@@ -172,7 +172,7 @@ class PrinterRegistry:
         """
         printers = self.list_all()
 
-        def _query(name: str, adapter: PrinterAdapter) -> Dict:
+        def _query(name: str, adapter: PrinterAdapter) -> dict:
             state = adapter.get_state()
             return {
                 "name": name,
@@ -185,7 +185,7 @@ class PrinterRegistry:
                 "bed_temp_target": state.bed_temp_target,
             }
 
-        def _error(name: str, adapter: PrinterAdapter, exc: Exception) -> Dict:
+        def _error(name: str, adapter: PrinterAdapter, exc: Exception) -> dict:
             logger.warning("Failed to query printer %r: %s", name, exc)
             return {
                 "name": name,
@@ -200,7 +200,7 @@ class PrinterRegistry:
 
         return self._query_printers_parallel(printers, _query, _error)
 
-    def get_idle_printers(self) -> List[str]:
+    def get_idle_printers(self) -> list[str]:
         """Return names of printers that are currently idle and ready.
 
         Useful for job scheduling -- find a printer that can accept work.
@@ -208,28 +208,28 @@ class PrinterRegistry:
         """
         printers = self.list_all()
 
-        def _query(name: str, adapter: PrinterAdapter) -> Tuple[str, bool]:
+        def _query(name: str, adapter: PrinterAdapter) -> tuple[str, bool]:
             state = adapter.get_state()
             return (name, state.connected and state.state == PrinterStatus.IDLE)
 
-        def _error(name: str, adapter: PrinterAdapter, exc: Exception) -> Tuple[str, bool]:
+        def _error(name: str, adapter: PrinterAdapter, exc: Exception) -> tuple[str, bool]:
             return (name, False)
 
         results = self._query_printers_parallel(printers, _query, _error)
         return sorted(name for name, is_idle in results if is_idle)
 
-    def get_printers_by_status(self, status: PrinterStatus) -> List[str]:
+    def get_printers_by_status(self, status: PrinterStatus) -> list[str]:
         """Return names of printers in the given state.
 
         Queries are executed in parallel for speed.
         """
         printers = self.list_all()
 
-        def _query(name: str, adapter: PrinterAdapter) -> Tuple[str, bool]:
+        def _query(name: str, adapter: PrinterAdapter) -> tuple[str, bool]:
             state = adapter.get_state()
             return (name, state.state == status)
 
-        def _error(name: str, adapter: PrinterAdapter, exc: Exception) -> Tuple[str, bool]:
+        def _error(name: str, adapter: PrinterAdapter, exc: Exception) -> tuple[str, bool]:
             # Printers that fail to respond match OFFLINE queries.
             return (name, status == PrinterStatus.OFFLINE)
 

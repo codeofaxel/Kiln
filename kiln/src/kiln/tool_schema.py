@@ -23,17 +23,17 @@ import inspect
 import re
 import types
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 from kiln.tool_tiers import TIERS, get_tier
-
 
 # ---------------------------------------------------------------------------
 # Internal registry (lazily populated)
 # ---------------------------------------------------------------------------
 
-_TOOL_REGISTRY: Dict[str, Callable] = {}
-_SCHEMA_CACHE: Dict[str, dict] = {}
+_TOOL_REGISTRY: dict[str, Callable] = {}
+_SCHEMA_CACHE: dict[str, dict] = {}
 _loaded = False
 
 
@@ -60,7 +60,7 @@ def _ensure_loaded() -> None:
 # Python type → JSON Schema type mapping
 # ---------------------------------------------------------------------------
 
-_PYTHON_TO_JSON_SCHEMA: Dict[type, str] = {
+_PYTHON_TO_JSON_SCHEMA: dict[type, str] = {
     str: "string",
     int: "integer",
     float: "number",
@@ -70,7 +70,7 @@ _PYTHON_TO_JSON_SCHEMA: Dict[type, str] = {
 }
 
 
-def _python_type_to_json_schema(annotation: Any) -> Tuple[dict, bool]:
+def _python_type_to_json_schema(annotation: Any) -> tuple[dict, bool]:
     """Convert a Python type annotation to a JSON Schema fragment.
 
     Returns:
@@ -95,7 +95,7 @@ def _python_type_to_json_schema(annotation: Any) -> Tuple[dict, bool]:
         return {"type": "string"}, True
 
     # list[X] or List[X]
-    if origin in (list, List):
+    if origin in (list, list):
         args = typing.get_args(annotation)
         if args:
             item_schema, _ = _python_type_to_json_schema(args[0])
@@ -103,7 +103,7 @@ def _python_type_to_json_schema(annotation: Any) -> Tuple[dict, bool]:
         return {"type": "array"}, False
 
     # dict[K, V] or Dict[K, V]
-    if origin in (dict, Dict):
+    if origin in (dict, dict):
         return {"type": "object"}, False
 
     # Plain types
@@ -118,7 +118,8 @@ def _python_type_to_json_schema(annotation: Any) -> Tuple[dict, bool]:
 # Docstring parsing
 # ---------------------------------------------------------------------------
 
-def _parse_docstring(doc: str | None) -> Tuple[str, Dict[str, str]]:
+
+def _parse_docstring(doc: str | None) -> tuple[str, dict[str, str]]:
     """Extract the description and per-parameter docs from a docstring.
 
     Returns:
@@ -143,7 +144,7 @@ def _parse_docstring(doc: str | None) -> Tuple[str, Dict[str, str]]:
     description = " ".join(desc_lines)
 
     # --- Parameter docs from "Args:" section ---
-    param_docs: Dict[str, str] = {}
+    param_docs: dict[str, str] = {}
     in_args = False
     current_param: str | None = None
     current_desc_parts: list[str] = []
@@ -175,9 +176,7 @@ def _parse_docstring(doc: str | None) -> Tuple[str, Dict[str, str]]:
             saw_blank = False
             # Check whether this looks like a new parameter.  If not,
             # we've left the Args block (trailing prose after a blank).
-            param_match_check = re.match(
-                r"^(\w+)\s*(?:\([^)]*\))?\s*:\s*(.+)", stripped
-            )
+            param_match_check = re.match(r"^(\w+)\s*(?:\([^)]*\))?\s*:\s*(.+)", stripped)
             if not param_match_check:
                 break
 
@@ -203,6 +202,7 @@ def _parse_docstring(doc: str | None) -> Tuple[str, Dict[str, str]]:
 # ---------------------------------------------------------------------------
 # Schema construction
 # ---------------------------------------------------------------------------
+
 
 def _build_openai_schema(tool: Any) -> dict:
     """Build an OpenAI function-calling schema from a FastMCP Tool object.
@@ -251,8 +251,8 @@ def _build_schema_from_function(fn: Callable) -> dict:
 
     description, param_docs = _parse_docstring(fn.__doc__)
 
-    properties: Dict[str, Any] = {}
-    required: List[str] = []
+    properties: dict[str, Any] = {}
+    required: list[str] = []
 
     for pname, param in sig.parameters.items():
         if pname in ("self", "cls"):
@@ -265,7 +265,7 @@ def _build_schema_from_function(fn: Callable) -> dict:
         else:
             schema_fragment, is_optional = _python_type_to_json_schema(annotation)
 
-        prop: Dict[str, Any] = dict(schema_fragment)
+        prop: dict[str, Any] = dict(schema_fragment)
         if pname in param_docs:
             prop["description"] = param_docs[pname]
 
@@ -279,7 +279,7 @@ def _build_schema_from_function(fn: Callable) -> dict:
         properties[pname] = prop
 
     # Return type is excluded per OpenAI spec (the schema describes inputs).
-    parameters: Dict[str, Any] = {
+    parameters: dict[str, Any] = {
         "type": "object",
         "properties": properties,
     }
@@ -299,6 +299,7 @@ def _build_schema_from_function(fn: Callable) -> dict:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def mcp_tool_to_openai_schema(func: Callable) -> dict:
     """Convert a single MCP tool function to an OpenAI function-calling schema.
@@ -322,7 +323,7 @@ def mcp_tool_to_openai_schema(func: Callable) -> dict:
     return _build_schema_from_function(func)
 
 
-def get_all_tool_schemas(tier: str = "full") -> List[dict]:
+def get_all_tool_schemas(tier: str = "full") -> list[dict]:
     """Get OpenAI function-calling schemas for all tools in a tier.
 
     Args:
@@ -394,23 +395,15 @@ def get_tool_function(name: str, *, tier: str | None = None) -> Callable:
             required_tier = _find_tier_for_tool(name)
             if required_tier is not None:
                 alternatives = _suggest_alternatives(name, tier)
-                alt_str = (
-                    f" Alternatives in your tier: {', '.join(alternatives)}"
-                    if alternatives
-                    else ""
-                )
+                alt_str = f" Alternatives in your tier: {', '.join(alternatives)}" if alternatives else ""
                 raise KeyError(
-                    f"Tool {name!r} requires the {required_tier!r} tier "
-                    f"(you are on {tier!r}).{alt_str}"
+                    f"Tool {name!r} requires the {required_tier!r} tier (you are on {tier!r}).{alt_str}"
                 ) from None
-        raise KeyError(
-            f"Unknown tool {name!r}. "
-            f"Available tools: {len(_TOOL_REGISTRY)}"
-        ) from None
+        raise KeyError(f"Unknown tool {name!r}. Available tools: {len(_TOOL_REGISTRY)}") from None
     return fn
 
 
-def get_tool_registry() -> Dict[str, Callable]:
+def get_tool_registry() -> dict[str, Callable]:
     """Return a copy of the tool name to function mapping.
 
     The registry is lazily populated on first call.
@@ -426,7 +419,7 @@ def get_tool_registry() -> Dict[str, Callable]:
 # Safety-annotated schemas
 # ---------------------------------------------------------------------------
 
-_SAFETY_DATA: Optional[dict] = None
+_SAFETY_DATA: dict | None = None
 
 
 def _load_tool_safety() -> dict:
@@ -445,10 +438,8 @@ def _load_tool_safety() -> dict:
         # Fallback for editable installs or non-standard layouts.
         import os
 
-        fallback = os.path.join(
-            os.path.dirname(__file__), "data", "tool_safety.json"
-        )
-        with open(fallback, "r") as fh:
+        fallback = os.path.join(os.path.dirname(__file__), "data", "tool_safety.json")
+        with open(fallback) as fh:
             raw = fh.read()
 
     data = json.loads(raw)
@@ -456,7 +447,7 @@ def _load_tool_safety() -> dict:
     return _SAFETY_DATA
 
 
-def get_annotated_tool_schemas(tier: str = "full") -> List[dict]:
+def get_annotated_tool_schemas(tier: str = "full") -> list[dict]:
     """Get OpenAI schemas enriched with safety-level metadata.
 
     Each schema dict gains a ``safety`` key under ``function`` containing

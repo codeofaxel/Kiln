@@ -29,7 +29,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -66,17 +66,17 @@ class OperatorListing:
 
     operator_id: str
     display_name: str
-    materials: List[str]
-    printer_models: List[str]
-    capabilities: List[str] = field(default_factory=list)
-    location: Optional[str] = None
+    materials: list[str]
+    printer_models: list[str]
+    capabilities: list[str] = field(default_factory=list)
+    location: str | None = None
     min_lead_time_hours: float = 0.0
     avg_quality_score: float = 0.0
     success_rate: float = 0.0
     verified: bool = False
     accepting_orders: bool = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "operator_id": self.operator_id,
@@ -97,15 +97,15 @@ class OperatorListing:
 class DiscoveryQuery:
     """Search criteria for finding operators."""
 
-    material: Optional[str] = None
-    capability: Optional[str] = None
-    location: Optional[str] = None
-    max_lead_time_hours: Optional[float] = None
-    min_quality_score: Optional[float] = None
-    min_success_rate: Optional[float] = None
+    material: str | None = None
+    capability: str | None = None
+    location: str | None = None
+    max_lead_time_hours: float | None = None
+    min_quality_score: float | None = None
+    min_success_rate: float | None = None
     verified_only: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "material": self.material,
@@ -122,12 +122,12 @@ class DiscoveryQuery:
 class DiscoveryResult:
     """Results from a discovery search."""
 
-    operators: List[OperatorListing]
+    operators: list[OperatorListing]
     total_matches: int
     query: DiscoveryQuery
     searched_at: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "operators": [op.to_dict() for op in self.operators],
@@ -151,30 +151,22 @@ def _validate_listing(listing: OperatorListing) -> None:
     if not isinstance(listing.operator_id, str) or not listing.operator_id.strip():
         raise DiscoveryValidationError("operator_id must be a non-empty string")
     if len(listing.operator_id) > _MAX_OPERATOR_ID_LEN:
-        raise DiscoveryValidationError(
-            f"operator_id exceeds max length of {_MAX_OPERATOR_ID_LEN} characters"
-        )
+        raise DiscoveryValidationError(f"operator_id exceeds max length of {_MAX_OPERATOR_ID_LEN} characters")
 
     # -- display_name --
     if not isinstance(listing.display_name, str) or not listing.display_name.strip():
         raise DiscoveryValidationError("display_name must be a non-empty string")
     if len(listing.display_name) > _MAX_DISPLAY_NAME_LEN:
-        raise DiscoveryValidationError(
-            f"display_name exceeds max length of {_MAX_DISPLAY_NAME_LEN} characters"
-        )
+        raise DiscoveryValidationError(f"display_name exceeds max length of {_MAX_DISPLAY_NAME_LEN} characters")
 
     # -- materials --
     if not listing.materials:
         raise DiscoveryValidationError("materials must be a non-empty list")
     for mat in listing.materials:
         if not isinstance(mat, str) or not mat.strip():
-            raise DiscoveryValidationError(
-                "each material must be a non-empty string"
-            )
+            raise DiscoveryValidationError("each material must be a non-empty string")
         if len(mat) > _MAX_MATERIAL_LEN:
-            raise DiscoveryValidationError(
-                f"material exceeds max length of {_MAX_MATERIAL_LEN} characters"
-            )
+            raise DiscoveryValidationError(f"material exceeds max length of {_MAX_MATERIAL_LEN} characters")
 
     # -- printer_models --
     if not listing.printer_models:
@@ -183,16 +175,12 @@ def _validate_listing(listing: OperatorListing) -> None:
     # -- avg_quality_score --
     if not (_MIN_QUALITY_SCORE <= listing.avg_quality_score <= _MAX_QUALITY_SCORE):
         raise DiscoveryValidationError(
-            f"avg_quality_score must be between {_MIN_QUALITY_SCORE} "
-            f"and {_MAX_QUALITY_SCORE}"
+            f"avg_quality_score must be between {_MIN_QUALITY_SCORE} and {_MAX_QUALITY_SCORE}"
         )
 
     # -- success_rate --
     if not (_MIN_SUCCESS_RATE <= listing.success_rate <= _MAX_SUCCESS_RATE):
-        raise DiscoveryValidationError(
-            f"success_rate must be between {_MIN_SUCCESS_RATE} "
-            f"and {_MAX_SUCCESS_RATE}"
-        )
+        raise DiscoveryValidationError(f"success_rate must be between {_MIN_SUCCESS_RATE} and {_MAX_SUCCESS_RATE}")
 
     # -- min_lead_time_hours --
     if listing.min_lead_time_hours < 0:
@@ -212,7 +200,7 @@ class DiscoveryEngine:
     """
 
     def __init__(self) -> None:
-        self._listings: Dict[str, OperatorListing] = {}
+        self._listings: dict[str, OperatorListing] = {}
         self._lock = threading.Lock()
 
     # -- write operations --------------------------------------------------
@@ -240,9 +228,7 @@ class DiscoveryEngine:
                 return True
             return False
 
-    def update_accepting_orders(
-        self, operator_id: str, *, accepting: bool
-    ) -> None:
+    def update_accepting_orders(self, operator_id: str, *, accepting: bool) -> None:
         """Toggle an operator's order-acceptance status.
 
         :raises KeyError: If the operator is not registered.
@@ -251,13 +237,11 @@ class DiscoveryEngine:
             if operator_id not in self._listings:
                 raise KeyError(f"Operator {operator_id!r} not found")
             self._listings[operator_id].accepting_orders = accepting
-        logger.info(
-            "Operator %s accepting_orders set to %s", operator_id, accepting
-        )
+        logger.info("Operator %s accepting_orders set to %s", operator_id, accepting)
 
     # -- read operations ---------------------------------------------------
 
-    def get_listing(self, operator_id: str) -> Optional[OperatorListing]:
+    def get_listing(self, operator_id: str) -> OperatorListing | None:
         """Return a single listing, or ``None`` if not found."""
         with self._lock:
             return self._listings.get(operator_id)
@@ -291,7 +275,7 @@ class DiscoveryEngine:
             searched_at=time.time(),
         )
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Return aggregate statistics across all registered operators."""
         with self._lock:
             listings = list(self._listings.values())
@@ -309,7 +293,7 @@ class DiscoveryEngine:
         verified_count = sum(1 for op in listings if op.verified)
         accepting_count = sum(1 for op in listings if op.accepting_orders)
 
-        material_coverage: Dict[str, int] = {}
+        material_coverage: dict[str, int] = {}
         for op in listings:
             for mat in op.materials:
                 material_coverage[mat] = material_coverage.get(mat, 0) + 1
@@ -329,15 +313,11 @@ class DiscoveryEngine:
     @staticmethod
     def _matches(op: OperatorListing, query: DiscoveryQuery) -> bool:
         """Return ``True`` if *op* satisfies every criterion in *query*."""
-        if query.material is not None:
-            if query.material.upper() not in (m.upper() for m in op.materials):
-                return False
+        if query.material is not None and query.material.upper() not in (m.upper() for m in op.materials):
+            return False
 
-        if query.capability is not None:
-            if query.capability.lower() not in (
-                c.lower() for c in op.capabilities
-            ):
-                return False
+        if query.capability is not None and query.capability.lower() not in (c.lower() for c in op.capabilities):
+            return False
 
         if query.location is not None:
             if op.location is None:
@@ -345,29 +325,23 @@ class DiscoveryEngine:
             if query.location.lower() not in op.location.lower():
                 return False
 
-        if query.max_lead_time_hours is not None:
-            if op.min_lead_time_hours > query.max_lead_time_hours:
-                return False
-
-        if query.min_quality_score is not None:
-            if op.avg_quality_score < query.min_quality_score:
-                return False
-
-        if query.min_success_rate is not None:
-            if op.success_rate < query.min_success_rate:
-                return False
-
-        if query.verified_only and not op.verified:
+        if query.max_lead_time_hours is not None and op.min_lead_time_hours > query.max_lead_time_hours:
             return False
 
-        return True
+        if query.min_quality_score is not None and op.avg_quality_score < query.min_quality_score:
+            return False
+
+        if query.min_success_rate is not None and op.success_rate < query.min_success_rate:
+            return False
+
+        return not (query.verified_only and not op.verified)
 
 
 # ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_engine: Optional[DiscoveryEngine] = None
+_engine: DiscoveryEngine | None = None
 _engine_lock = threading.Lock()
 
 

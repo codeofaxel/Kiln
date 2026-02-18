@@ -24,7 +24,7 @@ import logging
 import os
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -45,23 +45,23 @@ class AutonomyConstraints:
     confirm-level tools ONLY if the operation satisfies these constraints.
     """
 
-    max_print_time_seconds: Optional[int] = None  # None = no limit
-    allowed_materials: Optional[List[str]] = None  # None = any material
-    max_tool_temp: Optional[float] = None
-    max_bed_temp: Optional[float] = None
-    allowed_tools: Optional[List[str]] = None  # specific tool names allowed
-    blocked_tools: Optional[List[str]] = None  # tools that ALWAYS require confirmation
+    max_print_time_seconds: int | None = None  # None = no limit
+    allowed_materials: list[str] | None = None  # None = any material
+    max_tool_temp: float | None = None
+    max_bed_temp: float | None = None
+    allowed_tools: list[str] | None = None  # specific tool names allowed
+    blocked_tools: list[str] | None = None  # tools that ALWAYS require confirmation
     require_first_layer_check: bool = False  # If True, autonomous prints must monitor first layer
-    monitoring_mode: Optional[str] = None  # "vision", "telemetry", "auto" (default). None = auto
-    max_order_cost: Optional[float] = None  # Max cost (USD) per fulfillment order. None = no limit
+    monitoring_mode: str | None = None  # "vision", "telemetry", "auto" (default). None = auto
+    max_order_cost: float | None = None  # Max cost (USD) per fulfillment order. None = no limit
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return non-None fields as a plain dict.
 
         Boolean fields are always included (even when ``False``) so that
         the caller can distinguish "not set" from "explicitly disabled".
         """
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
         for k, v in asdict(self).items():
             if v is not None:
                 result[k] = v
@@ -80,7 +80,7 @@ class AutonomyConfig:
     level: AutonomyLevel = AutonomyLevel.CONFIRM_ALL
     constraints: AutonomyConstraints = field(default_factory=AutonomyConstraints)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-friendly dict."""
         return {
             "level": self.level.value,
@@ -89,7 +89,7 @@ class AutonomyConfig:
         }
 
 
-def load_autonomy_config(*, config_path: Optional[Any] = None) -> AutonomyConfig:
+def load_autonomy_config(*, config_path: Any | None = None) -> AutonomyConfig:
     """Load autonomy configuration.
 
     Precedence: ``KILN_AUTONOMY_LEVEL`` env var > config file > default (0).
@@ -101,20 +101,18 @@ def load_autonomy_config(*, config_path: Optional[Any] = None) -> AutonomyConfig
             level_int = int(env_level)
             level = AutonomyLevel(level_int)
         except (ValueError, KeyError):
-            logger.warning(
-                "Invalid KILN_AUTONOMY_LEVEL=%r, defaulting to 0", env_level
-            )
+            logger.warning("Invalid KILN_AUTONOMY_LEVEL=%r, defaulting to 0", env_level)
             level = AutonomyLevel.CONFIRM_ALL
         _flc_env = os.environ.get("KILN_MONITOR_REQUIRE_FIRST_LAYER", "").lower() in ("true", "1", "yes")
         _moc_env = os.environ.get("KILN_AUTONOMY_MAX_ORDER_COST")
-        _max_order_cost: Optional[float] = None
+        _max_order_cost: float | None = None
         if _moc_env is not None:
             try:
                 _max_order_cost = float(_moc_env)
             except ValueError:
                 logger.warning("Invalid KILN_AUTONOMY_MAX_ORDER_COST=%r, ignoring", _moc_env)
         _mm_env = os.environ.get("KILN_MONITOR_MODE", "").lower().strip()
-        _monitoring_mode: Optional[str] = _mm_env if _mm_env in ("vision", "telemetry", "auto") else None
+        _monitoring_mode: str | None = _mm_env if _mm_env in ("vision", "telemetry", "auto") else None
         constraints = AutonomyConstraints(
             require_first_layer_check=_flc_env,
             max_order_cost=_max_order_cost,
@@ -146,7 +144,7 @@ def load_autonomy_config(*, config_path: Optional[Any] = None) -> AutonomyConfig
         _flc = bool(_flc_raw) if not isinstance(_flc_raw, str) else _flc_raw.lower() in ("true", "1", "yes")
 
         _moc_raw = constraints_raw.get("max_order_cost")
-        _max_order_cost_cfg: Optional[float] = None
+        _max_order_cost_cfg: float | None = None
         if _moc_raw is not None:
             try:
                 _max_order_cost_cfg = float(_moc_raw)
@@ -154,7 +152,7 @@ def load_autonomy_config(*, config_path: Optional[Any] = None) -> AutonomyConfig
                 logger.warning("Invalid max_order_cost=%r in config, ignoring", _moc_raw)
 
         _mm_raw = constraints_raw.get("monitoring_mode")
-        _mm_cfg: Optional[str] = None
+        _mm_cfg: str | None = None
         if isinstance(_mm_raw, str) and _mm_raw.lower().strip() in ("vision", "telemetry", "auto"):
             _mm_cfg = _mm_raw.lower().strip()
 
@@ -199,9 +197,9 @@ def check_autonomy(
     tool_name: str,
     safety_level: str,
     *,
-    operation_context: Optional[Dict[str, Any]] = None,
-    config: Optional[AutonomyConfig] = None,
-) -> Dict[str, Any]:
+    operation_context: dict[str, Any] | None = None,
+    config: AutonomyConfig | None = None,
+) -> dict[str, Any]:
     """Check whether the agent may proceed without human confirmation.
 
     :param tool_name: The MCP tool being invoked (e.g. ``"start_print"``).
@@ -256,7 +254,7 @@ def check_autonomy(
                 "level": 2,
                 "constraints_met": False,
             }
-        result_l2: Dict[str, Any] = {
+        result_l2: dict[str, Any] = {
             "allowed": True,
             "reason": "Autonomy level 2 -- full trust granted",
             "level": 2,
@@ -294,10 +292,7 @@ def check_autonomy(
         if op_material and op_material not in allowed_upper:
             return {
                 "allowed": False,
-                "reason": (
-                    f"Material {op_material!r} not in allowed list: "
-                    f"{c.allowed_materials}"
-                ),
+                "reason": (f"Material {op_material!r} not in allowed list: {c.allowed_materials}"),
                 "level": 1,
                 "constraints_met": False,
             }
@@ -308,10 +303,7 @@ def check_autonomy(
         if op_time is not None and op_time > c.max_print_time_seconds:
             return {
                 "allowed": False,
-                "reason": (
-                    f"Estimated time {op_time}s exceeds limit "
-                    f"{c.max_print_time_seconds}s"
-                ),
+                "reason": (f"Estimated time {op_time}s exceeds limit {c.max_print_time_seconds}s"),
                 "level": 1,
                 "constraints_met": False,
             }
@@ -322,10 +314,7 @@ def check_autonomy(
         if op_tool_temp is not None and op_tool_temp > c.max_tool_temp:
             return {
                 "allowed": False,
-                "reason": (
-                    f"Tool temp {op_tool_temp}\u00b0C exceeds limit "
-                    f"{c.max_tool_temp}\u00b0C"
-                ),
+                "reason": (f"Tool temp {op_tool_temp}\u00b0C exceeds limit {c.max_tool_temp}\u00b0C"),
                 "level": 1,
                 "constraints_met": False,
             }
@@ -335,10 +324,7 @@ def check_autonomy(
         if op_bed_temp is not None and op_bed_temp > c.max_bed_temp:
             return {
                 "allowed": False,
-                "reason": (
-                    f"Bed temp {op_bed_temp}\u00b0C exceeds limit "
-                    f"{c.max_bed_temp}\u00b0C"
-                ),
+                "reason": (f"Bed temp {op_bed_temp}\u00b0C exceeds limit {c.max_bed_temp}\u00b0C"),
                 "level": 1,
                 "constraints_met": False,
             }
@@ -350,15 +336,12 @@ def check_autonomy(
         if op_cost is not None and op_cost > c.max_order_cost:
             return {
                 "allowed": False,
-                "reason": (
-                    f"Order cost ${op_cost:.2f} exceeds spending cap "
-                    f"${c.max_order_cost:.2f}"
-                ),
+                "reason": (f"Order cost ${op_cost:.2f} exceeds spending cap ${c.max_order_cost:.2f}"),
                 "level": 1,
                 "constraints_met": False,
             }
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "allowed": True,
         "reason": "All Level 1 constraints satisfied",
         "level": 1,
@@ -372,7 +355,7 @@ def check_autonomy(
 def save_autonomy_config(
     config: AutonomyConfig,
     *,
-    config_path: Optional[Any] = None,
+    config_path: Any | None = None,
 ) -> None:
     """Save autonomy configuration to the config file."""
     from kiln.cli.config import _read_config_file, _write_config_file, get_config_path
@@ -380,7 +363,7 @@ def save_autonomy_config(
     path = config_path or get_config_path()
     raw = _read_config_file(path)
 
-    autonomy_section: Dict[str, Any] = {
+    autonomy_section: dict[str, Any] = {
         "level": config.level.value,
     }
 

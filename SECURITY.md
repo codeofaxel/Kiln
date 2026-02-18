@@ -46,7 +46,7 @@ Kiln implements defense in depth across five layers:
   every print. Bypassing `preflight_check()` is treated as a security defect.
 - **G-code validation** blocks dangerous commands (firmware reset, unsafe motion, raw
   stepper control) before they reach hardware.
-- **Per-printer safety profiles** enforce temperature, feedrate, and flow limits for 27
+- **Per-printer safety profiles** enforce temperature, feedrate, and flow limits for 28
   printer models. Limits are validated server-side and cannot be overridden by agents.
 - **Heater watchdog** automatically cools idle heaters to prevent thermal runaway.
 

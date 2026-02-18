@@ -17,25 +17,27 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _DATA_FILE = Path(__file__).resolve().parent / "data" / "slicer_profiles.json"
 
 # Reuse temp files per printer_id so we don't leak thousands of files.
-_temp_cache: Dict[str, str] = {}
+_temp_cache: dict[str, str] = {}
 
 
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class SlicerProfile:
@@ -54,24 +56,26 @@ class SlicerProfile:
     display_name: str
     slicer: str
     notes: str
-    settings: Dict[str, str]
+    settings: dict[str, str]
     tier: str = "free"
 
 
 # Profile IDs available on the free tier.  Everything else requires PRO.
-_FREE_PROFILES: frozenset[str] = frozenset({
-    "default",
-    "ender3",
-    "prusa_mk3s",
-    "klipper_generic",
-})
+_FREE_PROFILES: frozenset[str] = frozenset(
+    {
+        "default",
+        "ender3",
+        "prusa_mk3s",
+        "klipper_generic",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
 # Singleton cache
 # ---------------------------------------------------------------------------
 
-_cache: Dict[str, SlicerProfile] = {}
+_cache: dict[str, SlicerProfile] = {}
 _loaded: bool = False
 
 
@@ -111,6 +115,7 @@ def _load() -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def get_slicer_profile(printer_id: str) -> SlicerProfile:
     """Return the slicer profile for *printer_id*.
 
@@ -136,7 +141,7 @@ def get_slicer_profile(printer_id: str) -> SlicerProfile:
     raise KeyError(f"No slicer profile for '{printer_id}' and no default available.")
 
 
-def list_slicer_profiles() -> List[str]:
+def list_slicer_profiles() -> list[str]:
     """Return all available slicer profile IDs sorted alphabetically."""
     _load()
     return sorted(_cache.keys())
@@ -145,7 +150,7 @@ def list_slicer_profiles() -> List[str]:
 def resolve_slicer_profile(
     printer_id: str,
     *,
-    overrides: Optional[Dict[str, str]] = None,
+    overrides: dict[str, str] | None = None,
 ) -> str:
     """Write a temporary .ini profile file for *printer_id*.
 
@@ -189,7 +194,7 @@ def resolve_slicer_profile(
     return path
 
 
-def slicer_profile_to_dict(profile: SlicerProfile) -> Dict[str, Any]:
+def slicer_profile_to_dict(profile: SlicerProfile) -> dict[str, Any]:
     """Serialise a :class:`SlicerProfile` to a plain dict for MCP responses."""
     return {
         "id": profile.id,
@@ -201,8 +206,7 @@ def slicer_profile_to_dict(profile: SlicerProfile) -> Dict[str, Any]:
     }
 
 
-
-def validate_profile_for_printer(profile_id: str, printer_model: str) -> Dict[str, Any]:
+def validate_profile_for_printer(profile_id: str, printer_model: str) -> dict[str, Any]:
     """Check if a slicer profile is compatible with a printer model.
 
     Compares the slicer profile's temperature settings against the printer's
@@ -216,8 +220,8 @@ def validate_profile_for_printer(profile_id: str, printer_model: str) -> Dict[st
     """
     from kiln.safety_profiles import get_profile as get_safety_profile
 
-    warnings: List[str] = []
-    errors: List[str] = []
+    warnings: list[str] = []
+    errors: list[str] = []
 
     # --- Resolve slicer profile ---
     try:
@@ -229,35 +233,34 @@ def validate_profile_for_printer(profile_id: str, printer_model: str) -> Dict[st
     try:
         safety_prof = get_safety_profile(printer_model)
     except KeyError:
-        warnings.append(
-            f"No safety profile for printer model {printer_model!r} -- "
-            "cannot validate temperature limits."
-        )
+        warnings.append(f"No safety profile for printer model {printer_model!r} -- cannot validate temperature limits.")
         return {"compatible": True, "warnings": warnings, "errors": []}
 
     # --- Check 1: Profile target mismatch ---
     profile_norm = slicer_prof.id.lower().replace("-", "_")
     printer_norm = printer_model.lower().replace("-", "_")
 
-    if profile_norm != "default" and profile_norm != printer_norm:
-        # Check if they share a family prefix (e.g. "ender3" vs "ender3_s1")
-        if not profile_norm.startswith(printer_norm) and not printer_norm.startswith(profile_norm):
-            warnings.append(
-                f"Slicer profile {slicer_prof.id!r} (target: {slicer_prof.display_name}) "
-                f"does not match printer model {printer_model!r} "
-                f"({safety_prof.display_name}). Speeds and settings may be unsuitable."
-            )
+    if (
+        profile_norm != "default"
+        and profile_norm != printer_norm
+        and not profile_norm.startswith(printer_norm)
+        and not printer_norm.startswith(profile_norm)
+    ):
+        # Profile target doesn't share a family prefix (e.g. "ender3" vs "ender3_s1")
+        warnings.append(
+            f"Slicer profile {slicer_prof.id!r} (target: {slicer_prof.display_name}) "
+            f"does not match printer model {printer_model!r} "
+            f"({safety_prof.display_name}). Speeds and settings may be unsuitable."
+        )
 
     # --- Check 2: Hotend temperature ---
     settings = slicer_prof.settings
-    hotend_temps: List[tuple[str, float]] = []
+    hotend_temps: list[tuple[str, float]] = []
     for key in ("temperature", "first_layer_temperature"):
         val = settings.get(key)
         if val is not None:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 hotend_temps.append((key, float(val)))
-            except (ValueError, TypeError):
-                pass
 
     for key, temp in hotend_temps:
         if temp > safety_prof.max_hotend_temp:
@@ -274,14 +277,12 @@ def validate_profile_for_printer(profile_id: str, printer_model: str) -> Dict[st
             )
 
     # --- Check 3: Bed temperature ---
-    bed_temps: List[tuple[str, float]] = []
+    bed_temps: list[tuple[str, float]] = []
     for key in ("bed_temperature", "first_layer_bed_temperature"):
         val = settings.get(key)
         if val is not None:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 bed_temps.append((key, float(val)))
-            except (ValueError, TypeError):
-                pass
 
     for key, temp in bed_temps:
         if temp > safety_prof.max_bed_temp:
@@ -300,11 +301,13 @@ def validate_profile_for_printer(profile_id: str, printer_model: str) -> Dict[st
     compatible = len(errors) == 0
     return {"compatible": compatible, "warnings": warnings, "errors": errors}
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _settings_to_ini(settings: Dict[str, str], header: str = "") -> str:
+
+def _settings_to_ini(settings: dict[str, str], header: str = "") -> str:
     """Convert a flat dict to PrusaSlicer INI format."""
     lines = [f"# Kiln auto-generated profile: {header}", ""]
     for key in sorted(settings):
@@ -313,8 +316,9 @@ def _settings_to_ini(settings: Dict[str, str], header: str = "") -> str:
     return "\n".join(lines)
 
 
-def _settings_hash(settings: Dict[str, str]) -> str:
+def _settings_hash(settings: dict[str, str]) -> str:
     """Deterministic short hash for cache keying."""
     import hashlib
+
     raw = json.dumps(settings, sort_keys=True).encode()
     return hashlib.md5(raw).hexdigest()

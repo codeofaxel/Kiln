@@ -42,9 +42,10 @@ import logging
 import os
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -82,19 +83,19 @@ class LicenseTier(enum.Enum):
     PRO = "pro"
     BUSINESS = "business"
 
-    def __ge__(self, other: "LicenseTier") -> bool:
+    def __ge__(self, other: LicenseTier) -> bool:
         order = {LicenseTier.FREE: 0, LicenseTier.PRO: 1, LicenseTier.BUSINESS: 2}
         return order[self] >= order[other]
 
-    def __gt__(self, other: "LicenseTier") -> bool:
+    def __gt__(self, other: LicenseTier) -> bool:
         order = {LicenseTier.FREE: 0, LicenseTier.PRO: 1, LicenseTier.BUSINESS: 2}
         return order[self] > order[other]
 
-    def __le__(self, other: "LicenseTier") -> bool:
+    def __le__(self, other: LicenseTier) -> bool:
         order = {LicenseTier.FREE: 0, LicenseTier.PRO: 1, LicenseTier.BUSINESS: 2}
         return order[self] <= order[other]
 
-    def __lt__(self, other: "LicenseTier") -> bool:
+    def __lt__(self, other: LicenseTier) -> bool:
         order = {LicenseTier.FREE: 0, LicenseTier.PRO: 1, LicenseTier.BUSINESS: 2}
         return order[self] < order[other]
 
@@ -110,8 +111,8 @@ class LicenseInfo:
 
     tier: LicenseTier
     license_key_hint: str = ""  # Last 6 chars of key for display
-    validated_at: Optional[float] = None
-    expires_at: Optional[float] = None
+    validated_at: float | None = None
+    expires_at: float | None = None
     source: str = "default"  # "env", "file", "default"
 
     @property
@@ -126,7 +127,7 @@ class LicenseInfo:
         """Whether the license is currently valid (not expired)."""
         return not self.is_expired
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["tier"] = self.tier.value
         data["is_expired"] = self.is_expired
@@ -141,6 +142,7 @@ class LicenseInfo:
 
 class LicenseError(Exception):
     """Base class for licensing errors."""
+
     pass
 
 
@@ -171,13 +173,13 @@ class LicenseManager:
 
     def __init__(
         self,
-        license_key: Optional[str] = None,
-        license_path: Optional[Path] = None,
-        cache_path: Optional[Path] = None,
+        license_key: str | None = None,
+        license_path: Path | None = None,
+        cache_path: Path | None = None,
     ) -> None:
         self._license_path = license_path or _DEFAULT_LICENSE_PATH
         self._cache_path = cache_path or _DEFAULT_CACHE_PATH
-        self._resolved: Optional[LicenseInfo] = None
+        self._resolved: LicenseInfo | None = None
 
         # Resolve the license key from explicit arg, env, or file.
         self._raw_key = license_key or self._resolve_key()
@@ -200,7 +202,7 @@ class LicenseManager:
 
         return ""
 
-    def _validate_key_signature(self, key: str) -> Optional[Dict[str, Any]]:
+    def _validate_key_signature(self, key: str) -> dict[str, Any] | None:
         """Validate the cryptographic signature of a license key.
 
         Expected format: kiln_{tier}_{payload}_{signature}
@@ -227,9 +229,7 @@ class LicenseManager:
         # Get verification key — must be set via env var; no default shipped in source.
         verification_key = os.environ.get("KILN_LICENSE_PUBLIC_KEY", "").strip()
         if not verification_key:
-            logger.debug(
-                "KILN_LICENSE_PUBLIC_KEY not set — signature verification unavailable"
-            )
+            logger.debug("KILN_LICENSE_PUBLIC_KEY not set — signature verification unavailable")
             return None
 
         try:
@@ -249,9 +249,7 @@ class LicenseManager:
                 signature = base64.urlsafe_b64decode(signature_b64 + "==")
 
             expected_signature = hmac.new(
-                verification_key.encode("utf-8"),
-                payload_b64.encode("utf-8"),
-                hashlib.sha256
+                verification_key.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256
             ).digest()
 
             if not hmac.compare_digest(signature, expected_signature):
@@ -279,7 +277,7 @@ class LicenseManager:
             logger.debug("License key signature validation failed: %s", exc)
             return None
 
-    def _infer_tier_from_key(self, key: str) -> Tuple[LicenseTier, Optional[float]]:
+    def _infer_tier_from_key(self, key: str) -> tuple[LicenseTier, float | None]:
         """Infer the license tier from the key, validating signature if present.
 
         This provides instant, offline tier resolution without needing
@@ -362,7 +360,7 @@ class LicenseManager:
     # Cache (offline fallback)
     # ------------------------------------------------------------------
 
-    def _read_cache(self) -> Optional[Dict[str, Any]]:
+    def _read_cache(self) -> dict[str, Any] | None:
         """Read the local validation cache."""
         try:
             if not self._cache_path.is_file():
@@ -378,7 +376,7 @@ class LicenseManager:
         except (OSError, json.JSONDecodeError, ValueError):
             return None
 
-    def _write_cache(self, tier: LicenseTier, key_hint: str, expires_at: Optional[float] = None) -> None:
+    def _write_cache(self, tier: LicenseTier, key_hint: str, expires_at: float | None = None) -> None:
         """Write validation result to local cache."""
         try:
             self._cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -435,7 +433,7 @@ class LicenseManager:
         assert self._resolved is not None
         return self._resolved
 
-    def check_tier(self, required: LicenseTier) -> Tuple[bool, Optional[str]]:
+    def check_tier(self, required: LicenseTier) -> tuple[bool, str | None]:
         """Check if the current license meets the required tier.
 
         Returns:
@@ -503,7 +501,7 @@ class LicenseManager:
 # Module-level convenience
 # ---------------------------------------------------------------------------
 
-_manager: Optional[LicenseManager] = None
+_manager: LicenseManager | None = None
 
 
 def get_license_manager() -> LicenseManager:
@@ -519,7 +517,7 @@ def get_tier() -> LicenseTier:
     return get_license_manager().get_tier()
 
 
-def check_tier(required: LicenseTier) -> Tuple[bool, Optional[str]]:
+def check_tier(required: LicenseTier) -> tuple[bool, str | None]:
     """Check if the current tier meets the requirement (convenience shortcut)."""
     return get_license_manager().check_tier(required)
 
@@ -544,6 +542,7 @@ def requires_tier(tier: LicenseTier) -> Callable:
 
     The decorated function's name, docstring, and signature are preserved.
     """
+
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -560,7 +559,9 @@ def requires_tier(tier: LicenseTier) -> Callable:
                     "upgrade_url": "https://kiln3d.com/pro",
                 }
             return func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
@@ -570,7 +571,7 @@ def requires_tier(tier: LicenseTier) -> Callable:
 
 # Which features require which tier.  Used by the decorator and by
 # documentation/help text generation.
-FEATURE_TIERS: Dict[str, LicenseTier] = {
+FEATURE_TIERS: dict[str, LicenseTier] = {
     # Fleet orchestration (multi-printer coordination) — Pro
     "fleet_status": LicenseTier.PRO,
     "fleet_analytics": LicenseTier.PRO,
@@ -588,7 +589,7 @@ def generate_license_key(
     tier: LicenseTier,
     email: str,
     *,
-    signing_key: Optional[str] = None,
+    signing_key: str | None = None,
     ttl_seconds: int = 365 * 24 * 3600,
 ) -> str:
     """Generate a cryptographically signed license key.
@@ -606,9 +607,7 @@ def generate_license_key(
     if signing_key is None:
         signing_key = os.environ.get("KILN_LICENSE_PUBLIC_KEY", "").strip()
     if not signing_key:
-        raise ValueError(
-            "Signing key is required: pass signing_key or set KILN_LICENSE_PUBLIC_KEY"
-        )
+        raise ValueError("Signing key is required: pass signing_key or set KILN_LICENSE_PUBLIC_KEY")
 
     now = time.time()
     payload = {
@@ -618,9 +617,7 @@ def generate_license_key(
         "expires_at": now + ttl_seconds,
     }
 
-    payload_b64 = base64.b64encode(
-        json.dumps(payload).encode("utf-8")
-    ).rstrip(b"=").decode("ascii")
+    payload_b64 = base64.b64encode(json.dumps(payload).encode("utf-8")).rstrip(b"=").decode("ascii")
 
     signature = hmac.new(
         signing_key.encode("utf-8"),

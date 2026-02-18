@@ -30,6 +30,7 @@ Key rotation re-encrypts every stored credential under a new master key::
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import logging
 import os
@@ -41,7 +42,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     from cryptography.exceptions import InvalidTag
@@ -105,7 +106,7 @@ class EncryptedCredential:
     created_at: float
     label: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a dict suitable for JSON output.
 
         The encrypted value and salt are intentionally **excluded** to
@@ -126,6 +127,7 @@ class EncryptedCredential:
 
 class CredentialStoreError(Exception):
     """Raised when a credential store operation fails."""
+
     pass
 
 
@@ -147,11 +149,12 @@ class CredentialStore:
     def __init__(
         self,
         *,
-        master_key: Optional[str] = None,
-        db_path: Optional[str] = None,
+        master_key: str | None = None,
+        db_path: str | None = None,
     ) -> None:
         self._db_path = db_path or os.environ.get(
-            "KILN_CREDENTIAL_DB_PATH", _DEFAULT_DB_PATH,
+            "KILN_CREDENTIAL_DB_PATH",
+            _DEFAULT_DB_PATH,
         )
         self._master_key = self._resolve_master_key(master_key)
         self._write_lock = threading.Lock()
@@ -172,7 +175,7 @@ class CredentialStore:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _resolve_master_key(explicit_key: Optional[str]) -> str:
+    def _resolve_master_key(explicit_key: str | None) -> str:
         """Determine the master key from explicit value, env, or auto-gen.
 
         :param explicit_key: Key passed directly to the constructor.
@@ -188,7 +191,7 @@ class CredentialStore:
         # Auto-generate and persist.
         key_path = _DEFAULT_MASTER_KEY_PATH
         if os.path.isfile(key_path):
-            with open(key_path, "r") as fh:
+            with open(key_path) as fh:
                 stored = fh.read().strip()
             if stored:
                 return stored
@@ -200,10 +203,8 @@ class CredentialStore:
 
         # Restrict file permissions (skip on Windows).
         if sys.platform != "win32":
-            try:
+            with contextlib.suppress(OSError):
                 os.chmod(key_path, 0o600)
-            except OSError:
-                pass
 
         logger.warning(
             "No master key provided. Auto-generated and saved to %s. "
@@ -286,20 +287,18 @@ class CredentialStore:
         """Legacy PBKDF2+XOR encryption (kept for migration)."""
         key = self._derive_key(salt)
         pt_bytes = plaintext.encode("utf-8")
-        key_stream = (key * ((len(pt_bytes) // len(key)) + 1))[:len(pt_bytes)]
-        return bytes(a ^ b for a, b in zip(pt_bytes, key_stream))
+        key_stream = (key * ((len(pt_bytes) // len(key)) + 1))[: len(pt_bytes)]
+        return bytes(a ^ b for a, b in zip(pt_bytes, key_stream, strict=False))
 
     def _decrypt_legacy(self, ciphertext: bytes, salt: bytes) -> str:
         """Decrypt legacy PBKDF2+XOR ciphertext."""
         key = self._derive_key(salt)
-        key_stream = (key * ((len(ciphertext) // len(key)) + 1))[:len(ciphertext)]
-        pt_bytes = bytes(a ^ b for a, b in zip(ciphertext, key_stream))
+        key_stream = (key * ((len(ciphertext) // len(key)) + 1))[: len(ciphertext)]
+        pt_bytes = bytes(a ^ b for a, b in zip(ciphertext, key_stream, strict=False))
         try:
             return pt_bytes.decode("utf-8")
         except UnicodeDecodeError as exc:
-            raise CredentialStoreError(
-                "Decryption failed — likely wrong master key"
-            ) from exc
+            raise CredentialStoreError("Decryption failed — likely wrong master key") from exc
 
     def _encrypt(self, plaintext: str, salt: bytes) -> bytes:
         """Encrypt plaintext with AES-GCM.
@@ -329,15 +328,11 @@ class CredentialStore:
         try:
             pt_bytes = AESGCM(key).decrypt(nonce, body, None)
         except InvalidTag as exc:
-            raise CredentialStoreError(
-                "Decryption failed — wrong master key or corrupted credential"
-            ) from exc
+            raise CredentialStoreError("Decryption failed — wrong master key or corrupted credential") from exc
         try:
             return pt_bytes.decode("utf-8")
         except UnicodeDecodeError as exc:
-            raise CredentialStoreError(
-                "Decryption failed — invalid plaintext encoding"
-            ) from exc
+            raise CredentialStoreError("Decryption failed — invalid plaintext encoding") from exc
 
     @staticmethod
     def _is_aead_encoded(encrypted_value: str) -> bool:
@@ -353,7 +348,7 @@ class CredentialStore:
     def _decode_stored_payload(encrypted_value: str) -> tuple[bytes, bool]:
         """Decode stored encrypted value to bytes + version marker."""
         if encrypted_value.startswith(_ENC_VERSION_PREFIX):
-            b64 = encrypted_value[len(_ENC_VERSION_PREFIX):]
+            b64 = encrypted_value[len(_ENC_VERSION_PREFIX) :]
             return base64.b64decode(b64), True
         return base64.b64decode(encrypted_value), False
 
@@ -422,14 +417,11 @@ class CredentialStore:
         """
         with self._write_lock:
             row = self._conn.execute(
-                "SELECT encrypted_value, salt FROM credentials "
-                "WHERE credential_id = ?",
+                "SELECT encrypted_value, salt FROM credentials WHERE credential_id = ?",
                 (credential_id,),
             ).fetchone()
         if row is None:
-            raise CredentialStoreError(
-                f"Credential {credential_id!r} not found"
-            )
+            raise CredentialStoreError(f"Credential {credential_id!r} not found")
 
         encrypted_value = row["encrypted_value"]
         ciphertext, is_v2 = self._decode_stored_payload(encrypted_value)
@@ -452,8 +444,7 @@ class CredentialStore:
 
         with self._write_lock:
             self._conn.execute(
-                "UPDATE credentials SET encrypted_value = ?, salt = ? "
-                "WHERE credential_id = ?",
+                "UPDATE credentials SET encrypted_value = ?, salt = ? WHERE credential_id = ?",
                 (enc_b64, salt_b64, credential_id),
             )
             self._conn.commit()
@@ -472,7 +463,7 @@ class CredentialStore:
             self._conn.commit()
             return cur.rowcount > 0
 
-    def list_credentials(self) -> List[EncryptedCredential]:
+    def list_credentials(self) -> list[EncryptedCredential]:
         """Return metadata for all stored credentials.
 
         The returned :class:`EncryptedCredential` objects include the
@@ -480,10 +471,8 @@ class CredentialStore:
         :meth:`EncryptedCredential.to_dict` intentionally omits them.
         """
         with self._write_lock:
-            rows = self._conn.execute(
-                "SELECT * FROM credentials ORDER BY created_at DESC"
-            ).fetchall()
-        results: List[EncryptedCredential] = []
+            rows = self._conn.execute("SELECT * FROM credentials ORDER BY created_at DESC").fetchall()
+        results: list[EncryptedCredential] = []
         for row in rows:
             results.append(
                 EncryptedCredential(
@@ -506,23 +495,17 @@ class CredentialStore:
             or re-encrypt.
         """
         with self._write_lock:
-            rows = self._conn.execute(
-                "SELECT credential_id, encrypted_value, salt FROM credentials"
-            ).fetchall()
+            rows = self._conn.execute("SELECT credential_id, encrypted_value, salt FROM credentials").fetchall()
 
         old_key = self._master_key
-        re_encrypted: List[tuple[str, str, str]] = []
+        re_encrypted: list[tuple[str, str, str]] = []
 
         for row in rows:
             ciphertext, is_v2 = self._decode_stored_payload(row["encrypted_value"])
             old_salt = base64.b64decode(row["salt"])
 
             # Decrypt with old key, handling mixed legacy/v2 rows.
-            plaintext = (
-                self._decrypt(ciphertext, old_salt)
-                if is_v2
-                else self._decrypt_legacy(ciphertext, old_salt)
-            )
+            plaintext = self._decrypt(ciphertext, old_salt) if is_v2 else self._decrypt_legacy(ciphertext, old_salt)
 
             # Encrypt with new key (always v2).
             new_salt = os.urandom(_SALT_LENGTH)
@@ -531,19 +514,19 @@ class CredentialStore:
             new_ciphertext = self._encrypt(plaintext, new_salt)
             self._master_key = old_key  # Restore in case of error.
 
-            re_encrypted.append((
-                self._encode_aead_payload(new_ciphertext),
-                base64.b64encode(new_salt).decode("ascii"),
-                row["credential_id"],
-            ))
+            re_encrypted.append(
+                (
+                    self._encode_aead_payload(new_ciphertext),
+                    base64.b64encode(new_salt).decode("ascii"),
+                    row["credential_id"],
+                )
+            )
 
         # Batch update inside the lock.
         with self._write_lock:
             for enc_b64, salt_b64, cred_id in re_encrypted:
                 self._conn.execute(
-                    "UPDATE credentials "
-                    "SET encrypted_value = ?, salt = ? "
-                    "WHERE credential_id = ?",
+                    "UPDATE credentials SET encrypted_value = ?, salt = ? WHERE credential_id = ?",
                     (enc_b64, salt_b64, cred_id),
                 )
             self._conn.commit()
@@ -561,7 +544,7 @@ class CredentialStore:
 # Module-level singleton & convenience functions
 # ---------------------------------------------------------------------------
 
-_store: Optional[CredentialStore] = None
+_store: CredentialStore | None = None
 
 
 def get_credential_store() -> CredentialStore:

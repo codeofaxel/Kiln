@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 
@@ -56,8 +56,7 @@ class ThangsAdapter(MarketplaceAdapter):
         self._api_key = api_key or os.environ.get("KILN_THANGS_API_KEY", "")
         if not self._api_key:
             raise MarketplaceAuthError(
-                "Thangs API key is required.  Set KILN_THANGS_API_KEY "
-                "or pass api_key= to ThangsAdapter."
+                "Thangs API key is required.  Set KILN_THANGS_API_KEY or pass api_key= to ThangsAdapter."
             )
         self._base_url = base_url.rstrip("/")
         self._session = session or requests.Session()
@@ -77,7 +76,7 @@ class ThangsAdapter(MarketplaceAdapter):
         method: str,
         path: str,
         *,
-        params: Dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
         timeout: int = _REQUEST_TIMEOUT,
     ) -> Any:
         """Make an authenticated API request and return parsed JSON."""
@@ -89,7 +88,11 @@ class ThangsAdapter(MarketplaceAdapter):
 
         try:
             resp = self._session.request(
-                method, url, params=params, headers=headers, timeout=timeout,
+                method,
+                url,
+                params=params,
+                headers=headers,
+                timeout=timeout,
             )
         except requests.ConnectionError as exc:
             raise MarketplaceError(
@@ -107,7 +110,8 @@ class ThangsAdapter(MarketplaceAdapter):
             )
         if resp.status_code == 404:
             raise MarketplaceNotFoundError(
-                f"Resource not found: {path}", status_code=404,
+                f"Resource not found: {path}",
+                status_code=404,
             )
         if resp.status_code == 429:
             raise MarketplaceRateLimitError(
@@ -131,18 +135,22 @@ class ThangsAdapter(MarketplaceAdapter):
         page: int = 1,
         per_page: int = 20,
         sort: str = "relevant",
-    ) -> List[ModelSummary]:
+    ) -> list[ModelSummary]:
         sort_map = {
             "relevant": "relevance",
             "popular": "popularity",
             "newest": "date",
         }
-        data = self._request("GET", "/search", params={
-            "q": query,
-            "page": page,
-            "per_page": min(per_page, 100),
-            "sort": sort_map.get(sort, sort),
-        })
+        data = self._request(
+            "GET",
+            "/search",
+            params={
+                "q": query,
+                "page": page,
+                "per_page": min(per_page, 100),
+                "sort": sort_map.get(sort, sort),
+            },
+        )
         items = data.get("results", []) if isinstance(data, dict) else []
         return [self._parse_summary(item) for item in items if isinstance(item, dict)]
 
@@ -150,7 +158,7 @@ class ThangsAdapter(MarketplaceAdapter):
         data = self._request("GET", f"/models/{model_id}")
         return self._parse_detail(data)
 
-    def get_files(self, model_id: str) -> List[ModelFile]:
+    def get_files(self, model_id: str) -> list[ModelFile]:
         data = self._request("GET", f"/models/{model_id}/files")
         items = data.get("files", []) if isinstance(data, dict) else []
         return [self._parse_file(f) for f in items if isinstance(f, dict)]
@@ -190,7 +198,7 @@ class ThangsAdapter(MarketplaceAdapter):
     # -- parsing helpers ---------------------------------------------------
 
     @staticmethod
-    def _parse_summary(data: Dict[str, Any]) -> ModelSummary:
+    def _parse_summary(data: dict[str, Any]) -> ModelSummary:
         creator = data.get("creator", data.get("owner", {})) or {}
         return ModelSummary(
             id=str(data.get("id", "")),
@@ -205,7 +213,7 @@ class ThangsAdapter(MarketplaceAdapter):
         )
 
     @staticmethod
-    def _parse_detail(data: Dict[str, Any]) -> ModelDetail:
+    def _parse_detail(data: dict[str, Any]) -> ModelDetail:
         creator = data.get("creator", data.get("owner", {})) or {}
         tags_raw = data.get("tags", []) or []
         tags: list[str] = []
@@ -239,7 +247,7 @@ class ThangsAdapter(MarketplaceAdapter):
         )
 
     @staticmethod
-    def _parse_file(data: Dict[str, Any]) -> ModelFile:
+    def _parse_file(data: dict[str, Any]) -> ModelFile:
         filename = data.get("file_name", data.get("name", ""))
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         return ModelFile(

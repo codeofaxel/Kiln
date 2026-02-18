@@ -12,7 +12,7 @@ import os
 import threading
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # Dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class LoadedMaterial:
     """Material currently loaded in a printer's tool slot."""
@@ -28,12 +29,12 @@ class LoadedMaterial:
     printer_name: str
     tool_index: int = 0
     material_type: str = "unknown"
-    color: Optional[str] = None
-    spool_id: Optional[str] = None
+    color: str | None = None
+    spool_id: str | None = None
     loaded_at: float = field(default_factory=time.time)
-    remaining_grams: Optional[float] = None
+    remaining_grams: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -43,15 +44,15 @@ class Spool:
 
     id: str
     material_type: str
-    color: Optional[str] = None
-    brand: Optional[str] = None
+    color: str | None = None
+    brand: str | None = None
     weight_grams: float = 1000.0
     remaining_grams: float = 1000.0
-    cost_usd: Optional[float] = None
-    purchase_date: Optional[float] = None
+    cost_usd: float | None = None
+    purchase_date: float | None = None
     notes: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -65,13 +66,14 @@ class MaterialWarning:
     severity: str = "warning"
     message: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 # ---------------------------------------------------------------------------
 # Material tracker
 # ---------------------------------------------------------------------------
+
 
 class MaterialTracker:
     """Thread-safe material and spool tracking.
@@ -94,10 +96,10 @@ class MaterialTracker:
         self,
         printer_name: str,
         material_type: str,
-        color: Optional[str] = None,
-        spool_id: Optional[str] = None,
+        color: str | None = None,
+        spool_id: str | None = None,
         tool_index: int = 0,
-        remaining_grams: Optional[float] = None,
+        remaining_grams: float | None = None,
     ) -> LoadedMaterial:
         """Record which material is loaded in a printer tool slot."""
         with self._lock:
@@ -121,6 +123,7 @@ class MaterialTracker:
                 )
             if self._bus is not None:
                 from kiln.events import EventType
+
                 self._bus.publish(
                     EventType.MATERIAL_LOADED,
                     data=mat.to_dict(),
@@ -129,35 +132,34 @@ class MaterialTracker:
             return mat
 
     def get_material(
-        self, printer_name: str, tool_index: int = 0,
-    ) -> Optional[LoadedMaterial]:
+        self,
+        printer_name: str,
+        tool_index: int = 0,
+    ) -> LoadedMaterial | None:
         """Get the material loaded in a specific tool slot."""
         if self._db is None:
             return None
         row = self._db.get_material(printer_name, tool_index)
         if row is None:
             return None
-        return LoadedMaterial(**{
-            k: row[k] for k in LoadedMaterial.__dataclass_fields__
-            if k in row
-        })
+        return LoadedMaterial(**{k: row[k] for k in LoadedMaterial.__dataclass_fields__ if k in row})
 
-    def get_all_materials(self, printer_name: str) -> List[LoadedMaterial]:
+    def get_all_materials(self, printer_name: str) -> list[LoadedMaterial]:
         """Get all loaded materials for a printer."""
         if self._db is None:
             return []
         rows = self._db.list_materials(printer_name)
-        results: List[LoadedMaterial] = []
+        results: list[LoadedMaterial] = []
         for row in rows:
-            results.append(LoadedMaterial(**{
-                k: row[k] for k in LoadedMaterial.__dataclass_fields__
-                if k in row
-            }))
+            results.append(LoadedMaterial(**{k: row[k] for k in LoadedMaterial.__dataclass_fields__ if k in row}))
         return results
 
     def check_match(
-        self, printer_name: str, expected_material: str, tool_index: int = 0,
-    ) -> Optional[MaterialWarning]:
+        self,
+        printer_name: str,
+        expected_material: str,
+        tool_index: int = 0,
+    ) -> MaterialWarning | None:
         """Check if the loaded material matches what's expected.
 
         Returns a :class:`MaterialWarning` if there is a mismatch,
@@ -185,6 +187,7 @@ class MaterialTracker:
         )
         if self._bus is not None:
             from kiln.events import EventType
+
             self._bus.publish(
                 EventType.MATERIAL_MISMATCH,
                 data=warning.to_dict(),
@@ -197,7 +200,7 @@ class MaterialTracker:
         printer_name: str,
         grams: float,
         tool_index: int = 0,
-    ) -> Optional[float]:
+    ) -> float | None:
         """Subtract used grams from loaded material and linked spool.
 
         Returns the new remaining grams, or ``None`` if no material tracked.
@@ -220,7 +223,9 @@ class MaterialTracker:
 
             new_remaining = max(0.0, old_remaining - grams)
             self._db.update_material_remaining(
-                printer_name, tool_index, new_remaining,
+                printer_name,
+                tool_index,
+                new_remaining,
             )
 
             # Also deduct from linked spool
@@ -229,12 +234,15 @@ class MaterialTracker:
                 spool_row = self._db.get_spool(spool_id)
                 if spool_row:
                     spool_remaining = max(
-                        0.0, spool_row["remaining_grams"] - grams,
+                        0.0,
+                        spool_row["remaining_grams"] - grams,
                     )
                     self._db.update_spool_remaining(spool_id, spool_remaining)
                     _spool_warning_args = (
-                        spool_id, spool_remaining,
-                        spool_row["weight_grams"], printer_name,
+                        spool_id,
+                        spool_remaining,
+                        spool_row["weight_grams"],
+                        printer_name,
                     )
 
         # Emit events outside the lock to prevent deadlocks
@@ -278,10 +286,10 @@ class MaterialTracker:
     def add_spool(
         self,
         material_type: str,
-        color: Optional[str] = None,
-        brand: Optional[str] = None,
+        color: str | None = None,
+        brand: str | None = None,
         weight_grams: float = 1000.0,
-        cost_usd: Optional[float] = None,
+        cost_usd: float | None = None,
         notes: str = "",
     ) -> Spool:
         """Add a new spool to inventory."""
@@ -307,17 +315,14 @@ class MaterialTracker:
             return False
         return self._db.remove_spool(spool_id)
 
-    def list_spools(self) -> List[Spool]:
+    def list_spools(self) -> list[Spool]:
         """Return all spools in inventory."""
         if self._db is None:
             return []
         rows = self._db.list_spools()
-        return [
-            Spool(**{k: row[k] for k in Spool.__dataclass_fields__ if k in row})
-            for row in rows
-        ]
+        return [Spool(**{k: row[k] for k in Spool.__dataclass_fields__ if k in row}) for row in rows]
 
-    def get_spool(self, spool_id: str) -> Optional[Spool]:
+    def get_spool(self, spool_id: str) -> Spool | None:
         """Get a spool by ID."""
         if self._db is None:
             return None

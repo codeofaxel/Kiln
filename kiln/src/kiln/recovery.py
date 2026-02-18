@@ -52,7 +52,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -119,9 +119,9 @@ class CheckpointData:
     filament_used_mm: float = 0.0
     fan_speed_pct: float = 0.0
     flow_rate_pct: float = 100.0
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "z_height_mm": self.z_height_mm,
@@ -157,7 +157,7 @@ class RecoveryCheckpoint:
     progress_pct: float = 0.0
     data: CheckpointData = field(default_factory=CheckpointData)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "job_id": self.job_id,
@@ -191,14 +191,14 @@ class RecoveryRecommendation:
     job_id: str
     failure_type: FailureType
     recommended_strategy: RecoveryStrategy
-    alternative_strategies: List[RecoveryStrategy] = field(default_factory=list)
-    checkpoint: Optional[RecoveryCheckpoint] = None
+    alternative_strategies: list[RecoveryStrategy] = field(default_factory=list)
+    checkpoint: RecoveryCheckpoint | None = None
     estimated_waste_pct: float = 0.0
     risk_assessment: str = ""
     auto_recoverable: bool = False
     safety_critical: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "job_id": self.job_id,
@@ -230,9 +230,9 @@ class RecoveryResult:
     success: bool
     resumed_from_checkpoint: bool = False
     time_saved_s: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "job_id": self.job_id,
@@ -252,25 +252,29 @@ class RecoveryResult:
 class RecoveryError(Exception):
     """Raised when a recovery operation cannot proceed."""
 
-    def __init__(self, message: str, *, cause: Optional[Exception] = None) -> None:
+    def __init__(self, message: str, *, cause: Exception | None = None) -> None:
         super().__init__(message)
         self.cause = cause
 
 
 # Failure types that indicate a physical safety hazard.  These require
 # the printer to be inspected before any retry attempt.
-_SAFETY_CRITICAL_FAILURES: frozenset[FailureType] = frozenset({
-    FailureType.THERMAL_RUNAWAY,
-    FailureType.BED_ADHESION_FAILURE,
-})
+_SAFETY_CRITICAL_FAILURES: frozenset[FailureType] = frozenset(
+    {
+        FailureType.THERMAL_RUNAWAY,
+        FailureType.BED_ADHESION_FAILURE,
+    }
+)
 
 # Failure types where the print is irrecoverably damaged and continuing
 # would waste filament.
-_PRINT_COMPROMISED_FAILURES: frozenset[FailureType] = frozenset({
-    FailureType.LAYER_SHIFT,
-    FailureType.BED_ADHESION_FAILURE,
-    FailureType.FIRST_LAYER_FAILURE,
-})
+_PRINT_COMPROMISED_FAILURES: frozenset[FailureType] = frozenset(
+    {
+        FailureType.LAYER_SHIFT,
+        FailureType.BED_ADHESION_FAILURE,
+        FailureType.FIRST_LAYER_FAILURE,
+    }
+)
 
 
 class RecoveryManager:
@@ -288,20 +292,18 @@ class RecoveryManager:
     def __init__(
         self,
         *,
-        max_retries: Optional[int] = None,
-        checkpoint_interval_s: Optional[float] = None,
+        max_retries: int | None = None,
+        checkpoint_interval_s: float | None = None,
     ) -> None:
-        self._max_retries = max_retries or int(
-            os.environ.get("KILN_RECOVERY_MAX_RETRIES", "3")
-        )
+        self._max_retries = max_retries or int(os.environ.get("KILN_RECOVERY_MAX_RETRIES", "3"))
         self._checkpoint_interval_s = checkpoint_interval_s or float(
             os.environ.get("KILN_RECOVERY_CHECKPOINT_INTERVAL", "30.0")
         )
         self._lock = threading.Lock()
         # job_id -> list of checkpoints (newest last)
-        self._checkpoints: Dict[str, List[RecoveryCheckpoint]] = {}
+        self._checkpoints: dict[str, list[RecoveryCheckpoint]] = {}
         # job_id -> retry count
-        self._retry_counts: Dict[str, int] = {}
+        self._retry_counts: dict[str, int] = {}
 
     # -- checkpoints -------------------------------------------------------
 
@@ -312,7 +314,7 @@ class RecoveryManager:
         phase: str,
         progress_pct: float,
         *,
-        state_data: Optional[Dict[str, Any]] = None,
+        state_data: dict[str, Any] | None = None,
     ) -> RecoveryCheckpoint:
         """Save a recovery checkpoint for a running print job.
 
@@ -347,22 +349,26 @@ class RecoveryManager:
         return cp
 
     @staticmethod
-    def _build_checkpoint_data(raw: Dict[str, Any]) -> CheckpointData:
+    def _build_checkpoint_data(raw: dict[str, Any]) -> CheckpointData:
         """Parse a raw state dict into a :class:`CheckpointData`.
 
         Known keys are mapped to typed fields; everything else goes into
         the ``extra`` bucket.
         """
         _KNOWN_KEYS = {
-            "z_height_mm", "layer_number", "hotend_temp_c",
-            "bed_temp_c", "filament_used_mm", "fan_speed_pct",
+            "z_height_mm",
+            "layer_number",
+            "hotend_temp_c",
+            "bed_temp_c",
+            "filament_used_mm",
+            "fan_speed_pct",
             "flow_rate_pct",
         }
         known = {k: v for k, v in raw.items() if k in _KNOWN_KEYS}
         extra = {k: v for k, v in raw.items() if k not in _KNOWN_KEYS}
         return CheckpointData(**known, extra=extra)
 
-    def get_latest_checkpoint(self, job_id: str) -> Optional[RecoveryCheckpoint]:
+    def get_latest_checkpoint(self, job_id: str) -> RecoveryCheckpoint | None:
         """Return the most recent checkpoint for a job, or ``None``.
 
         :param job_id: The job to look up.
@@ -373,7 +379,7 @@ class RecoveryManager:
                 return None
             return cps[-1]
 
-    def get_all_checkpoints(self, job_id: str) -> List[RecoveryCheckpoint]:
+    def get_all_checkpoints(self, job_id: str) -> list[RecoveryCheckpoint]:
         """Return all checkpoints for a job, oldest first.
 
         :param job_id: The job to look up.
@@ -414,7 +420,8 @@ class RecoveryManager:
         checkpoint = self.get_latest_checkpoint(job_id)
 
         strategy, alternatives, waste_pct, risk, auto = self._analyse_failure(
-            failure_type, checkpoint,
+            failure_type,
+            checkpoint,
         )
         safety_critical = failure_type in _SAFETY_CRITICAL_FAILURES
 
@@ -441,7 +448,7 @@ class RecoveryManager:
     def _analyse_failure(
         self,
         failure_type: FailureType,
-        checkpoint: Optional[RecoveryCheckpoint],
+        checkpoint: RecoveryCheckpoint | None,
     ) -> tuple[RecoveryStrategy, list[RecoveryStrategy], float, str, bool]:
         """Return (strategy, alternatives, waste_pct, risk, auto_recoverable).
 
@@ -637,14 +644,13 @@ class RecoveryManager:
             RecoveryStrategy.MANUAL_INTERVENTION,
             [RecoveryStrategy.ABORT],
             progress,
-            f"Unknown failure type: {failure_type.value}. Manual review "
-            "required before taking any action.",
+            f"Unknown failure type: {failure_type.value}. Manual review required before taking any action.",
             False,
         )
 
     def _plan_power_loss(
         self,
-        checkpoint: Optional[RecoveryCheckpoint],
+        checkpoint: RecoveryCheckpoint | None,
         has_checkpoint: bool,
         progress: float,
     ) -> tuple[RecoveryStrategy, list[RecoveryStrategy], float, str, bool]:
@@ -722,10 +728,7 @@ class RecoveryManager:
             self._retry_counts[job_id] = count + 1
 
         checkpoint = self.get_latest_checkpoint(job_id)
-        resumed = (
-            strategy == RecoveryStrategy.RESUME_FROM_CHECKPOINT
-            and checkpoint is not None
-        )
+        resumed = strategy == RecoveryStrategy.RESUME_FROM_CHECKPOINT and checkpoint is not None
         time_saved = 0.0
         if resumed and checkpoint is not None:
             # Rough estimate: progress_pct maps to time saved.  A real
@@ -770,14 +773,14 @@ class RecoveryManager:
             self._retry_counts.pop(job_id, None)
         logger.debug("Reset retry count for job %s", job_id)
 
-    def list_recoverable_jobs(self) -> List[str]:
+    def list_recoverable_jobs(self) -> list[str]:
         """Return job IDs that have checkpoints and have not exceeded
         max retries.
 
         :returns: List of job IDs eligible for recovery.
         """
         with self._lock:
-            result: List[str] = []
+            result: list[str] = []
             for job_id in self._checkpoints:
                 retries = self._retry_counts.get(job_id, 0)
                 if retries < self._max_retries:
@@ -806,7 +809,7 @@ class RecoveryManager:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_manager: Optional[RecoveryManager] = None
+_manager: RecoveryManager | None = None
 _manager_lock = threading.Lock()
 
 
@@ -829,7 +832,7 @@ def save_checkpoint(
     phase: str,
     progress_pct: float,
     *,
-    state_data: Optional[Dict[str, Any]] = None,
+    state_data: dict[str, Any] | None = None,
 ) -> RecoveryCheckpoint:
     """Save a checkpoint via the module-level singleton.
 

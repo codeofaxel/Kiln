@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 
@@ -56,8 +56,7 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
         self._api_key = api_key or os.environ.get("KILN_MMF_API_KEY", "")
         if not self._api_key:
             raise MarketplaceAuthError(
-                "MyMiniFactory API key is required.  Set KILN_MMF_API_KEY "
-                "or pass api_key= to MyMiniFactoryAdapter."
+                "MyMiniFactory API key is required.  Set KILN_MMF_API_KEY or pass api_key= to MyMiniFactoryAdapter."
             )
         self._base_url = base_url.rstrip("/")
         self._session = session or requests.Session()
@@ -77,7 +76,7 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
         method: str,
         path: str,
         *,
-        params: Dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
         timeout: int = _REQUEST_TIMEOUT,
     ) -> Any:
         """Make an authenticated API request and return parsed JSON."""
@@ -87,7 +86,10 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
 
         try:
             resp = self._session.request(
-                method, url, params=params, timeout=timeout,
+                method,
+                url,
+                params=params,
+                timeout=timeout,
             )
         except requests.ConnectionError as exc:
             raise MarketplaceError(
@@ -105,7 +107,8 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
             )
         if resp.status_code == 404:
             raise MarketplaceNotFoundError(
-                f"Resource not found: {path}", status_code=404,
+                f"Resource not found: {path}",
+                status_code=404,
             )
         if resp.status_code == 429:
             raise MarketplaceRateLimitError(
@@ -129,18 +132,22 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
         page: int = 1,
         per_page: int = 20,
         sort: str = "relevant",
-    ) -> List[ModelSummary]:
+    ) -> list[ModelSummary]:
         sort_map = {
             "relevant": "popularity",
             "popular": "visits",
             "newest": "date",
         }
-        data = self._request("GET", "/search", params={
-            "q": query,
-            "page": page,
-            "per_page": min(per_page, 100),
-            "sort": sort_map.get(sort, sort),
-        })
+        data = self._request(
+            "GET",
+            "/search",
+            params={
+                "q": query,
+                "page": page,
+                "per_page": min(per_page, 100),
+                "sort": sort_map.get(sort, sort),
+            },
+        )
         items = data.get("items", []) if isinstance(data, dict) else []
         return [self._parse_summary(item) for item in items if isinstance(item, dict)]
 
@@ -148,7 +155,7 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
         data = self._request("GET", f"/objects/{model_id}")
         return self._parse_detail(data)
 
-    def get_files(self, model_id: str) -> List[ModelFile]:
+    def get_files(self, model_id: str) -> list[ModelFile]:
         data = self._request("GET", f"/objects/{model_id}/files")
         items = data.get("items", []) if isinstance(data, dict) else []
         return [self._parse_file(f) for f in items if isinstance(f, dict)]
@@ -165,8 +172,7 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
         download_url = meta.get("download_url", "")
         if not download_url:
             raise MarketplaceError(
-                f"No download URL for file {file_id}.  "
-                "MyMiniFactory may require OAuth2 authentication for downloads.",
+                f"No download URL for file {file_id}.  MyMiniFactory may require OAuth2 authentication for downloads.",
             )
 
         name = file_name or meta.get("filename", f"file_{file_id}")
@@ -193,7 +199,7 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
     # -- parsing helpers ---------------------------------------------------
 
     @staticmethod
-    def _parse_summary(data: Dict[str, Any]) -> ModelSummary:
+    def _parse_summary(data: dict[str, Any]) -> ModelSummary:
         designer = data.get("designer", {}) or {}
         licenses = data.get("licenses", [])
         license_str = ""
@@ -219,7 +225,7 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
         )
 
     @staticmethod
-    def _parse_detail(data: Dict[str, Any]) -> ModelDetail:
+    def _parse_detail(data: dict[str, Any]) -> ModelDetail:
         designer = data.get("designer", {}) or {}
         licenses = data.get("licenses", [])
         license_str = ""
@@ -268,7 +274,7 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
         )
 
     @staticmethod
-    def _parse_file(data: Dict[str, Any]) -> ModelFile:
+    def _parse_file(data: dict[str, Any]) -> ModelFile:
         filename = data.get("filename", "")
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         return ModelFile(

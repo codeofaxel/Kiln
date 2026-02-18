@@ -23,13 +23,6 @@ from kiln.fulfillment.base import (
     ShippingOption,
 )
 from kiln.fulfillment.craftcloud import CraftcloudProvider
-from kiln.fulfillment.registry import (
-    get_provider,
-    get_provider_class,
-    list_providers,
-    register,
-)
-from kiln.fulfillment.sculpteo import SculpteoProvider
 from kiln.fulfillment.intelligence import (
     BatchQuote,
     BatchQuoteItem,
@@ -55,6 +48,13 @@ from kiln.fulfillment.intelligence import (
     place_order_with_retry,
     validate_quote_for_order,
 )
+from kiln.fulfillment.registry import (
+    get_provider,
+    get_provider_class,
+    list_providers,
+    register,
+)
+from kiln.fulfillment.sculpteo import SculpteoProvider
 
 __all__ = [
     "BatchQuote",

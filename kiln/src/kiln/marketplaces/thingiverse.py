@@ -13,7 +13,6 @@ Wraps :class:`kiln.thingiverse.ThingiverseClient` to implement the
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
 
 from kiln.marketplaces.base import (
     MarketplaceAdapter,
@@ -87,7 +86,7 @@ class ThingiverseAdapter(MarketplaceAdapter):
         page: int = 1,
         per_page: int = 20,
         sort: str = "relevant",
-    ) -> List[ModelSummary]:
+    ) -> list[ModelSummary]:
         try:
             results = self._client.search(query, page=page, per_page=per_page, sort=sort)
         except ThingiverseError as exc:
@@ -130,7 +129,7 @@ class ThingiverseAdapter(MarketplaceAdapter):
             file_count=d.file_count,
         )
 
-    def get_files(self, model_id: str) -> List[ModelFile]:
+    def get_files(self, model_id: str) -> list[ModelFile]:
         try:
             files = self._client.get_files(int(model_id))
         except ThingiverseError as exc:
@@ -158,7 +157,9 @@ class ThingiverseAdapter(MarketplaceAdapter):
     ) -> str:
         try:
             return self._client.download_file(
-                int(file_id), dest_dir, file_name=file_name,
+                int(file_id),
+                dest_dir,
+                file_name=file_name,
             )
         except ThingiverseError as exc:
             raise _wrap_error(exc) from exc

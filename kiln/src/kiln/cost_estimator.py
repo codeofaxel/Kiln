@@ -11,12 +11,12 @@ import math
 import os
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Material profiles
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class MaterialProfile:
@@ -29,39 +29,60 @@ class MaterialProfile:
     tool_temp_default: float = 200.0
     bed_temp_default: float = 60.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 # Common material database
-BUILTIN_MATERIALS: Dict[str, MaterialProfile] = {
+BUILTIN_MATERIALS: dict[str, MaterialProfile] = {
     "PLA": MaterialProfile(
-        name="PLA", density_g_per_cm3=1.24, cost_per_kg_usd=25.0,
-        tool_temp_default=210.0, bed_temp_default=60.0,
+        name="PLA",
+        density_g_per_cm3=1.24,
+        cost_per_kg_usd=25.0,
+        tool_temp_default=210.0,
+        bed_temp_default=60.0,
     ),
     "PETG": MaterialProfile(
-        name="PETG", density_g_per_cm3=1.27, cost_per_kg_usd=30.0,
-        tool_temp_default=240.0, bed_temp_default=80.0,
+        name="PETG",
+        density_g_per_cm3=1.27,
+        cost_per_kg_usd=30.0,
+        tool_temp_default=240.0,
+        bed_temp_default=80.0,
     ),
     "ABS": MaterialProfile(
-        name="ABS", density_g_per_cm3=1.04, cost_per_kg_usd=22.0,
-        tool_temp_default=245.0, bed_temp_default=100.0,
+        name="ABS",
+        density_g_per_cm3=1.04,
+        cost_per_kg_usd=22.0,
+        tool_temp_default=245.0,
+        bed_temp_default=100.0,
     ),
     "TPU": MaterialProfile(
-        name="TPU", density_g_per_cm3=1.21, cost_per_kg_usd=35.0,
-        tool_temp_default=230.0, bed_temp_default=50.0,
+        name="TPU",
+        density_g_per_cm3=1.21,
+        cost_per_kg_usd=35.0,
+        tool_temp_default=230.0,
+        bed_temp_default=50.0,
     ),
     "ASA": MaterialProfile(
-        name="ASA", density_g_per_cm3=1.07, cost_per_kg_usd=28.0,
-        tool_temp_default=250.0, bed_temp_default=100.0,
+        name="ASA",
+        density_g_per_cm3=1.07,
+        cost_per_kg_usd=28.0,
+        tool_temp_default=250.0,
+        bed_temp_default=100.0,
     ),
     "NYLON": MaterialProfile(
-        name="NYLON", density_g_per_cm3=1.14, cost_per_kg_usd=40.0,
-        tool_temp_default=260.0, bed_temp_default=70.0,
+        name="NYLON",
+        density_g_per_cm3=1.14,
+        cost_per_kg_usd=40.0,
+        tool_temp_default=260.0,
+        bed_temp_default=70.0,
     ),
     "PC": MaterialProfile(
-        name="PC", density_g_per_cm3=1.20, cost_per_kg_usd=45.0,
-        tool_temp_default=270.0, bed_temp_default=110.0,
+        name="PC",
+        density_g_per_cm3=1.20,
+        cost_per_kg_usd=45.0,
+        tool_temp_default=270.0,
+        bed_temp_default=110.0,
     ),
 }
 
@@ -69,6 +90,7 @@ BUILTIN_MATERIALS: Dict[str, MaterialProfile] = {
 # ---------------------------------------------------------------------------
 # Cost estimate result
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class CostEstimate:
@@ -79,14 +101,14 @@ class CostEstimate:
     filament_length_meters: float
     filament_weight_grams: float
     filament_cost_usd: float
-    estimated_time_seconds: Optional[int] = None
+    estimated_time_seconds: int | None = None
     electricity_cost_usd: float = 0.0
     electricity_rate_kwh: float = 0.12
     printer_wattage: float = 200.0
     total_cost_usd: float = 0.0
-    warnings: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -113,7 +135,7 @@ _TIME_PATTERNS = [
 ]
 
 
-def _extract_e_value(line: str) -> Optional[float]:
+def _extract_e_value(line: str) -> float | None:
     """Extract the E parameter value from a G-code line."""
     m = _E_PATTERN.search(line)
     if m:
@@ -121,7 +143,7 @@ def _extract_e_value(line: str) -> Optional[float]:
     return None
 
 
-def _parse_time_from_comments(lines: List[str]) -> Optional[int]:
+def _parse_time_from_comments(lines: list[str]) -> int | None:
     """Try to extract estimated print time from slicer comments."""
     for line in lines:
         if not line.startswith(";"):
@@ -150,23 +172,24 @@ def _parse_time_from_comments(lines: List[str]) -> Optional[int]:
 # Core estimator
 # ---------------------------------------------------------------------------
 
+
 class CostEstimator:
     """Estimates print cost from G-code files."""
 
     def __init__(
         self,
-        custom_materials: Optional[Dict[str, MaterialProfile]] = None,
+        custom_materials: dict[str, MaterialProfile] | None = None,
     ) -> None:
         self._materials = dict(BUILTIN_MATERIALS)
         if custom_materials:
             self._materials.update(custom_materials)
 
     @property
-    def materials(self) -> Dict[str, MaterialProfile]:
+    def materials(self) -> dict[str, MaterialProfile]:
         """Return available material profiles."""
         return dict(self._materials)
 
-    def get_material(self, name: str) -> Optional[MaterialProfile]:
+    def get_material(self, name: str) -> MaterialProfile | None:
         """Look up a material by name (case-insensitive)."""
         return self._materials.get(name.upper())
 
@@ -181,7 +204,7 @@ class CostEstimator:
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"G-code file not found: {file_path}")
 
-        with open(file_path, "r", errors="replace") as f:
+        with open(file_path, errors="replace") as f:
             lines = f.readlines()
 
         return self.estimate_from_gcode(
@@ -194,20 +217,18 @@ class CostEstimator:
 
     def estimate_from_gcode(
         self,
-        lines: List[str],
+        lines: list[str],
         file_name: str = "<unknown>",
         material: str = "PLA",
         electricity_rate: float = 0.12,
         printer_wattage: float = 200.0,
     ) -> CostEstimate:
         """Estimate cost from a list of G-code lines."""
-        warnings: List[str] = []
+        warnings: list[str] = []
 
         profile = self.get_material(material)
         if profile is None:
-            warnings.append(
-                f"Unknown material '{material}', using PLA defaults"
-            )
+            warnings.append(f"Unknown material '{material}', using PLA defaults")
             profile = BUILTIN_MATERIALS["PLA"]
 
         # Parse extrusion and time
@@ -259,7 +280,7 @@ class CostEstimator:
             warnings=warnings,
         )
 
-    def _parse_extrusion(self, lines: List[str]) -> float:
+    def _parse_extrusion(self, lines: list[str]) -> float:
         """Parse total filament extrusion in mm from G-code lines.
 
         Handles both absolute (default) and relative (M83) E-axis modes.
@@ -299,8 +320,12 @@ class CostEstimator:
                 continue
 
             # Only process G0/G1 moves
-            if not (upper.startswith("G0 ") or upper.startswith("G1 ")
-                    or upper.startswith("G0\t") or upper.startswith("G1\t")):
+            if not (
+                upper.startswith("G0 ")
+                or upper.startswith("G1 ")
+                or upper.startswith("G0\t")
+                or upper.startswith("G1\t")
+            ):
                 continue
 
             e_val = _extract_e_value(line)

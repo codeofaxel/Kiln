@@ -34,8 +34,9 @@ import logging
 import os
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ logger = logging.getLogger(__name__)
 # Result types
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PipelineStep:
     """Result of a single step in a pipeline."""
@@ -51,11 +53,11 @@ class PipelineStep:
     name: str
     success: bool
     message: str = ""
-    data: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
     duration_seconds: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
             "name": self.name,
             "success": self.success,
             "message": self.message,
@@ -73,11 +75,11 @@ class PipelineResult:
     pipeline: str
     success: bool
     message: str = ""
-    steps: List[PipelineStep] = field(default_factory=list)
-    job_id: Optional[str] = None
+    steps: list[PipelineStep] = field(default_factory=list)
+    job_id: str | None = None
     total_duration_seconds: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "pipeline": self.pipeline,
             "success": self.success,
@@ -92,6 +94,7 @@ class PipelineResult:
 # Pipeline state machine
 # ---------------------------------------------------------------------------
 
+
 class PipelineState(enum.Enum):
     """State of a pipeline execution."""
 
@@ -103,7 +106,7 @@ class PipelineState(enum.Enum):
 
 
 # Module-level registry of active executions
-_executions: Dict[str, PipelineExecution] = {}  # type: ignore[name-defined]  # forward ref
+_executions: dict[str, PipelineExecution] = {}  # type: ignore[name-defined]  # forward ref
 
 
 @dataclass
@@ -126,18 +129,18 @@ class PipelineExecution:
     def __init__(
         self,
         pipeline_name: str,
-        step_defs: List[_StepDef],
+        step_defs: list[_StepDef],
         *,
-        pause_after_step: Optional[int] = None,
+        pause_after_step: int | None = None,
     ) -> None:
         self.execution_id: str = secrets.token_hex(8)
         self.pipeline_name: str = pipeline_name
-        self.step_defs: List[_StepDef] = step_defs
+        self.step_defs: list[_StepDef] = step_defs
         self.current_step: int = 0
         self.state: PipelineState = PipelineState.RUNNING
-        self.steps: List[PipelineStep] = []
+        self.steps: list[PipelineStep] = []
         self.start_time: float = time.time()
-        self.pause_after_step: Optional[int] = pause_after_step
+        self.pause_after_step: int | None = pause_after_step
         self._pause_requested: bool = False
 
         # Register
@@ -265,10 +268,10 @@ class PipelineExecution:
 
     # -- Introspection -----------------------------------------------------
 
-    def status_dict(self) -> Dict[str, Any]:
+    def status_dict(self) -> dict[str, Any]:
         """Return current execution state as a dict."""
         completed = [s.to_dict() for s in self.steps]
-        next_step_name: Optional[str] = None
+        next_step_name: str | None = None
         if self.current_step < len(self.step_defs):
             next_step_name = self.step_defs[self.current_step].name
 
@@ -287,12 +290,13 @@ class PipelineExecution:
 # Execution registry helpers
 # ---------------------------------------------------------------------------
 
-def get_execution(execution_id: str) -> Optional[PipelineExecution]:
+
+def get_execution(execution_id: str) -> PipelineExecution | None:
     """Look up an active pipeline execution by ID."""
     return _executions.get(execution_id)
 
 
-def list_executions() -> List[Dict[str, Any]]:
+def list_executions() -> list[dict[str, Any]]:
     """Return summary of all tracked executions."""
     return [ex.status_dict() for ex in _executions.values()]
 
@@ -301,14 +305,15 @@ def list_executions() -> List[Dict[str, Any]]:
 # quick_print pipeline
 # ---------------------------------------------------------------------------
 
+
 def quick_print(
     *,
     model_path: str,
-    printer_name: Optional[str] = None,
-    printer_id: Optional[str] = None,
-    profile_path: Optional[str] = None,
-    slicer_path: Optional[str] = None,
-    pause_after_step: Optional[int] = None,
+    printer_name: str | None = None,
+    printer_id: str | None = None,
+    profile_path: str | None = None,
+    slicer_path: str | None = None,
+    pause_after_step: int | None = None,
 ) -> PipelineResult:
     """Slice → preflight → upload → start print in one call.
 
@@ -328,7 +333,7 @@ def quick_print(
         :class:`PipelineResult` with step-by-step outcomes.
     """
     # Shared mutable state between step closures
-    ctx: Dict[str, Any] = {
+    ctx: dict[str, Any] = {
         "effective_profile": profile_path,
         "gcode_path": None,
         "adapter": None,
@@ -345,6 +350,7 @@ def quick_print(
         step_start = time.time()
         try:
             from kiln.slicer_profiles import resolve_slicer_profile
+
             ctx["effective_profile"] = resolve_slicer_profile(printer_id)
             return PipelineStep(
                 name="resolve_profile",
@@ -365,6 +371,7 @@ def quick_print(
         step_start = time.time()
         try:
             from kiln.slicer import slice_file
+
             result = slice_file(
                 model_path,
                 profile=ctx["effective_profile"],
@@ -396,13 +403,14 @@ def quick_print(
         step_start = time.time()
         try:
             from kiln.gcode import scan_gcode_file
+
             vr = scan_gcode_file(ctx["gcode_path"], printer_id=printer_id)
             return PipelineStep(
                 name="safety_check",
                 success=vr.valid,
                 message=f"{'Passed' if vr.valid else 'BLOCKED'}: "
-                        f"{len(vr.commands)} OK, {len(vr.blocked_commands)} blocked, "
-                        f"{len(vr.warnings)} warnings",
+                f"{len(vr.commands)} OK, {len(vr.blocked_commands)} blocked, "
+                f"{len(vr.warnings)} warnings",
                 data={
                     "valid": vr.valid,
                     "warnings": vr.warnings[:5],
@@ -423,6 +431,7 @@ def quick_print(
         step_start = time.time()
         try:
             from kiln.server import _registry
+
             adapter = _registry.get_adapter(printer_name) if printer_name else _registry.get_default_adapter()
             ctx["adapter"] = adapter
             upload_result = adapter.upload_file(ctx["gcode_path"])
@@ -520,10 +529,11 @@ def quick_print(
 # calibrate pipeline
 # ---------------------------------------------------------------------------
 
+
 def calibrate(
     *,
-    printer_name: Optional[str] = None,
-    printer_id: Optional[str] = None,
+    printer_name: str | None = None,
+    printer_id: str | None = None,
 ) -> PipelineResult:
     """Run a printer calibration sequence: home → bed level → report guidance.
 
@@ -539,21 +549,24 @@ def calibrate(
         printer_id: Printer model ID for calibration guidance.
     """
     start = time.time()
-    steps: List[PipelineStep] = []
+    steps: list[PipelineStep] = []
 
     # Step 1: Get adapter
     step_start = time.time()
     try:
         from kiln.server import _registry
+
         adapter = _registry.get_adapter(printer_name) if printer_name else _registry.get_default_adapter()
         state = adapter.get_state()
-        steps.append(PipelineStep(
-            name="connect",
-            success=state.connected,
-            message="Connected" if state.connected else "Printer offline",
-            data={"status": state.status.value, "connected": state.connected},
-            duration_seconds=time.time() - step_start,
-        ))
+        steps.append(
+            PipelineStep(
+                name="connect",
+                success=state.connected,
+                message="Connected" if state.connected else "Printer offline",
+                data={"status": state.status.value, "connected": state.connected},
+                duration_seconds=time.time() - step_start,
+            )
+        )
         if not state.connected:
             return PipelineResult(
                 pipeline="calibrate",
@@ -563,12 +576,14 @@ def calibrate(
                 total_duration_seconds=time.time() - start,
             )
     except Exception as exc:
-        steps.append(PipelineStep(
-            name="connect",
-            success=False,
-            message=f"Connection failed: {exc}",
-            duration_seconds=time.time() - step_start,
-        ))
+        steps.append(
+            PipelineStep(
+                name="connect",
+                success=False,
+                message=f"Connection failed: {exc}",
+                duration_seconds=time.time() - step_start,
+            )
+        )
         return PipelineResult(
             pipeline="calibrate",
             success=False,
@@ -581,60 +596,73 @@ def calibrate(
     step_start = time.time()
     try:
         adapter.send_gcode("G28")
-        steps.append(PipelineStep(
-            name="home",
-            success=True,
-            message="Homed all axes (G28)",
-            duration_seconds=time.time() - step_start,
-        ))
+        steps.append(
+            PipelineStep(
+                name="home",
+                success=True,
+                message="Homed all axes (G28)",
+                duration_seconds=time.time() - step_start,
+            )
+        )
     except Exception as exc:
-        steps.append(PipelineStep(
-            name="home",
-            success=False,
-            message=f"Homing failed: {exc}",
-            duration_seconds=time.time() - step_start,
-        ))
+        steps.append(
+            PipelineStep(
+                name="home",
+                success=False,
+                message=f"Homing failed: {exc}",
+                duration_seconds=time.time() - step_start,
+            )
+        )
 
     # Step 3: Auto bed level
     step_start = time.time()
     try:
         adapter.send_gcode("G29")
-        steps.append(PipelineStep(
-            name="bed_level",
-            success=True,
-            message="Auto bed leveling complete (G29)",
-            duration_seconds=time.time() - step_start,
-        ))
+        steps.append(
+            PipelineStep(
+                name="bed_level",
+                success=True,
+                message="Auto bed leveling complete (G29)",
+                duration_seconds=time.time() - step_start,
+            )
+        )
     except Exception as exc:
-        steps.append(PipelineStep(
-            name="bed_level",
-            success=True,  # Non-fatal — not all printers support G29.
-            message=f"Auto bed level not available or failed: {exc}",
-            duration_seconds=time.time() - step_start,
-        ))
+        steps.append(
+            PipelineStep(
+                name="bed_level",
+                success=True,  # Non-fatal — not all printers support G29.
+                message=f"Auto bed level not available or failed: {exc}",
+                duration_seconds=time.time() - step_start,
+            )
+        )
 
     # Step 4: Gather calibration guidance
-    guidance: Dict[str, str] = {}
+    guidance: dict[str, str] = {}
     if printer_id:
         step_start = time.time()
         try:
             from kiln.printer_intelligence import get_printer_intel
+
             intel = get_printer_intel(printer_id)
             guidance = dict(intel.calibration)
-            steps.append(PipelineStep(
-                name="guidance",
-                success=True,
-                message=f"Loaded calibration guidance for {intel.display_name}",
-                data={"calibration": guidance},
-                duration_seconds=time.time() - step_start,
-            ))
+            steps.append(
+                PipelineStep(
+                    name="guidance",
+                    success=True,
+                    message=f"Loaded calibration guidance for {intel.display_name}",
+                    data={"calibration": guidance},
+                    duration_seconds=time.time() - step_start,
+                )
+            )
         except Exception as exc:
-            steps.append(PipelineStep(
-                name="guidance",
-                success=True,
-                message=f"No calibration guidance available: {exc}",
-                duration_seconds=time.time() - step_start,
-            ))
+            steps.append(
+                PipelineStep(
+                    name="guidance",
+                    success=True,
+                    message=f"No calibration guidance available: {exc}",
+                    duration_seconds=time.time() - step_start,
+                )
+            )
 
     return PipelineResult(
         pipeline="calibrate",
@@ -649,12 +677,13 @@ def calibrate(
 # benchmark pipeline
 # ---------------------------------------------------------------------------
 
+
 def benchmark(
     *,
-    printer_name: Optional[str] = None,
-    printer_id: Optional[str] = None,
-    model_path: Optional[str] = None,
-    profile_path: Optional[str] = None,
+    printer_name: str | None = None,
+    printer_id: str | None = None,
+    model_path: str | None = None,
+    profile_path: str | None = None,
 ) -> PipelineResult:
     """Slice a benchmark model, upload, and report estimated stats.
 
@@ -674,15 +703,17 @@ def benchmark(
         profile_path: Explicit slicer profile path.
     """
     start = time.time()
-    steps: List[PipelineStep] = []
+    steps: list[PipelineStep] = []
 
     # Step 1: Verify we have a model
     if not model_path:
-        steps.append(PipelineStep(
-            name="model",
-            success=False,
-            message="No benchmark model path provided. Supply a model_path to benchmark.",
-        ))
+        steps.append(
+            PipelineStep(
+                name="model",
+                success=False,
+                message="No benchmark model path provided. Supply a model_path to benchmark.",
+            )
+        )
         return PipelineResult(
             pipeline="benchmark",
             success=False,
@@ -697,42 +728,52 @@ def benchmark(
         step_start = time.time()
         try:
             from kiln.slicer_profiles import resolve_slicer_profile
+
             effective_profile = resolve_slicer_profile(printer_id)
-            steps.append(PipelineStep(
-                name="resolve_profile",
-                success=True,
-                message=f"Using bundled profile for {printer_id}",
-                data={"profile_path": effective_profile},
-                duration_seconds=time.time() - step_start,
-            ))
+            steps.append(
+                PipelineStep(
+                    name="resolve_profile",
+                    success=True,
+                    message=f"Using bundled profile for {printer_id}",
+                    data={"profile_path": effective_profile},
+                    duration_seconds=time.time() - step_start,
+                )
+            )
         except Exception as exc:
-            steps.append(PipelineStep(
-                name="resolve_profile",
-                success=True,
-                message=f"Profile resolution failed, using slicer defaults: {exc}",
-                duration_seconds=time.time() - step_start,
-            ))
+            steps.append(
+                PipelineStep(
+                    name="resolve_profile",
+                    success=True,
+                    message=f"Profile resolution failed, using slicer defaults: {exc}",
+                    duration_seconds=time.time() - step_start,
+                )
+            )
 
     # Step 3: Slice
     step_start = time.time()
     try:
         from kiln.slicer import slice_file
+
         result = slice_file(model_path, profile=effective_profile)
         gcode_path = result.output_path
-        steps.append(PipelineStep(
-            name="slice",
-            success=True,
-            message=result.message,
-            data={"output_path": gcode_path},
-            duration_seconds=time.time() - step_start,
-        ))
+        steps.append(
+            PipelineStep(
+                name="slice",
+                success=True,
+                message=result.message,
+                data={"output_path": gcode_path},
+                duration_seconds=time.time() - step_start,
+            )
+        )
     except Exception as exc:
-        steps.append(PipelineStep(
-            name="slice",
-            success=False,
-            message=f"Slicing failed: {exc}",
-            duration_seconds=time.time() - step_start,
-        ))
+        steps.append(
+            PipelineStep(
+                name="slice",
+                success=False,
+                message=f"Slicing failed: {exc}",
+                duration_seconds=time.time() - step_start,
+            )
+        )
         return PipelineResult(
             pipeline="benchmark",
             success=False,
@@ -745,23 +786,28 @@ def benchmark(
     step_start = time.time()
     try:
         from kiln.server import _registry
+
         adapter = _registry.get_adapter(printer_name) if printer_name else _registry.get_default_adapter()
         upload_result = adapter.upload_file(gcode_path)
         remote_name = upload_result.get("name", os.path.basename(gcode_path))
-        steps.append(PipelineStep(
-            name="upload",
-            success=True,
-            message=f"Uploaded benchmark file: {remote_name}",
-            data={"remote_name": remote_name},
-            duration_seconds=time.time() - step_start,
-        ))
+        steps.append(
+            PipelineStep(
+                name="upload",
+                success=True,
+                message=f"Uploaded benchmark file: {remote_name}",
+                data={"remote_name": remote_name},
+                duration_seconds=time.time() - step_start,
+            )
+        )
     except Exception as exc:
-        steps.append(PipelineStep(
-            name="upload",
-            success=False,
-            message=f"Upload failed: {exc}",
-            duration_seconds=time.time() - step_start,
-        ))
+        steps.append(
+            PipelineStep(
+                name="upload",
+                success=False,
+                message=f"Upload failed: {exc}",
+                duration_seconds=time.time() - step_start,
+            )
+        )
         return PipelineResult(
             pipeline="benchmark",
             success=False,
@@ -775,22 +821,27 @@ def benchmark(
         step_start = time.time()
         try:
             from kiln.persistence import get_db
+
             stats = get_db().get_printer_stats(printer_name)
-            steps.append(PipelineStep(
-                name="stats",
-                success=True,
-                message=f"Printer stats: {stats.get('total_prints', 0)} prints, "
-                        f"{stats.get('success_rate', 0):.0%} success rate",
-                data=stats,
-                duration_seconds=time.time() - step_start,
-            ))
+            steps.append(
+                PipelineStep(
+                    name="stats",
+                    success=True,
+                    message=f"Printer stats: {stats.get('total_prints', 0)} prints, "
+                    f"{stats.get('success_rate', 0):.0%} success rate",
+                    data=stats,
+                    duration_seconds=time.time() - step_start,
+                )
+            )
         except Exception as exc:
-            steps.append(PipelineStep(
-                name="stats",
-                success=True,
-                message=f"Stats unavailable: {exc}",
-                duration_seconds=time.time() - step_start,
-            ))
+            steps.append(
+                PipelineStep(
+                    name="stats",
+                    success=True,
+                    message=f"Stats unavailable: {exc}",
+                    duration_seconds=time.time() - step_start,
+                )
+            )
 
     return PipelineResult(
         pipeline="benchmark",
@@ -824,9 +875,8 @@ PIPELINES = {
 }
 
 
-def list_pipelines() -> List[Dict[str, str]]:
+def list_pipelines() -> list[dict[str, str]]:
     """Return metadata for all available pipelines."""
     return [
-        {"name": name, "description": info["description"], "params": info["params"]}
-        for name, info in PIPELINES.items()
+        {"name": name, "description": info["description"], "params": info["params"]} for name, info in PIPELINES.items()
     ]

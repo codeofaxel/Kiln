@@ -30,7 +30,7 @@ import os
 import secrets
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Set
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -44,15 +44,16 @@ _DEFAULT_GRACE_PERIOD = 86400  # seconds
 @dataclass
 class ApiKey:
     """A single API key."""
+
     id: str
     name: str
     key_hash: str  # SHA-256 hash of the actual key
-    scopes: Set[str]  # e.g. {"read", "write", "admin"}
+    scopes: set[str]  # e.g. {"read", "write", "admin"}
     active: bool = True
     created_at: float = field(default_factory=time.time)
-    last_used_at: Optional[float] = None
-    deprecated_at: Optional[float] = None
-    expires_at: Optional[float] = None
+    last_used_at: float | None = None
+    deprecated_at: float | None = None
+    expires_at: float | None = None
 
     @property
     def status(self) -> Literal["active", "deprecated", "expired", "revoked"]:
@@ -65,7 +66,7 @@ class ApiKey:
             return "deprecated"
         return "active"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["scopes"] = sorted(self.scopes)
         data["status"] = self.status
@@ -74,6 +75,7 @@ class ApiKey:
 
 class AuthError(Exception):
     """Raised when authentication fails."""
+
     pass
 
 
@@ -85,14 +87,15 @@ class AuthManager:
     2. Multi-key mode: Multiple keys stored in memory (extensible to SQLite)
     """
 
-    def __init__(self, enabled: Optional[bool] = None) -> None:
-        self._enabled = enabled if enabled is not None else (
-            os.environ.get("KILN_AUTH_ENABLED", "").lower()
-            in ("1", "true", "yes")
+    def __init__(self, enabled: bool | None = None) -> None:
+        self._enabled = (
+            enabled
+            if enabled is not None
+            else (os.environ.get("KILN_AUTH_ENABLED", "").lower() in ("1", "true", "yes"))
         )
-        self._keys: Dict[str, ApiKey] = {}  # key_hash -> ApiKey
-        self._env_key_hash: Optional[str] = None
-        self._generated_key: Optional[str] = None
+        self._keys: dict[str, ApiKey] = {}  # key_hash -> ApiKey
+        self._env_key_hash: str | None = None
+        self._generated_key: str | None = None
 
         # Load env key if set, otherwise auto-generate when auth is enabled
         env_key = os.environ.get("KILN_AUTH_KEY", "")
@@ -113,7 +116,7 @@ class AuthManager:
         return self._enabled
 
     @property
-    def generated_key(self) -> Optional[str]:
+    def generated_key(self) -> str | None:
         """Return the auto-generated session key, if one was created."""
         return self._generated_key
 
@@ -135,7 +138,7 @@ class AuthManager:
     def create_key(
         self,
         name: str,
-        scopes: Optional[List[str]] = None,
+        scopes: list[str] | None = None,
     ) -> tuple[ApiKey, str]:
         """Create a new API key.
 
@@ -159,7 +162,7 @@ class AuthManager:
     def rotate_key(
         self,
         old_key: str,
-        new_key: Optional[str] = None,
+        new_key: str | None = None,
         grace_period: float = _DEFAULT_GRACE_PERIOD,
     ) -> tuple[ApiKey, str]:
         """Rotate an API key: deprecate the old one and activate a new one.
@@ -196,7 +199,9 @@ class AuthManager:
         old_api_key.expires_at = now + grace_period
         logger.info(
             "Deprecated API key %r (id=%s), expires in %.0fs",
-            old_api_key.name, old_api_key.id, grace_period,
+            old_api_key.name,
+            old_api_key.id,
+            grace_period,
         )
 
         # Create the replacement key
@@ -253,7 +258,7 @@ class AuthManager:
             return True
         return False
 
-    def list_keys(self) -> List[ApiKey]:
+    def list_keys(self) -> list[ApiKey]:
         """Return all registered keys.
 
         Use ``ApiKey.to_dict()`` on individual entries if you need a
@@ -261,7 +266,7 @@ class AuthManager:
         """
         return list(self._keys.values())
 
-    def verify(self, key: str, required_scope: Optional[str] = None) -> ApiKey:
+    def verify(self, key: str, required_scope: str | None = None) -> ApiKey:
         """Verify an API key and optionally check scope.
 
         Returns the ApiKey if valid.
@@ -303,7 +308,7 @@ class AuthManager:
         api_key.last_used_at = time.time()
         return api_key
 
-    def check_request(self, key: Optional[str] = None, scope: Optional[str] = None) -> Dict[str, Any]:
+    def check_request(self, key: str | None = None, scope: str | None = None) -> dict[str, Any]:
         """Check auth for a request. Returns a dict suitable for MCP responses.
 
         If auth is disabled, returns {"authenticated": True, ...}.

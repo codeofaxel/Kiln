@@ -74,11 +74,13 @@ def submit_job(
             submitted_by="mcp-agent",
             priority=priority,
         )
-        _srv._event_bus.publish(Event(
-            type=EventType.JOB_QUEUED,
-            data={"job_id": job_id, "file_name": file_name, "printer_name": printer_name},
-            source="mcp",
-        ))
+        _srv._event_bus.publish(
+            Event(
+                type=EventType.JOB_QUEUED,
+                data={"job_id": job_id, "file_name": file_name, "printer_name": printer_name},
+                source="mcp",
+            )
+        )
         return {
             "success": True,
             "job_id": job_id,
@@ -134,8 +136,7 @@ def queue_summary() -> dict:
         registered_printers = _srv._registry.count
         dispatch_blocked = pending > 0 and active == 0 and registered_printers == 0
         dispatch_block_reason = (
-            "Jobs are queued but no printers are registered. "
-            "Register at least one printer with register_printer()."
+            "Jobs are queued but no printers are registered. Register at least one printer with register_printer()."
             if dispatch_blocked
             else None
         )
@@ -172,11 +173,13 @@ def cancel_job(job_id: str) -> dict:
         return err
     try:
         job = _srv._queue.cancel(job_id)
-        _srv._event_bus.publish(Event(
-            type=EventType.JOB_CANCELLED,
-            data={"job_id": job_id},
-            source="mcp",
-        ))
+        _srv._event_bus.publish(
+            Event(
+                type=EventType.JOB_CANCELLED,
+                data={"job_id": job_id},
+                source="mcp",
+            )
+        )
         return {
             "success": True,
             "job": job.to_dict(),

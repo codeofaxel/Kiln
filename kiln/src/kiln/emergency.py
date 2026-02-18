@@ -36,7 +36,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +46,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _FDM_EMERGENCY_GCODE: list[str] = [
-    "M112",     # Emergency stop — immediate firmware halt
+    "M112",  # Emergency stop — immediate firmware halt
     "M104 S0",  # Hotend heater off
     "M140 S0",  # Bed heater off
-    "M84",      # Disable stepper motors
+    "M84",  # Disable stepper motors
 ]
 
 _FDM_EMERGENCY_ACTIONS: list[str] = [
@@ -63,6 +63,7 @@ _FDM_EMERGENCY_ACTIONS: list[str] = [
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
+
 
 class EmergencyReason(str, enum.Enum):
     """Reason codes for emergency stop events.
@@ -83,6 +84,7 @@ class EmergencyReason(str, enum.Enum):
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class EmergencyRecord:
@@ -105,7 +107,7 @@ class EmergencyRecord:
     timestamp: float
     actions_taken: list[str] = field(default_factory=list)
     gcode_sent: list[str] = field(default_factory=list)
-    error: Optional[str] = None
+    error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
@@ -153,6 +155,7 @@ class SafetyInterlock:
 # Emergency coordinator
 # ---------------------------------------------------------------------------
 
+
 class EmergencyCoordinator:
     """Central coordinator for emergency stops and safety interlocks.
 
@@ -192,7 +195,7 @@ class EmergencyCoordinator:
         now = time.time()
         gcode_sent: list[str] = []
         actions: list[str] = []
-        error: Optional[str] = None
+        error: str | None = None
 
         # Attempt to send emergency G-code via the printer adapter.
         try:
@@ -308,10 +311,7 @@ class EmergencyCoordinator:
         key = (printer_id, name)
         with self._lock:
             if key not in self._interlocks:
-                raise KeyError(
-                    f"Interlock '{name}' not registered for printer "
-                    f"'{printer_id}'."
-                )
+                raise KeyError(f"Interlock '{name}' not registered for printer '{printer_id}'.")
             interlock = self._interlocks[key]
             interlock.is_engaged = is_engaged
             interlock.last_checked = time.time()
@@ -319,8 +319,7 @@ class EmergencyCoordinator:
 
         if is_critical and not is_engaged:
             logger.warning(
-                "CRITICAL interlock disengaged: printer=%s interlock=%s — "
-                "triggering emergency stop",
+                "CRITICAL interlock disengaged: printer=%s interlock=%s — triggering emergency stop",
                 printer_id,
                 name,
             )
@@ -336,10 +335,7 @@ class EmergencyCoordinator:
         :returns: List of :class:`SafetyInterlock` entries (may be empty).
         """
         with self._lock:
-            return [
-                il for (pid, _), il in self._interlocks.items()
-                if pid == printer_id
-            ]
+            return [il for (pid, _), il in self._interlocks.items() if pid == printer_id]
 
     # -- stop state queries ------------------------------------------------
 
@@ -373,8 +369,7 @@ class EmergencyCoordinator:
             for (pid, _), il in self._interlocks.items():
                 if pid == printer_id and il.is_critical and not il.is_engaged:
                     logger.warning(
-                        "Cannot clear E-stop for '%s': critical interlock "
-                        "'%s' is disengaged.",
+                        "Cannot clear E-stop for '%s': critical interlock '%s' is disengaged.",
                         printer_id,
                         il.name,
                     )
@@ -390,7 +385,7 @@ class EmergencyCoordinator:
     def get_stop_history(
         self,
         *,
-        printer_id: Optional[str] = None,
+        printer_id: str | None = None,
         limit: int = 50,
     ) -> list[EmergencyRecord]:
         """Retrieve recent emergency stop events.
@@ -454,22 +449,20 @@ class EmergencyCoordinator:
                 return gcode, actions
             # If the adapter reports failure, fall through to G-code.
             logger.warning(
-                "Hardware emergency_stop() reported failure for %s: %s "
-                "— falling back to G-code",
+                "Hardware emergency_stop() reported failure for %s: %s — falling back to G-code",
                 printer_id,
                 result.message,
             )
         except Exception as exc:
             logger.warning(
-                "Hardware emergency_stop() raised for %s: %s "
-                "— falling back to G-code",
+                "Hardware emergency_stop() raised for %s: %s — falling back to G-code",
                 printer_id,
                 exc,
             )
 
         # Fallback: send G-code commands individually so partial
         # delivery still disables heaters even if a later command fails.
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
         for cmd in gcode:
             try:
                 adapter.send_gcode([cmd])
@@ -513,7 +506,7 @@ class EmergencyCoordinator:
 
             # Try to use the server's shared event bus so subscribers
             # (webhooks, scheduler, persistence) receive the event.
-            bus: Optional[EventBus] = None
+            bus: EventBus | None = None
             try:
                 from kiln.server import _event_bus as server_bus
 
@@ -524,18 +517,19 @@ class EmergencyCoordinator:
             if bus is not None:
                 bus.publish(event)
                 logger.debug(
-                    "Emergency event published for %s", printer_id,
+                    "Emergency event published for %s",
+                    printer_id,
                 )
             else:
                 logger.debug(
-                    "No event bus available — emergency event for %s "
-                    "not published",
+                    "No event bus available — emergency event for %s not published",
                     printer_id,
                 )
         except Exception:
             # Best-effort: never let event emission break the stop flow.
             logger.debug(
-                "Failed to emit emergency event for %s", printer_id,
+                "Failed to emit emergency event for %s",
+                printer_id,
                 exc_info=True,
             )
 
@@ -544,7 +538,7 @@ class EmergencyCoordinator:
 # Module-level singleton and convenience functions
 # ---------------------------------------------------------------------------
 
-_coordinator: Optional[EmergencyCoordinator] = None
+_coordinator: EmergencyCoordinator | None = None
 _coordinator_lock = threading.Lock()
 
 
@@ -573,7 +567,8 @@ def emergency_stop(
     :returns: :class:`EmergencyRecord`.
     """
     return get_emergency_coordinator().emergency_stop(
-        printer_id, reason=reason,
+        printer_id,
+        reason=reason,
     )
 
 

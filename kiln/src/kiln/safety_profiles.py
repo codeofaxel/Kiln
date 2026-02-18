@@ -26,7 +26,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ _REQUIRED_FIELDS = ("max_hotend_temp", "max_bed_temp", "max_feedrate", "build_vo
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class SafetyProfile:
@@ -65,11 +66,11 @@ class SafetyProfile:
     display_name: str
     max_hotend_temp: float
     max_bed_temp: float
-    max_chamber_temp: Optional[float]
+    max_chamber_temp: float | None
     max_feedrate: float
     min_safe_z: float
-    max_volumetric_flow: Optional[float]
-    build_volume: Optional[List[int]]
+    max_volumetric_flow: float | None
+    build_volume: list[int] | None
     notes: str
 
 
@@ -77,13 +78,13 @@ class SafetyProfile:
 # Singleton cache
 # ---------------------------------------------------------------------------
 
-_cache: Dict[str, SafetyProfile] = {}
-_community_cache: Dict[str, SafetyProfile] = {}
+_cache: dict[str, SafetyProfile] = {}
+_community_cache: dict[str, SafetyProfile] = {}
 _loaded: bool = False
 _community_loaded: bool = False
 
 
-def _parse_profiles(raw: Dict[str, Any], target: Dict[str, SafetyProfile]) -> None:
+def _parse_profiles(raw: dict[str, Any], target: dict[str, SafetyProfile]) -> None:
     """Parse raw JSON profile entries into *target* dict."""
     for key, data in raw.items():
         if key == "_meta":
@@ -94,9 +95,7 @@ def _parse_profiles(raw: Dict[str, Any], target: Dict[str, SafetyProfile]) -> No
                 display_name=data.get("display_name", key),
                 max_hotend_temp=float(data["max_hotend_temp"]),
                 max_bed_temp=float(data["max_bed_temp"]),
-                max_chamber_temp=float(data["max_chamber_temp"])
-                if data.get("max_chamber_temp") is not None
-                else None,
+                max_chamber_temp=float(data["max_chamber_temp"]) if data.get("max_chamber_temp") is not None else None,
                 max_feedrate=float(data.get("max_feedrate", 10_000)),
                 min_safe_z=float(data.get("min_safe_z", 0.0)),
                 max_volumetric_flow=float(data["max_volumetric_flow"])
@@ -157,6 +156,7 @@ def _load_community() -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def get_profile(printer_id: str) -> SafetyProfile:
     """Return the safety profile for *printer_id*.
 
@@ -198,7 +198,7 @@ def get_profile(printer_id: str) -> SafetyProfile:
     raise KeyError(f"No safety profile for '{printer_id}' and no default profile available.")
 
 
-def list_profiles() -> List[str]:
+def list_profiles() -> list[str]:
     """Return all available profile IDs sorted alphabetically.
 
     Includes both bundled and community profiles.
@@ -208,13 +208,13 @@ def list_profiles() -> List[str]:
     return sorted(set(_cache.keys()) | set(_community_cache.keys()))
 
 
-def get_all_profiles() -> Dict[str, SafetyProfile]:
+def get_all_profiles() -> dict[str, SafetyProfile]:
     """Return all loaded profiles as a dict keyed by profile ID."""
     _load()
     return dict(_cache)
 
 
-def match_display_name(name: str) -> Optional[str]:
+def match_display_name(name: str) -> str | None:
     """Fuzzy-match a human-readable printer name to a profile ID.
 
     Tries normalised matching (lowercase, strip separators) and substring
@@ -243,7 +243,7 @@ def match_display_name(name: str) -> Optional[str]:
     return None
 
 
-def resolve_limits(printer_id: Optional[str] = None) -> tuple:
+def resolve_limits(printer_id: str | None = None) -> tuple:
     """Return ``(max_hotend, max_bed)`` for a printer, with fallback.
 
     When *printer_id* is provided, loads the matching profile.  Falls back
@@ -264,7 +264,7 @@ def resolve_limits(printer_id: Optional[str] = None) -> tuple:
         return 300.0, 130.0
 
 
-def profile_to_dict(profile: SafetyProfile) -> Dict[str, Any]:
+def profile_to_dict(profile: SafetyProfile) -> dict[str, Any]:
     """Serialise a :class:`SafetyProfile` to a plain dict for MCP responses."""
     return {
         "id": profile.id,
@@ -283,6 +283,7 @@ def profile_to_dict(profile: SafetyProfile) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Community profile contribution
 # ---------------------------------------------------------------------------
+
 
 def validate_safety_profile(profile: dict[str, Any]) -> list[str]:
     """Validate a candidate safety profile dict.
@@ -322,9 +323,7 @@ def validate_safety_profile(profile: dict[str, Any]) -> list[str]:
         if not isinstance(val, (int, float)):
             errors.append(f"max_chamber_temp must be a number, got {type(val).__name__}")
         elif not (0 <= val <= _MAX_TEMP_CEILING):
-            errors.append(
-                f"max_chamber_temp must be between 0 and {_MAX_TEMP_CEILING}, got {val}"
-            )
+            errors.append(f"max_chamber_temp must be between 0 and {_MAX_TEMP_CEILING}, got {val}")
 
     # --- feedrate ---
     fr = profile["max_feedrate"]
@@ -350,7 +349,7 @@ def validate_safety_profile(profile: dict[str, Any]) -> list[str]:
 def _save_community_profiles() -> None:
     """Persist the community cache to ``~/.kiln/community_profiles.json``."""
     _COMMUNITY_DIR.mkdir(parents=True, exist_ok=True)
-    payload: Dict[str, Any] = {}
+    payload: dict[str, Any] = {}
     for key, sp in _community_cache.items():
         payload[key] = {
             "display_name": sp.display_name,
@@ -401,9 +400,7 @@ def add_community_profile(
         display_name=profile.get("display_name", printer_model),
         max_hotend_temp=float(profile["max_hotend_temp"]),
         max_bed_temp=float(profile["max_bed_temp"]),
-        max_chamber_temp=float(profile["max_chamber_temp"])
-        if profile.get("max_chamber_temp") is not None
-        else None,
+        max_chamber_temp=float(profile["max_chamber_temp"]) if profile.get("max_chamber_temp") is not None else None,
         max_feedrate=float(profile["max_feedrate"]),
         min_safe_z=float(profile.get("min_safe_z", 0.0)),
         max_volumetric_flow=float(profile["max_volumetric_flow"])
@@ -418,7 +415,7 @@ def add_community_profile(
     logger.info("Saved community profile '%s' (source=%s)", normalised, source)
 
 
-def export_profile(printer_model: str) -> Dict[str, Any]:
+def export_profile(printer_model: str) -> dict[str, Any]:
     """Export a safety profile as a shareable dict.
 
     Looks up the profile (community first, then bundled) and returns a
@@ -433,7 +430,7 @@ def export_profile(printer_model: str) -> Dict[str, Any]:
     return result
 
 
-def list_community_profiles() -> List[str]:
+def list_community_profiles() -> list[str]:
     """Return model names from the user's community profile file."""
     _load_community()
     return sorted(_community_cache.keys())

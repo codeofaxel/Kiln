@@ -25,7 +25,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -99,14 +99,14 @@ class PrintOutcome:
     hotend_temp: float
     bed_temp: float
     success: bool
-    failure_mode: Optional[str]
+    failure_mode: str | None
     print_time_s: float
     layer_count: int
     file_hash: str
     is_outlier: bool = False
     recorded_at: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "printer_model": self.printer_model,
@@ -137,13 +137,13 @@ class MaterialInsight:
     """
 
     material: str
-    recommended_hotend_temp_range: Tuple[float, float]
-    recommended_bed_temp_range: Tuple[float, float]
+    recommended_hotend_temp_range: tuple[float, float]
+    recommended_bed_temp_range: tuple[float, float]
     success_rate: float
     sample_count: int
-    common_failures: List[Dict[str, Any]]
+    common_failures: list[dict[str, Any]]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "material": self.material,
@@ -168,13 +168,13 @@ class PrinterModelInsight:
     """
 
     printer_model: str
-    best_materials: List[str]
-    worst_materials: List[str]
-    common_failures: List[Dict[str, Any]]
+    best_materials: list[str]
+    worst_materials: list[str]
+    common_failures: list[dict[str, Any]]
     avg_success_rate: float
     sample_count: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "printer_model": self.printer_model,
@@ -200,44 +200,33 @@ def _validate_outcome(outcome: PrintOutcome) -> None:
     if not isinstance(outcome.printer_model, str) or not outcome.printer_model.strip():
         raise LearningValidationError("printer_model must be a non-empty string")
     if len(outcome.printer_model) > _MAX_PRINTER_MODEL_LEN:
-        raise LearningValidationError(
-            "printer_model exceeds max length of "
-            f"{_MAX_PRINTER_MODEL_LEN} characters"
-        )
+        raise LearningValidationError(f"printer_model exceeds max length of {_MAX_PRINTER_MODEL_LEN} characters")
     if not _PRINTER_MODEL_RE.match(outcome.printer_model):
         raise LearningValidationError(
-            "printer_model contains invalid characters; "
-            "only alphanumeric, spaces, hyphens, and underscores are allowed"
+            "printer_model contains invalid characters; only alphanumeric, spaces, hyphens, and underscores are allowed"
         )
 
     # -- material --
     if not isinstance(outcome.material, str) or not outcome.material.strip():
         raise LearningValidationError("material must be a non-empty string")
     if len(outcome.material) > _MAX_MATERIAL_LEN:
-        raise LearningValidationError(
-            f"material exceeds max length of {_MAX_MATERIAL_LEN} characters"
-        )
+        raise LearningValidationError(f"material exceeds max length of {_MAX_MATERIAL_LEN} characters")
     if not _MATERIAL_RE.match(outcome.material):
         raise LearningValidationError(
-            "material contains invalid characters; "
-            "only alphanumeric, spaces, and hyphens are allowed"
+            "material contains invalid characters; only alphanumeric, spaces, and hyphens are allowed"
         )
 
     # -- hotend_temp --
     if not isinstance(outcome.hotend_temp, (int, float)):
         raise LearningValidationError("hotend_temp must be a number")
     if outcome.hotend_temp < 0 or outcome.hotend_temp > _MAX_HOTEND_TEMP:
-        raise LearningValidationError(
-            f"hotend_temp must be between 0 and {_MAX_HOTEND_TEMP}"
-        )
+        raise LearningValidationError(f"hotend_temp must be between 0 and {_MAX_HOTEND_TEMP}")
 
     # -- bed_temp --
     if not isinstance(outcome.bed_temp, (int, float)):
         raise LearningValidationError("bed_temp must be a number")
     if outcome.bed_temp < 0 or outcome.bed_temp > _MAX_BED_TEMP:
-        raise LearningValidationError(
-            f"bed_temp must be between 0 and {_MAX_BED_TEMP}"
-        )
+        raise LearningValidationError(f"bed_temp must be between 0 and {_MAX_BED_TEMP}")
 
     # -- success --
     if not isinstance(outcome.success, bool):
@@ -248,13 +237,9 @@ def _validate_outcome(outcome: PrintOutcome) -> None:
         if not isinstance(outcome.failure_mode, str):
             raise LearningValidationError("failure_mode must be a string or None")
         if len(outcome.failure_mode) > _MAX_FAILURE_MODE_LEN:
-            raise LearningValidationError(
-                f"failure_mode exceeds max length of {_MAX_FAILURE_MODE_LEN} characters"
-            )
+            raise LearningValidationError(f"failure_mode exceeds max length of {_MAX_FAILURE_MODE_LEN} characters")
         if _CONTROL_CHAR_RE.search(outcome.failure_mode):
-            raise LearningValidationError(
-                "failure_mode contains control characters"
-            )
+            raise LearningValidationError("failure_mode contains control characters")
 
     # -- print_time_s --
     if not isinstance(outcome.print_time_s, (int, float)):
@@ -262,9 +247,7 @@ def _validate_outcome(outcome: PrintOutcome) -> None:
     if outcome.print_time_s < 0:
         raise LearningValidationError("print_time_s must be >= 0")
     if outcome.print_time_s > _MAX_PRINT_TIME_S:
-        raise LearningValidationError(
-            f"print_time_s exceeds maximum of {_MAX_PRINT_TIME_S} seconds (7 days)"
-        )
+        raise LearningValidationError(f"print_time_s exceeds maximum of {_MAX_PRINT_TIME_S} seconds (7 days)")
 
     # -- layer_count --
     if not isinstance(outcome.layer_count, int):
@@ -272,17 +255,13 @@ def _validate_outcome(outcome: PrintOutcome) -> None:
     if outcome.layer_count < 0:
         raise LearningValidationError("layer_count must be >= 0")
     if outcome.layer_count > _MAX_LAYER_COUNT:
-        raise LearningValidationError(
-            f"layer_count exceeds maximum of {_MAX_LAYER_COUNT}"
-        )
+        raise LearningValidationError(f"layer_count exceeds maximum of {_MAX_LAYER_COUNT}")
 
     # -- file_hash --
     if not isinstance(outcome.file_hash, str):
         raise LearningValidationError("file_hash must be a string")
     if not _HEX_RE.match(outcome.file_hash):
-        raise LearningValidationError(
-            "file_hash must be exactly 64 hexadecimal characters (SHA-256)"
-        )
+        raise LearningValidationError("file_hash must be exactly 64 hexadecimal characters (SHA-256)")
 
 
 # ---------------------------------------------------------------------------
@@ -290,14 +269,14 @@ def _validate_outcome(outcome: PrintOutcome) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _mean(values: List[float]) -> float:
+def _mean(values: list[float]) -> float:
     """Return the arithmetic mean of *values*, or 0.0 if empty."""
     if not values:
         return 0.0
     return sum(values) / len(values)
 
 
-def _std_dev(values: List[float]) -> float:
+def _std_dev(values: list[float]) -> float:
     """Return the population standard deviation of *values*."""
     if len(values) < 2:
         return 0.0
@@ -321,7 +300,7 @@ class CrossPrinterLearningEngine:
         of the ``KILN_LEARNING_MAX_OUTCOMES`` environment variable.
     """
 
-    def __init__(self, *, max_outcomes: Optional[int] = None) -> None:
+    def __init__(self, *, max_outcomes: int | None = None) -> None:
         env_max = os.environ.get("KILN_LEARNING_MAX_OUTCOMES")
         if max_outcomes is not None:
             self._max_outcomes = max_outcomes
@@ -338,11 +317,11 @@ class CrossPrinterLearningEngine:
         else:
             self._max_outcomes = _DEFAULT_MAX_OUTCOMES
 
-        self._outcomes: List[PrintOutcome] = []
+        self._outcomes: list[PrintOutcome] = []
         self._lock = threading.Lock()
 
         # Rate limiting: printer_model -> list of timestamps
-        self._rate_buckets: Dict[str, List[float]] = {}
+        self._rate_buckets: dict[str, list[float]] = {}
 
     # -- Recording ---------------------------------------------------------
 
@@ -397,10 +376,7 @@ class CrossPrinterLearningEngine:
 
         Must be called with *_lock* held.
         """
-        material_outcomes = [
-            o for o in self._outcomes
-            if o.material == outcome.material and not o.is_outlier
-        ]
+        material_outcomes = [o for o in self._outcomes if o.material == outcome.material and not o.is_outlier]
 
         if len(material_outcomes) < 5:
             # Not enough data to compute meaningful statistics
@@ -446,7 +422,7 @@ class CrossPrinterLearningEngine:
 
     # -- Querying ----------------------------------------------------------
 
-    def _non_outlier_outcomes(self) -> List[PrintOutcome]:
+    def _non_outlier_outcomes(self) -> list[PrintOutcome]:
         """Return all stored outcomes that are not outliers.
 
         Must be called with *_lock* held.
@@ -464,10 +440,7 @@ class CrossPrinterLearningEngine:
             raise LearningValidationError("material must be a non-empty string")
 
         with self._lock:
-            relevant = [
-                o for o in self._non_outlier_outcomes()
-                if o.material == material
-            ]
+            relevant = [o for o in self._non_outlier_outcomes() if o.material == material]
 
         if not relevant:
             return MaterialInsight(
@@ -500,10 +473,7 @@ class CrossPrinterLearningEngine:
             if not o.success and o.failure_mode:
                 failure_counter[o.failure_mode] += 1
 
-        common_failures = [
-            {"failure_mode": mode, "count": count}
-            for mode, count in failure_counter.most_common()
-        ]
+        common_failures = [{"failure_mode": mode, "count": count} for mode, count in failure_counter.most_common()]
 
         return MaterialInsight(
             material=material,
@@ -525,10 +495,7 @@ class CrossPrinterLearningEngine:
             raise LearningValidationError("printer_model must be a non-empty string")
 
         with self._lock:
-            relevant = [
-                o for o in self._non_outlier_outcomes()
-                if o.printer_model == printer_model
-            ]
+            relevant = [o for o in self._non_outlier_outcomes() if o.printer_model == printer_model]
 
         if not relevant:
             return PrinterModelInsight(
@@ -541,7 +508,7 @@ class CrossPrinterLearningEngine:
             )
 
         # Per-material success rates
-        material_stats: Dict[str, Dict[str, int]] = {}
+        material_stats: dict[str, dict[str, int]] = {}
         for o in relevant:
             if o.material not in material_stats:
                 material_stats[o.material] = {"success": 0, "total": 0}
@@ -550,14 +517,10 @@ class CrossPrinterLearningEngine:
                 material_stats[o.material]["success"] += 1
 
         material_rates = {
-            mat: stats["success"] / stats["total"]
-            for mat, stats in material_stats.items()
-            if stats["total"] > 0
+            mat: stats["success"] / stats["total"] for mat, stats in material_stats.items() if stats["total"] > 0
         }
 
-        sorted_materials = sorted(
-            material_rates.items(), key=lambda x: x[1], reverse=True
-        )
+        sorted_materials = sorted(material_rates.items(), key=lambda x: x[1], reverse=True)
 
         best_materials = [mat for mat, _ in sorted_materials[:3]]
         worst_materials = [mat for mat, _ in sorted_materials[-3:] if material_rates[mat] < 1.0]
@@ -572,10 +535,7 @@ class CrossPrinterLearningEngine:
             if not o.success and o.failure_mode:
                 failure_counter[o.failure_mode] += 1
 
-        common_failures = [
-            {"failure_mode": mode, "count": count}
-            for mode, count in failure_counter.most_common()
-        ]
+        common_failures = [{"failure_mode": mode, "count": count} for mode, count in failure_counter.most_common()]
 
         return PrinterModelInsight(
             printer_model=printer_model,
@@ -590,7 +550,7 @@ class CrossPrinterLearningEngine:
         self,
         printer_model: str,
         material: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Recommend print settings for a printer/material combination.
 
         Returns recommended temperatures based on successful non-outlier
@@ -610,24 +570,17 @@ class CrossPrinterLearningEngine:
         with self._lock:
             # Prefer outcomes for this specific printer+material combo
             specific = [
-                o for o in self._non_outlier_outcomes()
-                if o.printer_model == printer_model
-                and o.material == material
-                and o.success
+                o
+                for o in self._non_outlier_outcomes()
+                if o.printer_model == printer_model and o.material == material and o.success
             ]
 
             # Fall back to all printers for this material
-            all_material = [
-                o for o in self._non_outlier_outcomes()
-                if o.material == material
-                and o.success
-            ]
+            all_material = [o for o in self._non_outlier_outcomes() if o.material == material and o.success]
 
             # For success rate, include failures too (non-outlier)
             all_for_rate = [
-                o for o in self._non_outlier_outcomes()
-                if o.printer_model == printer_model
-                and o.material == material
+                o for o in self._non_outlier_outcomes() if o.printer_model == printer_model and o.material == material
             ]
 
         # Use specific data if we have enough, otherwise fall back
@@ -666,7 +619,7 @@ class CrossPrinterLearningEngine:
             "success_rate": success_rate,
         }
 
-    def get_network_stats(self) -> Dict[str, Any]:
+    def get_network_stats(self) -> dict[str, Any]:
         """Return aggregate statistics for the entire printer network.
 
         :returns: Dict with ``total_outcomes``, ``unique_printers``,
@@ -699,7 +652,7 @@ class CrossPrinterLearningEngine:
 # ---------------------------------------------------------------------------
 
 
-def _median(values: List[float]) -> float:
+def _median(values: list[float]) -> float:
     """Return the median of *values*.  Returns 0.0 if empty."""
     if not values:
         return 0.0
@@ -715,7 +668,7 @@ def _median(values: List[float]) -> float:
 # Module-level singleton (lazy, thread-safe)
 # ---------------------------------------------------------------------------
 
-_engine: Optional[CrossPrinterLearningEngine] = None
+_engine: CrossPrinterLearningEngine | None = None
 _engine_lock = threading.Lock()
 
 

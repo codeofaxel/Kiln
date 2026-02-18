@@ -9,23 +9,38 @@ from __future__ import annotations
 
 import enum
 import re
-import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Address validation
 # ---------------------------------------------------------------------------
 
 # ISO 3166-1 alpha-2 codes for countries supported by fulfillment providers.
-_SUPPORTED_COUNTRIES: Dict[str, str] = {
-    "US": "United States", "CA": "Canada", "GB": "United Kingdom",
-    "DE": "Germany", "FR": "France", "NL": "Netherlands", "BE": "Belgium",
-    "AT": "Austria", "CH": "Switzerland", "AU": "Australia", "NZ": "New Zealand",
-    "JP": "Japan", "KR": "South Korea", "SG": "Singapore", "IE": "Ireland",
-    "IT": "Italy", "ES": "Spain", "PT": "Portugal", "SE": "Sweden",
-    "NO": "Norway", "DK": "Denmark", "FI": "Finland", "PL": "Poland",
+_SUPPORTED_COUNTRIES: dict[str, str] = {
+    "US": "United States",
+    "CA": "Canada",
+    "GB": "United Kingdom",
+    "DE": "Germany",
+    "FR": "France",
+    "NL": "Netherlands",
+    "BE": "Belgium",
+    "AT": "Austria",
+    "CH": "Switzerland",
+    "AU": "Australia",
+    "NZ": "New Zealand",
+    "JP": "Japan",
+    "KR": "South Korea",
+    "SG": "Singapore",
+    "IE": "Ireland",
+    "IT": "Italy",
+    "ES": "Spain",
+    "PT": "Portugal",
+    "SE": "Sweden",
+    "NO": "Norway",
+    "DK": "Denmark",
+    "FI": "Finland",
+    "PL": "Poland",
     "CZ": "Czech Republic",
 }
 
@@ -35,7 +50,8 @@ _US_ZIP_RE = re.compile(r"^\d{5}(-\d{4})?$")
 _CA_POSTAL_RE = re.compile(r"^[A-Z]\d[A-Z]\s?\d[A-Z]\d$", re.IGNORECASE)
 # UK postcode: various formats
 _UK_POSTAL_RE = re.compile(
-    r"^[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}$", re.IGNORECASE,
+    r"^[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}$",
+    re.IGNORECASE,
 )
 
 
@@ -44,16 +60,16 @@ class AddressValidation:
     """Result of validating a shipping address."""
 
     valid: bool
-    address: Dict[str, str]
-    warnings: List[str] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
-    normalized: Dict[str, str] = field(default_factory=dict)
+    address: dict[str, str]
+    warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    normalized: dict[str, str] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def validate_address(address: Dict[str, str]) -> AddressValidation:
+def validate_address(address: dict[str, str]) -> AddressValidation:
     """Validate and normalize a shipping address.
 
     Required fields: street, city, country.
@@ -65,8 +81,8 @@ def validate_address(address: Dict[str, str]) -> AddressValidation:
     Returns:
         AddressValidation with errors/warnings and normalized address.
     """
-    errors: List[str] = []
-    warnings: List[str] = []
+    errors: list[str] = []
+    warnings: list[str] = []
 
     # Required fields
     street = (address.get("street") or "").strip()
@@ -143,18 +159,18 @@ class UseCase(enum.Enum):
 class MaterialRecommendation:
     """A recommended material with reasoning."""
 
-    technology: str           # FDM, SLA, SLS, MJF, etc.
-    material_name: str        # PLA, PETG, Nylon, Resin, etc.
-    reason: str               # Why this material fits the use case
-    price_tier: str           # budget, mid, premium
-    strength: str             # low, medium, high
-    detail_level: str         # low, medium, high
+    technology: str  # FDM, SLA, SLS, MJF, etc.
+    material_name: str  # PLA, PETG, Nylon, Resin, etc.
+    reason: str  # Why this material fits the use case
+    price_tier: str  # budget, mid, premium
+    strength: str  # low, medium, high
+    detail_level: str  # low, medium, high
     weather_resistant: bool
     food_safe: bool
-    typical_lead_days: int    # Typical production lead time
-    recommended_provider: str # craftcloud, sculpteo, 3dos
+    typical_lead_days: int  # Typical production lead time
+    recommended_provider: str  # craftcloud, sculpteo, 3dos
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -163,11 +179,11 @@ class MaterialGuide:
     """Full material recommendation result for a consumer query."""
 
     use_case: str
-    recommendations: List[MaterialRecommendation]
+    recommendations: list[MaterialRecommendation]
     best_pick: MaterialRecommendation
     explanation: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["recommendations"] = [r.to_dict() for r in self.recommendations]
         data["best_pick"] = self.best_pick.to_dict()
@@ -175,185 +191,300 @@ class MaterialGuide:
 
 
 # Knowledge base: use case -> ranked material recommendations.
-_MATERIAL_KNOWLEDGE: Dict[str, List[MaterialRecommendation]] = {
+_MATERIAL_KNOWLEDGE: dict[str, list[MaterialRecommendation]] = {
     UseCase.DECORATIVE.value: [
         MaterialRecommendation(
-            technology="FDM", material_name="PLA",
+            technology="FDM",
+            material_name="PLA",
             reason="Excellent surface finish, wide color range, lowest cost. Perfect for display items.",
-            price_tier="budget", strength="low", detail_level="medium",
-            weather_resistant=False, food_safe=False, typical_lead_days=5,
+            price_tier="budget",
+            strength="low",
+            detail_level="medium",
+            weather_resistant=False,
+            food_safe=False,
+            typical_lead_days=5,
             recommended_provider="craftcloud",
         ),
         MaterialRecommendation(
-            technology="SLA", material_name="Standard Resin",
+            technology="SLA",
+            material_name="Standard Resin",
             reason="Ultra-fine detail, smooth surface. Ideal for figurines, art pieces, and detailed decorations.",
-            price_tier="mid", strength="low", detail_level="high",
-            weather_resistant=False, food_safe=False, typical_lead_days=7,
+            price_tier="mid",
+            strength="low",
+            detail_level="high",
+            weather_resistant=False,
+            food_safe=False,
+            typical_lead_days=7,
             recommended_provider="sculpteo",
         ),
         MaterialRecommendation(
-            technology="MJF", material_name="Nylon PA12",
+            technology="MJF",
+            material_name="Nylon PA12",
             reason="Professional finish, strong and durable. Good for gifts and premium decorative items.",
-            price_tier="premium", strength="high", detail_level="high",
-            weather_resistant=True, food_safe=False, typical_lead_days=10,
+            price_tier="premium",
+            strength="high",
+            detail_level="high",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=10,
             recommended_provider="sculpteo",
         ),
     ],
     UseCase.FUNCTIONAL.value: [
         MaterialRecommendation(
-            technology="FDM", material_name="PETG",
+            technology="FDM",
+            material_name="PETG",
             reason="Strong, impact-resistant, and slightly flexible. Great for everyday functional parts.",
-            price_tier="budget", strength="medium", detail_level="medium",
-            weather_resistant=True, food_safe=False, typical_lead_days=5,
+            price_tier="budget",
+            strength="medium",
+            detail_level="medium",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=5,
             recommended_provider="craftcloud",
         ),
         MaterialRecommendation(
-            technology="SLS", material_name="Nylon PA12",
+            technology="SLS",
+            material_name="Nylon PA12",
             reason="Industrial-grade strength without support marks. Perfect for functional assemblies.",
-            price_tier="mid", strength="high", detail_level="medium",
-            weather_resistant=True, food_safe=False, typical_lead_days=8,
+            price_tier="mid",
+            strength="high",
+            detail_level="medium",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=8,
             recommended_provider="sculpteo",
         ),
         MaterialRecommendation(
-            technology="FDM", material_name="ABS",
+            technology="FDM",
+            material_name="ABS",
             reason="Heat-resistant and machinable. Good for functional parts that need post-processing.",
-            price_tier="budget", strength="medium", detail_level="low",
-            weather_resistant=True, food_safe=False, typical_lead_days=5,
+            price_tier="budget",
+            strength="medium",
+            detail_level="low",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=5,
             recommended_provider="craftcloud",
         ),
     ],
     UseCase.MECHANICAL.value: [
         MaterialRecommendation(
-            technology="SLS", material_name="Nylon PA12",
+            technology="SLS",
+            material_name="Nylon PA12",
             reason="Best strength-to-weight ratio. Ideal for gears, brackets, and mechanical assemblies.",
-            price_tier="mid", strength="high", detail_level="medium",
-            weather_resistant=True, food_safe=False, typical_lead_days=8,
+            price_tier="mid",
+            strength="high",
+            detail_level="medium",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=8,
             recommended_provider="sculpteo",
         ),
         MaterialRecommendation(
-            technology="MJF", material_name="Nylon PA12",
+            technology="MJF",
+            material_name="Nylon PA12",
             reason="Consistent mechanical properties and fine detail. Superior for snap-fits and hinges.",
-            price_tier="premium", strength="high", detail_level="high",
-            weather_resistant=True, food_safe=False, typical_lead_days=10,
+            price_tier="premium",
+            strength="high",
+            detail_level="high",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=10,
             recommended_provider="sculpteo",
         ),
         MaterialRecommendation(
-            technology="FDM", material_name="PETG",
+            technology="FDM",
+            material_name="PETG",
             reason="Budget-friendly for mechanical prototyping. Good layer adhesion for load-bearing parts.",
-            price_tier="budget", strength="medium", detail_level="medium",
-            weather_resistant=True, food_safe=False, typical_lead_days=5,
+            price_tier="budget",
+            strength="medium",
+            detail_level="medium",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=5,
             recommended_provider="craftcloud",
         ),
     ],
     UseCase.PROTOTYPE.value: [
         MaterialRecommendation(
-            technology="FDM", material_name="PLA",
+            technology="FDM",
+            material_name="PLA",
             reason="Cheapest and fastest option. Ideal for visual prototypes and fit-checks.",
-            price_tier="budget", strength="low", detail_level="medium",
-            weather_resistant=False, food_safe=False, typical_lead_days=3,
+            price_tier="budget",
+            strength="low",
+            detail_level="medium",
+            weather_resistant=False,
+            food_safe=False,
+            typical_lead_days=3,
             recommended_provider="craftcloud",
         ),
         MaterialRecommendation(
-            technology="SLA", material_name="Standard Resin",
+            technology="SLA",
+            material_name="Standard Resin",
             reason="High-detail prototype that looks like a finished product. Great for client presentations.",
-            price_tier="mid", strength="low", detail_level="high",
-            weather_resistant=False, food_safe=False, typical_lead_days=5,
+            price_tier="mid",
+            strength="low",
+            detail_level="high",
+            weather_resistant=False,
+            food_safe=False,
+            typical_lead_days=5,
             recommended_provider="sculpteo",
         ),
     ],
     UseCase.MINIATURE.value: [
         MaterialRecommendation(
-            technology="SLA", material_name="High-Detail Resin",
+            technology="SLA",
+            material_name="High-Detail Resin",
             reason="Best possible detail resolution. Industry standard for tabletop miniatures.",
-            price_tier="mid", strength="low", detail_level="high",
-            weather_resistant=False, food_safe=False, typical_lead_days=7,
+            price_tier="mid",
+            strength="low",
+            detail_level="high",
+            weather_resistant=False,
+            food_safe=False,
+            typical_lead_days=7,
             recommended_provider="sculpteo",
         ),
         MaterialRecommendation(
-            technology="MJF", material_name="Nylon PA12",
+            technology="MJF",
+            material_name="Nylon PA12",
             reason="Durable miniatures that survive handling. Good detail at scale.",
-            price_tier="premium", strength="high", detail_level="high",
-            weather_resistant=True, food_safe=False, typical_lead_days=10,
+            price_tier="premium",
+            strength="high",
+            detail_level="high",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=10,
             recommended_provider="sculpteo",
         ),
     ],
     UseCase.JEWELRY.value: [
         MaterialRecommendation(
-            technology="SLA", material_name="Castable Resin",
+            technology="SLA",
+            material_name="Castable Resin",
             reason="Designed for lost-wax casting into metal. Industry standard for custom jewelry.",
-            price_tier="premium", strength="low", detail_level="high",
-            weather_resistant=False, food_safe=False, typical_lead_days=10,
+            price_tier="premium",
+            strength="low",
+            detail_level="high",
+            weather_resistant=False,
+            food_safe=False,
+            typical_lead_days=10,
             recommended_provider="sculpteo",
         ),
         MaterialRecommendation(
-            technology="SLS", material_name="Nylon PA12",
+            technology="SLS",
+            material_name="Nylon PA12",
             reason="Lightweight fashion jewelry that's durable. Can be dyed in multiple colors.",
-            price_tier="mid", strength="high", detail_level="medium",
-            weather_resistant=True, food_safe=False, typical_lead_days=8,
+            price_tier="mid",
+            strength="high",
+            detail_level="medium",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=8,
             recommended_provider="sculpteo",
         ),
     ],
     UseCase.ENCLOSURE.value: [
         MaterialRecommendation(
-            technology="FDM", material_name="PETG",
+            technology="FDM",
+            material_name="PETG",
             reason="Impact-resistant, easy to post-process. Standard for electronics enclosures.",
-            price_tier="budget", strength="medium", detail_level="medium",
-            weather_resistant=True, food_safe=False, typical_lead_days=5,
+            price_tier="budget",
+            strength="medium",
+            detail_level="medium",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=5,
             recommended_provider="craftcloud",
         ),
         MaterialRecommendation(
-            technology="SLS", material_name="Nylon PA12",
+            technology="SLS",
+            material_name="Nylon PA12",
             reason="Professional enclosures with snap-fits and living hinges. No visible layer lines.",
-            price_tier="mid", strength="high", detail_level="medium",
-            weather_resistant=True, food_safe=False, typical_lead_days=8,
+            price_tier="mid",
+            strength="high",
+            detail_level="medium",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=8,
             recommended_provider="sculpteo",
         ),
     ],
     UseCase.WEARABLE.value: [
         MaterialRecommendation(
-            technology="SLS", material_name="TPU",
+            technology="SLS",
+            material_name="TPU",
             reason="Flexible, comfortable against skin. Ideal for wristbands, custom orthotics.",
-            price_tier="mid", strength="medium", detail_level="medium",
-            weather_resistant=True, food_safe=False, typical_lead_days=8,
+            price_tier="mid",
+            strength="medium",
+            detail_level="medium",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=8,
             recommended_provider="sculpteo",
         ),
         MaterialRecommendation(
-            technology="FDM", material_name="TPU",
+            technology="FDM",
+            material_name="TPU",
             reason="Budget flexible option. Good for simple wearable prototypes.",
-            price_tier="budget", strength="medium", detail_level="low",
-            weather_resistant=True, food_safe=False, typical_lead_days=5,
+            price_tier="budget",
+            strength="medium",
+            detail_level="low",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=5,
             recommended_provider="craftcloud",
         ),
     ],
     UseCase.OUTDOOR.value: [
         MaterialRecommendation(
-            technology="FDM", material_name="ASA",
+            technology="FDM",
+            material_name="ASA",
             reason="UV-resistant, weather-proof. The go-to for outdoor functional parts.",
-            price_tier="budget", strength="medium", detail_level="low",
-            weather_resistant=True, food_safe=False, typical_lead_days=5,
+            price_tier="budget",
+            strength="medium",
+            detail_level="low",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=5,
             recommended_provider="craftcloud",
         ),
         MaterialRecommendation(
-            technology="SLS", material_name="Nylon PA12",
+            technology="SLS",
+            material_name="Nylon PA12",
             reason="Industrial-grade weather resistance. Won't degrade in sun or rain.",
-            price_tier="mid", strength="high", detail_level="medium",
-            weather_resistant=True, food_safe=False, typical_lead_days=8,
+            price_tier="mid",
+            strength="high",
+            detail_level="medium",
+            weather_resistant=True,
+            food_safe=False,
+            typical_lead_days=8,
             recommended_provider="sculpteo",
         ),
     ],
     UseCase.FOOD_SAFE.value: [
         MaterialRecommendation(
-            technology="SLS", material_name="Nylon PA12 (food-safe)",
+            technology="SLS",
+            material_name="Nylon PA12 (food-safe)",
             reason="FDA-compliant when post-processed. Used for cookie cutters and kitchen tools.",
-            price_tier="mid", strength="high", detail_level="medium",
-            weather_resistant=True, food_safe=True, typical_lead_days=10,
+            price_tier="mid",
+            strength="high",
+            detail_level="medium",
+            weather_resistant=True,
+            food_safe=True,
+            typical_lead_days=10,
             recommended_provider="sculpteo",
         ),
         MaterialRecommendation(
-            technology="FDM", material_name="PETG (food-safe)",
+            technology="FDM",
+            material_name="PETG (food-safe)",
             reason="Budget food-safe option. Must be sealed/coated for full food safety.",
-            price_tier="budget", strength="medium", detail_level="low",
-            weather_resistant=True, food_safe=True, typical_lead_days=5,
+            price_tier="budget",
+            strength="medium",
+            detail_level="low",
+            weather_resistant=True,
+            food_safe=True,
+            typical_lead_days=5,
             recommended_provider="craftcloud",
         ),
     ],
@@ -363,7 +494,7 @@ _MATERIAL_KNOWLEDGE: Dict[str, List[MaterialRecommendation]] = {
 def recommend_material(
     use_case: str,
     *,
-    budget: Optional[str] = None,
+    budget: str | None = None,
     need_weather_resistant: bool = False,
     need_food_safe: bool = False,
     need_high_detail: bool = False,
@@ -391,9 +522,7 @@ def recommend_material(
     candidates = _MATERIAL_KNOWLEDGE.get(use_case_lower)
     if candidates is None:
         valid = ", ".join(sorted(_MATERIAL_KNOWLEDGE))
-        raise ValueError(
-            f"Unknown use case '{use_case}'. Valid options: {valid}"
-        )
+        raise ValueError(f"Unknown use case '{use_case}'. Valid options: {valid}")
 
     # Apply filters
     filtered = list(candidates)  # Start with all
@@ -470,7 +599,7 @@ class TimelineStage:
     estimated_days: int
     status: str = "pending"  # pending, in_progress, completed
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -478,19 +607,19 @@ class TimelineStage:
 class OrderTimeline:
     """Full order-to-delivery timeline with stage breakdowns."""
 
-    stages: List[TimelineStage]
+    stages: list[TimelineStage]
     total_days: int
     estimated_delivery_date: str  # ISO date string
     confidence: str  # low, medium, high
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["stages"] = [s.to_dict() for s in self.stages]
         return data
 
 
 # Baseline days per stage, keyed by technology.
-_STAGE_BASELINES: Dict[str, Dict[str, int]] = {
+_STAGE_BASELINES: dict[str, dict[str, int]] = {
     "FDM": {"quote_review": 0, "production": 3, "quality_check": 1, "packaging": 1},
     "SLA": {"quote_review": 0, "production": 4, "quality_check": 1, "packaging": 1},
     "SLS": {"quote_review": 1, "production": 5, "quality_check": 1, "packaging": 1},
@@ -510,7 +639,7 @@ _STAGE_DESCRIPTIONS = {
 def estimate_timeline(
     technology: str,
     *,
-    shipping_days: Optional[int] = None,
+    shipping_days: int | None = None,
     quantity: int = 1,
     country: str = "US",
 ) -> OrderTimeline:
@@ -571,6 +700,7 @@ def estimate_timeline(
 
     # Calculate estimated delivery date
     import datetime
+
     delivery_date = datetime.date.today() + datetime.timedelta(days=total)
 
     # Confidence based on technology maturity and shipping reliability
@@ -617,16 +747,16 @@ class PriceEstimate:
     currency: str
     technology: str
     material: str
-    volume_cm3: Optional[float]
+    volume_cm3: float | None
     confidence: str  # low, medium, high
     note: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 # Rough pricing per cm3 by technology (USD).
-_PRICE_PER_CM3: Dict[str, Dict[str, float]] = {
+_PRICE_PER_CM3: dict[str, dict[str, float]] = {
     "FDM": {"low": 0.10, "high": 0.30},
     "SLA": {"low": 0.30, "high": 0.80},
     "SLS": {"low": 0.50, "high": 1.20},
@@ -635,7 +765,7 @@ _PRICE_PER_CM3: Dict[str, Dict[str, float]] = {
 }
 
 # Base fee added to every order (setup/handling).
-_BASE_FEE: Dict[str, float] = {
+_BASE_FEE: dict[str, float] = {
     "FDM": 5.0,
     "SLA": 10.0,
     "SLS": 15.0,
@@ -647,8 +777,8 @@ _BASE_FEE: Dict[str, float] = {
 def estimate_price(
     technology: str,
     *,
-    volume_cm3: Optional[float] = None,
-    dimensions_mm: Optional[Dict[str, float]] = None,
+    volume_cm3: float | None = None,
+    dimensions_mm: dict[str, float] | None = None,
     quantity: int = 1,
 ) -> PriceEstimate:
     """Quick price estimate without calling the fulfillment API.
@@ -685,9 +815,7 @@ def estimate_price(
         bbox_cm3 = (x * y * z) / 1000.0  # mm3 -> cm3
         volume_cm3 = bbox_cm3 * 0.4
     elif volume_cm3 is None:
-        raise ValueError(
-            "Provide either volume_cm3 or dimensions_mm (with keys x, y, z)."
-        )
+        raise ValueError("Provide either volume_cm3 or dimensions_mm (with keys x, y, z).")
 
     base = _BASE_FEE.get(tech, 10.0)
     low = (volume_cm3 * pricing["low"] + base) * quantity
@@ -708,8 +836,7 @@ def estimate_price(
         volume_cm3=round(volume_cm3, 2) if volume_cm3 else None,
         confidence=confidence,
         note=(
-            f"Rough estimate for {tech}. Request a full quote with "
-            f"fulfillment_quote for exact pricing with shipping."
+            f"Rough estimate for {tech}. Request a full quote with fulfillment_quote for exact pricing with shipping."
         ),
     )
 
@@ -726,10 +853,10 @@ class OnboardingStep:
     step: int
     title: str
     description: str
-    tool: str       # MCP tool name to invoke
-    example: str    # Example invocation
+    tool: str  # MCP tool name to invoke
+    example: str  # Example invocation
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -737,10 +864,10 @@ class OnboardingStep:
 class ConsumerOnboarding:
     """Guided onboarding for users without a 3D printer."""
 
-    steps: List[OnboardingStep]
+    steps: list[OnboardingStep]
     summary: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["steps"] = [s.to_dict() for s in self.steps]
         return data
@@ -798,8 +925,7 @@ def get_onboarding() -> ConsumerOnboarding:
             step=5,
             title="Validate your shipping address",
             description=(
-                "We check your address format and postal code before placing "
-                "the order to prevent delivery issues."
+                "We check your address format and postal code before placing the order to prevent delivery issues."
             ),
             tool="validate_shipping_address",
             example='validate_shipping_address(street="123 Main St", city="Austin", state="TX", postal_code="78701", country="US")',
@@ -818,8 +944,7 @@ def get_onboarding() -> ConsumerOnboarding:
             step=7,
             title="Track your delivery",
             description=(
-                "Monitor your order through production, quality check, and "
-                "shipping — from factory to your door."
+                "Monitor your order through production, quality check, and shipping — from factory to your door."
             ),
             tool="fulfillment_order_status",
             example='fulfillment_order_status(order_id="ord-123")',
@@ -841,6 +966,6 @@ def get_onboarding() -> ConsumerOnboarding:
 # ---------------------------------------------------------------------------
 
 
-def list_supported_countries() -> Dict[str, str]:
+def list_supported_countries() -> dict[str, str]:
     """Return the dict of supported shipping countries (code -> name)."""
     return dict(_SUPPORTED_COUNTRIES)

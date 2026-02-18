@@ -34,7 +34,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -57,24 +57,24 @@ class PrintJob:
 
     id: str
     file_name: str
-    printer_name: Optional[str]  # None = any available printer
+    printer_name: str | None  # None = any available printer
     status: JobStatus
     submitted_by: str  # agent identifier
     priority: int = 0  # higher = more urgent
     created_at: float = field(default_factory=time.time)
-    started_at: Optional[float] = None
-    completed_at: Optional[float] = None
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    started_at: float | None = None
+    completed_at: float | None = None
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         data = asdict(self)
         data["status"] = self.status.value
         return data
 
     @property
-    def elapsed_seconds(self) -> Optional[float]:
+    def elapsed_seconds(self) -> float | None:
         """Seconds since the job started printing, or None if not started."""
         if self.started_at is None:
             return None
@@ -99,13 +99,8 @@ class JobNotFoundError(KeyError):
 class InvalidStateTransition(ValueError):
     """Raised when a job transition violates the state machine."""
 
-    def __init__(
-        self, job_id: str, from_status: JobStatus, to_status: JobStatus
-    ) -> None:
-        super().__init__(
-            f"Invalid state transition for job {job_id!r}: "
-            f"{from_status.value} -> {to_status.value}"
-        )
+    def __init__(self, job_id: str, from_status: JobStatus, to_status: JobStatus) -> None:
+        super().__init__(f"Invalid state transition for job {job_id!r}: {from_status.value} -> {to_status.value}")
         self.job_id = job_id
         self.from_status = from_status
         self.to_status = to_status
@@ -119,27 +114,35 @@ class JobStateMachine:
     """
 
     _TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
-        JobStatus.QUEUED: frozenset({
-            JobStatus.STARTING,
-            JobStatus.CANCELLED,
-            JobStatus.FAILED,
-        }),
-        JobStatus.STARTING: frozenset({
-            JobStatus.PRINTING,
-            JobStatus.FAILED,
-            JobStatus.CANCELLED,
-        }),
-        JobStatus.PRINTING: frozenset({
-            JobStatus.PAUSED,
-            JobStatus.COMPLETED,
-            JobStatus.FAILED,
-            JobStatus.CANCELLED,
-        }),
-        JobStatus.PAUSED: frozenset({
-            JobStatus.PRINTING,
-            JobStatus.CANCELLED,
-            JobStatus.FAILED,
-        }),
+        JobStatus.QUEUED: frozenset(
+            {
+                JobStatus.STARTING,
+                JobStatus.CANCELLED,
+                JobStatus.FAILED,
+            }
+        ),
+        JobStatus.STARTING: frozenset(
+            {
+                JobStatus.PRINTING,
+                JobStatus.FAILED,
+                JobStatus.CANCELLED,
+            }
+        ),
+        JobStatus.PRINTING: frozenset(
+            {
+                JobStatus.PAUSED,
+                JobStatus.COMPLETED,
+                JobStatus.FAILED,
+                JobStatus.CANCELLED,
+            }
+        ),
+        JobStatus.PAUSED: frozenset(
+            {
+                JobStatus.PRINTING,
+                JobStatus.CANCELLED,
+                JobStatus.FAILED,
+            }
+        ),
         # Terminal states — no outgoing transitions
         JobStatus.COMPLETED: frozenset(),
         JobStatus.FAILED: frozenset(),
@@ -147,9 +150,7 @@ class JobStateMachine:
     }
 
     @classmethod
-    def validate(
-        cls, job_id: str, from_status: JobStatus, to_status: JobStatus
-    ) -> None:
+    def validate(cls, job_id: str, from_status: JobStatus, to_status: JobStatus) -> None:
         """Raise :class:`InvalidStateTransition` if the transition is illegal.
 
         :param job_id: Used only for error messages.
@@ -167,9 +168,7 @@ class JobStateMachine:
 
 
 # Stuck job timeout — configurable via environment variable.
-_STUCK_JOB_TIMEOUT_MINUTES: int = int(
-    os.environ.get("KILN_STUCK_JOB_TIMEOUT_MINUTES", "30")
-)
+_STUCK_JOB_TIMEOUT_MINUTES: int = int(os.environ.get("KILN_STUCK_JOB_TIMEOUT_MINUTES", "30"))
 
 
 class PrintQueue:
@@ -185,14 +184,14 @@ class PrintQueue:
 
     def __init__(
         self,
-        db_path: Optional[str] = None,
+        db_path: str | None = None,
         *,
-        event_bus: Optional[Any] = None,
+        event_bus: Any | None = None,
     ) -> None:
-        self._jobs: Dict[str, PrintJob] = {}
+        self._jobs: dict[str, PrintJob] = {}
         self._lock = threading.Lock()
-        self._db: Optional[sqlite3.Connection] = None
-        self._event_bus: Optional[Any] = event_bus  # kiln.events.EventBus
+        self._db: sqlite3.Connection | None = None
+        self._event_bus: Any | None = event_bus  # kiln.events.EventBus
 
         if db_path:
             resolved = os.path.expanduser(db_path)
@@ -225,10 +224,10 @@ class PrintQueue:
     def submit(
         self,
         file_name: str,
-        printer_name: Optional[str] = None,
+        printer_name: str | None = None,
         submitted_by: str = "unknown",
         priority: int = 0,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """Add a new job to the queue.
 
@@ -373,10 +372,10 @@ class PrintQueue:
 
     def list_jobs(
         self,
-        status: Optional[JobStatus] = None,
-        printer_name: Optional[str] = None,
+        status: JobStatus | None = None,
+        printer_name: str | None = None,
         limit: int = 100,
-    ) -> List[PrintJob]:
+    ) -> list[PrintJob]:
         """Return jobs matching the given filters.
 
         Results are ordered by priority (descending) then creation time
@@ -399,7 +398,7 @@ class PrintQueue:
         jobs.sort(key=lambda j: (-j.priority, j.created_at))
         return jobs[:limit]
 
-    def next_job(self, printer_name: Optional[str] = None) -> Optional[PrintJob]:
+    def next_job(self, printer_name: str | None = None) -> PrintJob | None:
         """Return the next queued job to execute.
 
         Picks the highest-priority QUEUED job, optionally filtered to
@@ -417,10 +416,7 @@ class PrintQueue:
             candidates = [j for j in self._jobs.values() if j.status == JobStatus.QUEUED]
 
         if printer_name is not None:
-            candidates = [
-                j for j in candidates
-                if j.printer_name is None or j.printer_name == printer_name
-            ]
+            candidates = [j for j in candidates if j.printer_name is None or j.printer_name == printer_name]
 
         if not candidates:
             return None
@@ -436,10 +432,7 @@ class PrintQueue:
     def active_count(self) -> int:
         """Number of jobs in STARTING or PRINTING state."""
         with self._lock:
-            return sum(
-                1 for j in self._jobs.values()
-                if j.status in (JobStatus.STARTING, JobStatus.PRINTING)
-            )
+            return sum(1 for j in self._jobs.values() if j.status in (JobStatus.STARTING, JobStatus.PRINTING))
 
     @property
     def total_count(self) -> int:
@@ -447,10 +440,10 @@ class PrintQueue:
         with self._lock:
             return len(self._jobs)
 
-    def summary(self) -> Dict[str, int]:
+    def summary(self) -> dict[str, int]:
         """Return a count of jobs per status."""
         with self._lock:
-            counts: Dict[str, int] = {}
+            counts: dict[str, int] = {}
             for job in self._jobs.values():
                 key = job.status.value
                 counts[key] = counts.get(key, 0) + 1
@@ -460,9 +453,7 @@ class PrintQueue:
     # Stuck job detection
     # ------------------------------------------------------------------
 
-    def check_stuck_jobs(
-        self, *, timeout_minutes: Optional[int] = None
-    ) -> List[PrintJob]:
+    def check_stuck_jobs(self, *, timeout_minutes: int | None = None) -> list[PrintJob]:
         """Scan for jobs stuck in STARTING or PRINTING and auto-fail them.
 
         A job is considered stuck if it has been in STARTING or PRINTING
@@ -481,11 +472,12 @@ class PrintQueue:
         """
         timeout = timeout_minutes if timeout_minutes is not None else _STUCK_JOB_TIMEOUT_MINUTES
         cutoff = time.time() - (timeout * 60)
-        failed_jobs: List[PrintJob] = []
+        failed_jobs: list[PrintJob] = []
 
         with self._lock:
             candidates = [
-                j for j in self._jobs.values()
+                j
+                for j in self._jobs.values()
                 if j.status in (JobStatus.STARTING, JobStatus.PRINTING)
                 and j.started_at is not None
                 and j.started_at < cutoff
@@ -552,10 +544,17 @@ class PrintQueue:
                     priority, created_at, started_at, completed_at, error, metadata)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    job.id, job.file_name, job.printer_name,
-                    job.status.value, job.submitted_by, job.priority,
-                    job.created_at, job.started_at, job.completed_at,
-                    job.error, json.dumps(job.metadata),
+                    job.id,
+                    job.file_name,
+                    job.printer_name,
+                    job.status.value,
+                    job.submitted_by,
+                    job.priority,
+                    job.created_at,
+                    job.started_at,
+                    job.completed_at,
+                    job.error,
+                    json.dumps(job.metadata),
                 ),
             )
             self._db.commit()
@@ -571,8 +570,11 @@ class PrintQueue:
                 """UPDATE jobs SET status=?, started_at=?, completed_at=?,
                    error=? WHERE id=?""",
                 (
-                    job.status.value, job.started_at, job.completed_at,
-                    job.error, job.id,
+                    job.status.value,
+                    job.started_at,
+                    job.completed_at,
+                    job.error,
+                    job.id,
                 ),
             )
             self._db.commit()

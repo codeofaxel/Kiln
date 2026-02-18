@@ -23,6 +23,7 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
+
 try:
     from kiln.printers.bambu import BambuAdapter
 except ImportError:

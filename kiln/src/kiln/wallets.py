@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -24,7 +23,7 @@ class WalletInfo:
     """A blockchain wallet address with optional ENS/SNS domain."""
 
     address: str
-    domain: Optional[str] = None
+    domain: str | None = None
     chain: str = ""
 
     def display_name(self) -> str:
@@ -71,10 +70,7 @@ def get_donation_info() -> dict:
     eth = get_ethereum_wallet()
 
     return {
-        "message": (
-            "Kiln is free, open-source software. "
-            "If you find it useful, consider sending a tip!"
-        ),
+        "message": ("Kiln is free, open-source software. If you find it useful, consider sending a tip!"),
         "wallets": {
             "solana": {
                 "address": sol.address,
@@ -87,8 +83,5 @@ def get_donation_info() -> dict:
                 "accepts": ["ETH", "USDC", "ERC-20 tokens"],
             },
         },
-        "note": (
-            "You can send to the ENS/SNS domain names directly from "
-            "any wallet that supports them."
-        ),
+        "note": ("You can send to the ENS/SNS domain names directly from any wallet that supports them."),
     }

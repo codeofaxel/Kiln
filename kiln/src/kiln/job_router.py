@@ -132,15 +132,9 @@ class PrinterScore:
             "available": self.available,
             "estimated_wait_s": round(self.estimated_wait_s, 2),
             "material_success_rate": (
-                round(self.material_success_rate, 4)
-                if self.material_success_rate is not None
-                else None
+                round(self.material_success_rate, 4) if self.material_success_rate is not None else None
             ),
-            "distance_km": (
-                round(self.distance_km, 2)
-                if self.distance_km is not None
-                else None
-            ),
+            "distance_km": (round(self.distance_km, 2) if self.distance_km is not None else None),
         }
 
 
@@ -223,9 +217,7 @@ class JobRouter:
         candidates = self._filter_candidates(criteria, available_printers)
 
         if not candidates:
-            raise RoutingValidationError(
-                "No printers match the required capabilities and constraints"
-            )
+            raise RoutingValidationError("No printers match the required capabilities and constraints")
 
         # Score each candidate
         scores: list[PrinterScore] = []
@@ -322,9 +314,7 @@ class JobRouter:
         if not criteria.material or not isinstance(criteria.material, str):
             raise RoutingValidationError("material must be a non-empty string")
         if len(criteria.material) > _MAX_MATERIAL_LEN:
-            raise RoutingValidationError(
-                f"material must be at most {_MAX_MATERIAL_LEN} characters"
-            )
+            raise RoutingValidationError(f"material must be at most {_MAX_MATERIAL_LEN} characters")
 
         for name, value in [
             ("quality_priority", criteria.quality_priority),
@@ -332,10 +322,7 @@ class JobRouter:
             ("cost_priority", criteria.cost_priority),
         ]:
             if not isinstance(value, int) or value < _MIN_PRIORITY or value > _MAX_PRIORITY:
-                raise RoutingValidationError(
-                    f"{name} must be an integer between "
-                    f"{_MIN_PRIORITY} and {_MAX_PRIORITY}"
-                )
+                raise RoutingValidationError(f"{name} must be an integer between {_MIN_PRIORITY} and {_MAX_PRIORITY}")
 
         if criteria.max_distance_km is not None:
             if not isinstance(criteria.max_distance_km, (int, float)):
@@ -353,9 +340,7 @@ class JobRouter:
             raise RoutingValidationError("available_printers must be a non-empty list")
         for idx, p in enumerate(printers):
             if "printer_id" not in p:
-                raise RoutingValidationError(
-                    f"printer at index {idx} missing required key 'printer_id'"
-                )
+                raise RoutingValidationError(f"printer at index {idx} missing required key 'printer_id'")
 
     # ------------------------------------------------------------------
     # Filtering
@@ -456,9 +441,7 @@ class JobRouter:
             return 0.0
 
         # Refine with learning engine data if available
-        rate = self._get_material_success_rate(
-            criteria.material, printer_info.get("printer_model", "")
-        )
+        rate = self._get_material_success_rate(criteria.material, printer_info.get("printer_model", ""))
         if rate is not None:
             # Blend base compatibility with empirical success rate
             return base * 0.4 + (rate * 100.0) * 0.6
@@ -482,9 +465,7 @@ class JobRouter:
             if insight.sample_count > 0:
                 return insight.success_rate
         except Exception:
-            logger.debug(
-                "Learning engine query failed for %s/%s", material, printer_model
-            )
+            logger.debug("Learning engine query failed for %s/%s", material, printer_model)
 
         return None
 

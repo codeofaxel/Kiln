@@ -13,18 +13,15 @@ import secrets
 import threading
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from kiln.fulfillment.base import (
     FulfillmentError,
-    FulfillmentProvider,
     Material,
     OrderRequest,
     OrderResult,
-    OrderStatus,
     Quote,
     QuoteRequest,
-    ShippingOption,
 )
 from kiln.fulfillment.registry import get_provider, list_providers
 
@@ -51,12 +48,12 @@ class ProviderStatus:
 
     provider: str
     health: ProviderHealth
-    last_check: Optional[float] = None  # Unix timestamp
-    response_time_ms: Optional[float] = None
-    error: Optional[str] = None
+    last_check: float | None = None  # Unix timestamp
+    response_time_ms: float | None = None
+    error: str | None = None
     consecutive_failures: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["health"] = self.health.value
         return data
@@ -70,11 +67,14 @@ class HealthMonitor:
     """
 
     def __init__(self) -> None:
-        self._statuses: Dict[str, ProviderStatus] = {}
+        self._statuses: dict[str, ProviderStatus] = {}
         self._lock = threading.Lock()
 
     def record_success(
-        self, provider_name: str, *, response_time_ms: float = 0.0,
+        self,
+        provider_name: str,
+        *,
+        response_time_ms: float = 0.0,
     ) -> None:
         """Record a successful API call to a provider."""
         with self._lock:
@@ -87,7 +87,10 @@ class HealthMonitor:
             )
 
     def record_failure(
-        self, provider_name: str, *, error: str = "",
+        self,
+        provider_name: str,
+        *,
+        error: str = "",
     ) -> None:
         """Record a failed API call to a provider."""
         with self._lock:
@@ -110,7 +113,7 @@ class HealthMonitor:
                 ProviderStatus(provider=provider_name, health=ProviderHealth.UNKNOWN),
             )
 
-    def get_all_statuses(self) -> List[ProviderStatus]:
+    def get_all_statuses(self) -> list[ProviderStatus]:
         """Return health statuses for all known providers."""
         with self._lock:
             return list(self._statuses.values())
@@ -122,7 +125,7 @@ class HealthMonitor:
 
 
 # Module-level singleton.
-_health_monitor: Optional[HealthMonitor] = None
+_health_monitor: HealthMonitor | None = None
 _health_lock = threading.Lock()
 
 
@@ -147,13 +150,13 @@ class ProviderQuote:
 
     provider_name: str
     provider_display_name: str
-    quote: Optional[Quote] = None
-    error: Optional[str] = None
+    quote: Quote | None = None
+    error: str | None = None
     response_time_ms: float = 0.0
     health: str = "unknown"
 
-    def to_dict(self) -> Dict[str, Any]:
-        data: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
             "provider_name": self.provider_name,
             "provider_display_name": self.provider_display_name,
             "response_time_ms": self.response_time_ms,
@@ -170,13 +173,13 @@ class ProviderQuote:
 class QuoteComparison:
     """Side-by-side quotes from multiple fulfillment providers."""
 
-    quotes: List[ProviderQuote]
-    cheapest: Optional[str] = None        # Provider name
-    fastest: Optional[str] = None         # Provider name
-    recommended: Optional[str] = None     # Provider name (best balance)
+    quotes: list[ProviderQuote]
+    cheapest: str | None = None  # Provider name
+    fastest: str | None = None  # Provider name
+    recommended: str | None = None  # Provider name (best balance)
     summary: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["quotes"] = [q.to_dict() for q in self.quotes]
         return data
@@ -188,7 +191,7 @@ def compare_providers(
     *,
     quantity: int = 1,
     shipping_country: str = "US",
-    providers: Optional[List[str]] = None,
+    providers: list[str] | None = None,
 ) -> QuoteComparison:
     """Get quotes from multiple providers and compare them.
 
@@ -204,7 +207,7 @@ def compare_providers(
     """
     monitor = get_health_monitor()
     provider_names = providers or list_providers()
-    results: List[ProviderQuote] = []
+    results: list[ProviderQuote] = []
 
     request = QuoteRequest(
         file_path=file_path,
@@ -215,12 +218,14 @@ def compare_providers(
 
     for name in provider_names:
         if not monitor.is_healthy(name):
-            results.append(ProviderQuote(
-                provider_name=name,
-                provider_display_name=name,
-                error=f"Provider {name} is currently unhealthy, skipped.",
-                health=monitor.get_status(name).health.value,
-            ))
+            results.append(
+                ProviderQuote(
+                    provider_name=name,
+                    provider_display_name=name,
+                    error=f"Provider {name} is currently unhealthy, skipped.",
+                    health=monitor.get_status(name).health.value,
+                )
+            )
             continue
 
         start = time.monotonic()
@@ -229,23 +234,27 @@ def compare_providers(
             quote = provider.get_quote(request)
             elapsed = (time.monotonic() - start) * 1000
             monitor.record_success(name, response_time_ms=elapsed)
-            results.append(ProviderQuote(
-                provider_name=name,
-                provider_display_name=provider.display_name,
-                quote=quote,
-                response_time_ms=round(elapsed, 1),
-                health="healthy",
-            ))
+            results.append(
+                ProviderQuote(
+                    provider_name=name,
+                    provider_display_name=provider.display_name,
+                    quote=quote,
+                    response_time_ms=round(elapsed, 1),
+                    health="healthy",
+                )
+            )
         except (FulfillmentError, RuntimeError, FileNotFoundError) as exc:
             elapsed = (time.monotonic() - start) * 1000
             monitor.record_failure(name, error=str(exc))
-            results.append(ProviderQuote(
-                provider_name=name,
-                provider_display_name=name,
-                error=str(exc),
-                response_time_ms=round(elapsed, 1),
-                health=monitor.get_status(name).health.value,
-            ))
+            results.append(
+                ProviderQuote(
+                    provider_name=name,
+                    provider_display_name=name,
+                    error=str(exc),
+                    response_time_ms=round(elapsed, 1),
+                    health=monitor.get_status(name).health.value,
+                )
+            )
 
     # Find cheapest and fastest among successful quotes
     successful = [r for r in results if r.quote is not None]
@@ -266,16 +275,13 @@ def compare_providers(
         # Recommendation: prefer cheapest unless fastest is significantly quicker
         # and only modestly more expensive (< 20% premium for > 3 days faster).
         recommended = cheapest
-        if (
-            cheapest != fastest
-            and by_price[0].quote.lead_time_days
-            and by_time[0].quote.lead_time_days
-        ):
+        if cheapest != fastest and by_price[0].quote.lead_time_days and by_time[0].quote.lead_time_days:
             time_diff = by_price[0].quote.lead_time_days - by_time[0].quote.lead_time_days
             price_diff_pct = (
-                (by_time[0].quote.total_price - by_price[0].quote.total_price)
-                / by_price[0].quote.total_price * 100
-            ) if by_price[0].quote.total_price > 0 else 0
+                ((by_time[0].quote.total_price - by_price[0].quote.total_price) / by_price[0].quote.total_price * 100)
+                if by_price[0].quote.total_price > 0
+                else 0
+            )
             if time_diff > 3 and price_diff_pct < 20:
                 recommended = fastest
 
@@ -285,9 +291,7 @@ def compare_providers(
         summary_parts.append(f"Cheapest: {cheapest} at ${c.quote.total_price:.2f}.")
     if fastest:
         f = next(r for r in successful if r.provider_name == fastest)
-        summary_parts.append(
-            f"Fastest: {fastest} ({f.quote.lead_time_days or '?'} days)."
-        )
+        summary_parts.append(f"Fastest: {fastest} ({f.quote.lead_time_days or '?'} days).")
 
     return QuoteComparison(
         quotes=results,
@@ -307,21 +311,21 @@ def compare_providers(
 class MaterialFilter:
     """Criteria for filtering available materials."""
 
-    technology: Optional[str] = None
-    color: Optional[str] = None
-    finish: Optional[str] = None
-    max_price_per_cm3: Optional[float] = None
-    min_wall_mm: Optional[float] = None
-    search_text: Optional[str] = None
+    technology: str | None = None
+    color: str | None = None
+    finish: str | None = None
+    max_price_per_cm3: float | None = None
+    min_wall_mm: float | None = None
+    search_text: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None}
 
 
 def filter_materials(
-    materials: List[Material],
+    materials: list[Material],
     criteria: MaterialFilter,
-) -> List[Material]:
+) -> list[Material]:
     """Filter a material list by technology, color, finish, price, or text search.
 
     Args:
@@ -346,22 +350,15 @@ def filter_materials(
         result = [m for m in result if finish in m.finish.lower()]
 
     if criteria.max_price_per_cm3 is not None:
-        result = [
-            m for m in result
-            if m.price_per_cm3 is not None and m.price_per_cm3 <= criteria.max_price_per_cm3
-        ]
+        result = [m for m in result if m.price_per_cm3 is not None and m.price_per_cm3 <= criteria.max_price_per_cm3]
 
     if criteria.min_wall_mm is not None:
-        result = [
-            m for m in result
-            if m.min_wall_mm is not None and m.min_wall_mm <= criteria.min_wall_mm
-        ]
+        result = [m for m in result if m.min_wall_mm is not None and m.min_wall_mm <= criteria.min_wall_mm]
 
     if criteria.search_text:
         text = criteria.search_text.lower()
         result = [
-            m for m in result
-            if text in m.name.lower() or text in m.technology.lower() or text in m.color.lower()
+            m for m in result if text in m.name.lower() or text in m.technology.lower() or text in m.color.lower()
         ]
 
     return result
@@ -379,7 +376,7 @@ class BatchQuoteItem:
     file_path: str
     material_id: str
     quantity: int = 1
-    label: str = ""   # Optional user label like "Left bracket"
+    label: str = ""  # Optional user label like "Left bracket"
 
 
 @dataclass
@@ -388,11 +385,11 @@ class BatchQuoteResult:
 
     label: str
     file_path: str
-    quote: Optional[Quote] = None
-    error: Optional[str] = None
+    quote: Quote | None = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        data: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
             "label": self.label,
             "file_path": self.file_path,
         }
@@ -407,22 +404,22 @@ class BatchQuoteResult:
 class BatchQuote:
     """Aggregated batch quote for multiple parts."""
 
-    items: List[BatchQuoteResult]
+    items: list[BatchQuoteResult]
     total_price: float
     currency: str = "USD"
     successful_count: int = 0
     failed_count: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["items"] = [i.to_dict() for i in self.items]
         return data
 
 
 def batch_quote(
-    items: List[BatchQuoteItem],
+    items: list[BatchQuoteItem],
     *,
-    provider_name: Optional[str] = None,
+    provider_name: str | None = None,
     shipping_country: str = "US",
 ) -> BatchQuote:
     """Get quotes for multiple parts in a single operation.
@@ -437,7 +434,7 @@ def batch_quote(
     """
     provider = get_provider(provider_name)
     monitor = get_health_monitor()
-    results: List[BatchQuoteResult] = []
+    results: list[BatchQuoteResult] = []
     total = 0.0
     success = 0
     fail = 0
@@ -445,23 +442,33 @@ def batch_quote(
     for item in items:
         label = item.label or item.file_path.rsplit("/", 1)[-1]
         try:
-            quote = provider.get_quote(QuoteRequest(
-                file_path=item.file_path,
-                material_id=item.material_id,
-                quantity=item.quantity,
-                shipping_country=shipping_country,
-            ))
+            quote = provider.get_quote(
+                QuoteRequest(
+                    file_path=item.file_path,
+                    material_id=item.material_id,
+                    quantity=item.quantity,
+                    shipping_country=shipping_country,
+                )
+            )
             monitor.record_success(provider.name)
-            results.append(BatchQuoteResult(
-                label=label, file_path=item.file_path, quote=quote,
-            ))
+            results.append(
+                BatchQuoteResult(
+                    label=label,
+                    file_path=item.file_path,
+                    quote=quote,
+                )
+            )
             total += quote.total_price
             success += 1
         except (FulfillmentError, FileNotFoundError) as exc:
             monitor.record_failure(provider.name, error=str(exc))
-            results.append(BatchQuoteResult(
-                label=label, file_path=item.file_path, error=str(exc),
-            ))
+            results.append(
+                BatchQuoteResult(
+                    label=label,
+                    file_path=item.file_path,
+                    error=str(exc),
+                )
+            )
             fail += 1
 
     return BatchQuote(
@@ -484,13 +491,13 @@ class RetryResult:
 
     success: bool
     provider_used: str
-    order_result: Optional[OrderResult] = None
+    order_result: OrderResult | None = None
     attempts: int = 0
     fallback_used: bool = False
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
-        data: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
             "success": self.success,
             "provider_used": self.provider_used,
             "attempts": self.attempts,
@@ -507,9 +514,9 @@ def place_order_with_retry(
     quote_id: str,
     *,
     shipping_option_id: str = "",
-    shipping_address: Optional[Dict[str, str]] = None,
-    primary_provider: Optional[str] = None,
-    fallback_providers: Optional[List[str]] = None,
+    shipping_address: dict[str, str] | None = None,
+    primary_provider: str | None = None,
+    fallback_providers: list[str] | None = None,
     max_retries: int = 2,
 ) -> RetryResult:
     """Place an order with automatic retry and provider fallback.
@@ -529,7 +536,7 @@ def place_order_with_retry(
         RetryResult with the outcome and any errors encountered.
     """
     monitor = get_health_monitor()
-    errors: List[str] = []
+    errors: list[str] = []
     attempts = 0
 
     request = OrderRequest(
@@ -600,15 +607,15 @@ class OrderRecord:
     quantity: int
     total_price: float
     currency: str = "USD"
-    shipping_address: Dict[str, str] = field(default_factory=dict)
-    tracking_url: Optional[str] = None
-    tracking_number: Optional[str] = None
-    quote_id: Optional[str] = None
+    shipping_address: dict[str, str] = field(default_factory=dict)
+    tracking_url: str | None = None
+    tracking_number: str | None = None
+    quote_id: str | None = None
     created_at: float = 0.0
     updated_at: float = 0.0
     notes: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -620,7 +627,7 @@ class OrderHistory:
     """
 
     def __init__(self, *, db: Any = None) -> None:
-        self._orders: Dict[str, OrderRecord] = {}
+        self._orders: dict[str, OrderRecord] = {}
         self._db = db
         self._lock = threading.Lock()
 
@@ -635,10 +642,10 @@ class OrderHistory:
         total_price: float,
         *,
         currency: str = "USD",
-        shipping_address: Optional[Dict[str, str]] = None,
-        tracking_url: Optional[str] = None,
-        tracking_number: Optional[str] = None,
-        quote_id: Optional[str] = None,
+        shipping_address: dict[str, str] | None = None,
+        tracking_url: str | None = None,
+        tracking_number: str | None = None,
+        quote_id: str | None = None,
         notes: str = "",
     ) -> OrderRecord:
         """Save or update an order in history."""
@@ -688,8 +695,11 @@ class OrderHistory:
         return record
 
     def list_orders(
-        self, *, limit: int = 20, provider: Optional[str] = None,
-    ) -> List[OrderRecord]:
+        self,
+        *,
+        limit: int = 20,
+        provider: str | None = None,
+    ) -> list[OrderRecord]:
         """Return recent orders, optionally filtered by provider."""
         with self._lock:
             orders = list(self._orders.values())
@@ -700,7 +710,7 @@ class OrderHistory:
         orders.sort(key=lambda o: o.created_at, reverse=True)
         return orders[:limit]
 
-    def get_order(self, order_id: str) -> Optional[OrderRecord]:
+    def get_order(self, order_id: str) -> OrderRecord | None:
         """Look up an order by order_id."""
         with self._lock:
             for rec in self._orders.values():
@@ -712,6 +722,7 @@ class OrderHistory:
         """Persist an order record to SQLite."""
         try:
             import json
+
             self._db.execute(
                 """INSERT OR REPLACE INTO fulfillment_orders
                    (id, order_id, provider, status, file_path, material_id,
@@ -720,13 +731,22 @@ class OrderHistory:
                     created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    record.id, record.order_id, record.provider, record.status,
-                    record.file_path, record.material_id, record.quantity,
-                    record.total_price, record.currency,
+                    record.id,
+                    record.order_id,
+                    record.provider,
+                    record.status,
+                    record.file_path,
+                    record.material_id,
+                    record.quantity,
+                    record.total_price,
+                    record.currency,
                     json.dumps(record.shipping_address),
-                    record.tracking_url, record.tracking_number,
-                    record.quote_id, record.notes,
-                    record.created_at, record.updated_at,
+                    record.tracking_url,
+                    record.tracking_number,
+                    record.quote_id,
+                    record.notes,
+                    record.created_at,
+                    record.updated_at,
                 ),
             )
             self._db.commit()
@@ -741,7 +761,7 @@ class OrderHistory:
 
 
 # Module-level singleton.
-_order_history: Optional[OrderHistory] = None
+_order_history: OrderHistory | None = None
 _order_history_lock = threading.Lock()
 
 
@@ -764,9 +784,9 @@ class InsuranceTier(enum.Enum):
     """Shipping insurance tiers."""
 
     NONE = "none"
-    BASIC = "basic"       # Covers loss only
-    STANDARD = "standard" # Covers loss + damage
-    PREMIUM = "premium"   # Covers loss + damage + reprint guarantee
+    BASIC = "basic"  # Covers loss only
+    STANDARD = "standard"  # Covers loss + damage
+    PREMIUM = "premium"  # Covers loss + damage + reprint guarantee
 
 
 @dataclass
@@ -781,13 +801,13 @@ class InsuranceOption:
     coverage_percent: int = 100
     max_coverage: float = 0.0  # 0 = unlimited up to order value
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["tier"] = self.tier.value
         return data
 
 
-def get_insurance_options(order_value: float, *, currency: str = "USD") -> List[InsuranceOption]:
+def get_insurance_options(order_value: float, *, currency: str = "USD") -> list[InsuranceOption]:
     """Return available shipping insurance options for an order.
 
     Args:
@@ -853,10 +873,10 @@ class QuoteValidation:
     provider: str
     quoted_price: float
     currency: str = "USD"
-    error: Optional[str] = None
-    warnings: List[str] = field(default_factory=list)
+    error: str | None = None
+    warnings: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -866,7 +886,7 @@ def _check_price_drift(
     *,
     warn_threshold: float = 0.10,
     block_threshold: float = 0.25,
-) -> Tuple[Optional[str], bool]:
+) -> tuple[str | None, bool]:
     """Check if the actual price drifted from the quoted price.
 
     :returns:
@@ -893,7 +913,7 @@ def _check_price_drift(
 def validate_quote_for_order(
     quote_id: str,
     *,
-    provider_name: Optional[str] = None,
+    provider_name: str | None = None,
 ) -> QuoteValidation:
     """Validate that a quote is still eligible for order placement.
 
@@ -944,11 +964,10 @@ def validate_quote_for_order(
             code="PROVIDER_DOWN",
         )
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     if status.health == ProviderHealth.DEGRADED:
         warnings.append(
-            f"Provider '{prov}' is experiencing degraded performance. "
-            "The order may take longer to process."
+            f"Provider '{prov}' is experiencing degraded performance. The order may take longer to process."
         )
 
     return QuoteValidation(

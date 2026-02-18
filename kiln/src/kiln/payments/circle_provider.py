@@ -29,7 +29,7 @@ import os
 import re
 import secrets
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 from requests.exceptions import ConnectionError as ReqConnectionError
@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BASE_URL = "https://api.circle.com"
 
 # Map W3S transaction states to PaymentStatus.
-_W3S_STATUS_MAP: Dict[str, PaymentStatus] = {
+_W3S_STATUS_MAP: dict[str, PaymentStatus] = {
     "COMPLETE": PaymentStatus.COMPLETED,
     "CONFIRMED": PaymentStatus.PROCESSING,
     "SENT": PaymentStatus.PROCESSING,
@@ -62,7 +62,7 @@ _W3S_STATUS_MAP: Dict[str, PaymentStatus] = {
 }
 
 # USDC token contract addresses per blockchain.
-_USDC_ADDRESSES: Dict[str, str] = {
+_USDC_ADDRESSES: dict[str, str] = {
     "SOL": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "SOL-DEVNET": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
     "ETH": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
@@ -70,7 +70,7 @@ _USDC_ADDRESSES: Dict[str, str] = {
     "BASE-SEPOLIA": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
 }
 
-_RAIL_TO_CHAIN: Dict[PaymentRail, str] = {
+_RAIL_TO_CHAIN: dict[PaymentRail, str] = {
     PaymentRail.SOLANA: "SOL",
     PaymentRail.BASE: "BASE",
 }
@@ -129,28 +129,21 @@ class CircleProvider(PaymentProvider):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        entity_secret: Optional[str] = None,
-        wallet_id: Optional[str] = None,
+        api_key: str | None = None,
+        entity_secret: str | None = None,
+        wallet_id: str | None = None,
         default_network: str = "solana",
         base_url: str = _DEFAULT_BASE_URL,
     ) -> None:
         self._api_key = api_key or os.environ.get("KILN_CIRCLE_API_KEY", "")
-        self._entity_secret = entity_secret or os.environ.get(
-            "KILN_CIRCLE_ENTITY_SECRET", ""
-        )
+        self._entity_secret = entity_secret or os.environ.get("KILN_CIRCLE_ENTITY_SECRET", "")
         self._wallet_id = wallet_id or os.environ.get("KILN_CIRCLE_WALLET_ID", "")
         self._wallet_set_id = os.environ.get("KILN_CIRCLE_WALLET_SET_ID", "")
         self._base_url = base_url.rstrip("/")
-        self._default_network = default_network or os.environ.get(
-            "KILN_CIRCLE_NETWORK", "solana"
-        )
+        self._default_network = default_network or os.environ.get("KILN_CIRCLE_NETWORK", "solana")
 
         if not self._api_key:
-            raise ValueError(
-                "Circle API key required. "
-                "Set KILN_CIRCLE_API_KEY or pass api_key."
-            )
+            raise ValueError("Circle API key required. Set KILN_CIRCLE_API_KEY or pass api_key.")
 
         self._session = requests.Session()
         self._session.headers.update(
@@ -162,7 +155,7 @@ class CircleProvider(PaymentProvider):
         )
 
         # Lazily fetched and cached RSA public key for entity secret encryption.
-        self._public_key_pem: Optional[str] = None
+        self._public_key_pem: str | None = None
 
     # -- PaymentProvider identity ---------------------------------------------
 
@@ -190,7 +183,7 @@ class CircleProvider(PaymentProvider):
         method: str,
         path: str,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Execute an authenticated HTTP request to the Circle API.
 
         Args:
@@ -211,8 +204,7 @@ class CircleProvider(PaymentProvider):
 
             if not response.ok:
                 raise PaymentError(
-                    f"Circle API returned HTTP {response.status_code} "
-                    f"for {method} {path}: {response.text[:300]}",
+                    f"Circle API returned HTTP {response.status_code} for {method} {path}: {response.text[:300]}",
                     code=f"HTTP_{response.status_code}",
                 )
 
@@ -223,8 +215,7 @@ class CircleProvider(PaymentProvider):
 
         except Timeout as exc:
             raise PaymentError(
-                "Circle API timeout. USDC transfers usually complete in "
-                "under 30 seconds — please try again shortly.",
+                "Circle API timeout. USDC transfers usually complete in under 30 seconds — please try again shortly.",
                 code="TIMEOUT",
             ) from exc
         except ReqConnectionError as exc:
@@ -303,11 +294,7 @@ class CircleProvider(PaymentProvider):
             chain = _RAIL_TO_CHAIN[rail]
         else:
             # Fall back to default network
-            default_rail = (
-                PaymentRail.SOLANA
-                if self._default_network == "solana"
-                else PaymentRail.BASE
-            )
+            default_rail = PaymentRail.SOLANA if self._default_network == "solana" else PaymentRail.BASE
             chain = _RAIL_TO_CHAIN.get(default_rail, "SOL")
 
         # TEST_API_KEY requires testnet blockchains
@@ -342,7 +329,7 @@ class CircleProvider(PaymentProvider):
 
     # -- Setup methods (for initial configuration) ----------------------------
 
-    def setup_entity_secret(self) -> Dict[str, str]:
+    def setup_entity_secret(self) -> dict[str, str]:
         """Generate and register an entity secret with Circle.
 
         This is a one-time setup step.  The returned hex string must be saved
@@ -366,9 +353,7 @@ class CircleProvider(PaymentProvider):
         payload = {
             "entitySecretCiphertext": ciphertext,
         }
-        data = self._request(
-            "POST", "/v1/w3s/config/entity/entitySecret", json=payload
-        )
+        data = self._request("POST", "/v1/w3s/config/entity/entitySecret", json=payload)
 
         recovery_file = data.get("data", {}).get("recoveryFile", "")
 
@@ -382,7 +367,7 @@ class CircleProvider(PaymentProvider):
             "recovery_file": recovery_file,
         }
 
-    def setup_wallet(self, blockchain: str = "SOL") -> Dict[str, str]:
+    def setup_wallet(self, blockchain: str = "SOL") -> dict[str, str]:
         """Create a wallet set and wallet for developer-controlled transfers.
 
         This is a one-time setup step.  The returned wallet ID must be saved
@@ -407,9 +392,7 @@ class CircleProvider(PaymentProvider):
                 "entitySecretCiphertext": ciphertext,
                 "name": f"kiln-{blockchain.lower()}",
             }
-            ws_data = self._request(
-                "POST", "/v1/w3s/developer/walletSets", json=ws_payload
-            )
+            ws_data = self._request("POST", "/v1/w3s/developer/walletSets", json=ws_payload)
             wallet_set = ws_data.get("data", {}).get("walletSet", {})
             wallet_set_id = wallet_set.get("id", "")
             if not wallet_set_id:
@@ -429,9 +412,7 @@ class CircleProvider(PaymentProvider):
             "count": 1,
             "walletSetId": wallet_set_id,
         }
-        w_data = self._request(
-            "POST", "/v1/w3s/developer/wallets", json=w_payload
-        )
+        w_data = self._request("POST", "/v1/w3s/developer/wallets", json=w_payload)
         wallets = w_data.get("data", {}).get("wallets", [])
         if not wallets:
             raise PaymentError(
@@ -463,7 +444,7 @@ class CircleProvider(PaymentProvider):
             "address": address,
         }
 
-    def get_wallet_balance(self, wallet_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_wallet_balance(self, wallet_id: str | None = None) -> dict[str, Any]:
         """Check the USDC balance of a wallet.
 
         Args:
@@ -485,7 +466,7 @@ class CircleProvider(PaymentProvider):
         data = self._request("GET", f"/v1/w3s/wallets/{wid}/balances")
         token_balances = data.get("data", {}).get("tokenBalances", [])
 
-        balances: List[Dict[str, Any]] = []
+        balances: list[dict[str, Any]] = []
         for tb in token_balances:
             balances.append(
                 {
@@ -522,8 +503,7 @@ class CircleProvider(PaymentProvider):
         """
         if not self._wallet_id:
             raise PaymentError(
-                "Wallet ID required for transfers. "
-                "Set KILN_CIRCLE_WALLET_ID or run setup_wallet().",
+                "Wallet ID required for transfers. Set KILN_CIRCLE_WALLET_ID or run setup_wallet().",
                 code="MISSING_WALLET_ID",
             )
 
@@ -543,9 +523,7 @@ class CircleProvider(PaymentProvider):
             )
         # Basic format validation -- Ethereum addresses are 42 chars (0x + 40 hex),
         # Solana addresses are 32-44 chars base58.
-        if not re.match(
-            r"^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$", dest_address
-        ):
+        if not re.match(r"^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$", dest_address):
             return PaymentResult(
                 success=False,
                 payment_id="",
@@ -581,9 +559,7 @@ class CircleProvider(PaymentProvider):
         )
 
         try:
-            data = self._request(
-                "POST", "/v1/w3s/developer/transactions/transfer", json=payload
-            )
+            data = self._request("POST", "/v1/w3s/developer/transactions/transfer", json=payload)
         except PaymentError as exc:
             raise PaymentError(
                 f"USDC transfer failed: {exc}. "
@@ -680,15 +656,12 @@ class CircleProvider(PaymentProvider):
         """
         if not self._wallet_id:
             raise PaymentError(
-                "Wallet ID required for refunds. "
-                "Set KILN_CIRCLE_WALLET_ID or run setup_wallet().",
+                "Wallet ID required for refunds. Set KILN_CIRCLE_WALLET_ID or run setup_wallet().",
                 code="MISSING_WALLET_ID",
             )
 
         # Retrieve the original transaction
-        original_data = self._request(
-            "GET", f"/v1/w3s/transactions/{payment_id}"
-        )
+        original_data = self._request("GET", f"/v1/w3s/transactions/{payment_id}")
         transaction = original_data.get("data", {}).get("transaction", {})
         if not transaction:
             transaction = original_data.get("data", original_data)
@@ -710,8 +683,7 @@ class CircleProvider(PaymentProvider):
             # If source address not available, try destinationAddress
             # (for inbound transfers, source is the external address)
             raise PaymentError(
-                "Cannot determine refund destination: "
-                "original transaction has no source address.",
+                "Cannot determine refund destination: original transaction has no source address.",
                 code="MISSING_SOURCE_ADDRESS",
             )
 
@@ -752,9 +724,7 @@ class CircleProvider(PaymentProvider):
             refund_dest,
         )
 
-        data = self._request(
-            "POST", "/v1/w3s/developer/transactions/transfer", json=refund_payload
-        )
+        data = self._request("POST", "/v1/w3s/developer/transactions/transfer", json=refund_payload)
 
         tx_ids = data.get("data", {}).get("transactionIds", [])
         if not tx_ids:

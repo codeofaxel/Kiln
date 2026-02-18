@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,7 @@ _DATA_FILE = Path(__file__).resolve().parent / "data" / "printer_intelligence.js
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class MaterialProfile:
@@ -76,17 +77,17 @@ class PrinterIntel:
     hotend_type: str
     has_enclosure: bool
     has_abl: bool
-    materials: Dict[str, MaterialProfile]
-    quirks: List[str]
-    calibration: Dict[str, str]
-    failure_modes: List[FailureMode]
+    materials: dict[str, MaterialProfile]
+    quirks: list[str]
+    calibration: dict[str, str]
+    failure_modes: list[FailureMode]
 
 
 # ---------------------------------------------------------------------------
 # Singleton cache
 # ---------------------------------------------------------------------------
 
-_cache: Dict[str, PrinterIntel] = {}
+_cache: dict[str, PrinterIntel] = {}
 _loaded: bool = False
 
 
@@ -117,11 +118,13 @@ def _load() -> None:
 
             failure_modes = []
             for fm in data.get("failure_modes", []):
-                failure_modes.append(FailureMode(
-                    symptom=fm["symptom"],
-                    cause=fm["cause"],
-                    fix=fm["fix"],
-                ))
+                failure_modes.append(
+                    FailureMode(
+                        symptom=fm["symptom"],
+                        cause=fm["cause"],
+                        fix=fm["fix"],
+                    )
+                )
 
             _cache[key] = PrinterIntel(
                 id=key,
@@ -147,6 +150,7 @@ def _load() -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def get_printer_intel(printer_id: str) -> PrinterIntel:
     """Return operational intelligence for *printer_id*.
 
@@ -168,7 +172,7 @@ def get_printer_intel(printer_id: str) -> PrinterIntel:
     raise KeyError(f"No printer intelligence for '{printer_id}' and no default available.")
 
 
-def list_intel_profiles() -> List[str]:
+def list_intel_profiles() -> list[str]:
     """Return all available printer intel profile IDs."""
     _load()
     return sorted(_cache.keys())
@@ -177,7 +181,7 @@ def list_intel_profiles() -> List[str]:
 def get_material_settings(
     printer_id: str,
     material: str,
-) -> Optional[MaterialProfile]:
+) -> MaterialProfile | None:
     """Get recommended settings for a material on a specific printer.
 
     Returns ``None`` if the material isn't in the printer's profile.
@@ -189,7 +193,7 @@ def get_material_settings(
 def diagnose_issue(
     printer_id: str,
     symptom: str,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Search failure modes for matching symptoms.
 
     Returns a list of matching ``{symptom, cause, fix}`` dicts.
@@ -203,15 +207,17 @@ def diagnose_issue(
             or symptom_lower in fm.cause.lower()
             or any(word in fm.symptom.lower() for word in symptom_lower.split() if len(word) > 3)
         ):
-            matches.append({
-                "symptom": fm.symptom,
-                "cause": fm.cause,
-                "fix": fm.fix,
-            })
+            matches.append(
+                {
+                    "symptom": fm.symptom,
+                    "cause": fm.cause,
+                    "fix": fm.fix,
+                }
+            )
     return matches
 
 
-def intel_to_dict(intel: PrinterIntel) -> Dict[str, Any]:
+def intel_to_dict(intel: PrinterIntel) -> dict[str, Any]:
     """Serialise a :class:`PrinterIntel` to a plain dict for MCP responses."""
     return {
         "id": intel.id,
@@ -227,8 +233,5 @@ def intel_to_dict(intel: PrinterIntel) -> Dict[str, Any]:
         },
         "quirks": intel.quirks,
         "calibration": intel.calibration,
-        "failure_modes": [
-            {"symptom": fm.symptom, "cause": fm.cause, "fix": fm.fix}
-            for fm in intel.failure_modes
-        ],
+        "failure_modes": [{"symptom": fm.symptom, "cause": fm.cause, "fix": fm.fix} for fm in intel.failure_modes],
     }

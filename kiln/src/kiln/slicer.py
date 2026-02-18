@@ -29,7 +29,6 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +37,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Names to probe on PATH, in preference order.
-_SLICER_NAMES: List[str] = [
+_SLICER_NAMES: list[str] = [
     "prusa-slicer",
     "PrusaSlicer",
     "prusaslicer",
@@ -49,7 +48,7 @@ _SLICER_NAMES: List[str] = [
 
 # Common install locations on macOS (app bundles).
 # Only populated on macOS to avoid useless stat() calls on Linux/WSL.
-_MACOS_PATHS: List[str] = (
+_MACOS_PATHS: list[str] = (
     [
         "/Applications/PrusaSlicer.app/Contents/MacOS/PrusaSlicer",
         "/Applications/Original Prusa Drivers/PrusaSlicer.app/Contents/MacOS/PrusaSlicer",
@@ -70,6 +69,7 @@ _DEFAULT_OUTPUT_DIR = os.path.join(tempfile.gettempdir(), "kiln_sliced")
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class SlicerError(Exception):
     """Raised when slicing fails."""
 
@@ -82,13 +82,14 @@ class SlicerNotFoundError(SlicerError):
 # Dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SlicerInfo:
     """Information about a discovered slicer binary."""
 
     path: str
     name: str
-    version: Optional[str] = None
+    version: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -103,8 +104,8 @@ class SliceResult:
     """Outcome of a slicing operation."""
 
     success: bool
-    output_path: Optional[str] = None
-    slicer: Optional[str] = None
+    output_path: str | None = None
+    slicer: str | None = None
     message: str = ""
     stdout: str = ""
     stderr: str = ""
@@ -125,7 +126,8 @@ class SliceResult:
 # Slicer discovery
 # ---------------------------------------------------------------------------
 
-def find_slicer(slicer_path: Optional[str] = None) -> SlicerInfo:
+
+def find_slicer(slicer_path: str | None = None) -> SlicerInfo:
     """Locate a slicer binary on the system.
 
     Args:
@@ -175,7 +177,7 @@ def find_slicer(slicer_path: Optional[str] = None) -> SlicerInfo:
     )
 
 
-def _get_version(slicer_path: str) -> Optional[str]:
+def _get_version(slicer_path: str) -> str | None:
     """Try to get the slicer version string."""
     try:
         result = subprocess.run(
@@ -198,15 +200,16 @@ def _get_version(slicer_path: str) -> Optional[str]:
 # Slicing
 # ---------------------------------------------------------------------------
 
+
 def slice_file(
     input_path: str,
     *,
-    output_dir: Optional[str] = None,
-    output_name: Optional[str] = None,
-    profile: Optional[str] = None,
-    printer_preset: Optional[str] = None,
-    slicer_path: Optional[str] = None,
-    extra_args: Optional[List[str]] = None,
+    output_dir: str | None = None,
+    output_name: str | None = None,
+    profile: str | None = None,
+    printer_preset: str | None = None,
+    slicer_path: str | None = None,
+    extra_args: list[str] | None = None,
     timeout: int = 300,
 ) -> SliceResult:
     """Slice a 3D model file to G-code.
@@ -239,10 +242,7 @@ def slice_file(
 
     ext = Path(input_abs).suffix.lower()
     if ext not in _INPUT_EXTENSIONS:
-        raise SlicerError(
-            f"Unsupported input format '{ext}'. "
-            f"Supported: {', '.join(sorted(_INPUT_EXTENSIONS))}"
-        )
+        raise SlicerError(f"Unsupported input format '{ext}'. Supported: {', '.join(sorted(_INPUT_EXTENSIONS))}")
 
     # Find slicer
     slicer = find_slicer(slicer_path)
@@ -265,11 +265,12 @@ def slice_file(
         out_file = os.path.join(out_dir, f"{stem}.gcode")
 
     # Build command
-    cmd: List[str] = [
+    cmd: list[str] = [
         slicer.path,
         "--export-gcode",
         input_abs,
-        "--output", out_file,
+        "--output",
+        out_file,
     ]
 
     # PrusaSlicer preset selection helps enforce printer-specific machine
@@ -297,24 +298,19 @@ def slice_file(
         )
     except subprocess.TimeoutExpired:
         raise SlicerError(
-            f"Slicing timed out after {timeout}s. "
-            "The model may be too complex or the slicer is hanging."
-        )
+            f"Slicing timed out after {timeout}s. The model may be too complex or the slicer is hanging."
+        ) from None
     except OSError as exc:
-        raise SlicerError(f"Failed to run slicer: {exc}")
+        raise SlicerError(f"Failed to run slicer: {exc}") from exc
 
     if result.returncode != 0:
         stderr_snippet = (result.stderr or "").strip()[:500]
-        raise SlicerError(
-            f"Slicer exited with code {result.returncode}. "
-            f"stderr: {stderr_snippet}"
-        )
+        raise SlicerError(f"Slicer exited with code {result.returncode}. stderr: {stderr_snippet}")
 
     # Verify output exists
     if not os.path.isfile(out_file):
         raise SlicerError(
-            f"Slicer completed but output file not found: {out_file}. "
-            f"stdout: {(result.stdout or '').strip()[:200]}"
+            f"Slicer completed but output file not found: {out_file}. stdout: {(result.stdout or '').strip()[:200]}"
         )
 
     return SliceResult(

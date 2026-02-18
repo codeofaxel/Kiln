@@ -24,8 +24,8 @@
       </a>
       <img src="https://img.shields.io/badge/python-3.10%E2%80%933.13-blue" alt="Python 3.10-3.13" width="120" height="20">
       <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" width="80" height="20">
-      <img src="https://img.shields.io/badge/tests-2%2C788%20passed-brightgreen" alt="Tests" width="130" height="20">
-      <img src="https://img.shields.io/badge/MCP%20tools-100%2B-orange" alt="100+ MCP Tools" width="120" height="20">
+      <img src="https://img.shields.io/badge/tests-5%2C287%20passed-brightgreen" alt="Tests" width="130" height="20">
+      <img src="https://img.shields.io/badge/MCP%20tools-197-orange" alt="197 MCP Tools" width="120" height="20">
     </div>
   </div>
 </div>
@@ -69,18 +69,22 @@
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 20px 28px;
-    max-width: 560px;
+    max-width: 720px;
     margin: 0 auto 16px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    overflow: hidden;
   }
   .install-block code {
     font-family: var(--mono);
-    font-size: 14px;
+    font-size: 13px;
     color: var(--text);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
   .install-block .prompt { color: var(--accent); }
   .install-block button {

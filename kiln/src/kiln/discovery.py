@@ -17,7 +17,7 @@ import platform
 import socket
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests  # already a kiln dependency
 
@@ -48,7 +48,7 @@ class DiscoveredPrinter:
     discovery_method: str = ""  # "mdns", "http_probe", "manual"
     trusted: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -76,7 +76,7 @@ def discover_printers(
     timeout: float = 5.0,
     subnet: str | None = None,
     methods: list[str] | None = None,
-) -> List[DiscoveredPrinter]:
+) -> list[DiscoveredPrinter]:
     """Run discovery using all available methods.
 
     Args:
@@ -106,7 +106,7 @@ def discover_printers(
                 "Consider using explicit printer IPs or providing a subnet."
             )
 
-    all_printers: List[DiscoveredPrinter] = []
+    all_printers: list[DiscoveredPrinter] = []
     deadline = time.monotonic() + timeout
 
     for method in methods:
@@ -121,13 +121,9 @@ def discover_printers(
             elif method == "http_probe":
                 scan_subnet = subnet or _detect_subnet()
                 if scan_subnet is None:
-                    logger.warning(
-                        "Could not detect subnet for HTTP probe; skipping"
-                    )
+                    logger.warning("Could not detect subnet for HTTP probe; skipping")
                     continue
-                all_printers.extend(
-                    _try_http_probe(scan_subnet, timeout=remaining)
-                )
+                all_printers.extend(_try_http_probe(scan_subnet, timeout=remaining))
             else:
                 logger.warning("Unknown discovery method: %s", method)
         except Exception:
@@ -138,13 +134,13 @@ def discover_printers(
     return deduped
 
 
-def probe_host(host: str, timeout: float = 3.0) -> List[DiscoveredPrinter]:
+def probe_host(host: str, timeout: float = 3.0) -> list[DiscoveredPrinter]:
     """Probe a specific host for known printer services.
 
     Tries each known port/path combination and returns all matches.
     This is useful for verifying a manually-provided host.
     """
-    results: List[DiscoveredPrinter] = []
+    results: list[DiscoveredPrinter] = []
 
     for port, path, expected_key, printer_type in _PROBE_TARGETS:
         # Skip Bambu MQTT-only entries (no HTTP probe possible)
@@ -214,18 +210,15 @@ def probe_host(host: str, timeout: float = 3.0) -> List[DiscoveredPrinter]:
     return results
 
 
-def _try_mdns(timeout: float) -> List[DiscoveredPrinter]:
+def _try_mdns(timeout: float) -> list[DiscoveredPrinter]:
     """Discover printers via mDNS/Bonjour (requires zeroconf)."""
     try:
         from zeroconf import ServiceBrowser, Zeroconf  # type: ignore[import-untyped]
     except ImportError:
-        logger.debug(
-            "zeroconf library not installed; skipping mDNS discovery. "
-            "Install it with: pip install zeroconf"
-        )
+        logger.debug("zeroconf library not installed; skipping mDNS discovery. Install it with: pip install zeroconf")
         return []
 
-    results: List[DiscoveredPrinter] = []
+    results: list[DiscoveredPrinter] = []
 
     class _Listener:
         """Collect discovered services."""
@@ -276,18 +269,18 @@ def _try_mdns(timeout: float) -> List[DiscoveredPrinter]:
     return results
 
 
-def _try_http_probe(subnet: str, timeout: float) -> List[DiscoveredPrinter]:
+def _try_http_probe(subnet: str, timeout: float) -> list[DiscoveredPrinter]:
     """Probe common printer ports on the local subnet.
 
     Scans hosts 1-254 in the given subnet using a thread pool for
     concurrent probing.
     """
-    results: List[DiscoveredPrinter] = []
+    results: list[DiscoveredPrinter] = []
     per_host_timeout = min(timeout / 10, 2.0)  # keep individual probes short
 
-    def _probe_single(host_num: int) -> List[DiscoveredPrinter]:
+    def _probe_single(host_num: int) -> list[DiscoveredPrinter]:
         host = f"{subnet}.{host_num}"
-        found: List[DiscoveredPrinter] = []
+        found: list[DiscoveredPrinter] = []
 
         for port, path, expected_key, printer_type in _PROBE_TARGETS:
             if path is None:
@@ -344,12 +337,8 @@ def _try_http_probe(subnet: str, timeout: float) -> List[DiscoveredPrinter]:
         return found
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
-        futures = {
-            executor.submit(_probe_single, i): i for i in range(1, 255)
-        }
-        done, _ = concurrent.futures.wait(
-            futures, timeout=timeout, return_when=concurrent.futures.ALL_COMPLETED
-        )
+        futures = {executor.submit(_probe_single, i): i for i in range(1, 255)}
+        done, _ = concurrent.futures.wait(futures, timeout=timeout, return_when=concurrent.futures.ALL_COMPLETED)
         for future in done:
             try:
                 found = future.result(timeout=0)
@@ -391,9 +380,9 @@ def _detect_subnet() -> str | None:
             wsl_subnet = _detect_wsl_host_subnet()
             if wsl_subnet:
                 logger.info(
-                    "WSL 2 detected. Using Windows host subnet %s "
-                    "instead of virtual network %s",
-                    wsl_subnet, ip,
+                    "WSL 2 detected. Using Windows host subnet %s instead of virtual network %s",
+                    wsl_subnet,
+                    ip,
                 )
                 return wsl_subnet
 
@@ -414,7 +403,7 @@ def _detect_wsl_host_subnet() -> str | None:
     used to derive the subnet for printer discovery.
     """
     try:
-        with open("/etc/resolv.conf", "r") as f:
+        with open("/etc/resolv.conf") as f:
             for line in f:
                 line = line.strip()
                 if line.startswith("nameserver"):
@@ -422,22 +411,22 @@ def _detect_wsl_host_subnet() -> str | None:
                     if len(parts) >= 2:
                         ns_ip = parts[1]
                         octets = ns_ip.split(".")
-                        if len(octets) == 4:
+                        if len(octets) == 4 and not ns_ip.startswith("172."):
                             # The nameserver in WSL 2 is typically the
                             # Windows host IP on the virtual network.
                             # If it's 172.x.x.x it's the vEthernet
                             # adapter, not the home network.
-                            if not ns_ip.startswith("172."):
-                                return ".".join(octets[:3])
-    except (OSError, IOError):
+                            return ".".join(octets[:3])
+    except OSError:
         pass
     return None
 
 
-def _annotate_trust(printers: List[DiscoveredPrinter]) -> None:
+def _annotate_trust(printers: list[DiscoveredPrinter]) -> None:
     """Mark each printer as trusted or untrusted based on the config whitelist."""
     try:
         from kiln.cli.config import get_trusted_printers
+
         trusted = get_trusted_printers()
     except Exception as exc:
         # Config may not be available in all environments.
@@ -450,8 +439,8 @@ def _annotate_trust(printers: List[DiscoveredPrinter]) -> None:
 
 
 def _deduplicate(
-    printers: List[DiscoveredPrinter],
-) -> List[DiscoveredPrinter]:
+    printers: list[DiscoveredPrinter],
+) -> list[DiscoveredPrinter]:
     """Remove duplicate printers, preferring the entry with more detail.
 
     Deduplicates by (host, port). When two entries share the same key,
@@ -462,9 +451,7 @@ def _deduplicate(
     for p in printers:
         key = (p.host, p.port)
         existing = seen.get(key)
-        if existing is None:
-            seen[key] = p
-        elif p.api_available and not existing.api_available:
+        if existing is None or p.api_available and not existing.api_available:
             seen[key] = p
         # else keep existing
 

@@ -15,7 +15,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import click
 
@@ -39,6 +39,8 @@ except ImportError:
 
 from kiln.cli.config import (
     list_printers as _list_printers,
+)
+from kiln.cli.config import (
     load_printer_config,
     remove_printer,
     save_printer,
@@ -73,7 +75,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _make_adapter(cfg: Dict[str, Any]):
+def _make_adapter(cfg: dict[str, Any]):
     """Create a PrinterAdapter from a config dict."""
     from kiln.printers import (
         BambuAdapter,
@@ -91,10 +93,7 @@ def _make_adapter(cfg: Dict[str, Any]):
         return MoonrakerAdapter(host=host, api_key=cfg.get("api_key") or None)
     elif ptype == "bambu":
         if BambuAdapter is None:
-            raise click.ClickException(
-                "Bambu support requires paho-mqtt. "
-                "Install it with: pip install paho-mqtt"
-            )
+            raise click.ClickException("Bambu support requires paho-mqtt. Install it with: pip install paho-mqtt")
         return BambuAdapter(
             host=host,
             access_code=cfg.get("access_code", ""),
@@ -115,7 +114,7 @@ def _get_adapter_from_ctx(ctx: click.Context):
     try:
         cfg = load_printer_config(printer_name)
     except ValueError as exc:
-        raise click.ClickException(str(exc))
+        raise click.ClickException(str(exc)) from exc
 
     ok, err = validate_printer_config(cfg)
     if not ok:
@@ -136,7 +135,7 @@ def _get_adapter_from_ctx(ctx: click.Context):
     return _make_adapter(cfg)
 
 
-def _map_printer_hint_to_profile_id(raw: Optional[str]) -> Optional[str]:
+def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
     """Map free-form printer model hints to bundled slicer profile IDs."""
     if not raw:
         return None
@@ -165,9 +164,9 @@ def _map_printer_hint_to_profile_id(raw: Optional[str]) -> Optional[str]:
     return None
 
 
-def _extract_model_hints(payload: Dict[str, Any]) -> List[str]:
+def _extract_model_hints(payload: dict[str, Any]) -> list[str]:
     """Extract candidate model strings from backend payloads."""
-    hints: List[str] = []
+    hints: list[str] = []
     keys = ("hostname", "printer_name", "name", "model", "type")
     seen: set[str] = set()
 
@@ -196,7 +195,7 @@ def _extract_model_hints(payload: Dict[str, Any]) -> List[str]:
     return hints
 
 
-def _prusaslicer_preset_for_profile(profile_id: Optional[str]) -> Optional[str]:
+def _prusaslicer_preset_for_profile(profile_id: str | None) -> str | None:
     """Return a PrusaSlicer preset name for a known profile ID."""
     if profile_id == "prusa_mini":
         return "Original Prusa MINI & MINI+"
@@ -209,7 +208,7 @@ def _prusaslicer_preset_for_profile(profile_id: Optional[str]) -> Optional[str]:
     return None
 
 
-def _autodetect_printer_profile_id(ctx: click.Context) -> Optional[str]:
+def _autodetect_printer_profile_id(ctx: click.Context) -> str | None:
     """Best-effort profile auto-detection from env, config, and backend APIs."""
     env_model = os.environ.get("KILN_PRINTER_MODEL")
     mapped = _map_printer_hint_to_profile_id(env_model)
@@ -250,10 +249,10 @@ def _autodetect_printer_profile_id(ctx: click.Context) -> Optional[str]:
     return None
 
 
-def _run_prusa_diagnostics(cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _run_prusa_diagnostics(cfg: dict[str, Any]) -> dict[str, Any]:
     """Run non-destructive diagnostics for a Prusa Link printer config."""
-    checks: List[Dict[str, Any]] = []
-    summary: Dict[str, Any] = {
+    checks: list[dict[str, Any]] = []
+    summary: dict[str, Any] = {
         "host": cfg.get("host", ""),
         "type": cfg.get("type", ""),
         "checks": checks,
@@ -265,11 +264,13 @@ def _run_prusa_diagnostics(cfg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     if str(cfg.get("type", "")).lower() != "prusaconnect":
-        checks.append({
-            "name": "backend",
-            "ok": False,
-            "detail": "Active printer is not type 'prusaconnect'.",
-        })
+        checks.append(
+            {
+                "name": "backend",
+                "ok": False,
+                "detail": "Active printer is not type 'prusaconnect'.",
+            }
+        )
         return summary
 
     try:
@@ -282,21 +283,23 @@ def _run_prusa_diagnostics(cfg: Dict[str, Any]) -> Dict[str, Any]:
     try:
         status = adapter._get_json("/api/v1/status")  # type: ignore[attr-defined]
         printer_state = (status.get("printer") or {}).get("state")
-        checks.append({
-            "name": "api_status",
-            "ok": True,
-            "detail": f"/api/v1/status reachable (state={printer_state or 'unknown'})",
-        })
+        checks.append(
+            {
+                "name": "api_status",
+                "ok": True,
+                "detail": f"/api/v1/status reachable (state={printer_state or 'unknown'})",
+            }
+        )
         status_ok = True
     except Exception as exc:
         checks.append({"name": "api_status", "ok": False, "detail": str(exc)})
         status_ok = False
 
     # Model hint from info/version endpoints
-    model_hint: Optional[str] = None
+    model_hint: str | None = None
     info_ok = False
-    info_endpoint: Optional[str] = None
-    last_info_error: Optional[Exception] = None
+    info_endpoint: str | None = None
+    last_info_error: Exception | None = None
     for endpoint in ("/api/v1/info", "/api/version"):
         try:
             payload = adapter._get_json(endpoint)  # type: ignore[attr-defined]
@@ -321,22 +324,26 @@ def _run_prusa_diagnostics(cfg: Dict[str, Any]) -> Dict[str, Any]:
             break
 
     if info_ok:
-        checks.append({
-            "name": "api_info",
-            "ok": True,
-            "detail": (
-                f"{info_endpoint} reachable (model='{summary.get('model_hint')}', "
-                f"profile='{summary.get('profile_id')}')"
-                if summary.get("model_hint")
-                else f"{info_endpoint} reachable (model unknown)"
-            ),
-        })
+        checks.append(
+            {
+                "name": "api_info",
+                "ok": True,
+                "detail": (
+                    f"{info_endpoint} reachable (model='{summary.get('model_hint')}', "
+                    f"profile='{summary.get('profile_id')}')"
+                    if summary.get("model_hint")
+                    else f"{info_endpoint} reachable (model unknown)"
+                ),
+            }
+        )
     else:
-        checks.append({
-            "name": "api_info",
-            "ok": False,
-            "detail": str(last_info_error) if last_info_error else "No model endpoint reachable",
-        })
+        checks.append(
+            {
+                "name": "api_info",
+                "ok": False,
+                "detail": str(last_info_error) if last_info_error else "No model endpoint reachable",
+            }
+        )
 
     # Storage roots
     root_ok = False
@@ -346,20 +353,24 @@ def _run_prusa_diagnostics(cfg: Dict[str, Any]) -> Dict[str, Any]:
             children = payload.get("children", [])
             count = len(children) if isinstance(children, list) else 0
             summary["storage_roots"][root] = {"ok": True, "entries": count}
-            checks.append({
-                "name": f"storage_{root}",
-                "ok": True,
-                "detail": f"/api/v1/files/{root} reachable ({count} top-level entries)",
-            })
+            checks.append(
+                {
+                    "name": f"storage_{root}",
+                    "ok": True,
+                    "detail": f"/api/v1/files/{root} reachable ({count} top-level entries)",
+                }
+            )
             root_ok = True
         except Exception as exc:
             summary["storage_roots"][root] = {"ok": False, "error": str(exc)}
-            checks.append({
-                "name": f"storage_{root}",
-                "ok": False,
-                "detail": str(exc),
-                "warn": True,
-            })
+            checks.append(
+                {
+                    "name": f"storage_{root}",
+                    "ok": False,
+                    "detail": str(exc),
+                    "warn": True,
+                }
+            )
 
     # Unified list-files + path-resolution check
     try:
@@ -386,14 +397,15 @@ def _run_prusa_diagnostics(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 @click.group()
 @click.option(
-    "--printer", "-p",
+    "--printer",
+    "-p",
     default=None,
     envvar="KILN_PRINTER",
     help="Printer name to use (overrides active printer).",
 )
 @click.version_option(package_name="kiln")
 @click.pass_context
-def cli(ctx: click.Context, printer: Optional[str]) -> None:
+def cli(ctx: click.Context, printer: str | None) -> None:
     """Kiln — agent-friendly 3D printer control."""
     ctx.ensure_object(dict)
     ctx.obj["printer"] = printer
@@ -403,13 +415,13 @@ def cli(ctx: click.Context, printer: Optional[str]) -> None:
     try:
         if sys.stderr.isatty():
             from kiln.terms import is_current
+
             if not is_current():
                 invoked = ctx.invoked_subcommand
                 if invoked not in ("setup", None):
                     click.echo(
                         click.style(
-                            "  Note: Terms of use not yet accepted. "
-                            "Run 'kiln setup' to review and accept.",
+                            "  Note: Terms of use not yet accepted. Run 'kiln setup' to review and accept.",
                             fg="yellow",
                         ),
                         err=True,
@@ -426,16 +438,21 @@ def cli(ctx: click.Context, printer: Optional[str]) -> None:
 @cli.command()
 @click.option("--timeout", "-t", default=5.0, help="Scan duration in seconds.")
 @click.option(
-    "--subnet", "-s", default=None,
+    "--subnet",
+    "-s",
+    default=None,
     help="Subnet to scan (e.g. '192.168.1'). Auto-detected if omitted.",
 )
 @click.option(
-    "--method", "-m", "methods", multiple=True,
+    "--method",
+    "-m",
+    "methods",
+    multiple=True,
     type=click.Choice(["mdns", "http_probe"]),
     help="Discovery method(s) to use (repeatable). Default: mdns + http_probe.",
 )
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def discover(timeout: float, subnet: Optional[str], methods: tuple, json_mode: bool) -> None:
+def discover(timeout: float, subnet: str | None, methods: tuple, json_mode: bool) -> None:
     """Scan the local network for 3D printers.
 
     Uses mDNS and HTTP probing by default. Results are deduplicated
@@ -452,16 +469,22 @@ def discover(timeout: float, subnet: Optional[str], methods: tuple, json_mode: b
             methods=method_list,
         )
     except OSError as exc:
-        click.echo(format_error(
-            f"Network discovery failed: {exc}. Check network connectivity and try 'kiln discover --method http_probe'.",
-            code="DISCOVERY_ERROR", json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Network discovery failed: {exc}. Check network connectivity and try 'kiln discover --method http_probe'.",
+                code="DISCOVERY_ERROR",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Network discovery failed: {exc}. Check network connectivity and try 'kiln discover --method http_probe'.",
-            code="DISCOVERY_ERROR", json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Network discovery failed: {exc}. Check network connectivity and try 'kiln discover --method http_probe'.",
+                code="DISCOVERY_ERROR",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
     click.echo(format_discovered([p.to_dict() for p in found], json_mode=json_mode))
@@ -482,7 +505,8 @@ def discover(timeout: float, subnet: Optional[str], methods: tuple, json_mode: b
 @click.option("--name", "-n", required=True, help="Name for this printer (e.g. 'voron').")
 @click.option("--host", "-h", required=True, help="Printer URL or IP (e.g. http://octopi.local).")
 @click.option(
-    "--type", "printer_type",
+    "--type",
+    "printer_type",
     required=True,
     type=click.Choice(["octoprint", "moonraker", "bambu", "prusaconnect"]),
     help="Printer backend type.",
@@ -495,9 +519,9 @@ def auth(
     name: str,
     host: str,
     printer_type: str,
-    api_key: Optional[str],
-    access_code: Optional[str],
-    serial: Optional[str],
+    api_key: str | None,
+    access_code: str | None,
+    serial: str | None,
     json_mode: bool,
 ) -> None:
     """Save printer credentials to the config file."""
@@ -510,7 +534,7 @@ def auth(
             access_code=access_code,
             serial=serial,
         )
-        prusa_diagnostics: Optional[Dict[str, Any]] = None
+        prusa_diagnostics: dict[str, Any] | None = None
         if printer_type == "prusaconnect":
             try:
                 cfg = load_printer_config(name)
@@ -552,12 +576,14 @@ def auth(
                 f"({failed_summary}). Run 'kiln doctor-prusa --json' for details."
             )
             if json_mode:
-                click.echo(format_response(
-                    "error",
-                    data=data,
-                    error={"code": "PRUSA_DIAGNOSTICS_FAILED", "message": message},
-                    json_mode=True,
-                ))
+                click.echo(
+                    format_response(
+                        "error",
+                        data=data,
+                        error={"code": "PRUSA_DIAGNOSTICS_FAILED", "message": message},
+                        json_mode=True,
+                    )
+                )
             else:
                 click.echo(format_error(message, code="PRUSA_DIAGNOSTICS_FAILED", json_mode=False))
             sys.exit(1)
@@ -568,9 +594,7 @@ def auth(
             file_count = prusa_diagnostics.get("file_count")
             checks = prusa_diagnostics.get("checks", [])
             root_ok = any(
-                c.get("name", "").startswith("storage_") and c.get("ok")
-                for c in checks
-                if isinstance(c, dict)
+                c.get("name", "").startswith("storage_") and c.get("ok") for c in checks if isinstance(c, dict)
             )
             if profile_id:
                 click.echo(f"Detected printer profile: {profile_id}")
@@ -583,16 +607,20 @@ def auth(
             else:
                 click.echo("Prusa connectivity check passed. Run: kiln doctor-prusa for full diagnostics.")
     except OSError as exc:
-        click.echo(format_error(
-            f"Failed to save printer credentials: {exc}. Check file permissions on ~/.kiln/",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to save printer credentials: {exc}. Check file permissions on ~/.kiln/",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to save printer credentials: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to save printer credentials: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -625,16 +653,20 @@ def status(ctx: click.Context, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(
-            f"Failed to get printer status: {exc}. Verify the printer is online and credentials are correct.",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to get printer status: {exc}. Verify the printer is online and credentials are correct.",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to get printer status: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to get printer status: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -655,16 +687,20 @@ def files(ctx: click.Context, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(
-            f"Failed to list printer files: {exc}. Verify the printer is online.",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to list printer files: {exc}. Verify the printer is online.",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to list printer files: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to list printer files: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -686,16 +722,20 @@ def upload(ctx: click.Context, file_path: str, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(
-            f"Failed to upload file '{file_path}': {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to upload file '{file_path}': {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to upload file '{file_path}': {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to upload file '{file_path}': {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -706,12 +746,16 @@ def upload(ctx: click.Context, file_path: str, json_mode: bool) -> None:
 
 @cli.command()
 @click.option("--file", "-f", "file_path", default=None, type=click.Path(), help="Local G-code file to validate.")
-@click.option("--material", "-m", default=None,
-              type=click.Choice(["PLA", "PETG", "ABS", "TPU", "ASA", "Nylon", "PC"]),
-              help="Expected material — validates temps match.")
+@click.option(
+    "--material",
+    "-m",
+    default=None,
+    type=click.Choice(["PLA", "PETG", "ABS", "TPU", "ASA", "Nylon", "PC"]),
+    help="Expected material — validates temps match.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def preflight(ctx: click.Context, file_path: Optional[str], material: Optional[str], json_mode: bool) -> None:
+def preflight(ctx: click.Context, file_path: str | None, material: str | None, json_mode: bool) -> None:
     """Run pre-print safety checks.
 
     Validates printer state, temperatures, and connectivity.
@@ -721,14 +765,14 @@ def preflight(ctx: click.Context, file_path: Optional[str], material: Optional[s
     from kiln.printers.base import PrinterStatus
 
     # Material temperature ranges (tool_min, tool_max, bed_min, bed_max)
-    _MATERIAL_TEMPS: Dict[str, tuple] = {
-        "PLA":   (180, 220, 40, 70),
-        "PETG":  (220, 260, 60, 90),
-        "ABS":   (230, 270, 90, 115),
-        "TPU":   (210, 240, 30, 60),
-        "ASA":   (230, 270, 90, 115),
+    _MATERIAL_TEMPS: dict[str, tuple] = {
+        "PLA": (180, 220, 40, 70),
+        "PETG": (220, 260, 60, 90),
+        "ABS": (230, 270, 90, 115),
+        "TPU": (210, 240, 30, 60),
+        "ASA": (230, 270, 90, 115),
         "Nylon": (240, 280, 60, 80),
-        "PC":    (260, 310, 90, 120),
+        "PC": (260, 310, 90, 120),
     }
 
     try:
@@ -739,31 +783,37 @@ def preflight(ctx: click.Context, file_path: Optional[str], material: Optional[s
         errors: list = []
 
         # Connected
-        checks.append({
-            "name": "printer_connected",
-            "passed": state.connected,
-            "message": "Printer is connected" if state.connected else "Printer is offline",
-        })
+        checks.append(
+            {
+                "name": "printer_connected",
+                "passed": state.connected,
+                "message": "Printer is connected" if state.connected else "Printer is offline",
+            }
+        )
         if not state.connected:
             errors.append("Printer is not connected / offline")
 
         # Idle
         is_idle = state.state == PrinterStatus.IDLE
-        checks.append({
-            "name": "printer_idle",
-            "passed": is_idle,
-            "message": f"Printer state: {state.state.value}",
-        })
+        checks.append(
+            {
+                "name": "printer_idle",
+                "passed": is_idle,
+                "message": f"Printer state: {state.state.value}",
+            }
+        )
         if not is_idle:
             errors.append(f"Printer is not idle (state: {state.state.value})")
 
         # No error
         no_error = state.state != PrinterStatus.ERROR
-        checks.append({
-            "name": "no_errors",
-            "passed": no_error,
-            "message": "No errors" if no_error else "Printer is in error state",
-        })
+        checks.append(
+            {
+                "name": "no_errors",
+                "passed": no_error,
+                "message": "No errors" if no_error else "Printer is in error state",
+            }
+        )
         if not no_error:
             errors.append("Printer is in an error state")
 
@@ -775,11 +825,13 @@ def preflight(ctx: click.Context, file_path: Optional[str], material: Optional[s
         if state.bed_temp_actual is not None and state.bed_temp_actual > MAX_BED:
             temp_warnings.append(f"Bed temp ({state.bed_temp_actual:.1f}C) exceeds {MAX_BED:.0f}C")
         temps_safe = len(temp_warnings) == 0
-        checks.append({
-            "name": "temperatures_safe",
-            "passed": temps_safe,
-            "message": "Temperatures within limits" if temps_safe else "; ".join(temp_warnings),
-        })
+        checks.append(
+            {
+                "name": "temperatures_safe",
+                "passed": temps_safe,
+                "message": "Temperatures within limits" if temps_safe else "; ".join(temp_warnings),
+            }
+        )
         if not temps_safe:
             errors.extend(temp_warnings)
 
@@ -790,43 +842,52 @@ def preflight(ctx: click.Context, file_path: Optional[str], material: Optional[s
                 tool_min, tool_max, bed_min, bed_max = mat_range
                 mat_warnings: list = []
 
-                if state.tool_temp_target is not None:
-                    if state.tool_temp_target > 0 and not (tool_min <= state.tool_temp_target <= tool_max):
-                        mat_warnings.append(
-                            f"Tool target ({state.tool_temp_target:.0f}C) outside "
-                            f"{material} range ({tool_min}-{tool_max}C)"
-                        )
+                if (
+                    state.tool_temp_target is not None
+                    and state.tool_temp_target > 0
+                    and not (tool_min <= state.tool_temp_target <= tool_max)
+                ):
+                    mat_warnings.append(
+                        f"Tool target ({state.tool_temp_target:.0f}C) outside {material} range ({tool_min}-{tool_max}C)"
+                    )
 
-                if state.bed_temp_target is not None:
-                    if state.bed_temp_target > 0 and not (bed_min <= state.bed_temp_target <= bed_max):
-                        mat_warnings.append(
-                            f"Bed target ({state.bed_temp_target:.0f}C) outside "
-                            f"{material} range ({bed_min}-{bed_max}C)"
-                        )
+                if (
+                    state.bed_temp_target is not None
+                    and state.bed_temp_target > 0
+                    and not (bed_min <= state.bed_temp_target <= bed_max)
+                ):
+                    mat_warnings.append(
+                        f"Bed target ({state.bed_temp_target:.0f}C) outside {material} range ({bed_min}-{bed_max}C)"
+                    )
 
                 mat_ok = len(mat_warnings) == 0
-                checks.append({
-                    "name": "material_match",
-                    "passed": mat_ok,
-                    "message": f"{material} temps OK" if mat_ok else "; ".join(mat_warnings),
-                })
+                checks.append(
+                    {
+                        "name": "material_match",
+                        "passed": mat_ok,
+                        "message": f"{material} temps OK" if mat_ok else "; ".join(mat_warnings),
+                    }
+                )
                 if not mat_ok:
                     errors.extend(mat_warnings)
 
         # File validation (optional)
         if file_path is not None:
             import os
+
             file_errors: list = []
             if not os.path.isfile(file_path):
                 file_errors.append(f"File not found: {file_path}")
             elif not file_path.lower().endswith((".gcode", ".gco", ".g")):
                 file_errors.append(f"Unsupported extension: {os.path.splitext(file_path)[1]}")
             file_ok = len(file_errors) == 0
-            checks.append({
-                "name": "file_valid",
-                "passed": file_ok,
-                "message": "File OK" if file_ok else "; ".join(file_errors),
-            })
+            checks.append(
+                {
+                    "name": "file_valid",
+                    "passed": file_ok,
+                    "message": "File OK" if file_ok else "; ".join(file_errors),
+                }
+            )
             if not file_ok:
                 errors.extend(file_errors)
 
@@ -834,14 +895,20 @@ def preflight(ctx: click.Context, file_path: Optional[str], material: Optional[s
 
         if json_mode:
             import json
-            click.echo(json.dumps({
-                "status": "success",
-                "data": {
-                    "ready": ready,
-                    "checks": checks,
-                    "errors": errors,
-                },
-            }, indent=2))
+
+            click.echo(
+                json.dumps(
+                    {
+                        "status": "success",
+                        "data": {
+                            "ready": ready,
+                            "checks": checks,
+                            "errors": errors,
+                        },
+                    },
+                    indent=2,
+                )
+            )
         else:
             for c in checks:
                 symbol = "PASS" if c["passed"] else "FAIL"
@@ -875,7 +942,15 @@ def preflight(ctx: click.Context, file_path: Optional[str], material: Optional[s
 @click.option("--dry-run", is_flag=True, help="Preview what would happen without actually printing.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bool, skip_preflight: bool, dry_run: bool, json_mode: bool) -> None:
+def print_cmd(
+    ctx: click.Context,
+    files: tuple,
+    show_status: bool,
+    use_queue: bool,
+    skip_preflight: bool,
+    dry_run: bool,
+    json_mode: bool,
+) -> None:
     """Start a print or check print status.
 
     Pass a file name/path to start printing.  Use --status to check progress.
@@ -915,9 +990,10 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
 
         # Batch mode: queue multiple files
         if len(expanded) > 1 and use_queue:
-            from kiln.persistence import get_db
             import json as _json
             import uuid
+
+            from kiln.persistence import get_db
 
             db = get_db()
             import time as _time
@@ -930,34 +1006,43 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
                         click.echo(f"Uploading {f}...")
                     upload_result = adapter.upload_file(f)
                     if not upload_result.success:
-                        click.echo(format_error(
-                            f"Failed to upload {f}: {upload_result.message}",
-                            code="UPLOAD_FAILED",
-                            json_mode=json_mode,
-                        ))
+                        click.echo(
+                            format_error(
+                                f"Failed to upload {f}: {upload_result.message}",
+                                code="UPLOAD_FAILED",
+                                json_mode=json_mode,
+                            )
+                        )
                         continue
                     file_name = upload_result.file_name or os.path.basename(f)
 
                 job_id = str(uuid.uuid4())[:8]
-                db.save_job({
-                    "id": job_id,
-                    "file_name": file_name,
-                    "printer_name": None,
-                    "status": "queued",
-                    "priority": 0,
-                    "submitted_by": "cli",
-                    "submitted_at": _time.time(),
-                    "started_at": None,
-                    "completed_at": None,
-                    "error_message": None,
-                })
+                db.save_job(
+                    {
+                        "id": job_id,
+                        "file_name": file_name,
+                        "printer_name": None,
+                        "status": "queued",
+                        "priority": 0,
+                        "submitted_by": "cli",
+                        "submitted_at": _time.time(),
+                        "started_at": None,
+                        "completed_at": None,
+                        "error_message": None,
+                    }
+                )
                 queued.append({"job_id": job_id, "file_name": file_name})
 
             if json_mode:
-                click.echo(_json.dumps({
-                    "status": "success",
-                    "data": {"queued": queued, "count": len(queued)},
-                }, indent=2))
+                click.echo(
+                    _json.dumps(
+                        {
+                            "status": "success",
+                            "data": {"queued": queued, "count": len(queued)},
+                        },
+                        indent=2,
+                    )
+                )
             else:
                 click.echo(f"Queued {len(queued)} file(s) for sequential printing.")
                 for q in queued:
@@ -965,9 +1050,8 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
             return
 
         # Single file (or first of batch without --queue)
-        if len(expanded) > 1 and not use_queue:
-            if not json_mode:
-                click.echo(f"Printing {len(expanded)} files sequentially (use --queue for background)...")
+        if len(expanded) > 1 and not use_queue and not json_mode:
+            click.echo(f"Printing {len(expanded)} files sequentially (use --queue for background)...")
 
         # Auto-preflight: check printer is ready before starting
         _preflight_state = None
@@ -979,11 +1063,8 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
                 preflight_warnings = []
                 if state.state.value in ("error", "offline"):
                     preflight_errors.append(f"Printer is {state.state.value}")
-                if state.tool_temp_actual is not None:
-                    if state.tool_temp_actual > 50 and state.state.value == "idle":
-                        preflight_warnings.append(
-                            f"Hotend is already warm ({state.tool_temp_actual:.0f}°C) while idle"
-                        )
+                if state.tool_temp_actual is not None and state.tool_temp_actual > 50 and state.state.value == "idle":
+                    preflight_warnings.append(f"Hotend is already warm ({state.tool_temp_actual:.0f}°C) while idle")
                 if preflight_errors:
                     msg = "Pre-flight check failed: " + "; ".join(preflight_errors)
                     click.echo(format_error(msg, code="PREFLIGHT_FAILED", json_mode=json_mode))
@@ -1028,11 +1109,14 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
                     click.echo(f"Uploading {f}...")
                 upload_result = adapter.upload_file(f)
                 if not upload_result.success:
-                    click.echo(format_error(
-                        upload_result.message or f"Upload failed for '{f}' — check printer storage and connectivity",
-                        code="UPLOAD_FAILED",
-                        json_mode=json_mode,
-                    ))
+                    click.echo(
+                        format_error(
+                            upload_result.message
+                            or f"Upload failed for '{f}' — check printer storage and connectivity",
+                            code="UPLOAD_FAILED",
+                            json_mode=json_mode,
+                        )
+                    )
                     sys.exit(1)
                 file_name = upload_result.file_name or os.path.basename(f)
 
@@ -1051,10 +1135,12 @@ def print_cmd(ctx: click.Context, files: tuple, show_status: bool, use_queue: bo
     except click.ClickException:
         raise
     except Exception as exc:
-        click.echo(format_error(
-            f"Print operation failed: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Print operation failed: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -1075,16 +1161,20 @@ def cancel(ctx: click.Context, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(
-            f"Failed to cancel print: {exc}. Is a print currently running?",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to cancel print: {exc}. Is a print currently running?",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to cancel print: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to cancel print: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -1100,16 +1190,20 @@ def pause(ctx: click.Context, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(
-            f"Failed to pause print: {exc}. Is a print currently running?",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to pause print: {exc}. Is a print currently running?",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to pause print: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to pause print: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -1125,16 +1219,20 @@ def resume(ctx: click.Context, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(
-            f"Failed to resume print: {exc}. Is the print currently paused?",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to resume print: {exc}. Is the print currently paused?",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to resume print: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to resume print: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -1148,7 +1246,7 @@ def resume(ctx: click.Context, json_mode: bool) -> None:
 @click.option("--bed", "bed_temp", type=float, default=None, help="Set bed temperature (°C).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def temp(ctx: click.Context, tool_temp: Optional[float], bed_temp: Optional[float], json_mode: bool) -> None:
+def temp(ctx: click.Context, tool_temp: float | None, bed_temp: float | None, json_mode: bool) -> None:
     """Get or set printer temperatures.
 
     With no flags, shows current temperatures.  Pass --tool and/or --bed to
@@ -1168,22 +1266,26 @@ def temp(ctx: click.Context, tool_temp: Optional[float], bed_temp: Optional[floa
             click.echo(format_response("success", data=data, json_mode=json_mode))
             return
 
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
         if tool_temp is not None:
             if tool_temp < 0 or tool_temp > 300:
-                click.echo(format_error(
-                    f"Hotend temperature {tool_temp}°C out of safe range (0-300°C).",
-                    json_mode=json_mode,
-                ))
+                click.echo(
+                    format_error(
+                        f"Hotend temperature {tool_temp}°C out of safe range (0-300°C).",
+                        json_mode=json_mode,
+                    )
+                )
                 sys.exit(1)
             adapter.set_tool_temp(tool_temp)
             results["tool_target"] = tool_temp
         if bed_temp is not None:
             if bed_temp < 0 or bed_temp > 130:
-                click.echo(format_error(
-                    f"Bed temperature {bed_temp}°C out of safe range (0-130°C).",
-                    json_mode=json_mode,
-                ))
+                click.echo(
+                    format_error(
+                        f"Bed temperature {bed_temp}°C out of safe range (0-130°C).",
+                        json_mode=json_mode,
+                    )
+                )
                 sys.exit(1)
             adapter.set_bed_temp(bed_temp)
             results["bed_target"] = bed_temp
@@ -1192,16 +1294,20 @@ def temp(ctx: click.Context, tool_temp: Optional[float], bed_temp: Optional[floa
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(
-            f"Failed to set temperature: {exc}. Verify the printer is online and idle.",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to set temperature: {exc}. Verify the printer is online and idle.",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to set temperature: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to set temperature: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -1233,11 +1339,13 @@ def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
                 "blocked": validation.blocked_commands,
                 "errors": validation.errors,
             }
-            click.echo(format_error(
-                "G-code blocked by safety validator: " + "; ".join(validation.errors),
-                code="GCODE_BLOCKED",
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    "G-code blocked by safety validator: " + "; ".join(validation.errors),
+                    code="GCODE_BLOCKED",
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         adapter.send_gcode(validation.commands)
@@ -1253,16 +1361,20 @@ def gcode(ctx: click.Context, commands: tuple, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except PrinterError as exc:
-        click.echo(format_error(
-            f"Failed to send G-code: {exc}. Verify the printer is online and ready.",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to send G-code: {exc}. Verify the printer is online and ready.",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to send G-code: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to send G-code: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -1287,7 +1399,7 @@ def use(name: str) -> None:
         set_active_printer(name)
         click.echo(f"Active printer set to '{name}'.")
     except ValueError as exc:
-        raise click.ClickException(str(exc))
+        raise click.ClickException(str(exc)) from exc
 
 
 @cli.command("remove")
@@ -1298,7 +1410,7 @@ def remove(name: str) -> None:
         remove_printer(name)
         click.echo(f"Removed printer '{name}'.")
     except ValueError as exc:
-        raise click.ClickException(str(exc))
+        raise click.ClickException(str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1311,7 +1423,9 @@ def remove(name: str) -> None:
 @click.option("--output-dir", "-o", default=None, help="Output directory (default: system temp dir).")
 @click.option("--output-name", default=None, help="Override output file name.")
 @click.option("--profile", "-P", default=None, type=click.Path(), help="Slicer profile file (.ini/.json).")
-@click.option("--printer-id", default=None, help="Printer model ID for bundled profile auto-selection (e.g. prusa_mini).")
+@click.option(
+    "--printer-id", default=None, help="Printer model ID for bundled profile auto-selection (e.g. prusa_mini)."
+)
 @click.option("--slicer", default=None, help="Explicit path to slicer binary.")
 @click.option("--print-after", is_flag=True, help="Upload and start printing after slicing.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
@@ -1319,11 +1433,11 @@ def remove(name: str) -> None:
 def slice(
     ctx: click.Context,
     input_file: str,
-    output_dir: Optional[str],
-    output_name: Optional[str],
-    profile: Optional[str],
-    printer_id: Optional[str],
-    slicer: Optional[str],
+    output_dir: str | None,
+    output_name: str | None,
+    profile: str | None,
+    printer_id: str | None,
+    slicer: str | None,
     print_after: bool,
     json_mode: bool,
 ) -> None:
@@ -1360,6 +1474,7 @@ def slice(
         if not print_after:
             if json_mode:
                 import json as _json
+
                 payload = result.to_dict()
                 if effective_printer_id:
                     payload["printer_id"] = effective_printer_id
@@ -1385,27 +1500,36 @@ def slice(
 
         upload_result = adapter.upload_file(result.output_path)
         if not upload_result.success:
-            click.echo(format_error(
-                upload_result.message or "Upload failed",
-                code="UPLOAD_FAILED",
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    upload_result.message or "Upload failed",
+                    code="UPLOAD_FAILED",
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         import os
+
         file_name = upload_result.file_name or os.path.basename(result.output_path)
         print_result = adapter.start_print(file_name)
 
         if json_mode:
             import json as _json
-            click.echo(_json.dumps({
-                "status": "success",
-                "data": {
-                    "slice": result.to_dict(),
-                    "upload": upload_result.to_dict(),
-                    "print": print_result.to_dict(),
-                },
-            }, indent=2))
+
+            click.echo(
+                _json.dumps(
+                    {
+                        "status": "success",
+                        "data": {
+                            "slice": result.to_dict(),
+                            "upload": upload_result.to_dict(),
+                            "print": print_result.to_dict(),
+                        },
+                    },
+                    indent=2,
+                )
+            )
         else:
             click.echo(format_action("start", print_result.to_dict(), json_mode=False))
 
@@ -1434,7 +1558,7 @@ def slice(
 @click.option("--output", "-o", default=None, type=click.Path(), help="Save snapshot to file.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON (base64 encoded).")
 @click.pass_context
-def snapshot(ctx: click.Context, output: Optional[str], json_mode: bool) -> None:
+def snapshot(ctx: click.Context, output: str | None, json_mode: bool) -> None:
     """Capture a webcam snapshot from the printer.
 
     Saves the image to a file (--output) or prints base64-encoded data
@@ -1447,11 +1571,13 @@ def snapshot(ctx: click.Context, output: Optional[str], json_mode: bool) -> None
         image_data = adapter.get_snapshot()
 
         if image_data is None:
-            click.echo(format_error(
-                "Webcam not available or not supported by this printer.",
-                code="NO_WEBCAM",
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    "Webcam not available or not supported by this printer.",
+                    code="NO_WEBCAM",
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         if output:
@@ -1460,11 +1586,13 @@ def snapshot(ctx: click.Context, output: Optional[str], json_mode: bool) -> None
             _tmpdir = os.path.realpath(tempfile.gettempdir())
             _allowed_prefixes = (_home, _tmpdir)
             if not any(_safe.startswith(p) for p in _allowed_prefixes):
-                click.echo(format_error(
-                    "Output path must be under home directory or a temp directory.",
-                    code="VALIDATION_ERROR",
-                    json_mode=json_mode,
-                ))
+                click.echo(
+                    format_error(
+                        "Output path must be under home directory or a temp directory.",
+                        code="VALIDATION_ERROR",
+                        json_mode=json_mode,
+                    )
+                )
                 sys.exit(1)
             os.makedirs(os.path.dirname(_safe) or ".", exist_ok=True)
             with open(_safe, "wb") as f:
@@ -1476,13 +1604,19 @@ def snapshot(ctx: click.Context, output: Optional[str], json_mode: bool) -> None
             click.echo(format_response("success", data=data, json_mode=json_mode))
         elif json_mode:
             import json as _json
-            click.echo(_json.dumps({
-                "status": "success",
-                "data": {
-                    "image_base64": base64.b64encode(image_data).decode("ascii"),
-                    "size_bytes": len(image_data),
-                },
-            }, indent=2))
+
+            click.echo(
+                _json.dumps(
+                    {
+                        "status": "success",
+                        "data": {
+                            "image_base64": base64.b64encode(image_data).decode("ascii"),
+                            "size_bytes": len(image_data),
+                        },
+                    },
+                    indent=2,
+                )
+            )
         else:
             default_path = os.path.join(os.path.expanduser("~"), ".kiln", "snapshots", "kiln_snapshot.jpg")
             os.makedirs(os.path.dirname(default_path), exist_ok=True)
@@ -1507,8 +1641,9 @@ def snapshot(ctx: click.Context, output: Optional[str], json_mode: bool) -> None
 
 @cli.command()
 @click.option("--interval", "-i", default=5.0, help="Poll interval in seconds (default 5).")
-@click.option("--timeout", "-t", "max_timeout", default=0, type=float,
-              help="Maximum wait time in seconds (0 = unlimited).")
+@click.option(
+    "--timeout", "-t", "max_timeout", default=0, type=float, help="Maximum wait time in seconds (0 = unlimited)."
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON on completion.")
 @click.pass_context
 def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: bool) -> None:
@@ -1547,10 +1682,13 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
                     "elapsed_seconds": round(_time.time() - start, 1),
                 }
                 if json_mode:
-                    click.echo(format_response("error",
-                                               error={"code": "PRINT_FAILED",
-                                                      "message": f"Printer entered {state.state.value} state"},
-                                               json_mode=True))
+                    click.echo(
+                        format_response(
+                            "error",
+                            error={"code": "PRINT_FAILED", "message": f"Printer entered {state.state.value} state"},
+                            json_mode=True,
+                        )
+                    )
                 else:
                     click.echo(f"Print ended with state: {state.state.value}")
                 sys.exit(1)
@@ -1558,15 +1696,18 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
             # Still printing/paused — show progress
             if not json_mode and job.completion is not None:
                 from kiln.cli.output import progress_bar
+
                 click.echo(f"\r  {progress_bar(job.completion)}  ", nl=False)
 
             # Timeout check
             if max_timeout > 0 and (_time.time() - start) >= max_timeout:
-                click.echo(format_error(
-                    f"Timed out after {max_timeout}s",
-                    code="TIMEOUT",
-                    json_mode=json_mode,
-                ))
+                click.echo(
+                    format_error(
+                        f"Timed out after {max_timeout}s",
+                        code="TIMEOUT",
+                        json_mode=json_mode,
+                    )
+                )
                 sys.exit(1)
 
             _time.sleep(interval)
@@ -1592,11 +1733,16 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
 
 @cli.command()
 @click.option("--limit", "-n", default=20, help="Number of records (default 20).")
-@click.option("--status", "-s", "filter_status", default=None,
-              type=click.Choice(["completed", "failed", "cancelled"]),
-              help="Filter by job status.")
+@click.option(
+    "--status",
+    "-s",
+    "filter_status",
+    default=None,
+    type=click.Choice(["completed", "failed", "cancelled"]),
+    help="Filter by job status.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def history(limit: int, filter_status: Optional[str], json_mode: bool) -> None:
+def history(limit: int, filter_status: str | None, json_mode: bool) -> None:
     """Show print history from the local database.
 
     Displays past print jobs with status, duration, and timestamps.
@@ -1610,16 +1756,20 @@ def history(limit: int, filter_status: Optional[str], json_mode: bool) -> None:
         click.echo(format_history(jobs, json_mode=json_mode))
 
     except OSError as exc:
-        click.echo(format_error(
-            f"Failed to read print history: {exc}. Check database at ~/.kiln/kiln.db",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to read print history: {exc}. Check database at ~/.kiln/kiln.db",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to read print history: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to read print history: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -1665,16 +1815,20 @@ def order_materials(json_mode: bool) -> None:
     except click.ClickException:
         raise
     except FulfillmentError as exc:
-        click.echo(format_error(
-            f"Failed to list fulfillment materials: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to list fulfillment materials: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to list fulfillment materials: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to list fulfillment materials: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -1690,17 +1844,19 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
     Upload a model file (STL, 3MF, OBJ) and receive pricing, lead time,
     and shipping options from Craftcloud's network of 150+ print services.
     """
-    from kiln.fulfillment import QuoteRequest
     from kiln.billing import BillingLedger
+    from kiln.fulfillment import QuoteRequest
 
     try:
         provider = _get_fulfillment_provider()
-        quote = provider.get_quote(QuoteRequest(
-            file_path=file_path,
-            material_id=material,
-            quantity=quantity,
-            shipping_country=country,
-        ))
+        quote = provider.get_quote(
+            QuoteRequest(
+                file_path=file_path,
+                material_id=material,
+                quantity=quantity,
+                shipping_country=country,
+            )
+        )
         quote_data = quote.to_dict()
         ledger = BillingLedger()
         fee_calc = ledger.calculate_fee(quote.total_price, currency=quote.currency)
@@ -1713,16 +1869,20 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
         click.echo(format_error(str(exc), code="FILE_NOT_FOUND", json_mode=json_mode))
         sys.exit(1)
     except FulfillmentError as exc:
-        click.echo(format_error(
-            f"Quote request failed: {exc}. Verify the material ID with 'kiln order materials'.",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Quote request failed: {exc}. Verify the material ID with 'kiln order materials'.",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Quote request failed: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Quote request failed: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -1735,23 +1895,26 @@ def order_place(quote_id: str, shipping_id: str, json_mode: bool) -> None:
 
     Requires a quote ID from 'kiln order quote'.
     """
-    from kiln.fulfillment import OrderRequest
     from kiln.billing import BillingLedger
-    from kiln.persistence import get_db
-    from kiln.payments.manager import PaymentManager
+    from kiln.fulfillment import OrderRequest
     from kiln.payments.base import PaymentError
+    from kiln.payments.manager import PaymentManager
+    from kiln.persistence import get_db
 
     try:
         provider = _get_fulfillment_provider()
-        result = provider.place_order(OrderRequest(
-            quote_id=quote_id,
-            shipping_option_id=shipping_id,
-        ))
+        result = provider.place_order(
+            OrderRequest(
+                quote_id=quote_id,
+                shipping_option_id=shipping_id,
+            )
+        )
         order_data = result.to_dict()
         if result.total_price and result.total_price > 0:
             ledger = BillingLedger(db=get_db())
             fee_calc = ledger.calculate_fee(
-                result.total_price, currency=result.currency,
+                result.total_price,
+                currency=result.currency,
             )
             try:
                 mgr = PaymentManager()
@@ -1763,7 +1926,9 @@ def order_place(quote_id: str, shipping_id: str, json_mode: bool) -> None:
                     order_data["payment"] = {"status": "no_payment_method"}
             except PaymentError:
                 ledger.record_charge(
-                    result.order_id, fee_calc, payment_status="failed",
+                    result.order_id,
+                    fee_calc,
+                    payment_status="failed",
                 )
                 order_data["payment"] = {"status": "failed"}
             order_data["kiln_fee"] = fee_calc.to_dict()
@@ -1772,16 +1937,20 @@ def order_place(quote_id: str, shipping_id: str, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except FulfillmentError as exc:
-        click.echo(format_error(
-            f"Failed to place order: {exc}. Verify the quote ID from 'kiln order quote'.",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to place order: {exc}. Verify the quote ID from 'kiln order quote'.",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to place order: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to place order: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -1797,16 +1966,20 @@ def order_status(order_id: str, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except FulfillmentError as exc:
-        click.echo(format_error(
-            f"Failed to get order status for {order_id!r}: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to get order status for {order_id!r}: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to get order status for {order_id!r}: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to get order status for {order_id!r}: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -1822,16 +1995,20 @@ def order_cancel(order_id: str, json_mode: bool) -> None:
     except click.ClickException:
         raise
     except FulfillmentError as exc:
-        click.echo(format_error(
-            f"Failed to cancel order {order_id!r}: {exc}. The order may no longer be cancellable.",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to cancel order {order_id!r}: {exc}. The order may no longer be cancellable.",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to cancel order {order_id!r}: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to cancel order {order_id!r}: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -1850,7 +2027,7 @@ def order_cancel(order_id: str, json_mode: bool) -> None:
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_recommend(
     use_case: str,
-    budget: Optional[str],
+    budget: str | None,
     weather_resistant: bool,
     food_safe: bool,
     high_detail: bool,
@@ -1903,10 +2080,10 @@ def order_recommend(
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_estimate(
     technology: str,
-    volume: Optional[float],
-    dim_x: Optional[float],
-    dim_y: Optional[float],
-    dim_z: Optional[float],
+    volume: float | None,
+    dim_x: float | None,
+    dim_y: float | None,
+    dim_z: float | None,
     quantity: int,
     json_mode: bool,
 ) -> None:
@@ -1933,7 +2110,9 @@ def order_estimate(
             click.echo(json.dumps({"status": "success", "data": data}, indent=2))
         else:
             click.echo(f"\n  Price Estimate ({result.technology})")
-            click.echo(f"  Range: ${result.estimated_price_low:.2f} — ${result.estimated_price_high:.2f} {result.currency}")
+            click.echo(
+                f"  Range: ${result.estimated_price_low:.2f} — ${result.estimated_price_high:.2f} {result.currency}"
+            )
             if result.volume_cm3:
                 click.echo(f"  Volume: {result.volume_cm3} cm³")
             click.echo(f"  Confidence: {result.confidence}")
@@ -1951,7 +2130,7 @@ def order_estimate(
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def order_timeline(
     technology: str,
-    shipping_days: Optional[int],
+    shipping_days: int | None,
     quantity: int,
     country: str,
     json_mode: bool,
@@ -2003,13 +2182,15 @@ def order_validate_address(
     """Validate a shipping address before placing an order."""
     from kiln.consumer import validate_address
 
-    result = validate_address({
-        "street": street,
-        "city": city,
-        "state": state,
-        "postal_code": postal_code,
-        "country": country,
-    })
+    result = validate_address(
+        {
+            "street": street,
+            "city": city,
+            "state": state,
+            "postal_code": postal_code,
+            "country": country,
+        }
+    )
     data = result.to_dict()
     if json_mode:
         click.echo(json.dumps({"status": "success" if result.valid else "error", "data": data}, indent=2))
@@ -2024,7 +2205,9 @@ def order_validate_address(
                 click.echo(f"    Warning: {w}")
         if result.valid:
             n = result.normalized
-            click.echo(f"    Normalized: {n.get('street')}, {n.get('city')}, {n.get('state')} {n.get('postal_code')}, {n.get('country')}")
+            click.echo(
+                f"    Normalized: {n.get('street')}, {n.get('city')}, {n.get('state')} {n.get('postal_code')}, {n.get('country')}"
+            )
         click.echo()
     if not result.valid:
         sys.exit(1)
@@ -2122,25 +2305,31 @@ def fleet_status_cmd(json_mode: bool) -> None:
 
         result = _fleet_status()
         if not result.get("success"):
-            click.echo(format_error(
-                result.get("error", "Unknown error"),
-                code=result.get("code", "ERROR"),
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    result.get("error", "Unknown error"),
+                    code=result.get("code", "ERROR"),
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         click.echo(format_fleet_status(result.get("printers", []), json_mode=json_mode))
     except PrinterError as exc:
-        click.echo(format_error(
-            f"Fleet status check failed: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Fleet status check failed: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Fleet status check failed: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Fleet status check failed: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -2152,8 +2341,12 @@ def fleet_status_cmd(json_mode: bool) -> None:
 @click.option("--serial", default=None, help="Printer serial (required for Bambu).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def fleet_register_cmd(
-    name: str, printer_type: str, host: str,
-    api_key: Optional[str], serial: Optional[str], json_mode: bool,
+    name: str,
+    printer_type: str,
+    host: str,
+    api_key: str | None,
+    serial: str | None,
+    json_mode: bool,
 ) -> None:
     """Register a printer in the fleet.
 
@@ -2174,25 +2367,31 @@ def fleet_register_cmd(
             serial=serial,
         )
         if not result.get("success"):
-            click.echo(format_error(
-                result.get("error", "Unknown error"),
-                code=result.get("code", "ERROR"),
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    result.get("error", "Unknown error"),
+                    code=result.get("code", "ERROR"),
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         click.echo(format_response("success", data=result, json_mode=json_mode))
     except PrinterError as exc:
-        click.echo(format_error(
-            f"Failed to register printer '{name}': {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to register printer '{name}': {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to register printer '{name}': {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to register printer '{name}': {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -2215,7 +2414,7 @@ def queue() -> None:
 @click.option("--printer", default=None, help="Target printer name (omit for auto-dispatch).")
 @click.option("--priority", default=0, type=int, help="Job priority (higher = first, default 0).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def queue_submit_cmd(file: str, printer: Optional[str], priority: int, json_mode: bool) -> None:
+def queue_submit_cmd(file: str, printer: str | None, priority: int, json_mode: bool) -> None:
     """Submit a print job to the queue.
 
     FILE is the G-code file name (must already exist on the printer).
@@ -2230,25 +2429,31 @@ def queue_submit_cmd(file: str, printer: Optional[str], priority: int, json_mode
             priority=priority,
         )
         if not result.get("success"):
-            click.echo(format_error(
-                result.get("error", "Unknown error"),
-                code=result.get("code", "ERROR"),
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    result.get("error", "Unknown error"),
+                    code=result.get("code", "ERROR"),
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         click.echo(format_response("success", data=result, json_mode=json_mode))
     except ValueError as exc:
-        click.echo(format_error(
-            f"Failed to submit job for '{file}': {exc}. Use 'kiln files' to list available files.",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to submit job for '{file}': {exc}. Use 'kiln files' to list available files.",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to submit job for '{file}': {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to submit job for '{file}': {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -2265,50 +2470,65 @@ def queue_status_cmd(job_id: str, json_mode: bool) -> None:
 
         result = _job_status(job_id)
         if not result.get("success"):
-            click.echo(format_error(
-                result.get("error", "Unknown error"),
-                code=result.get("code", "ERROR"),
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    result.get("error", "Unknown error"),
+                    code=result.get("code", "ERROR"),
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         click.echo(format_job_detail(result.get("job", {}), json_mode=json_mode))
     except ValueError as exc:
-        click.echo(format_error(
-            f"Failed to get job status for {job_id!r}: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to get job status for {job_id!r}: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to get job status for {job_id!r}: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to get job status for {job_id!r}: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
 @queue.command("list")
-@click.option("--status", "-s", "filter_status", default=None,
-              type=click.Choice(["completed", "failed", "cancelled"]),
-              help="Filter by job status.")
+@click.option(
+    "--status",
+    "-s",
+    "filter_status",
+    default=None,
+    type=click.Choice(["completed", "failed", "cancelled"]),
+    help="Filter by job status.",
+)
 @click.option("--limit", "-n", default=20, type=int, help="Max records (default 20).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def queue_list_cmd(filter_status: Optional[str], limit: int, json_mode: bool) -> None:
+def queue_list_cmd(filter_status: str | None, limit: int, json_mode: bool) -> None:
     """List jobs in the queue with optional status filter."""
     try:
         if filter_status:
             from kiln.plugins.queue_tools import job_history as _job_history
+
             result = _job_history(limit=limit, status=filter_status)
         else:
             from kiln.plugins.queue_tools import queue_summary as _queue_summary
+
             result = _queue_summary()
 
         if not result.get("success"):
-            click.echo(format_error(
-                result.get("error", "Unknown error"),
-                code=result.get("code", "ERROR"),
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    result.get("error", "Unknown error"),
+                    code=result.get("code", "ERROR"),
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         if filter_status:
@@ -2316,16 +2536,20 @@ def queue_list_cmd(filter_status: Optional[str], limit: int, json_mode: bool) ->
         else:
             click.echo(format_queue_summary(result, json_mode=json_mode))
     except ValueError as exc:
-        click.echo(format_error(
-            f"Failed to list queue: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to list queue: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to list queue: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to list queue: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -2342,25 +2566,31 @@ def queue_cancel_cmd(job_id: str, json_mode: bool) -> None:
 
         result = _cancel_job(job_id)
         if not result.get("success"):
-            click.echo(format_error(
-                result.get("error", "Unknown error"),
-                code=result.get("code", "ERROR"),
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    result.get("error", "Unknown error"),
+                    code=result.get("code", "ERROR"),
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         click.echo(format_response("success", data=result, json_mode=json_mode))
     except ValueError as exc:
-        click.echo(format_error(
-            f"Failed to cancel job {job_id!r}: {exc}. Only queued or running jobs can be cancelled.",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to cancel job {job_id!r}: {exc}. Only queued or running jobs can be cancelled.",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
     except Exception as exc:
-        click.echo(format_error(
-            f"Failed to cancel job {job_id!r}: {exc}",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                f"Failed to cancel job {job_id!r}: {exc}",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
 
@@ -2389,25 +2619,32 @@ def cost(
 ) -> None:
     """Estimate print cost from a G-code file."""
     import json as _json
+
     from kiln.cost_estimator import CostEstimator
 
     try:
         estimator = CostEstimator()
         estimate = estimator.estimate_from_file(
-            file_path, material=material,
+            file_path,
+            material=material,
             electricity_rate=electricity_rate,
             printer_wattage=printer_wattage,
         )
 
         if json_mode:
-            click.echo(_json.dumps({
-                "status": "success", "data": estimate.to_dict(),
-            }, indent=2))
+            click.echo(
+                _json.dumps(
+                    {
+                        "status": "success",
+                        "data": estimate.to_dict(),
+                    },
+                    indent=2,
+                )
+            )
         else:
             click.echo(f"File:       {estimate.file_name}")
             click.echo(f"Material:   {estimate.material}")
-            click.echo(f"Filament:   {estimate.filament_length_meters:.2f} m "
-                       f"({estimate.filament_weight_grams:.1f} g)")
+            click.echo(f"Filament:   {estimate.filament_length_meters:.2f} m ({estimate.filament_weight_grams:.1f} g)")
             click.echo(f"Filament $: ${estimate.filament_cost_usd:.2f}")
             if estimate.estimated_time_seconds:
                 hours = estimate.estimated_time_seconds / 3600
@@ -2439,7 +2676,7 @@ def cost(
 def compare_cost(
     file_path: str,
     material: str,
-    fulfillment_material: Optional[str],
+    fulfillment_material: str | None,
     quantity: int,
     electricity_rate: float,
     printer_wattage: float,
@@ -2448,6 +2685,7 @@ def compare_cost(
 ) -> None:
     """Compare local printing cost vs. outsourced manufacturing."""
     import json as _json
+
     from kiln.cost_estimator import CostEstimator
 
     result: dict = {}
@@ -2456,7 +2694,8 @@ def compare_cost(
     try:
         estimator = CostEstimator()
         estimate = estimator.estimate_from_file(
-            file_path, material=material,
+            file_path,
+            material=material,
             electricity_rate=electricity_rate,
             printer_wattage=printer_wattage,
         )
@@ -2469,14 +2708,18 @@ def compare_cost(
     # Fulfillment quote (optional)
     if fulfillment_material:
         try:
-            from kiln.fulfillment import get_provider, QuoteRequest as QR
+            from kiln.fulfillment import QuoteRequest as QR
+            from kiln.fulfillment import get_provider
+
             provider = get_provider()
-            quote = provider.get_quote(QR(
-                file_path=file_path,
-                material_id=fulfillment_material,
-                quantity=quantity,
-                shipping_country=country,
-            ))
+            quote = provider.get_quote(
+                QR(
+                    file_path=file_path,
+                    material_id=fulfillment_material,
+                    quantity=quantity,
+                    shipping_country=country,
+                )
+            )
             result["fulfillment"] = {"available": True, "quote": quote.to_dict()}
         except FulfillmentError as exc:
             result["fulfillment"] = {"available": False, "error": str(exc)}
@@ -2532,11 +2775,16 @@ def material() -> None:
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def material_set(
-    ctx: click.Context, material_type: str, color: Optional[str],
-    spool: Optional[str], tool: int, json_mode: bool,
+    ctx: click.Context,
+    material_type: str,
+    color: str | None,
+    spool: str | None,
+    tool: int,
+    json_mode: bool,
 ) -> None:
     """Record which material is loaded in the printer."""
     import json as _json
+
     from kiln.materials import MaterialTracker
     from kiln.persistence import get_db
 
@@ -2551,12 +2799,17 @@ def material_set(
             tool_index=tool,
         )
         if json_mode:
-            click.echo(_json.dumps({
-                "status": "success", "data": mat.to_dict(),
-            }, indent=2))
+            click.echo(
+                _json.dumps(
+                    {
+                        "status": "success",
+                        "data": mat.to_dict(),
+                    },
+                    indent=2,
+                )
+            )
         else:
-            click.echo(f"Set {printer_name} tool {tool}: {mat.material_type}"
-                       + (f" ({color})" if color else ""))
+            click.echo(f"Set {printer_name} tool {tool}: {mat.material_type}" + (f" ({color})" if color else ""))
     except OSError as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
         sys.exit(1)
@@ -2571,6 +2824,7 @@ def material_set(
 def material_show(ctx: click.Context, json_mode: bool) -> None:
     """Show loaded materials for the active printer."""
     import json as _json
+
     from kiln.materials import MaterialTracker
     from kiln.persistence import get_db
 
@@ -2579,10 +2833,15 @@ def material_show(ctx: click.Context, json_mode: bool) -> None:
         tracker = MaterialTracker(db=get_db())
         materials = tracker.get_all_materials(printer_name)
         if json_mode:
-            click.echo(_json.dumps({
-                "status": "success",
-                "data": [m.to_dict() for m in materials],
-            }, indent=2))
+            click.echo(
+                _json.dumps(
+                    {
+                        "status": "success",
+                        "data": [m.to_dict() for m in materials],
+                    },
+                    indent=2,
+                )
+            )
         else:
             if not materials:
                 click.echo("No materials loaded.")
@@ -2606,6 +2865,7 @@ def material_show(ctx: click.Context, json_mode: bool) -> None:
 def material_spools(json_mode: bool) -> None:
     """List all tracked filament spools."""
     import json as _json
+
     from kiln.materials import MaterialTracker
     from kiln.persistence import get_db
 
@@ -2613,10 +2873,15 @@ def material_spools(json_mode: bool) -> None:
         tracker = MaterialTracker(db=get_db())
         spools = tracker.list_spools()
         if json_mode:
-            click.echo(_json.dumps({
-                "status": "success",
-                "data": [s.to_dict() for s in spools],
-            }, indent=2))
+            click.echo(
+                _json.dumps(
+                    {
+                        "status": "success",
+                        "data": [s.to_dict() for s in spools],
+                    },
+                    indent=2,
+                )
+            )
         else:
             if not spools:
                 click.echo("No spools tracked.")
@@ -2644,24 +2909,38 @@ def material_spools(json_mode: bool) -> None:
 @click.option("--cost", default=None, type=float, help="Cost in USD.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def material_add_spool(
-    material_type: str, color: Optional[str], brand: Optional[str],
-    weight: float, cost: Optional[float], json_mode: bool,
+    material_type: str,
+    color: str | None,
+    brand: str | None,
+    weight: float,
+    cost: float | None,
+    json_mode: bool,
 ) -> None:
     """Add a new filament spool to inventory."""
     import json as _json
+
     from kiln.materials import MaterialTracker
     from kiln.persistence import get_db
 
     try:
         tracker = MaterialTracker(db=get_db())
         spool = tracker.add_spool(
-            material_type=material_type, color=color, brand=brand,
-            weight_grams=weight, cost_usd=cost,
+            material_type=material_type,
+            color=color,
+            brand=brand,
+            weight_grams=weight,
+            cost_usd=cost,
         )
         if json_mode:
-            click.echo(_json.dumps({
-                "status": "success", "data": spool.to_dict(),
-            }, indent=2))
+            click.echo(
+                _json.dumps(
+                    {
+                        "status": "success",
+                        "data": spool.to_dict(),
+                    },
+                    indent=2,
+                )
+            )
         else:
             click.echo(f"Added spool {spool.id}: {spool.material_type} {spool.weight_grams:.0f}g")
     except OSError as exc:
@@ -2686,13 +2965,18 @@ def material_add_spool(
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def level(
-    ctx: click.Context, trigger: bool, show_status: bool,
-    set_prints: Optional[int], set_hours: Optional[float],
-    enable: Optional[bool], json_mode: bool,
+    ctx: click.Context,
+    trigger: bool,
+    show_status: bool,
+    set_prints: int | None,
+    set_hours: float | None,
+    enable: bool | None,
+    json_mode: bool,
 ) -> None:
     """Manage bed leveling triggers and status."""
     import json as _json
-    from kiln.bed_leveling import BedLevelManager, LevelingPolicy
+
+    from kiln.bed_leveling import BedLevelManager
     from kiln.persistence import get_db
 
     try:
@@ -2722,9 +3006,15 @@ def level(
 
         status = mgr.check_needed(printer_name)
         if json_mode:
-            click.echo(_json.dumps({
-                "status": "success", "data": status.to_dict(),
-            }, indent=2))
+            click.echo(
+                _json.dumps(
+                    {
+                        "status": "success",
+                        "data": status.to_dict(),
+                    },
+                    indent=2,
+                )
+            )
         else:
             click.echo(f"Printer:        {status.printer_name}")
             click.echo(f"Needs leveling: {'Yes' if status.needs_leveling else 'No'}")
@@ -2733,6 +3023,7 @@ def level(
             click.echo(f"Prints since:   {status.prints_since_level}")
             if status.last_leveled_at:
                 import time
+
                 age = (time.time() - status.last_leveled_at) / 3600
                 click.echo(f"Last leveled:   {age:.1f} hours ago")
     except click.ClickException:
@@ -2758,6 +3049,7 @@ def level(
 def stream(ctx: click.Context, port: int, do_stop: bool, json_mode: bool) -> None:
     """Start or stop the MJPEG webcam streaming proxy."""
     import json as _json
+
     from kiln.streaming import MJPEGProxy
 
     proxy = MJPEGProxy()
@@ -2774,11 +3066,13 @@ def stream(ctx: click.Context, port: int, do_stop: bool, json_mode: bool) -> Non
         adapter = _get_adapter_from_ctx(ctx)
         stream_url = adapter.get_stream_url()
         if stream_url is None:
-            click.echo(format_error(
-                "Webcam streaming not available for this printer.",
-                code="NO_STREAM",
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    "Webcam streaming not available for this printer.",
+                    code="NO_STREAM",
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         printer_name = ctx.obj.get("printer") or "default"
@@ -2789,6 +3083,7 @@ def stream(ctx: click.Context, port: int, do_stop: bool, json_mode: bool) -> Non
             click.echo(f"Stream started at {info.local_url}")
             click.echo("Press Ctrl+C to stop.")
             import time
+
             try:
                 while proxy.active:
                     time.sleep(1)
@@ -2820,10 +3115,18 @@ def sync() -> None:
 def sync_status(json_mode: bool) -> None:
     """Show cloud sync status."""
     import json as _json
-    click.echo(_json.dumps({
-        "status": "success",
-        "data": {"message": "Cloud sync status — use MCP server for full status."},
-    }, indent=2) if json_mode else "Cloud sync status available via MCP server (kiln serve).")
+
+    click.echo(
+        _json.dumps(
+            {
+                "status": "success",
+                "data": {"message": "Cloud sync status — use MCP server for full status."},
+            },
+            indent=2,
+        )
+        if json_mode
+        else "Cloud sync status available via MCP server (kiln serve)."
+    )
 
 
 @sync.command("now")
@@ -2841,12 +3144,14 @@ def sync_now(json_mode: bool) -> None:
 def sync_configure(url: str, api_key: str, interval: float, json_mode: bool) -> None:
     """Save cloud sync configuration."""
     import json as _json
+
     from kiln.cloud_sync import SyncConfig
     from kiln.persistence import get_db
 
     try:
         config = SyncConfig(cloud_url=url, api_key=api_key, sync_interval_seconds=interval)
         from dataclasses import asdict
+
         get_db().set_setting("cloud_sync_config", _json.dumps(asdict(config)))
         if json_mode:
             click.echo(_json.dumps({"status": "success", "data": config.to_dict()}, indent=2))
@@ -2875,15 +3180,21 @@ def plugins() -> None:
 def plugins_list(json_mode: bool) -> None:
     """List all discovered plugins."""
     import json as _json
+
     from kiln.plugins import PluginManager
 
     mgr = PluginManager()
     discovered = mgr.discover()
     if json_mode:
-        click.echo(_json.dumps({
-            "status": "success",
-            "data": [p.to_dict() for p in discovered],
-        }, indent=2))
+        click.echo(
+            _json.dumps(
+                {
+                    "status": "success",
+                    "data": [p.to_dict() for p in discovered],
+                },
+                indent=2,
+            )
+        )
     else:
         if not discovered:
             click.echo("No plugins found.")
@@ -2902,6 +3213,7 @@ def plugins_list(json_mode: bool) -> None:
 def plugins_info(name: str, json_mode: bool) -> None:
     """Show details for a specific plugin."""
     import json as _json
+
     from kiln.plugins import PluginManager
 
     mgr = PluginManager()
@@ -2939,8 +3251,9 @@ def billing() -> None:
 
 
 @billing.command("setup")
-@click.option("--rail", default="stripe", type=click.Choice(["stripe", "crypto"]),
-              help="Payment rail (default stripe).")
+@click.option(
+    "--rail", default="stripe", type=click.Choice(["stripe", "crypto"]), help="Payment rail (default stripe)."
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def billing_setup(rail: str, json_mode: bool) -> None:
     """Link a payment method for platform fees.
@@ -2949,25 +3262,28 @@ def billing_setup(rail: str, json_mode: bool) -> None:
     crypto payments (USDC on Solana/Base).
     """
     from kiln.cli.config import get_billing_config, get_or_create_user_id
-    from kiln.persistence import get_db
     from kiln.payments.manager import PaymentManager
+    from kiln.persistence import get_db
 
     try:
         config = get_billing_config()
-        user_id = get_or_create_user_id()
+        get_or_create_user_id()
         mgr = PaymentManager(db=get_db(), config=config)
 
         if rail == "stripe":
             from kiln.payments.stripe_provider import StripeProvider
+
             provider = StripeProvider()
             mgr.register_provider(provider)
         else:
-            click.echo(format_error(
-                "Crypto setup: set KILN_CIRCLE_API_KEY and configure your "
-                "wallet via the Circle dashboard. Then run 'kiln billing status' "
-                "to verify.",
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    "Crypto setup: set KILN_CIRCLE_API_KEY and configure your "
+                    "wallet via the Circle dashboard. Then run 'kiln billing status' "
+                    "to verify.",
+                    json_mode=json_mode,
+                )
+            )
             return
 
         url = mgr.get_setup_url(rail=rail)
@@ -2987,8 +3303,8 @@ def billing_setup(rail: str, json_mode: bool) -> None:
 def billing_status(json_mode: bool) -> None:
     """Show current payment method, monthly spend, and limits."""
     from kiln.cli.config import get_billing_config, get_or_create_user_id
-    from kiln.persistence import get_db
     from kiln.payments.manager import PaymentManager
+    from kiln.persistence import get_db
 
     try:
         config = get_billing_config()
@@ -3010,8 +3326,8 @@ def billing_status(json_mode: bool) -> None:
 def billing_history(limit: int, json_mode: bool) -> None:
     """Show recent billing charges and payment outcomes."""
     from kiln.cli.config import get_billing_config
-    from kiln.persistence import get_db
     from kiln.payments.manager import PaymentManager
+    from kiln.persistence import get_db
 
     try:
         config = get_billing_config()
@@ -3044,11 +3360,14 @@ def donate(json_mode: bool) -> None:
     info = get_donation_info()
     if json_mode:
         import json as _json
-        click.echo(_json.dumps(
-            {"status": "success", "data": info},
-            indent=2,
-            sort_keys=False,
-        ))
+
+        click.echo(
+            _json.dumps(
+                {"status": "success", "data": info},
+                indent=2,
+                sort_keys=False,
+            )
+        )
         return
 
     sol = info["wallets"]["solana"]
@@ -3099,11 +3418,15 @@ _PRINTER_TYPE_LABELS = {
 
 @cli.command()
 @click.option(
-    "--skip-discovery", is_flag=True,
+    "--skip-discovery",
+    is_flag=True,
     help="Skip network scan and go straight to manual entry.",
 )
 @click.option(
-    "--timeout", "-t", "discovery_timeout", default=5.0,
+    "--timeout",
+    "-t",
+    "discovery_timeout",
+    default=5.0,
     help="Discovery scan timeout in seconds (default 5).",
 )
 def setup(skip_discovery: bool, discovery_timeout: float) -> None:
@@ -3123,10 +3446,9 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     # -- Terms of use ------------------------------------------------------
     from kiln.terms import is_current, prompt_acceptance
 
-    if not is_current():
-        if not prompt_acceptance():
-            click.echo("  You must accept the terms of use to use Kiln.")
-            sys.exit(1)
+    if not is_current() and not prompt_acceptance():
+        click.echo("  You must accept the terms of use to use Kiln.")
+        sys.exit(1)
 
     # -- Check existing config ---------------------------------------------
     config_path = get_config_path()
@@ -3151,6 +3473,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
                 return
             # Wipe printers section
             from kiln.cli.config import _read_config_file, _write_config_file
+
             raw = _read_config_file(config_path)
             raw["printers"] = {}
             raw.pop("active_printer", None)
@@ -3163,6 +3486,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         click.echo("  Scanning LAN for printers...")
         try:
             from kiln.cli.discovery import discover_printers
+
             discovered = discover_printers(timeout=discovery_timeout)
         except OSError as exc:
             click.echo(click.style(f"  Discovery failed: {exc}", fg="yellow"))
@@ -3174,13 +3498,11 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         if discovered:
             click.echo(f"\n  Found {len(discovered)} printer(s):\n")
             click.echo(f"    {'#':<4} {'Name':<25} {'Host':<22} {'Type':<14} {'Method'}")
-            click.echo(f"    {'─'*4} {'─'*25} {'─'*22} {'─'*14} {'─'*10}")
+            click.echo(f"    {'─' * 4} {'─' * 25} {'─' * 22} {'─' * 14} {'─' * 10}")
             for i, p in enumerate(discovered, 1):
                 label = _PRINTER_TYPE_LABELS.get(p.printer_type, p.printer_type)
                 display_name = p.name or "(unnamed)"
-                click.echo(
-                    f"    {i:<4} {display_name:<25} {p.host:<22} {label:<14} {p.discovery_method}"
-                )
+                click.echo(f"    {i:<4} {display_name:<25} {p.host:<22} {label:<14} {p.discovery_method}")
             click.echo()
         else:
             click.echo("  No printers found on the LAN.\n")
@@ -3224,6 +3546,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         click.echo("  Probing host...")
         try:
             from kiln.cli.discovery import probe_host
+
             probed = probe_host(host)
             if probed:
                 p = probed[0]
@@ -3297,10 +3620,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
         cfg = load_printer_config(name)
         adapter = _make_adapter(cfg)
         state = adapter.get_state()
-        click.echo(
-            click.style("  Connected!", fg="green")
-            + f" Printer state: {state.state.value}"
-        )
+        click.echo(click.style("  Connected!", fg="green") + f" Printer state: {state.state.value}")
         if state.tool_temp_actual is not None:
             click.echo(f"  Hotend: {state.tool_temp_actual:.0f}C")
         if state.bed_temp_actual is not None:
@@ -3335,13 +3655,11 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     )
 
     auto_mkt = click.confirm(
-        "  Enable auto-print for MARKETPLACE downloads?\n"
-        "  (Community models — moderate risk)",
+        "  Enable auto-print for MARKETPLACE downloads?\n  (Community models — moderate risk)",
         default=False,
     )
     auto_gen = click.confirm(
-        "  Enable auto-print for AI-GENERATED models?\n"
-        "  (Experimental geometry — higher risk)",
+        "  Enable auto-print for AI-GENERATED models?\n  (Experimental geometry — higher risk)",
         default=False,
     )
 
@@ -3361,8 +3679,7 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     else:
         click.echo()
         click.echo(
-            click.style("  Auto-print disabled (recommended).", fg="green")
-            + " Models will upload but not print\n"
+            click.style("  Auto-print disabled (recommended).", fg="green") + " Models will upload but not print\n"
             "  until you explicitly call start_print."
         )
 
@@ -3371,10 +3688,10 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
     click.echo(click.style("  Setup complete!", bold=True))
     click.echo()
     click.echo("  Next steps:")
-    click.echo(f"    kiln status          Check printer state")
-    click.echo(f"    kiln files           List files on the printer")
-    click.echo(f"    kiln print <file>    Start a print")
-    click.echo(f"    kiln serve           Start the MCP server")
+    click.echo("    kiln status          Check printer state")
+    click.echo("    kiln files           List files on the printer")
+    click.echo("    kiln print <file>    Start a print")
+    click.echo("    kiln serve           Start the MCP server")
     click.echo()
     click.echo("  Auto-print toggles (change anytime via env vars):")
     click.echo(f"    KILN_AUTO_PRINT_MARKETPLACE={'true' if auto_mkt else 'false (default)'}")
@@ -3387,7 +3704,6 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
 # ---------------------------------------------------------------------------
 
 
-
 # ---------------------------------------------------------------------------
 # quickstart
 # ---------------------------------------------------------------------------
@@ -3396,7 +3712,10 @@ def setup(skip_discovery: bool, discovery_timeout: float) -> None:
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.option(
-    "--timeout", "-t", "discovery_timeout", default=5.0,
+    "--timeout",
+    "-t",
+    "discovery_timeout",
+    default=5.0,
     help="Discovery scan timeout in seconds (default 5).",
 )
 @click.pass_context
@@ -3409,7 +3728,7 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
     """
     import json as _json
 
-    results: Dict[str, Any] = {"verify": {}, "discover": {}, "setup": {}, "status": {}}
+    results: dict[str, Any] = {"verify": {}, "discover": {}, "setup": {}, "status": {}}
     failed = False
 
     # -- Step 1: Verify environment ----------------------------------------
@@ -3441,13 +3760,11 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
     discovered = []
     try:
         from kiln.cli.discovery import discover_printers
+
         discovered = discover_printers(timeout=discovery_timeout)
         results["discover"] = {
             "count": len(discovered),
-            "printers": [
-                {"name": p.name, "host": p.host, "type": p.printer_type}
-                for p in discovered
-            ],
+            "printers": [{"name": p.name, "host": p.host, "type": p.printer_type} for p in discovered],
         }
     except OSError as exc:
         results["discover"] = {"count": 0, "error": str(exc)}
@@ -3569,7 +3886,7 @@ def quickstart(ctx: click.Context, json_mode: bool, discovery_timeout: float) ->
         sys.exit(1)
 
 
-def _quickstart_verify() -> List[Dict[str, Any]]:
+def _quickstart_verify() -> list[dict[str, Any]]:
     """Run lightweight environment checks for quickstart.
 
     Returns a list of check dicts with 'name', 'ok', 'detail' keys.
@@ -3577,7 +3894,7 @@ def _quickstart_verify() -> List[Dict[str, Any]]:
     import platform
     import sqlite3
 
-    checks: List[Dict[str, Any]] = []
+    checks: list[dict[str, Any]] = []
 
     # Python version
     vi = sys.version_info
@@ -3587,6 +3904,7 @@ def _quickstart_verify() -> List[Dict[str, Any]]:
     # Kiln importable
     try:
         import kiln as _kiln
+
         ver = getattr(_kiln, "__version__", "unknown")
         checks.append({"name": "kiln", "ok": True, "detail": f"v{ver}"})
     except ImportError as exc:
@@ -3596,7 +3914,8 @@ def _quickstart_verify() -> List[Dict[str, Any]]:
 
     # Slicer available
     try:
-        from kiln.slicer import SlicerNotFoundError, find_slicer
+        from kiln.slicer import find_slicer
+
         info = find_slicer()
         label = info.name
         if info.version:
@@ -3604,11 +3923,13 @@ def _quickstart_verify() -> List[Dict[str, Any]]:
         checks.append({"name": "slicer", "ok": True, "detail": label})
     except Exception as exc:
         logger.debug("Slicer discovery failed: %s", exc)
-        checks.append({
-            "name": "slicer",
-            "ok": False,
-            "detail": "not found (install prusa-slicer or set KILN_SLICER_PATH)",
-        })
+        checks.append(
+            {
+                "name": "slicer",
+                "ok": False,
+                "detail": "not found (install prusa-slicer or set KILN_SLICER_PATH)",
+            }
+        )
 
     # Database writable
     db_dir = os.path.join(os.path.expanduser("~"), ".kiln")
@@ -3630,12 +3951,14 @@ def _quickstart_verify() -> List[Dict[str, Any]]:
         try:
             release = platform.uname().release.lower()
             if "microsoft" in release or "wsl" in release:
-                checks.append({
-                    "name": "wsl",
-                    "ok": True,
-                    "warn": True,
-                    "detail": "WSL 2 detected — mDNS discovery will not work, use explicit IPs",
-                })
+                checks.append(
+                    {
+                        "name": "wsl",
+                        "ok": True,
+                        "warn": True,
+                        "detail": "WSL 2 detected — mDNS discovery will not work, use explicit IPs",
+                    }
+                )
         except Exception as exc:
             logger.debug("WSL detection failed in doctor checks: %s", exc)
 
@@ -3652,6 +3975,7 @@ def serve() -> None:
     or register printers dynamically via the register_printer tool.
     """
     from kiln.server import main as _server_main
+
     _server_main()
 
 
@@ -3664,30 +3988,28 @@ def serve() -> None:
 @click.option("--host", default="0.0.0.0", help="Bind address.")
 @click.option("--port", default=8420, type=int, help="Port number.")
 @click.option(
-    "--auth-token", default=None,
+    "--auth-token",
+    default=None,
     help="Bearer token for REST auth (defaults to KILN_API_AUTH_TOKEN env var).",
 )
 @click.option(
-    "--tier", default="full",
+    "--tier",
+    default="full",
     type=click.Choice(["essential", "standard", "full"]),
     help="Which tool tier to expose (default: full).",
 )
-def rest(host: str, port: int, auth_token: Optional[str], tier: str) -> None:
+def rest(host: str, port: int, auth_token: str | None, tier: str) -> None:
     """Start the Kiln REST API server.
 
     Wraps all MCP tools as REST endpoints so any HTTP client can control
     printers.  Tools are available at POST /api/tools/{tool_name} and a
     discovery endpoint at GET /api/tools lists available tools with schemas.
     """
-    from kiln.rest_api import run_rest_server, RestApiConfig
+    from kiln.rest_api import RestApiConfig, run_rest_server
 
     resolved_auth_token = auth_token
     if resolved_auth_token is None:
-        resolved_auth_token = (
-            os.environ.get("KILN_API_AUTH_TOKEN")
-            or os.environ.get("KILN_AUTH_TOKEN")
-            or None
-        )
+        resolved_auth_token = os.environ.get("KILN_API_AUTH_TOKEN") or os.environ.get("KILN_AUTH_TOKEN") or None
 
     config = RestApiConfig(
         host=host,
@@ -3706,36 +4028,33 @@ def rest(host: str, port: int, auth_token: Optional[str], tier: str) -> None:
 
 @cli.command()
 @click.option(
-    "--model", "-m", default="openai/gpt-4o",
+    "--model",
+    "-m",
+    default="openai/gpt-4o",
     help="Model ID (default: openai/gpt-4o).",
 )
 @click.option("--tier", default=None, help="Tool tier (auto-detect if not set).")
 @click.option(
-    "--base-url", default="https://openrouter.ai/api/v1",
+    "--base-url",
+    default="https://openrouter.ai/api/v1",
     help="LLM provider base URL.",
 )
-def agent(model: str, tier: Optional[str], base_url: str) -> None:
+def agent(model: str, tier: str | None, base_url: str) -> None:
     """Interactive agent REPL -- chat with any LLM to control your printer.
 
     Requires KILN_OPENROUTER_KEY or OPENROUTER_API_KEY environment variable.
     """
     import os
 
-    api_key = os.environ.get("KILN_OPENROUTER_KEY") or os.environ.get(
-        "OPENROUTER_API_KEY"
-    )
+    api_key = os.environ.get("KILN_OPENROUTER_KEY") or os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
-        click.echo(
-            "Set KILN_OPENROUTER_KEY or OPENROUTER_API_KEY environment variable."
-        )
+        click.echo("Set KILN_OPENROUTER_KEY or OPENROUTER_API_KEY environment variable.")
         sys.exit(1)
 
     try:
-        from kiln.agent_loop import run_agent_loop, AgentConfig
+        from kiln.agent_loop import AgentConfig, run_agent_loop
     except ImportError:
-        click.echo(
-            "Agent loop module not available. Ensure kiln.agent_loop is installed."
-        )
+        click.echo("Agent loop module not available. Ensure kiln.agent_loop is installed.")
         sys.exit(1)
 
     agent_config = AgentConfig(
@@ -3759,13 +4078,13 @@ def agent(model: str, tier: Optional[str], base_url: str) -> None:
             break
         try:
             result = run_agent_loop(
-                prompt, agent_config, conversation=conversation,
+                prompt,
+                agent_config,
+                conversation=conversation,
             )
             conversation = result.messages
             click.echo(f"\nAgent> {result.response}\n")
-            click.echo(
-                f"  ({result.tool_calls_made} tool calls, {result.turns} turns)\n"
-            )
+            click.echo(f"  ({result.tool_calls_made} tool calls, {result.turns} turns)\n")
         except RuntimeError as exc:
             click.echo(f"\nAgent error: {exc}\n")
         except Exception as exc:
@@ -3779,20 +4098,25 @@ def agent(model: str, tier: Optional[str], base_url: str) -> None:
 
 @cli.command()
 @click.argument("prompt")
-@click.option("--provider", "-p", default="meshy",
-              type=click.Choice(["meshy", "openscad"]),
-              help="Generation provider (default: meshy).")
+@click.option(
+    "--provider",
+    "-p",
+    default="meshy",
+    type=click.Choice(["meshy", "openscad"]),
+    help="Generation provider (default: meshy).",
+)
 @click.option("--style", "-s", default=None, help="Style hint (e.g. realistic, sculpture).")
 @click.option("--output-dir", "-o", default=None, help="Output directory for generated model.")
-@click.option("--wait/--no-wait", "wait_for", default=False,
-              help="Wait for generation to complete (default: return immediately).")
+@click.option(
+    "--wait/--no-wait", "wait_for", default=False, help="Wait for generation to complete (default: return immediately)."
+)
 @click.option("--timeout", "-t", default=600, type=int, help="Max wait time in seconds (default 600).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def generate(
     prompt: str,
     provider: str,
-    style: Optional[str],
-    output_dir: Optional[str],
+    style: str | None,
+    output_dir: str | None,
     wait_for: bool,
     timeout: int,
     json_mode: bool,
@@ -3808,6 +4132,7 @@ def generate(
         kiln generate "a gear with 24 teeth" --wait --json
     """
     import time as _time
+
     from kiln.generation import (
         GenerationAuthError,
         GenerationError,
@@ -3832,19 +4157,27 @@ def generate(
         if not wait_for or job.status == GenerationStatus.SUCCEEDED:
             if job.status == GenerationStatus.SUCCEEDED:
                 # Download the result for synchronous providers.
-                result = gen.download_result(job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated"))
+                result = gen.download_result(
+                    job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                )
                 val = validate_mesh(result.local_path)
 
                 if json_mode:
                     import json
-                    click.echo(json.dumps({
-                        "status": "success",
-                        "data": {
-                            "job": job.to_dict(),
-                            "result": result.to_dict(),
-                            "validation": val.to_dict(),
-                        },
-                    }, indent=2))
+
+                    click.echo(
+                        json.dumps(
+                            {
+                                "status": "success",
+                                "data": {
+                                    "job": job.to_dict(),
+                                    "result": result.to_dict(),
+                                    "validation": val.to_dict(),
+                                },
+                            },
+                            indent=2,
+                        )
+                    )
                 else:
                     click.echo(f"Generated: {result.local_path}")
                     click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
@@ -3857,10 +4190,16 @@ def generate(
             # Async job submitted, not waiting.
             if json_mode:
                 import json
-                click.echo(json.dumps({
-                    "status": "success",
-                    "data": {"job": job.to_dict()},
-                }, indent=2))
+
+                click.echo(
+                    json.dumps(
+                        {
+                            "status": "success",
+                            "data": {"job": job.to_dict()},
+                        },
+                        indent=2,
+                    )
+                )
             else:
                 click.echo(f"Job submitted: {job.id}")
                 click.echo(f"  Provider: {gen.display_name}  Status: {job.status.value}")
@@ -3875,9 +4214,7 @@ def generate(
         while True:
             elapsed = _time.time() - start
             if elapsed >= timeout:
-                click.echo(format_error(
-                    f"Timed out after {timeout}s", code="TIMEOUT", json_mode=json_mode
-                ))
+                click.echo(format_error(f"Timed out after {timeout}s", code="TIMEOUT", json_mode=json_mode))
                 sys.exit(1)
 
             job = gen.get_job_status(job.id)
@@ -3886,20 +4223,28 @@ def generate(
                 click.echo(f"\r  Progress: {job.progress}%  ", nl=False)
 
             if job.status == GenerationStatus.SUCCEEDED:
-                result = gen.download_result(job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated"))
+                result = gen.download_result(
+                    job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
+                )
                 val = validate_mesh(result.local_path)
 
                 if json_mode:
                     import json
-                    click.echo(json.dumps({
-                        "status": "success",
-                        "data": {
-                            "job": job.to_dict(),
-                            "result": result.to_dict(),
-                            "validation": val.to_dict(),
-                            "elapsed_seconds": round(elapsed, 1),
-                        },
-                    }, indent=2))
+
+                    click.echo(
+                        json.dumps(
+                            {
+                                "status": "success",
+                                "data": {
+                                    "job": job.to_dict(),
+                                    "result": result.to_dict(),
+                                    "validation": val.to_dict(),
+                                    "elapsed_seconds": round(elapsed, 1),
+                                },
+                            },
+                            indent=2,
+                        )
+                    )
                 else:
                     click.echo(f"\nGenerated: {result.local_path}")
                     click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
@@ -3908,11 +4253,13 @@ def generate(
                 return
 
             if job.status in (GenerationStatus.FAILED, GenerationStatus.CANCELLED):
-                click.echo(format_error(
-                    f"Generation {job.status.value}: {job.error or 'unknown'}",
-                    code="GENERATION_FAILED",
-                    json_mode=json_mode,
-                ))
+                click.echo(
+                    format_error(
+                        f"Generation {job.status.value}: {job.error or 'unknown'}",
+                        code="GENERATION_FAILED",
+                        json_mode=json_mode,
+                    )
+                )
                 sys.exit(1)
 
             _time.sleep(10)
@@ -3936,9 +4283,9 @@ def generate(
 
 @cli.command("generate-status")
 @click.argument("job_id")
-@click.option("--provider", "-p", default="meshy",
-              type=click.Choice(["meshy", "openscad"]),
-              help="Generation provider.")
+@click.option(
+    "--provider", "-p", default="meshy", type=click.Choice(["meshy", "openscad"]), help="Generation provider."
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
     """Check the status of a generation job.
@@ -3962,10 +4309,16 @@ def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
 
         if json_mode:
             import json
-            click.echo(json.dumps({
-                "status": "success",
-                "data": {"job": job.to_dict()},
-            }, indent=2))
+
+            click.echo(
+                json.dumps(
+                    {
+                        "status": "success",
+                        "data": {"job": job.to_dict()},
+                    },
+                    indent=2,
+                )
+            )
         else:
             click.echo(f"Job: {job.id}")
             click.echo(f"  Provider: {job.provider}  Status: {job.status.value}")
@@ -3979,11 +4332,6 @@ def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
     except GenerationError as exc:
         click.echo(format_error(str(exc), code=exc.code or "GENERATION_ERROR", json_mode=json_mode))
         sys.exit(1)
-    except click.ClickException:
-        raise
-    except GenerationError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
-        sys.exit(1)
     except Exception as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
         sys.exit(1)
@@ -3991,13 +4339,13 @@ def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
 
 @cli.command("generate-download")
 @click.argument("job_id")
-@click.option("--provider", "-p", default="meshy",
-              type=click.Choice(["meshy", "openscad"]),
-              help="Generation provider.")
-@click.option("--output-dir", "-o", default=os.path.join(tempfile.gettempdir(), "kiln_generated"),
-              help="Output directory.")
-@click.option("--validate/--no-validate", default=True,
-              help="Run mesh validation (default: on).")
+@click.option(
+    "--provider", "-p", default="meshy", type=click.Choice(["meshy", "openscad"]), help="Generation provider."
+)
+@click.option(
+    "--output-dir", "-o", default=os.path.join(tempfile.gettempdir(), "kiln_generated"), help="Output directory."
+)
+@click.option("--validate/--no-validate", default=True, help="Run mesh validation (default: on).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def generate_download(
     job_id: str,
@@ -4032,7 +4380,8 @@ def generate_download(
 
         if json_mode:
             import json
-            data: Dict[str, Any] = {"result": result.to_dict()}
+
+            data: dict[str, Any] = {"result": result.to_dict()}
             if validation:
                 data["validation"] = validation.to_dict()
             click.echo(json.dumps({"status": "success", "data": data}, indent=2))
@@ -4052,11 +4401,6 @@ def generate_download(
         sys.exit(1)
     except GenerationError as exc:
         click.echo(format_error(str(exc), code=exc.code or "GENERATION_ERROR", json_mode=json_mode))
-        sys.exit(1)
-    except click.ClickException:
-        raise
-    except GenerationError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
         sys.exit(1)
     except Exception as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
@@ -4087,19 +4431,23 @@ def firmware_status_cmd(ctx: click.Context, json_mode: bool) -> None:
     try:
         adapter = _get_adapter_from_ctx(ctx)
         if not adapter.capabilities.can_update_firmware:
-            click.echo(format_error(
-                "This printer does not support firmware updates.",
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    "This printer does not support firmware updates.",
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         status = adapter.get_firmware_status()
         if status is None:
-            click.echo(format_error(
-                "Could not retrieve firmware status. The printer may not support firmware queries, "
-                "or the connection timed out. Try 'kiln status' to verify connectivity.",
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    "Could not retrieve firmware status. The printer may not support firmware queries, "
+                    "or the connection timed out. Try 'kiln status' to verify connectivity.",
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         data = {
@@ -4144,7 +4492,7 @@ def firmware_status_cmd(ctx: click.Context, json_mode: bool) -> None:
 @click.option("--component", "-c", default=None, help="Component to update (default: all).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def firmware_update_cmd(ctx: click.Context, component: Optional[str], json_mode: bool) -> None:
+def firmware_update_cmd(ctx: click.Context, component: str | None, json_mode: bool) -> None:
     """Apply available firmware updates.
 
     Optionally specify --component to update a single component,
@@ -4155,10 +4503,12 @@ def firmware_update_cmd(ctx: click.Context, component: Optional[str], json_mode:
     try:
         adapter = _get_adapter_from_ctx(ctx)
         if not adapter.capabilities.can_update_firmware:
-            click.echo(format_error(
-                "This printer does not support firmware updates.",
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    "This printer does not support firmware updates.",
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         result = adapter.update_firmware(component=component)
@@ -4202,10 +4552,12 @@ def firmware_rollback_cmd(ctx: click.Context, component: str, json_mode: bool) -
     try:
         adapter = _get_adapter_from_ctx(ctx)
         if not adapter.capabilities.can_update_firmware:
-            click.echo(format_error(
-                "This printer does not support firmware rollback.",
-                json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    "This printer does not support firmware rollback.",
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         result = adapter.rollback_firmware(component)
@@ -4256,11 +4608,13 @@ def doctor_prusa(ctx: click.Context, json_mode: bool) -> None:
         sys.exit(1)
 
     if str(cfg.get("type", "")).strip().lower() != "prusaconnect":
-        click.echo(format_error(
-            "Active printer is not Prusa Link. Set one with --printer or run: kiln auth --type prusaconnect ...",
-            code="WRONG_PRINTER_TYPE",
-            json_mode=json_mode,
-        ))
+        click.echo(
+            format_error(
+                "Active printer is not Prusa Link. Set one with --printer or run: kiln auth --type prusaconnect ...",
+                code="WRONG_PRINTER_TYPE",
+                json_mode=json_mode,
+            )
+        )
         sys.exit(1)
 
     result = _run_prusa_diagnostics(cfg)
@@ -4290,22 +4644,24 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
     import json as _json
     import platform
     import sqlite3
-    import urllib.request
 
     checks: list[dict] = []
 
     # 1. Python version
     vi = sys.version_info
     ok = vi >= (3, 10)
-    checks.append({
-        "name": "python",
-        "ok": ok,
-        "detail": f"{vi.major}.{vi.minor}.{vi.micro}",
-    })
+    checks.append(
+        {
+            "name": "python",
+            "ok": ok,
+            "detail": f"{vi.major}.{vi.minor}.{vi.micro}",
+        }
+    )
 
     # 2. Kiln importable
     try:
         import kiln as _kiln
+
         ver = getattr(_kiln, "__version__", "unknown")
         checks.append({"name": "kiln", "ok": True, "detail": f"v{ver}"})
     except ImportError as exc:
@@ -4316,17 +4672,20 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
     # 3. Slicer available
     try:
         from kiln.slicer import SlicerNotFoundError, find_slicer
+
         info = find_slicer()
         label = info.name
         if info.version:
             label += f" {info.version}"
         checks.append({"name": "slicer", "ok": True, "detail": label})
     except SlicerNotFoundError:
-        checks.append({
-            "name": "slicer",
-            "ok": False,
-            "detail": "not found (install prusa-slicer or set KILN_SLICER_PATH)",
-        })
+        checks.append(
+            {
+                "name": "slicer",
+                "ok": False,
+                "detail": "not found (install prusa-slicer or set KILN_SLICER_PATH)",
+            }
+        )
     except OSError as exc:
         checks.append({"name": "slicer", "ok": False, "detail": str(exc)})
     except Exception as exc:
@@ -4338,11 +4697,13 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
         printer_name = ctx.obj.get("printer")
         printer_cfg = load_printer_config(printer_name)
         name_label = printer_name or printer_cfg.get("name", "default")
-        checks.append({
-            "name": "config",
-            "ok": True,
-            "detail": f"printer '{name_label}' configured",
-        })
+        checks.append(
+            {
+                "name": "config",
+                "ok": True,
+                "detail": f"printer '{name_label}' configured",
+            }
+        )
     except ValueError as exc:
         checks.append({"name": "config", "ok": False, "detail": str(exc)})
     except Exception as exc:
@@ -4361,42 +4722,50 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
                     checks.append({"name": "printer_reachable", "ok": False, "detail": f"{host} (offline)"})
             except Exception as exc:
                 logger.debug("Printer reachability check failed for %s: %s", host, exc)
-                checks.append({
-                    "name": "printer_reachable",
-                    "ok": False,
-                    "detail": f"cannot reach {host}: {exc}",
-                })
+                checks.append(
+                    {
+                        "name": "printer_reachable",
+                        "ok": False,
+                        "detail": f"cannot reach {host}: {exc}",
+                    }
+                )
 
         # Prusa-specific diagnostics for first-run clarity.
         if str(printer_cfg.get("type", "")).strip().lower() == "prusaconnect":
             try:
                 prusa_diag = _run_prusa_diagnostics(printer_cfg)
-                checks.append({
-                    "name": "prusa_storage",
-                    "ok": bool(prusa_diag.get("ok")),
-                    "detail": (
-                        f"roots checked: usb/local; files={prusa_diag.get('file_count')}"
-                    ),
-                })
+                checks.append(
+                    {
+                        "name": "prusa_storage",
+                        "ok": bool(prusa_diag.get("ok")),
+                        "detail": (f"roots checked: usb/local; files={prusa_diag.get('file_count')}"),
+                    }
+                )
                 if prusa_diag.get("profile_id"):
-                    checks.append({
-                        "name": "prusa_model",
-                        "ok": True,
-                        "detail": f"detected profile {prusa_diag.get('profile_id')}",
-                    })
+                    checks.append(
+                        {
+                            "name": "prusa_model",
+                            "ok": True,
+                            "detail": f"detected profile {prusa_diag.get('profile_id')}",
+                        }
+                    )
             except Exception as exc:
                 logger.debug("Prusa verify diagnostics failed: %s", exc)
-                checks.append({
-                    "name": "prusa_storage",
-                    "ok": False,
-                    "detail": str(exc),
-                })
+                checks.append(
+                    {
+                        "name": "prusa_storage",
+                        "ok": False,
+                        "detail": str(exc),
+                    }
+                )
     else:
-        checks.append({
-            "name": "printer_reachable",
-            "ok": False,
-            "detail": "skipped (no printer configured)",
-        })
+        checks.append(
+            {
+                "name": "printer_reachable",
+                "ok": False,
+                "detail": "skipped (no printer configured)",
+            }
+        )
 
     # 6. SQLite writable
     db_dir = os.path.join(os.path.expanduser("~"), ".kiln")
@@ -4423,12 +4792,14 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
         except Exception as exc:
             logger.debug("WSL detection failed in diag checks: %s", exc)
     if wsl:
-        checks.append({
-            "name": "wsl",
-            "ok": True,
-            "warn": True,
-            "detail": "WSL 2 detected — mDNS discovery will not work, use explicit IPs",
-        })
+        checks.append(
+            {
+                "name": "wsl",
+                "ok": True,
+                "warn": True,
+                "detail": "WSL 2 detected — mDNS discovery will not work, use explicit IPs",
+            }
+        )
 
     # --- Output ---
     if json_mode:
@@ -4463,16 +4834,20 @@ cli.add_command(verify, name="doctor")
 
 @cli.command()
 @click.option(
-    "--key", "-k", default=None,
+    "--key",
+    "-k",
+    default=None,
     help="License key to activate. If omitted, opens the upgrade page.",
 )
 @click.option(
-    "--session", "-s", default=None,
+    "--session",
+    "-s",
+    default=None,
     help="Stripe Checkout Session ID to retrieve and activate the license key.",
 )
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def upgrade(ctx: click.Context, key: Optional[str], session: Optional[str], json_mode: bool) -> None:
+def upgrade(ctx: click.Context, key: str | None, session: str | None, json_mode: bool) -> None:
     """Activate a Kiln Pro or Business license, or view current tier."""
     from kiln.licensing import LicenseTier, get_license_manager
 
@@ -4482,42 +4857,57 @@ def upgrade(ctx: click.Context, key: Optional[str], session: Optional[str], json
         try:
             import stripe  # type: ignore[import-untyped]
         except ImportError:
-            click.echo(format_error(
-                "stripe package not installed. Install with: pip install kiln3d[payments]",
-                code="MISSING_DEPENDENCY", json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    "stripe package not installed. Install with: pip install kiln3d[payments]",
+                    code="MISSING_DEPENDENCY",
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         stripe.api_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
         if not stripe.api_key:
-            click.echo(format_error(
-                "KILN_STRIPE_SECRET_KEY not set. Cannot retrieve session.",
-                code="CONFIG_MISSING", json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    "KILN_STRIPE_SECRET_KEY not set. Cannot retrieve session.",
+                    code="CONFIG_MISSING",
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         try:
             checkout_session = stripe.checkout.Session.retrieve(session)
         except stripe.error.StripeError as exc:
-            click.echo(format_error(
-                f"Failed to retrieve Stripe session: {exc}",
-                code="STRIPE_ERROR", json_mode=json_mode,
-            ))
+            click.echo(
+                format_error(
+                    f"Failed to retrieve Stripe session: {exc}",
+                    code="STRIPE_ERROR",
+                    json_mode=json_mode,
+                )
+            )
             sys.exit(1)
 
         license_key = (checkout_session.metadata or {}).get("license_key", "")
         if not license_key:
             if getattr(checkout_session, "payment_status", "") != "paid":
-                click.echo(format_error(
-                    "Payment not completed. Complete payment first, then retry.",
-                    code="PAYMENT_PENDING", json_mode=json_mode,
-                ))
+                click.echo(
+                    format_error(
+                        "Payment not completed. Complete payment first, then retry.",
+                        code="PAYMENT_PENDING",
+                        json_mode=json_mode,
+                    )
+                )
             else:
-                click.echo(format_error(
-                    "License key not found on session. The webhook may not have "
-                    "processed yet — wait a moment and retry.",
-                    code="KEY_NOT_READY", json_mode=json_mode,
-                ))
+                click.echo(
+                    format_error(
+                        "License key not found on session. The webhook may not have "
+                        "processed yet — wait a moment and retry.",
+                        code="KEY_NOT_READY",
+                        json_mode=json_mode,
+                    )
+                )
             sys.exit(1)
 
         # Activate the key (reuse existing activation path)
@@ -4526,6 +4916,7 @@ def upgrade(ctx: click.Context, key: Optional[str], session: Optional[str], json
             data = info.to_dict()
             if json_mode:
                 import json as _json
+
                 click.echo(_json.dumps({"success": True, **data}, indent=2))
             else:
                 click.echo(f"  ✓ License activated: Kiln {info.tier.value.title()}")
@@ -4544,6 +4935,7 @@ def upgrade(ctx: click.Context, key: Optional[str], session: Optional[str], json
             data = info.to_dict()
             if json_mode:
                 import json as _json
+
                 click.echo(_json.dumps({"success": True, **data}, indent=2))
             else:
                 click.echo(f"  ✓ License activated: Kiln {info.tier.value.title()}")
@@ -4562,21 +4954,22 @@ def upgrade(ctx: click.Context, key: Optional[str], session: Optional[str], json
         data = info.to_dict()
         if json_mode:
             import json as _json
+
             click.echo(_json.dumps({"success": True, **data}, indent=2))
         else:
-            click.echo(f"\n  Kiln License")
-            click.echo(f"  ────────────")
+            click.echo("\n  Kiln License")
+            click.echo("  ────────────")
             click.echo(f"  Tier:   {info.tier.value.title()}")
             if info.license_key_hint:
                 click.echo(f"  Key:    ...{info.license_key_hint}")
             click.echo(f"  Source: {info.source}")
             if info.tier == LicenseTier.FREE:
-                click.echo(f"\n  Upgrade to Pro for fleet management, job queue,")
-                click.echo(f"  analytics, and more.")
-                click.echo(f"\n  Visit: https://kiln3d.com/pro")
-                click.echo(f"  Or:    kiln upgrade --key <your-license-key>")
+                click.echo("\n  Upgrade to Pro for fleet management, job queue,")
+                click.echo("  analytics, and more.")
+                click.echo("\n  Visit: https://kiln3d.com/pro")
+                click.echo("  Or:    kiln upgrade --key <your-license-key>")
             else:
-                click.echo(f"\n  ✓ Active and valid.")
+                click.echo("\n  ✓ Active and valid.")
 
 
 @cli.command()
@@ -4591,10 +4984,11 @@ def license_info(json_mode: bool) -> None:
 
     if json_mode:
         import json as _json
+
         click.echo(_json.dumps({"success": True, **data}, indent=2))
     else:
-        click.echo(f"\n  Kiln License")
-        click.echo(f"  ────────────")
+        click.echo("\n  Kiln License")
+        click.echo("  ────────────")
         click.echo(f"  Tier:     {info.tier.value.title()}")
         click.echo(f"  Valid:    {'Yes' if info.is_valid else 'No'}")
         if info.license_key_hint:
@@ -4623,9 +5017,7 @@ def _get_threedos_client():
     try:
         return ThreeDOSClient()
     except ValueError as exc:
-        raise click.ClickException(
-            f"3DOS not configured: {exc}. Set KILN_3DOS_API_KEY."
-        ) from exc
+        raise click.ClickException(f"3DOS not configured: {exc}. Set KILN_3DOS_API_KEY.") from exc
 
 
 @network.command("register")
@@ -4633,7 +5025,7 @@ def _get_threedos_client():
 @click.option("--location", "-l", required=True, help="Geographic location.")
 @click.option("--price", type=float, default=None, help="Price per gram (USD).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def network_register(name: str, location: str, price: Optional[float], json_mode: bool) -> None:
+def network_register(name: str, location: str, price: float | None, json_mode: bool) -> None:
     """Register a local printer on the 3DOS network."""
     try:
         client = _get_threedos_client()
@@ -4662,7 +5054,9 @@ def network_update(printer_id: str, available: bool, json_mode: bool) -> None:
         client = _get_threedos_client()
         client.update_printer_status(printer_id=printer_id, available=available)
         if json_mode:
-            click.echo(format_response("success", data={"printer_id": printer_id, "available": available}, json_mode=True))
+            click.echo(
+                format_response("success", data={"printer_id": printer_id, "available": available}, json_mode=True)
+            )
         else:
             status = "available" if available else "unavailable"
             click.echo(f"Printer {printer_id} is now {status}")
@@ -4684,7 +5078,13 @@ def network_list(json_mode: bool) -> None:
         client = _get_threedos_client()
         printers = client.list_my_printers()
         if json_mode:
-            click.echo(format_response("success", data={"printers": [p.to_dict() for p in printers], "count": len(printers)}, json_mode=True))
+            click.echo(
+                format_response(
+                    "success",
+                    data={"printers": [p.to_dict() for p in printers], "count": len(printers)},
+                    json_mode=True,
+                )
+            )
         else:
             if not printers:
                 click.echo("No printers registered on the 3DOS network.")
@@ -4706,13 +5106,19 @@ def network_list(json_mode: bool) -> None:
 @click.option("--material", "-m", required=True, help="Material type (PLA, PETG, ABS).")
 @click.option("--location", "-l", default=None, help="Geographic filter.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def network_find(material: str, location: Optional[str], json_mode: bool) -> None:
+def network_find(material: str, location: str | None, json_mode: bool) -> None:
     """Search for available printers on the 3DOS network."""
     try:
         client = _get_threedos_client()
         printers = client.find_printers(material=material, location=location)
         if json_mode:
-            click.echo(format_response("success", data={"printers": [p.to_dict() for p in printers], "count": len(printers)}, json_mode=True))
+            click.echo(
+                format_response(
+                    "success",
+                    data={"printers": [p.to_dict() for p in printers], "count": len(printers)},
+                    json_mode=True,
+                )
+            )
         else:
             if not printers:
                 click.echo(f"No printers found for material '{material}'.")
@@ -4736,7 +5142,7 @@ def network_find(material: str, location: Optional[str], json_mode: bool) -> Non
 @click.option("--material", "-m", required=True, help="Material type.")
 @click.option("--printer", "-p", default=None, help="Target printer ID (auto-assign if omitted).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def network_submit(file_url: str, material: str, printer: Optional[str], json_mode: bool) -> None:
+def network_submit(file_url: str, material: str, printer: str | None, json_mode: bool) -> None:
     """Submit a print job to the 3DOS network."""
     try:
         client = _get_threedos_client()
@@ -4780,8 +5186,6 @@ def network_status(job_id: str, json_mode: bool) -> None:
         sys.exit(1)
 
 
-
-
 # ---------------------------------------------------------------------------
 # cache — local model cache
 # ---------------------------------------------------------------------------
@@ -4805,10 +5209,12 @@ def cache_list(limit: int, offset: int, json_mode: bool) -> None:
         data = [e.to_dict() for e in entries]
 
         if json_mode:
-            click.echo(json.dumps(
-                {"status": "success", "data": {"entries": data, "count": len(data)}},
-                indent=2,
-            ))
+            click.echo(
+                json.dumps(
+                    {"status": "success", "data": {"entries": data, "count": len(data)}},
+                    indent=2,
+                )
+            )
             return
 
         if not data:
@@ -4822,8 +5228,7 @@ def cache_list(limit: int, offset: int, json_mode: bool) -> None:
             size_kb = e["file_size_bytes"] / 1024
             size_str = f"{size_kb:.0f} KB" if size_kb < 1024 else f"{size_kb / 1024:.1f} MB"
             click.echo(
-                f"{e['cache_id']:<18} {e['file_name']:<30} "
-                f"{e['source']:<14} {size_str:>10} {e['print_count']:>6}"
+                f"{e['cache_id']:<18} {e['file_name']:<30} {e['source']:<14} {size_str:>10} {e['print_count']:>6}"
             )
     except OSError as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
@@ -4837,7 +5242,7 @@ def cache_list(limit: int, offset: int, json_mode: bool) -> None:
 @click.argument("query")
 @click.option("--source", "-s", default=None, help="Filter by source.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def cache_search(query: str, source: Optional[str], json_mode: bool) -> None:
+def cache_search(query: str, source: str | None, json_mode: bool) -> None:
     """Search cached models by name, tags, or prompt."""
     from kiln.model_cache import get_model_cache
 
@@ -4846,10 +5251,12 @@ def cache_search(query: str, source: Optional[str], json_mode: bool) -> None:
         data = [e.to_dict() for e in entries]
 
         if json_mode:
-            click.echo(json.dumps(
-                {"status": "success", "data": {"entries": data, "count": len(data)}},
-                indent=2,
-            ))
+            click.echo(
+                json.dumps(
+                    {"status": "success", "data": {"entries": data, "count": len(data)}},
+                    indent=2,
+                )
+            )
             return
 
         if not data:
@@ -4872,7 +5279,7 @@ def cache_search(query: str, source: Optional[str], json_mode: bool) -> None:
 @click.option("--source", "-s", required=True, help="Model source (myminifactory, meshy, upload, ...).")
 @click.option("--tags", "-t", default=None, help="Comma-separated tags.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def cache_add(file_path: str, source: str, tags: Optional[str], json_mode: bool) -> None:
+def cache_add(file_path: str, source: str, tags: str | None, json_mode: bool) -> None:
     """Add a model file to the local cache."""
     from kiln.model_cache import get_model_cache
 
@@ -4881,10 +5288,12 @@ def cache_add(file_path: str, source: str, tags: Optional[str], json_mode: bool)
         entry = get_model_cache().add(file_path, source=source, tags=tag_list)
 
         if json_mode:
-            click.echo(json.dumps(
-                {"status": "success", "data": entry.to_dict()},
-                indent=2,
-            ))
+            click.echo(
+                json.dumps(
+                    {"status": "success", "data": entry.to_dict()},
+                    indent=2,
+                )
+            )
             return
 
         click.echo(f"Cached: {entry.cache_id}  {entry.file_name}  ({entry.file_size_bytes} bytes)")
@@ -4923,7 +5332,6 @@ def cache_delete(cache_id: str, json_mode: bool) -> None:
     except Exception as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
         sys.exit(1)
-
 
 
 # ---------------------------------------------------------------------------
@@ -4968,14 +5376,9 @@ def untrust(host: str, json_mode: bool) -> None:
     except ValueError as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
         sys.exit(1)
-    except ValueError as exc:
-        click.echo(format_error(str(exc), json_mode=json_mode))
-        sys.exit(1)
     except Exception as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
         sys.exit(1)
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -4987,7 +5390,7 @@ def untrust(host: str, json_mode: bool) -> None:
 @click.option("--output", "-o", default=None, help="Output file path for backup.")
 @click.option("--no-redact", is_flag=True, help="Skip credential redaction.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
-def backup(output: Optional[str], no_redact: bool, json_mode: bool) -> None:
+def backup(output: str | None, no_redact: bool, json_mode: bool) -> None:
     """Back up the Kiln database with credential redaction."""
     from kiln.backup import BackupError, backup_database
     from kiln.persistence import get_db
@@ -5054,7 +5457,7 @@ def restore(backup_path: str, force: bool, json_mode: bool) -> None:
 @click.option("--force", is_flag=True, help="Overwrite existing skill file.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
-def setup_agent(ctx: click.Context, workspace: Optional[str], force: bool, json_mode: bool) -> None:
+def setup_agent(ctx: click.Context, workspace: str | None, force: bool, json_mode: bool) -> None:
     """Install the Kiln skill into an AI agent workspace.
 
     Auto-detects agent workspaces (Claude Code, Cursor, Windsurf) or
@@ -5148,9 +5551,7 @@ def autonomy_set(level: int, json_mode: bool) -> None:
 
     try:
         existing = load_autonomy_config()
-        new_config = AutonomyConfig(
-            level=AutonomyLevel(level), constraints=existing.constraints
-        )
+        new_config = AutonomyConfig(level=AutonomyLevel(level), constraints=existing.constraints)
         save_autonomy_config(new_config)
         data = new_config.to_dict()
         if json_mode:
@@ -5166,19 +5567,21 @@ def autonomy_set(level: int, json_mode: bool) -> None:
 
 @autonomy.command("configure")
 @click.option("--max-print-time", type=int, default=None, help="Max print time in seconds.")
-@click.option("--allowed-materials", type=str, default=None, help="Comma-separated list of allowed materials (e.g. PLA,PETG).")
+@click.option(
+    "--allowed-materials", type=str, default=None, help="Comma-separated list of allowed materials (e.g. PLA,PETG)."
+)
 @click.option("--max-tool-temp", type=float, default=None, help="Max tool/nozzle temperature.")
 @click.option("--max-bed-temp", type=float, default=None, help="Max bed temperature.")
 @click.option("--allowed-tools", type=str, default=None, help="Comma-separated tool whitelist.")
 @click.option("--blocked-tools", type=str, default=None, help="Comma-separated tool blocklist.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def autonomy_configure(
-    max_print_time: Optional[int],
-    allowed_materials: Optional[str],
-    max_tool_temp: Optional[float],
-    max_bed_temp: Optional[float],
-    allowed_tools: Optional[str],
-    blocked_tools: Optional[str],
+    max_print_time: int | None,
+    allowed_materials: str | None,
+    max_tool_temp: float | None,
+    max_bed_temp: float | None,
+    allowed_tools: str | None,
+    blocked_tools: str | None,
     json_mode: bool,
 ) -> None:
     """Set Level 1 constraints for pre-screened autonomy.
@@ -5195,24 +5598,15 @@ def autonomy_configure(
         if max_print_time is not None:
             c.max_print_time_seconds = max_print_time if max_print_time > 0 else None
         if allowed_materials is not None:
-            c.allowed_materials = (
-                [m.strip() for m in allowed_materials.split(",") if m.strip()]
-                or None
-            )
+            c.allowed_materials = [m.strip() for m in allowed_materials.split(",") if m.strip()] or None
         if max_tool_temp is not None:
             c.max_tool_temp = max_tool_temp if max_tool_temp > 0 else None
         if max_bed_temp is not None:
             c.max_bed_temp = max_bed_temp if max_bed_temp > 0 else None
         if allowed_tools is not None:
-            c.allowed_tools = (
-                [t.strip() for t in allowed_tools.split(",") if t.strip()]
-                or None
-            )
+            c.allowed_tools = [t.strip() for t in allowed_tools.split(",") if t.strip()] or None
         if blocked_tools is not None:
-            c.blocked_tools = (
-                [t.strip() for t in blocked_tools.split(",") if t.strip()]
-                or None
-            )
+            c.blocked_tools = [t.strip() for t in blocked_tools.split(",") if t.strip()] or None
 
         save_autonomy_config(cfg)
         data = cfg.to_dict()
@@ -5274,10 +5668,15 @@ def watch(printer: str | None, delay: int, checks: int, interval: int, use_json:
         result = monitor.run()
 
         if use_json:
-            click.echo(json.dumps({
-                "status": "success" if result.outcome == "success" else "error",
-                "data": result.to_dict(),
-            }, indent=2))
+            click.echo(
+                json.dumps(
+                    {
+                        "status": "success" if result.outcome == "success" else "error",
+                        "data": result.to_dict(),
+                    },
+                    indent=2,
+                )
+            )
         else:
             click.echo(f"Outcome: {result.outcome}")
             click.echo(f"Elapsed: {result.elapsed_seconds:.1f}s")

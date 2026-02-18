@@ -21,7 +21,7 @@ import base64
 import logging
 import time
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from kiln.events import EventType
 from kiln.printers.base import PrinterError, PrinterStatus
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 _PHASE_THRESHOLDS = {"first_layers": 10.0, "final_layers": 90.0}
 
 
-def _detect_phase(completion: Optional[float]) -> str:
+def _detect_phase(completion: float | None) -> str:
     """Classify print phase from completion percentage."""
     if completion is None or completion < 0:
         return "unknown"
@@ -84,12 +84,12 @@ class MonitorPolicy:
     stall_timeout_seconds: int = 600
     monitoring_mode: str = "auto"  # "vision", "telemetry", or "auto"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> MonitorPolicy:
+    def from_dict(cls, data: dict[str, Any]) -> MonitorPolicy:
         """Construct a :class:`MonitorPolicy` from a plain dictionary.
 
         Unknown keys are silently ignored so forward-compatible config
@@ -118,14 +118,14 @@ class MonitorResult:
 
     success: bool
     outcome: str
-    snapshots: List[Dict[str, Any]] = field(default_factory=list)
+    snapshots: list[dict[str, Any]] = field(default_factory=list)
     snapshot_failures: int = 0
     duration_seconds: float = 0.0
     auto_paused: bool = False
-    failure_type: Optional[str] = None
+    failure_type: str | None = None
     message: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return asdict(self)
 
@@ -135,12 +135,14 @@ class MonitorResult:
 # ---------------------------------------------------------------------------
 
 # Terminal printer states that mean the print is no longer running.
-_TERMINAL_STATES = frozenset({
-    PrinterStatus.IDLE,
-    PrinterStatus.ERROR,
-    PrinterStatus.OFFLINE,
-    PrinterStatus.CANCELLING,
-})
+_TERMINAL_STATES = frozenset(
+    {
+        PrinterStatus.IDLE,
+        PrinterStatus.ERROR,
+        PrinterStatus.OFFLINE,
+        PrinterStatus.CANCELLING,
+    }
+)
 
 # Minimum image size in bytes to consider a snapshot valid.
 _MIN_SNAPSHOT_BYTES = 100
@@ -164,8 +166,8 @@ class FirstLayerMonitor:
         adapter: PrinterAdapter,
         printer_name: str,
         *,
-        policy: Optional[MonitorPolicy] = None,
-        event_bus: Optional[EventBus] = None,
+        policy: MonitorPolicy | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._adapter = adapter
         self._printer_name = printer_name
@@ -174,7 +176,7 @@ class FirstLayerMonitor:
 
     # -- public API --------------------------------------------------------
 
-    def monitor(self, *, monitoring_mode: Optional[str] = None) -> MonitorResult:
+    def monitor(self, *, monitoring_mode: str | None = None) -> MonitorResult:
         """Run the first-layer monitoring session (blocking).
 
         Call this AFTER starting the print.  The method will:
@@ -242,20 +244,17 @@ class FirstLayerMonitor:
             return self._build_early_exit(start_time)
 
         # --- Snapshot collection ------------------------------------------
-        snapshots: List[Dict[str, Any]] = []
+        snapshots: list[dict[str, Any]] = []
         consecutive_failures = 0
 
         for i in range(self._policy.first_layer_check_count):
             # Wait for interval (skip on first iteration)
-            if i > 0:
-                if not self._wait_printing(
-                    self._policy.first_layer_interval_seconds, start_time
-                ):
-                    return self._build_early_exit(
-                        start_time,
-                        snapshots=snapshots,
-                        snapshot_failures=consecutive_failures,
-                    )
+            if i > 0 and not self._wait_printing(self._policy.first_layer_interval_seconds, start_time):
+                return self._build_early_exit(
+                    start_time,
+                    snapshots=snapshots,
+                    snapshot_failures=consecutive_failures,
+                )
 
             # Verify printer is still printing
             try:
@@ -263,7 +262,8 @@ class FirstLayerMonitor:
             except PrinterError as exc:
                 logger.error(
                     "Failed to read printer state on %s: %s",
-                    self._printer_name, exc,
+                    self._printer_name,
+                    exc,
                 )
                 return MonitorResult(
                     success=False,
@@ -277,7 +277,8 @@ class FirstLayerMonitor:
             if state.state in _TERMINAL_STATES:
                 logger.info(
                     "Printer %s entered %s during monitoring — stopping",
-                    self._printer_name, state.state.value,
+                    self._printer_name,
+                    state.state.value,
                 )
                 return MonitorResult(
                     success=True,
@@ -302,8 +303,10 @@ class FirstLayerMonitor:
                     consecutive_failures += 1
                     logger.warning(
                         "Snapshot %d/%d failed on %s (consecutive: %d)",
-                        i + 1, self._policy.first_layer_check_count,
-                        self._printer_name, consecutive_failures,
+                        i + 1,
+                        self._policy.first_layer_check_count,
+                        self._printer_name,
+                        consecutive_failures,
                     )
                     if consecutive_failures >= self._policy.max_snapshot_failures:
                         self._publish_vision_alert(
@@ -329,18 +332,22 @@ class FirstLayerMonitor:
                     completion = job.completion
                 except PrinterError:
                     completion = None
-                snapshots.append({
-                    "captured_at": time.time(),
-                    "completion_percent": completion,
-                    "print_phase": _detect_phase(completion),
-                    "image_base64": None,
-                    "note": "no camera available",
-                })
+                snapshots.append(
+                    {
+                        "captured_at": time.time(),
+                        "completion_percent": completion,
+                        "print_phase": _detect_phase(completion),
+                        "image_base64": None,
+                        "note": "no camera available",
+                    }
+                )
 
         elapsed = round(time.time() - start_time, 1)
         logger.info(
             "First-layer monitoring complete on %s: %d snapshots in %.1f s",
-            self._printer_name, len(snapshots), elapsed,
+            self._printer_name,
+            len(snapshots),
+            elapsed,
         )
         return MonitorResult(
             success=True,
@@ -379,18 +386,16 @@ class FirstLayerMonitor:
         if not self._wait_printing(self._policy.first_layer_delay_seconds, start_time):
             return self._build_early_exit(start_time)
 
-        telemetry_snapshots: List[Dict[str, Any]] = []
-        state_changes: List[str] = []
-        prev_state: Optional[str] = None
+        telemetry_snapshots: list[dict[str, Any]] = []
+        state_changes: list[str] = []
+        prev_state: str | None = None
 
         for i in range(self._policy.first_layer_check_count):
-            if i > 0:
-                if not self._wait_printing(
-                    self._policy.first_layer_interval_seconds, start_time
-                ):
-                    return self._build_early_exit(
-                        start_time, snapshots=telemetry_snapshots,
-                    )
+            if i > 0 and not self._wait_printing(self._policy.first_layer_interval_seconds, start_time):
+                return self._build_early_exit(
+                    start_time,
+                    snapshots=telemetry_snapshots,
+                )
 
             # Read printer state
             try:
@@ -398,7 +403,8 @@ class FirstLayerMonitor:
             except PrinterError as exc:
                 logger.error(
                     "Failed to read printer state on %s: %s",
-                    self._printer_name, exc,
+                    self._printer_name,
+                    exc,
                 )
                 return MonitorResult(
                     success=False,
@@ -411,17 +417,15 @@ class FirstLayerMonitor:
             if state.state in _TERMINAL_STATES:
                 logger.info(
                     "Printer %s entered %s during telemetry monitoring — stopping",
-                    self._printer_name, state.state.value,
+                    self._printer_name,
+                    state.state.value,
                 )
                 return MonitorResult(
                     success=True,
                     outcome="print_ended",
                     snapshots=telemetry_snapshots,
                     duration_seconds=round(time.time() - start_time, 1),
-                    message=(
-                        f"Print ended (state={state.state.value}) during "
-                        "telemetry monitoring."
-                    ),
+                    message=(f"Print ended (state={state.state.value}) during telemetry monitoring."),
                 )
 
             # Track state transitions
@@ -438,7 +442,7 @@ class FirstLayerMonitor:
                 completion = None
 
             # Collect temperature data
-            temps: Dict[str, Any] = {}
+            temps: dict[str, Any] = {}
             if state.tool_temp_actual is not None:
                 temps["hotend_actual"] = state.tool_temp_actual
             if state.tool_temp_target is not None:
@@ -448,22 +452,26 @@ class FirstLayerMonitor:
             if state.bed_temp_target is not None:
                 temps["bed_target"] = state.bed_temp_target
 
-            telemetry_snapshots.append({
-                "captured_at": time.time(),
-                "completion_percent": completion,
-                "print_phase": _detect_phase(completion),
-                "image_base64": None,
-                "monitoring_mode": "telemetry",
-                "printer_state": current_state,
-                "temperatures": temps,
-                "state_changes": list(state_changes),
-                "note": "telemetry-only monitoring (no camera)",
-            })
+            telemetry_snapshots.append(
+                {
+                    "captured_at": time.time(),
+                    "completion_percent": completion,
+                    "print_phase": _detect_phase(completion),
+                    "image_base64": None,
+                    "monitoring_mode": "telemetry",
+                    "printer_state": current_state,
+                    "temperatures": temps,
+                    "state_changes": list(state_changes),
+                    "note": "telemetry-only monitoring (no camera)",
+                }
+            )
 
         elapsed = round(time.time() - start_time, 1)
         logger.info(
             "Telemetry monitoring complete on %s: %d checks in %.1f s",
-            self._printer_name, len(telemetry_snapshots), elapsed,
+            self._printer_name,
+            len(telemetry_snapshots),
+            elapsed,
         )
         return MonitorResult(
             success=True,
@@ -506,7 +514,7 @@ class FirstLayerMonitor:
         self,
         start_time: float,
         *,
-        snapshots: Optional[List[Dict[str, Any]]] = None,
+        snapshots: list[dict[str, Any]] | None = None,
         snapshot_failures: int = 0,
     ) -> MonitorResult:
         """Build a result for when the print ends during the delay/interval."""
@@ -528,7 +536,7 @@ class FirstLayerMonitor:
             ),
         )
 
-    def _capture_snapshot(self, index: int) -> Optional[Dict[str, Any]]:
+    def _capture_snapshot(self, index: int) -> dict[str, Any] | None:
         """Capture a single snapshot with one retry on failure.
 
         :param index: 1-based snapshot index for logging.
@@ -540,7 +548,10 @@ class FirstLayerMonitor:
             except PrinterError as exc:
                 logger.warning(
                     "Snapshot %d attempt %d failed on %s: %s",
-                    index, attempt + 1, self._printer_name, exc,
+                    index,
+                    attempt + 1,
+                    self._printer_name,
+                    exc,
                 )
                 if attempt == 0:
                     time.sleep(2)
@@ -549,7 +560,9 @@ class FirstLayerMonitor:
             if image_data is None or len(image_data) < _MIN_SNAPSHOT_BYTES:
                 logger.warning(
                     "Snapshot %d attempt %d on %s returned insufficient data (%d bytes)",
-                    index, attempt + 1, self._printer_name,
+                    index,
+                    attempt + 1,
+                    self._printer_name,
                     len(image_data) if image_data else 0,
                 )
                 if attempt == 0:
@@ -561,7 +574,9 @@ class FirstLayerMonitor:
             if not analysis["valid"]:
                 logger.warning(
                     "Snapshot %d on %s failed validation: %s",
-                    index, self._printer_name, analysis.get("warnings"),
+                    index,
+                    self._printer_name,
+                    analysis.get("warnings"),
                 )
                 if attempt == 0:
                     time.sleep(2)
@@ -585,7 +600,7 @@ class FirstLayerMonitor:
 
         return None
 
-    def _publish_vision_check(self, snap: Dict[str, Any]) -> None:
+    def _publish_vision_check(self, snap: dict[str, Any]) -> None:
         """Publish a ``VISION_CHECK`` event for the captured snapshot."""
         if self._event_bus is None:
             return
@@ -626,7 +641,7 @@ class FirstLayerMonitor:
 # ---------------------------------------------------------------------------
 
 
-def load_monitor_policy(*, config_path: Optional[Any] = None) -> MonitorPolicy:
+def load_monitor_policy(*, config_path: Any | None = None) -> MonitorPolicy:
     """Load monitoring policy from environment or config file.
 
     Precedence: env vars > config file > defaults.
@@ -750,7 +765,7 @@ _MIN_BRIGHTNESS = 0.05
 _MIN_VARIANCE = 0.01
 
 
-def analyze_snapshot_basic(image_data: bytes) -> Dict[str, Any]:
+def analyze_snapshot_basic(image_data: bytes) -> dict[str, Any]:
     """Run basic heuristic checks on a snapshot image.
 
     Uses only stdlib -- no PIL or OpenCV dependency.  Checks for obvious
@@ -769,7 +784,7 @@ def analyze_snapshot_basic(image_data: bytes) -> Dict[str, Any]:
     For actual print-quality defect detection, the agent should use a
     vision model on the base64-encoded image.
     """
-    warnings: List[str] = []
+    warnings: list[str] = []
     size_bytes = len(image_data) if image_data else 0
 
     # Size check

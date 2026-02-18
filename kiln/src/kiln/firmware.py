@@ -21,7 +21,7 @@ import enum
 import logging
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +65,12 @@ class FirmwareInfo:
 
     printer_name: str
     current_version: str
-    latest_version: Optional[str] = None
+    latest_version: str | None = None
     firmware_type: FirmwareType = FirmwareType.UNKNOWN
     update_available: bool = False
-    release_notes: Optional[str] = None
+    release_notes: str | None = None
     components: list[FirmwareComponent] = field(default_factory=list)
-    last_checked: Optional[str] = None
+    last_checked: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary.
@@ -105,7 +105,7 @@ class FirmwareComponent:
 
     name: str
     current_version: str
-    latest_version: Optional[str] = None
+    latest_version: str | None = None
     update_available: bool = False
     critical: bool = False
     component_type: str = ""
@@ -156,7 +156,7 @@ class FirmwareError(Exception):
     :param cause: Optional underlying exception for chaining.
     """
 
-    def __init__(self, message: str, *, cause: Optional[Exception] = None) -> None:
+    def __init__(self, message: str, *, cause: Exception | None = None) -> None:
         super().__init__(message)
         self.cause = cause
 
@@ -200,7 +200,7 @@ class FirmwareManager:
         firmware_type: FirmwareType,
         components: list[FirmwareComponent],
         *,
-        release_notes: Optional[str] = None,
+        release_notes: str | None = None,
     ) -> None:
         """Register a printer and its firmware components.
 
@@ -257,9 +257,7 @@ class FirmwareManager:
             last_checked=now,
         )
 
-    def get_component(
-        self, printer_name: str, component_name: str
-    ) -> Optional[FirmwareComponent]:
+    def get_component(self, printer_name: str, component_name: str) -> FirmwareComponent | None:
         """Look up a single firmware component by name.
 
         :returns: The component, or ``None`` if not found.
@@ -278,7 +276,7 @@ class FirmwareManager:
         self,
         printer_name: str,
         *,
-        component: Optional[str] = None,
+        component: str | None = None,
     ) -> dict[str, Any]:
         """Apply firmware updates for a printer.
 
@@ -298,20 +296,14 @@ class FirmwareManager:
         if component is not None:
             targets = [c for c in components if c.name == component]
             if not targets:
-                raise FirmwareError(
-                    f"Component {component!r} not found on printer {printer_name!r}."
-                )
+                raise FirmwareError(f"Component {component!r} not found on printer {printer_name!r}.")
             if not targets[0].update_available:
-                raise FirmwareError(
-                    f"No update available for {component!r} on {printer_name!r}."
-                )
+                raise FirmwareError(f"No update available for {component!r} on {printer_name!r}.")
             targets = targets[:1]
         else:
             targets = [c for c in components if c.update_available]
             if not targets:
-                raise FirmwareError(
-                    f"No firmware updates available for printer {printer_name!r}."
-                )
+                raise FirmwareError(f"No firmware updates available for printer {printer_name!r}.")
 
         updated_names: list[str] = []
         for comp in targets:
@@ -362,12 +354,10 @@ class FirmwareManager:
 
         comp = self.get_component(printer_name, component)
         if comp is None:
-            raise FirmwareError(
-                f"Component {component!r} not found on printer {printer_name!r}."
-            )
+            raise FirmwareError(f"Component {component!r} not found on printer {printer_name!r}.")
 
         # Find the most recent update record to determine the previous version.
-        previous_version: Optional[str] = None
+        previous_version: str | None = None
         for record in reversed(self._history):
             if (
                 record.printer_name == printer_name
@@ -399,9 +389,7 @@ class FirmwareManager:
                 operation="rollback",
                 success=True,
                 timestamp=time.time(),
-                message=(
-                    f"Rolled back {component} from {old_version} to {previous_version}."
-                ),
+                message=(f"Rolled back {component} from {old_version} to {previous_version}."),
             )
         )
 
@@ -426,21 +414,13 @@ class FirmwareManager:
         """
         if printer_name not in self._components:
             raise FirmwareError(f"Printer not registered: {printer_name!r}")
-        return [
-            r.to_dict()
-            for r in reversed(self._history)
-            if r.printer_name == printer_name
-        ]
+        return [r.to_dict() for r in reversed(self._history) if r.printer_name == printer_name]
 
     # -- fleet-wide helpers -------------------------------------------------
 
     def list_printers_with_updates(self) -> list[str]:
         """Return printer names that have at least one pending update."""
-        return [
-            name
-            for name, components in self._components.items()
-            if any(c.update_available for c in components)
-        ]
+        return [name for name, components in self._components.items() if any(c.update_available for c in components)]
 
     def list_printers_with_critical_updates(self) -> list[str]:
         """Return printer names that have at least one critical pending update."""
@@ -461,16 +441,16 @@ class FirmwareManager:
         for name in self._components:
             components = self._components[name]
             update_count = sum(1 for c in components if c.update_available)
-            critical_count = sum(
-                1 for c in components if c.update_available and c.critical
+            critical_count = sum(1 for c in components if c.update_available and c.critical)
+            printers_summary.append(
+                {
+                    "printer_name": name,
+                    "firmware_type": self._firmware_types[name].value,
+                    "updates_available": update_count,
+                    "critical_updates": critical_count,
+                    "last_checked": self._last_checked.get(name),
+                }
             )
-            printers_summary.append({
-                "printer_name": name,
-                "firmware_type": self._firmware_types[name].value,
-                "updates_available": update_count,
-                "critical_updates": critical_count,
-                "last_checked": self._last_checked.get(name),
-            })
 
         with_updates = self.list_printers_with_updates()
         with_critical = self.list_printers_with_critical_updates()
@@ -487,7 +467,7 @@ class FirmwareManager:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_manager: Optional[FirmwareManager] = None
+_manager: FirmwareManager | None = None
 
 
 def get_firmware_manager() -> FirmwareManager:

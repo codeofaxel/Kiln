@@ -34,7 +34,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from kiln.marketplaces.base import (
     MarketplaceAdapter,
@@ -46,9 +46,9 @@ from kiln.marketplaces.base import (
     ModelFile,
     ModelSummary,
 )
-from kiln.marketplaces.thingiverse import ThingiverseAdapter
-from kiln.marketplaces.myminifactory import MyMiniFactoryAdapter
 from kiln.marketplaces.cults3d import Cults3DAdapter
+from kiln.marketplaces.myminifactory import MyMiniFactoryAdapter
+from kiln.marketplaces.thingiverse import ThingiverseAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -98,12 +98,12 @@ class MarketplaceStatus:
 
     marketplace: str
     health: MarketplaceHealth
-    last_check: Optional[float] = None
-    response_time_ms: Optional[float] = None
-    error: Optional[str] = None
+    last_check: float | None = None
+    response_time_ms: float | None = None
+    error: str | None = None
     consecutive_failures: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["health"] = self.health.value
         return data
@@ -121,11 +121,14 @@ class MarketplaceHealthMonitor:
     """
 
     def __init__(self) -> None:
-        self._statuses: Dict[str, MarketplaceStatus] = {}
+        self._statuses: dict[str, MarketplaceStatus] = {}
         self._lock = threading.Lock()
 
     def record_success(
-        self, marketplace_name: str, *, response_time_ms: float = 0.0,
+        self,
+        marketplace_name: str,
+        *,
+        response_time_ms: float = 0.0,
     ) -> None:
         """Record a successful API call to a marketplace."""
         with self._lock:
@@ -138,17 +141,16 @@ class MarketplaceHealthMonitor:
             )
 
     def record_failure(
-        self, marketplace_name: str, *, error: str = "",
+        self,
+        marketplace_name: str,
+        *,
+        error: str = "",
     ) -> None:
         """Record a failed API call to a marketplace."""
         with self._lock:
             existing = self._statuses.get(marketplace_name)
             failures = (existing.consecutive_failures if existing else 0) + 1
-            health = (
-                MarketplaceHealth.DEGRADED
-                if failures < _CONSECUTIVE_FAILURE_THRESHOLD
-                else MarketplaceHealth.DOWN
-            )
+            health = MarketplaceHealth.DEGRADED if failures < _CONSECUTIVE_FAILURE_THRESHOLD else MarketplaceHealth.DOWN
             self._statuses[marketplace_name] = MarketplaceStatus(
                 marketplace=marketplace_name,
                 health=health,
@@ -168,7 +170,7 @@ class MarketplaceHealthMonitor:
                 ),
             )
 
-    def get_all_statuses(self) -> List[MarketplaceStatus]:
+    def get_all_statuses(self) -> list[MarketplaceStatus]:
         """Return health statuses for all known marketplaces."""
         with self._lock:
             return list(self._statuses.values())
@@ -197,14 +199,14 @@ class MarketplaceSearchResults:
     (circuit-breaker open), and which failed on this request.
     """
 
-    models: List[ModelSummary]
-    health: Dict[str, MarketplaceStatus]
-    searched: List[str]
-    skipped: List[str]
-    failed: List[str]
+    models: list[ModelSummary]
+    health: dict[str, MarketplaceStatus]
+    searched: list[str]
+    skipped: list[str]
+    failed: list[str]
     summary: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "models": [m.to_dict() for m in self.models],
             "health": {k: v.to_dict() for k, v in self.health.items()},
@@ -228,7 +230,7 @@ class MarketplaceRegistry:
     """
 
     def __init__(self) -> None:
-        self._adapters: Dict[str, MarketplaceAdapter] = {}
+        self._adapters: dict[str, MarketplaceAdapter] = {}
         self._health = MarketplaceHealthMonitor()
 
     @property
@@ -252,7 +254,7 @@ class MarketplaceRegistry:
         return adapter
 
     @property
-    def connected(self) -> List[str]:
+    def connected(self) -> list[str]:
         """Names of all connected marketplaces."""
         return list(self._adapters.keys())
 
@@ -260,12 +262,12 @@ class MarketplaceRegistry:
     def count(self) -> int:
         return len(self._adapters)
 
-    def marketplace_health(self) -> List[MarketplaceStatus]:
+    def marketplace_health(self) -> list[MarketplaceStatus]:
         """Return current health status of all connected marketplaces.
 
         Marketplaces that have never been queried are reported as UNKNOWN.
         """
-        statuses: List[MarketplaceStatus] = []
+        statuses: list[MarketplaceStatus] = []
         for name in self._adapters:
             statuses.append(self._health.get_status(name))
         return statuses
@@ -277,7 +279,7 @@ class MarketplaceRegistry:
         page: int = 1,
         per_page: int = 10,
         sort: str = "relevant",
-        sources: Optional[List[str]] = None,
+        sources: list[str] | None = None,
     ) -> MarketplaceSearchResults:
         """Search all connected marketplaces and merge results.
 
@@ -303,8 +305,8 @@ class MarketplaceRegistry:
             candidates = [a for a in candidates if a.name in sources]
 
         # Separate available vs circuit-broken marketplaces
-        targets: List[MarketplaceAdapter] = []
-        skipped: List[str] = []
+        targets: list[MarketplaceAdapter] = []
+        skipped: list[str] = []
         for adapter in candidates:
             if self._health.is_available(adapter.name):
                 targets.append(adapter)
@@ -316,9 +318,9 @@ class MarketplaceRegistry:
                     self._health.get_status(adapter.name).consecutive_failures,
                 )
 
-        all_results: Dict[str, List[ModelSummary]] = {}
-        searched: List[str] = []
-        failed: List[str] = []
+        all_results: dict[str, list[ModelSummary]] = {}
+        searched: list[str] = []
+        failed: list[str] = []
 
         if targets:
             # Fan out searches in parallel
@@ -340,27 +342,28 @@ class MarketplaceRegistry:
                         results = future.result()
                         elapsed_ms = (time.monotonic_ns() - start_ns) / 1e6
                         self._health.record_success(
-                            adapter.name, response_time_ms=elapsed_ms,
+                            adapter.name,
+                            response_time_ms=elapsed_ms,
                         )
                         all_results[adapter.name] = results
                         searched.append(adapter.name)
                     except (MarketplaceError, RuntimeError, OSError) as exc:
                         logger.warning(
                             "Search failed for %s: %s",
-                            adapter.display_name, exc,
+                            adapter.display_name,
+                            exc,
                         )
                         self._health.record_failure(
-                            adapter.name, error=str(exc),
+                            adapter.name,
+                            error=str(exc),
                         )
                         failed.append(adapter.name)
 
         # Interleave results for variety (round-robin across sources)
-        merged: List[ModelSummary] = []
-        source_iters = {
-            name: iter(results) for name, results in all_results.items()
-        }
+        merged: list[ModelSummary] = []
+        source_iters = {name: iter(results) for name, results in all_results.items()}
         while source_iters:
-            exhausted: List[str] = []
+            exhausted: list[str] = []
             for name, it in source_iters.items():
                 item = next(it, None)
                 if item is not None:
@@ -373,8 +376,11 @@ class MarketplaceRegistry:
         # Build human-readable summary for the agent
         health_snapshot = {name: self._health.get_status(name) for name in self._adapters}
         summary = _build_search_summary(
-            searched=searched, skipped=skipped, failed=failed,
-            health=health_snapshot, result_count=len(merged),
+            searched=searched,
+            skipped=skipped,
+            failed=failed,
+            health=health_snapshot,
+            result_count=len(merged),
         )
 
         return MarketplaceSearchResults(
@@ -389,19 +395,17 @@ class MarketplaceRegistry:
 
 def _build_search_summary(
     *,
-    searched: List[str],
-    skipped: List[str],
-    failed: List[str],
-    health: Dict[str, MarketplaceStatus],
+    searched: list[str],
+    skipped: list[str],
+    failed: list[str],
+    health: dict[str, MarketplaceStatus],
     result_count: int,
 ) -> str:
     """Build a concise human-readable summary of the search outcome."""
-    parts: List[str] = []
+    parts: list[str] = []
 
     # Health status line: "thingiverse: healthy, cults3d: DOWN"
-    status_tokens = [
-        f"{name}: {status.health.value}" for name, status in health.items()
-    ]
+    status_tokens = [f"{name}: {status.health.value}" for name, status in health.items()]
     if status_tokens:
         parts.append(", ".join(status_tokens))
 
@@ -411,13 +415,9 @@ def _build_search_summary(
         parts.append("No marketplaces connected.")
 
     if skipped:
-        parts.append(
-            f"Skipped (DOWN): {', '.join(skipped)}."
-        )
+        parts.append(f"Skipped (DOWN): {', '.join(skipped)}.")
 
     if failed:
-        parts.append(
-            f"Failed this request: {', '.join(failed)}."
-        )
+        parts.append(f"Failed this request: {', '.join(failed)}.")
 
     return " ".join(parts)

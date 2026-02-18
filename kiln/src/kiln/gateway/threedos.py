@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 from requests.exceptions import RequestException
@@ -38,12 +38,12 @@ class PrinterListing:
     id: str
     name: str
     location: str
-    capabilities: Dict[str, Any] = field(default_factory=dict)
+    capabilities: dict[str, Any] = field(default_factory=dict)
     available: bool = True
-    price_per_gram: Optional[float] = None
+    price_per_gram: float | None = None
     currency: str = "USD"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -55,18 +55,18 @@ class NetworkJob:
     file_url: str
     material: str
     status: str
-    printer_id: Optional[str] = None
-    estimated_cost: Optional[float] = None
+    printer_id: str | None = None
+    estimated_cost: float | None = None
     currency: str = "USD"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 class ThreeDOSError(Exception):
     """Error communicating with the 3DOS platform."""
 
-    def __init__(self, message: str, status_code: Optional[int] = None) -> None:
+    def __init__(self, message: str, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
 
@@ -85,24 +85,24 @@ class ThreeDOSClient:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
     ) -> None:
         self._api_key = api_key or os.environ.get("KILN_3DOS_API_KEY", "")
         self._base_url = (base_url or os.environ.get("KILN_3DOS_BASE_URL", _DEFAULT_BASE_URL)).rstrip("/")
 
         if not self._api_key:
-            raise ValueError(
-                "3DOS API key required. Set KILN_3DOS_API_KEY or pass api_key."
-            )
+            raise ValueError("3DOS API key required. Set KILN_3DOS_API_KEY or pass api_key.")
 
         self._session = requests.Session()
-        self._session.headers.update({
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        })
+        self._session.headers.update(
+            {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            }
+        )
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> Dict[str, Any]:
+    def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         """Make an authenticated request to the 3DOS API."""
         url = f"{self._base_url}{path}"
         try:
@@ -124,8 +124,8 @@ class ThreeDOSClient:
         self,
         name: str,
         location: str,
-        capabilities: Optional[Dict[str, Any]] = None,
-        price_per_gram: Optional[float] = None,
+        capabilities: dict[str, Any] | None = None,
+        price_per_gram: float | None = None,
     ) -> PrinterListing:
         """Register a local printer on the 3DOS network.
 
@@ -151,7 +151,7 @@ class ThreeDOSClient:
         """Update a registered printer's availability on the network."""
         self._request("PATCH", f"/printers/{printer_id}", json={"available": available})
 
-    def list_my_printers(self) -> List[PrinterListing]:
+    def list_my_printers(self) -> list[PrinterListing]:
         """List all printers registered by this account."""
         data = self._request("GET", "/printers/mine")
         return [
@@ -173,10 +173,10 @@ class ThreeDOSClient:
     def find_printers(
         self,
         material: str,
-        location: Optional[str] = None,
-    ) -> List[PrinterListing]:
+        location: str | None = None,
+    ) -> list[PrinterListing]:
         """Search for available printers on the 3DOS network."""
-        params: Dict[str, str] = {"material": material}
+        params: dict[str, str] = {"material": material}
         if location:
             params["location"] = location
         data = self._request("GET", "/printers/search", params=params)
@@ -197,14 +197,14 @@ class ThreeDOSClient:
         self,
         file_url: str,
         material: str,
-        printer_id: Optional[str] = None,
+        printer_id: str | None = None,
     ) -> NetworkJob:
         """Submit a print job to the 3DOS network.
 
         If ``printer_id`` is given, the job targets that specific printer.
         Otherwise, 3DOS auto-assigns to the best available printer.
         """
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "file_url": file_url,
             "material": material,
         }

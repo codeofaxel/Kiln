@@ -21,8 +21,7 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
-from pathlib import Path
-from typing import Any, Callable, List, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 _logger = logging.getLogger(__name__)
 
@@ -78,7 +77,7 @@ class ToolPlugin(Protocol):
 # ---------------------------------------------------------------------------
 
 
-def discover_plugins(plugin_package: str) -> List[ToolPlugin]:
+def discover_plugins(plugin_package: str) -> list[ToolPlugin]:
     """Import all modules from *plugin_package* and collect their plugins.
 
     Each module is expected to expose a ``plugin`` attribute that satisfies
@@ -93,7 +92,7 @@ def discover_plugins(plugin_package: str) -> List[ToolPlugin]:
         (e.g. ``"kiln.plugins"``).
     :returns: List of :class:`ToolPlugin` instances found.
     """
-    plugins: List[ToolPlugin] = []
+    plugins: list[ToolPlugin] = []
 
     try:
         package = importlib.import_module(plugin_package)
@@ -113,7 +112,7 @@ def discover_plugins(plugin_package: str) -> List[ToolPlugin]:
         )
         return plugins
 
-    for finder, module_name, _is_pkg in pkgutil.iter_modules(package_path):
+    for _finder, module_name, _is_pkg in pkgutil.iter_modules(package_path):
         fqn = f"{plugin_package}.{module_name}"
         try:
             mod = importlib.import_module(fqn)
@@ -132,8 +131,7 @@ def discover_plugins(plugin_package: str) -> List[ToolPlugin]:
 
         if not isinstance(candidate, ToolPlugin):
             _logger.warning(
-                "Module %s has a 'plugin' attribute but it does not satisfy "
-                "the ToolPlugin protocol — skipping",
+                "Module %s has a 'plugin' attribute but it does not satisfy the ToolPlugin protocol — skipping",
                 fqn,
             )
             continue
@@ -170,7 +168,9 @@ def register_all_plugins(
             p.register(mcp)
             registered += 1
             _logger.info(
-                "Registered tool plugin: %s (%s)", p.name, p.description,
+                "Registered tool plugin: %s (%s)",
+                p.name,
+                p.description,
             )
         except Exception:
             _logger.error(
@@ -182,7 +182,9 @@ def register_all_plugins(
     if registered:
         _logger.info(
             "Loaded %d/%d tool plugin(s) from %s",
-            registered, len(plugins), plugin_package,
+            registered,
+            len(plugins),
+            plugin_package,
         )
 
     return registered

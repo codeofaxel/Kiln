@@ -11,7 +11,7 @@ import json
 import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -23,32 +23,41 @@ class SkillManifest:
     description: str = "3D printer control and monitoring via CLI and MCP"
 
     # Configuration requirements
-    required_env: List[str] = field(default_factory=lambda: [
-        "KILN_PRINTER_HOST",
-        "KILN_PRINTER_API_KEY",
-        "KILN_PRINTER_TYPE",
-    ])
-    optional_env: List[str] = field(default_factory=lambda: [
-        "KILN_PRINTER_MODEL",
-        "KILN_PRINTER_SERIAL",
-        "KILN_AUTONOMY_LEVEL",
-        "KILN_HEATER_TIMEOUT",
-        "KILN_CRAFTCLOUD_API_KEY",
-        "KILN_SCULPTEO_API_KEY",
-    ])
+    required_env: list[str] = field(
+        default_factory=lambda: [
+            "KILN_PRINTER_HOST",
+            "KILN_PRINTER_API_KEY",
+            "KILN_PRINTER_TYPE",
+        ]
+    )
+    optional_env: list[str] = field(
+        default_factory=lambda: [
+            "KILN_PRINTER_MODEL",
+            "KILN_PRINTER_SERIAL",
+            "KILN_AUTONOMY_LEVEL",
+            "KILN_HEATER_TIMEOUT",
+            "KILN_CRAFTCLOUD_API_KEY",
+            "KILN_SCULPTEO_API_KEY",
+        ]
+    )
 
     # Capabilities
-    interfaces: List[str] = field(default_factory=lambda: ["cli", "mcp"])
+    interfaces: list[str] = field(default_factory=lambda: ["cli", "mcp"])
     tool_count: int = 0  # populated dynamically
-    safety_levels: List[str] = field(default_factory=lambda: [
-        "safe", "guarded", "confirm", "emergency",
-    ])
+    safety_levels: list[str] = field(
+        default_factory=lambda: [
+            "safe",
+            "guarded",
+            "confirm",
+            "emergency",
+        ]
+    )
 
     # Setup verification
     setup_command: str = "kiln verify"
     health_command: str = "kiln status --json"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict (enum-safe)."""
         return asdict(self)
 
@@ -57,6 +66,7 @@ def get_version() -> str:
     """Get the installed Kiln package version."""
     try:
         from importlib.metadata import version
+
         return version("kiln")
     except Exception:
         return "unknown"
@@ -98,42 +108,42 @@ def get_skill_definition_path() -> Path:
     for p in candidates:
         if p.is_file():
             return p
-    raise FileNotFoundError(
-        "SKILL.md not found. Run 'pip install kiln' or check your installation."
-    )
+    raise FileNotFoundError("SKILL.md not found. Run 'pip install kiln' or check your installation.")
 
 
-_AGENT_WORKSPACE_MARKERS: List[str] = [
-    "CLAUDE.md",         # Claude Code
-    "claude.yaml",       # Claude Desktop
-    ".cursorrules",      # Cursor
-    ".windsurfrules",    # Windsurf
-    "AGENTS.md",         # Generic agent workspace
-    ".github/copilot",   # GitHub Copilot
+_AGENT_WORKSPACE_MARKERS: list[str] = [
+    "CLAUDE.md",  # Claude Code
+    "claude.yaml",  # Claude Desktop
+    ".cursorrules",  # Cursor
+    ".windsurfrules",  # Windsurf
+    "AGENTS.md",  # Generic agent workspace
+    ".github/copilot",  # GitHub Copilot
 ]
 
 
-def detect_agent_workspaces(*, search_dir: Optional[str] = None) -> List[Dict[str, Any]]:
+def detect_agent_workspaces(*, search_dir: str | None = None) -> list[dict[str, Any]]:
     """Detect AI agent workspaces in common locations.
 
     Searches for marker files that indicate an agent workspace.
     Returns a list of dicts with path, agent_type, and marker info.
     """
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
 
-    search_paths: List[Path] = []
+    search_paths: list[Path] = []
     if search_dir:
         search_paths.append(Path(search_dir))
     else:
         home = Path.home()
-        search_paths.extend([
-            Path.cwd(),
-            home / "Documents",
-            home / "Projects",
-            home / "Code",
-            home / "Developer",
-            home / "dev",
-        ])
+        search_paths.extend(
+            [
+                Path.cwd(),
+                home / "Documents",
+                home / "Projects",
+                home / "Code",
+                home / "Developer",
+                home / "dev",
+            ]
+        )
 
     seen: set[str] = set()
     for base in search_paths:
@@ -154,7 +164,7 @@ def detect_agent_workspaces(*, search_dir: Optional[str] = None) -> List[Dict[st
 def _scan_dir_for_markers(
     directory: Path,
     seen: set[str],
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
 ) -> None:
     """Check *directory* for agent workspace marker files."""
     resolved = str(directory.resolve())
@@ -165,18 +175,20 @@ def _scan_dir_for_markers(
     for marker in _AGENT_WORKSPACE_MARKERS:
         marker_path = directory / marker
         if marker_path.exists():
-            results.append({
-                "path": str(directory),
-                "agent_type": _marker_to_agent_type(marker),
-                "marker": marker,
-                "skill_installed": _check_skill_installed(directory),
-            })
+            results.append(
+                {
+                    "path": str(directory),
+                    "agent_type": _marker_to_agent_type(marker),
+                    "marker": marker,
+                    "skill_installed": _check_skill_installed(directory),
+                }
+            )
             break
 
 
 def _marker_to_agent_type(marker: str) -> str:
     """Map a marker filename to an agent type name."""
-    mapping: Dict[str, str] = {
+    mapping: dict[str, str] = {
         "CLAUDE.md": "claude_code",
         "claude.yaml": "claude_desktop",
         ".cursorrules": "cursor",
@@ -197,7 +209,7 @@ def _check_skill_installed(workspace: Path) -> bool:
     return any(p.is_file() for p in skill_locations)
 
 
-def install_skill(workspace_path: str, *, force: bool = False) -> Dict[str, Any]:
+def install_skill(workspace_path: str, *, force: bool = False) -> dict[str, Any]:
     """Install the Kiln skill definition into an agent workspace.
 
     Copies SKILL.md to the appropriate location based on workspace layout.

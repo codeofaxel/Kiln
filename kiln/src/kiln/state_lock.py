@@ -24,7 +24,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class StateVersion:
@@ -48,7 +49,7 @@ class StateVersion:
     updated_at: float = field(default_factory=time.time)
     updated_by: str = "unknown"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "printer_id": self.printer_id,
@@ -61,6 +62,7 @@ class StateVersion:
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
+
 
 class StaleStateError(Exception):
     """Raised when a state update conflicts with a newer version.
@@ -91,6 +93,7 @@ class StaleStateError(Exception):
 # Printer state lock
 # ---------------------------------------------------------------------------
 
+
 class PrinterStateLock:
     """Thread-safe optimistic lock manager for printer state versions.
 
@@ -106,9 +109,9 @@ class PrinterStateLock:
     def __init__(
         self,
         *,
-        persistence: Optional[Any] = None,
+        persistence: Any | None = None,
     ) -> None:
-        self._versions: Dict[str, StateVersion] = {}
+        self._versions: dict[str, StateVersion] = {}
         self._lock = threading.Lock()
         self._persistence = persistence
 
@@ -137,7 +140,9 @@ class PrinterStateLock:
             self._persist(sv)
             logger.debug(
                 "Acquired lock for %r v%d by %s",
-                printer_id, new_version, owner,
+                printer_id,
+                new_version,
+                owner,
             )
             return sv
 
@@ -155,7 +160,9 @@ class PrinterStateLock:
             if current.version != version:
                 logger.warning(
                     "Stale release for %r: caller has v%d, current is v%d",
-                    printer_id, version, current.version,
+                    printer_id,
+                    version,
+                    current.version,
                 )
                 return False
             del self._versions[printer_id]
@@ -176,7 +183,7 @@ class PrinterStateLock:
                 return False
             return current.version == version
 
-    def get_version(self, printer_id: str) -> Optional[StateVersion]:
+    def get_version(self, printer_id: str) -> StateVersion | None:
         """Return the current :class:`StateVersion` for *printer_id*.
 
         :returns: The version info, or ``None`` if no lock is held.
@@ -197,10 +204,12 @@ class PrinterStateLock:
                 self._persist_delete(printer_id)
                 logger.warning(
                     "Force-released lock for %r (was v%d by %s)",
-                    printer_id, old.version, old.updated_by,
+                    printer_id,
+                    old.version,
+                    old.updated_by,
                 )
 
-    def list_locks(self) -> List[StateVersion]:
+    def list_locks(self) -> list[StateVersion]:
         """Return all currently held locks.
 
         :returns: A list of :class:`StateVersion` entries, sorted by
@@ -227,7 +236,8 @@ class PrinterStateLock:
         except Exception as exc:
             logger.warning(
                 "Failed to persist state lock for %r: %s",
-                sv.printer_id, exc,
+                sv.printer_id,
+                exc,
             )
 
     def _persist_delete(self, printer_id: str) -> None:
@@ -242,7 +252,8 @@ class PrinterStateLock:
         except Exception as exc:
             logger.warning(
                 "Failed to delete persisted lock for %r: %s",
-                printer_id, exc,
+                printer_id,
+                exc,
             )
 
     def _load_from_persistence(self) -> None:
@@ -279,6 +290,7 @@ class PrinterStateLock:
 # Context manager
 # ---------------------------------------------------------------------------
 
+
 class PrinterLockContext:
     """Context manager for scoped printer lock acquire / release.
 
@@ -303,7 +315,7 @@ class PrinterLockContext:
         self._lock = lock
         self._printer_id = printer_id
         self._owner = owner
-        self._version: Optional[StateVersion] = None
+        self._version: StateVersion | None = None
 
     def __enter__(self) -> StateVersion:
         self._version = self._lock.acquire(self._printer_id, owner=self._owner)
@@ -312,12 +324,12 @@ class PrinterLockContext:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         if self._version is not None:
             released = self._lock.release(
-                self._printer_id, self._version.version,
+                self._printer_id,
+                self._version.version,
             )
             if not released:
                 logger.warning(
-                    "Lock for %r v%d was stale on context exit "
-                    "(owner=%s, exc=%s)",
+                    "Lock for %r v%d was stale on context exit (owner=%s, exc=%s)",
                     self._printer_id,
                     self._version.version,
                     self._owner,
@@ -329,7 +341,7 @@ class PrinterLockContext:
 # Module-level convenience
 # ---------------------------------------------------------------------------
 
-_state_lock: Optional[PrinterStateLock] = None
+_state_lock: PrinterStateLock | None = None
 
 
 def get_state_lock() -> PrinterStateLock:

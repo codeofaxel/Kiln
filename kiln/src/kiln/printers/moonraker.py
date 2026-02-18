@@ -16,7 +16,8 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -56,7 +57,7 @@ _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({502, 503, 504})
 # Mapping from Moonraker's ``klippy_state`` / ``state`` strings to the
 # canonical :class:`PrinterStatus` enum.  Moonraker reports the Klipper
 # state via ``GET /printer/info`` in the ``state`` field.
-_STATE_MAP: Dict[str, PrinterStatus] = {
+_STATE_MAP: dict[str, PrinterStatus] = {
     "ready": PrinterStatus.IDLE,
     "printing": PrinterStatus.PRINTING,
     "paused": PrinterStatus.PAUSED,
@@ -73,6 +74,7 @@ _STATE_MAP: Dict[str, PrinterStatus] = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
     """Walk nested dicts safely, returning *default* on any miss or type error."""
     current = data
@@ -83,7 +85,7 @@ def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
     return current
 
 
-def _map_moonraker_state(state_string: str, print_state: Optional[str] = None) -> PrinterStatus:
+def _map_moonraker_state(state_string: str, print_state: str | None = None) -> PrinterStatus:
     """Translate a Moonraker state string to a :class:`PrinterStatus`.
 
     Moonraker exposes two relevant state fields:
@@ -140,7 +142,7 @@ class MoonrakerWebSocketMonitor:
             Receives the full ``status`` dict from the Moonraker notification.
     """
 
-    _SUBSCRIBE_OBJECTS: Dict[str, Optional[list[str]]] = {
+    _SUBSCRIBE_OBJECTS: dict[str, list[str] | None] = {
         "print_stats": None,
         "heater_bed": None,
         "extruder": None,
@@ -151,19 +153,19 @@ class MoonrakerWebSocketMonitor:
         self,
         host: str,
         *,
-        on_state_update: Optional[Callable[[Dict[str, Any]], None]] = None,
+        on_state_update: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._host: str = host.rstrip("/")
         self._on_state_update = on_state_update
 
         # Shared state cache -- written by the WS thread, read by the adapter.
-        self._cache: Dict[str, Any] = {}
+        self._cache: dict[str, Any] = {}
         self._cache_lock: threading.Lock = threading.Lock()
         self._connected: bool = False
 
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event: threading.Event = threading.Event()
-        self._ws: Optional[Any] = None  # websocket.WebSocketApp instance
+        self._ws: Any | None = None  # websocket.WebSocketApp instance
         self._rpc_id: int = 0
 
     # -- public API --------------------------------------------------------
@@ -173,7 +175,7 @@ class MoonrakerWebSocketMonitor:
         """Whether the WebSocket connection is currently alive."""
         return self._connected
 
-    def get_cached_state(self) -> Optional[Dict[str, Any]]:
+    def get_cached_state(self) -> dict[str, Any] | None:
         """Return the latest cached status dict, or ``None`` if empty."""
         with self._cache_lock:
             return dict(self._cache) if self._cache else None
@@ -227,9 +229,9 @@ class MoonrakerWebSocketMonitor:
         """Convert the HTTP base URL to a WebSocket URL."""
         url = self._host
         if url.startswith("https://"):
-            url = "wss://" + url[len("https://"):]
+            url = "wss://" + url[len("https://") :]
         elif url.startswith("http://"):
-            url = "ws://" + url[len("http://"):]
+            url = "ws://" + url[len("http://") :]
         return f"{url}/websocket"
 
     def _run_loop(self) -> None:
@@ -248,7 +250,8 @@ class MoonrakerWebSocketMonitor:
                 break
 
             logger.debug(
-                "Moonraker WS reconnecting in %.1fs", backoff,
+                "Moonraker WS reconnecting in %.1fs",
+                backoff,
             )
             self._stop_event.wait(timeout=backoff)
             backoff = min(backoff * 2, _MAX_RECONNECT_BACKOFF)
@@ -273,12 +276,14 @@ class MoonrakerWebSocketMonitor:
         logger.info("Moonraker WS connected")
 
         # Subscribe to printer objects for push updates.
-        subscribe_msg = _json.dumps({
-            "jsonrpc": "2.0",
-            "method": "printer.objects.subscribe",
-            "params": {"objects": self._SUBSCRIBE_OBJECTS},
-            "id": self._next_rpc_id(),
-        })
+        subscribe_msg = _json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "printer.objects.subscribe",
+                "params": {"objects": self._SUBSCRIBE_OBJECTS},
+                "id": self._next_rpc_id(),
+            }
+        )
         ws.send(subscribe_msg)
 
     def _on_message(self, ws: Any, message: str) -> None:
@@ -323,6 +328,7 @@ class MoonrakerWebSocketMonitor:
 # Adapter
 # ---------------------------------------------------------------------------
 
+
 class MoonrakerAdapter(PrinterAdapter):
     """Concrete :class:`PrinterAdapter` backed by the Moonraker HTTP API.
 
@@ -350,7 +356,7 @@ class MoonrakerAdapter(PrinterAdapter):
     def __init__(
         self,
         host: str,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         timeout: int = 30,
         retries: int = 3,
         verify_ssl: bool = True,
@@ -359,7 +365,7 @@ class MoonrakerAdapter(PrinterAdapter):
             raise ValueError("host must not be empty")
 
         self._host: str = host.rstrip("/")
-        self._api_key: Optional[str] = api_key or None
+        self._api_key: str | None = api_key or None
         self._timeout: int = timeout
         self._retries: int = max(retries, 1)
 
@@ -369,6 +375,7 @@ class MoonrakerAdapter(PrinterAdapter):
         self._session.verify = verify_ssl
         if not verify_ssl:
             import urllib3
+
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         # Configure HTTP proxy from environment variables.
@@ -381,7 +388,7 @@ class MoonrakerAdapter(PrinterAdapter):
             }
 
         # Push monitoring (WebSocket) -- disabled by default.
-        self._ws_monitor: Optional[MoonrakerWebSocketMonitor] = None
+        self._ws_monitor: MoonrakerWebSocketMonitor | None = None
         if _PUSH_MONITORING_ENABLED:
             self.enable_push_monitoring()
 
@@ -441,10 +448,10 @@ class MoonrakerAdapter(PrinterAdapter):
         method: str,
         path: str,
         *,
-        json: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        files: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
     ) -> requests.Response:
         """Execute an HTTP request with exponential-backoff retry logic.
 
@@ -455,7 +462,7 @@ class MoonrakerAdapter(PrinterAdapter):
                 timeouts, or when all retry attempts are exhausted.
         """
         url = self._url(path)
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
 
         for attempt in range(self._retries):
             try:
@@ -478,8 +485,7 @@ class MoonrakerAdapter(PrinterAdapter):
                     if len(response.text) > 300:
                         body += " (truncated)"
                     raise PrinterError(
-                        f"Moonraker returned HTTP {response.status_code} "
-                        f"for {method} {path}: {body}",
+                        f"Moonraker returned HTTP {response.status_code} for {method} {path}: {body}",
                     )
 
                 # Retryable HTTP status -- fall through to backoff.
@@ -498,8 +504,7 @@ class MoonrakerAdapter(PrinterAdapter):
                 )
             except ReqConnectionError as exc:
                 last_exc = PrinterError(
-                    f"Could not connect to Moonraker at {self._host} "
-                    f"(attempt {attempt + 1}/{self._retries})",
+                    f"Could not connect to Moonraker at {self._host} (attempt {attempt + 1}/{self._retries})",
                     cause=exc,
                 )
             except RequestException as exc:
@@ -526,7 +531,7 @@ class MoonrakerAdapter(PrinterAdapter):
         assert last_exc is not None
         raise last_exc
 
-    def _get_json(self, path: str, **kwargs: Any) -> Dict[str, Any]:
+    def _get_json(self, path: str, **kwargs: Any) -> dict[str, Any]:
         """Shorthand: GET *path* and return the parsed JSON body.
 
         Raises :class:`PrinterError` if the response body is not valid JSON.
@@ -544,10 +549,10 @@ class MoonrakerAdapter(PrinterAdapter):
         self,
         path: str,
         *,
-        json: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        files: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
     ) -> requests.Response:
         """Shorthand for POST requests."""
         return self._request("POST", path, json=json, params=params, files=files, data=data)
@@ -671,7 +676,7 @@ class MoonrakerAdapter(PrinterAdapter):
             chamber_temp_actual=chamber_actual,
         )
 
-    def _state_from_push_cache(self) -> Optional[PrinterState]:
+    def _state_from_push_cache(self) -> PrinterState | None:
         """Build a :class:`PrinterState` from the WebSocket cache.
 
         Returns ``None`` if push monitoring is inactive, disconnected,
@@ -738,7 +743,7 @@ class MoonrakerAdapter(PrinterAdapter):
         print_stats = _safe_get(status, "print_stats", default={})
         file_name = print_stats.get("filename") if isinstance(print_stats, dict) else None
         print_duration = print_stats.get("print_duration") if isinstance(print_stats, dict) else None
-        total_duration = print_stats.get("total_duration") if isinstance(print_stats, dict) else None
+        print_stats.get("total_duration") if isinstance(print_stats, dict) else None
 
         # virtual_sdcard
         vsd = _safe_get(status, "virtual_sdcard", default={})
@@ -746,22 +751,18 @@ class MoonrakerAdapter(PrinterAdapter):
 
         # Moonraker reports progress as 0.0--1.0; convert to 0.0--100.0 to
         # match the PrinterAdapter contract.
-        completion: Optional[float] = None
+        completion: float | None = None
         if progress is not None:
             completion = round(float(progress) * 100.0, 2)
 
         # Estimate time left based on progress and elapsed time.
-        print_time_seconds: Optional[int] = None
-        print_time_left_seconds: Optional[int] = None
+        print_time_seconds: int | None = None
+        print_time_left_seconds: int | None = None
 
         if print_duration is not None:
             print_time_seconds = int(print_duration)
 
-        if (
-            print_time_seconds is not None
-            and completion is not None
-            and completion > 0
-        ):
+        if print_time_seconds is not None and completion is not None and completion > 0:
             # total_estimated = elapsed / (completion / 100)
             total_estimated = print_time_seconds / (completion / 100.0)
             print_time_left_seconds = max(0, int(total_estimated - print_time_seconds))
@@ -773,7 +774,7 @@ class MoonrakerAdapter(PrinterAdapter):
             print_time_left_seconds=print_time_left_seconds,
         )
 
-    def list_files(self) -> List[PrinterFile]:
+    def list_files(self) -> list[PrinterFile]:
         """Return a list of G-code files stored on the Klipper host.
 
         Calls ``GET /server/files/list?root=gcodes``.
@@ -790,7 +791,7 @@ class MoonrakerAdapter(PrinterAdapter):
         if not isinstance(raw_files, list):
             raw_files = []
 
-        results: List[PrinterFile] = []
+        results: list[PrinterFile] = []
         for entry in raw_files:
             if not isinstance(entry, dict):
                 continue
@@ -980,7 +981,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # PrinterAdapter -- G-code
     # ------------------------------------------------------------------
 
-    def send_gcode(self, commands: List[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> bool:
         """Send G-code commands to Klipper via Moonraker.
 
         Joins all commands into a single newline-separated script and
@@ -1025,7 +1026,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # PrinterAdapter -- webcam snapshot
     # ------------------------------------------------------------------
 
-    def get_snapshot(self) -> Optional[bytes]:
+    def get_snapshot(self) -> bytes | None:
         """Capture a webcam snapshot from Moonraker.
 
         Discovers the webcam snapshot URL via
@@ -1040,8 +1041,7 @@ class MoonrakerAdapter(PrinterAdapter):
             webcams = _safe_get(payload, "result", "webcams", default=[])
             if not isinstance(webcams, list) or not webcams:
                 raise PrinterError(
-                    "No webcams configured in Moonraker. Add a webcam via "
-                    "Moonraker's webcam configuration."
+                    "No webcams configured in Moonraker. Add a webcam via Moonraker's webcam configuration."
                 )
 
             # Use the first webcam's snapshot_url
@@ -1054,8 +1054,7 @@ class MoonrakerAdapter(PrinterAdapter):
                     snapshot_url = stream_url.replace("/stream", "/?action=snapshot")
                 else:
                     raise PrinterError(
-                        "Webcam found in Moonraker but no snapshot URL configured. "
-                        "Check your webcam configuration."
+                        "Webcam found in Moonraker but no snapshot URL configured. Check your webcam configuration."
                     )
 
             # If the URL is relative, prepend the host
@@ -1067,16 +1066,14 @@ class MoonrakerAdapter(PrinterAdapter):
                 return response.content
             if not response.ok:
                 raise PrinterError(
-                    f"Webcam snapshot failed (HTTP {response.status_code}). "
-                    f"Check that the webcam service is running."
+                    f"Webcam snapshot failed (HTTP {response.status_code}). Check that the webcam service is running."
                 )
             return None
         except PrinterError:
             raise
         except Timeout as exc:
             raise PrinterError(
-                "Webcam snapshot timed out after 10s. Check that the webcam "
-                "service is running and accessible."
+                "Webcam snapshot timed out after 10s. Check that the webcam service is running and accessible."
             ) from exc
         except ReqConnectionError as exc:
             raise PrinterError(
@@ -1084,19 +1081,15 @@ class MoonrakerAdapter(PrinterAdapter):
                 "webcam is configured and the printer is online."
             ) from exc
         except RequestException as exc:
-            raise PrinterError(
-                f"Webcam snapshot failed: {exc}"
-            ) from exc
+            raise PrinterError(f"Webcam snapshot failed: {exc}") from exc
         except Exception as exc:
-            raise PrinterError(
-                f"Webcam snapshot failed unexpectedly: {exc}"
-            ) from exc
+            raise PrinterError(f"Webcam snapshot failed unexpectedly: {exc}") from exc
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- webcam streaming
     # ------------------------------------------------------------------
 
-    def get_stream_url(self) -> Optional[str]:
+    def get_stream_url(self) -> str | None:
         """Discover and return the MJPEG stream URL from Moonraker.
 
         Queries ``GET /server/webcams/list`` and returns the first
@@ -1125,7 +1118,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # PrinterAdapter -- filament sensor
     # ------------------------------------------------------------------
 
-    def get_filament_status(self) -> Optional[Dict[str, Any]]:
+    def get_filament_status(self) -> dict[str, Any] | None:
         """Query Klipper for filament switch sensor status via Moonraker.
 
         Uses ``GET /printer/objects/query?filament_switch_sensor`` to check
@@ -1138,7 +1131,11 @@ class MoonrakerAdapter(PrinterAdapter):
                 params={"filament_switch_sensor": ""},
             )
             sensor_data = _safe_get(
-                payload, "result", "status", "filament_switch_sensor", default=None,
+                payload,
+                "result",
+                "status",
+                "filament_switch_sensor",
+                default=None,
             )
             if not sensor_data or not isinstance(sensor_data, dict):
                 return None
@@ -1157,7 +1154,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # PrinterAdapter -- bed mesh
     # ------------------------------------------------------------------
 
-    def get_bed_mesh(self) -> Optional[Dict[str, Any]]:
+    def get_bed_mesh(self) -> dict[str, Any] | None:
         """Query Moonraker for the current bed mesh data.
 
         Uses ``GET /printer/objects/query?bed_mesh`` to retrieve the
@@ -1180,7 +1177,7 @@ class MoonrakerAdapter(PrinterAdapter):
     # Firmware updates
     # ------------------------------------------------------------------
 
-    def get_firmware_status(self) -> Optional[FirmwareStatus]:
+    def get_firmware_status(self) -> FirmwareStatus | None:
         """Check Moonraker update manager for available updates.
 
         Calls ``GET /machine/update/status`` to get version info for all
@@ -1214,23 +1211,23 @@ class MoonrakerAdapter(PrinterAdapter):
             has_update = False
             if comp_name == "system":
                 has_update = int(info.get("package_count", 0)) > 0
-            elif current and remote and current != remote:
-                has_update = True
-            elif int(info.get("commits_behind_count", 0)) > 0:
+            elif current and remote and current != remote or int(info.get("commits_behind_count", 0)) > 0:
                 has_update = True
 
             if has_update:
                 updates_available += 1
 
-            components.append(FirmwareComponent(
-                name=comp_name,
-                current_version=str(current),
-                remote_version=str(remote) if remote else None,
-                update_available=has_update,
-                rollback_version=str(rollback) if rollback else None,
-                component_type=comp_type,
-                channel=channel,
-            ))
+            components.append(
+                FirmwareComponent(
+                    name=comp_name,
+                    current_version=str(current),
+                    remote_version=str(remote) if remote else None,
+                    update_available=has_update,
+                    rollback_version=str(rollback) if rollback else None,
+                    component_type=comp_type,
+                    channel=channel,
+                )
+            )
 
         return FirmwareStatus(
             busy=busy,
@@ -1240,7 +1237,7 @@ class MoonrakerAdapter(PrinterAdapter):
 
     def update_firmware(
         self,
-        component: Optional[str] = None,
+        component: str | None = None,
     ) -> FirmwareUpdateResult:
         """Trigger an update via Moonraker's update manager.
 
@@ -1255,14 +1252,13 @@ class MoonrakerAdapter(PrinterAdapter):
         try:
             state = self.get_state()
             if state.state == PrinterStatus.PRINTING:
-                raise PrinterError(
-                    "Cannot update firmware while printing. "
-                    "Wait for the current print to finish."
-                )
+                raise PrinterError("Cannot update firmware while printing. Wait for the current print to finish.")
         except PrinterError:
             raise
         except Exception as exc:
-            logger.debug("Failed to check printer state before firmware update: %s", exc)  # If we can't check state, let Moonraker decide
+            logger.debug(
+                "Failed to check printer state before firmware update: %s", exc
+            )  # If we can't check state, let Moonraker decide
 
         payload = {}
         if component:
@@ -1274,14 +1270,14 @@ class MoonrakerAdapter(PrinterAdapter):
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Firmware update failed: {exc}", cause=exc,
+                f"Firmware update failed: {exc}",
+                cause=exc,
             ) from exc
 
         target = component or "all components"
         return FirmwareUpdateResult(
             success=True,
-            message=f"Update started for {target}. "
-                    "The printer services may restart.",
+            message=f"Update started for {target}. The printer services may restart.",
             component=component,
         )
 
@@ -1302,7 +1298,8 @@ class MoonrakerAdapter(PrinterAdapter):
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Firmware rollback failed: {exc}", cause=exc,
+                f"Firmware rollback failed: {exc}",
+                cause=exc,
             ) from exc
 
         return FirmwareUpdateResult(

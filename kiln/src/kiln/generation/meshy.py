@@ -15,7 +15,7 @@ import logging
 import os
 import tempfile
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.meshy.ai/openapi/v2"
 
-_STATUS_MAP: Dict[str, GenerationStatus] = {
+_STATUS_MAP: dict[str, GenerationStatus] = {
     "PENDING": GenerationStatus.PENDING,
     "IN_PROGRESS": GenerationStatus.IN_PROGRESS,
     "SUCCEEDED": GenerationStatus.SUCCEEDED,
@@ -75,8 +75,8 @@ class MeshyProvider(GenerationProvider):
             }
         )
         # Cache model URLs for download after polling.
-        self._results: Dict[str, Dict[str, str]] = {}
-        self._prompts: Dict[str, str] = {}
+        self._results: dict[str, dict[str, str]] = {}
+        self._prompts: dict[str, str] = {}
 
     @property
     def name(self) -> str:
@@ -104,7 +104,7 @@ class MeshyProvider(GenerationProvider):
         Returns:
             :class:`GenerationJob` with ``PENDING`` status.
         """
-        body: Dict[str, Any] = {
+        body: dict[str, Any] = {
             "mode": "preview",
             "prompt": prompt[:600],
             "ai_model": "meshy-6",
@@ -119,9 +119,7 @@ class MeshyProvider(GenerationProvider):
         data = resp.json()
         task_id = data.get("result", "")
         if not task_id:
-            raise GenerationError(
-                "Meshy API returned no task ID.", code="INVALID_RESPONSE"
-            )
+            raise GenerationError("Meshy API returned no task ID.", code="INVALID_RESPONSE")
 
         self._prompts[task_id] = prompt
 
@@ -169,9 +167,7 @@ class MeshyProvider(GenerationProvider):
             prompt=prompt,
             status=status,
             progress=progress,
-            created_at=data.get("created_at", 0) / 1000.0
-            if data.get("created_at")
-            else 0.0,
+            created_at=data.get("created_at", 0) / 1000.0 if data.get("created_at") else 0.0,
             format="obj",
             style=data.get("art_style"),
             error=error_msg,
@@ -198,8 +194,7 @@ class MeshyProvider(GenerationProvider):
             model_urls = self._results.get(job_id)
             if not model_urls:
                 raise GenerationError(
-                    f"No model URLs available for job {job_id}.  "
-                    f"Job status: {job.status.value}",
+                    f"No model URLs available for job {job_id}.  Job status: {job.status.value}",
                     code="NO_RESULT",
                 )
 
@@ -236,7 +231,7 @@ class MeshyProvider(GenerationProvider):
             prompt=prompt,
         )
 
-    def list_styles(self) -> List[str]:
+    def list_styles(self) -> list[str]:
         return ["realistic", "sculpture"]
 
     # ------------------------------------------------------------------
@@ -248,8 +243,8 @@ class MeshyProvider(GenerationProvider):
         method: str,
         url: str,
         *,
-        json_body: Optional[Dict[str, Any]] = None,
-        timeout: Optional[int] = None,
+        json_body: dict[str, Any] | None = None,
+        timeout: int | None = None,
         stream: bool = False,
     ) -> requests.Response:
         """Make an HTTP request with rate-limit retry and backoff.
@@ -259,7 +254,6 @@ class MeshyProvider(GenerationProvider):
         backoff: 2s, 4s, 8s.
         """
         req_timeout = timeout or self._timeout
-        last_exc: Exception | None = None
 
         for attempt in range(_MAX_RETRIES + 1):
             try:
@@ -271,31 +265,27 @@ class MeshyProvider(GenerationProvider):
                     stream=stream,
                 )
             except requests.ConnectionError:
-                raise GenerationError(
-                    "Could not connect to Meshy API.", code="CONNECTION_ERROR"
-                )
+                raise GenerationError("Could not connect to Meshy API.", code="CONNECTION_ERROR") from None
             except requests.Timeout:
-                raise GenerationError(
-                    "Meshy API request timed out.", code="TIMEOUT"
-                )
+                raise GenerationError("Meshy API request timed out.", code="TIMEOUT") from None
 
             if resp.status_code in (429, 502, 503, 504) and attempt < _MAX_RETRIES:
-                wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
+                wait = _RETRY_BACKOFF_BASE * (2**attempt)
                 logger.warning(
                     "Meshy API returned %d, retrying in %.0fs (attempt %d/%d)",
-                    resp.status_code, wait, attempt + 1, _MAX_RETRIES,
+                    resp.status_code,
+                    wait,
+                    attempt + 1,
+                    _MAX_RETRIES,
                 )
                 time.sleep(wait)
-                last_exc = None
                 continue
 
             self._handle_http_error(resp)
             return resp
 
         # Should not reach here, but just in case.
-        raise GenerationError(
-            "Meshy API request failed after retries.", code="RETRY_EXHAUSTED"
-        )
+        raise GenerationError("Meshy API request failed after retries.", code="RETRY_EXHAUSTED")
 
     def _handle_http_error(self, resp: requests.Response) -> None:
         """Raise a typed exception for non-2xx responses."""
@@ -303,9 +293,7 @@ class MeshyProvider(GenerationProvider):
             return
 
         if resp.status_code == 401:
-            raise GenerationAuthError(
-                "Meshy API key is invalid or expired.", code="AUTH_INVALID"
-            )
+            raise GenerationAuthError("Meshy API key is invalid or expired.", code="AUTH_INVALID")
         if resp.status_code == 429:
             raise GenerationError(
                 "Meshy API rate limit exceeded.  Try again later.",

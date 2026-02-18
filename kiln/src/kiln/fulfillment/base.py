@@ -17,7 +17,7 @@ from __future__ import annotations
 import enum
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class OrderStatus(enum.Enum):
@@ -40,14 +40,14 @@ class Material:
 
     id: str
     name: str
-    technology: str = ""          # FDM, SLA, SLS, MJF, etc.
+    technology: str = ""  # FDM, SLA, SLS, MJF, etc.
     color: str = ""
-    finish: str = ""              # raw, polished, dyed, etc.
-    min_wall_mm: Optional[float] = None
-    price_per_cm3: Optional[float] = None
+    finish: str = ""  # raw, polished, dyed, etc.
+    min_wall_mm: float | None = None
+    price_per_cm3: float | None = None
     currency: str = "USD"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -59,9 +59,9 @@ class ShippingOption:
     name: str
     price: float
     currency: str = "USD"
-    estimated_days: Optional[int] = None
+    estimated_days: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -75,7 +75,7 @@ class QuoteRequest:
     shipping_country: str = "US"
     notes: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -90,12 +90,12 @@ class Quote:
     unit_price: float
     total_price: float
     currency: str = "USD"
-    lead_time_days: Optional[int] = None
-    shipping_options: List[ShippingOption] = field(default_factory=list)
-    expires_at: Optional[float] = None  # Unix timestamp
-    raw: Dict[str, Any] = field(default_factory=dict)
+    lead_time_days: int | None = None
+    shipping_options: list[ShippingOption] = field(default_factory=list)
+    expires_at: float | None = None  # Unix timestamp
+    raw: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data.pop("raw", None)
         data["shipping_options"] = [s.to_dict() for s in self.shipping_options]
@@ -108,10 +108,10 @@ class OrderRequest:
 
     quote_id: str
     shipping_option_id: str = ""
-    shipping_address: Dict[str, str] = field(default_factory=dict)
+    shipping_address: dict[str, str] = field(default_factory=dict)
     notes: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -123,14 +123,14 @@ class OrderResult:
     order_id: str
     status: OrderStatus
     provider: str
-    tracking_url: Optional[str] = None
-    tracking_number: Optional[str] = None
-    estimated_delivery: Optional[str] = None
-    total_price: Optional[float] = None
+    tracking_url: str | None = None
+    tracking_number: str | None = None
+    estimated_delivery: str | None = None
+    total_price: float | None = None
     currency: str = "USD"
-    error: Optional[str] = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["status"] = self.status.value
         return data
@@ -139,7 +139,7 @@ class OrderResult:
 class FulfillmentError(Exception):
     """Base exception for fulfillment-related errors."""
 
-    def __init__(self, message: str, *, code: Optional[str] = None) -> None:
+    def __init__(self, message: str, *, code: str | None = None) -> None:
         super().__init__(message)
         self.code = code
 
@@ -163,11 +163,11 @@ class FulfillmentProvider(ABC):
 
     @property
     @abstractmethod
-    def supported_technologies(self) -> List[str]:
+    def supported_technologies(self) -> list[str]:
         """Manufacturing technologies supported (e.g. ``["FDM", "SLA", "SLS"]``)."""
 
     @abstractmethod
-    def list_materials(self) -> List[Material]:
+    def list_materials(self) -> list[Material]:
         """Return all available materials from this provider.
 
         Returns:

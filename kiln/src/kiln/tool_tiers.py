@@ -17,14 +17,11 @@ Tiers
 
 from __future__ import annotations
 
-from typing import Dict, List
-
-
 # ---------------------------------------------------------------------------
 # Tier definitions
 # ---------------------------------------------------------------------------
 
-TIER_ESSENTIAL: List[str] = [
+TIER_ESSENTIAL: list[str] = [
     "printer_status",
     "printer_files",
     "upload_file",
@@ -42,7 +39,7 @@ TIER_ESSENTIAL: List[str] = [
     "kiln_health",
 ]
 
-TIER_STANDARD: List[str] = TIER_ESSENTIAL + [
+TIER_STANDARD: list[str] = TIER_ESSENTIAL + [
     # Marketplace & models
     "search_all_models",
     "download_model",
@@ -88,7 +85,7 @@ TIER_STANDARD: List[str] = TIER_ESSENTIAL + [
     "get_started",
 ]
 
-TIER_FULL: List[str] = [
+TIER_FULL: list[str] = [
     # --- Core printer control ---
     "printer_status",
     "printer_files",
@@ -224,7 +221,7 @@ TIER_FULL: List[str] = [
     "run_benchmark",
 ]
 
-TIERS: Dict[str, List[str]] = {
+TIERS: dict[str, list[str]] = {
     "essential": TIER_ESSENTIAL,
     "standard": TIER_STANDARD,
     "full": TIER_FULL,
@@ -235,7 +232,8 @@ TIERS: Dict[str, List[str]] = {
 # Tier lookup
 # ---------------------------------------------------------------------------
 
-def get_tier(name: str) -> List[str]:
+
+def get_tier(name: str) -> list[str]:
     """Return tool names for a tier.
 
     Args:
@@ -250,9 +248,7 @@ def get_tier(name: str) -> List[str]:
     try:
         return TIERS[name]
     except KeyError:
-        raise KeyError(
-            f"Unknown tier {name!r}. Available tiers: {', '.join(sorted(TIERS))}"
-        ) from None
+        raise KeyError(f"Unknown tier {name!r}. Available tiers: {', '.join(sorted(TIERS))}") from None
 
 
 # ---------------------------------------------------------------------------

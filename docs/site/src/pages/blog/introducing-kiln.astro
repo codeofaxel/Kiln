@@ -1,0 +1,205 @@
+---
+import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
+---
+
+<BlogPostLayout
+  title="Introducing Kiln: Let AI Agents Run Your 3D Printers"
+  description="Kiln is open-source infrastructure that gives AI agents safe, direct control over 3D printers. Today, we're making it available to everyone."
+  date="February 17, 2026"
+  tags={["launch", "open source", "v0.1.0"]}
+>
+
+<p>
+  Today I'm releasing <strong>Kiln</strong> — open-source infrastructure that lets AI agents safely control 3D printers. It's free, it runs locally, and it's available right now.
+</p>
+
+<p>
+  <a href="https://github.com/codeofaxel/Kiln">GitHub</a> ·
+  <a href="/install">Install</a> ·
+  <a href="/docs">Docs</a> ·
+  <a href="/litepaper">Litepaper</a> ·
+  <a href="/whitepaper">Whitepaper</a>
+</p>
+
+<h2>The gap between AI and the physical world</h2>
+
+<p>
+  AI agents have gotten remarkably good at digital tasks — writing code, analyzing data, drafting documents. But when it comes to making physical things, they hit a wall. There's no standardized way for an AI to talk to a 3D printer. Every printer brand speaks a different protocol. OctoPrint, Klipper, Bambu Lab, and Prusa Link are all islands with their own APIs, their own quirks, and their own failure modes.
+</p>
+
+<p>
+  If you want an AI agent to print something on your desk, you're writing bespoke glue code for your specific printer, handling edge cases nobody documented, and hoping the agent doesn't accidentally set your hotend to 400 degrees. If you have a fleet of mixed printers, multiply that pain by every machine you own.
+</p>
+
+<p>
+  I built Kiln because this problem frustrated me personally. I have printers. I use AI agents constantly. The two should work together, and the infrastructure to make that happen safely didn't exist. So I built it.
+</p>
+
+<h2>What Kiln does</h2>
+
+<p>
+  Kiln sits between any AI agent and your printers. It gives the agent a clean, unified interface — 197 MCP tools and a full CLI — while handling all the messy protocol translation, safety validation, and fleet coordination underneath.
+</p>
+
+<h3>One interface, any printer</h3>
+
+<p>
+  Kiln supports <strong>OctoPrint</strong>, <strong>Moonraker</strong> (Klipper), <strong>Bambu Lab</strong> (X1C, P1S, P1P, A1, A1 Mini), and <strong>Prusa Link</strong> (MK4, MK3.9, Mini, XL). Your agent doesn't need to know which firmware a printer runs. It calls <code>get_printer_status</code> and gets a consistent response, whether the printer behind it is a $200 Ender running OctoPrint or a $1,500 Bambu X1 Carbon.
+</p>
+
+<h3>Three ways to manufacture</h3>
+
+<p>
+  Local printing is just the start. Kiln gives agents three co-equal paths to turn a digital file into a physical object:
+</p>
+
+<ol>
+  <li><strong>Your printers.</strong> Direct control over machines on your local network. Upload, slice, print, monitor — all through the agent.</li>
+  <li><strong>Fulfillment centers.</strong> Outsource to Craftcloud (150+ print services) or Sculpteo (75+ materials). No printer required. The agent handles quoting, ordering, and tracking.</li>
+  <li><strong>Distributed network.</strong> Route jobs to printers on the 3DOS peer-to-peer network, or register your own printer to earn revenue from incoming jobs.</li>
+</ol>
+
+<p>
+  All three use the same interface. An agent can prototype locally, send the production run to Craftcloud, and route overflow to 3DOS — all in one conversation. If your local printer is busy, the agent can automatically reroute to the next best option.
+</p>
+
+<h3>Full workflow, not just printer control</h3>
+
+<p>
+  Kiln doesn't just send G-code to printers. It covers the entire pipeline:
+</p>
+
+<ul>
+  <li><strong>Model discovery.</strong> Search MyMiniFactory, Cults3D, and other marketplaces for 3D models directly from the agent.</li>
+  <li><strong>Slicing.</strong> Integrated PrusaSlicer and OrcaSlicer support with per-printer profiles. Go from STL to printable G-code without leaving the conversation.</li>
+  <li><strong>Model generation.</strong> Two paths — cloud AI text-to-3D (via Meshy) for quick concepts, or local parametric generation (via OpenSCAD) for precise, dimensionally accurate parts. Both automatically validated for printability.</li>
+  <li><strong>Fleet management.</strong> A priority job queue that routes work across multiple printers, with cross-printer learning that favors machines with the best track record for each material.</li>
+  <li><strong>Vision monitoring.</strong> The agent can analyze webcam snapshots mid-print to catch failures early — spaghetti, layer shifts, adhesion problems — and decide whether to pause or cancel.</li>
+</ul>
+
+<h2>Safety is not optional</h2>
+
+<p>
+  Here's the thing about connecting AI to hardware: it has to be safe by default, not safe by policy. An agent shouldn't be able to cause damage just because it's confident.
+</p>
+
+<p>
+  Kiln enforces safety at the protocol level. Every print passes through mandatory pre-flight checks that validate temperatures against per-printer limits, scan G-code for dangerous commands, and confirm the printer is in a safe state. These checks <strong>cannot be bypassed</strong>, even if the agent explicitly asks to skip them.
+</p>
+
+<p>
+  The safety system includes:
+</p>
+
+<ul>
+  <li><strong>28 per-printer safety profiles</strong> with manufacturer-specified temperature and speed limits.</li>
+  <li><strong>G-code validation</strong> that blocks dangerous commands — unauthorized heater control, extreme moves, firmware-altering instructions.</li>
+  <li><strong>A heater watchdog</strong> that auto-cools idle heaters after 30 minutes to prevent fire hazards.</li>
+  <li><strong>Tool tiers</strong> that let you restrict which operations the agent can perform — from read-only monitoring up to full fleet control.</li>
+  <li><strong>Tamper-proof audit logs</strong> of every action the agent takes.</li>
+</ul>
+
+<p>
+  The agent has enough autonomy to be useful, but not enough rope to cause damage. That's a deliberate design choice, and it's non-negotiable.
+</p>
+
+<h2>Why open source</h2>
+
+<p>
+  I believe the infrastructure layer between AI and physical manufacturing should be open. If agents are going to control real machines in people's homes and workshops, the code that governs that interaction needs to be auditable, modifiable, and not locked behind a vendor.
+</p>
+
+<p>
+  Kiln is MIT licensed. You can self-host it, fork it, extend it, and contribute back. The entire codebase — 5,000+ tests, 197 MCP tools, 88 CLI commands, safety profiles for 28 printer models — is on <a href="https://github.com/codeofaxel/Kiln">GitHub</a>.
+</p>
+
+<h2>Where the project stands today</h2>
+
+<p>
+  This is v0.1.0. It's a real, working system — not a prototype or proof of concept. Here's what ships today:
+</p>
+
+<ul>
+  <li><strong>4 printer adapters</strong> — OctoPrint, Moonraker, Bambu Lab, Prusa Link</li>
+  <li><strong>197 MCP tools</strong> for AI agent integration</li>
+  <li><strong>88 CLI commands</strong> for terminal-first workflows</li>
+  <li><strong>REST API</strong> for custom integrations</li>
+  <li><strong>28 safety profiles</strong> covering popular printer models</li>
+  <li><strong>5,000+ tests</strong> across the full codebase</li>
+  <li><strong>Slicing integration</strong> with PrusaSlicer and OrcaSlicer</li>
+  <li><strong>Fulfillment</strong> through Craftcloud and Sculpteo</li>
+  <li><strong>3DOS network</strong> integration for distributed manufacturing</li>
+  <li><strong>Marketplace adapters</strong> for MyMiniFactory and Cults3D</li>
+  <li><strong>Model generation</strong> via Meshy (cloud AI) and OpenSCAD (local parametric)</li>
+</ul>
+
+<p>
+  It works with Claude, GPT-based agents, and any MCP-compatible client. If your agent can talk MCP, it can run your printers.
+</p>
+
+<h2>Free local printing, forever</h2>
+
+<p>
+  Let me be explicit about this: <strong>local printing with Kiln is free and always will be.</strong> Unlimited prints, slicing, printer control, safety validation — all free, no account required, no telemetry, no strings.
+</p>
+
+<p>
+  The free tier includes up to 2 printers, a 10-job queue, and 5 fulfillment orders per month. That's more than enough for most people.
+</p>
+
+<p>
+  We may introduce premium tiers in the near future for users who need more — unlimited printers, fleet orchestration, cloud sync, hosted deployments, priority support. If that happens, the core will stay free. Local printing will never be paywalled. The paid features will be for power users and businesses running fleets, not for hobbyists printing on their desk.
+</p>
+
+<p>
+  The goal is simple: make the free version so good that most people never need to pay, and make the paid version worth it for the people who do.
+</p>
+
+<h2>What's next</h2>
+
+<p>
+  V0.1.0 is the foundation. Here's what's on the roadmap:
+</p>
+
+<ul>
+  <li><strong>More printer adapters.</strong> Elegoo, AnkerMake, and other platforms as demand warrants.</li>
+  <li><strong>Plugin system.</strong> Let the community extend Kiln with custom tools, adapters, and integrations without forking.</li>
+  <li><strong>Smarter fleet routing.</strong> ML-based job assignment that considers printer history, material performance, and estimated completion time.</li>
+  <li><strong>Better failure recovery.</strong> Automatic mid-print recovery strategies — pause, adjust, and resume instead of just canceling.</li>
+</ul>
+
+<p>
+  The best version of this gets built in the open, with feedback from the people actually using it.
+</p>
+
+<h2>Get started</h2>
+
+<p>
+  If you have a 3D printer and you use AI agents, give Kiln a try:
+</p>
+
+<pre><code>git clone https://github.com/codeofaxel/Kiln.git ~/.kiln/src && ~/.kiln/src/install.sh</code></pre>
+
+<p>
+  Or install via pip:
+</p>
+
+<pre><code>pip install kiln3d</code></pre>
+
+<p>
+  Full install instructions for macOS, Linux, and WSL are on the <a href="/install">install page</a>.
+</p>
+
+<p>
+  If you want to understand the architecture before diving in, the <a href="/litepaper">litepaper</a> is a 10-minute non-technical overview and the <a href="/whitepaper">whitepaper</a> goes deep on protocol design and safety.
+</p>
+
+<p>
+  Star the repo, open issues, submit PRs. This is day one.
+</p>
+
+<p>
+  &mdash; Adam
+</p>
+
+</BlogPostLayout>

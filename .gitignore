@@ -33,7 +33,12 @@ tools/
 CLAUDE.md
 .claude/
 .pre-commit-config.yaml
+
+# Deployment / infrastructure (operator-private)
 fly.toml
+deploy.sh
+Dockerfile.api
+scripts/
 
 # Internal working docs (backed up via iCloud)
 .dev
@@ -41,6 +46,14 @@ fly.toml
 # Internal R&D (not public-facing)
 .forge
 
+# Internal task tracking
+task.md
+
 # Circle recovery files
 .circle-recovery.txt
 recovery.dat
+
+# Marketing drafts
+docs/marketing/
+.vercel
+.env*.local

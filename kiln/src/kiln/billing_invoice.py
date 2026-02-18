@@ -11,7 +11,7 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -35,31 +35,29 @@ class Invoice:
     total_cost: float
     currency: str
     # Payment details
-    payment_id: Optional[str]
-    payment_rail: Optional[str]
+    payment_id: str | None
+    payment_rail: str | None
     payment_status: str
     # Waiver info
     waived: bool
-    waiver_reason: Optional[str]
+    waiver_reason: str | None
     # Integrity
     checksum: str
     # Tax
     tax_amount: float = 0.0
     tax_rate: float = 0.0
-    tax_jurisdiction: Optional[str] = None
-    tax_type: Optional[str] = None
+    tax_jurisdiction: str | None = None
+    tax_type: str | None = None
     tax_reverse_charge: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
             "invoice_number": self.invoice_number,
             "charge_id": self.charge_id,
             "job_id": self.job_id,
             "order_id": self.order_id,
             "issued_at": self.issued_at,
-            "issued_at_human": datetime.fromtimestamp(
-                self.issued_at, tz=timezone.utc
-            ).strftime("%Y-%m-%d %H:%M UTC"),
+            "issued_at_human": datetime.fromtimestamp(self.issued_at, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
             "job_cost": self.job_cost,
             "fee_amount": self.fee_amount,
             "fee_percent": self.fee_percent,
@@ -99,26 +97,24 @@ class Invoice:
             lines.append(f"Kiln fee:   ${self.fee_amount:.2f} ({self.fee_percent}%)")
             if self.tax_jurisdiction is not None:
                 if self.tax_reverse_charge:
-                    lines.append(
-                        "Tax:        $0.00 (B2B reverse charge"
-                        " \u2014 buyer self-assesses)"
-                    )
+                    lines.append("Tax:        $0.00 (B2B reverse charge \u2014 buyer self-assesses)")
                 else:
                     tax_label = (self.tax_type or "TAX").upper()
                     lines.append(
-                        f"Tax ({tax_label} {self.tax_jurisdiction}):"
-                        f" ${self.tax_amount:.2f} ({self.tax_rate}%)"
+                        f"Tax ({tax_label} {self.tax_jurisdiction}): ${self.tax_amount:.2f} ({self.tax_rate}%)"
                     )
             lines.append(f"Total:      ${self.total_cost:.2f} {self.currency}")
         lines.append("-" * 50)
         if self.payment_id:
             lines.append(f"Payment:    {self.payment_rail or 'unknown'} ({self.payment_status})")
             lines.append(f"Ref:        {self.payment_id}")
-        lines.extend([
-            "-" * 50,
-            f"Checksum:   {self.checksum[:16]}...",
-            "=" * 50,
-        ])
+        lines.extend(
+            [
+                "-" * 50,
+                f"Checksum:   {self.checksum[:16]}...",
+                "=" * 50,
+            ]
+        )
         return "\n".join(lines)
 
 
@@ -130,7 +126,7 @@ def _generate_invoice_number(charge_id: str, timestamp: float) -> str:
     return f"{_INVOICE_PREFIX}-{date_part}-{charge_id[:6].upper()}"
 
 
-def _compute_checksum(data: Dict[str, Any]) -> str:
+def _compute_checksum(data: dict[str, Any]) -> str:
     """Compute SHA-256 checksum of invoice data for tamper detection."""
     content = (
         f"{data.get('charge_id', '')}:"
@@ -142,7 +138,7 @@ def _compute_checksum(data: Dict[str, Any]) -> str:
     return hashlib.sha256(content.encode()).hexdigest()
 
 
-def generate_invoice(charge: Dict[str, Any]) -> Invoice:
+def generate_invoice(charge: dict[str, Any]) -> Invoice:
     """Generate an invoice from a billing charge record.
 
     :param charge: A charge dict from ``BillingLedger.list_charges()``
@@ -178,23 +174,34 @@ def generate_invoice(charge: Dict[str, Any]) -> Invoice:
 
 
 def generate_invoices(
-    charges: List[Dict[str, Any]],
-) -> List[Invoice]:
+    charges: list[dict[str, Any]],
+) -> list[Invoice]:
     """Generate invoices for a list of billing charges."""
     return [generate_invoice(c) for c in charges]
 
 
-def export_billing_csv(charges: List[Dict[str, Any]]) -> str:
+def export_billing_csv(charges: list[dict[str, Any]]) -> str:
     """Export billing charges as CSV for accounting.
 
     :returns: CSV string with headers.
     """
     headers = [
-        "invoice_number", "date", "order_id", "job_cost",
-        "fee_amount", "fee_percent", "tax_amount", "tax_rate",
-        "tax_jurisdiction", "tax_type", "tax_reverse_charge",
-        "total_cost", "currency",
-        "payment_rail", "payment_status", "waived",
+        "invoice_number",
+        "date",
+        "order_id",
+        "job_cost",
+        "fee_amount",
+        "fee_percent",
+        "tax_amount",
+        "tax_rate",
+        "tax_jurisdiction",
+        "tax_type",
+        "tax_reverse_charge",
+        "total_cost",
+        "currency",
+        "payment_rail",
+        "payment_status",
+        "waived",
     ]
     lines = [",".join(headers)]
     for charge in charges:

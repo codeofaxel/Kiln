@@ -11,12 +11,12 @@ from __future__ import annotations
 import enum
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
+
 
 class PrinterError(Exception):
     """Base exception for all printer-related errors.
@@ -27,7 +27,7 @@ class PrinterError(Exception):
     unexpected responses from the printer firmware.
     """
 
-    def __init__(self, message: str, *, cause: Optional[Exception] = None) -> None:
+    def __init__(self, message: str, *, cause: Exception | None = None) -> None:
         super().__init__(message)
         self.cause = cause
 
@@ -35,6 +35,7 @@ class PrinterError(Exception):
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
+
 
 class PrinterStatus(enum.Enum):
     """High-level operational state of a printer."""
@@ -51,6 +52,7 @@ class PrinterStatus(enum.Enum):
 
 class DeviceType(enum.Enum):
     """Classification of physical fabrication devices."""
+
     FDM_PRINTER = "fdm_printer"
     SLA_PRINTER = "sla_printer"
     CNC_ROUTER = "cnc_router"
@@ -62,20 +64,21 @@ class DeviceType(enum.Enum):
 # Dataclasses -- structured return types
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PrinterState:
     """Snapshot of the printer's current state and temperatures."""
 
     connected: bool
     state: PrinterStatus
-    tool_temp_actual: Optional[float] = None
-    tool_temp_target: Optional[float] = None
-    bed_temp_actual: Optional[float] = None
-    bed_temp_target: Optional[float] = None
-    chamber_temp_actual: Optional[float] = None
-    chamber_temp_target: Optional[float] = None
+    tool_temp_actual: float | None = None
+    tool_temp_target: float | None = None
+    bed_temp_actual: float | None = None
+    bed_temp_target: float | None = None
+    chamber_temp_actual: float | None = None
+    chamber_temp_target: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary.
 
         The :attr:`state` enum is converted to its string value so the
@@ -90,12 +93,12 @@ class PrinterState:
 class JobProgress:
     """Progress information for the currently active (or most recent) job."""
 
-    file_name: Optional[str] = None
-    completion: Optional[float] = None  # 0.0 -- 100.0
-    print_time_seconds: Optional[int] = None
-    print_time_left_seconds: Optional[int] = None
+    file_name: str | None = None
+    completion: float | None = None  # 0.0 -- 100.0
+    print_time_seconds: int | None = None
+    print_time_left_seconds: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return asdict(self)
 
@@ -106,18 +109,18 @@ class PrinterFile:
 
     name: str
     path: str
-    size_bytes: Optional[int] = None
-    date: Optional[int] = None  # Unix timestamp
+    size_bytes: int | None = None
+    date: int | None = None  # Unix timestamp
     # G-code metadata fields (populated by gcode_metadata.enrich_printer_file)
-    material: Optional[str] = None
-    estimated_time_seconds: Optional[int] = None
-    tool_temp: Optional[float] = None
-    bed_temp: Optional[float] = None
-    slicer: Optional[str] = None
-    layer_height: Optional[float] = None
-    filament_used_mm: Optional[float] = None
+    material: str | None = None
+    estimated_time_seconds: int | None = None
+    tool_temp: float | None = None
+    bed_temp: float | None = None
+    slicer: str | None = None
+    layer_height: float | None = None
+    filament_used_mm: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary.
 
         Omits metadata fields that are ``None`` to keep output compact
@@ -126,8 +129,13 @@ class PrinterFile:
         data = asdict(self)
         # Strip None metadata fields for cleaner output
         _METADATA_KEYS = (
-            "material", "estimated_time_seconds", "tool_temp",
-            "bed_temp", "slicer", "layer_height", "filament_used_mm",
+            "material",
+            "estimated_time_seconds",
+            "tool_temp",
+            "bed_temp",
+            "slicer",
+            "layer_height",
+            "filament_used_mm",
         )
         for key in _METADATA_KEYS:
             if data.get(key) is None:
@@ -143,7 +151,7 @@ class UploadResult:
     file_name: str
     message: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return asdict(self)
 
@@ -154,9 +162,9 @@ class PrintResult:
 
     success: bool
     message: str
-    job_id: Optional[str] = None
+    job_id: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return asdict(self)
 
@@ -179,9 +187,9 @@ class PrinterCapabilities:
     can_snapshot: bool = False
     can_detect_filament: bool = False
     device_type: str = "fdm_printer"
-    supported_extensions: Tuple[str, ...] = (".gcode", ".gco", ".g")
+    supported_extensions: tuple[str, ...] = (".gcode", ".gco", ".g")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary.
 
         The :attr:`supported_extensions` tuple is converted to a list for
@@ -198,13 +206,13 @@ class FirmwareComponent:
 
     name: str
     current_version: str
-    remote_version: Optional[str] = None
+    remote_version: str | None = None
     update_available: bool = False
-    rollback_version: Optional[str] = None
+    rollback_version: str | None = None
     component_type: str = ""  # e.g. "git_repo", "system", "web"
     channel: str = ""  # e.g. "stable", "dev"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -213,10 +221,10 @@ class FirmwareStatus:
     """Firmware/software update status for a printer."""
 
     busy: bool = False
-    components: List[FirmwareComponent] = field(default_factory=list)
+    components: list[FirmwareComponent] = field(default_factory=list)
     updates_available: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["components"] = [c.to_dict() for c in self.components]
         return data
@@ -228,15 +236,16 @@ class FirmwareUpdateResult:
 
     success: bool
     message: str
-    component: Optional[str] = None
+    component: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 # ---------------------------------------------------------------------------
 # Abstract base class
 # ---------------------------------------------------------------------------
+
 
 class PrinterAdapter(ABC):
     """Abstract base for all printer backend adapters.
@@ -266,7 +275,7 @@ class PrinterAdapter(ABC):
 
     # -- safety profile --------------------------------------------------
 
-    _safety_profile_id: Optional[str] = None
+    _safety_profile_id: str | None = None
 
     def set_safety_profile(self, profile_id: str) -> None:
         """Bind a printer safety profile for temperature validation.
@@ -310,7 +319,7 @@ class PrinterAdapter(ABC):
         """
 
     @abstractmethod
-    def list_files(self) -> List[PrinterFile]:
+    def list_files(self) -> list[PrinterFile]:
         """Return a list of files available on the printer / print server.
 
         Raises:
@@ -400,6 +409,7 @@ class PrinterAdapter(ABC):
         if self._safety_profile_id:
             try:
                 from kiln.safety_profiles import get_profile  # noqa: E402
+
                 profile = get_profile(self._safety_profile_id)
                 lower_heater = heater.lower()
                 if lower_heater in ("hotend", "tool"):
@@ -410,13 +420,9 @@ class PrinterAdapter(ABC):
                 pass  # fall back to caller-supplied max_temp
 
         if target < 0:
-            raise PrinterError(
-                f"{heater} temperature {target}°C is negative -- must be >= 0."
-            )
+            raise PrinterError(f"{heater} temperature {target}°C is negative -- must be >= 0.")
         if target > max_temp:
-            raise PrinterError(
-                f"{heater} temperature {target}°C exceeds safety limit ({max_temp}°C)."
-            )
+            raise PrinterError(f"{heater} temperature {target}°C exceeds safety limit ({max_temp}°C).")
 
     @abstractmethod
     def set_tool_temp(self, target: float) -> bool:
@@ -449,7 +455,7 @@ class PrinterAdapter(ABC):
     # -- G-code ---------------------------------------------------------
 
     @abstractmethod
-    def send_gcode(self, commands: List[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> bool:
         """Send one or more G-code commands to the printer.
 
         Args:
@@ -465,7 +471,7 @@ class PrinterAdapter(ABC):
 
     # -- webcam snapshot (optional) ------------------------------------
 
-    def get_snapshot(self) -> Optional[bytes]:
+    def get_snapshot(self) -> bytes | None:
         """Capture a webcam snapshot from the printer.
 
         Returns raw JPEG/PNG image bytes, or ``None`` if webcam is not
@@ -476,7 +482,7 @@ class PrinterAdapter(ABC):
 
     # -- webcam streaming (optional) -----------------------------------
 
-    def get_stream_url(self) -> Optional[str]:
+    def get_stream_url(self) -> str | None:
         """Return the MJPEG stream URL for the printer's webcam.
 
         Returns the full URL to the live video stream, or ``None`` if
@@ -487,7 +493,7 @@ class PrinterAdapter(ABC):
 
     # -- firmware updates (optional) ------------------------------------
 
-    def get_firmware_status(self) -> Optional["FirmwareStatus"]:
+    def get_firmware_status(self) -> FirmwareStatus | None:
         """Check for available firmware/software updates.
 
         Returns a :class:`FirmwareStatus` describing each updatable
@@ -498,8 +504,8 @@ class PrinterAdapter(ABC):
 
     def update_firmware(
         self,
-        component: Optional[str] = None,
-    ) -> "FirmwareUpdateResult":
+        component: str | None = None,
+    ) -> FirmwareUpdateResult:
         """Trigger a firmware or software update.
 
         Args:
@@ -514,11 +520,9 @@ class PrinterAdapter(ABC):
             PrinterError: If the printer is busy, printing, or the
                 update cannot be started.
         """
-        raise PrinterError(
-            f"{self.name} adapter does not support firmware updates."
-        )
+        raise PrinterError(f"{self.name} adapter does not support firmware updates.")
 
-    def rollback_firmware(self, component: str) -> "FirmwareUpdateResult":
+    def rollback_firmware(self, component: str) -> FirmwareUpdateResult:
         """Roll back a component to its previous version.
 
         Args:
@@ -530,13 +534,11 @@ class PrinterAdapter(ABC):
         Raises:
             PrinterError: If rollback is not available or cannot be started.
         """
-        raise PrinterError(
-            f"{self.name} adapter does not support firmware rollback."
-        )
+        raise PrinterError(f"{self.name} adapter does not support firmware rollback.")
 
     # -- bed mesh (optional) --------------------------------------------
 
-    def get_bed_mesh(self) -> Optional[Dict[str, Any]]:
+    def get_bed_mesh(self) -> dict[str, Any] | None:
         """Return the current bed mesh / probe data.
 
         Returns a dict with mesh information (points, variance, etc.),
@@ -547,7 +549,7 @@ class PrinterAdapter(ABC):
 
     # -- filament sensor (optional) ----------------------------------------
 
-    def get_filament_status(self) -> Optional[Dict[str, Any]]:
+    def get_filament_status(self) -> dict[str, Any] | None:
         """Query the filament runout sensor status.
 
         Returns a dict with sensor information (e.g. ``{"detected": True,
@@ -567,7 +569,7 @@ class PrinterAdapter(ABC):
         """Set laser power (0--100 %).  Only for laser-type devices."""
         raise PrinterError(f"{self.name} does not support laser control")
 
-    def get_tool_position(self) -> Optional[Dict[str, float]]:
+    def get_tool_position(self) -> dict[str, float] | None:
         """Return current tool position ``{x, y, z, ...}``.  Optional."""
         return None
 

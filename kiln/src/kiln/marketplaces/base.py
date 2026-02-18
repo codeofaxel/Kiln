@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 _logger = logging.getLogger(__name__)
 
@@ -56,8 +55,8 @@ class ModelFile:
     name: str
     size_bytes: int = 0
     download_url: str = ""
-    thumbnail_url: Optional[str] = None
-    date: Optional[str] = None
+    thumbnail_url: str | None = None
+    date: str | None = None
     file_type: str = ""  # "stl", "gcode", "3mf", "obj", etc.
 
     @property
@@ -72,7 +71,7 @@ class ModelFile:
         ext = self.name.rsplit(".", 1)[-1].lower() if "." in self.name else ""
         return ext in {"stl", "3mf", "obj", "step", "stp"}
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["is_printable"] = self.is_printable
         d["needs_slicing"] = self.needs_slicing
@@ -88,7 +87,7 @@ class ModelSummary:
     url: str
     creator: str
     source: str  # "thingiverse", "myminifactory", "cults3d"
-    thumbnail: Optional[str] = None
+    thumbnail: str | None = None
     like_count: int = 0
     download_count: int = 0
     license: str = ""
@@ -98,7 +97,7 @@ class ModelSummary:
     has_sliceable_files: bool = True  # has .stl / .3mf files
     can_download: bool = True  # False for metadata-only sources (e.g. Cults3D)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -114,17 +113,17 @@ class ModelDetail:
     description: str = ""
     instructions: str = ""
     license: str = ""
-    thumbnail: Optional[str] = None
+    thumbnail: str | None = None
     like_count: int = 0
     download_count: int = 0
-    category: Optional[str] = None
-    tags: List[str] = field(default_factory=list)
+    category: str | None = None
+    tags: list[str] = field(default_factory=list)
     file_count: int = 0
     is_free: bool = True
     price_cents: int = 0
     can_download: bool = True  # False for metadata-only sources
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -169,7 +168,7 @@ class MarketplaceAdapter(ABC):
         page: int = 1,
         per_page: int = 20,
         sort: str = "relevant",
-    ) -> List[ModelSummary]:
+    ) -> list[ModelSummary]:
         """Search for models by keyword."""
 
     @abstractmethod
@@ -177,7 +176,7 @@ class MarketplaceAdapter(ABC):
         """Get full details for a single model."""
 
     @abstractmethod
-    def get_files(self, model_id: str) -> List[ModelFile]:
+    def get_files(self, model_id: str) -> list[ModelFile]:
         """List downloadable files for a model."""
 
     def download_file(
@@ -204,7 +203,6 @@ class MarketplaceAdapter(ABC):
 # ---------------------------------------------------------------------------
 
 
-
 def _verify_download(
     path: Path,
     expected_sha256: str | None,
@@ -220,8 +218,7 @@ def _verify_download(
 
     if expected_size is not None and actual_size != expected_size:
         raise MarketplaceError(
-            f"Size mismatch for {path.name}: "
-            f"expected {expected_size} bytes, got {actual_size} bytes",
+            f"Size mismatch for {path.name}: expected {expected_size} bytes, got {actual_size} bytes",
         )
 
     sha256 = hashlib.sha256()
@@ -236,8 +233,7 @@ def _verify_download(
 
     if expected_sha256 is not None and digest != expected_sha256.lower():
         raise MarketplaceError(
-            f"SHA-256 mismatch for {path.name}: "
-            f"expected {expected_sha256.lower()}, got {digest}",
+            f"SHA-256 mismatch for {path.name}: expected {expected_sha256.lower()}, got {digest}",
         )
 
 
@@ -246,7 +242,7 @@ def resumable_download(
     url: str,
     out_path: Path,
     *,
-    params: Dict[str, str] | None = None,
+    params: dict[str, str] | None = None,
     timeout: int = 120,
     chunk_size: int = 65536,
     max_retries: int = 3,
@@ -290,7 +286,7 @@ def resumable_download(
         return str(out_path.resolve())
 
     for attempt in range(max_retries):
-        headers: Dict[str, str] = {}
+        headers: dict[str, str] = {}
         existing_bytes = 0
 
         if part_path.exists():
@@ -299,7 +295,9 @@ def resumable_download(
                 headers["Range"] = f"bytes={existing_bytes}-"
                 _logger.info(
                     "Resuming download at byte %d (attempt %d/%d)",
-                    existing_bytes, attempt + 1, max_retries,
+                    existing_bytes,
+                    attempt + 1,
+                    max_retries,
                 )
 
         try:
@@ -344,7 +342,8 @@ def resumable_download(
                         if actual_size < expected:
                             _logger.warning(
                                 "Incomplete download: got %d bytes, expected %d",
-                                actual_size, expected,
+                                actual_size,
+                                expected,
                             )
                             # Don't rename — leave .part for resume on next attempt
                             continue
@@ -356,7 +355,10 @@ def resumable_download(
 
         except Exception as exc:
             _logger.warning(
-                "Download attempt %d/%d failed: %s", attempt + 1, max_retries, exc,
+                "Download attempt %d/%d failed: %s",
+                attempt + 1,
+                max_retries,
+                exc,
             )
             if attempt == max_retries - 1:
                 raise MarketplaceError(

@@ -20,7 +20,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ class OperatorProfile:
     failed_orders: int = 0
     avg_print_time_s: float = 0.0
     avg_quality_score: float = 0.0
-    materials_supported: List[str] = field(default_factory=list)
+    materials_supported: list[str] = field(default_factory=list)
     response_time_avg_s: float = 0.0
     last_active_at: float = field(default_factory=time.time)
 
@@ -143,7 +143,7 @@ class OperatorProfile:
             return "bronze"
         return "new"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary with computed properties."""
         return {
             "operator_id": self.operator_id,
@@ -186,10 +186,10 @@ class OrderFeedback:
     on_time: bool
     communication_score: int
     would_recommend: bool
-    comment: Optional[str] = None
+    comment: str | None = None
     created_at: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "order_id": self.order_id,
@@ -219,17 +219,19 @@ class ReputationEvent:
     event_type: str
     operator_id: str
     timestamp: float = field(default_factory=time.time)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    _VALID_TYPES = frozenset({
-        "order_completed",
-        "order_failed",
-        "feedback_received",
-        "verification_granted",
-        "verification_revoked",
-    })
+    _VALID_TYPES = frozenset(
+        {
+            "order_completed",
+            "order_failed",
+            "feedback_received",
+            "verification_granted",
+            "verification_revoked",
+        }
+    )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "event_type": self.event_type,
@@ -250,17 +252,12 @@ def _validate_id(value: str, field_name: str, *, max_len: int) -> None:
     :raises ReputationValidationError: If validation fails.
     """
     if not isinstance(value, str) or not value.strip():
-        raise ReputationValidationError(
-            f"{field_name} must be a non-empty string"
-        )
+        raise ReputationValidationError(f"{field_name} must be a non-empty string")
     if len(value) > max_len:
-        raise ReputationValidationError(
-            f"{field_name} exceeds max length of {max_len} characters"
-        )
+        raise ReputationValidationError(f"{field_name} exceeds max length of {max_len} characters")
     if not _ID_RE.match(value):
         raise ReputationValidationError(
-            f"{field_name} contains invalid characters; "
-            "only alphanumeric, hyphens, and underscores are allowed"
+            f"{field_name} contains invalid characters; only alphanumeric, hyphens, and underscores are allowed"
         )
 
 
@@ -270,17 +267,11 @@ def _validate_display_name(value: str) -> None:
     :raises ReputationValidationError: If validation fails.
     """
     if not isinstance(value, str) or not value.strip():
-        raise ReputationValidationError(
-            "display_name must be a non-empty string"
-        )
+        raise ReputationValidationError("display_name must be a non-empty string")
     if len(value) > _MAX_DISPLAY_NAME_LEN:
-        raise ReputationValidationError(
-            f"display_name exceeds max length of {_MAX_DISPLAY_NAME_LEN} characters"
-        )
+        raise ReputationValidationError(f"display_name exceeds max length of {_MAX_DISPLAY_NAME_LEN} characters")
     if _CONTROL_CHAR_RE.search(value):
-        raise ReputationValidationError(
-            "display_name contains control characters"
-        )
+        raise ReputationValidationError("display_name contains control characters")
 
 
 def _validate_score(value: int, field_name: str) -> None:
@@ -289,14 +280,9 @@ def _validate_score(value: int, field_name: str) -> None:
     :raises ReputationValidationError: If validation fails.
     """
     if not isinstance(value, int):
-        raise ReputationValidationError(
-            f"{field_name} must be an integer"
-        )
+        raise ReputationValidationError(f"{field_name} must be an integer")
     if value < _MIN_QUALITY_SCORE or value > _MAX_QUALITY_SCORE:
-        raise ReputationValidationError(
-            f"{field_name} must be between {_MIN_QUALITY_SCORE} and "
-            f"{_MAX_QUALITY_SCORE}"
-        )
+        raise ReputationValidationError(f"{field_name} must be between {_MIN_QUALITY_SCORE} and {_MAX_QUALITY_SCORE}")
 
 
 def _validate_feedback(feedback: OrderFeedback) -> None:
@@ -319,13 +305,9 @@ def _validate_feedback(feedback: OrderFeedback) -> None:
         if not isinstance(feedback.comment, str):
             raise ReputationValidationError("comment must be a string or None")
         if len(feedback.comment) > _MAX_COMMENT_LEN:
-            raise ReputationValidationError(
-                f"comment exceeds max length of {_MAX_COMMENT_LEN} characters"
-            )
+            raise ReputationValidationError(f"comment exceeds max length of {_MAX_COMMENT_LEN} characters")
         if _CONTROL_CHAR_RE.search(feedback.comment):
-            raise ReputationValidationError(
-                "comment contains control characters"
-            )
+            raise ReputationValidationError("comment contains control characters")
 
 
 # ---------------------------------------------------------------------------
@@ -340,9 +322,9 @@ class ReputationEngine:
     """
 
     def __init__(self) -> None:
-        self._operators: Dict[str, OperatorProfile] = {}
-        self._feedback: List[OrderFeedback] = []
-        self._events: List[ReputationEvent] = []
+        self._operators: dict[str, OperatorProfile] = {}
+        self._feedback: list[OrderFeedback] = []
+        self._events: list[ReputationEvent] = []
         self._lock = threading.Lock()
 
     # -- Registration ------------------------------------------------------
@@ -377,7 +359,7 @@ class ReputationEngine:
 
     # -- Querying ----------------------------------------------------------
 
-    def get_operator(self, operator_id: str) -> Optional[OperatorProfile]:
+    def get_operator(self, operator_id: str) -> OperatorProfile | None:
         """Return the profile for *operator_id*, or ``None`` if not found."""
         with self._lock:
             return self._operators.get(operator_id)
@@ -422,21 +404,20 @@ class ReputationEngine:
             if prev_total == 0:
                 profile.avg_print_time_s = float(print_time_s)
             else:
-                profile.avg_print_time_s = (
-                    (profile.avg_print_time_s * prev_total + print_time_s)
-                    / profile.total_orders
-                )
+                profile.avg_print_time_s = (profile.avg_print_time_s * prev_total + print_time_s) / profile.total_orders
 
             now = time.time()
             profile.last_active_at = now
 
             event_type = "order_completed" if success else "order_failed"
-            self._events.append(ReputationEvent(
-                event_type=event_type,
-                operator_id=operator_id,
-                timestamp=now,
-                metadata={"print_time_s": print_time_s, "success": success},
-            ))
+            self._events.append(
+                ReputationEvent(
+                    event_type=event_type,
+                    operator_id=operator_id,
+                    timestamp=now,
+                    metadata={"print_time_s": print_time_s, "success": success},
+                )
+            )
 
     # -- Feedback ----------------------------------------------------------
 
@@ -457,25 +438,24 @@ class ReputationEngine:
             self._feedback.append(feedback)
 
             # Update rolling average quality score
-            op_feedback = [
-                f for f in self._feedback
-                if f.operator_id == feedback.operator_id
-            ]
+            op_feedback = [f for f in self._feedback if f.operator_id == feedback.operator_id]
             total_quality = sum(f.quality_score for f in op_feedback)
             profile.avg_quality_score = total_quality / len(op_feedback)
 
             now = time.time()
             profile.last_active_at = now
 
-            self._events.append(ReputationEvent(
-                event_type="feedback_received",
-                operator_id=feedback.operator_id,
-                timestamp=now,
-                metadata={
-                    "order_id": feedback.order_id,
-                    "quality_score": feedback.quality_score,
-                },
-            ))
+            self._events.append(
+                ReputationEvent(
+                    event_type="feedback_received",
+                    operator_id=feedback.operator_id,
+                    timestamp=now,
+                    metadata={
+                        "order_id": feedback.order_id,
+                        "quality_score": feedback.quality_score,
+                    },
+                )
+            )
 
     # -- Verification ------------------------------------------------------
 
@@ -492,12 +472,14 @@ class ReputationEngine:
 
             profile.verified = True
 
-            self._events.append(ReputationEvent(
-                event_type="verification_granted",
-                operator_id=operator_id,
-                timestamp=time.time(),
-                metadata={},
-            ))
+            self._events.append(
+                ReputationEvent(
+                    event_type="verification_granted",
+                    operator_id=operator_id,
+                    timestamp=time.time(),
+                    metadata={},
+                )
+            )
             logger.info("Operator %r verified", operator_id)
 
     # -- Leaderboard & filtering -------------------------------------------
@@ -506,8 +488,8 @@ class ReputationEngine:
         self,
         *,
         limit: int = 10,
-        material: Optional[str] = None,
-    ) -> List[OperatorProfile]:
+        material: str | None = None,
+    ) -> list[OperatorProfile]:
         """Return top operators sorted by reliability tier then success rate.
 
         :param limit: Maximum number of results.
@@ -519,10 +501,7 @@ class ReputationEngine:
             operators = list(self._operators.values())
 
         if material is not None:
-            operators = [
-                op for op in operators
-                if material in op.materials_supported
-            ]
+            operators = [op for op in operators if material in op.materials_supported]
 
         # Sort by tier rank (lower index = better), then by success rate desc
         operators.sort(
@@ -534,7 +513,7 @@ class ReputationEngine:
 
         return operators[:limit]
 
-    def get_operator_stats(self, operator_id: str) -> Dict[str, Any]:
+    def get_operator_stats(self, operator_id: str) -> dict[str, Any]:
         """Return full stats and feedback summary for an operator.
 
         :param operator_id: The operator to query.
@@ -546,10 +525,7 @@ class ReputationEngine:
             if profile is None:
                 raise OperatorNotFoundError(operator_id)
 
-            op_feedback = [
-                f for f in self._feedback
-                if f.operator_id == operator_id
-            ]
+            op_feedback = [f for f in self._feedback if f.operator_id == operator_id]
 
         feedback_count = len(op_feedback)
         avg_communication = 0.0
@@ -557,15 +533,9 @@ class ReputationEngine:
         on_time_rate = 0.0
 
         if feedback_count > 0:
-            avg_communication = (
-                sum(f.communication_score for f in op_feedback) / feedback_count
-            )
-            recommend_rate = (
-                sum(1 for f in op_feedback if f.would_recommend) / feedback_count
-            )
-            on_time_rate = (
-                sum(1 for f in op_feedback if f.on_time) / feedback_count
-            )
+            avg_communication = sum(f.communication_score for f in op_feedback) / feedback_count
+            recommend_rate = sum(1 for f in op_feedback if f.would_recommend) / feedback_count
+            on_time_rate = sum(1 for f in op_feedback if f.on_time) / feedback_count
 
         return {
             **profile.to_dict(),
@@ -582,8 +552,8 @@ class ReputationEngine:
         *,
         verified_only: bool = False,
         min_tier: str = "new",
-        material: Optional[str] = None,
-    ) -> List[OperatorProfile]:
+        material: str | None = None,
+    ) -> list[OperatorProfile]:
         """Return a filtered list of operators.
 
         :param verified_only: If ``True``, only return verified operators.
@@ -593,17 +563,14 @@ class ReputationEngine:
         :returns: Filtered list of :class:`OperatorProfile`.
         """
         if min_tier not in _TIER_ORDER:
-            raise ReputationValidationError(
-                f"Invalid tier: {min_tier!r}; "
-                f"must be one of {_TIER_ORDER}"
-            )
+            raise ReputationValidationError(f"Invalid tier: {min_tier!r}; must be one of {_TIER_ORDER}")
 
         min_tier_index = _TIER_ORDER.index(min_tier)
 
         with self._lock:
             operators = list(self._operators.values())
 
-        result: List[OperatorProfile] = []
+        result: list[OperatorProfile] = []
         for op in operators:
             if verified_only and not op.verified:
                 continue
@@ -621,7 +588,7 @@ class ReputationEngine:
 # Module-level singleton (lazy, thread-safe)
 # ---------------------------------------------------------------------------
 
-_engine: Optional[ReputationEngine] = None
+_engine: ReputationEngine | None = None
 _engine_lock = threading.Lock()
 
 

@@ -8,11 +8,10 @@ parsing) — no external mesh libraries required.
 
 from __future__ import annotations
 
+import contextlib
 import logging
-import os
 import struct
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from kiln.generation.base import MeshValidationResult
 
@@ -59,7 +58,7 @@ def convert_to_stl(input_path: str, output_path: str | None = None) -> str:
     if path.suffix.lower() != ".obj":
         raise ValueError(f"convert_to_stl expects .obj input, got {path.suffix!r}")
 
-    errors: List[str] = []
+    errors: list[str] = []
     triangles, vertices = _parse_obj(path, errors)
     if errors:
         raise ValueError(f"Failed to parse OBJ: {'; '.join(errors)}")
@@ -91,8 +90,8 @@ def validate_mesh(file_path: str) -> MeshValidationResult:
     Returns:
         :class:`MeshValidationResult` with errors, warnings, and metrics.
     """
-    errors: List[str] = []
-    warnings: List[str] = []
+    errors: list[str] = []
+    warnings: list[str] = []
 
     path = Path(file_path)
 
@@ -142,15 +141,11 @@ def validate_mesh(file_path: str) -> MeshValidationResult:
 
     if tri_count > _MAX_TRIANGLES:
         errors.append(
-            f"Triangle count ({tri_count:,}) exceeds maximum "
-            f"({_MAX_TRIANGLES:,}).  Model is too complex for slicing."
+            f"Triangle count ({tri_count:,}) exceeds maximum ({_MAX_TRIANGLES:,}).  Model is too complex for slicing."
         )
 
     if tri_count > _WARN_TRIANGLES and tri_count <= _MAX_TRIANGLES:
-        warnings.append(
-            f"High triangle count ({tri_count:,}).  "
-            f"Slicing may be slow."
-        )
+        warnings.append(f"High triangle count ({tri_count:,}).  Slicing may be slow.")
 
     # --- bounding box ---
     bbox = _bounding_box(vertices)
@@ -195,8 +190,8 @@ def validate_mesh(file_path: str) -> MeshValidationResult:
 
 def _parse_stl(
     path: Path,
-    errors: List[str],
-) -> Tuple[List[Tuple[Tuple[float, ...], ...]], List[Tuple[float, ...]]]:
+    errors: list[str],
+) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
     """Parse a binary or ASCII STL file.
 
     Returns:
@@ -232,8 +227,8 @@ def _parse_stl(
 
 def _parse_stl_binary(
     path: Path,
-    errors: List[str],
-) -> Tuple[List[Tuple[Tuple[float, ...], ...]], List[Tuple[float, ...]]]:
+    errors: list[str],
+) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
     """Parse a binary STL file."""
     with open(path, "rb") as fh:
         fh.read(_STL_HEADER_SIZE)  # skip header
@@ -243,9 +238,7 @@ def _parse_stl_binary(
             return [], []
 
         tri_count = struct.unpack("<I", count_bytes)[0]
-        expected_size = (
-            _STL_HEADER_SIZE + _STL_COUNT_SIZE + _STL_TRIANGLE_SIZE * tri_count
-        )
+        expected_size = _STL_HEADER_SIZE + _STL_COUNT_SIZE + _STL_TRIANGLE_SIZE * tri_count
         actual_size = path.stat().st_size
         if actual_size < expected_size:
             errors.append(
@@ -255,7 +248,7 @@ def _parse_stl_binary(
             return [], []
 
         triangles = []
-        vertex_set: set[Tuple[float, ...]] = set()
+        vertex_set: set[tuple[float, ...]] = set()
 
         for _ in range(tri_count):
             data = fh.read(_STL_TRIANGLE_SIZE)
@@ -276,15 +269,15 @@ def _parse_stl_binary(
 
 def _parse_stl_ascii(
     path: Path,
-    errors: List[str],
-) -> Tuple[List[Tuple[Tuple[float, ...], ...]], List[Tuple[float, ...]]]:
+    errors: list[str],
+) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
     """Parse an ASCII STL file."""
     triangles = []
-    vertex_set: set[Tuple[float, ...]] = set()
-    current_verts: List[Tuple[float, ...]] = []
+    vertex_set: set[tuple[float, ...]] = set()
+    current_verts: list[tuple[float, ...]] = []
 
     try:
-        with open(path, "r", errors="replace") as fh:
+        with open(path, errors="replace") as fh:
             for line in fh:
                 stripped = line.strip()
                 if stripped.startswith("vertex"):
@@ -313,25 +306,21 @@ def _parse_stl_ascii(
 
 def _parse_obj(
     path: Path,
-    errors: List[str],
-) -> Tuple[List[Tuple[Tuple[float, ...], ...]], List[Tuple[float, ...]]]:
+    errors: list[str],
+) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
     """Parse a Wavefront OBJ file (vertices and faces only)."""
-    vertices: List[Tuple[float, ...]] = []
-    triangles: List[Tuple[Tuple[float, ...], ...]] = []
+    vertices: list[tuple[float, ...]] = []
+    triangles: list[tuple[tuple[float, ...], ...]] = []
 
     try:
-        with open(path, "r", errors="replace") as fh:
+        with open(path, errors="replace") as fh:
             for line in fh:
                 stripped = line.strip()
                 if stripped.startswith("v "):
                     parts = stripped.split()
                     if len(parts) >= 4:
-                        try:
-                            vertices.append(
-                                (float(parts[1]), float(parts[2]), float(parts[3]))
-                            )
-                        except ValueError:
-                            pass
+                        with contextlib.suppress(ValueError):
+                            vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
                 elif stripped.startswith("f "):
                     parts = stripped.split()[1:]
                     # OBJ face indices are 1-based, may contain v/vt/vn.
@@ -347,9 +336,7 @@ def _parse_obj(
                         for i in range(1, len(indices) - 1):
                             i0, i1, i2 = indices[0], indices[i], indices[i + 1]
                             if 0 <= i0 < len(vertices) and 0 <= i1 < len(vertices) and 0 <= i2 < len(vertices):
-                                triangles.append(
-                                    (vertices[i0], vertices[i1], vertices[i2])
-                                )
+                                triangles.append((vertices[i0], vertices[i1], vertices[i2]))
     except Exception as exc:
         errors.append(f"Could not read OBJ file: {exc}")
 
@@ -361,13 +348,16 @@ def _parse_obj(
 # ---------------------------------------------------------------------------
 
 
-def _bounding_box(vertices: List[Tuple[float, ...]]) -> Dict[str, float]:
+def _bounding_box(vertices: list[tuple[float, ...]]) -> dict[str, float]:
     """Compute axis-aligned bounding box from vertex list."""
     if not vertices:
         return {
-            "x_min": 0.0, "x_max": 0.0,
-            "y_min": 0.0, "y_max": 0.0,
-            "z_min": 0.0, "z_max": 0.0,
+            "x_min": 0.0,
+            "x_max": 0.0,
+            "y_min": 0.0,
+            "y_max": 0.0,
+            "z_min": 0.0,
+            "z_max": 0.0,
         }
 
     xs = [v[0] for v in vertices]
@@ -375,15 +365,18 @@ def _bounding_box(vertices: List[Tuple[float, ...]]) -> Dict[str, float]:
     zs = [v[2] for v in vertices]
 
     return {
-        "x_min": min(xs), "x_max": max(xs),
-        "y_min": min(ys), "y_max": max(ys),
-        "z_min": min(zs), "z_max": max(zs),
+        "x_min": min(xs),
+        "x_max": max(xs),
+        "y_min": min(ys),
+        "y_max": max(ys),
+        "z_min": min(zs),
+        "z_max": max(zs),
     }
 
 
 def _check_manifold(
-    triangles: List[Tuple[Tuple[float, ...], ...]],
-    warnings: List[str],
+    triangles: list[tuple[tuple[float, ...], ...]],
+    warnings: list[str],
 ) -> bool:
     """Check if the mesh is manifold (watertight).
 
@@ -396,7 +389,7 @@ def _check_manifold(
     if not triangles:
         return False
 
-    edge_count: Dict[Tuple[Tuple[float, ...], Tuple[float, ...]], int] = {}
+    edge_count: dict[tuple[tuple[float, ...], tuple[float, ...]], int] = {}
 
     for tri in triangles:
         for i in range(3):
@@ -425,7 +418,7 @@ def _check_manifold(
 
 
 def _write_binary_stl(
-    triangles: List[Tuple[Tuple[float, ...], ...]],
+    triangles: list[tuple[tuple[float, ...], ...]],
     output_path: str,
 ) -> None:
     """Write triangles to a binary STL file.

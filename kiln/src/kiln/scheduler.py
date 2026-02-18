@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from kiln.events import EventBus, EventType
 from kiln.printers.base import PrinterError, PrinterStatus
@@ -49,7 +49,7 @@ class JobScheduler:
         poll_interval: float = 5.0,
         max_retries: int = 2,
         retry_backoff_base: float = 30.0,
-        persistence: Optional[object] = None,
+        persistence: object | None = None,
     ) -> None:
         self._queue = queue
         self._registry = registry
@@ -59,10 +59,10 @@ class JobScheduler:
         self._retry_backoff_base = retry_backoff_base
         self._persistence = persistence
         self._running = False
-        self._thread: Optional[threading.Thread] = None
-        self._active_jobs: Dict[str, str] = {}  # job_id -> printer_name
-        self._retry_counts: Dict[str, int] = {}  # job_id -> attempts so far
-        self._retry_not_before: Dict[str, float] = {}  # job_id -> earliest retry timestamp
+        self._thread: threading.Thread | None = None
+        self._active_jobs: dict[str, str] = {}  # job_id -> printer_name
+        self._retry_counts: dict[str, int] = {}  # job_id -> attempts so far
+        self._retry_not_before: dict[str, float] = {}  # job_id -> earliest retry timestamp
         self._lock = threading.Lock()
 
     @property
@@ -71,7 +71,7 @@ class JobScheduler:
         return self._running
 
     @property
-    def active_jobs(self) -> Dict[str, str]:
+    def active_jobs(self) -> dict[str, str]:
         """Return a copy of the active job->printer mapping."""
         with self._lock:
             return dict(self._active_jobs)
@@ -101,7 +101,7 @@ class JobScheduler:
         self,
         job_id: str,
         error_msg: str,
-        failed_list: list[Dict[str, str]],
+        failed_list: list[dict[str, str]],
         printer_name: str | None = None,
     ) -> bool:
         """Try to re-queue a failed job if retries remain.
@@ -113,7 +113,7 @@ class JobScheduler:
         if count < self._max_retries:
             self._retry_counts[job_id] = count + 1
             # Exponential backoff: 30s, 60s, 120s, ...
-            delay = self._retry_backoff_base * (2 ** count)
+            delay = self._retry_backoff_base * (2**count)
             self._retry_not_before[job_id] = time.time() + delay
             # Reset the job back to QUEUED so a future tick can redispatch it
             with self._lock:
@@ -156,7 +156,7 @@ class JobScheduler:
         failed_list.append({"job_id": job_id, "error": error_msg})
         return False
 
-    def _rank_printers(self, available: List[str], job) -> List[str]:
+    def _rank_printers(self, available: list[str], job) -> list[str]:
         """Reorder available printers by historical success rate for this job.
 
         When a persistence layer is configured and the job metadata contains
@@ -175,7 +175,8 @@ class JobScheduler:
         if not file_hash and not material_type:
             return available
         rankings = self._persistence.suggest_printer_for_outcome(
-            file_hash=file_hash, material_type=material_type,
+            file_hash=file_hash,
+            material_type=material_type,
         )
         if not rankings:
             return available
@@ -207,26 +208,28 @@ class JobScheduler:
             # Try to get job metadata for richer outcome data
             job = self._queue.get_job(job_id)
 
-            self._persistence.save_print_outcome({
-                "job_id": job_id,
-                "printer_name": printer_name,
-                "file_name": job.file_name if job else None,
-                "file_hash": job.metadata.get("file_hash") if job and job.metadata else None,
-                "material_type": job.metadata.get("material_type") if job and job.metadata else None,
-                "outcome": outcome,
-                "quality_grade": None,  # Only agents can assess quality
-                "failure_mode": None,   # Only agents can classify failure mode
-                "settings": None,
-                "environment": None,
-                "notes": f"Auto-recorded by scheduler. {error_msg}" if error_msg else "Auto-recorded by scheduler.",
-                "agent_id": "scheduler",
-                "created_at": time.time(),
-            })
+            self._persistence.save_print_outcome(
+                {
+                    "job_id": job_id,
+                    "printer_name": printer_name,
+                    "file_name": job.file_name if job else None,
+                    "file_hash": job.metadata.get("file_hash") if job and job.metadata else None,
+                    "material_type": job.metadata.get("material_type") if job and job.metadata else None,
+                    "outcome": outcome,
+                    "quality_grade": None,  # Only agents can assess quality
+                    "failure_mode": None,  # Only agents can classify failure mode
+                    "settings": None,
+                    "environment": None,
+                    "notes": f"Auto-recorded by scheduler. {error_msg}" if error_msg else "Auto-recorded by scheduler.",
+                    "agent_id": "scheduler",
+                    "created_at": time.time(),
+                }
+            )
             logger.debug("Auto-recorded %s outcome for job %s", outcome, job_id)
         except Exception:
             logger.debug("Failed to auto-record outcome for job %s (non-fatal)", job_id, exc_info=True)
 
-    def tick(self) -> Dict[str, Any]:
+    def tick(self) -> dict[str, Any]:
         """Run one scheduling cycle.  Can be called manually for testing.
 
         Returns a dict summarising what happened:
@@ -235,9 +238,9 @@ class JobScheduler:
             failed: list of {job_id, error}
             checked: number of active jobs checked
         """
-        dispatched: list[Dict[str, Any]] = []
+        dispatched: list[dict[str, Any]] = []
         completed: list[str] = []
-        failed: list[Dict[str, str]] = []
+        failed: list[dict[str, str]] = []
         checked = 0
 
         # Phase 1: Check active jobs for completion / failure
@@ -284,10 +287,7 @@ class JobScheduler:
                     # Stuck job detection: fail jobs in PRINTING too long
                     try:
                         job = self._queue.get_job(job_id)
-                        if (
-                            job.started_at is not None
-                            and (time.time() - job.started_at) > _STUCK_JOB_TIMEOUT_SECONDS
-                        ):
+                        if job.started_at is not None and (time.time() - job.started_at) > _STUCK_JOB_TIMEOUT_SECONDS:
                             error_msg = (
                                 f"Job timed out after "
                                 f"{_STUCK_JOB_TIMEOUT_SECONDS / 3600:.0f}h "
@@ -295,7 +295,8 @@ class JobScheduler:
                             )
                             logger.warning(
                                 "Stuck job detected: %s on %s (%.0f min)",
-                                job_id, printer_name,
+                                job_id,
+                                printer_name,
                                 (time.time() - job.started_at) / 60,
                             )
                             with self._lock:
@@ -324,9 +325,7 @@ class JobScheduler:
                     self._active_jobs.pop(job_id, None)
                 self._requeue_or_fail(job_id, error_msg, failed, printer_name=printer_name)
             except Exception as exc:
-                logger.warning(
-                    "Error checking job %s on %s: %s", job_id, printer_name, exc
-                )
+                logger.warning("Error checking job %s on %s: %s", job_id, printer_name, exc)
 
         # Phase 2: Dispatch queued jobs to idle printers
         idle_printers = self._registry.get_idle_printers()
@@ -340,10 +339,7 @@ class JobScheduler:
         # next queued unassigned job.  This ensures the best-performing
         # printer for the job's file/material gets first dispatch priority.
         if self._persistence and available:
-            queued = [
-                j for j in self._queue.list_jobs(status=JobStatus.QUEUED)
-                if j.printer_name is None
-            ]
+            queued = [j for j in self._queue.list_jobs(status=JobStatus.QUEUED) if j.printer_name is None]
             if queued:
                 available = self._rank_printers(available, queued[0])
 

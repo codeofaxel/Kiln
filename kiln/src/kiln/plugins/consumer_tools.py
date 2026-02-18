@@ -12,7 +12,7 @@ is the extraction target.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 _logger = logging.getLogger(__name__)
 
@@ -71,9 +71,11 @@ class _ConsumerToolsPlugin:
 
             try:
                 from kiln.tax import TaxCalculator
+
                 calc = TaxCalculator()
                 result = calc.calculate_tax(
-                    fee_amount, jurisdiction,
+                    fee_amount,
+                    jurisdiction,
                     business_tax_id=business_tax_id or None,
                 )
                 return {"status": "success", "tax": result.to_dict()}
@@ -93,6 +95,7 @@ class _ConsumerToolsPlugin:
 
             try:
                 from kiln.tax import TaxCalculator
+
                 calc = TaxCalculator()
                 jurisdictions = [j.to_dict() for j in calc.list_jurisdictions()]
                 return {
@@ -115,12 +118,12 @@ class _ConsumerToolsPlugin:
 
             try:
                 from kiln.tax import TaxCalculator
+
                 calc = TaxCalculator()
                 jur = calc.get_jurisdiction(code)
                 if jur is None:
                     return _error_dict(
-                        f"Unknown jurisdiction: {code}. "
-                        "Use tax_jurisdictions to see all supported codes."
+                        f"Unknown jurisdiction: {code}. Use tax_jurisdictions to see all supported codes."
                     )
                 return {"status": "success", "jurisdiction": jur.to_dict()}
             except Exception as exc:
@@ -140,6 +143,7 @@ class _ConsumerToolsPlugin:
 
             try:
                 from kiln.wallets import get_donation_info
+
                 return {"success": True, **get_donation_info()}
             except Exception as exc:
                 _logger.exception("Unexpected error in donate_info")
@@ -192,13 +196,15 @@ class _ConsumerToolsPlugin:
             from kiln.server import _error_dict
 
             try:
-                result = validate_address({
-                    "street": street,
-                    "city": city,
-                    "state": state,
-                    "postal_code": postal_code,
-                    "country": country,
-                })
+                result = validate_address(
+                    {
+                        "street": street,
+                        "city": city,
+                        "state": state,
+                        "postal_code": postal_code,
+                        "country": country,
+                    }
+                )
                 return {
                     "success": True,
                     "validation": result.to_dict(),
@@ -235,6 +241,7 @@ class _ConsumerToolsPlugin:
 
             try:
                 from kiln.consumer import recommend_material as _recommend
+
                 guide = _recommend(
                     use_case,
                     budget=budget or None,
@@ -256,10 +263,10 @@ class _ConsumerToolsPlugin:
         @mcp.tool()
         def estimate_price(
             technology: str,
-            volume_cm3: Optional[float] = None,
-            dimensions_x_mm: Optional[float] = None,
-            dimensions_y_mm: Optional[float] = None,
-            dimensions_z_mm: Optional[float] = None,
+            volume_cm3: float | None = None,
+            dimensions_x_mm: float | None = None,
+            dimensions_y_mm: float | None = None,
+            dimensions_z_mm: float | None = None,
             quantity: int = 1,
         ) -> dict:
             """Get an instant price estimate before requesting a full quote.
@@ -282,6 +289,7 @@ class _ConsumerToolsPlugin:
 
             try:
                 from kiln.consumer import estimate_price as _estimate
+
                 dims = None
                 if dimensions_x_mm and dimensions_y_mm and dimensions_z_mm:
                     dims = {"x": dimensions_x_mm, "y": dimensions_y_mm, "z": dimensions_z_mm}
@@ -304,7 +312,7 @@ class _ConsumerToolsPlugin:
         @mcp.tool()
         def estimate_timeline(
             technology: str,
-            shipping_days: Optional[int] = None,
+            shipping_days: int | None = None,
             quantity: int = 1,
             country: str = "US",
         ) -> dict:
@@ -324,6 +332,7 @@ class _ConsumerToolsPlugin:
 
             try:
                 from kiln.consumer import estimate_timeline as _timeline
+
                 timeline = _timeline(
                     technology,
                     shipping_days=shipping_days,

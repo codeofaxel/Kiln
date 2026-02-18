@@ -39,9 +39,12 @@ import threading
 import time as _time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request  # module-level so PEP 563 deferred annotations resolve
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +56,7 @@ logger = logging.getLogger(__name__)
 
 def _rest_auth_token_from_env() -> str | None:
     """Resolve REST bearer token from environment variables."""
-    token = (
-        os.environ.get("KILN_API_AUTH_TOKEN", "")
-        or os.environ.get("KILN_AUTH_TOKEN", "")
-    ).strip()
+    token = (os.environ.get("KILN_API_AUTH_TOKEN", "") or os.environ.get("KILN_AUTH_TOKEN", "")).strip()
     return token or None
 
 
@@ -97,7 +97,7 @@ class RateLimiter:
         """Whether rate limiting is active (max > 0)."""
         return self._max > 0
 
-    def check(self, key: str) -> Tuple[bool, int, float]:
+    def check(self, key: str) -> tuple[bool, int, float]:
         """Check whether a request from *key* is allowed.
 
         Returns:
@@ -162,9 +162,7 @@ _rate_limiter = _build_rate_limiter()
 class RestApiConfig:
     """Configuration for the REST API server."""
 
-    host: str = field(
-        default_factory=lambda: os.environ.get("KILN_REST_HOST", "127.0.0.1")
-    )
+    host: str = field(default_factory=lambda: os.environ.get("KILN_REST_HOST", "127.0.0.1"))
     port: int = 8420
     auth_token: str | None = field(default_factory=_rest_auth_token_from_env)
     cors_origins: list[str] = field(default_factory=list)
@@ -183,10 +181,11 @@ def _get_mcp_instance():
     triggering the heavyweight server module at import time.
     """
     from kiln.server import mcp  # noqa: F811
+
     return mcp
 
 
-def _list_tool_schemas(mcp_instance, *, tier: str = "full") -> List[Dict[str, Any]]:
+def _list_tool_schemas(mcp_instance, *, tier: str = "full") -> list[dict[str, Any]]:
     """Extract tool metadata from the FastMCP tool manager.
 
     Returns a list of dicts with name, description, parameters, and
@@ -198,6 +197,7 @@ def _list_tool_schemas(mcp_instance, *, tier: str = "full") -> List[Dict[str, An
     if tier != "full":
         try:
             from kiln.tool_tiers import TIERS
+
             tier_list = TIERS.get(tier)
             if tier_list is not None:
                 allowed = set(tier_list)
@@ -209,13 +209,15 @@ def _list_tool_schemas(mcp_instance, *, tier: str = "full") -> List[Dict[str, An
     for t in tools:
         if allowed is not None and t.name not in allowed:
             continue
-        schemas.append({
-            "name": t.name,
-            "description": t.description or "",
-            "parameters": t.parameters or {},
-            "method": "POST",
-            "endpoint": f"/api/tools/{t.name}",
-        })
+        schemas.append(
+            {
+                "name": t.name,
+                "description": t.description or "",
+                "parameters": t.parameters or {},
+                "method": "POST",
+                "endpoint": f"/api/tools/{t.name}",
+            }
+        )
     return schemas
 
 
@@ -225,6 +227,7 @@ def _allowed_tool_names(tier: str) -> set[str] | None:
         return None  # Full tier exposes everything.
     try:
         from kiln.tool_tiers import TIERS
+
         tier_list = TIERS.get(tier)
         if tier_list is not None:
             return set(tier_list)
@@ -249,7 +252,7 @@ def _get_tool_function(mcp_instance, tool_name: str):
 # ---------------------------------------------------------------------------
 
 
-def create_app(config: RestApiConfig | None = None) -> "FastAPI":
+def create_app(config: RestApiConfig | None = None) -> FastAPI:
     """Create and configure the FastAPI application.
 
     All tool functions are imported lazily from ``kiln.server`` and wrapped
@@ -267,21 +270,20 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
     # Load .env file if present.
     try:
         from pathlib import Path as _P
+
         from dotenv import load_dotenv
+
         load_dotenv()
         load_dotenv(_P.home() / ".kiln" / ".env")
     except ImportError:
         pass
 
     try:
-        from fastapi import FastAPI, HTTPException, Request, Depends
+        from fastapi import Depends, FastAPI, HTTPException
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import JSONResponse
     except ImportError:
-        raise ImportError(
-            "FastAPI is required for the REST API. "
-            "Install it with: pip install kiln3d[rest]"
-        )
+        raise ImportError("FastAPI is required for the REST API. Install it with: pip install kiln3d[rest]") from None
 
     if config is None:
         config = RestApiConfig()
@@ -367,6 +369,7 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
         if not config.auth_token:
             return
         import hmac as _hmac
+
         auth_header = request.headers.get("Authorization", "")
         expected = f"Bearer {config.auth_token}"
         if not _hmac.compare_digest(auth_header, expected):
@@ -374,6 +377,8 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
                 status_code=401,
                 detail="Invalid or missing auth token",
             )
+
+    _auth_dep = Depends(verify_auth)
 
     # ----- Health check ---------------------------------------------------
 
@@ -385,7 +390,7 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
     # ----- Tool discovery -------------------------------------------------
 
     @app.get("/api/tools")
-    async def list_tools(_=Depends(verify_auth)):
+    async def list_tools(_=_auth_dep):
         """List all available MCP tools with their schemas."""
         mcp_instance = _get_mcp_instance()
         schemas = _list_tool_schemas(mcp_instance, tier=config.tool_tier)
@@ -401,7 +406,7 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
     async def execute_tool(
         tool_name: str,
         request: Request,
-        _=Depends(verify_auth),
+        _=_auth_dep,
     ):
         """Execute an MCP tool by name with JSON parameters."""
         # Tier gate: reject tools outside the configured tier.
@@ -473,7 +478,7 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid parameters: {exc}",
-            )
+            ) from exc
         except Exception as exc:
             logger.exception("Tool execution failed: %s", tool_name)
             return JSONResponse(
@@ -484,7 +489,7 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
     # ----- Agent loop endpoint --------------------------------------------
 
     @app.post("/api/agent")
-    async def run_agent(request: Request, _=Depends(verify_auth)):
+    async def run_agent(request: Request, _=_auth_dep):
         """Run the agent loop with a prompt and return the result.
 
         Requires an API key for the LLM provider (OpenRouter, OpenAI, etc.)
@@ -496,7 +501,7 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
             raise HTTPException(
                 status_code=400,
                 detail="Request body must be valid JSON",
-            )
+            ) from None
 
         prompt = body.get("prompt")
         if not prompt:
@@ -513,15 +518,12 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
             )
 
         try:
-            from kiln.agent_loop import run_agent_loop, AgentConfig
+            from kiln.agent_loop import AgentConfig, run_agent_loop
         except ImportError:
             raise HTTPException(
                 status_code=501,
-                detail=(
-                    "Agent loop module not available. "
-                    "Ensure kiln.agent_loop is installed."
-                ),
-            )
+                detail=("Agent loop module not available. Ensure kiln.agent_loop is installed."),
+            ) from None
 
         agent_config = AgentConfig(
             api_key=api_key,
@@ -534,9 +536,7 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
         try:
             # Run in thread pool to avoid blocking the event loop
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, lambda: run_agent_loop(prompt, agent_config)
-            )
+            result = await loop.run_in_executor(None, lambda: run_agent_loop(prompt, agent_config))
             return result.to_dict()
         except Exception as exc:
             logger.exception("Agent loop error")
@@ -557,7 +557,10 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
         if not webhook_secret:
             logger.warning("Stripe webhook received but KILN_STRIPE_WEBHOOK_SECRET not set")
             return JSONResponse(
-                {"success": False, "error": "Webhook secret not configured. Set KILN_STRIPE_WEBHOOK_SECRET environment variable."},
+                {
+                    "success": False,
+                    "error": "Webhook secret not configured. Set KILN_STRIPE_WEBHOOK_SECRET environment variable.",
+                },
                 status_code=400,
             )
 
@@ -571,12 +574,20 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
 
         try:
             event = _stripe_mod.Webhook.construct_event(
-                raw_body, sig_header, webhook_secret,
+                raw_body,
+                sig_header,
+                webhook_secret,
             )
         except ValueError as exc:
             return JSONResponse({"success": False, "error": f"Invalid payload: {exc}"}, status_code=400)
         except _stripe_mod.error.SignatureVerificationError:
-            return JSONResponse({"success": False, "error": "Invalid signature. Verify KILN_STRIPE_WEBHOOK_SECRET matches your Stripe Dashboard webhook signing secret."}, status_code=400)
+            return JSONResponse(
+                {
+                    "success": False,
+                    "error": "Invalid signature. Verify KILN_STRIPE_WEBHOOK_SECRET matches your Stripe Dashboard webhook signing secret.",
+                },
+                status_code=400,
+            )
 
         if event["type"] == "setup_intent.succeeded":
             si = event["data"]["object"]
@@ -585,6 +596,7 @@ def create_app(config: RestApiConfig | None = None) -> "FastAPI":
             if pm_id:
                 try:
                     from kiln.cli.config import save_billing_config
+
                     save_data = {"stripe_payment_method_id": pm_id}
                     if customer_id:
                         save_data["stripe_customer_id"] = customer_id
@@ -657,9 +669,8 @@ def run_rest_server(config: RestApiConfig | None = None) -> None:
         import uvicorn
     except ImportError:
         raise ImportError(
-            "Uvicorn is required to run the REST server. "
-            "Install with: pip install kiln3d[rest]"
-        )
+            "Uvicorn is required to run the REST server. Install with: pip install kiln3d[rest]"
+        ) from None
 
     if config is None:
         config = RestApiConfig()
@@ -668,13 +679,12 @@ def run_rest_server(config: RestApiConfig | None = None) -> None:
 
     # Refuse to bind to non-localhost without authentication
     _LOCALHOST_ADDRESSES = {"127.0.0.1", "localhost", "::1"}
-    if config.host not in _LOCALHOST_ADDRESSES:
-        if not config.auth_token:
-            raise RuntimeError(
-                f"REST API cannot bind to {config.host} without authentication. "
-                "Set KILN_API_AUTH_TOKEN=<token> (or pass --auth-token), "
-                "or bind to localhost by setting KILN_REST_HOST=127.0.0.1"
-            )
+    if config.host not in _LOCALHOST_ADDRESSES and not config.auth_token:
+        raise RuntimeError(
+            f"REST API cannot bind to {config.host} without authentication. "
+            "Set KILN_API_AUTH_TOKEN=<token> (or pass --auth-token), "
+            "or bind to localhost by setting KILN_REST_HOST=127.0.0.1"
+        )
 
     logger.info(
         "Starting Kiln REST API on %s:%d (tier: %s)",

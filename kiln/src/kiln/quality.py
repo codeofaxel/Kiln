@@ -27,7 +27,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class QualityError(Exception):
     """Raised when quality assessment or verification fails."""
 
-    def __init__(self, message: str, *, cause: Optional[Exception] = None) -> None:
+    def __init__(self, message: str, *, cause: Exception | None = None) -> None:
         super().__init__(message)
         self.cause = cause
 
@@ -62,13 +62,13 @@ class QualityScore:
     assessed_by: str
     assessed_at: str
     notes: str = ""
-    dimensional_accuracy: Optional[float] = None
-    surface_quality: Optional[float] = None
-    layer_adhesion: Optional[float] = None
-    structural_integrity: Optional[float] = None
-    reference_model_hash: Optional[str] = None
+    dimensional_accuracy: float | None = None
+    surface_quality: float | None = None
+    layer_adhesion: float | None = None
+    structural_integrity: float | None = None
+    reference_model_hash: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return asdict(self)
 
@@ -83,12 +83,12 @@ class QualityThreshold:
     """
 
     min_overall: float = 0.7
-    min_dimensional_accuracy: Optional[float] = None
-    min_surface_quality: Optional[float] = None
-    min_layer_adhesion: Optional[float] = None
-    min_structural_integrity: Optional[float] = None
+    min_dimensional_accuracy: float | None = None
+    min_surface_quality: float | None = None
+    min_layer_adhesion: float | None = None
+    min_structural_integrity: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return asdict(self)
 
@@ -110,7 +110,7 @@ class QualityAttestation:
     passed: bool
     attestation_hash: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         data = asdict(self)
         data["score"] = self.score.to_dict()
@@ -149,14 +149,12 @@ def _compute_hmac(payload: str, key: str) -> str:
 def _validate_score_range(value: float, name: str) -> None:
     """Raise :class:`QualityError` if *value* is outside [0.0, 1.0]."""
     if not 0.0 <= value <= 1.0:
-        raise QualityError(
-            f"{name} must be between 0.0 and 1.0, got {value}"
-        )
+        raise QualityError(f"{name} must be between 0.0 and 1.0, got {value}")
 
 
 def _check_threshold(
-    score_value: Optional[float],
-    threshold_value: Optional[float],
+    score_value: float | None,
+    threshold_value: float | None,
     name: str,
 ) -> bool:
     """Return ``False`` if the score is below the threshold.
@@ -175,14 +173,14 @@ def _check_threshold(
 
 
 def assess_quality(
-    metrics: Dict[str, Any],
+    metrics: dict[str, Any],
     job_id: str,
     printer_id: str,
     assessed_by: str,
     signing_key: str,
     *,
-    threshold: Optional[QualityThreshold] = None,
-    reference_model_hash: Optional[str] = None,
+    threshold: QualityThreshold | None = None,
+    reference_model_hash: str | None = None,
     notes: str = "",
 ) -> QualityAttestation:
     """Build a quality attestation from raw metric values.
@@ -220,10 +218,10 @@ def assess_quality(
         raise QualityError("metrics must include 'overall' score")
     _validate_score_range(overall, "overall")
 
-    dimensional_accuracy: Optional[float] = metrics.get("dimensional_accuracy")
-    surface_quality: Optional[float] = metrics.get("surface_quality")
-    layer_adhesion: Optional[float] = metrics.get("layer_adhesion")
-    structural_integrity: Optional[float] = metrics.get("structural_integrity")
+    dimensional_accuracy: float | None = metrics.get("dimensional_accuracy")
+    surface_quality: float | None = metrics.get("surface_quality")
+    layer_adhesion: float | None = metrics.get("layer_adhesion")
+    structural_integrity: float | None = metrics.get("structural_integrity")
 
     for name, value in [
         ("dimensional_accuracy", dimensional_accuracy),
@@ -251,29 +249,31 @@ def assess_quality(
     if threshold is None:
         threshold = QualityThreshold()
 
-    passed = all([
-        _check_threshold(score.overall, threshold.min_overall, "overall"),
-        _check_threshold(
-            score.dimensional_accuracy,
-            threshold.min_dimensional_accuracy,
-            "dimensional_accuracy",
-        ),
-        _check_threshold(
-            score.surface_quality,
-            threshold.min_surface_quality,
-            "surface_quality",
-        ),
-        _check_threshold(
-            score.layer_adhesion,
-            threshold.min_layer_adhesion,
-            "layer_adhesion",
-        ),
-        _check_threshold(
-            score.structural_integrity,
-            threshold.min_structural_integrity,
-            "structural_integrity",
-        ),
-    ])
+    passed = all(
+        [
+            _check_threshold(score.overall, threshold.min_overall, "overall"),
+            _check_threshold(
+                score.dimensional_accuracy,
+                threshold.min_dimensional_accuracy,
+                "dimensional_accuracy",
+            ),
+            _check_threshold(
+                score.surface_quality,
+                threshold.min_surface_quality,
+                "surface_quality",
+            ),
+            _check_threshold(
+                score.layer_adhesion,
+                threshold.min_layer_adhesion,
+                "layer_adhesion",
+            ),
+            _check_threshold(
+                score.structural_integrity,
+                threshold.min_structural_integrity,
+                "structural_integrity",
+            ),
+        ]
+    )
 
     # -- Sign --
     canonical = _canonical_payload(score, job_id, printer_id)
@@ -310,8 +310,6 @@ def verify_attestation(attestation: QualityAttestation, signing_key: str) -> boo
     :returns: ``True`` if the attestation is intact, ``False`` if
         tampered.
     """
-    canonical = _canonical_payload(
-        attestation.score, attestation.job_id, attestation.printer_id
-    )
+    canonical = _canonical_payload(attestation.score, attestation.job_id, attestation.printer_id)
     expected = _compute_hmac(canonical, signing_key)
     return hmac.compare_digest(expected, attestation.attestation_hash)

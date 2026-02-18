@@ -14,7 +14,7 @@ import logging
 import threading
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class SyncConfig:
@@ -37,7 +38,7 @@ class SyncConfig:
     sync_printers: bool = True
     sync_settings: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         # Mask the API key in output
         if d.get("api_key"):
@@ -45,10 +46,8 @@ class SyncConfig:
         return d
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> SyncConfig:
-        return cls(**{
-            k: data[k] for k in cls.__dataclass_fields__ if k in data
-        })
+    def from_dict(cls, data: dict[str, Any]) -> SyncConfig:
+        return cls(**{k: data[k] for k in cls.__dataclass_fields__ if k in data})
 
 
 @dataclass
@@ -57,13 +56,13 @@ class SyncStatus:
 
     enabled: bool
     connected: bool = False
-    last_sync_at: Optional[float] = None
+    last_sync_at: float | None = None
     last_sync_status: str = "never"
     jobs_synced: int = 0
     events_synced: int = 0
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -71,16 +70,20 @@ class SyncStatus:
 # HMAC helper
 # ---------------------------------------------------------------------------
 
+
 def _compute_signature(secret: str, payload: bytes) -> str:
     """Compute HMAC-SHA256 signature for a payload."""
     return hmac.new(
-        secret.encode(), payload, hashlib.sha256,
+        secret.encode(),
+        payload,
+        hashlib.sha256,
     ).hexdigest()
 
 
 # ---------------------------------------------------------------------------
 # Cloud sync manager
 # ---------------------------------------------------------------------------
+
 
 class CloudSyncManager:
     """Background sync engine.
@@ -95,22 +98,22 @@ class CloudSyncManager:
         self,
         db: Any = None,
         event_bus: Any = None,
-        config: Optional[SyncConfig] = None,
+        config: SyncConfig | None = None,
     ) -> None:
         self._db = db
         self._bus = event_bus
         self._config = config or SyncConfig()
         self._lock = threading.Lock()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._session = requests.Session()
 
         # Counters
         self._jobs_synced = 0
         self._events_synced = 0
-        self._last_sync_at: Optional[float] = None
+        self._last_sync_at: float | None = None
         self._last_status = "never"
-        self._errors: List[str] = []
+        self._errors: list[str] = []
 
     @property
     def enabled(self) -> bool:
@@ -160,7 +163,7 @@ class CloudSyncManager:
                 errors=list(self._errors[-10:]),
             )
 
-    def sync_now(self) -> Dict[str, Any]:
+    def sync_now(self) -> dict[str, Any]:
         """Run a single sync cycle immediately."""
         return self._sync_cycle()
 
@@ -175,12 +178,12 @@ class CloudSyncManager:
                 logger.exception("Sync cycle error")
             self._stop_event.wait(timeout=self._config.sync_interval_seconds)
 
-    def _sync_cycle(self) -> Dict[str, Any]:
+    def _sync_cycle(self) -> dict[str, Any]:
         """Execute one push/pull sync cycle."""
         if not self.enabled or self._db is None:
             return {"error": "Sync not configured"}
 
-        result: Dict[str, Any] = {"jobs_pushed": 0, "events_pushed": 0}
+        result: dict[str, Any] = {"jobs_pushed": 0, "events_pushed": 0}
 
         # Get sync cursor (last sync timestamp)
         cursor_str = self._db.get_setting("sync_cursor", "0")
@@ -203,7 +206,8 @@ class CloudSyncManager:
                 if events:
                     self._push("events", events)
                     self._db.mark_synced(
-                        "event", [str(e["id"]) for e in events],
+                        "event",
+                        [str(e["id"]) for e in events],
                     )
                     result["events_pushed"] = len(events)
                     with self._lock:
@@ -224,6 +228,7 @@ class CloudSyncManager:
 
             if self._bus is not None:
                 from kiln.events import EventType
+
                 self._bus.publish(
                     EventType.SYNC_COMPLETED,
                     data=result,
@@ -236,7 +241,8 @@ class CloudSyncManager:
             raw_msg = str(exc)[:300]
             # Redact anything that looks like a URL with credentials
             import re
-            safe_msg = re.sub(r'https?://[^@\s]*@', 'https://[CREDENTIALS]@', raw_msg)
+
+            safe_msg = re.sub(r"https?://[^@\s]*@", "https://[CREDENTIALS]@", raw_msg)
             safe_msg = f"{error_type}: {safe_msg}"
             with self._lock:
                 self._last_status = f"error: {safe_msg}"
@@ -246,6 +252,7 @@ class CloudSyncManager:
 
             if self._bus is not None:
                 from kiln.events import EventType
+
                 self._bus.publish(
                     EventType.SYNC_FAILED,
                     data={"error": safe_msg},
@@ -254,14 +261,16 @@ class CloudSyncManager:
 
         return result
 
-    def _push(self, entity_type: str, records: List[Dict[str, Any]]) -> None:
+    def _push(self, entity_type: str, records: list[dict[str, Any]]) -> None:
         """Push records to the cloud endpoint."""
         url = f"{self._config.cloud_url.rstrip('/')}/api/sync"
-        payload = json.dumps({
-            "type": entity_type,
-            "records": records,
-            "timestamp": time.time(),
-        }).encode()
+        payload = json.dumps(
+            {
+                "type": entity_type,
+                "records": records,
+                "timestamp": time.time(),
+            }
+        ).encode()
 
         headers = {
             "Content-Type": "application/json",
@@ -273,6 +282,9 @@ class CloudSyncManager:
         headers["X-Kiln-Signature"] = f"sha256={sig}"
 
         response = self._session.post(
-            url, data=payload, headers=headers, timeout=30,
+            url,
+            data=payload,
+            headers=headers,
+            timeout=30,
         )
         response.raise_for_status()

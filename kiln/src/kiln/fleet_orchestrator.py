@@ -30,7 +30,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class OrchestratorError(Exception):
     :param cause: Original exception that triggered this error, if any.
     """
 
-    def __init__(self, message: str, *, cause: Optional[Exception] = None) -> None:
+    def __init__(self, message: str, *, cause: Exception | None = None) -> None:
         super().__init__(message)
         self.cause = cause
 
@@ -116,21 +116,21 @@ class OrchestratedJob:
 
     job_id: str
     file_path: str
-    printer_name: Optional[str] = None
+    printer_name: str | None = None
     status: OrchestratedJobStatus = OrchestratedJobStatus.QUEUED
     submitted_at: float = field(default_factory=time.time)
-    started_at: Optional[float] = None
-    completed_at: Optional[float] = None
+    started_at: float | None = None
+    completed_at: float | None = None
     submitted_by: str = "unknown"
     priority: int = 0
-    error: Optional[str] = None
+    error: str | None = None
     attempt: int = 0
     max_attempts: int = 3
-    preferred_printer: Optional[str] = None
-    failed_printers: Set[str] = field(default_factory=set)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    preferred_printer: str | None = None
+    failed_printers: set[str] = field(default_factory=set)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary.
 
         Enum values are converted to strings and sets to sorted lists.
@@ -154,7 +154,7 @@ class OrchestratedJob:
         }
 
     @property
-    def elapsed_seconds(self) -> Optional[float]:
+    def elapsed_seconds(self) -> float | None:
         """Seconds since the job started printing, or None if not started."""
         if self.started_at is None:
             return None
@@ -187,10 +187,10 @@ class AssignmentResult:
     """
 
     success: bool
-    printer_name: Optional[str] = None
+    printer_name: str | None = None
     message: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "success": self.success,
@@ -228,7 +228,7 @@ class FleetUtilization:
     cancelled_jobs: int = 0
     utilization_pct: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return asdict(self)
 
@@ -251,8 +251,8 @@ class PrinterSelector:
     def select(
         self,
         job: OrchestratedJob,
-        idle_printers: List[str],
-    ) -> Optional[str]:
+        idle_printers: list[str],
+    ) -> str | None:
         """Choose a printer for *job* from the list of idle printers.
 
         :param job: The job that needs a printer.
@@ -260,10 +260,7 @@ class PrinterSelector:
         :returns: Printer name, or ``None`` if no suitable printer is available.
         """
         # Filter out printers that already failed this job.
-        candidates = [
-            p for p in idle_printers
-            if p not in job.failed_printers
-        ]
+        candidates = [p for p in idle_printers if p not in job.failed_printers]
         if not candidates:
             return None
 
@@ -304,16 +301,16 @@ class FleetOrchestrator:
     def __init__(
         self,
         *,
-        registry: Optional[Any] = None,
-        event_bus: Optional[Any] = None,
-        selector: Optional[PrinterSelector] = None,
+        registry: Any | None = None,
+        event_bus: Any | None = None,
+        selector: PrinterSelector | None = None,
     ) -> None:
         self._registry = registry
         self._event_bus = event_bus
         self._selector = selector or PrinterSelector()
-        self._jobs: Dict[str, OrchestratedJob] = {}
+        self._jobs: dict[str, OrchestratedJob] = {}
         self._lock = threading.Lock()
-        self._printer_jobs: Dict[str, str] = {}  # printer_name -> job_id
+        self._printer_jobs: dict[str, str] = {}  # printer_name -> job_id
 
     # ------------------------------------------------------------------
     # Lazy accessors for kiln subsystems
@@ -328,7 +325,7 @@ class FleetOrchestrator:
             logger.debug("Fleet orchestrator created default PrinterRegistry")
         return self._registry
 
-    def _get_event_bus(self) -> Optional[Any]:
+    def _get_event_bus(self) -> Any | None:
         """Lazily resolve the event bus (returns None if unavailable)."""
         if self._event_bus is None:
             try:
@@ -341,7 +338,7 @@ class FleetOrchestrator:
                 return None
         return self._event_bus
 
-    def _publish_event(self, event_type_name: str, data: Dict[str, Any]) -> None:
+    def _publish_event(self, event_type_name: str, data: dict[str, Any]) -> None:
         """Publish an event to the bus if available.
 
         :param event_type_name: String name of the :class:`EventType` member
@@ -355,15 +352,15 @@ class FleetOrchestrator:
             from kiln.events import Event, EventType
 
             event_type = EventType[event_type_name]
-            bus.publish(Event(
-                type=event_type,
-                data=data,
-                source="fleet_orchestrator",
-            ))
-        except (KeyError, Exception) as exc:
-            logger.debug(
-                "Failed to publish event %s: %s", event_type_name, exc
+            bus.publish(
+                Event(
+                    type=event_type,
+                    data=data,
+                    source="fleet_orchestrator",
+                )
             )
+        except (KeyError, Exception) as exc:
+            logger.debug("Failed to publish event %s: %s", event_type_name, exc)
 
     # ------------------------------------------------------------------
     # Job submission
@@ -375,9 +372,9 @@ class FleetOrchestrator:
         *,
         submitted_by: str = "unknown",
         priority: int = 0,
-        preferred_printer: Optional[str] = None,
+        preferred_printer: str | None = None,
         max_attempts: int = 3,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """Submit a print job to the fleet orchestrator.
 
@@ -413,13 +410,19 @@ class FleetOrchestrator:
 
         logger.info(
             "Submitted job %s: file=%s, submitted_by=%s, priority=%d",
-            job_id, file_path, submitted_by, priority,
+            job_id,
+            file_path,
+            submitted_by,
+            priority,
         )
-        self._publish_event("JOB_SUBMITTED", {
-            "job_id": job_id,
-            "file_path": file_path,
-            "submitted_by": submitted_by,
-        })
+        self._publish_event(
+            "JOB_SUBMITTED",
+            {
+                "job_id": job_id,
+                "file_path": file_path,
+                "submitted_by": submitted_by,
+            },
+        )
         return job_id
 
     def submit_and_assign(
@@ -428,9 +431,9 @@ class FleetOrchestrator:
         *,
         submitted_by: str = "unknown",
         priority: int = 0,
-        preferred_printer: Optional[str] = None,
+        preferred_printer: str | None = None,
         max_attempts: int = 3,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> AssignmentResult:
         """Submit a job and immediately attempt to assign it to a printer.
 
@@ -477,19 +480,14 @@ class FleetOrchestrator:
             if job.status != OrchestratedJobStatus.QUEUED:
                 return AssignmentResult(
                     success=False,
-                    message=(
-                        f"Job {job_id} is {job.status.value}, "
-                        f"only QUEUED jobs can be assigned"
-                    ),
+                    message=(f"Job {job_id} is {job.status.value}, only QUEUED jobs can be assigned"),
                 )
 
             registry = self._get_registry()
             try:
                 idle_names = registry.get_idle_printers()
             except Exception as exc:
-                logger.warning(
-                    "Failed to query idle printers: %s", exc
-                )
+                logger.warning("Failed to query idle printers: %s", exc)
                 return AssignmentResult(
                     success=False,
                     message=f"Failed to query printer fleet: {exc}",
@@ -510,20 +508,26 @@ class FleetOrchestrator:
 
         logger.info(
             "Assigned job %s to printer %r (attempt %d/%d)",
-            job_id, printer_name, job.attempt, job.max_attempts,
+            job_id,
+            printer_name,
+            job.attempt,
+            job.max_attempts,
         )
-        self._publish_event("JOB_STARTED", {
-            "job_id": job_id,
-            "printer_name": printer_name,
-            "file_path": job.file_path,
-        })
+        self._publish_event(
+            "JOB_STARTED",
+            {
+                "job_id": job_id,
+                "printer_name": printer_name,
+                "file_path": job.file_path,
+            },
+        )
         return AssignmentResult(
             success=True,
             printer_name=printer_name,
             message=f"Assigned to {printer_name}",
         )
 
-    def assign_jobs(self) -> List[AssignmentResult]:
+    def assign_jobs(self) -> list[AssignmentResult]:
         """Attempt to assign all queued jobs to available printers.
 
         Jobs are processed in priority order (highest first), then by
@@ -532,26 +536,25 @@ class FleetOrchestrator:
         :returns: List of :class:`AssignmentResult` for each queued job.
         """
         with self._lock:
-            queued = [
-                j for j in self._jobs.values()
-                if j.status == OrchestratedJobStatus.QUEUED
-            ]
+            queued = [j for j in self._jobs.values() if j.status == OrchestratedJobStatus.QUEUED]
 
         # Sort: highest priority first, then oldest first.
         queued.sort(key=lambda j: (-j.priority, j.submitted_at))
 
-        results: List[AssignmentResult] = []
+        results: list[AssignmentResult] = []
         for job in queued:
             result = self.assign_job(job.job_id)
             results.append(result)
             # Stop if we ran out of printers.
             if not result.success and "No suitable" in result.message:
                 # Remaining jobs would also fail; skip them.
-                for remaining in queued[len(results):]:
-                    results.append(AssignmentResult(
-                        success=False,
-                        message="No idle printers remaining",
-                    ))
+                for _remaining in queued[len(results) :]:
+                    results.append(
+                        AssignmentResult(
+                            success=False,
+                            message="No idle printers remaining",
+                        )
+                    )
                 break
 
         return results
@@ -581,11 +584,14 @@ class FleetOrchestrator:
             job.started_at = time.time()
 
         logger.info("Job %s is now PRINTING on %s", job_id, job.printer_name)
-        self._publish_event("PRINT_STARTED", {
-            "job_id": job_id,
-            "printer_name": job.printer_name,
-            "file_path": job.file_path,
-        })
+        self._publish_event(
+            "PRINT_STARTED",
+            {
+                "job_id": job_id,
+                "printer_name": job.printer_name,
+                "file_path": job.file_path,
+            },
+        )
 
     def mark_completed(self, job_id: str) -> None:
         """Transition a job to ``COMPLETED``.
@@ -599,25 +605,26 @@ class FleetOrchestrator:
         with self._lock:
             job = self._get_job(job_id)
             if job.is_terminal:
-                raise OrchestratorError(
-                    f"Job {job_id} is already {job.status.value} and cannot "
-                    f"be marked completed."
-                )
+                raise OrchestratorError(f"Job {job_id} is already {job.status.value} and cannot be marked completed.")
             job.status = OrchestratedJobStatus.COMPLETED
             job.completed_at = time.time()
             self._release_printer(job)
 
         logger.info(
             "Job %s COMPLETED on %s (%.1fs elapsed)",
-            job_id, job.printer_name,
+            job_id,
+            job.printer_name,
             job.elapsed_seconds or 0,
         )
-        self._publish_event("PRINT_COMPLETED", {
-            "job_id": job_id,
-            "printer_name": job.printer_name,
-            "file_path": job.file_path,
-            "elapsed_seconds": job.elapsed_seconds,
-        })
+        self._publish_event(
+            "PRINT_COMPLETED",
+            {
+                "job_id": job_id,
+                "printer_name": job.printer_name,
+                "file_path": job.file_path,
+                "elapsed_seconds": job.elapsed_seconds,
+            },
+        )
 
     def mark_failed(self, job_id: str, error: str) -> None:
         """Mark a job as failed and attempt reassignment if retries remain.
@@ -635,10 +642,7 @@ class FleetOrchestrator:
         with self._lock:
             job = self._get_job(job_id)
             if job.is_terminal:
-                raise OrchestratorError(
-                    f"Job {job_id} is already {job.status.value} and cannot "
-                    f"be marked failed."
-                )
+                raise OrchestratorError(f"Job {job_id} is already {job.status.value} and cannot be marked failed.")
 
             failed_printer = job.printer_name
 
@@ -654,16 +658,23 @@ class FleetOrchestrator:
                 job.error = None
                 logger.warning(
                     "Job %s failed on %s (attempt %d/%d): %s — re-queuing",
-                    job_id, failed_printer, job.attempt, job.max_attempts, error,
+                    job_id,
+                    failed_printer,
+                    job.attempt,
+                    job.max_attempts,
+                    error,
                 )
-                self._publish_event("JOB_FAILED", {
-                    "job_id": job_id,
-                    "printer_name": failed_printer,
-                    "error": error,
-                    "will_retry": True,
-                    "attempt": job.attempt,
-                    "max_attempts": job.max_attempts,
-                })
+                self._publish_event(
+                    "JOB_FAILED",
+                    {
+                        "job_id": job_id,
+                        "printer_name": failed_printer,
+                        "error": error,
+                        "will_retry": True,
+                        "attempt": job.attempt,
+                        "max_attempts": job.max_attempts,
+                    },
+                )
                 return
 
             # All attempts exhausted.
@@ -673,22 +684,27 @@ class FleetOrchestrator:
 
         logger.error(
             "Job %s permanently FAILED after %d attempts: %s",
-            job_id, job.attempt, error,
+            job_id,
+            job.attempt,
+            error,
         )
-        self._publish_event("JOB_FAILED", {
-            "job_id": job_id,
-            "printer_name": failed_printer,
-            "error": error,
-            "will_retry": False,
-            "attempt": job.attempt,
-            "max_attempts": job.max_attempts,
-        })
+        self._publish_event(
+            "JOB_FAILED",
+            {
+                "job_id": job_id,
+                "printer_name": failed_printer,
+                "error": error,
+                "will_retry": False,
+                "attempt": job.attempt,
+                "max_attempts": job.max_attempts,
+            },
+        )
 
     # ------------------------------------------------------------------
     # Job status queries
     # ------------------------------------------------------------------
 
-    def get_job_status(self, job_id: str) -> Dict[str, Any]:
+    def get_job_status(self, job_id: str) -> dict[str, Any]:
         """Return full status for a tracked job.
 
         :param job_id: Job tracking ID.
@@ -706,10 +722,10 @@ class FleetOrchestrator:
     def list_jobs(
         self,
         *,
-        status: Optional[OrchestratedJobStatus] = None,
-        printer_name: Optional[str] = None,
+        status: OrchestratedJobStatus | None = None,
+        printer_name: str | None = None,
         limit: int = 100,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return summaries of tracked jobs, optionally filtered.
 
         :param status: Filter to jobs in this state (None = all states).
@@ -744,15 +760,17 @@ class FleetOrchestrator:
             for j in jobs
         ]
 
-    def get_active_jobs(self) -> List[Dict[str, Any]]:
+    def get_active_jobs(self) -> list[dict[str, Any]]:
         """Return all jobs currently assigned or printing.
 
         :returns: List of job detail dicts for non-terminal, non-queued jobs.
         """
         with self._lock:
             active = [
-                j for j in self._jobs.values()
-                if j.status in (
+                j
+                for j in self._jobs.values()
+                if j.status
+                in (
                     OrchestratedJobStatus.ASSIGNED,
                     OrchestratedJobStatus.PRINTING,
                 )
@@ -799,7 +817,8 @@ class FleetOrchestrator:
             if job.is_terminal:
                 logger.debug(
                     "Cannot cancel job %s — already %s",
-                    job_id, job.status.value,
+                    job_id,
+                    job.status.value,
                 )
                 return False
 
@@ -807,9 +826,9 @@ class FleetOrchestrator:
                 # Cannot cancel a printing job from the orchestrator alone;
                 # the caller must also stop the printer.
                 logger.warning(
-                    "Cancelling PRINTING job %s on %s — caller must also "
-                    "stop the printer",
-                    job_id, job.printer_name,
+                    "Cancelling PRINTING job %s on %s — caller must also stop the printer",
+                    job_id,
+                    job.printer_name,
                 )
 
             job.status = OrchestratedJobStatus.CANCELLED
@@ -818,11 +837,14 @@ class FleetOrchestrator:
             self._release_printer(job)
 
         logger.info("Job %s CANCELLED: %s", job_id, reason)
-        self._publish_event("JOB_CANCELLED", {
-            "job_id": job_id,
-            "printer_name": job.printer_name,
-            "reason": reason,
-        })
+        self._publish_event(
+            "JOB_CANCELLED",
+            {
+                "job_id": job_id,
+                "printer_name": job.printer_name,
+                "reason": reason,
+            },
+        )
         return True
 
     # ------------------------------------------------------------------
@@ -888,13 +910,11 @@ class FleetOrchestrator:
         # Utilization percentage.
         operable = util.total_printers - util.offline_printers
         if operable > 0:
-            util.utilization_pct = round(
-                (util.busy_printers / operable) * 100, 1
-            )
+            util.utilization_pct = round((util.busy_printers / operable) * 100, 1)
 
         return util
 
-    def get_printer_job(self, printer_name: str) -> Optional[Dict[str, Any]]:
+    def get_printer_job(self, printer_name: str) -> dict[str, Any] | None:
         """Return the currently active job for a specific printer, if any.
 
         :param printer_name: Name of the printer to query.
@@ -922,10 +942,7 @@ class FleetOrchestrator:
         :returns: Number of jobs cancelled.
         """
         with self._lock:
-            queued_ids = [
-                j.job_id for j in self._jobs.values()
-                if j.status == OrchestratedJobStatus.QUEUED
-            ]
+            queued_ids = [j.job_id for j in self._jobs.values() if j.status == OrchestratedJobStatus.QUEUED]
 
         count = 0
         for job_id in queued_ids:
@@ -943,10 +960,7 @@ class FleetOrchestrator:
         cutoff = time.time() - older_than_seconds
         with self._lock:
             to_remove = [
-                job_id
-                for job_id, job in self._jobs.items()
-                if job.is_terminal
-                and (job.completed_at or 0) <= cutoff
+                job_id for job_id, job in self._jobs.items() if job.is_terminal and (job.completed_at or 0) <= cutoff
             ]
             for job_id in to_remove:
                 del self._jobs[job_id]
@@ -983,18 +997,17 @@ class FleetOrchestrator:
     def queued_count(self) -> int:
         """Number of jobs in ``QUEUED`` state."""
         with self._lock:
-            return sum(
-                1 for j in self._jobs.values()
-                if j.status == OrchestratedJobStatus.QUEUED
-            )
+            return sum(1 for j in self._jobs.values() if j.status == OrchestratedJobStatus.QUEUED)
 
     @property
     def active_count(self) -> int:
         """Number of jobs in ``ASSIGNED`` or ``PRINTING`` state."""
         with self._lock:
             return sum(
-                1 for j in self._jobs.values()
-                if j.status in (
+                1
+                for j in self._jobs.values()
+                if j.status
+                in (
                     OrchestratedJobStatus.ASSIGNED,
                     OrchestratedJobStatus.PRINTING,
                 )
@@ -1005,15 +1018,15 @@ class FleetOrchestrator:
 # Lazy singleton
 # ---------------------------------------------------------------------------
 
-_orchestrator_instance: Optional[FleetOrchestrator] = None
+_orchestrator_instance: FleetOrchestrator | None = None
 _orchestrator_lock = threading.Lock()
 
 
 def get_fleet_orchestrator(
     *,
-    registry: Optional[Any] = None,
-    event_bus: Optional[Any] = None,
-    selector: Optional[PrinterSelector] = None,
+    registry: Any | None = None,
+    event_bus: Any | None = None,
+    selector: PrinterSelector | None = None,
 ) -> FleetOrchestrator:
     """Return the global :class:`FleetOrchestrator` singleton.
 

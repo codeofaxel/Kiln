@@ -14,7 +14,8 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -56,6 +57,7 @@ _RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({502, 503, 504})
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
     """Walk nested dicts safely, returning *default* on any miss or type error."""
     current = data
@@ -66,7 +68,7 @@ def _safe_get(data: Any, *keys: str, default: Any = None) -> Any:
     return current
 
 
-def _map_flags_to_status(flags: Dict[str, Any]) -> PrinterStatus:
+def _map_flags_to_status(flags: dict[str, Any]) -> PrinterStatus:
     """Translate OctoPrint state-flag booleans to a :class:`PrinterStatus`.
 
     OctoPrint exposes a ``flags`` dictionary on ``GET /api/printer`` with keys
@@ -89,9 +91,9 @@ def _map_flags_to_status(flags: Dict[str, Any]) -> PrinterStatus:
     return PrinterStatus.UNKNOWN
 
 
-def _flatten_files(entries: List[Dict[str, Any]], prefix: str = "") -> List[Dict[str, Any]]:
+def _flatten_files(entries: list[dict[str, Any]], prefix: str = "") -> list[dict[str, Any]]:
     """Recursively flatten OctoPrint's nested file/folder listing."""
-    flat: List[Dict[str, Any]] = []
+    flat: list[dict[str, Any]] = []
     for entry in entries:
         if entry.get("type") == "folder":
             children = entry.get("children", [])
@@ -136,20 +138,20 @@ class OctoPrintSockJSMonitor:
         host: str,
         api_key: str,
         *,
-        on_state_update: Optional[Callable[[Dict[str, Any]], None]] = None,
+        on_state_update: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._host: str = host.rstrip("/")
         self._api_key: str = api_key
         self._on_state_update = on_state_update
 
         # Shared state cache -- written by the WS thread, read by the adapter.
-        self._cache: Dict[str, Any] = {}
+        self._cache: dict[str, Any] = {}
         self._cache_lock: threading.Lock = threading.Lock()
         self._connected: bool = False
 
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event: threading.Event = threading.Event()
-        self._ws: Optional[Any] = None  # websocket.WebSocketApp instance
+        self._ws: Any | None = None  # websocket.WebSocketApp instance
 
     # -- public API --------------------------------------------------------
 
@@ -158,7 +160,7 @@ class OctoPrintSockJSMonitor:
         """Whether the WebSocket connection is currently alive."""
         return self._connected
 
-    def get_cached_state(self) -> Optional[Dict[str, Any]]:
+    def get_cached_state(self) -> dict[str, Any] | None:
         """Return the latest cached ``current`` payload, or ``None``."""
         with self._cache_lock:
             return dict(self._cache) if self._cache else None
@@ -208,9 +210,9 @@ class OctoPrintSockJSMonitor:
         """Convert the HTTP base URL to a SockJS WebSocket URL."""
         url = self._host
         if url.startswith("https://"):
-            url = "wss://" + url[len("https://"):]
+            url = "wss://" + url[len("https://") :]
         elif url.startswith("http://"):
-            url = "ws://" + url[len("http://"):]
+            url = "ws://" + url[len("http://") :]
         return f"{url}/sockjs/websocket"
 
     def _run_loop(self) -> None:
@@ -229,7 +231,8 @@ class OctoPrintSockJSMonitor:
                 break
 
             logger.debug(
-                "OctoPrint SockJS reconnecting in %.1fs", backoff,
+                "OctoPrint SockJS reconnecting in %.1fs",
+                backoff,
             )
             self._stop_event.wait(timeout=backoff)
             backoff = min(backoff * 2, _MAX_RECONNECT_BACKOFF)
@@ -291,6 +294,7 @@ class OctoPrintSockJSMonitor:
 # Adapter
 # ---------------------------------------------------------------------------
 
+
 class OctoPrintAdapter(PrinterAdapter):
     """Concrete :class:`PrinterAdapter` backed by the OctoPrint REST API.
 
@@ -336,6 +340,7 @@ class OctoPrintAdapter(PrinterAdapter):
         if not verify_ssl:
             # Suppress noisy InsecureRequestWarning for self-signed certs
             import urllib3
+
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         # Configure HTTP proxy from environment variables.
@@ -348,7 +353,7 @@ class OctoPrintAdapter(PrinterAdapter):
             }
 
         # Push monitoring (SockJS) -- disabled by default.
-        self._sockjs_monitor: Optional[OctoPrintSockJSMonitor] = None
+        self._sockjs_monitor: OctoPrintSockJSMonitor | None = None
         if _PUSH_MONITORING_ENABLED:
             self.enable_push_monitoring()
 
@@ -387,7 +392,8 @@ class OctoPrintAdapter(PrinterAdapter):
         if self._sockjs_monitor is not None:
             return
         self._sockjs_monitor = OctoPrintSockJSMonitor(
-            self._host, self._api_key,
+            self._host,
+            self._api_key,
         )
         self._sockjs_monitor.start()
 
@@ -410,10 +416,10 @@ class OctoPrintAdapter(PrinterAdapter):
         method: str,
         path: str,
         *,
-        json: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        files: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
     ) -> requests.Response:
         """Execute an HTTP request with exponential-backoff retry logic.
 
@@ -424,7 +430,7 @@ class OctoPrintAdapter(PrinterAdapter):
                 timeouts, or when all retry attempts are exhausted.
         """
         url = self._url(path)
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
 
         for attempt in range(self._retries):
             try:
@@ -447,8 +453,7 @@ class OctoPrintAdapter(PrinterAdapter):
                     if len(response.text) > 300:
                         body += " (truncated)"
                     raise PrinterError(
-                        f"OctoPrint returned HTTP {response.status_code} "
-                        f"for {method} {path}: {body}",
+                        f"OctoPrint returned HTTP {response.status_code} for {method} {path}: {body}",
                     )
 
                 # Retryable HTTP status -- fall through to backoff.
@@ -467,8 +472,7 @@ class OctoPrintAdapter(PrinterAdapter):
                 )
             except ReqConnectionError as exc:
                 last_exc = PrinterError(
-                    f"Could not connect to OctoPrint at {self._host} "
-                    f"(attempt {attempt + 1}/{self._retries})",
+                    f"Could not connect to OctoPrint at {self._host} (attempt {attempt + 1}/{self._retries})",
                     cause=exc,
                 )
             except RequestException as exc:
@@ -495,7 +499,7 @@ class OctoPrintAdapter(PrinterAdapter):
         assert last_exc is not None
         raise last_exc
 
-    def _get_json(self, path: str, **kwargs: Any) -> Dict[str, Any]:
+    def _get_json(self, path: str, **kwargs: Any) -> dict[str, Any]:
         """Shorthand: GET *path* and return the parsed JSON body.
 
         Raises :class:`PrinterError` if the response body is not valid JSON.
@@ -513,9 +517,9 @@ class OctoPrintAdapter(PrinterAdapter):
         self,
         path: str,
         *,
-        json: Optional[Dict[str, Any]] = None,
-        files: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        json: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
     ) -> requests.Response:
         """Shorthand for POST requests."""
         return self._request("POST", path, json=json, files=files, data=data)
@@ -578,7 +582,7 @@ class OctoPrintAdapter(PrinterAdapter):
             chamber_temp_target=chamber.get("target") if isinstance(chamber, dict) else None,
         )
 
-    def _state_from_push_cache(self) -> Optional[PrinterState]:
+    def _state_from_push_cache(self) -> PrinterState | None:
         """Build a :class:`PrinterState` from the SockJS push cache.
 
         Returns ``None`` if push monitoring is inactive, disconnected,
@@ -598,7 +602,7 @@ class OctoPrintAdapter(PrinterAdapter):
         #   temps: [{tool0: {actual, target}, bed: {actual, target}, ...}]
         #   state: {flags: {...}, text: "..."}
         temps_list = cached.get("temps", [])
-        temps: Dict[str, Any] = {}
+        temps: dict[str, Any] = {}
         if isinstance(temps_list, list) and temps_list:
             temps = temps_list[-1] if isinstance(temps_list[-1], dict) else {}
 
@@ -646,7 +650,7 @@ class OctoPrintAdapter(PrinterAdapter):
             print_time_left_seconds=int(print_time_left) if print_time_left is not None else None,
         )
 
-    def list_files(self) -> List[PrinterFile]:
+    def list_files(self) -> list[PrinterFile]:
         """Return a list of files stored on OctoPrint's local storage.
 
         Calls ``GET /api/files/local?recursive=true`` and flattens the
@@ -666,7 +670,7 @@ class OctoPrintAdapter(PrinterAdapter):
 
         flat = _flatten_files(raw_files)
 
-        results: List[PrinterFile] = []
+        results: list[PrinterFile] = []
         for entry in flat:
             results.append(
                 PrinterFile(
@@ -812,7 +816,7 @@ class OctoPrintAdapter(PrinterAdapter):
         hotend_temp_c: float,
         bed_temp_c: float,
         file_name: str,
-        layer_number: Optional[int] = None,
+        layer_number: int | None = None,
         fan_speed_pct: float = 100.0,
         flow_rate_pct: float = 100.0,
         prime_length_mm: float = 30.0,
@@ -848,42 +852,34 @@ class OctoPrintAdapter(PrinterAdapter):
         """
         # -- parameter validation ------------------------------------------
         if z_height_mm <= 0:
-            raise PrinterError(
-                f"z_height_mm must be > 0, got {z_height_mm}."
-            )
+            raise PrinterError(f"z_height_mm must be > 0, got {z_height_mm}.")
         if hotend_temp_c <= 0:
-            raise PrinterError(
-                f"Hotend temperature must be > 0°C, got {hotend_temp_c}°C."
-            )
+            raise PrinterError(f"Hotend temperature must be > 0°C, got {hotend_temp_c}°C.")
         self._validate_temp(hotend_temp_c, 300.0, "Hotend")
         self._validate_temp(bed_temp_c, 130.0, "Bed")
         if prime_length_mm < 0:
-            raise PrinterError(
-                f"prime_length_mm must be >= 0, got {prime_length_mm}."
-            )
+            raise PrinterError(f"prime_length_mm must be >= 0, got {prime_length_mm}.")
         if z_clearance_mm <= 0 or z_clearance_mm > 10:
-            raise PrinterError(
-                f"z_clearance_mm must be > 0 and <= 10, got {z_clearance_mm}."
-            )
+            raise PrinterError(f"z_clearance_mm must be > 0 and <= 10, got {z_clearance_mm}.")
 
         # -- build G-code sequence -----------------------------------------
         fan_pwm = int(fan_speed_pct * 2.55)
         commands = [
-            "M413 S0",                          # Disable Marlin power-loss recovery
-            "G28 X Y",                           # Home X/Y only (NEVER Z)
-            f"M140 S{bed_temp_c}",               # Start heating bed (non-blocking)
-            f"M104 S{hotend_temp_c}",            # Start heating hotend (non-blocking)
-            f"M190 S{bed_temp_c}",               # Wait for bed temp
-            f"M109 S{hotend_temp_c}",            # Wait for hotend temp
-            "G92 E0",                            # Reset extruder position
-            f"G92 Z{z_height_mm}",               # Set Z position without moving
-            "G91",                               # Relative positioning
-            f"G1 Z{z_clearance_mm} F300",        # Raise nozzle above part
-            "G90",                               # Absolute positioning
-            f"G1 E{prime_length_mm} F200",       # Prime nozzle
-            "G92 E0",                            # Reset extruder again
-            f"M106 S{fan_pwm}",                  # Set fan speed (0-255)
-            f"M221 S{int(flow_rate_pct)}",       # Set flow rate multiplier
+            "M413 S0",  # Disable Marlin power-loss recovery
+            "G28 X Y",  # Home X/Y only (NEVER Z)
+            f"M140 S{bed_temp_c}",  # Start heating bed (non-blocking)
+            f"M104 S{hotend_temp_c}",  # Start heating hotend (non-blocking)
+            f"M190 S{bed_temp_c}",  # Wait for bed temp
+            f"M109 S{hotend_temp_c}",  # Wait for hotend temp
+            "G92 E0",  # Reset extruder position
+            f"G92 Z{z_height_mm}",  # Set Z position without moving
+            "G91",  # Relative positioning
+            f"G1 Z{z_clearance_mm} F300",  # Raise nozzle above part
+            "G90",  # Absolute positioning
+            f"G1 E{prime_length_mm} F200",  # Prime nozzle
+            "G92 E0",  # Reset extruder again
+            f"M106 S{fan_pwm}",  # Set fan speed (0-255)
+            f"M221 S{int(flow_rate_pct)}",  # Set flow rate multiplier
         ]
 
         self.send_gcode(commands)
@@ -948,7 +944,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # PrinterAdapter -- G-code
     # ------------------------------------------------------------------
 
-    def send_gcode(self, commands: List[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> bool:
         """Send G-code commands to OctoPrint.
 
         Calls ``POST /api/printer/command`` with a JSON body containing
@@ -994,7 +990,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # PrinterAdapter -- webcam snapshot
     # ------------------------------------------------------------------
 
-    def get_snapshot(self) -> Optional[bytes]:
+    def get_snapshot(self) -> bytes | None:
         """Capture a webcam snapshot from OctoPrint.
 
         Attempts ``GET /webcam/?action=snapshot`` which is the standard
@@ -1022,8 +1018,7 @@ class OctoPrintAdapter(PrinterAdapter):
             raise
         except Timeout as exc:
             raise PrinterError(
-                "Webcam snapshot timed out after 10s. Check that the webcam "
-                "is connected and mjpg-streamer is running."
+                "Webcam snapshot timed out after 10s. Check that the webcam is connected and mjpg-streamer is running."
             ) from exc
         except ReqConnectionError as exc:
             raise PrinterError(
@@ -1031,19 +1026,15 @@ class OctoPrintAdapter(PrinterAdapter):
                 "webcam is configured in OctoPrint and the printer is online."
             ) from exc
         except RequestException as exc:
-            raise PrinterError(
-                f"Webcam snapshot failed: {exc}"
-            ) from exc
+            raise PrinterError(f"Webcam snapshot failed: {exc}") from exc
         except Exception as exc:
-            raise PrinterError(
-                f"Webcam snapshot failed unexpectedly: {exc}"
-            ) from exc
+            raise PrinterError(f"Webcam snapshot failed unexpectedly: {exc}") from exc
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- webcam streaming
     # ------------------------------------------------------------------
 
-    def get_stream_url(self) -> Optional[str]:
+    def get_stream_url(self) -> str | None:
         """Return the MJPEG stream URL for OctoPrint's webcam.
 
         The standard mjpg-streamer endpoint is
@@ -1053,7 +1044,7 @@ class OctoPrintAdapter(PrinterAdapter):
 
     # -- filament sensor (optional) ----------------------------------------
 
-    def get_filament_status(self) -> Optional[Dict[str, Any]]:
+    def get_filament_status(self) -> dict[str, Any] | None:
         """Query OctoPrint for filament sensor status via the Filament Manager plugin.
 
         Uses ``GET /api/plugin/filamentmanager`` to check whether filament
@@ -1065,9 +1056,7 @@ class OctoPrintAdapter(PrinterAdapter):
             # The plugin returns spool/selection info; if we get a response
             # at all, the plugin is installed.
             selections = payload.get("selections", [])
-            detected = len(selections) > 0 and any(
-                s.get("spool") is not None for s in selections
-            )
+            detected = len(selections) > 0 and any(s.get("spool") is not None for s in selections)
             return {
                 "detected": detected,
                 "sensor_enabled": True,
@@ -1083,7 +1072,7 @@ class OctoPrintAdapter(PrinterAdapter):
 
     # -- bed mesh (optional) -----------------------------------------------
 
-    def get_bed_mesh(self) -> Optional[Dict[str, Any]]:
+    def get_bed_mesh(self) -> dict[str, Any] | None:
         """Query OctoPrint for bed mesh data via the Bed Level Visualizer plugin.
 
         Uses ``GET /api/plugin/bedlevelvisualizer`` to retrieve probe data.
@@ -1103,7 +1092,7 @@ class OctoPrintAdapter(PrinterAdapter):
     # Firmware updates
     # ------------------------------------------------------------------
 
-    def get_firmware_status(self) -> Optional[FirmwareStatus]:
+    def get_firmware_status(self) -> FirmwareStatus | None:
         """Check OctoPrint's Software Update plugin for available updates.
 
         Calls ``GET /plugin/softwareupdate/check`` to get version info
@@ -1129,22 +1118,22 @@ class OctoPrintAdapter(PrinterAdapter):
                 continue
 
             display = info.get("displayName", comp_name)
-            current = info.get("information", {}).get(
-                "local", {}).get("value", "")
-            remote = info.get("information", {}).get(
-                "remote", {}).get("value", "")
+            current = info.get("information", {}).get("local", {}).get("value", "")
+            remote = info.get("information", {}).get("remote", {}).get("value", "")
             has_update = bool(info.get("updateAvailable", False))
 
             if has_update:
                 updates_available += 1
 
-            components.append(FirmwareComponent(
-                name=display,
-                current_version=str(current),
-                remote_version=str(remote) if remote else None,
-                update_available=has_update,
-                component_type="octoprint_plugin",
-            ))
+            components.append(
+                FirmwareComponent(
+                    name=display,
+                    current_version=str(current),
+                    remote_version=str(remote) if remote else None,
+                    update_available=has_update,
+                    component_type="octoprint_plugin",
+                )
+            )
 
         return FirmwareStatus(
             busy=busy,
@@ -1154,7 +1143,7 @@ class OctoPrintAdapter(PrinterAdapter):
 
     def update_firmware(
         self,
-        component: Optional[str] = None,
+        component: str | None = None,
     ) -> FirmwareUpdateResult:
         """Trigger an update via OctoPrint's Software Update plugin.
 
@@ -1169,16 +1158,12 @@ class OctoPrintAdapter(PrinterAdapter):
         try:
             state = self.get_state()
             if state.state == PrinterStatus.PRINTING:
-                raise PrinterError(
-                    "Cannot update firmware while printing. "
-                    "Wait for the current print to finish."
-                )
+                raise PrinterError("Cannot update firmware while printing. Wait for the current print to finish.")
         except PrinterError:
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Cannot verify printer is idle before firmware update: {exc}. "
-                "Aborting for safety.",
+                f"Cannot verify printer is idle before firmware update: {exc}. Aborting for safety.",
                 cause=exc,
             ) from exc
 
@@ -1189,12 +1174,8 @@ class OctoPrintAdapter(PrinterAdapter):
             # Get all components with updates available
             status = self.get_firmware_status()
             if status is None:
-                raise PrinterError(
-                    "Software Update plugin not available on this OctoPrint instance."
-                )
-            targets = [
-                c.name for c in status.components if c.update_available
-            ]
+                raise PrinterError("Software Update plugin not available on this OctoPrint instance.")
+            targets = [c.name for c in status.components if c.update_available]
             if not targets:
                 return FirmwareUpdateResult(
                     success=True,
@@ -1211,14 +1192,14 @@ class OctoPrintAdapter(PrinterAdapter):
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Firmware update failed: {exc}", cause=exc,
+                f"Firmware update failed: {exc}",
+                cause=exc,
             ) from exc
 
         target_str = component or "all components"
         return FirmwareUpdateResult(
             success=True,
-            message=f"Update started for {target_str}. "
-                    "OctoPrint may restart.",
+            message=f"Update started for {target_str}. OctoPrint may restart.",
             component=component,
         )
 

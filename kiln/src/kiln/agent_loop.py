@@ -37,7 +37,7 @@ import os
 import re
 import time
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 import requests
 from requests.exceptions import ConnectionError, ReadTimeout, RequestException
@@ -80,7 +80,6 @@ def _sanitize_tool_output(output: str, max_length: int = 50_000) -> str:
     return output
 
 
-
 def _is_privacy_mode_enabled() -> bool:
     """Check whether LLM privacy mode is enabled.
 
@@ -88,38 +87,34 @@ def _is_privacy_mode_enabled() -> bool:
     Enabled by default (returns True when the variable is unset).
     Set to 0, false, or no to disable.
     """
-    val = os.environ.get('KILN_LLM_PRIVACY_MODE', '1').strip().lower()
-    return val not in ('0', 'false', 'no')
+    val = os.environ.get("KILN_LLM_PRIVACY_MODE", "1").strip().lower()
+    return val not in ("0", "false", "no")
 
 
 # Pre-compiled patterns for sensitive data redaction
 _PRIVATE_IP_RE = re.compile(
-    r'\b(?:'
-    r'192\.168\.\d{1,3}\.\d{1,3}'
-    r'|10\.\d{1,3}\.\d{1,3}\.\d{1,3}'
-    r'|172\.(?:1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3}'
-    r')\b'
+    r"\b(?:"
+    r"192\.168\.\d{1,3}\.\d{1,3}"
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|172\.(?:1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3}"
+    r")\b"
 )
 
-_BEARER_RE = re.compile(r'(Bearer\s+)\S+', re.IGNORECASE)
-_AUTH_HEADER_RE = re.compile(
-    r'(Authorization\s*:\s*)\S+', re.IGNORECASE
-)
+_BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
+_AUTH_HEADER_RE = re.compile(r"(Authorization\s*:\s*)\S+", re.IGNORECASE)
 _API_KEY_KV_RE = re.compile(
-    r'((?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token|auth[_-]?token)'
-    r'\s*[:=]\s*)\S+',
+    r"((?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token|auth[_-]?token)"
+    r"\s*[:=]\s*)\S+",
     re.IGNORECASE,
 )
-_KILN_SECRET_RE = re.compile(
-    r'(KILN_\w*(?:KEY|SECRET)\s*=\s*)\S+', re.IGNORECASE
-)
+_KILN_SECRET_RE = re.compile(r"(KILN_\w*(?:KEY|SECRET)\s*=\s*)\S+", re.IGNORECASE)
 _HEX_TOKEN_RE = re.compile(
-    r'((?:key|token|secret|password|credential|api_key|apikey)'
+    r"((?:key|token|secret|password|credential|api_key|apikey)"
     r"\s*[:=]\s*[\"']?)([0-9a-fA-F]{32,})([\"']?)",
     re.IGNORECASE,
 )
 _BASE64_TOKEN_RE = re.compile(
-    r'((?:key|token|secret|password|credential|api_key|apikey)'
+    r"((?:key|token|secret|password|credential|api_key|apikey)"
     r"\s*[:=]\s*[\"']?)([A-Za-z0-9+/=]{20,})([\"']?)",
     re.IGNORECASE,
 )
@@ -142,23 +137,23 @@ def _redact_sensitive_data(text: str) -> str:
         return text
 
     # Bearer tokens and Authorization headers
-    text = _BEARER_RE.sub(r'\1[REDACTED]', text)
-    text = _AUTH_HEADER_RE.sub(r'\1[REDACTED]', text)
+    text = _BEARER_RE.sub(r"\1[REDACTED]", text)
+    text = _AUTH_HEADER_RE.sub(r"\1[REDACTED]", text)
 
     # Generic api_key / secret_key / access_token key-value pairs
-    text = _API_KEY_KV_RE.sub(r'\1[REDACTED]', text)
+    text = _API_KEY_KV_RE.sub(r"\1[REDACTED]", text)
 
     # KILN_*_KEY= and KILN_*_SECRET= env var values
-    text = _KILN_SECRET_RE.sub(r'\1[REDACTED]', text)
+    text = _KILN_SECRET_RE.sub(r"\1[REDACTED]", text)
 
     # Long hex tokens preceded by key-like labels (32+ hex chars)
-    text = _HEX_TOKEN_RE.sub(r'\1[REDACTED]\3', text)
+    text = _HEX_TOKEN_RE.sub(r"\1[REDACTED]\3", text)
 
     # Base64 tokens preceded by key-like labels (20+ base64 chars)
-    text = _BASE64_TOKEN_RE.sub(r'\1[REDACTED]\3', text)
+    text = _BASE64_TOKEN_RE.sub(r"\1[REDACTED]\3", text)
 
     # Private IP addresses (RFC 1918)
-    text = _PRIVATE_IP_RE.sub('[REDACTED]', text)
+    text = _PRIVATE_IP_RE.sub("[REDACTED]", text)
 
     return text
 
@@ -168,71 +163,75 @@ def _redact_sensitive_data(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 # Essential: safe read-only tools for basic interaction
-_ESSENTIAL_TOOLS = frozenset({
-    "printer_status",
-    "printer_files",
-    "preflight_check",
-    "validate_gcode",
-    "fleet_status",
-    "queue_summary",
-    "kiln_health",
-    "marketplace_info",
-    "search_models",
-    "search_all_models",
-    "model_details",
-    "model_files",
-    "list_materials",
-    "get_material",
-    "list_safety_profiles",
-    "get_safety_profile",
-    "list_print_pipelines",
-    "list_generation_providers",
-    "list_slicer_profiles_tool",
-    "get_slicer_profile_tool",
-    "get_printer_intelligence",
-})
+_ESSENTIAL_TOOLS = frozenset(
+    {
+        "printer_status",
+        "printer_files",
+        "preflight_check",
+        "validate_gcode",
+        "fleet_status",
+        "queue_summary",
+        "kiln_health",
+        "marketplace_info",
+        "search_models",
+        "search_all_models",
+        "model_details",
+        "model_files",
+        "list_materials",
+        "get_material",
+        "list_safety_profiles",
+        "get_safety_profile",
+        "list_print_pipelines",
+        "list_generation_providers",
+        "list_slicer_profiles_tool",
+        "get_slicer_profile_tool",
+        "get_printer_intelligence",
+    }
+)
 
 # Standard: essential + write operations, job management, downloads
-_STANDARD_TOOLS = _ESSENTIAL_TOOLS | frozenset({
-    "upload_file",
-    "delete_file",
-    "start_print",
-    "cancel_print",
-    "pause_print",
-    "resume_print",
-    "set_temperature",
-    "send_gcode",
-    "submit_job",
-    "job_status",
-    "cancel_job",
-    "job_history",
-    "recent_events",
-    "download_model",
-    "download_and_upload",
-    "browse_models",
-    "list_model_categories",
-    "slice_model",
-    "find_slicer_tool",
-    "slice_and_print",
-    "register_printer",
-    "discover_printers",
-    "set_material",
-    "check_material_match",
-    "estimate_cost",
-    "bed_level_status",
-    "trigger_bed_level",
-    "set_leveling_policy",
-    "validate_gcode_safe",
-    "print_history",
-    "printer_stats",
-    "annotate_print",
-    "get_material_recommendation",
-    "troubleshoot_printer",
-    "run_quick_print",
-    "run_calibrate",
-    "run_benchmark",
-    "generation_status",
-})
+_STANDARD_TOOLS = _ESSENTIAL_TOOLS | frozenset(
+    {
+        "upload_file",
+        "delete_file",
+        "start_print",
+        "cancel_print",
+        "pause_print",
+        "resume_print",
+        "set_temperature",
+        "send_gcode",
+        "submit_job",
+        "job_status",
+        "cancel_job",
+        "job_history",
+        "recent_events",
+        "download_model",
+        "download_and_upload",
+        "browse_models",
+        "list_model_categories",
+        "slice_model",
+        "find_slicer_tool",
+        "slice_and_print",
+        "register_printer",
+        "discover_printers",
+        "set_material",
+        "check_material_match",
+        "estimate_cost",
+        "bed_level_status",
+        "trigger_bed_level",
+        "set_leveling_policy",
+        "validate_gcode_safe",
+        "print_history",
+        "printer_stats",
+        "annotate_print",
+        "get_material_recommendation",
+        "troubleshoot_printer",
+        "run_quick_print",
+        "run_calibrate",
+        "run_benchmark",
+        "generation_status",
+    }
+)
 
 # Full: all tools -- includes billing, webhooks, fulfillment, advanced ops
 # (set dynamically from the MCP server's registered tools)
@@ -273,7 +272,7 @@ class AgentConfig:
     system_prompt: str | None = None
     timeout: int = 120
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict (redacts the API key)."""
         data = asdict(self)
         data["api_key"] = data["api_key"][:8] + "..." if data["api_key"] else ""
@@ -298,9 +297,9 @@ class AgentMessage:
     tool_call_id: str | None = None
     name: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to the OpenAI message format, omitting ``None`` fields."""
-        d: Dict[str, Any] = {"role": self.role}
+        d: dict[str, Any] = {"role": self.role}
         if self.content is not None:
             d["content"] = self.content
         if self.tool_calls is not None:
@@ -332,7 +331,7 @@ class AgentResult:
     model: str
     total_tokens: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "response": self.response,
             "messages": [m.to_dict() for m in self.messages],
@@ -348,16 +347,17 @@ class AgentResult:
 # ---------------------------------------------------------------------------
 
 # Cached tool data to avoid repeated async introspection
-_tool_cache: Dict[str, Any] | None = None
+_tool_cache: dict[str, Any] | None = None
 
 
 def _get_mcp_server():
     """Lazily import the MCP server to avoid circular imports."""
     from kiln.server import mcp  # noqa: F811
+
     return mcp
 
 
-def _ensure_tool_cache() -> Dict[str, Any]:
+def _ensure_tool_cache() -> dict[str, Any]:
     """Build and cache the mapping of tool names to schemas and callables.
 
     Returns a dict of ``{name: {"schema": openai_tool_dict, "name": str}}``.
@@ -380,14 +380,13 @@ def _ensure_tool_cache() -> Dict[str, Any]:
         # thread to run the coroutine to avoid "cannot be called from
         # a running event loop" errors.
         import concurrent.futures
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            tools = pool.submit(
-                asyncio.run, mcp_server.list_tools()
-            ).result(timeout=30)
+            tools = pool.submit(asyncio.run, mcp_server.list_tools()).result(timeout=30)
     else:
         tools = asyncio.run(mcp_server.list_tools())
 
-    cache: Dict[str, Any] = {}
+    cache: dict[str, Any] = {}
     for tool in tools:
         openai_schema = {
             "type": "function",
@@ -427,14 +426,10 @@ def get_all_tool_schemas(tier: str = "full") -> list[dict]:
         # "full" -- include everything
         return [entry["schema"] for entry in cache.values()]
 
-    return [
-        entry["schema"]
-        for name, entry in cache.items()
-        if name in allowed
-    ]
+    return [entry["schema"] for name, entry in cache.items() if name in allowed]
 
 
-def _execute_tool(name: str, arguments: Dict[str, Any]) -> str:
+def _execute_tool(name: str, arguments: dict[str, Any]) -> str:
     """Execute a single MCP tool by name and return a JSON string result.
 
     Args:
@@ -454,18 +449,13 @@ def _execute_tool(name: str, arguments: Dict[str, Any]) -> str:
             required_tier = _find_tier_for_tool(name)
             if required_tier is not None:
                 alternatives = _suggest_alternatives(name, tier)
-                alt_str = (
-                    f" Alternatives in your tier: {', '.join(alternatives)}"
-                    if alternatives
-                    else ""
+                alt_str = f" Alternatives in your tier: {', '.join(alternatives)}" if alternatives else ""
+                return json.dumps(
+                    {
+                        "error": (f"Tool '{name}' requires the '{required_tier}' tier (you are on '{tier}').{alt_str}"),
+                        "success": False,
+                    }
                 )
-                return json.dumps({
-                    "error": (
-                        f"Tool '{name}' requires the '{required_tier}' tier "
-                        f"(you are on '{tier}').{alt_str}"
-                    ),
-                    "success": False,
-                })
         return json.dumps({"error": f"Unknown tool: {name}", "success": False})
 
     mcp_server = _get_mcp_server()
@@ -479,10 +469,9 @@ def _execute_tool(name: str, arguments: Dict[str, Any]) -> str:
 
         if loop and loop.is_running():
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                result = pool.submit(
-                    asyncio.run, mcp_server.call_tool(name, arguments)
-                ).result(timeout=60)
+                result = pool.submit(asyncio.run, mcp_server.call_tool(name, arguments)).result(timeout=60)
         else:
             result = asyncio.run(mcp_server.call_tool(name, arguments))
 
@@ -497,11 +486,13 @@ def _execute_tool(name: str, arguments: Dict[str, Any]) -> str:
 
     except Exception as exc:
         logger.exception("Tool execution failed: %s", name)
-        return json.dumps({
-            "error": f"Tool execution error: {exc}",
-            "tool": name,
-            "success": False,
-        })
+        return json.dumps(
+            {
+                "error": f"Tool execution error: {exc}",
+                "tool": name,
+                "success": False,
+            }
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -533,7 +524,7 @@ def _call_llm(
         "Content-Type": "application/json",
     }
 
-    body: Dict[str, Any] = {
+    body: dict[str, Any] = {
         "model": config.model,
         "messages": messages,
         "temperature": config.temperature,
@@ -558,30 +549,25 @@ def _call_llm(
         )
     except ReadTimeout:
         raise AgentLoopError(
-            f"LLM API timed out after {config.timeout}s. "
-            "Try increasing config.timeout or using a faster model."
-        )
+            f"LLM API timed out after {config.timeout}s. Try increasing config.timeout or using a faster model."
+        ) from None
     except ConnectionError as exc:
-        raise AgentLoopError(f"Cannot connect to LLM API at {url}: {exc}")
+        raise AgentLoopError(f"Cannot connect to LLM API at {url}: {exc}") from exc
     except RequestException as exc:
-        raise AgentLoopError(f"LLM API request failed: {exc}")
+        raise AgentLoopError(f"LLM API request failed: {exc}") from exc
 
     if resp.status_code == 429:
         retry_after = resp.headers.get("Retry-After", "unknown")
-        raise AgentLoopError(
-            f"LLM API rate limited (429). Retry after {retry_after}s."
-        )
+        raise AgentLoopError(f"LLM API rate limited (429). Retry after {retry_after}s.")
 
     if resp.status_code != 200:
         error_body = resp.text[:500]
-        raise AgentLoopError(
-            f"LLM API returned HTTP {resp.status_code}: {error_body}"
-        )
+        raise AgentLoopError(f"LLM API returned HTTP {resp.status_code}: {error_body}")
 
     try:
         return resp.json()
     except ValueError:
-        raise AgentLoopError("LLM API returned non-JSON response.")
+        raise AgentLoopError("LLM API returned non-JSON response.") from None
 
 
 def _execute_tool_call(tool_call: dict) -> str:
@@ -600,10 +586,12 @@ def _execute_tool_call(tool_call: dict) -> str:
     try:
         arguments = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
     except json.JSONDecodeError:
-        return json.dumps({
-            "error": f"Invalid JSON in tool arguments: {raw_args[:200]}",
-            "success": False,
-        })
+        return json.dumps(
+            {
+                "error": f"Invalid JSON in tool arguments: {raw_args[:200]}",
+                "success": False,
+            }
+        )
 
     logger.info("Executing tool: %s(%s)", name, json.dumps(arguments)[:200])
     start = time.monotonic()
@@ -717,7 +705,7 @@ def run_agent_loop(
     global _current_tier  # noqa: PLW0603
     _current_tier = config.tool_tier
     try:
-        for turn in range(config.max_turns):
+        for _turn in range(config.max_turns):
             turns += 1
 
             # Call the LLM
@@ -732,13 +720,10 @@ def run_agent_loop(
             # Extract the first choice
             choices = response.get("choices", [])
             if not choices:
-                raise AgentLoopError(
-                    "LLM returned empty choices array. "
-                    "The model may not support tool calling."
-                )
+                raise AgentLoopError("LLM returned empty choices array. The model may not support tool calling.")
 
             choice = choices[0]
-            finish_reason = choice.get("finish_reason", "")
+            choice.get("finish_reason", "")
             assistant_msg = choice.get("message", {})
 
             # Append the assistant's message to conversation history
@@ -775,7 +760,7 @@ def run_agent_loop(
                 result_str = _execute_tool_call(tc)
 
                 # Add tool result message (sanitized then redacted for privacy)
-                tool_msg: Dict[str, Any] = {
+                tool_msg: dict[str, Any] = {
                     "role": "tool",
                     "tool_call_id": tc_id,
                     "content": _redact_sensitive_data(_sanitize_tool_output(result_str)),
@@ -825,11 +810,13 @@ def _messages_to_agent_messages(messages: list[dict]) -> list[AgentMessage]:
     """Convert raw OpenAI-format message dicts to AgentMessage objects."""
     result: list[AgentMessage] = []
     for m in messages:
-        result.append(AgentMessage(
-            role=m.get("role", ""),
-            content=m.get("content"),
-            tool_calls=m.get("tool_calls"),
-            tool_call_id=m.get("tool_call_id"),
-            name=m.get("name"),
-        ))
+        result.append(
+            AgentMessage(
+                role=m.get("role", ""),
+                content=m.get("content"),
+                tool_calls=m.get("tool_calls"),
+                tool_call_id=m.get("tool_call_id"),
+                name=m.get("name"),
+            )
+        )
     return result

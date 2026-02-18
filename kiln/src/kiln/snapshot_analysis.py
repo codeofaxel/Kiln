@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,7 @@ _MAX_VARIANCE_NORMALIZATION: float = 16256.0
 # Dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SnapshotAnalysis:
     """Result of heuristic snapshot analysis.
@@ -90,6 +91,7 @@ class SnapshotAnalysis:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _estimate_brightness_and_variance(
     image_data: bytes,
@@ -133,12 +135,13 @@ def _estimate_brightness_and_variance(
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def analyze_snapshot(
     image_data: bytes,
     *,
-    previous_brightness: Optional[float] = None,
-    width: Optional[int] = None,
-    height: Optional[int] = None,
+    previous_brightness: float | None = None,
+    width: int | None = None,
+    height: int | None = None,
 ) -> SnapshotAnalysis:
     """Run heuristic checks on a webcam snapshot for print monitoring.
 
@@ -175,7 +178,8 @@ def analyze_snapshot(
 
     # --- Brightness and variance ---
     brightness, variance = _estimate_brightness_and_variance(
-        image_data, is_png=is_png,
+        image_data,
+        is_png=is_png,
     )
 
     if brightness == 0.0 and variance == 0.0 and size_bytes > _MIN_SNAPSHOT_BYTES:
@@ -193,33 +197,24 @@ def analyze_snapshot(
         bed_visible = False
 
     if variance < _MIN_VARIANCE:
-        warnings.append(
-            "very low variance — image may be uniform (camera off or blocked)"
-        )
+        warnings.append("very low variance — image may be uniform (camera off or blocked)")
         bed_visible = False
 
     # --- FDM-specific: movement detection via frame delta ---
     if previous_brightness is not None:
         delta = abs(brightness - previous_brightness)
         if delta < 0.002:
-            warnings.append(
-                "no brightness change between frames — "
-                "print may be stalled or camera frozen"
-            )
+            warnings.append("no brightness change between frames — print may be stalled or camera frozen")
 
     # --- Resolution / usable quality check ---
     usable_quality = True
 
     if width is not None and width < _MIN_USABLE_DIMENSION:
-        warnings.append(
-            f"image width {width}px below minimum {_MIN_USABLE_DIMENSION}px"
-        )
+        warnings.append(f"image width {width}px below minimum {_MIN_USABLE_DIMENSION}px")
         usable_quality = False
 
     if height is not None and height < _MIN_USABLE_DIMENSION:
-        warnings.append(
-            f"image height {height}px below minimum {_MIN_USABLE_DIMENSION}px"
-        )
+        warnings.append(f"image height {height}px below minimum {_MIN_USABLE_DIMENSION}px")
         usable_quality = False
 
     # A valid image that is too dark or uniform is still not usable

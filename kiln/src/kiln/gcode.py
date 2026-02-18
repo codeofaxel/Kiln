@@ -34,14 +34,14 @@ from __future__ import annotations
 
 import os
 import re
-from enum import Enum
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
-
+from enum import Enum
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Result dataclass
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class GCodeValidationResult:
@@ -67,10 +67,10 @@ class GCodeValidationResult:
     blocked_commands: list[str] = field(default_factory=list)
 
 
-
 # ---------------------------------------------------------------------------
 # G-code dialect awareness
 # ---------------------------------------------------------------------------
+
 
 class GCodeDialect(Enum):
     """Firmware dialect for dialect-specific command validation."""
@@ -83,7 +83,7 @@ class GCodeDialect(Enum):
 
 # Additional commands blocked per dialect.  GENERIC and MARLIN have no
 # extra blocks -- they use only the global ``_BLOCKED_COMMANDS`` table.
-_DIALECT_BLOCKED: Dict[GCodeDialect, Dict[str, str]] = {
+_DIALECT_BLOCKED: dict[GCodeDialect, dict[str, str]] = {
     GCodeDialect.GENERIC: {},
     GCodeDialect.MARLIN: {},
     GCodeDialect.KLIPPER: {
@@ -115,16 +115,16 @@ _MIN_SAFE_Z: float = 0.0
 _MAX_SAFE_FEEDRATE: float = 10_000.0
 
 # Hotend temperature commands: M104 (set, no wait), M109 (set and wait).
-_HOTEND_TEMP_COMMANDS: Set[str] = {"M104", "M109"}
+_HOTEND_TEMP_COMMANDS: set[str] = {"M104", "M109"}
 
 # Bed temperature commands: M140 (set, no wait), M190 (set and wait).
-_BED_TEMP_COMMANDS: Set[str] = {"M140", "M190"}
+_BED_TEMP_COMMANDS: set[str] = {"M140", "M190"}
 
 # Chamber temperature command.
-_CHAMBER_TEMP_COMMANDS: Set[str] = {"M141"}
+_CHAMBER_TEMP_COMMANDS: set[str] = {"M141"}
 
 # Commands that are unconditionally blocked.
-_BLOCKED_COMMANDS: Dict[str, str] = {
+_BLOCKED_COMMANDS: dict[str, str] = {
     "M112": "Emergency stop (M112) is blocked -- use the cancel_print tool instead",
     "M502": "Reset to factory defaults (M502) is blocked -- this can overwrite critical calibration",
     "M500": "Save settings to EEPROM (M500) is blocked -- agents must not persist firmware changes",
@@ -136,7 +136,7 @@ _BLOCKED_COMMANDS: Dict[str, str] = {
 }
 
 # Commands that generate warnings but are allowed.
-_WARN_COMMANDS: Dict[str, str] = {
+_WARN_COMMANDS: dict[str, str] = {
     "G28": "G28 will home all axes -- ensure the bed is clear",
     "M18": "M18 will disable stepper motors -- part may shift if on the bed",
     "M84": "M84 will disable stepper motors -- part may shift if on the bed",
@@ -144,10 +144,10 @@ _WARN_COMMANDS: Dict[str, str] = {
 }
 
 # Movement commands that can carry Z and F parameters.
-_MOVE_COMMANDS: Set[str] = {"G0", "G1", "G2", "G3"}
+_MOVE_COMMANDS: set[str] = {"G0", "G1", "G2", "G3"}
 
 # Arc commands that require I/J or R parameters.
-_ARC_COMMANDS: Set[str] = {"G2", "G3"}
+_ARC_COMMANDS: set[str] = {"G2", "G3"}
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +186,7 @@ def _strip_line_number(line: str) -> str:
     return _LINE_NUMBER_RE.sub("", line)
 
 
-def _parse_command_word(line: str) -> Optional[str]:
+def _parse_command_word(line: str) -> str | None:
     """Extract and normalise the command word from a G-code line.
 
     Returns the command in upper-case canonical form (e.g. ``"G28"``,
@@ -210,7 +210,7 @@ def _parse_command_word(line: str) -> Optional[str]:
     return f"{letter}{number}"
 
 
-def _extract_param(line: str, letter: str) -> Optional[float]:
+def _extract_param(line: str, letter: str) -> float | None:
     """Extract the numeric value for parameter *letter* from *line*.
 
     The search is case-insensitive.  Returns ``None`` if the parameter
@@ -238,13 +238,14 @@ def _strip_comment(line: str) -> str:
 # Core validation logic
 # ---------------------------------------------------------------------------
 
+
 def _validate_single(
     raw_line: str,
-    warnings: List[str],
-    errors: List[str],
-    blocked: List[str],
+    warnings: list[str],
+    errors: list[str],
+    blocked: list[str],
     dialect: GCodeDialect = GCodeDialect.GENERIC,
-) -> Optional[str]:
+) -> str | None:
     """Validate a single G-code line.
 
     If the line is safe, returns the cleaned command string.  If the line
@@ -289,17 +290,11 @@ def _validate_single(
         temp = _extract_param(cleaned, "S")
         if temp is not None:
             if temp < 0:
-                errors.append(
-                    f"{cmd} S{temp:g} has negative temperature -- "
-                    f"temperatures must be >= 0"
-                )
+                errors.append(f"{cmd} S{temp:g} has negative temperature -- temperatures must be >= 0")
                 blocked.append(cleaned)
                 return None
             if temp > _MAX_HOTEND_TEMP:
-                errors.append(
-                    f"{cmd} S{temp:g} exceeds maximum hotend temperature "
-                    f"({_MAX_HOTEND_TEMP:g}C)"
-                )
+                errors.append(f"{cmd} S{temp:g} exceeds maximum hotend temperature ({_MAX_HOTEND_TEMP:g}C)")
                 blocked.append(cleaned)
                 return None
             if 0 < temp < _MIN_EXTRUDE_TEMP:
@@ -312,17 +307,11 @@ def _validate_single(
         temp = _extract_param(cleaned, "S")
         if temp is not None:
             if temp < 0:
-                errors.append(
-                    f"{cmd} S{temp:g} has negative temperature -- "
-                    f"temperatures must be >= 0"
-                )
+                errors.append(f"{cmd} S{temp:g} has negative temperature -- temperatures must be >= 0")
                 blocked.append(cleaned)
                 return None
             if temp > _MAX_BED_TEMP:
-                errors.append(
-                    f"{cmd} S{temp:g} exceeds maximum bed temperature "
-                    f"({_MAX_BED_TEMP:g}C)"
-                )
+                errors.append(f"{cmd} S{temp:g} exceeds maximum bed temperature ({_MAX_BED_TEMP:g}C)")
                 blocked.append(cleaned)
                 return None
 
@@ -330,17 +319,11 @@ def _validate_single(
         temp = _extract_param(cleaned, "S")
         if temp is not None:
             if temp < 0:
-                errors.append(
-                    f"{cmd} S{temp:g} has negative temperature -- "
-                    f"temperatures must be >= 0"
-                )
+                errors.append(f"{cmd} S{temp:g} has negative temperature -- temperatures must be >= 0")
                 blocked.append(cleaned)
                 return None
             if temp > _MAX_CHAMBER_TEMP:
-                errors.append(
-                    f"{cmd} S{temp:g} exceeds maximum chamber temperature "
-                    f"({_MAX_CHAMBER_TEMP:g}C)"
-                )
+                errors.append(f"{cmd} S{temp:g} exceeds maximum chamber temperature ({_MAX_CHAMBER_TEMP:g}C)")
                 blocked.append(cleaned)
                 return None
 
@@ -348,16 +331,11 @@ def _validate_single(
     if cmd in _MOVE_COMMANDS:
         z_val = _extract_param(cleaned, "Z")
         if z_val is not None and z_val < _MIN_SAFE_Z:
-            warnings.append(
-                f"{cmd} moves Z to {z_val:g} which is below the bed plane (Z < 0)"
-            )
+            warnings.append(f"{cmd} moves Z to {z_val:g} which is below the bed plane (Z < 0)")
 
         f_val = _extract_param(cleaned, "F")
         if f_val is not None and f_val > _MAX_SAFE_FEEDRATE:
-            warnings.append(
-                f"{cmd} feedrate F{f_val:g} exceeds recommended maximum "
-                f"({_MAX_SAFE_FEEDRATE:g} mm/min)"
-            )
+            warnings.append(f"{cmd} feedrate F{f_val:g} exceeds recommended maximum ({_MAX_SAFE_FEEDRATE:g} mm/min)")
 
     # --- Arc command validation (G2/G3) ----------------------------------
     if cmd in _ARC_COMMANDS:
@@ -367,14 +345,9 @@ def _validate_single(
         has_ij = i_val is not None or j_val is not None
         has_r = r_val is not None
         if not has_ij and not has_r:
-            warnings.append(
-                f"{cmd} arc command missing I/J or R parameters "
-                f"\u2014 arc is undefined"
-            )
+            warnings.append(f"{cmd} arc command missing I/J or R parameters \u2014 arc is undefined")
         if has_r and r_val == 0:
-            warnings.append(
-                f"{cmd} has R=0 (zero-radius arc is degenerate)"
-            )
+            warnings.append(f"{cmd} has R=0 (zero-radius arc is degenerate)")
 
     return cleaned
 
@@ -383,8 +356,9 @@ def _validate_single(
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def validate_gcode(
-    commands: Union[str, List[str]],
+    commands: str | list[str],
     dialect: GCodeDialect = GCodeDialect.GENERIC,
 ) -> GCodeValidationResult:
     """Parse and validate G-code commands for safety.
@@ -442,7 +416,7 @@ def validate_gcode(
 
 
 def validate_gcode_for_printer(
-    commands: Union[str, List[str]],
+    commands: str | list[str],
     printer_id: str,
     dialect: GCodeDialect = GCodeDialect.GENERIC,
 ) -> GCodeValidationResult:
@@ -497,12 +471,12 @@ def validate_gcode_for_printer(
 
 def _validate_single_with_profile(
     raw_line: str,
-    warnings: List[str],
-    errors: List[str],
-    blocked: List[str],
+    warnings: list[str],
+    errors: list[str],
+    blocked: list[str],
     profile: Any,
     dialect: GCodeDialect = GCodeDialect.GENERIC,
-) -> Optional[str]:
+) -> str | None:
     """Validate a single G-code line against a printer safety profile.
 
     Works like ``_validate_single`` but uses limits from *profile*
@@ -545,17 +519,11 @@ def _validate_single_with_profile(
         limit = profile.max_hotend_temp
         if temp is not None:
             if temp < 0:
-                errors.append(
-                    f"{cmd} S{temp:g} has negative temperature -- "
-                    f"temperatures must be >= 0"
-                )
+                errors.append(f"{cmd} S{temp:g} has negative temperature -- temperatures must be >= 0")
                 blocked.append(cleaned)
                 return None
             if temp > limit:
-                errors.append(
-                    f"{cmd} S{temp:g} exceeds {profile.display_name} max hotend "
-                    f"temperature ({limit:g}°C)"
-                )
+                errors.append(f"{cmd} S{temp:g} exceeds {profile.display_name} max hotend temperature ({limit:g}°C)")
                 blocked.append(cleaned)
                 return None
             if 0 < temp < _MIN_EXTRUDE_TEMP:
@@ -569,17 +537,11 @@ def _validate_single_with_profile(
         limit = profile.max_bed_temp
         if temp is not None:
             if temp < 0:
-                errors.append(
-                    f"{cmd} S{temp:g} has negative temperature -- "
-                    f"temperatures must be >= 0"
-                )
+                errors.append(f"{cmd} S{temp:g} has negative temperature -- temperatures must be >= 0")
                 blocked.append(cleaned)
                 return None
             if temp > limit:
-                errors.append(
-                    f"{cmd} S{temp:g} exceeds {profile.display_name} max bed "
-                    f"temperature ({limit:g}°C)"
-                )
+                errors.append(f"{cmd} S{temp:g} exceeds {profile.display_name} max bed temperature ({limit:g}°C)")
                 blocked.append(cleaned)
                 return None
 
@@ -588,17 +550,11 @@ def _validate_single_with_profile(
         limit = profile.max_chamber_temp
         if temp is not None:
             if temp < 0:
-                errors.append(
-                    f"{cmd} S{temp:g} has negative temperature -- "
-                    f"temperatures must be >= 0"
-                )
+                errors.append(f"{cmd} S{temp:g} has negative temperature -- temperatures must be >= 0")
                 blocked.append(cleaned)
                 return None
             if limit is not None and temp > limit:
-                errors.append(
-                    f"{cmd} S{temp:g} exceeds {profile.display_name} max chamber "
-                    f"temperature ({limit:g}°C)"
-                )
+                errors.append(f"{cmd} S{temp:g} exceeds {profile.display_name} max chamber temperature ({limit:g}°C)")
                 blocked.append(cleaned)
                 return None
 
@@ -606,10 +562,7 @@ def _validate_single_with_profile(
     if cmd in _MOVE_COMMANDS:
         z_val = _extract_param(cleaned, "Z")
         if z_val is not None and z_val < profile.min_safe_z:
-            warnings.append(
-                f"{cmd} moves Z to {z_val:g} which is below the bed plane "
-                f"(Z < {profile.min_safe_z:g})"
-            )
+            warnings.append(f"{cmd} moves Z to {z_val:g} which is below the bed plane (Z < {profile.min_safe_z:g})")
 
         f_val = _extract_param(cleaned, "F")
         if f_val is not None and f_val > profile.max_feedrate:
@@ -632,7 +585,7 @@ def _validate_single_with_profile(
                 if x_val is not None or y_val is not None:
                     dx = x_val if x_val is not None else 0.0
                     dy = y_val if y_val is not None else 0.0
-                    dist = (dx ** 2 + dy ** 2) ** 0.5
+                    dist = (dx**2 + dy**2) ** 0.5
                 if dist > 0:
                     # Filament cross-section: 1.75mm diameter -> area ~2.405 mm²
                     filament_area = 2.405
@@ -651,21 +604,11 @@ def _validate_single_with_profile(
             x_val = _extract_param(cleaned, "X")
             y_val = _extract_param(cleaned, "Y")
             if x_val is not None and (x_val < 0 or x_val > bv_x):
-                warnings.append(
-                    f"{cmd} X{x_val:g} is outside {profile.display_name} "
-                    f"build volume (X: 0–{bv_x} mm)"
-                )
+                warnings.append(f"{cmd} X{x_val:g} is outside {profile.display_name} build volume (X: 0–{bv_x} mm)")
             if y_val is not None and (y_val < 0 or y_val > bv_y):
-                warnings.append(
-                    f"{cmd} Y{y_val:g} is outside {profile.display_name} "
-                    f"build volume (Y: 0–{bv_y} mm)"
-                )
+                warnings.append(f"{cmd} Y{y_val:g} is outside {profile.display_name} build volume (Y: 0–{bv_y} mm)")
             if z_val is not None and z_val > bv_z:
-                warnings.append(
-                    f"{cmd} Z{z_val:g} is outside {profile.display_name} "
-                    f"build volume (Z: 0–{bv_z} mm)"
-                )
-
+                warnings.append(f"{cmd} Z{z_val:g} is outside {profile.display_name} build volume (Z: 0–{bv_z} mm)")
 
     # --- Arc command validation (G2/G3) ---
     if cmd in _ARC_COMMANDS:
@@ -675,14 +618,9 @@ def _validate_single_with_profile(
         has_ij = i_val is not None or j_val is not None
         has_r = r_val is not None
         if not has_ij and not has_r:
-            warnings.append(
-                f"{cmd} arc command missing I/J or R parameters "
-                f"\u2014 arc is undefined"
-            )
+            warnings.append(f"{cmd} arc command missing I/J or R parameters \u2014 arc is undefined")
         if has_r and r_val == 0:
-            warnings.append(
-                f"{cmd} has R=0 (zero-radius arc is degenerate)"
-            )
+            warnings.append(f"{cmd} has R=0 (zero-radius arc is degenerate)")
 
     return cleaned
 
@@ -711,7 +649,7 @@ _PRINTER_HEADER_PATTERNS: list[re.Pattern] = [
 ]
 
 
-def detect_printer_from_header(file_path: str) -> Optional[str]:
+def detect_printer_from_header(file_path: str) -> str | None:
     """Try to detect the printer model from G-code file header comments.
 
     Reads the first :data:`_MAX_HEADER_LINES` lines of the file looking for
@@ -721,7 +659,7 @@ def detect_printer_from_header(file_path: str) -> Optional[str]:
     Returns a matched safety profile ID if found, or ``None`` if no match.
     """
     try:
-        with open(file_path, "r", errors="replace") as fh:
+        with open(file_path, errors="replace") as fh:
             for i, line in enumerate(fh):
                 if i >= _MAX_HEADER_LINES:
                     break
@@ -738,7 +676,7 @@ def detect_printer_from_header(file_path: str) -> Optional[str]:
     return None
 
 
-def _match_printer_name(raw_name: str) -> Optional[str]:
+def _match_printer_name(raw_name: str) -> str | None:
     """Fuzzy-match a slicer-embedded printer name to a safety profile ID.
 
     Normalises the name (lowercase, strip common prefixes and separators)
@@ -759,7 +697,7 @@ def _match_printer_name(raw_name: str) -> Optional[str]:
         normalised = raw_name.lower()
         for prefix in ("prusa ", "creality ", "bambu lab ", "bambulab ", "anycubic "):
             if normalised.startswith(prefix):
-                normalised = normalised[len(prefix):]
+                normalised = normalised[len(prefix) :]
         normalised = normalised.replace("-", "_").replace(" ", "_").strip("_")
 
         # Try again after normalisation
@@ -786,7 +724,7 @@ def _match_printer_name(raw_name: str) -> Optional[str]:
 def scan_gcode_file(
     file_path: str,
     *,
-    printer_id: Optional[str] = None,
+    printer_id: str | None = None,
     dialect: GCodeDialect = GCodeDialect.GENERIC,
 ) -> GCodeValidationResult:
     """Stream-validate an entire G-code file for safety.
@@ -846,7 +784,7 @@ def scan_gcode_file(
 
     result = GCodeValidationResult()
 
-    with open(abs_path, "r", errors="replace") as fh:
+    with open(abs_path, errors="replace") as fh:
         for raw_line in fh:
             if profile is not None:
                 cleaned = _validate_single_with_profile(
@@ -877,9 +815,7 @@ def scan_gcode_file(
             # Cap warnings to avoid unbounded memory growth.
             if len(result.warnings) > _MAX_WARNINGS:
                 result.warnings = result.warnings[:_MAX_WARNINGS]
-                result.warnings.append(
-                    f"(warnings capped at {_MAX_WARNINGS} -- additional warnings suppressed)"
-                )
+                result.warnings.append(f"(warnings capped at {_MAX_WARNINGS} -- additional warnings suppressed)")
                 break
 
     result.valid = len(result.errors) == 0

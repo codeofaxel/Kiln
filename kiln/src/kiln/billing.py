@@ -42,10 +42,10 @@ import logging
 import secrets
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from kiln.persistence import KilnDB
@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
+
 
 class PaymentStatus(str, Enum):
     """Payment status values for billing charges."""
@@ -70,6 +71,7 @@ class PaymentStatus(str, Enum):
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class FeePolicy:
@@ -116,16 +118,16 @@ class FeeCalculation:
     total_cost: float
     currency: str
     waived: bool = False
-    waiver_reason: Optional[str] = None
+    waiver_reason: str | None = None
     tax_amount: float = 0.0
     tax_rate: float = 0.0
-    tax_jurisdiction: Optional[str] = None
-    tax_type: Optional[str] = None
+    tax_jurisdiction: str | None = None
+    tax_type: str | None = None
     tax_reverse_charge: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
-        d: Dict[str, Any] = {
+        d: dict[str, Any] = {
             "job_cost": self.job_cost,
             "fee_amount": self.fee_amount,
             "fee_percent": self.fee_percent,
@@ -162,6 +164,7 @@ class SpendLimits:
 # Billing ledger
 # ---------------------------------------------------------------------------
 
+
 class BillingLedger:
     """Thread-safe billing ledger with optional SQLite persistence.
 
@@ -172,13 +175,13 @@ class BillingLedger:
 
     def __init__(
         self,
-        fee_policy: Optional[FeePolicy] = None,
-        db: Optional[KilnDB] = None,
+        fee_policy: FeePolicy | None = None,
+        db: KilnDB | None = None,
     ) -> None:
         self._policy: FeePolicy = fee_policy or FeePolicy()
         self._db = db
         # In-memory fallback when no db is provided.
-        self._charges: List[Dict[str, Any]] = []
+        self._charges: list[dict[str, Any]] = []
         self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
@@ -190,8 +193,8 @@ class BillingLedger:
         job_cost: float,
         currency: str = "USD",
         *,
-        jurisdiction: Optional[str] = None,
-        business_tax_id: Optional[str] = None,
+        jurisdiction: str | None = None,
+        business_tax_id: str | None = None,
     ) -> FeeCalculation:
         """Calculate the Kiln fee for an outsourced order.
 
@@ -214,7 +217,7 @@ class BillingLedger:
         fee_calc: FeeCalculation,
         jurisdiction: str,
         *,
-        business_tax_id: Optional[str] = None,
+        business_tax_id: str | None = None,
     ) -> FeeCalculation:
         """Apply tax to a FeeCalculation based on jurisdiction.
 
@@ -224,7 +227,8 @@ class BillingLedger:
 
         calc = TaxCalculator()
         result = calc.calculate_tax(
-            fee_calc.fee_amount, jurisdiction,
+            fee_calc.fee_amount,
+            jurisdiction,
             business_tax_id=business_tax_id,
         )
         fee_calc.tax_amount = result.tax_amount
@@ -234,7 +238,8 @@ class BillingLedger:
         fee_calc.tax_reverse_charge = result.reverse_charge
         # Update total to include tax.
         fee_calc.total_cost = round(
-            fee_calc.job_cost + fee_calc.fee_amount + result.tax_amount, 2,
+            fee_calc.job_cost + fee_calc.fee_amount + result.tax_amount,
+            2,
         )
         return fee_calc
 
@@ -274,10 +279,7 @@ class BillingLedger:
                 total_cost=job_cost,
                 currency=currency,
                 waived=True,
-                waiver_reason=(
-                    f"Free tier: job {network_jobs + 1} of "
-                    f"{policy.free_tier_jobs} free this month"
-                ),
+                waiver_reason=(f"Free tier: job {network_jobs + 1} of {policy.free_tier_jobs} free this month"),
             )
 
         # Standard fee: percentage of job cost, clamped to [min, max].
@@ -302,7 +304,7 @@ class BillingLedger:
     def check_spend_limits(
         self,
         fee_amount: float,
-        limits: Optional[SpendLimits] = None,
+        limits: SpendLimits | None = None,
     ) -> tuple:
         """Check whether a fee amount is within spend limits.
 
@@ -320,16 +322,14 @@ class BillingLedger:
         if fee_amount > lim.max_per_order_usd:
             return (
                 False,
-                f"Fee ${fee_amount:.2f} exceeds per-order limit "
-                f"${lim.max_per_order_usd:.2f}",
+                f"Fee ${fee_amount:.2f} exceeds per-order limit ${lim.max_per_order_usd:.2f}",
             )
 
         month_total = self._get_monthly_fee_total()
         if month_total + fee_amount > lim.monthly_cap_usd:
             return (
                 False,
-                f"Monthly cap ${lim.monthly_cap_usd:.2f} would be exceeded "
-                f"(current: ${month_total:.2f})",
+                f"Monthly cap ${lim.monthly_cap_usd:.2f} would be exceeded (current: ${month_total:.2f})",
             )
 
         return (True, None)
@@ -358,8 +358,8 @@ class BillingLedger:
         job_id: str,
         fee_calc: FeeCalculation,
         *,
-        payment_id: Optional[str] = None,
-        payment_rail: Optional[str] = None,
+        payment_id: str | None = None,
+        payment_rail: str | None = None,
         payment_status: str = "pending",
     ) -> str:
         """Record a fee calculation against a job in the ledger.
@@ -375,7 +375,8 @@ class BillingLedger:
             The generated charge ID.
         """
         return self._record_charge_locked(
-            job_id, fee_calc,
+            job_id,
+            fee_calc,
             payment_id=payment_id,
             payment_rail=payment_rail,
             payment_status=payment_status,
@@ -386,8 +387,8 @@ class BillingLedger:
         job_id: str,
         fee_calc: FeeCalculation,
         *,
-        payment_id: Optional[str] = None,
-        payment_rail: Optional[str] = None,
+        payment_id: str | None = None,
+        payment_rail: str | None = None,
         payment_status: str = "pending",
     ) -> str:
         """Core charge-recording logic.
@@ -401,30 +402,32 @@ class BillingLedger:
         now = time.time()
 
         if self._db is not None:
-            self._db.save_billing_charge({
-                "id": charge_id,
-                "job_id": job_id,
-                "order_id": job_id,
-                "fee_amount": fee_calc.fee_amount,
-                "fee_percent": fee_calc.fee_percent,
-                "job_cost": fee_calc.job_cost,
-                "total_cost": fee_calc.total_cost,
-                "currency": fee_calc.currency,
-                "waived": fee_calc.waived,
-                "waiver_reason": fee_calc.waiver_reason,
-                "tax_amount": fee_calc.tax_amount,
-                "tax_rate": fee_calc.tax_rate,
-                "tax_jurisdiction": fee_calc.tax_jurisdiction,
-                "tax_type": fee_calc.tax_type,
-                "tax_reverse_charge": fee_calc.tax_reverse_charge,
-                "payment_id": payment_id,
-                "payment_rail": payment_rail,
-                "payment_status": payment_status,
-                "created_at": now,
-            })
+            self._db.save_billing_charge(
+                {
+                    "id": charge_id,
+                    "job_id": job_id,
+                    "order_id": job_id,
+                    "fee_amount": fee_calc.fee_amount,
+                    "fee_percent": fee_calc.fee_percent,
+                    "job_cost": fee_calc.job_cost,
+                    "total_cost": fee_calc.total_cost,
+                    "currency": fee_calc.currency,
+                    "waived": fee_calc.waived,
+                    "waiver_reason": fee_calc.waiver_reason,
+                    "tax_amount": fee_calc.tax_amount,
+                    "tax_rate": fee_calc.tax_rate,
+                    "tax_jurisdiction": fee_calc.tax_jurisdiction,
+                    "tax_type": fee_calc.tax_type,
+                    "tax_reverse_charge": fee_calc.tax_reverse_charge,
+                    "payment_id": payment_id,
+                    "payment_rail": payment_rail,
+                    "payment_status": payment_status,
+                    "created_at": now,
+                }
+            )
         else:
             # In-memory fallback.
-            entry: Dict[str, Any] = {
+            entry: dict[str, Any] = {
                 "id": charge_id,
                 "job_id": job_id,
                 "fee_calc": fee_calc,
@@ -454,11 +457,11 @@ class BillingLedger:
         job_cost: float,
         currency: str = "USD",
         *,
-        payment_id: Optional[str] = None,
-        payment_rail: Optional[str] = None,
+        payment_id: str | None = None,
+        payment_rail: str | None = None,
         payment_status: str = "pending",
-        jurisdiction: Optional[str] = None,
-        business_tax_id: Optional[str] = None,
+        jurisdiction: str | None = None,
+        business_tax_id: str | None = None,
     ) -> tuple[FeeCalculation, str]:
         """Atomically calculate fee (with tax) and record charge.
 
@@ -483,10 +486,13 @@ class BillingLedger:
             fee_calc = self._calculate_fee_locked(job_cost, currency)
             if jurisdiction and fee_calc.fee_amount > 0:
                 fee_calc = self._apply_tax(
-                    fee_calc, jurisdiction, business_tax_id=business_tax_id,
+                    fee_calc,
+                    jurisdiction,
+                    business_tax_id=business_tax_id,
                 )
             charge_id = self._record_charge_locked(
-                job_id, fee_calc,
+                job_id,
+                fee_calc,
                 payment_id=payment_id,
                 payment_rail=payment_rail,
                 payment_status=payment_status,
@@ -499,9 +505,9 @@ class BillingLedger:
 
     def monthly_revenue(
         self,
-        year: Optional[int] = None,
-        month: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        year: int | None = None,
+        month: int | None = None,
+    ) -> dict[str, Any]:
         """Summarise revenue for a given calendar month.
 
         Args:
@@ -555,7 +561,7 @@ class BillingLedger:
                     count += 1
         return count
 
-    def get_job_charges(self, job_id: str) -> Optional[FeeCalculation]:
+    def get_job_charges(self, job_id: str) -> FeeCalculation | None:
         """Look up the fee calculation for a specific job.
 
         Args:
@@ -568,7 +574,7 @@ class BillingLedger:
             charge = self._db.get_billing_charge(job_id)
             if charge is None:
                 # Try by job_id column.
-                charges = self._db.list_billing_charges(limit=1)
+                self._db.list_billing_charges(limit=1)
                 for c in self._db.list_billing_charges(limit=500):
                     if c["job_id"] == job_id:
                         charge = c
@@ -600,9 +606,9 @@ class BillingLedger:
     def list_charges(
         self,
         limit: int = 50,
-        month: Optional[int] = None,
-        year: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        month: int | None = None,
+        year: int | None = None,
+    ) -> list[dict[str, Any]]:
         """Return recent billing charges as dicts.
 
         Args:
@@ -615,15 +621,17 @@ class BillingLedger:
         """
         if self._db is not None:
             return self._db.list_billing_charges(
-                limit=limit, month=month, year=year,
+                limit=limit,
+                month=month,
+                year=year,
             )
 
         # In-memory fallback.
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         with self._lock:
             for entry in reversed(self._charges):
                 fc: FeeCalculation = entry["fee_calc"]
-                charge_dict: Dict[str, Any] = {
+                charge_dict: dict[str, Any] = {
                     "id": entry.get("id", ""),
                     "job_id": entry["job_id"],
                     "fee_amount": fc.fee_amount,
@@ -656,10 +664,10 @@ class BillingLedger:
     def refund_charge(
         self,
         *,
-        charge_id: Optional[str] = None,
-        job_id: Optional[str] = None,
-        refund_reason: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+        charge_id: str | None = None,
+        job_id: str | None = None,
+        refund_reason: str | None = None,
+    ) -> dict[str, Any] | None:
         """Refund a charge by updating its payment status to 'refunded'.
 
         Args:
@@ -693,7 +701,8 @@ class BillingLedger:
             if charge is None:
                 logger.warning(
                     "Refund requested for charge_id=%s job_id=%s but not found",
-                    charge_id, job_id,
+                    charge_id,
+                    job_id,
                 )
                 return None
 
@@ -708,22 +717,29 @@ class BillingLedger:
             # Publish event if event bus is available.
             try:
                 from kiln.events import get_event_bus
+
                 bus = get_event_bus()
                 if bus:
-                    bus.publish("PAYMENT_REFUNDED", {
-                        "charge_id": charge["id"],
-                        "job_id": charge["job_id"],
-                        "fee_amount": charge["fee_amount"],
-                        "refund_reason": refund_reason,
-                        "refunded_at": refunded_at,
-                    })
+                    bus.publish(
+                        "PAYMENT_REFUNDED",
+                        {
+                            "charge_id": charge["id"],
+                            "job_id": charge["job_id"],
+                            "fee_amount": charge["fee_amount"],
+                            "refund_reason": refund_reason,
+                            "refunded_at": refunded_at,
+                        },
+                    )
             except Exception as e:
                 logger.debug("Event bus not available for PAYMENT_REFUNDED: %s", e)
 
             logger.info(
                 "Refunded charge %s (job %s): fee=%.2f %s, reason=%s",
-                charge["id"], charge["job_id"], charge["fee_amount"],
-                charge["currency"], refund_reason,
+                charge["id"],
+                charge["job_id"],
+                charge["fee_amount"],
+                charge["currency"],
+                refund_reason,
             )
 
             # Return updated charge.
@@ -732,10 +748,7 @@ class BillingLedger:
         # In-memory fallback.
         with self._lock:
             for entry in self._charges:
-                match = (
-                    (charge_id and entry.get("id") == charge_id)
-                    or (job_id and entry["job_id"] == job_id)
-                )
+                match = (charge_id and entry.get("id") == charge_id) or (job_id and entry["job_id"] == job_id)
                 if match:
                     entry["payment_status"] = PaymentStatus.REFUNDED.value
                     entry["refund_reason"] = refund_reason
@@ -743,9 +756,11 @@ class BillingLedger:
 
                     logger.info(
                         "Refunded charge %s (job %s): fee=%.2f %s, reason=%s",
-                        entry.get("id", "unknown"), entry["job_id"],
+                        entry.get("id", "unknown"),
+                        entry["job_id"],
                         entry["fee_calc"].fee_amount,
-                        entry["fee_calc"].currency, refund_reason,
+                        entry["fee_calc"].currency,
+                        refund_reason,
                     )
 
                     # Build return dict.
@@ -761,7 +776,8 @@ class BillingLedger:
 
         logger.warning(
             "Refund requested for charge_id=%s job_id=%s but not found",
-            charge_id, job_id,
+            charge_id,
+            job_id,
         )
         return None
 
@@ -769,7 +785,7 @@ class BillingLedger:
         self,
         *,
         stale_threshold_seconds: int = 3600,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Reconcile stale pending charges by checking associated job status.
 
         Scans for charges with ``payment_status="pending"`` older than
@@ -794,7 +810,8 @@ class BillingLedger:
         if self._db is not None:
             # DB-backed reconciliation.
             pending_charges = self._db.list_billing_charges_by_status(
-                PaymentStatus.PENDING.value, limit=1000,
+                PaymentStatus.PENDING.value,
+                limit=1000,
             )
 
             for charge in pending_charges:
@@ -805,9 +822,14 @@ class BillingLedger:
 
                 job_id = charge["job_id"]
                 # Check job status (requires persistence to have job table).
-                job_status = self._db.get_job_status(job_id) if hasattr(
-                    self._db, "get_job_status",
-                ) else None
+                job_status = (
+                    self._db.get_job_status(job_id)
+                    if hasattr(
+                        self._db,
+                        "get_job_status",
+                    )
+                    else None
+                )
 
                 if job_status == "failed":
                     # Auto-refund failed job.
@@ -842,9 +864,10 @@ class BillingLedger:
                     still_pending += 1
 
         logger.info(
-            "Reconciled pending charges: refunded=%d, flagged_for_collection=%d, "
-            "still_pending=%d",
-            refunded, flagged_for_collection, still_pending,
+            "Reconciled pending charges: refunded=%d, flagged_for_collection=%d, still_pending=%d",
+            refunded,
+            flagged_for_collection,
+            still_pending,
         )
 
         return {
@@ -853,7 +876,7 @@ class BillingLedger:
             "still_pending": still_pending,
         }
 
-    def get_aging_report(self) -> Dict[str, Any]:
+    def get_aging_report(self) -> dict[str, Any]:
         """Generate an aging report for all charges grouped by age buckets.
 
         Returns:

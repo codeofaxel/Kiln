@@ -25,7 +25,7 @@ import time
 import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -75,10 +75,10 @@ class ThingFile:
     name: str
     size_bytes: int
     download_url: str
-    thumbnail_url: Optional[str] = None
-    date: Optional[str] = None
+    thumbnail_url: str | None = None
+    date: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -90,12 +90,12 @@ class ThingSummary:
     name: str
     url: str
     creator: str
-    thumbnail: Optional[str] = None
+    thumbnail: str | None = None
     like_count: int = 0
     download_count: int = 0
     collect_count: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -110,15 +110,15 @@ class ThingDetail:
     description: str = ""
     instructions: str = ""
     license: str = ""
-    thumbnail: Optional[str] = None
+    thumbnail: str | None = None
     like_count: int = 0
     download_count: int = 0
     collect_count: int = 0
-    category: Optional[str] = None
-    tags: List[str] = field(default_factory=list)
+    category: str | None = None
+    tags: list[str] = field(default_factory=list)
     file_count: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -131,7 +131,7 @@ class Category:
     url: str
     count: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -167,8 +167,7 @@ class ThingiverseClient:
         self._token = token or os.environ.get("KILN_THINGIVERSE_TOKEN", "")
         if not self._token:
             raise ThingiverseAuthError(
-                "Thingiverse API token is required.  Set KILN_THINGIVERSE_TOKEN "
-                "or pass token= to ThingiverseClient."
+                "Thingiverse API token is required.  Set KILN_THINGIVERSE_TOKEN or pass token= to ThingiverseClient."
             )
         self._base_url = base_url.rstrip("/")
         self._session = session or requests.Session()
@@ -189,7 +188,7 @@ class ThingiverseClient:
         method: str,
         path: str,
         *,
-        params: Dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
         timeout: int = _REQUEST_TIMEOUT,
         _rate_limit_retries: int = 3,
     ) -> Any:
@@ -206,15 +205,20 @@ class ThingiverseClient:
         for attempt in range(_rate_limit_retries + 1):
             try:
                 resp = self._session.request(
-                    method, url, params=params, timeout=timeout,
+                    method,
+                    url,
+                    params=params,
+                    timeout=timeout,
                 )
             except requests.ConnectionError as exc:
                 raise ThingiverseError(
-                    f"Connection to Thingiverse failed: {exc}", status_code=None,
+                    f"Connection to Thingiverse failed: {exc}",
+                    status_code=None,
                 ) from exc
             except requests.Timeout as exc:
                 raise ThingiverseError(
-                    f"Thingiverse request timed out: {exc}", status_code=None,
+                    f"Thingiverse request timed out: {exc}",
+                    status_code=None,
                 ) from exc
 
             if resp.status_code == 401:
@@ -224,7 +228,8 @@ class ThingiverseClient:
                 )
             if resp.status_code == 404:
                 raise ThingiverseNotFoundError(
-                    f"Resource not found: {path}", status_code=404,
+                    f"Resource not found: {path}",
+                    status_code=404,
                 )
             if resp.status_code == 429:
                 if attempt < _rate_limit_retries:
@@ -234,13 +239,15 @@ class ThingiverseClient:
                         try:
                             delay = float(retry_after)
                         except (ValueError, TypeError):
-                            delay = 2.0 ** attempt
+                            delay = 2.0**attempt
                     else:
-                        delay = 2.0 ** attempt  # 1s, 2s, 4s
+                        delay = 2.0**attempt  # 1s, 2s, 4s
                     delay = min(delay, 60.0)  # cap at 60s
                     logger.info(
                         "Thingiverse rate limited (429), retrying in %.1fs (attempt %d/%d)",
-                        delay, attempt + 1, _rate_limit_retries,
+                        delay,
+                        attempt + 1,
+                        _rate_limit_retries,
                     )
                     time.sleep(delay)
                     continue
@@ -268,7 +275,7 @@ class ThingiverseClient:
         page: int = 1,
         per_page: int = 20,
         sort: str = "relevant",
-    ) -> List[ThingSummary]:
+    ) -> list[ThingSummary]:
         """Search for things by keyword.
 
         Args:
@@ -281,11 +288,15 @@ class ThingiverseClient:
         Returns:
             List of matching :class:`ThingSummary` objects.
         """
-        data = self._request("GET", f"/search/{quote(query)}", params={
-            "page": page,
-            "per_page": min(per_page, 100),
-            "sort": sort,
-        })
+        data = self._request(
+            "GET",
+            f"/search/{quote(query)}",
+            params={
+                "page": page,
+                "per_page": min(per_page, 100),
+                "sort": sort,
+            },
+        )
         return self._parse_thing_list(data)
 
     # -- thing detail ------------------------------------------------------
@@ -304,7 +315,7 @@ class ThingiverseClient:
 
     # -- files -------------------------------------------------------------
 
-    def get_files(self, thing_id: int) -> List[ThingFile]:
+    def get_files(self, thing_id: int) -> list[ThingFile]:
         """List downloadable files for a thing.
 
         Args:
@@ -342,7 +353,8 @@ class ThingiverseClient:
         download_url = meta.get("download_url", "")
         if not download_url:
             raise ThingiverseError(
-                f"No download URL for file {file_id}.", status_code=None,
+                f"No download URL for file {file_id}.",
+                status_code=None,
             )
 
         name = file_name or meta.get("name", f"file_{file_id}")
@@ -366,44 +378,61 @@ class ThingiverseClient:
 
     # -- browse endpoints --------------------------------------------------
 
-    def popular(self, *, page: int = 1, per_page: int = 20) -> List[ThingSummary]:
+    def popular(self, *, page: int = 1, per_page: int = 20) -> list[ThingSummary]:
         """Browse popular (trending) things."""
-        data = self._request("GET", "/popular", params={
-            "page": page, "per_page": min(per_page, 100),
-        })
+        data = self._request(
+            "GET",
+            "/popular",
+            params={
+                "page": page,
+                "per_page": min(per_page, 100),
+            },
+        )
         return self._parse_thing_list(data)
 
-    def newest(self, *, page: int = 1, per_page: int = 20) -> List[ThingSummary]:
+    def newest(self, *, page: int = 1, per_page: int = 20) -> list[ThingSummary]:
         """Browse newest things."""
-        data = self._request("GET", "/newest", params={
-            "page": page, "per_page": min(per_page, 100),
-        })
+        data = self._request(
+            "GET",
+            "/newest",
+            params={
+                "page": page,
+                "per_page": min(per_page, 100),
+            },
+        )
         return self._parse_thing_list(data)
 
-    def featured(self, *, page: int = 1, per_page: int = 20) -> List[ThingSummary]:
+    def featured(self, *, page: int = 1, per_page: int = 20) -> list[ThingSummary]:
         """Browse featured things."""
-        data = self._request("GET", "/featured", params={
-            "page": page, "per_page": min(per_page, 100),
-        })
+        data = self._request(
+            "GET",
+            "/featured",
+            params={
+                "page": page,
+                "per_page": min(per_page, 100),
+            },
+        )
         return self._parse_thing_list(data)
 
     # -- categories --------------------------------------------------------
 
-    def list_categories(self) -> List[Category]:
+    def list_categories(self) -> list[Category]:
         """List top-level content categories."""
         data = self._request("GET", "/categories")
         if not isinstance(data, list):
             return []
-        results: List[Category] = []
+        results: list[Category] = []
         for cat in data:
             if not isinstance(cat, dict):
                 continue
-            results.append(Category(
-                name=cat.get("name", ""),
-                slug=cat.get("slug", cat.get("name", "").lower().replace(" ", "-")),
-                url=cat.get("url", ""),
-                count=cat.get("count", 0),
-            ))
+            results.append(
+                Category(
+                    name=cat.get("name", ""),
+                    slug=cat.get("slug", cat.get("name", "").lower().replace(" ", "-")),
+                    url=cat.get("url", ""),
+                    count=cat.get("count", 0),
+                )
+            )
         return results
 
     def category_things(
@@ -412,7 +441,7 @@ class ThingiverseClient:
         *,
         page: int = 1,
         per_page: int = 20,
-    ) -> List[ThingSummary]:
+    ) -> list[ThingSummary]:
         """Browse things in a specific category."""
         data = self._request(
             "GET",
@@ -424,7 +453,7 @@ class ThingiverseClient:
     # -- parsing helpers ---------------------------------------------------
 
     @staticmethod
-    def _parse_thing_list(data: Any) -> List[ThingSummary]:
+    def _parse_thing_list(data: Any) -> list[ThingSummary]:
         """Parse a list of thing summaries from raw API data."""
         # The search endpoint wraps results in a "hits" key; browse
         # endpoints return a plain list.
@@ -436,39 +465,33 @@ class ThingiverseClient:
         else:
             return []
 
-        results: List[ThingSummary] = []
+        results: list[ThingSummary] = []
         for item in items:
             if not isinstance(item, dict):
                 continue
             creator_raw = item.get("creator", {})
-            creator_name = (
-                creator_raw.get("name", "")
-                if isinstance(creator_raw, dict)
-                else str(creator_raw)
+            creator_name = creator_raw.get("name", "") if isinstance(creator_raw, dict) else str(creator_raw)
+            results.append(
+                ThingSummary(
+                    id=item.get("id", 0),
+                    name=item.get("name", ""),
+                    url=item.get("public_url", item.get("url", "")),
+                    creator=creator_name,
+                    thumbnail=item.get("thumbnail", item.get("preview_image", None)),
+                    like_count=item.get("like_count", 0),
+                    download_count=item.get("download_count", 0),
+                    collect_count=item.get("collect_count", 0),
+                )
             )
-            results.append(ThingSummary(
-                id=item.get("id", 0),
-                name=item.get("name", ""),
-                url=item.get("public_url", item.get("url", "")),
-                creator=creator_name,
-                thumbnail=item.get("thumbnail", item.get("preview_image", None)),
-                like_count=item.get("like_count", 0),
-                download_count=item.get("download_count", 0),
-                collect_count=item.get("collect_count", 0),
-            ))
         return results
 
     @staticmethod
-    def _parse_thing_detail(data: Dict[str, Any]) -> ThingDetail:
+    def _parse_thing_detail(data: dict[str, Any]) -> ThingDetail:
         """Parse a single thing detail from raw API data."""
         creator_raw = data.get("creator", {})
-        creator_name = (
-            creator_raw.get("name", "")
-            if isinstance(creator_raw, dict)
-            else str(creator_raw)
-        )
+        creator_name = creator_raw.get("name", "") if isinstance(creator_raw, dict) else str(creator_raw)
         tags_raw = data.get("tags", [])
-        tags: List[str] = []
+        tags: list[str] = []
         if isinstance(tags_raw, list):
             for t in tags_raw:
                 if isinstance(t, dict):
@@ -484,23 +507,23 @@ class ThingiverseClient:
             description=data.get("description", ""),
             instructions=data.get("instructions", ""),
             license=data.get("license", ""),
-            thumbnail=data.get("thumbnail", None),
+            thumbnail=data.get("thumbnail"),
             like_count=data.get("like_count", 0),
             download_count=data.get("download_count", 0),
             collect_count=data.get("collect_count", 0),
-            category=data.get("category", None),
+            category=data.get("category"),
             tags=tags,
             file_count=data.get("file_count", 0),
         )
 
     @staticmethod
-    def _parse_file(data: Dict[str, Any]) -> ThingFile:
+    def _parse_file(data: dict[str, Any]) -> ThingFile:
         """Parse a single file entry from raw API data."""
         return ThingFile(
             id=data.get("id", 0),
             name=data.get("name", ""),
             size_bytes=data.get("size", 0),
             download_url=data.get("download_url", ""),
-            thumbnail_url=data.get("thumbnail", None),
-            date=data.get("date", None),
+            thumbnail_url=data.get("thumbnail"),
+            date=data.get("date"),
         )

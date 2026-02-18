@@ -25,13 +25,13 @@ from __future__ import annotations
 import enum
 import time
 from collections import defaultdict
-from dataclasses import asdict, dataclass, field
-from typing import Any, Optional
-
+from dataclasses import asdict, dataclass
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
+
 
 class PrintPhase(enum.Enum):
     """Manufacturing phase within an FDM print job.
@@ -115,6 +115,7 @@ _HISTORY_WINDOW = 20
 # Dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PhaseEstimate:
     """Estimated timing for a single FDM print phase.
@@ -163,8 +164,8 @@ class PrintProgressEstimate:
     overall_progress_pct: float  # 0.0 -- 100.0
     estimated_completion: float  # unix timestamp
     confidence: float  # 0.0 -- 1.0
-    current_layer: Optional[int] = None
-    total_layers: Optional[int] = None
+    current_layer: int | None = None
+    total_layers: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
@@ -190,6 +191,7 @@ class PrintProgressEstimate:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _build_phases(
     *,
     phase_durations: dict[PrintPhase, float],
@@ -214,53 +216,63 @@ def _build_phases(
 
         if found_current:
             # Past current phase — remaining phases not started
-            phase_estimates.append(PhaseEstimate(
-                phase=phase,
-                estimated_duration_s=duration,
-                elapsed_s=0.0,
-                progress_pct=0.0,
-            ))
+            phase_estimates.append(
+                PhaseEstimate(
+                    phase=phase,
+                    estimated_duration_s=duration,
+                    elapsed_s=0.0,
+                    progress_pct=0.0,
+                )
+            )
             continue
 
         if duration > 0 and remaining_elapsed >= duration:
             # Phase fully complete
-            phase_estimates.append(PhaseEstimate(
-                phase=phase,
-                estimated_duration_s=duration,
-                elapsed_s=duration,
-                progress_pct=100.0,
-            ))
+            phase_estimates.append(
+                PhaseEstimate(
+                    phase=phase,
+                    estimated_duration_s=duration,
+                    elapsed_s=duration,
+                    progress_pct=100.0,
+                )
+            )
             remaining_elapsed -= duration
             current_phase = phase
         elif duration > 0 and remaining_elapsed < duration:
             # Currently in this phase (partially complete)
             pct = remaining_elapsed / duration * 100.0
-            phase_estimates.append(PhaseEstimate(
-                phase=phase,
-                estimated_duration_s=duration,
-                elapsed_s=remaining_elapsed,
-                progress_pct=round(pct, 2),
-            ))
+            phase_estimates.append(
+                PhaseEstimate(
+                    phase=phase,
+                    estimated_duration_s=duration,
+                    elapsed_s=remaining_elapsed,
+                    progress_pct=round(pct, 2),
+                )
+            )
             current_phase = phase
             remaining_elapsed = 0.0
             found_current = True
         else:
             # Zero-duration phase — mark complete if we haven't found current
             if not found_current and remaining_elapsed >= 0 and phase != _FDM_PHASES[-1]:
-                phase_estimates.append(PhaseEstimate(
-                    phase=phase,
-                    estimated_duration_s=0.0,
-                    elapsed_s=0.0,
-                    progress_pct=100.0,
-                ))
+                phase_estimates.append(
+                    PhaseEstimate(
+                        phase=phase,
+                        estimated_duration_s=0.0,
+                        elapsed_s=0.0,
+                        progress_pct=100.0,
+                    )
+                )
                 current_phase = phase
             else:
-                phase_estimates.append(PhaseEstimate(
-                    phase=phase,
-                    estimated_duration_s=0.0,
-                    elapsed_s=0.0,
-                    progress_pct=0.0,
-                ))
+                phase_estimates.append(
+                    PhaseEstimate(
+                        phase=phase,
+                        estimated_duration_s=0.0,
+                        elapsed_s=0.0,
+                        progress_pct=0.0,
+                    )
+                )
 
     overall_pct = (elapsed_s / total_duration * 100.0) if total_duration > 0 else 0.0
     overall_pct = min(overall_pct, 100.0)
@@ -295,9 +307,7 @@ def _estimate_printing_duration(
 
     # First layer penalty: extra time for the slower first layer
     if layer_count > 0:
-        first_layer_extra = (extrusion_s / max(layer_count, 1)) * (
-            (1.0 / _FIRST_LAYER_SPEED_FACTOR) - 1.0
-        )
+        first_layer_extra = (extrusion_s / max(layer_count, 1)) * ((1.0 / _FIRST_LAYER_SPEED_FACTOR) - 1.0)
     else:
         first_layer_extra = 0.0
 
@@ -310,6 +320,7 @@ def _estimate_printing_duration(
 # ---------------------------------------------------------------------------
 # ProgressEstimator
 # ---------------------------------------------------------------------------
+
 
 class ProgressEstimator:
     """Estimates print progress and time-remaining for FDM print jobs.
@@ -336,7 +347,7 @@ class ProgressEstimator:
         print_speed_mm_s: float,
         current_layer: int = 0,
         printer_model: str = "fdm",
-        job_id: Optional[str] = None,
+        job_id: str | None = None,
     ) -> PrintProgressEstimate:
         """Estimate progress for an FDM print job.
 
@@ -416,7 +427,7 @@ class ProgressEstimator:
         progress_pct: float,
         elapsed_s: float,
         printer_model: str = "fdm",
-        job_id: Optional[str] = None,
+        job_id: str | None = None,
     ) -> PrintProgressEstimate:
         """Estimate completion from a raw progress percentage and elapsed time.
 
@@ -611,7 +622,7 @@ class ProgressEstimator:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_estimator: Optional[ProgressEstimator] = None
+_estimator: ProgressEstimator | None = None
 
 
 def get_estimator() -> ProgressEstimator:
@@ -633,7 +644,7 @@ def estimate_print_progress(
     print_speed_mm_s: float,
     current_layer: int = 0,
     printer_model: str = "fdm",
-    job_id: Optional[str] = None,
+    job_id: str | None = None,
 ) -> PrintProgressEstimate:
     """Convenience wrapper delegating to the singleton estimator.
 
@@ -655,7 +666,7 @@ def estimate_progress_from_pct(
     progress_pct: float,
     elapsed_s: float,
     printer_model: str = "fdm",
-    job_id: Optional[str] = None,
+    job_id: str | None = None,
 ) -> PrintProgressEstimate:
     """Convenience wrapper for percentage-based estimation.
 

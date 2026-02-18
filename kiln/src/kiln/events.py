@@ -41,8 +41,9 @@ import logging
 import os
 import threading
 import time
-from dataclasses import asdict, dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -140,11 +141,11 @@ class Event:
     """A single event in the system."""
 
     type: EventType
-    data: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
     source: str = ""  # e.g. "printer:voron-350" or "queue"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "type": self.type.value,
@@ -175,18 +176,18 @@ class EventBus:
     """
 
     def __init__(self) -> None:
-        self._handlers: Dict[EventType, List[tuple[EventHandler, Optional[EventFilter]]]] = {}
-        self._wildcard_handlers: List[tuple[EventHandler, Optional[EventFilter]]] = []
+        self._handlers: dict[EventType, list[tuple[EventHandler, EventFilter | None]]] = {}
+        self._wildcard_handlers: list[tuple[EventHandler, EventFilter | None]] = []
         self._lock = threading.Lock()
-        self._history: List[Event] = []
+        self._history: list[Event] = []
         self._max_history: int = 1000
 
     def subscribe(
         self,
-        event_type: Optional[EventType],
+        event_type: EventType | None,
         handler: EventHandler,
         *,
-        filter: Optional[EventFilter] = None,
+        filter: EventFilter | None = None,
     ) -> None:
         """Register a handler for a specific event type.
 
@@ -215,7 +216,7 @@ class EventBus:
 
     def unsubscribe(
         self,
-        event_type: Optional[EventType],
+        event_type: EventType | None,
         handler: EventHandler,
     ) -> None:
         """Remove a previously registered handler.
@@ -224,14 +225,10 @@ class EventBus:
         """
         with self._lock:
             if event_type is None:
-                self._wildcard_handlers = [
-                    (h, f) for h, f in self._wildcard_handlers if h is not handler
-                ]
+                self._wildcard_handlers = [(h, f) for h, f in self._wildcard_handlers if h is not handler]
             else:
                 entries = self._handlers.get(event_type, [])
-                self._handlers[event_type] = [
-                    (h, f) for h, f in entries if h is not handler
-                ]
+                self._handlers[event_type] = [(h, f) for h, f in entries if h is not handler]
 
     # ------------------------------------------------------------------
     # Internal dispatch helper
@@ -240,7 +237,7 @@ class EventBus:
     def _dispatch_to_handlers(
         self,
         event: Event,
-        handlers: List[tuple[EventHandler, Optional[EventFilter]]],
+        handlers: list[tuple[EventHandler, EventFilter | None]],
     ) -> None:
         """Call each handler whose filter (if any) passes for *event*."""
         for handler, filt in handlers:
@@ -262,7 +259,7 @@ class EventBus:
     def _resolve_event(
         self,
         event_or_type: Event | EventType,
-        data: Optional[Dict[str, Any]],
+        data: dict[str, Any] | None,
         source: str,
     ) -> Event:
         """Normalise the flexible publish signature into an :class:`Event`."""
@@ -273,7 +270,7 @@ class EventBus:
     def publish(
         self,
         event_or_type: Event | EventType,
-        data: Optional[Dict[str, Any]] = None,
+        data: dict[str, Any] | None = None,
         source: str = "",
     ) -> None:
         """Dispatch an event to all matching handlers.
@@ -290,14 +287,14 @@ class EventBus:
         with self._lock:
             self._history.append(event)
             if len(self._history) > self._max_history:
-                self._history = self._history[-self._max_history:]
+                self._history = self._history[-self._max_history :]
             specific = list(self._handlers.get(event.type, []))
             wildcards = list(self._wildcard_handlers)
 
         # Call outside the lock to avoid deadlocks.
         self._dispatch_to_handlers(event, specific + wildcards)
 
-    def publish_batch(self, events: List[Event]) -> None:
+    def publish_batch(self, events: list[Event]) -> None:
         """Publish multiple events atomically.
 
         All events are recorded in history under a single lock
@@ -308,7 +305,7 @@ class EventBus:
         if not events:
             return
 
-        all_targets: List[tuple[Event, List[tuple[EventHandler, Optional[EventFilter]]]]] = []
+        all_targets: list[tuple[Event, list[tuple[EventHandler, EventFilter | None]]]] = []
         with self._lock:
             for event in events:
                 self._history.append(event)
@@ -326,7 +323,7 @@ class EventBus:
     def dispatch_async(
         self,
         event_or_type: Event | EventType,
-        data: Optional[Dict[str, Any]] = None,
+        data: dict[str, Any] | None = None,
         source: str = "",
     ) -> None:
         """Schedule an event for async delivery if an event loop is running.
@@ -351,7 +348,7 @@ class EventBus:
             with self._lock:
                 self._history.append(event)
                 if len(self._history) > self._max_history:
-                    self._history = self._history[-self._max_history:]
+                    self._history = self._history[-self._max_history :]
                 specific = list(self._handlers.get(event.type, []))
                 wildcards = list(self._wildcard_handlers)
 
@@ -369,10 +366,10 @@ class EventBus:
 
     def recent_events(
         self,
-        event_type: Optional[EventType] = None,
+        event_type: EventType | None = None,
         limit: int = 50,
-        event_type_prefix: Optional[str] = None,
-    ) -> List[Event]:
+        event_type_prefix: str | None = None,
+    ) -> list[Event]:
         """Return recent events, newest first.
 
         :param event_type: Filter by exact type, or ``None`` for all.
@@ -404,6 +401,7 @@ class EventBus:
 # AsyncEventBus — non-blocking, asyncio-native event dispatch
 # ---------------------------------------------------------------------------
 
+
 class AsyncEventBus:
     """Async event bus backed by :class:`asyncio.Queue`.
 
@@ -420,16 +418,18 @@ class AsyncEventBus:
         await bus.stop()      # drains remaining events, then exits
     """
 
-    def __init__(self, *, queue_size: Optional[int] = None) -> None:
-        size = queue_size if queue_size is not None else int(
-            os.environ.get("KILN_EVENT_QUEUE_SIZE", str(_DEFAULT_QUEUE_SIZE))
+    def __init__(self, *, queue_size: int | None = None) -> None:
+        size = (
+            queue_size
+            if queue_size is not None
+            else int(os.environ.get("KILN_EVENT_QUEUE_SIZE", str(_DEFAULT_QUEUE_SIZE)))
         )
-        self._queue: asyncio.Queue[Optional[Event]] = asyncio.Queue(maxsize=size)
-        self._handlers: Dict[EventType, List[tuple[AsyncEventHandler, Optional[EventFilter]]]] = {}
-        self._wildcard_handlers: List[tuple[AsyncEventHandler, Optional[EventFilter]]] = []
+        self._queue: asyncio.Queue[Event | None] = asyncio.Queue(maxsize=size)
+        self._handlers: dict[EventType, list[tuple[AsyncEventHandler, EventFilter | None]]] = {}
+        self._wildcard_handlers: list[tuple[AsyncEventHandler, EventFilter | None]] = []
         self._lock = asyncio.Lock()
-        self._consumer_task: Optional[asyncio.Task[None]] = None
-        self._history: List[Event] = []
+        self._consumer_task: asyncio.Task[None] | None = None
+        self._history: list[Event] = []
         self._max_history: int = 1000
 
     async def start(self) -> None:
@@ -465,10 +465,10 @@ class AsyncEventBus:
 
     async def subscribe(
         self,
-        event_type: Optional[EventType],
+        event_type: EventType | None,
         handler: AsyncEventHandler,
         *,
-        filter: Optional[EventFilter] = None,
+        filter: EventFilter | None = None,
     ) -> None:
         """Register an async handler for a specific event type.
 
@@ -493,20 +493,16 @@ class AsyncEventBus:
 
     async def unsubscribe(
         self,
-        event_type: Optional[EventType],
+        event_type: EventType | None,
         handler: AsyncEventHandler,
     ) -> None:
         """Remove a previously registered async handler."""
         async with self._lock:
             if event_type is None:
-                self._wildcard_handlers = [
-                    (h, f) for h, f in self._wildcard_handlers if h is not handler
-                ]
+                self._wildcard_handlers = [(h, f) for h, f in self._wildcard_handlers if h is not handler]
             else:
                 entries = self._handlers.get(event_type, [])
-                self._handlers[event_type] = [
-                    (h, f) for h, f in entries if h is not handler
-                ]
+                self._handlers[event_type] = [(h, f) for h, f in entries if h is not handler]
 
     # ------------------------------------------------------------------
     # Publish
@@ -515,7 +511,7 @@ class AsyncEventBus:
     async def publish(
         self,
         event_or_type: Event | EventType,
-        data: Optional[Dict[str, Any]] = None,
+        data: dict[str, Any] | None = None,
         source: str = "",
     ) -> None:
         """Enqueue an event for async dispatch.
@@ -529,7 +525,7 @@ class AsyncEventBus:
             event = event_or_type
         self._queue.put_nowait(event)
 
-    async def publish_batch(self, events: List[Event]) -> None:
+    async def publish_batch(self, events: list[Event]) -> None:
         """Enqueue multiple events atomically.
 
         All events are placed into the queue in order.  If any single
@@ -568,7 +564,7 @@ class AsyncEventBus:
         async with self._lock:
             self._history.append(event)
             if len(self._history) > self._max_history:
-                self._history = self._history[-self._max_history:]
+                self._history = self._history[-self._max_history :]
             specific = list(self._handlers.get(event.type, []))
             wildcards = list(self._wildcard_handlers)
 
@@ -590,10 +586,10 @@ class AsyncEventBus:
 
     async def recent_events(
         self,
-        event_type: Optional[EventType] = None,
+        event_type: EventType | None = None,
         limit: int = 50,
-        event_type_prefix: Optional[str] = None,
-    ) -> List[Event]:
+        event_type_prefix: str | None = None,
+    ) -> list[Event]:
         """Return recent events, newest first."""
         async with self._lock:
             events = list(self._history)

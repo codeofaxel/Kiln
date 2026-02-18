@@ -14,8 +14,9 @@ import logging
 import os
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 _PLUGIN_POLICY_STRICT = "strict"
@@ -25,6 +26,7 @@ _PLUGIN_POLICY_PERMISSIVE = "permissive"
 # ---------------------------------------------------------------------------
 # Enums & dataclasses
 # ---------------------------------------------------------------------------
+
 
 class PluginHook(enum.Enum):
     """Extension points available to plugins."""
@@ -45,11 +47,11 @@ class PluginInfo:
     version: str
     description: str = ""
     author: str = ""
-    hooks: List[str] = field(default_factory=list)
+    hooks: list[str] = field(default_factory=list)
     active: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -67,6 +69,7 @@ class PluginContext:
 # ---------------------------------------------------------------------------
 # Abstract plugin base class
 # ---------------------------------------------------------------------------
+
 
 class KilnPlugin(ABC):
     """Abstract base class that all Kiln plugins must implement.
@@ -109,24 +112,29 @@ class KilnPlugin(ABC):
         """Plugin author."""
         return ""
 
-    def on_activate(self, context: PluginContext) -> None:
+    def on_activate(self, context: PluginContext) -> None:  # noqa: B027
         """Called when the plugin is activated.
 
         The *context* provides access to the event bus, printer registry,
         job queue, MCP server, and database.
+
+        Optional hook; subclasses may override.
         """
 
-    def on_deactivate(self) -> None:
-        """Called when the plugin is deactivated."""
+    def on_deactivate(self) -> None:  # noqa: B027
+        """Called when the plugin is deactivated.
 
-    def get_tools(self) -> List[Callable]:
+        Optional hook; subclasses may override.
+        """
+
+    def get_tools(self) -> list[Callable]:
         """Return a list of MCP tool functions to register.
 
         Each callable should be a function suitable for ``@mcp.tool()``.
         """
         return []
 
-    def get_event_handlers(self) -> Dict[Any, Callable]:
+    def get_event_handlers(self) -> dict[Any, Callable]:
         """Return event type → handler mappings to subscribe.
 
         Keys are :class:`~kiln.events.EventType` values (or ``None``
@@ -134,26 +142,33 @@ class KilnPlugin(ABC):
         """
         return {}
 
-    def get_cli_commands(self) -> List[Any]:
+    def get_cli_commands(self) -> list[Any]:
         """Return Click commands to add to the CLI."""
         return []
 
-    def pre_print_hook(self, job: Any, adapter: Any) -> Optional[str]:
+    def pre_print_hook(self, job: Any, adapter: Any) -> str | None:
         """Called before a print starts.
 
         Return an error string to block the print, or ``None`` to allow.
         """
         return None
 
-    def post_print_hook(
-        self, job: Any, adapter: Any, success: bool,
+    def post_print_hook(  # noqa: B027
+        self,
+        job: Any,
+        adapter: Any,
+        success: bool,
     ) -> None:
-        """Called after a print completes or fails."""
+        """Called after a print completes or fails.
+
+        Optional hook; subclasses may override.
+        """
 
 
 # ---------------------------------------------------------------------------
 # Plugin manager
 # ---------------------------------------------------------------------------
+
 
 class PluginManager:
     """Discovers, loads, and manages Kiln plugins.
@@ -165,18 +180,18 @@ class PluginManager:
     ENTRY_POINT_GROUP = "kiln.plugins"
 
     def __init__(self) -> None:
-        self._plugins: Dict[str, KilnPlugin] = {}
-        self._infos: Dict[str, PluginInfo] = {}
+        self._plugins: dict[str, KilnPlugin] = {}
+        self._infos: dict[str, PluginInfo] = {}
         self._lock = threading.Lock()
-        self._context: Optional[PluginContext] = None
+        self._context: PluginContext | None = None
 
-    def discover(self) -> List[PluginInfo]:
+    def discover(self) -> list[PluginInfo]:
         """Discover installed plugins via entry points.
 
         Returns:
             List of :class:`PluginInfo` for all discovered plugins.
         """
-        infos: List[PluginInfo] = []
+        infos: list[PluginInfo] = []
 
         try:
             eps = importlib.metadata.entry_points()
@@ -186,10 +201,7 @@ class PluginManager:
             elif isinstance(eps, dict):
                 group_eps = eps.get(self.ENTRY_POINT_GROUP, [])
             else:
-                group_eps = [
-                    ep for ep in eps
-                    if getattr(ep, "group", None) == self.ENTRY_POINT_GROUP
-                ]
+                group_eps = [ep for ep in eps if getattr(ep, "group", None) == self.ENTRY_POINT_GROUP]
         except Exception:
             logger.debug("No plugins found", exc_info=True)
             return []
@@ -228,14 +240,12 @@ class PluginManager:
             if policy == _PLUGIN_POLICY_STRICT and not _allowed:
                 blocked = True
                 blocked_reason = (
-                    "Blocked by strict plugin policy. "
-                    "Set KILN_ALLOWED_PLUGINS=<name> to allow this plugin."
+                    "Blocked by strict plugin policy. Set KILN_ALLOWED_PLUGINS=<name> to allow this plugin."
                 )
             elif _allowed and ep.name not in _allowed:
                 blocked = True
                 blocked_reason = (
-                    "Plugin not in KILN_ALLOWED_PLUGINS allow-list. "
-                    f"Set KILN_ALLOWED_PLUGINS={ep.name} to enable it."
+                    f"Plugin not in KILN_ALLOWED_PLUGINS allow-list. Set KILN_ALLOWED_PLUGINS={ep.name} to enable it."
                 )
 
             if blocked:
@@ -256,17 +266,15 @@ class PluginManager:
 
             try:
                 plugin_cls = ep.load()
-                if not (isinstance(plugin_cls, type)
-                        and issubclass(plugin_cls, KilnPlugin)):
+                if not (isinstance(plugin_cls, type) and issubclass(plugin_cls, KilnPlugin)):
                     logger.warning(
-                        "Plugin entry point %s does not point to a "
-                        "KilnPlugin subclass, skipping",
+                        "Plugin entry point %s does not point to a KilnPlugin subclass, skipping",
                         ep.name,
                     )
                     continue
 
                 plugin = plugin_cls()
-                hooks: List[str] = []
+                hooks: list[str] = []
                 if plugin.get_tools():
                     hooks.append(PluginHook.TOOL.value)
                 if plugin.get_event_handlers():
@@ -312,7 +320,7 @@ class PluginManager:
         for name in names:
             self.activate(name, context)
 
-    def activate(self, name: str, context: Optional[PluginContext] = None) -> bool:
+    def activate(self, name: str, context: PluginContext | None = None) -> bool:
         """Activate a single plugin by name.
 
         Returns ``True`` if activation succeeded.
@@ -353,6 +361,7 @@ class PluginManager:
 
             if ctx.event_bus is not None:
                 from kiln.events import EventType
+
                 ctx.event_bus.publish(
                     EventType.PLUGIN_LOADED,
                     data={"name": name, "version": plugin.version},
@@ -369,6 +378,7 @@ class PluginManager:
 
             if ctx.event_bus is not None:
                 from kiln.events import EventType
+
                 ctx.event_bus.publish(
                     EventType.PLUGIN_ERROR,
                     data={"name": name, "error": str(exc)},
@@ -396,17 +406,17 @@ class PluginManager:
             logger.error("Error deactivating plugin %s: %s", name, exc)
             return False
 
-    def list_plugins(self) -> List[PluginInfo]:
+    def list_plugins(self) -> list[PluginInfo]:
         """Return info for all discovered plugins."""
         with self._lock:
             return list(self._infos.values())
 
-    def get_plugin_info(self, name: str) -> Optional[PluginInfo]:
+    def get_plugin_info(self, name: str) -> PluginInfo | None:
         """Return info for a specific plugin."""
         with self._lock:
             return self._infos.get(name)
 
-    def run_pre_print_hooks(self, job: Any, adapter: Any) -> Optional[str]:
+    def run_pre_print_hooks(self, job: Any, adapter: Any) -> str | None:
         """Run all pre-print hooks.
 
         Returns the first error string (blocks the print), or ``None``
@@ -414,8 +424,7 @@ class PluginManager:
         """
         with self._lock:
             active = [
-                (n, p) for n, p in self._plugins.items()
-                if self._infos.get(n, PluginInfo(name=n, version="")).active
+                (n, p) for n, p in self._plugins.items() if self._infos.get(n, PluginInfo(name=n, version="")).active
             ]
 
         for name, plugin in active:
@@ -425,18 +434,22 @@ class PluginManager:
                     return f"[{name}] {result}"
             except Exception as exc:
                 logger.error(
-                    "Plugin %s pre_print_hook error: %s", name, exc,
+                    "Plugin %s pre_print_hook error: %s",
+                    name,
+                    exc,
                 )
         return None
 
     def run_post_print_hooks(
-        self, job: Any, adapter: Any, success: bool,
+        self,
+        job: Any,
+        adapter: Any,
+        success: bool,
     ) -> None:
         """Run all post-print hooks."""
         with self._lock:
             active = [
-                (n, p) for n, p in self._plugins.items()
-                if self._infos.get(n, PluginInfo(name=n, version="")).active
+                (n, p) for n, p in self._plugins.items() if self._infos.get(n, PluginInfo(name=n, version="")).active
             ]
 
         for name, plugin in active:
@@ -444,15 +457,16 @@ class PluginManager:
                 plugin.post_print_hook(job, adapter, success)
             except Exception as exc:
                 logger.error(
-                    "Plugin %s post_print_hook error: %s", name, exc,
+                    "Plugin %s post_print_hook error: %s",
+                    name,
+                    exc,
                 )
 
     def register_cli_hooks(self, cli_group: Any) -> None:
         """Register CLI commands from all active plugins."""
         with self._lock:
             active = [
-                (n, p) for n, p in self._plugins.items()
-                if self._infos.get(n, PluginInfo(name=n, version="")).active
+                (n, p) for n, p in self._plugins.items() if self._infos.get(n, PluginInfo(name=n, version="")).active
             ]
 
         for name, plugin in active:
@@ -461,5 +475,7 @@ class PluginManager:
                     cli_group.add_command(cmd)
             except Exception as exc:
                 logger.error(
-                    "Plugin %s CLI registration error: %s", name, exc,
+                    "Plugin %s CLI registration error: %s",
+                    name,
+                    exc,
                 )

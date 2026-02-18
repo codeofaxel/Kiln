@@ -51,10 +51,99 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from kiln.auth import AuthManager
+from kiln.backup import BackupError
+from kiln.backup import backup_database as _backup_db
+from kiln.bed_leveling import BedLevelManager, LevelingPolicy
+from kiln.billing import BillingLedger
+from kiln.billing_alerts import BillingAlertManager
+from kiln.cli.config import _validate_printer_url
+from kiln.cloud_sync import CloudSyncManager, SyncConfig
+from kiln.cost_estimator import CostEstimator
+from kiln.events import Event, EventBus, EventType
+from kiln.fulfillment import (
+    FulfillmentError,
+    FulfillmentProvider,
+    OrderRequest,
+    QuoteRequest,
+)
+from kiln.fulfillment import (
+    get_provider as get_fulfillment_provider,
+)
+from kiln.fulfillment.intelligence import (
+    QuoteValidation,
+    _check_price_drift,
+)
+from kiln.fulfillment.intelligence import (
+    validate_quote_for_order as _validate_quote_for_order,
+)
+from kiln.gateway.threedos import ThreeDOSClient
+from kiln.gcode import validate_gcode as _validate_gcode_impl
+from kiln.gcode import validate_gcode_for_printer
+from kiln.generation import (
+    GenerationAuthError,
+    GenerationError,
+    GenerationProvider,
+    GenerationResult,
+    GenerationStatus,
+    MeshyProvider,
+    OpenSCADProvider,
+    convert_to_stl,
+    validate_mesh,
+)
+from kiln.heater_watchdog import HeaterWatchdog
+from kiln.licensing import (
+    FREE_TIER_MAX_PRINTERS,
+    LicenseTier,
+    check_tier,
+    get_tier,
+    requires_tier,
+)
+from kiln.log_config import configure_logging as _configure_log_rotation
+from kiln.marketplaces import (
+    Cults3DAdapter,
+    MarketplaceError,
+    MarketplaceRegistry,
+    MyMiniFactoryAdapter,
+    ThingiverseAdapter,
+)
+from kiln.marketplaces import (
+    MarketplaceNotFoundError as MktNotFoundError,
+)
+from kiln.materials import MaterialTracker
+from kiln.payments.base import PaymentError
+from kiln.payments.manager import PaymentManager
+from kiln.persistence import get_db
+from kiln.pipelines import (
+    PipelineState as _PipelineState,
+)
+from kiln.pipelines import (
+    benchmark as _pipeline_benchmark,
+)
+from kiln.pipelines import (
+    calibrate as _pipeline_calibrate,
+)
+from kiln.pipelines import (
+    get_execution as _get_execution,
+)
+from kiln.pipelines import (
+    list_pipelines as _list_pipelines,
+)
+from kiln.pipelines import (
+    quick_print as _pipeline_quick_print,
+)
+from kiln.plugin_loader import register_all_plugins
+from kiln.plugins import PluginContext, PluginManager
+from kiln.printer_intelligence import (
+    diagnose_issue,
+    get_material_settings,
+    get_printer_intel,
+    intel_to_dict,
+)
 from kiln.printers import (
     BambuAdapter,
     MoonrakerAdapter,
@@ -65,132 +154,33 @@ from kiln.printers import (
     PrusaConnectAdapter,
     SerialPrinterAdapter,
 )
-from kiln.gcode import validate_gcode as _validate_gcode_impl, validate_gcode_for_printer
+from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
+from kiln.registry import PrinterNotFoundError, PrinterRegistry
 from kiln.safety_profiles import (
     add_community_profile,
-    export_profile as _export_profile,
     get_profile,
     list_profiles,
     profile_to_dict,
     validate_safety_profile,
 )
-from kiln.slicer_profiles import (
-    get_slicer_profile, list_slicer_profiles, resolve_slicer_profile,
-    slicer_profile_to_dict, validate_profile_for_printer,
+from kiln.safety_profiles import (
+    export_profile as _export_profile,
 )
-from kiln.printer_intelligence import (
-    get_printer_intel, list_intel_profiles, get_material_settings,
-    diagnose_issue, intel_to_dict,
-)
-from kiln.pipelines import (
-    quick_print as _pipeline_quick_print,
-    calibrate as _pipeline_calibrate,
-    benchmark as _pipeline_benchmark,
-    list_pipelines as _list_pipelines,
-    get_execution as _get_execution,
-    PipelineState as _PipelineState,
-)
-from kiln.registry import PrinterRegistry, PrinterNotFoundError
-from kiln.cli.config import _validate_printer_url
-from kiln.queue import PrintQueue, JobStatus, JobNotFoundError
-from kiln.events import Event, EventBus, EventType
 from kiln.scheduler import JobScheduler
-from kiln.persistence import get_db
-from kiln.webhooks import WebhookManager
-from kiln.auth import AuthManager
-from kiln.licensing import (
-    FREE_TIER_MAX_PRINTERS,
-    FREE_TIER_MAX_QUEUED_JOBS,
-    LicenseTier,
-    check_tier,
-    get_tier,
-    requires_tier,
+from kiln.slicer_profiles import (
+    get_slicer_profile,
+    list_slicer_profiles,
+    resolve_slicer_profile,
+    slicer_profile_to_dict,
+    validate_profile_for_printer,
 )
-from kiln.billing import BillingLedger, FeeCalculation, FeePolicy
-from kiln.billing_alerts import BillingAlertManager
-from kiln.payments.manager import PaymentManager
-from kiln.payments.base import PaymentError
-from kiln.cost_estimator import CostEstimator
-from kiln.materials import MaterialTracker
-from kiln.bed_leveling import BedLevelManager, LevelingPolicy
 from kiln.streaming import MJPEGProxy
-from kiln.cloud_sync import CloudSyncManager, SyncConfig
-from kiln.heater_watchdog import HeaterWatchdog
-from kiln.backup import backup_database as _backup_db, BackupError
-from kiln.log_config import configure_logging as _configure_log_rotation
-from kiln.plugins import PluginManager, PluginContext
-from kiln.plugin_loader import register_all_plugins
-from kiln.fulfillment import (
-    FulfillmentError,
-    FulfillmentProvider,
-    OrderRequest,
-    QuoteRequest,
-    get_provider as get_fulfillment_provider,
-    list_providers as list_fulfillment_providers,
-)
 from kiln.thingiverse import (
     ThingiverseClient,
     ThingiverseError,
-    ThingiverseAuthError,
     ThingiverseNotFoundError,
-    ThingiverseRateLimitError,
 )
-from kiln.marketplaces import (
-    MarketplaceRegistry,
-    MarketplaceError,
-    MarketplaceNotFoundError as MktNotFoundError,
-    ThingiverseAdapter,
-    MyMiniFactoryAdapter,
-    Cults3DAdapter,
-)
-from kiln.generation import (
-    GenerationError,
-    GenerationAuthError,
-    GenerationProvider,
-    GenerationJob,
-    GenerationResult,
-    GenerationStatus,
-    MeshyProvider,
-    OpenSCADProvider,
-    convert_to_stl,
-    validate_mesh,
-)
-from kiln.gateway.threedos import ThreeDOSClient, ThreeDOSError
-from kiln.consumer import (
-    AddressValidation,
-    MaterialGuide,
-    OrderTimeline,
-    PriceEstimate,
-    ConsumerOnboarding,
-    validate_address,
-    recommend_material,
-    estimate_timeline,
-    estimate_price,
-    get_onboarding,
-    list_supported_countries,
-)
-from kiln.fulfillment.intelligence import (
-    BatchQuote,
-    BatchQuoteItem,
-    InsuranceOption,
-    InsuranceTier,
-    MaterialFilter,
-    OrderHistory,
-    ProviderHealth,
-    ProviderStatus,
-    QuoteComparison,
-    QuoteValidation,
-    RetryResult,
-    _check_price_drift,
-    batch_quote as _batch_quote,
-    compare_providers as _compare_providers,
-    filter_materials as _filter_materials,
-    get_health_monitor as _get_health_monitor,
-    get_insurance_options as _get_insurance_options,
-    get_order_history as _get_order_history,
-    validate_quote_for_order as _validate_quote_for_order,
-)
-
+from kiln.webhooks import WebhookManager
 
 
 class _JsonLogFormatter(logging.Formatter):
@@ -202,6 +192,7 @@ class _JsonLogFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         import json as _json_mod
+
         entry = {
             "timestamp": self.formatTime(record, self.datefmt),
             "level": record.levelname,
@@ -241,12 +232,8 @@ _PRINTER_API_KEY: str = os.environ.get("KILN_PRINTER_API_KEY", "")
 _PRINTER_TYPE: str = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
 _PRINTER_SERIAL: str = os.environ.get("KILN_PRINTER_SERIAL", "")
 _PRINTER_MODEL: str = os.environ.get("KILN_PRINTER_MODEL", "")
-_CONFIRM_UPLOAD: bool = (
-    os.environ.get("KILN_CONFIRM_UPLOAD", "").lower() in ("1", "true", "yes")
-)
-_CONFIRM_MODE: bool = (
-    os.environ.get("KILN_CONFIRM_MODE", "").lower() in ("1", "true", "yes")
-)
+_CONFIRM_UPLOAD: bool = os.environ.get("KILN_CONFIRM_UPLOAD", "").lower() in ("1", "true", "yes")
+_CONFIRM_MODE: bool = os.environ.get("KILN_CONFIRM_MODE", "").lower() in ("1", "true", "yes")
 _THINGIVERSE_TOKEN: str = os.environ.get("KILN_THINGIVERSE_TOKEN", "")
 _THINGIVERSE_DEPRECATION_NOTICE: str = (
     "Thingiverse was acquired by MyMiniFactory in February 2026. "
@@ -263,12 +250,8 @@ _MESHY_API_KEY: str = os.environ.get("KILN_MESHY_API_KEY", "")
 # Auto-print toggles: OFF by default for safety.  Generated models are
 # higher risk than marketplace downloads — two independent toggles let
 # users opt in to each separately.
-_AUTO_PRINT_MARKETPLACE: bool = (
-    os.environ.get("KILN_AUTO_PRINT_MARKETPLACE", "").lower() in ("1", "true", "yes")
-)
-_AUTO_PRINT_GENERATED: bool = (
-    os.environ.get("KILN_AUTO_PRINT_GENERATED", "").lower() in ("1", "true", "yes")
-)
+_AUTO_PRINT_MARKETPLACE: bool = os.environ.get("KILN_AUTO_PRINT_MARKETPLACE", "").lower() in ("1", "true", "yes")
+_AUTO_PRINT_GENERATED: bool = os.environ.get("KILN_AUTO_PRINT_GENERATED", "").lower() in ("1", "true", "yes")
 
 # Heater watchdog: minutes of idle heater time before auto-cooldown (0=disabled).
 _HEATER_TIMEOUT_MIN: float = float(os.environ.get("KILN_HEATER_TIMEOUT", "30"))
@@ -314,7 +297,7 @@ mcp = FastMCP(
 # Printer adapter singleton
 # ---------------------------------------------------------------------------
 
-_adapter: Optional[PrinterAdapter] = None
+_adapter: PrinterAdapter | None = None
 
 
 def _get_adapter() -> PrinterAdapter:
@@ -349,8 +332,7 @@ def _get_adapter() -> PrinterAdapter:
     if printer_type == "octoprint":
         if not api_key:
             raise RuntimeError(
-                "KILN_PRINTER_API_KEY environment variable is not set.  "
-                "Set it to your printer server's API key."
+                "KILN_PRINTER_API_KEY environment variable is not set.  Set it to your printer server's API key."
             )
         _adapter = OctoPrintAdapter(host=host, api_key=api_key)
     elif printer_type == "moonraker":
@@ -360,19 +342,16 @@ def _get_adapter() -> PrinterAdapter:
     elif printer_type == "bambu":
         if BambuAdapter is None:
             raise RuntimeError(
-                "Bambu support requires paho-mqtt.  "
-                "Install it with: pip install 'kiln[bambu]' or pip install paho-mqtt"
+                "Bambu support requires paho-mqtt.  Install it with: pip install 'kiln[bambu]' or pip install paho-mqtt"
             )
         if not api_key:
             raise RuntimeError(
-                "KILN_PRINTER_API_KEY environment variable is not set.  "
-                "Set it to your Bambu printer's LAN Access Code."
+                "KILN_PRINTER_API_KEY environment variable is not set.  Set it to your Bambu printer's LAN Access Code."
             )
         serial = _PRINTER_SERIAL
         if not serial:
             raise RuntimeError(
-                "KILN_PRINTER_SERIAL environment variable is not set.  "
-                "Set it to your Bambu printer's serial number."
+                "KILN_PRINTER_SERIAL environment variable is not set.  Set it to your Bambu printer's serial number."
             )
         _adapter = BambuAdapter(host=host, access_code=api_key, serial=serial)
     elif printer_type == "prusaconnect":
@@ -408,6 +387,7 @@ def _get_adapter() -> PrinterAdapter:
 # Per-printer temperature limits
 # ---------------------------------------------------------------------------
 
+
 def _get_temp_limits() -> tuple:
     """Return ``(max_tool, max_bed)`` from the printer's safety profile.
 
@@ -417,6 +397,7 @@ def _get_temp_limits() -> tuple:
     if _PRINTER_MODEL:
         try:
             from kiln.safety_profiles import get_profile  # noqa: E402
+
             profile = get_profile(_PRINTER_MODEL)
             return profile.max_hotend_temp, profile.max_bed_temp
         except (KeyError, ImportError):
@@ -427,6 +408,7 @@ def _get_temp_limits() -> tuple:
 # ---------------------------------------------------------------------------
 # MCP tool rate limiter
 # ---------------------------------------------------------------------------
+
 
 class _ToolRateLimiter:
     """Per-tool rate limiter for MCP tool calls.
@@ -440,8 +422,8 @@ class _ToolRateLimiter:
     """
 
     # Circuit breaker thresholds
-    _BLOCK_THRESHOLD: int = 3      # blocks within the window to trigger
-    _BLOCK_WINDOW: float = 60.0    # seconds
+    _BLOCK_THRESHOLD: int = 3  # blocks within the window to trigger
+    _BLOCK_WINDOW: float = 60.0  # seconds
     _COOLDOWN_DURATION: float = 300.0  # 5 minutes
 
     def __init__(self) -> None:
@@ -450,7 +432,7 @@ class _ToolRateLimiter:
         self._block_history: dict[str, list[float]] = {}
         self._cooldown_until: dict[str, float] = {}
 
-    def record_block(self, tool_name: str) -> Optional[str]:
+    def record_block(self, tool_name: str) -> str | None:
         """Record a blocked attempt for the circuit breaker.
 
         Returns an escalation message if the threshold is hit, else ``None``.
@@ -473,9 +455,7 @@ class _ToolRateLimiter:
             )
         return None
 
-    def check(
-        self, tool_name: str, min_interval_ms: int = 0, max_per_minute: int = 0
-    ) -> Optional[str]:
+    def check(self, tool_name: str, min_interval_ms: int = 0, max_per_minute: int = 0) -> str | None:
         """Return ``None`` if allowed, or an error message if rate-limited."""
         now = time.monotonic()
 
@@ -494,10 +474,7 @@ class _ToolRateLimiter:
             elapsed_ms = (now - last) * 1000
             if elapsed_ms < min_interval_ms:
                 wait = (min_interval_ms - elapsed_ms) / 1000
-                return (
-                    f"Rate limited: {tool_name} called too rapidly. "
-                    f"Wait {wait:.1f}s before retrying."
-                )
+                return f"Rate limited: {tool_name} called too rapidly. Wait {wait:.1f}s before retrying."
 
         # Max calls per rolling 60-second window.
         if max_per_minute > 0:
@@ -506,8 +483,7 @@ class _ToolRateLimiter:
             history = [t for t in history if t > cutoff]
             if len(history) >= max_per_minute:
                 return (
-                    f"Rate limited: {tool_name} called {max_per_minute} times "
-                    f"in the last minute. Wait before retrying."
+                    f"Rate limited: {tool_name} called {max_per_minute} times in the last minute. Wait before retrying."
                 )
             self._call_history[tool_name] = history
 
@@ -526,17 +502,17 @@ _pending_uploads: dict[str, str] = {}
 # Read-only tools have no limits.  Physically-dangerous tools get cooldowns.
 _TOOL_RATE_LIMITS: dict[str, tuple[int, int]] = {
     "set_temperature": (2000, 10),
-    "send_gcode":      (500, 30),
-    "emergency_stop":  (5000, 3),
-    "cancel_print":    (5000, 3),
-    "start_print":     (5000, 3),
-    "upload_file":     (2000, 10),
-    "pause_print":     (5000, 6),
-    "resume_print":    (5000, 6),
+    "send_gcode": (500, 30),
+    "emergency_stop": (5000, 3),
+    "cancel_print": (5000, 3),
+    "start_print": (5000, 3),
+    "upload_file": (2000, 10),
+    "pause_print": (5000, 6),
+    "resume_print": (5000, 6),
 }
 
 
-def _check_rate_limit(tool_name: str) -> Optional[dict]:
+def _check_rate_limit(tool_name: str) -> dict | None:
     """Return an error dict if *tool_name* is rate-limited, else ``None``."""
     limits = _TOOL_RATE_LIMITS.get(tool_name)
     if not limits:
@@ -548,7 +524,7 @@ def _check_rate_limit(tool_name: str) -> Optional[dict]:
     return None
 
 
-def _record_tool_block(tool_name: str) -> Optional[dict]:
+def _record_tool_block(tool_name: str) -> dict | None:
     """Record a blocked attempt for the circuit breaker.
 
     Returns an escalation error dict if the threshold is hit, else ``None``.
@@ -570,9 +546,10 @@ def _record_tool_block(tool_name: str) -> Optional[dict]:
 # ---------------------------------------------------------------------------
 
 # Load tool safety classifications for audit metadata.
-_TOOL_SAFETY: Dict[str, Dict[str, Any]] = {}
+_TOOL_SAFETY: dict[str, dict[str, Any]] = {}
 try:
     import json as _json
+
     _safety_data_path = Path(__file__).resolve().parent / "data" / "tool_safety.json"
     _raw_safety = _json.loads(_safety_data_path.read_text(encoding="utf-8"))
     _TOOL_SAFETY = _raw_safety.get("classifications", {})
@@ -589,7 +566,7 @@ def _get_safety_level(tool_name: str) -> str:
 def _audit(
     tool_name: str,
     action: str,
-    details: Optional[Dict[str, Any]] = None,
+    details: dict[str, Any] | None = None,
 ) -> None:
     """Record a safety audit event (fire-and-forget).
 
@@ -613,11 +590,11 @@ def _audit(
 # ---------------------------------------------------------------------------
 
 # Pending confirmations: {token: {tool, args, created_at}}.
-_pending_confirmations: dict[str, Dict[str, Any]] = {}
+_pending_confirmations: dict[str, dict[str, Any]] = {}
 _CONFIRM_TOKEN_TTL: float = 300.0  # 5 minutes
 
 
-def _check_confirmation(tool_name: str, args: Dict[str, Any]) -> Optional[dict]:
+def _check_confirmation(tool_name: str, args: dict[str, Any]) -> dict | None:
     """If confirm mode is active and the tool is confirm/emergency level, return
     a confirmation-required response.  Otherwise return ``None`` to proceed.
     """
@@ -628,9 +605,8 @@ def _check_confirmation(tool_name: str, args: Dict[str, Any]) -> Optional[dict]:
         return None
 
     import hashlib
-    token = hashlib.sha256(
-        f"{tool_name}:{time.time()}:{id(args)}".encode()
-    ).hexdigest()[:16]
+
+    token = hashlib.sha256(f"{tool_name}:{time.time()}:{id(args)}".encode()).hexdigest()[:16]
 
     _pending_confirmations[token] = {
         "tool": tool_name,
@@ -640,8 +616,7 @@ def _check_confirmation(tool_name: str, args: Dict[str, Any]) -> Optional[dict]:
 
     # Prune expired tokens
     now = time.time()
-    expired = [t for t, v in _pending_confirmations.items()
-               if now - v["created_at"] > _CONFIRM_TOKEN_TTL]
+    expired = [t for t, v in _pending_confirmations.items() if now - v["created_at"] > _CONFIRM_TOKEN_TTL]
     for t in expired:
         del _pending_confirmations[t]
 
@@ -671,15 +646,17 @@ _scheduler = JobScheduler(_queue, _registry, _event_bus, persistence=get_db())
 _webhook_mgr = WebhookManager(_event_bus)
 _auth = AuthManager()
 _billing = BillingLedger(db=get_db())
-_payment_mgr: Optional[PaymentManager] = None
-_billing_alert_mgr: Optional[BillingAlertManager] = None
+_payment_mgr: PaymentManager | None = None
+_billing_alert_mgr: BillingAlertManager | None = None
 _cost_estimator = CostEstimator()
 _material_tracker = MaterialTracker(db=get_db(), event_bus=_event_bus)
 _bed_level_mgr = BedLevelManager(
-    db=get_db(), event_bus=_event_bus, registry=_registry,
+    db=get_db(),
+    event_bus=_event_bus,
+    registry=_registry,
 )
 _stream_proxy = MJPEGProxy()
-_cloud_sync: Optional[CloudSyncManager] = None
+_cloud_sync: CloudSyncManager | None = None
 _heater_watchdog = HeaterWatchdog(
     get_adapter=lambda: _get_adapter(),
     timeout_minutes=_HEATER_TIMEOUT_MIN,
@@ -695,7 +672,7 @@ _start_time = time.time()
 
 # Thingiverse client (lazy -- created on first use so the module can be
 # imported without requiring the token env var).
-_thingiverse: Optional[ThingiverseClient] = None
+_thingiverse: ThingiverseClient | None = None
 
 
 def _get_thingiverse() -> ThingiverseClient:
@@ -735,14 +712,12 @@ def _init_marketplace_registry() -> None:
             logger.debug("Could not register MyMiniFactory adapter", exc_info=True)
     if _CULTS3D_USERNAME and _CULTS3D_API_KEY:
         try:
-            _marketplace_registry.register(
-                Cults3DAdapter(username=_CULTS3D_USERNAME, api_key=_CULTS3D_API_KEY)
-            )
+            _marketplace_registry.register(Cults3DAdapter(username=_CULTS3D_USERNAME, api_key=_CULTS3D_API_KEY))
         except Exception:
             logger.debug("Could not register Cults3D adapter", exc_info=True)
 
 
-_fulfillment: Optional[FulfillmentProvider] = None
+_fulfillment: FulfillmentProvider | None = None
 
 
 def _get_fulfillment() -> FulfillmentProvider:
@@ -769,7 +744,7 @@ def _get_fulfillment() -> FulfillmentProvider:
     return _fulfillment
 
 
-_fulfillment_monitor: Optional[Any] = None
+_fulfillment_monitor: Any | None = None
 
 
 def _get_fulfillment_monitor() -> Any:
@@ -785,13 +760,14 @@ def _get_fulfillment_monitor() -> Any:
     from kiln.fulfillment_monitor import FulfillmentMonitor
 
     _fulfillment_monitor = FulfillmentMonitor(
-        db=get_db(), event_bus=_event_bus,
+        db=get_db(),
+        event_bus=_event_bus,
     )
     _fulfillment_monitor.start()
     return _fulfillment_monitor
 
 
-_threedos_client: Optional[ThreeDOSClient] = None
+_threedos_client: ThreeDOSClient | None = None
 
 
 def _get_threedos_client() -> ThreeDOSClient:
@@ -816,9 +792,13 @@ def _get_payment_mgr() -> PaymentManager:
         return _payment_mgr
 
     from kiln.cli.config import get_billing_config
+
     config = get_billing_config()
     _payment_mgr = PaymentManager(
-        db=get_db(), config=config, event_bus=_event_bus, ledger=_billing,
+        db=get_db(),
+        config=config,
+        event_bus=_event_bus,
+        ledger=_billing,
     )
 
     # Auto-register providers from env vars.
@@ -826,6 +806,7 @@ def _get_payment_mgr() -> PaymentManager:
     if stripe_key:
         try:
             from kiln.payments.stripe_provider import StripeProvider
+
             customer_id = config.get("stripe_customer_id")
             payment_method_id = config.get("stripe_payment_method_id")
             _payment_mgr.register_provider(
@@ -842,6 +823,7 @@ def _get_payment_mgr() -> PaymentManager:
     if circle_key:
         try:
             from kiln.payments.circle_provider import CircleProvider
+
             circle_network = os.environ.get(
                 "KILN_CIRCLE_NETWORK",
                 config.get("circle_default_network", "solana"),
@@ -866,9 +848,9 @@ def _get_billing_alert_mgr() -> BillingAlertManager:
 
 
 def _refund_after_order_failure(
-    pay_result: Optional[Any],
+    pay_result: Any | None,
     payment_hold_id: str,
-) -> Optional[str]:
+) -> str | None:
     """Best-effort refund/cancel after a failed order placement.
 
     If a completed charge exists (``pay_result``), attempts to refund it
@@ -895,62 +877,69 @@ def _refund_after_order_failure(
                 )
         except Exception as exc:
             logger.error(
-                "CRITICAL: Failed to auto-refund payment %s after order failure. "
-                "Manual refund required. Error: %s",
-                payment_id, exc,
+                "CRITICAL: Failed to auto-refund payment %s after order failure. Manual refund required. Error: %s",
+                payment_id,
+                exc,
             )
             # Emit event for alert manager.
             try:
-                _event_bus.publish(EventType.PAYMENT_FAILED, {
-                    "payment_id": payment_id,
-                    "error": f"Auto-refund failed: {exc}",
-                    "requires_manual_refund": True,
-                }, source="fulfillment")
+                _event_bus.publish(
+                    EventType.PAYMENT_FAILED,
+                    {
+                        "payment_id": payment_id,
+                        "error": f"Auto-refund failed: {exc}",
+                        "requires_manual_refund": True,
+                    },
+                    source="fulfillment",
+                )
             except Exception as exc2:
                 logger.debug("Failed to publish refund failure event: %s", exc2)
-            return (
-                f"WARNING: Automatic refund of payment {payment_id} failed. "
-                "Manual refund may be required."
-            )
+            return f"WARNING: Automatic refund of payment {payment_id} failed. Manual refund may be required."
     elif payment_hold_id:
         try:
             mgr = _get_payment_mgr()
             mgr.cancel_fee(payment_hold_id)
             logger.info(
-                "Cancelled hold %s after order failure", payment_hold_id,
+                "Cancelled hold %s after order failure",
+                payment_hold_id,
             )
         except Exception as exc:
             logger.error(
-                "CRITICAL: Failed to cancel hold %s after order failure. "
-                "Manual cancellation required. Error: %s",
-                payment_hold_id, exc,
+                "CRITICAL: Failed to cancel hold %s after order failure. Manual cancellation required. Error: %s",
+                payment_hold_id,
+                exc,
             )
             # Emit event for alert manager.
             try:
-                _event_bus.publish(EventType.PAYMENT_FAILED, {
-                    "payment_id": payment_hold_id,
-                    "error": f"Hold cancellation failed: {exc}",
-                    "requires_manual_refund": True,
-                }, source="fulfillment")
+                _event_bus.publish(
+                    EventType.PAYMENT_FAILED,
+                    {
+                        "payment_id": payment_hold_id,
+                        "error": f"Hold cancellation failed: {exc}",
+                        "requires_manual_refund": True,
+                    },
+                    source="fulfillment",
+                )
             except Exception as exc2:
                 logger.debug("Failed to publish hold cancellation failure event: %s", exc2)
             return (
-                f"WARNING: Cancellation of payment hold {payment_hold_id} failed. "
-                "Manual cancellation may be required."
+                f"WARNING: Cancellation of payment hold {payment_hold_id} failed. Manual cancellation may be required."
             )
     return None
 
 
 # Error codes that represent transient failures the caller may retry.
-_RETRYABLE_CODES = frozenset({
-    "ERROR",  # Generic printer / runtime errors are typically transient.
-    "INTERNAL_ERROR",
-    "GENERATION_TIMEOUT",
-    "RATE_LIMIT",
-})
+_RETRYABLE_CODES = frozenset(
+    {
+        "ERROR",  # Generic printer / runtime errors are typically transient.
+        "INTERNAL_ERROR",
+        "GENERATION_TIMEOUT",
+        "RATE_LIMIT",
+    }
+)
 
 # Per-check remediation hints shown when mandatory preflight blocks start_print.
-_PREFLIGHT_HINTS: Dict[str, str] = {
+_PREFLIGHT_HINTS: dict[str, str] = {
     "printer_connected": "Check that the printer is powered on, connected to the network, and reachable at the configured host.",
     "printer_idle": "Wait for the current job to finish or cancel it with cancel_print() before starting a new print.",
     "no_errors": "Clear the error on the printer (power-cycle or acknowledge via the printer's UI) and retry.",
@@ -969,10 +958,18 @@ _PREFLIGHT_HINTS: Dict[str, str] = {
 
 # Environment variable names containing secrets — used to sanitize logs.
 _SECRET_ENV_VARS = (
-    "KILN_PRINTER_API_KEY", "KILN_THINGIVERSE_TOKEN", "KILN_MMF_API_KEY",
-    "KILN_CULTS3D_API_KEY", "KILN_MESHY_API_KEY", "KILN_CRAFTCLOUD_API_KEY",
-    "KILN_PRINTER_ACCESS_CODE", "KILN_CIRCLE_API_KEY", "KILN_STRIPE_API_KEY",
-    "KILN_STRIPE_WEBHOOK_SECRET", "KILN_API_AUTH_TOKEN", "KILN_AUTH_TOKEN",
+    "KILN_PRINTER_API_KEY",
+    "KILN_THINGIVERSE_TOKEN",
+    "KILN_MMF_API_KEY",
+    "KILN_CULTS3D_API_KEY",
+    "KILN_MESHY_API_KEY",
+    "KILN_CRAFTCLOUD_API_KEY",
+    "KILN_PRINTER_ACCESS_CODE",
+    "KILN_CIRCLE_API_KEY",
+    "KILN_STRIPE_API_KEY",
+    "KILN_STRIPE_WEBHOOK_SECRET",
+    "KILN_API_AUTH_TOKEN",
+    "KILN_AUTH_TOKEN",
 )
 
 
@@ -985,7 +982,7 @@ def _sanitize_log_msg(msg: str) -> str:
     return msg
 
 
-def _check_disk_space(path: str, required_mb: int = 100) -> Optional[Dict[str, Any]]:
+def _check_disk_space(path: str, required_mb: int = 100) -> dict[str, Any] | None:
     """Return an error dict if fewer than *required_mb* MB are free at *path*.
 
     Returns ``None`` if there's enough space.
@@ -995,8 +992,7 @@ def _check_disk_space(path: str, required_mb: int = 100) -> Optional[Dict[str, A
         free_mb = usage.free / (1024 * 1024)
         if free_mb < required_mb:
             return _error_dict(
-                f"Insufficient disk space: {free_mb:.0f} MB free, "
-                f"need at least {required_mb} MB.",
+                f"Insufficient disk space: {free_mb:.0f} MB free, need at least {required_mb} MB.",
                 code="DISK_FULL",
             )
     except OSError:
@@ -1008,8 +1004,8 @@ def _error_dict(
     message: str,
     code: str = "ERROR",
     *,
-    retryable: Optional[bool] = None,
-) -> Dict[str, Any]:
+    retryable: bool | None = None,
+) -> dict[str, Any]:
     """Build a standardised error response dict.
 
     If *retryable* is not supplied explicitly it is inferred from *code*:
@@ -1028,7 +1024,7 @@ def _error_dict(
     }
 
 
-def _check_auth(scope: str) -> Optional[Dict[str, Any]]:
+def _check_auth(scope: str) -> dict[str, Any] | None:
     """Check authentication for a tool invocation.
 
     Returns ``None`` if the request is allowed (either auth is disabled or the
@@ -1051,7 +1047,7 @@ def _check_auth(scope: str) -> Optional[Dict[str, Any]]:
     )
 
 
-def _check_billing_auth(scope: str = "print") -> Optional[Dict[str, Any]]:
+def _check_billing_auth(scope: str = "print") -> dict[str, Any] | None:
     """Check authentication for billable operations.
 
     Unlike :func:`_check_auth`, this ALWAYS requires authentication for
@@ -1076,6 +1072,7 @@ def _check_billing_auth(scope: str = "print") -> Optional[Dict[str, Any]]:
 # Persistence hooks — save job/event changes to SQLite
 # ---------------------------------------------------------------------------
 
+
 def _persist_event(event: Event) -> None:
     """EventBus subscriber that writes every event to SQLite."""
     try:
@@ -1091,25 +1088,30 @@ def _persist_event(event: Event) -> None:
 
     # Also persist job state changes
     job_events = {
-        EventType.JOB_QUEUED, EventType.JOB_STARTED,
-        EventType.JOB_COMPLETED, EventType.JOB_FAILED, EventType.JOB_CANCELLED,
+        EventType.JOB_QUEUED,
+        EventType.JOB_STARTED,
+        EventType.JOB_COMPLETED,
+        EventType.JOB_FAILED,
+        EventType.JOB_CANCELLED,
     }
     if event.type in job_events and "job_id" in event.data:
         try:
             job = _queue.get_job(event.data["job_id"])
             db = get_db()
-            db.save_job({
-                "id": job.id,
-                "file_name": job.file_name,
-                "printer_name": job.printer_name,
-                "status": job.status.value,
-                "priority": job.priority,
-                "submitted_by": job.submitted_by,
-                "submitted_at": job.created_at,
-                "started_at": job.started_at,
-                "completed_at": job.completed_at,
-                "error_message": job.error,
-            })
+            db.save_job(
+                {
+                    "id": job.id,
+                    "file_name": job.file_name,
+                    "printer_name": job.printer_name,
+                    "status": job.status.value,
+                    "priority": job.priority,
+                    "submitted_by": job.submitted_by,
+                    "submitted_at": job.created_at,
+                    "started_at": job.started_at,
+                    "completed_at": job.completed_at,
+                    "error_message": job.error,
+                }
+            )
         except Exception:
             logger.debug("Failed to persist job %s", event.data.get("job_id"), exc_info=True)
 
@@ -1127,7 +1129,8 @@ def _billing_hook(event: Event) -> None:
         return  # Local job — free
     try:
         fee_calc, _charge_id = _billing.calculate_and_record_fee(
-            event.data["job_id"], float(network_cost),
+            event.data["job_id"],
+            float(network_cost),
         )
         logger.info(
             "Billing: job %s network_cost=%.2f fee=%.2f (waived=%s)",
@@ -1165,9 +1168,11 @@ def _log_print_completion(event: Event) -> None:
             "slicer_profile": event.data.get("slicer_profile"),
             "agent_id": event.data.get("agent_id") or os.environ.get("KILN_AGENT_ID", "default"),
             "metadata": {
-                k: v for k, v in event.data.items()
+                k: v
+                for k, v in event.data.items()
                 if k not in ("job_id", "material_type", "file_hash", "slicer_profile", "agent_id")
-            } or None,
+            }
+            or None,
             "started_at": job.started_at,
             "completed_at": job.completed_at,
             "created_at": time.time(),
@@ -1227,7 +1232,9 @@ def printer_status() -> dict:
             "capabilities": caps.to_dict(),
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to get printer status: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct.")
+        return _error_dict(
+            f"Failed to get printer status: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct."
+        )
     except Exception as exc:
         logger.exception("Unexpected error in printer_status")
         return _error_dict(f"Unexpected error in printer_status: {exc}", code="INTERNAL_ERROR")
@@ -1260,7 +1267,9 @@ def printer_files() -> dict:
             "count": len(files),
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to list printer files: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct.")
+        return _error_dict(
+            f"Failed to list printer files: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct."
+        )
     except Exception as exc:
         logger.exception("Unexpected error in printer_files")
         return _error_dict(f"Unexpected error in printer_files: {exc}", code="INTERNAL_ERROR")
@@ -1332,9 +1341,7 @@ def upload_file(file_path: str) -> dict:
         if _CONFIRM_UPLOAD:
             import hashlib
 
-            token = hashlib.sha256(
-                f"{file_path}:{file_size}".encode()
-            ).hexdigest()[:16]
+            token = hashlib.sha256(f"{file_path}:{file_size}".encode()).hexdigest()[:16]
             # Store token for upload_file_confirm() to verify.
             _pending_uploads[token] = file_path
             summary: dict[str, Any] = {
@@ -1360,7 +1367,9 @@ def upload_file(file_path: str) -> dict:
     except FileNotFoundError as exc:
         return _error_dict(f"Failed to upload file: {exc}", code="FILE_NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to upload file: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct.")
+        return _error_dict(
+            f"Failed to upload file: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct."
+        )
     except Exception as exc:
         logger.exception("Unexpected error in upload_file")
         return _error_dict(f"Unexpected error in upload_file: {exc}", code="INTERNAL_ERROR")
@@ -1382,8 +1391,7 @@ def upload_file_confirm(token: str) -> dict:
     file_path = _pending_uploads.pop(token, None)
     if file_path is None:
         return _error_dict(
-            f"Invalid or expired upload token: {token!r}. "
-            f"Call upload_file() again to get a new token.",
+            f"Invalid or expired upload token: {token!r}. Call upload_file() again to get a new token.",
             code="INVALID_TOKEN",
         )
     try:
@@ -1393,7 +1401,9 @@ def upload_file_confirm(token: str) -> dict:
     except FileNotFoundError as exc:
         return _error_dict(f"Failed to confirm upload: {exc}", code="FILE_NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to confirm upload: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct.")
+        return _error_dict(
+            f"Failed to confirm upload: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct."
+        )
     except Exception as exc:
         logger.exception("Unexpected error in upload_file_confirm")
         return _error_dict(f"Unexpected error in upload_file_confirm: {exc}", code="INTERNAL_ERROR")
@@ -1432,14 +1442,13 @@ def analyze_print_file(filename: str) -> dict:
 
         if target is None:
             return _error_dict(
-                f"File not found on printer: {filename!r}. "
-                f"Use printer_files() to list available files.",
+                f"File not found on printer: {filename!r}. Use printer_files() to list available files.",
                 code="FILE_NOT_FOUND",
             )
 
         # Try to download file content for metadata extraction.
         # Not all adapters support content download -- this is best-effort.
-        metadata_dict: Dict[str, Any] = {}
+        metadata_dict: dict[str, Any] = {}
         try:
             if hasattr(adapter, "download_file_content"):
                 content = adapter.download_file_content(target.path)
@@ -1479,7 +1488,9 @@ def delete_file(file_path: str) -> dict:
         adapter = _get_adapter()
         ok = adapter.delete_file(file_path)
         if not ok:
-            return _error_dict(f"Failed to delete {file_path}. The printer may have rejected the request. Use printer_files() to verify the file exists.")
+            return _error_dict(
+                f"Failed to delete {file_path}. The printer may have rejected the request. Use printer_files() to verify the file exists."
+            )
         return {
             "success": True,
             "message": f"Deleted {file_path}.",
@@ -1515,7 +1526,9 @@ def start_print(file_name: str) -> dict:
         # Mandatory by default.  Set KILN_SKIP_PREFLIGHT=1 to bypass (advanced
         # users only — e.g. custom firmware that reports non-standard states).
         skip_preflight = os.environ.get("KILN_SKIP_PREFLIGHT", "").strip() in (
-            "1", "true", "yes",
+            "1",
+            "true",
+            "yes",
         )
         if skip_preflight:
             logger.warning(
@@ -1529,10 +1542,7 @@ def start_print(file_name: str) -> dict:
             pf = preflight_check(remote_file=file_name)
             if not pf.get("ready", False):
                 # Build a detailed remediation message from individual checks
-                failed = [
-                    c for c in pf.get("checks", [])
-                    if not c.get("passed", False)
-                ]
+                failed = [c for c in pf.get("checks", []) if not c.get("passed", False)]
                 remediation_lines = []
                 for chk in failed:
                     name = chk.get("name", "unknown")
@@ -1543,19 +1553,24 @@ def start_print(file_name: str) -> dict:
                 detail_text = "\n".join(remediation_lines) if remediation_lines else ""
                 summary = pf.get("summary", "Pre-flight checks failed")
                 full_message = (
-                    f"{summary}\n\nFailed checks:\n{detail_text}\n\n"
-                    "Resolve the issues above and retry. To bypass pre-flight "
-                    "checks (advanced users only), set KILN_SKIP_PREFLIGHT=1."
-                ) if detail_text else (
-                    f"{summary}\n\nTo bypass pre-flight checks (advanced users "
-                    "only), set KILN_SKIP_PREFLIGHT=1."
+                    (
+                        f"{summary}\n\nFailed checks:\n{detail_text}\n\n"
+                        "Resolve the issues above and retry. To bypass pre-flight "
+                        "checks (advanced users only), set KILN_SKIP_PREFLIGHT=1."
+                    )
+                    if detail_text
+                    else (f"{summary}\n\nTo bypass pre-flight checks (advanced users only), set KILN_SKIP_PREFLIGHT=1.")
                 )
 
-                _audit("start_print", "preflight_failed", details={
-                    "file": file_name,
-                    "summary": summary,
-                    "failed_checks": [c.get("name") for c in failed],
-                })
+                _audit(
+                    "start_print",
+                    "preflight_failed",
+                    details={
+                        "file": file_name,
+                        "summary": summary,
+                        "failed_checks": [c.get("name") for c in failed],
+                    },
+                )
                 result = _error_dict(full_message, code="PREFLIGHT_FAILED")
                 result["preflight"] = pf
                 return result
@@ -1565,7 +1580,9 @@ def start_print(file_name: str) -> dict:
         _audit("start_print", "executed", details={"file": file_name})
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to start print: {exc}. Check that the printer is online and idle. Use printer_files() to verify the file exists.")
+        return _error_dict(
+            f"Failed to start print: {exc}. Check that the printer is online and idle. Use printer_files() to verify the file exists."
+        )
     except Exception as exc:
         logger.exception("Unexpected error in start_print")
         return _error_dict(f"Unexpected error in start_print: {exc}", code="INTERNAL_ERROR")
@@ -1601,7 +1618,7 @@ def cancel_print() -> dict:
 
 
 @mcp.tool()
-def emergency_stop(printer_name: Optional[str] = None) -> dict:
+def emergency_stop(printer_name: str | None = None) -> dict:
     """Trigger an emergency stop on one or all printers.
 
     Sends M112 (emergency stop), turns off heaters, and disables steppers.
@@ -1730,8 +1747,7 @@ def set_temperature(
             )
         if tool_temp > _MAX_TOOL:
             return _error_dict(
-                f"Hotend temperature {tool_temp}°C exceeds safety limit "
-                f"({_MAX_TOOL}°C).",
+                f"Hotend temperature {tool_temp}°C exceeds safety limit ({_MAX_TOOL}°C).",
                 code="VALIDATION_ERROR",
             )
     if bed_temp is not None:
@@ -1742,14 +1758,13 @@ def set_temperature(
             )
         if bed_temp > _MAX_BED:
             return _error_dict(
-                f"Bed temperature {bed_temp}°C exceeds safety limit "
-                f"({_MAX_BED}°C).",
+                f"Bed temperature {bed_temp}°C exceeds safety limit ({_MAX_BED}°C).",
                 code="VALIDATION_ERROR",
             )
 
     try:
         adapter = _get_adapter()
-        results: Dict[str, Any] = {"success": True}
+        results: dict[str, Any] = {"success": True}
 
         # -- Relative temperature change advisory (non-blocking) ----------
         _DELTA_WARN_TOOL = 10.0
@@ -1757,11 +1772,7 @@ def set_temperature(
         rate_warnings: list[str] = []
         try:
             state = adapter.get_state()
-            if (
-                tool_temp is not None
-                and state.tool_temp_target is not None
-                and state.tool_temp_target > 0
-            ):
+            if tool_temp is not None and state.tool_temp_target is not None and state.tool_temp_target > 0:
                 delta = abs(tool_temp - state.tool_temp_target)
                 if delta > _DELTA_WARN_TOOL:
                     rate_warnings.append(
@@ -1769,11 +1780,7 @@ def set_temperature(
                         f"{state.tool_temp_target:.0f}°C -> {tool_temp:.0f}°C "
                         f"(delta {delta:.0f}°C)."
                     )
-            if (
-                bed_temp is not None
-                and state.bed_temp_target is not None
-                and state.bed_temp_target > 0
-            ):
+            if bed_temp is not None and state.bed_temp_target is not None and state.bed_temp_target > 0:
                 delta = abs(bed_temp - state.bed_temp_target)
                 if delta > _DELTA_WARN_BED:
                     rate_warnings.append(
@@ -1782,7 +1789,9 @@ def set_temperature(
                         f"(delta {delta:.0f}°C)."
                     )
         except Exception as exc:
-            logger.debug("Failed to compute temperature rate warnings: %s", exc)  # Don't let warning logic block the actual operation.
+            logger.debug(
+                "Failed to compute temperature rate warnings: %s", exc
+            )  # Don't let warning logic block the actual operation.
 
         if tool_temp is not None:
             ok = adapter.set_tool_temp(tool_temp)
@@ -1816,29 +1825,35 @@ def set_temperature(
                 logger.debug("Heater-off safety G-code failed (best-effort)")
                 results["heater_off_gcode_sent"] = False
 
-
         if rate_warnings:
             results["warnings"] = rate_warnings
 
         # Notify heater watchdog when heaters are turned on.
-        if (tool_temp is not None and tool_temp > 0) or (
-            bed_temp is not None and bed_temp > 0
-        ):
+        if (tool_temp is not None and tool_temp > 0) or (bed_temp is not None and bed_temp > 0):
             _heater_watchdog.notify_heater_set()
 
-        _audit("set_temperature", "executed", details={
-            "tool_temp": tool_temp, "bed_temp": bed_temp,
-        })
+        _audit(
+            "set_temperature",
+            "executed",
+            details={
+                "tool_temp": tool_temp,
+                "bed_temp": bed_temp,
+            },
+        )
         return results
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to set temperature: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct.")
+        return _error_dict(
+            f"Failed to set temperature: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct."
+        )
     except Exception as exc:
         logger.exception("Unexpected error in set_temperature")
         return _error_dict(f"Unexpected error in set_temperature: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
-def preflight_check(file_path: str | None = None, expected_material: str | None = None, remote_file: str | None = None) -> dict:
+def preflight_check(
+    file_path: str | None = None, expected_material: str | None = None, remote_file: str | None = None
+) -> dict:
     """Run pre-print safety checks to verify the printer is ready.
 
     Checks performed:
@@ -1866,59 +1881,63 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
 
         # -- Printer state checks ------------------------------------------
         state = adapter.get_state()
-        checks: List[Dict[str, Any]] = []
-        errors: List[str] = []
+        checks: list[dict[str, Any]] = []
+        errors: list[str] = []
 
         # Connected
         is_connected = state.connected
-        checks.append({
-            "name": "printer_connected",
-            "passed": is_connected,
-            "message": "Printer is connected" if is_connected else "Printer is offline",
-        })
+        checks.append(
+            {
+                "name": "printer_connected",
+                "passed": is_connected,
+                "message": "Printer is connected" if is_connected else "Printer is offline",
+            }
+        )
         if not is_connected:
             errors.append("Printer is not connected / offline")
 
         # Idle (not printing or in error)
         idle_states = {PrinterStatus.IDLE}
         is_idle = state.state in idle_states
-        checks.append({
-            "name": "printer_idle",
-            "passed": is_idle,
-            "message": f"Printer state: {state.state.value}",
-        })
+        checks.append(
+            {
+                "name": "printer_idle",
+                "passed": is_idle,
+                "message": f"Printer state: {state.state.value}",
+            }
+        )
         if not is_idle:
             errors.append(f"Printer is not idle (state: {state.state.value})")
 
         # No error
         no_error = state.state != PrinterStatus.ERROR
-        checks.append({
-            "name": "no_errors",
-            "passed": no_error,
-            "message": "No errors" if no_error else "Printer is in error state",
-        })
+        checks.append(
+            {
+                "name": "no_errors",
+                "passed": no_error,
+                "message": "No errors" if no_error else "Printer is in error state",
+            }
+        )
         if not no_error:
             errors.append("Printer is in an error state")
 
         # -- Temperature checks --------------------------------------------
-        temp_warnings: List[str] = []
+        temp_warnings: list[str] = []
         MAX_TOOL, MAX_BED = _get_temp_limits()
 
         if state.tool_temp_actual is not None and state.tool_temp_actual > MAX_TOOL:
-            temp_warnings.append(
-                f"Tool temp ({state.tool_temp_actual:.1f}C) exceeds safe max ({MAX_TOOL:.0f}C)"
-            )
+            temp_warnings.append(f"Tool temp ({state.tool_temp_actual:.1f}C) exceeds safe max ({MAX_TOOL:.0f}C)")
         if state.bed_temp_actual is not None and state.bed_temp_actual > MAX_BED:
-            temp_warnings.append(
-                f"Bed temp ({state.bed_temp_actual:.1f}C) exceeds safe max ({MAX_BED:.0f}C)"
-            )
+            temp_warnings.append(f"Bed temp ({state.bed_temp_actual:.1f}C) exceeds safe max ({MAX_BED:.0f}C)")
 
         temps_safe = len(temp_warnings) == 0
-        checks.append({
-            "name": "temperatures_safe",
-            "passed": temps_safe,
-            "message": "Temperatures within limits" if temps_safe else "; ".join(temp_warnings),
-        })
+        checks.append(
+            {
+                "name": "temperatures_safe",
+                "passed": temps_safe,
+                "message": "Temperatures within limits" if temps_safe else "; ".join(temp_warnings),
+            }
+        )
         if not temps_safe:
             errors.extend(temp_warnings)
 
@@ -1930,29 +1949,31 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
                     filament_detected = filament_status.get("detected", False)
                     sensor_enabled = filament_status.get("sensor_enabled", False)
                     if sensor_enabled and not filament_detected:
-                        checks.append({
-                            "name": "filament_loaded",
-                            "passed": True,  # Warning only -- does not block print
-                            "message": (
-                                "WARNING: Filament not detected by runout sensor. "
-                                "Verify filament is loaded before printing."
-                            ),
-                            "advisory": True,
-                        })
+                        checks.append(
+                            {
+                                "name": "filament_loaded",
+                                "passed": True,  # Warning only -- does not block print
+                                "message": (
+                                    "WARNING: Filament not detected by runout sensor. "
+                                    "Verify filament is loaded before printing."
+                                ),
+                                "advisory": True,
+                            }
+                        )
                     elif sensor_enabled and filament_detected:
-                        checks.append({
-                            "name": "filament_loaded",
-                            "passed": True,
-                            "message": "Filament detected by runout sensor",
-                        })
+                        checks.append(
+                            {
+                                "name": "filament_loaded",
+                                "passed": True,
+                                "message": "Filament detected by runout sensor",
+                            }
+                        )
                     # If sensor not enabled, skip silently
             except Exception as exc:
                 logger.debug("Filament sensor check failed: %s", exc)  # Filament sensor not available -- skip silently
 
         # -- Material mismatch check (optional) ----------------------------
-        _strict_material = os.environ.get(
-            "KILN_STRICT_MATERIAL_CHECK", "true"
-        ).lower() in ("1", "true", "yes")
+        _strict_material = os.environ.get("KILN_STRICT_MATERIAL_CHECK", "true").lower() in ("1", "true", "yes")
 
         if expected_material is not None:
             # 1) Check against loaded material (if material tracking is configured)
@@ -1965,18 +1986,22 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
                 warning = _material_tracker.check_match(printer_name, expected_material)
                 if warning is not None:
                     mat_msg = warning.message
-                    checks.append({
-                        "name": "material_match",
-                        "passed": False,
-                        "message": mat_msg,
-                    })
+                    checks.append(
+                        {
+                            "name": "material_match",
+                            "passed": False,
+                            "message": mat_msg,
+                        }
+                    )
                     errors.append(mat_msg)
                 else:
-                    checks.append({
-                        "name": "material_match",
-                        "passed": True,
-                        "message": f"Loaded material matches expected ({expected_material.upper()})",
-                    })
+                    checks.append(
+                        {
+                            "name": "material_match",
+                            "passed": True,
+                            "message": f"Loaded material matches expected ({expected_material.upper()})",
+                        }
+                    )
             except Exception as exc:
                 # Material tracking not configured — skip silently
                 logger.debug("Material match check failed: %s", exc)
@@ -1992,23 +2017,27 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
                             f"This material may damage the printer."
                         )
                         # Strict mode = blocking; non-strict = warning only
-                        checks.append({
-                            "name": "material_compatible",
-                            "passed": not _strict_material,
-                            "message": msg,
-                        })
+                        checks.append(
+                            {
+                                "name": "material_compatible",
+                                "passed": not _strict_material,
+                                "message": msg,
+                            }
+                        )
                         if _strict_material:
                             errors.append(msg)
                     else:
-                        checks.append({
-                            "name": "material_compatible",
-                            "passed": True,
-                            "message": (
-                                f"{expected_material.upper()} is validated for "
-                                f"'{_PRINTER_MODEL}' "
-                                f"(hotend {mat_settings.hotend_temp}C, bed {mat_settings.bed_temp}C)"
-                            ),
-                        })
+                        checks.append(
+                            {
+                                "name": "material_compatible",
+                                "passed": True,
+                                "message": (
+                                    f"{expected_material.upper()} is validated for "
+                                    f"'{_PRINTER_MODEL}' "
+                                    f"(hotend {mat_settings.hotend_temp}C, bed {mat_settings.bed_temp}C)"
+                                ),
+                            }
+                        )
                 except Exception as exc:
                     logger.debug("Failed to check material compatibility via intelligence DB: %s", exc)
 
@@ -2051,49 +2080,60 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
                     top_failures = sorted(failure_info.items(), key=lambda x: x[1], reverse=True)[:3]
 
                     if mat_warning:
-                        checks.append({
-                            "name": "outcome_history",
-                            "passed": True,  # Advisory — always passes
-                            "message": mat_warning,
-                            "advisory": True,
-                        })
+                        checks.append(
+                            {
+                                "name": "outcome_history",
+                                "passed": True,  # Advisory — always passes
+                                "message": mat_warning,
+                                "advisory": True,
+                            }
+                        )
                     elif success_rate < 0.5 and insights["total_outcomes"] >= 5:
-                        failure_summary = ", ".join(f"{m} ({c}x)" for m, c in top_failures) if top_failures else "unknown"
-                        checks.append({
-                            "name": "outcome_history",
-                            "passed": True,  # Advisory — always passes
-                            "message": (
-                                f"Advisory: {_printer_name} has a {int(success_rate * 100)}% overall success rate "
-                                f"({insights['total_outcomes']} prints). "
-                                f"Common failures: {failure_summary}."
-                            ),
-                            "advisory": True,
-                        })
+                        failure_summary = (
+                            ", ".join(f"{m} ({c}x)" for m, c in top_failures) if top_failures else "unknown"
+                        )
+                        checks.append(
+                            {
+                                "name": "outcome_history",
+                                "passed": True,  # Advisory — always passes
+                                "message": (
+                                    f"Advisory: {_printer_name} has a {int(success_rate * 100)}% overall success rate "
+                                    f"({insights['total_outcomes']} prints). "
+                                    f"Common failures: {failure_summary}."
+                                ),
+                                "advisory": True,
+                            }
+                        )
                     else:
-                        checks.append({
-                            "name": "outcome_history",
-                            "passed": True,
-                            "message": (
-                                f"Learning data: {int(success_rate * 100)}% success rate "
-                                f"({insights['total_outcomes']} outcomes recorded)"
-                            ),
-                        })
+                        checks.append(
+                            {
+                                "name": "outcome_history",
+                                "passed": True,
+                                "message": (
+                                    f"Learning data: {int(success_rate * 100)}% success rate "
+                                    f"({insights['total_outcomes']} outcomes recorded)"
+                                ),
+                            }
+                        )
         except Exception as exc:
-            logger.debug("Learning DB outcome history check failed: %s", exc)  # Learning DB not available — skip silently
+            logger.debug(
+                "Learning DB outcome history check failed: %s", exc
+            )  # Learning DB not available — skip silently
 
         # -- File validation (optional) ------------------------------------
-        file_result: Optional[Dict[str, Any]] = None
+        file_result: dict[str, Any] | None = None
         if file_path is not None:
             file_result = _validate_local_file(file_path)
             file_ok = file_result.get("valid", False)
-            checks.append({
-                "name": "file_valid",
-                "passed": file_ok,
-                "message": "File OK" if file_ok else "; ".join(file_result.get("errors", [])),
-            })
+            checks.append(
+                {
+                    "name": "file_valid",
+                    "passed": file_ok,
+                    "message": "File OK" if file_ok else "; ".join(file_result.get("errors", [])),
+                }
+            )
             if not file_ok:
                 errors.extend(file_result.get("errors", []))
-
 
         # -- Remote file check (optional) ----------------------------------
         if remote_file is not None:
@@ -2101,27 +2141,30 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
                 printer_files = adapter.list_files()
                 remote_lower = remote_file.lower()
                 file_found = any(
-                    f.name.lower() == remote_lower or f.path.lower() == remote_lower
-                    for f in printer_files
+                    f.name.lower() == remote_lower or f.path.lower() == remote_lower for f in printer_files
                 )
-                checks.append({
-                    "name": "file_on_printer",
-                    "passed": file_found,
-                    "message": (
-                        f"File '{remote_file}' found on printer"
-                        if file_found
-                        else f"File '{remote_file}' not found on printer"
-                    ),
-                })
+                checks.append(
+                    {
+                        "name": "file_on_printer",
+                        "passed": file_found,
+                        "message": (
+                            f"File '{remote_file}' found on printer"
+                            if file_found
+                            else f"File '{remote_file}' not found on printer"
+                        ),
+                    }
+                )
                 if not file_found:
                     errors.append(f"File '{remote_file}' not found on printer")
             except Exception as exc:
                 logger.debug("Failed to verify remote file on printer: %s", exc)
-                checks.append({
-                    "name": "file_on_printer",
-                    "passed": False,
-                    "message": "Unable to list files on printer to verify remote file",
-                })
+                checks.append(
+                    {
+                        "name": "file_on_printer",
+                        "passed": False,
+                        "message": "Unable to list files on printer to verify remote file",
+                    }
+                )
                 errors.append("Unable to list files on printer to verify remote file")
 
         # -- Summary -------------------------------------------------------
@@ -2132,7 +2175,7 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
             else "Pre-flight checks failed: " + "; ".join(errors) + "."
         )
 
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "success": True,
             "ready": ready,
             "checks": checks,
@@ -2151,7 +2194,9 @@ def preflight_check(file_path: str | None = None, expected_material: str | None 
         return result
 
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to run preflight check: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct.")
+        return _error_dict(
+            f"Failed to run preflight check: {exc}. Check that the printer is online and KILN_PRINTER_HOST is correct."
+        )
     except Exception as exc:
         logger.exception("Unexpected error in preflight_check")
         return _error_dict(f"Unexpected error in preflight_check: {exc}", code="INTERNAL_ERROR")
@@ -2180,16 +2225,15 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
         return err
     if err := _check_rate_limit("send_gcode"):
         return err
-    if not dry_run:
-        if conf := _check_confirmation("send_gcode", {"commands": commands}):
-            return conf
+    if not dry_run and (conf := _check_confirmation("send_gcode", {"commands": commands})):
+        return conf
     try:
         adapter = _get_adapter()
 
         # Split on newlines and/or whitespace-separated commands, filtering
         # out empty strings.
         raw_lines = re.split(r"[\n\r]+", commands.strip())
-        cmd_list: List[str] = []
+        cmd_list: list[str] = []
         for line in raw_lines:
             stripped = line.strip()
             if stripped:
@@ -2213,10 +2257,14 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
         else:
             validation = _validate_gcode_impl(cmd_list)
         if not validation.valid:
-            _audit("send_gcode", "blocked", details={
-                "blocked_commands": validation.blocked_commands[:5],
-                "errors": validation.errors[:5],
-            })
+            _audit(
+                "send_gcode",
+                "blocked",
+                details={
+                    "blocked_commands": validation.blocked_commands[:5],
+                    "errors": validation.errors[:5],
+                },
+            )
             _record_tool_block("send_gcode")  # Track for circuit breaker
             return {
                 "success": False,
@@ -2231,17 +2279,20 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
 
         # -- Dry-run mode: return validated commands without sending ----------
         if dry_run:
-            _audit("send_gcode", "dry_run", details={
-                "count": len(cmd_list),
-            })
-            result: Dict[str, Any] = {
+            _audit(
+                "send_gcode",
+                "dry_run",
+                details={
+                    "count": len(cmd_list),
+                },
+            )
+            result: dict[str, Any] = {
                 "success": True,
                 "dry_run": True,
                 "commands_validated": cmd_list,
                 "count": len(cmd_list),
                 "message": (
-                    f"{len(cmd_list)} command(s) validated successfully. "
-                    f"No commands were sent (dry-run mode)."
+                    f"{len(cmd_list)} command(s) validated successfully. No commands were sent (dry-run mode)."
                 ),
             }
             if validation.warnings:
@@ -2369,8 +2420,7 @@ def confirm_action(token: str) -> dict:
     pending = _pending_confirmations.pop(token, None)
     if pending is None:
         return _error_dict(
-            "Invalid or expired confirmation token. "
-            "Tokens expire after 5 minutes.",
+            "Invalid or expired confirmation token. Tokens expire after 5 minutes.",
             code="INVALID_TOKEN",
         )
 
@@ -2421,7 +2471,7 @@ def safety_status() -> dict:
     """
     try:
         # Active safety profile
-        profile_info: Dict[str, Any] = {"printer_model": _PRINTER_MODEL or "not configured"}
+        profile_info: dict[str, Any] = {"printer_model": _PRINTER_MODEL or "not configured"}
         max_tool, max_bed = _get_temp_limits()
         profile_info["max_hotend_temp"] = max_tool
         profile_info["max_bed_temp"] = max_bed
@@ -2443,8 +2493,7 @@ def safety_status() -> dict:
 
         # Confirm-level tools (from tool_safety.json)
         confirm_tools = sorted(
-            name for name, meta in _TOOL_SAFETY.items()
-            if meta.get("level") in ("confirm", "emergency")
+            name for name, meta in _TOOL_SAFETY.items() if meta.get("level") in ("confirm", "emergency")
         )
 
         # Auth status
@@ -2454,11 +2503,13 @@ def safety_status() -> dict:
 
         # Confirm mode
         confirm_mode = os.environ.get("KILN_CONFIRM_MODE", "").lower() in (
-            "1", "true", "yes",
+            "1",
+            "true",
+            "yes",
         )
 
         # Recent blocked actions (from audit log)
-        recent_blocked: List[Dict[str, Any]] = []
+        recent_blocked: list[dict[str, Any]] = []
         try:
             db = get_db()
             summary = db.audit_summary(window_seconds=3600.0)
@@ -2468,6 +2519,7 @@ def safety_status() -> dict:
 
         # G-code blocked command list
         from kiln.gcode import _BLOCKED_COMMANDS  # noqa: E402
+
         blocked_gcode_commands = sorted(_BLOCKED_COMMANDS.keys())
 
         return {
@@ -2543,11 +2595,7 @@ def fleet_status() -> dict:
             if (not p.get("connected")) or str(p.get("state", "")).lower() == "offline"
         ]
         busy_states = {"printing", "busy", "starting", "cancelling", "paused"}
-        busy_printers = [
-            p.get("name", "")
-            for p in status
-            if str(p.get("state", "")).lower() in busy_states
-        ]
+        busy_printers = [p.get("name", "") for p in status if str(p.get("state", "")).lower() in busy_states]
         return {
             "success": True,
             "printers": status,
@@ -2660,21 +2708,20 @@ def register_printer(
         # without a Pro license.  Replacing an existing printer doesn't
         # count against the limit.
         current_tier = get_tier()
-        if current_tier < LicenseTier.PRO:
-            if name not in _registry and _registry.count >= FREE_TIER_MAX_PRINTERS:
-                return {
-                    "success": False,
-                    "error": (
-                        f"Fleet registration is limited to {FREE_TIER_MAX_PRINTERS} printers on the Free tier "
-                        f"(you have {_registry.count}). "
-                        "Kiln Pro unlocks unlimited printers with fleet orchestration. "
-                        "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
-                    ),
-                    "code": "FREE_TIER_LIMIT",
-                    "current_count": _registry.count,
-                    "max_allowed": FREE_TIER_MAX_PRINTERS,
-                    "upgrade_url": "https://kiln3d.com/pro",
-                }
+        if current_tier < LicenseTier.PRO and name not in _registry and _registry.count >= FREE_TIER_MAX_PRINTERS:
+            return {
+                "success": False,
+                "error": (
+                    f"Fleet registration is limited to {FREE_TIER_MAX_PRINTERS} printers on the Free tier "
+                    f"(you have {_registry.count}). "
+                    "Kiln Pro unlocks unlimited printers with fleet orchestration. "
+                    "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+                ),
+                "code": "FREE_TIER_LIMIT",
+                "current_count": _registry.count,
+                "max_allowed": FREE_TIER_MAX_PRINTERS,
+                "upgrade_url": "https://kiln3d.com/pro",
+            }
         # Validate and clean the printer URL
         host, url_warnings = _validate_printer_url(host, printer_type=printer_type)
         if not host:
@@ -2695,8 +2742,7 @@ def register_printer(
         elif printer_type == "bambu":
             if BambuAdapter is None:
                 return _error_dict(
-                    "Bambu support requires paho-mqtt.  "
-                    "Install it with: pip install paho-mqtt",
+                    "Bambu support requires paho-mqtt.  Install it with: pip install paho-mqtt",
                     code="MISSING_DEPENDENCY",
                 )
             if not api_key:
@@ -2759,6 +2805,7 @@ def discover_printers(timeout: float = 5.0) -> dict:
     """
     try:
         from kiln.discovery import discover_printers as _discover
+
         results = _discover(timeout=timeout)
         return {
             "success": True,
@@ -2782,7 +2829,7 @@ def discover_printers(timeout: float = 5.0) -> dict:
 
 
 @mcp.tool()
-def recent_events(limit: int = 20, *, type: Optional[str] = None) -> dict:
+def recent_events(limit: int = 20, *, type: str | None = None) -> dict:
     """Get recent events from the Kiln event bus.
 
     Args:
@@ -2897,6 +2944,7 @@ def billing_status() -> dict:
         return err
     try:
         from kiln.cli.config import get_or_create_user_id
+
         user_id = get_or_create_user_id()
         mgr = _get_payment_mgr()
         data = mgr.get_billing_status(user_id)
@@ -2952,7 +3000,9 @@ def billing_invoice(charge_id: str = "", job_id: str = "") -> dict:
             charges = _billing.list_charges(limit=500)
             charge = next((c for c in charges if c.get("job_id") == job_id), None)
         else:
-            return _error_dict("billing_invoice requires either charge_id (from billing_history) or job_id (from fulfillment_order) to look up the charge.")
+            return _error_dict(
+                "billing_invoice requires either charge_id (from billing_history) or job_id (from fulfillment_order) to look up the charge."
+            )
 
         if charge is None:
             return _error_dict("Charge not found.", code="NOT_FOUND")
@@ -3091,7 +3141,10 @@ def refund_payment(payment_id: str, reason: str = "") -> dict:
                 )
                 logger.info(
                     "Refund processed: payment=%s amount=%.2f rail=%s reason=%s",
-                    payment_id, result.amount, provider_name, reason or "(none)",
+                    payment_id,
+                    result.amount,
+                    provider_name,
+                    reason or "(none)",
                 )
                 return {
                     "success": True,
@@ -3108,8 +3161,7 @@ def refund_payment(payment_id: str, reason: str = "") -> dict:
                 logger.debug("Failed to refund payment %s on provider %s: %s", payment_id, provider_name, exc)
                 continue
         return _error_dict(
-            f"Payment {payment_id!r} not found in any registered provider. "
-            "Verify the payment_id from billing_history.",
+            f"Payment {payment_id!r} not found in any registered provider. Verify the payment_id from billing_history.",
             code="PAYMENT_NOT_FOUND",
         )
     except Exception as exc:
@@ -3153,10 +3205,13 @@ def billing_check_setup() -> dict:
         provider.set_payment_method(pm_id)
         # Persist to config so it survives restarts.
         from kiln.cli.config import save_billing_config
-        save_billing_config({
-            "stripe_payment_method_id": pm_id,
-            "stripe_customer_id": getattr(provider, "_customer_id", None),
-        })
+
+        save_billing_config(
+            {
+                "stripe_payment_method_id": pm_id,
+                "stripe_customer_id": getattr(provider, "_customer_id", None),
+            }
+        )
         return {
             "success": True,
             "status": "active",
@@ -3204,12 +3259,11 @@ def billing_delete_data(confirm: str = "") -> dict:
         return err
     if confirm != "DELETE":
         return _error_dict(
-            "Destructive operation requires confirmation. "
-            "Call again with confirm='DELETE' to proceed.",
+            "Destructive operation requires confirmation. Call again with confirm='DELETE' to proceed.",
             code="CONFIRMATION_REQUIRED",
         )
     try:
-        db = _get_db()
+        db = get_db()
         # Use a placeholder user_id since we're single-tenant.
         result = db.delete_user_billing_data("default")
         return {
@@ -3241,6 +3295,7 @@ def license_status() -> dict:
     """
     try:
         from kiln.licensing import get_license_manager
+
         info = get_license_manager().get_info()
         return {"success": True, **info.to_dict()}
     except Exception as exc:
@@ -3262,6 +3317,7 @@ def activate_license(key: str) -> dict:
         return _error_dict("License key is required.", code="INVALID_INPUT")
     try:
         from kiln.licensing import get_license_manager
+
         info = get_license_manager().activate_license(key.strip())
         return {"success": True, **info.to_dict()}
     except Exception as exc:
@@ -3298,6 +3354,7 @@ def get_upgrade_url(tier: str = "pro", email: str = "") -> dict:
 
     try:
         from kiln.payments.stripe_provider import StripeProvider
+
         provider = StripeProvider(secret_key=stripe_key)
         result = provider.create_checkout_session(
             price_id=price_id,
@@ -3423,7 +3480,7 @@ def health_check() -> dict:
     except Exception as exc:
         logger.debug("Database health check failed: %s", exc)
 
-    health_data: Dict[str, Any] = {
+    health_data: dict[str, Any] = {
         "success": True,
         "status": "healthy",
         "uptime": f"{hours}h {minutes}m {secs}s",
@@ -3436,8 +3493,7 @@ def health_check() -> dict:
         "database_reachable": db_ok,
         "python_version": platform.python_version(),
         "platform": platform.system(),
-        "auth_enabled": os.environ.get("KILN_AUTH_ENABLED", "").lower()
-            in ("1", "true", "yes"),
+        "auth_enabled": os.environ.get("KILN_AUTH_ENABLED", "").lower() in ("1", "true", "yes"),
     }
 
     try:
@@ -3545,9 +3601,7 @@ def set_autonomy_level(level: int) -> dict:
 
     try:
         existing = load_autonomy_config()
-        new_config = AutonomyConfig(
-            level=autonomy_level, constraints=existing.constraints
-        )
+        new_config = AutonomyConfig(level=autonomy_level, constraints=existing.constraints)
         save_autonomy_config(new_config)
         return {
             "success": True,
@@ -3576,7 +3630,7 @@ def check_autonomy(
     """
     from kiln.autonomy import check_autonomy as _check
 
-    ctx: Dict[str, Any] = {}
+    ctx: dict[str, Any] = {}
     if material:
         ctx["material"] = material
     if estimated_time_seconds > 0:
@@ -3602,13 +3656,10 @@ def get_started() -> dict:
     and the most useful tools to call first.  Call this at the start
     of a session if you're unfamiliar with the available capabilities.
     """
-    from kiln.tool_tiers import TIERS, suggest_tier
+    from kiln.tool_tiers import TIERS
 
     # Build a concise tier summary
-    tier_summary = {
-        name: {"tool_count": len(tools), "examples": tools[:5]}
-        for name, tools in TIERS.items()
-    }
+    tier_summary = {name: {"tool_count": len(tools), "examples": tools[:5]} for name, tools in TIERS.items()}
 
     return {
         "success": True,
@@ -3652,6 +3703,7 @@ def get_started() -> dict:
         ),
     }
 
+
 @mcp.tool()
 def marketplace_info() -> dict:
     """Show which 3D model marketplaces are connected and available.
@@ -3672,11 +3724,13 @@ def marketplace_info() -> dict:
         sources = []
         for name in _marketplace_registry.connected:
             adapter = _marketplace_registry.get(name)
-            sources.append({
-                "name": adapter.name,
-                "display_name": adapter.display_name,
-                "supports_download": adapter.supports_download,
-            })
+            sources.append(
+                {
+                    "name": adapter.name,
+                    "display_name": adapter.display_name,
+                    "supports_download": adapter.supports_download,
+                }
+            )
 
         env_hints = []
         if not _THINGIVERSE_TOKEN:
@@ -3684,9 +3738,7 @@ def marketplace_info() -> dict:
         if not _MMF_API_KEY:
             env_hints.append("Set KILN_MMF_API_KEY to enable MyMiniFactory")
         if not (_CULTS3D_USERNAME and _CULTS3D_API_KEY):
-            env_hints.append(
-                "Set KILN_CULTS3D_USERNAME + KILN_CULTS3D_API_KEY to enable Cults3D"
-            )
+            env_hints.append("Set KILN_CULTS3D_USERNAME + KILN_CULTS3D_API_KEY to enable Cults3D")
 
         return {
             "success": True,
@@ -3860,19 +3912,25 @@ def download_model(
             for mf in files:
                 try:
                     path = mkt.download_file(
-                        mf.id, dest_dir, file_name=None,
+                        mf.id,
+                        dest_dir,
+                        file_name=None,
                     )
-                    downloaded.append({
-                        "file_id": mf.id,
-                        "file_name": mf.name,
-                        "local_path": path,
-                    })
+                    downloaded.append(
+                        {
+                            "file_id": mf.id,
+                            "file_name": mf.name,
+                            "local_path": path,
+                        }
+                    )
                 except (MarketplaceError, RuntimeError) as exc:
-                    errors.append({
-                        "file_id": mf.id,
-                        "file_name": mf.name,
-                        "error": str(exc),
-                    })
+                    errors.append(
+                        {
+                            "file_id": mf.id,
+                            "file_name": mf.name,
+                            "error": str(exc),
+                        }
+                    )
 
             dl_resp = {
                 "success": len(downloaded) > 0,
@@ -3889,10 +3947,7 @@ def download_model(
                     "with validate_generated_mesh before printing. Prefer "
                     "proven models with high download counts."
                 ),
-                "message": (
-                    f"Downloaded {len(downloaded)}/{len(files)} files "
-                    f"from {source} to {dest_dir}"
-                ),
+                "message": (f"Downloaded {len(downloaded)}/{len(files)} files from {source} to {dest_dir}"),
             }
             if source == "thingiverse":
                 dl_resp["deprecation_notice"] = _THINGIVERSE_DEPRECATION_NOTICE
@@ -3926,7 +3981,9 @@ def download_model(
             code="NOT_FOUND",
         )
     except (ThingiverseError, MarketplaceError, RuntimeError) as exc:
-        return _error_dict(f"Failed to download model: {exc}. Check marketplace credentials and that the model/file ID is correct.")
+        return _error_dict(
+            f"Failed to download model: {exc}. Check marketplace credentials and that the model/file ID is correct."
+        )
     except Exception as exc:
         logger.exception("Unexpected error in download_model")
         return _error_dict(f"Unexpected error in download_model: {exc}", code="INTERNAL_ERROR")
@@ -4000,15 +4057,13 @@ def download_and_upload(
             # Filter to printable extensions
             _printable_exts = {"stl", "gcode", "gco", "g", "3mf"}
             printable_files = [
-                mf for mf in all_files
-                if (
-                    mf.name.rsplit(".", 1)[-1].lower() if "." in mf.name else ""
-                ) in _printable_exts
+                mf
+                for mf in all_files
+                if (mf.name.rsplit(".", 1)[-1].lower() if "." in mf.name else "") in _printable_exts
             ]
             if not printable_files:
                 return _error_dict(
-                    f"No printable files (.stl, .gcode, .3mf) found for "
-                    f"model {model_id} on {source}.",
+                    f"No printable files (.stl, .gcode, .3mf) found for model {model_id} on {source}.",
                     code="NOT_FOUND",
                 )
 
@@ -4019,18 +4074,22 @@ def download_and_upload(
                     local_path = mkt.download_file(mf.id, _dl_dir)
                     upload_result = adapter.upload_file(local_path)
                     up_name = upload_result.file_name or os.path.basename(local_path)
-                    uploaded.append({
-                        "file_id": mf.id,
-                        "file_name": up_name,
-                        "local_path": local_path,
-                        "upload": upload_result.to_dict(),
-                    })
+                    uploaded.append(
+                        {
+                            "file_id": mf.id,
+                            "file_name": up_name,
+                            "local_path": local_path,
+                            "upload": upload_result.to_dict(),
+                        }
+                    )
                 except (MarketplaceError, PrinterError, RuntimeError) as exc:
-                    errors.append({
-                        "file_id": mf.id,
-                        "file_name": mf.name,
-                        "error": str(exc),
-                    })
+                    errors.append(
+                        {
+                            "file_id": mf.id,
+                            "file_name": mf.name,
+                            "error": str(exc),
+                        }
+                    )
 
             return {
                 "success": len(uploaded) > 0,
@@ -4048,8 +4107,7 @@ def download_and_upload(
                     "to begin printing after review."
                 ),
                 "message": (
-                    f"Downloaded and uploaded {len(uploaded)}/"
-                    f"{len(printable_files)} printable files from {source}."
+                    f"Downloaded and uploaded {len(uploaded)}/{len(printable_files)} printable files from {source}."
                 ),
             }
 
@@ -4088,9 +4146,14 @@ def download_and_upload(
             # Mandatory pre-flight safety gate before starting print.
             pf = preflight_check()
             if not pf.get("ready", False):
-                _audit("download_and_upload", "preflight_failed", details={
-                    "file": file_name, "summary": pf.get("summary", ""),
-                })
+                _audit(
+                    "download_and_upload",
+                    "preflight_failed",
+                    details={
+                        "file": file_name,
+                        "summary": pf.get("summary", ""),
+                    },
+                )
                 return _error_dict(
                     pf.get("summary", "Pre-flight checks failed"),
                     code="PREFLIGHT_FAILED",
@@ -4119,10 +4182,7 @@ def download_and_upload(
                 "are unverified and could cause print failures. "
                 "Disable this setting unless you accept the risk."
             )
-            resp["message"] = (
-                f"Downloaded from {source}, uploaded, and started "
-                f"printing (auto-print ON)."
-            )
+            resp["message"] = f"Downloaded from {source}, uploaded, and started printing (auto-print ON)."
         else:
             resp["safety_notice"] = (
                 "Model uploaded but NOT started. Community models are "
@@ -4131,8 +4191,7 @@ def download_and_upload(
                 "KILN_AUTO_PRINT_MARKETPLACE=true to enable auto-print."
             )
             resp["message"] = (
-                f"Downloaded from {source} and uploaded to printer. "
-                f"Call start_print(\'{file_name}\') to begin printing."
+                f"Downloaded from {source} and uploaded to printer. Call start_print('{file_name}') to begin printing."
             )
 
         return resp
@@ -4144,7 +4203,9 @@ def download_and_upload(
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (ThingiverseError, MarketplaceError, PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to download and upload model: {exc}. Check marketplace credentials and printer connection.")
+        return _error_dict(
+            f"Failed to download and upload model: {exc}. Check marketplace credentials and printer connection."
+        )
     except Exception as exc:
         logger.exception("Unexpected error in download_and_upload")
         return _error_dict(f"Unexpected error in download_and_upload: {exc}", code="INTERNAL_ERROR")
@@ -4181,8 +4242,7 @@ def browse_models(
             results = client.featured(page=page, per_page=per_page)
         else:
             return _error_dict(
-                f"Unknown browse_type: {browse_type!r}.  "
-                "Supported: 'popular', 'newest', 'featured'.",
+                f"Unknown browse_type: {browse_type!r}.  Supported: 'popular', 'newest', 'featured'.",
                 code="INVALID_ARGS",
             )
 
@@ -4273,9 +4333,8 @@ def _resolve_slice_profile_context(
     printer_id: str | None,
 ) -> tuple[str | None, str | None, str | None]:
     """Resolve effective profile path and Prusa preset for slicing."""
-    effective_printer_id = (
-        _map_printer_hint_to_profile_id(printer_id)
-        or _map_printer_hint_to_profile_id(_PRINTER_MODEL)
+    effective_printer_id = _map_printer_hint_to_profile_id(printer_id) or _map_printer_hint_to_profile_id(
+        _PRINTER_MODEL
     )
     effective_profile = profile
     if effective_profile is None and effective_printer_id:
@@ -4325,7 +4384,7 @@ def slice_model(
             printer_preset=printer_preset,
             slicer_path=slicer_path,
         )
-        response: Dict[str, Any] = {
+        response: dict[str, Any] = {
             "success": True,
             **result.to_dict(),
         }
@@ -4350,14 +4409,15 @@ def slice_model(
                             + "; ".join(validation["errors"])
                         )
                     elif validation["warnings"]:
-                        response["profile_validation_warning"] = (
-                            "Profile compatibility note: "
-                            + "; ".join(validation["warnings"])
+                        response["profile_validation_warning"] = "Profile compatibility note: " + "; ".join(
+                            validation["warnings"]
                         )
 
         return response
     except SlicerNotFoundError as exc:
-        return _error_dict(f"Failed to slice model: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.", code="SLICER_NOT_FOUND")
+        return _error_dict(
+            f"Failed to slice model: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.", code="SLICER_NOT_FOUND"
+        )
     except SlicerError as exc:
         return _error_dict(f"Failed to slice model: {exc}", code="SLICER_ERROR")
     except FileNotFoundError as exc:
@@ -4383,7 +4443,9 @@ def find_slicer_tool() -> dict:
             **info.to_dict(),
         }
     except SlicerNotFoundError as exc:
-        return _error_dict(f"Failed to find slicer: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.", code="SLICER_NOT_FOUND")
+        return _error_dict(
+            f"Failed to find slicer: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.", code="SLICER_NOT_FOUND"
+        )
     except Exception as exc:
         logger.exception("Unexpected error in find_slicer_tool")
         return _error_dict(f"Unexpected error in find_slicer_tool: {exc}", code="INTERNAL_ERROR")
@@ -4434,9 +4496,14 @@ def slice_and_print(
         # Mandatory pre-flight safety gate before starting print.
         pf = preflight_check()
         if not pf.get("ready", False):
-            _audit("slice_and_print", "preflight_failed", details={
-                "file": file_name, "summary": pf.get("summary", ""),
-            })
+            _audit(
+                "slice_and_print",
+                "preflight_failed",
+                details={
+                    "file": file_name,
+                    "summary": pf.get("summary", ""),
+                },
+            )
             return _error_dict(
                 pf.get("summary", "Pre-flight checks failed"),
                 code="PREFLIGHT_FAILED",
@@ -4456,7 +4523,9 @@ def slice_and_print(
             "message": f"Sliced, uploaded, and started printing {os.path.basename(input_path)}.",
         }
     except SlicerNotFoundError as exc:
-        return _error_dict(f"Failed to slice and print: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.", code="SLICER_NOT_FOUND")
+        return _error_dict(
+            f"Failed to slice and print: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.", code="SLICER_NOT_FOUND"
+        )
     except SlicerError as exc:
         return _error_dict(f"Failed to slice and print: {exc}", code="SLICER_ERROR")
     except PrinterNotFoundError:
@@ -4500,7 +4569,7 @@ def printer_snapshot(
                 code="NO_WEBCAM",
             )
 
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "success": True,
             "size_bytes": len(image_data),
         }
@@ -4522,6 +4591,7 @@ def printer_snapshot(
             result["message"] = f"Snapshot saved to {_safe}"
         else:
             import base64
+
             result["image_base64"] = base64.b64encode(image_data).decode("ascii")
             result["message"] = "Snapshot captured (base64 encoded)"
 
@@ -4561,7 +4631,8 @@ def estimate_cost(
     """
     try:
         estimate = _cost_estimator.estimate_from_file(
-            file_path, material=material,
+            file_path,
+            material=material,
             electricity_rate=electricity_rate,
             printer_wattage=printer_wattage,
         )
@@ -4701,8 +4772,11 @@ def add_spool(
     """
     try:
         spool = _material_tracker.add_spool(
-            material_type=material, color=color, brand=brand,
-            weight_grams=weight_grams, cost_usd=cost_usd,
+            material_type=material,
+            color=color,
+            brand=brand,
+            weight_grams=weight_grams,
+            cost_usd=cost_usd,
         )
         return {"success": True, "spool": spool.to_dict()}
     except Exception as exc:
@@ -4912,13 +4986,16 @@ def cloud_sync_configure(
     global _cloud_sync
     try:
         config = SyncConfig(
-            cloud_url=cloud_url, api_key=api_key,
+            cloud_url=cloud_url,
+            api_key=api_key,
             sync_interval_seconds=interval,
         )
         if _cloud_sync is not None:
             _cloud_sync.stop()
         _cloud_sync = CloudSyncManager(
-            db=get_db(), event_bus=_event_bus, config=config,
+            db=get_db(),
+            event_bus=_event_bus,
+            config=config,
         )
         _cloud_sync.start()
         return {"success": True, "config": config.to_dict()}
@@ -5016,14 +5093,17 @@ def fulfillment_quote(
     """
     try:
         provider = _get_fulfillment()
-        quote = provider.get_quote(QuoteRequest(
-            file_path=file_path,
-            material_id=material_id,
-            quantity=quantity,
-            shipping_country=shipping_country,
-        ))
+        quote = provider.get_quote(
+            QuoteRequest(
+                file_path=file_path,
+                material_id=material_id,
+                quantity=quantity,
+                shipping_country=shipping_country,
+            )
+        )
         fee_calc = _billing.calculate_fee(
-            quote.total_price, currency=quote.currency,
+            quote.total_price,
+            currency=quote.currency,
         )
         quote_data = quote.to_dict()
         quote_data["kiln_fee"] = fee_calc.to_dict()
@@ -5034,7 +5114,8 @@ def fulfillment_quote(
             mgr = _get_payment_mgr()
             if mgr.available_rails:
                 auth_result = mgr.authorize_fee(
-                    quote.quote_id, fee_calc,
+                    quote.quote_id,
+                    fee_calc,
                 )
                 if auth_result.payment_id:
                     quote_data["payment_hold"] = {
@@ -5105,10 +5186,11 @@ def fulfillment_order(
         provider = _get_fulfillment()
 
         # 0. Validate quote is still valid (exists, not expired, provider up).
-        quote_validation: Optional[QuoteValidation] = None
+        quote_validation: QuoteValidation | None = None
         try:
             quote_validation = _validate_quote_for_order(
-                quote_id, provider_name=provider.name,
+                quote_id,
+                provider_name=provider.name,
             )
         except FulfillmentError as exc:
             return _error_dict(
@@ -5125,7 +5207,8 @@ def fulfillment_order(
         # 1a. Early spend limit check (before any work).
         if estimated_price and estimated_price > 0:
             fee_estimate = _billing.calculate_fee(
-                estimated_price, currency=currency,
+                estimated_price,
+                currency=currency,
                 jurisdiction=jurisdiction or None,
                 business_tax_id=business_tax_id or None,
             )
@@ -5143,7 +5226,8 @@ def fulfillment_order(
         if payment_hold_id or estimated_price > 0:
             if estimated_price > 0:
                 fee_calc = _billing.calculate_fee(
-                    estimated_price, currency=currency,
+                    estimated_price,
+                    currency=currency,
                     jurisdiction=jurisdiction or None,
                     business_tax_id=business_tax_id or None,
                 )
@@ -5158,7 +5242,9 @@ def fulfillment_order(
                             # will use the amount from the original auth.
                             fee_calc = _billing.calculate_fee(0.0)
                         pay_result = mgr.capture_fee(
-                            payment_hold_id, quote_id, fee_calc,
+                            payment_hold_id,
+                            quote_id,
+                            fee_calc,
                         )
                     elif fee_calc:
                         # No hold — one-shot charge before order.
@@ -5177,28 +5263,32 @@ def fulfillment_order(
                     # conditions.
                     if estimated_price > 0:
                         fee_calc, _charge_id = _billing.calculate_and_record_fee(
-                            quote_id, estimated_price, currency=currency,
+                            quote_id,
+                            estimated_price,
+                            currency=currency,
                             jurisdiction=jurisdiction or None,
                             business_tax_id=business_tax_id or None,
                         )
             except PaymentError as pe:
                 # Payment failed — do NOT place the order.
                 return _error_dict(
-                    f"Payment failed: {pe}. Order was NOT placed. "
-                    "Please update your payment method and try again.",
+                    f"Payment failed: {pe}. Order was NOT placed. Please update your payment method and try again.",
                     code="PAYMENT_ERROR",
                 )
 
         # 3. Place the order AFTER payment succeeds.
         try:
-            result = provider.place_order(OrderRequest(
-                quote_id=quote_id,
-                shipping_option_id=shipping_option_id,
-            ))
+            result = provider.place_order(
+                OrderRequest(
+                    quote_id=quote_id,
+                    shipping_option_id=shipping_option_id,
+                )
+            )
         except (FulfillmentError, RuntimeError) as exc:
             # Order failed — refund the payment automatically.
             refund_warning = _refund_after_order_failure(
-                pay_result, payment_hold_id,
+                pay_result,
+                payment_hold_id,
             )
             msg = f"Order placement failed: {exc}. "
             if refund_warning:
@@ -5220,35 +5310,40 @@ def fulfillment_order(
             if result.order_id and result.order_id != quote_id:
                 try:
                     _billing.record_charge(
-                        result.order_id, fee_calc,
+                        result.order_id,
+                        fee_calc,
                         payment_id=pay_result.payment_id,
                         payment_rail=pay_result.rail.value,
                         payment_status=pay_result.status.value,
                     )
                 except Exception:
                     logger.debug(
-                        "Could not link charge to order %s", result.order_id,
+                        "Could not link charge to order %s",
+                        result.order_id,
                     )
 
         # 5. Price-drift check: warn or block if actual order price
         #    diverges from the original quoted price.
-        response_warnings: List[str] = []
+        response_warnings: list[str] = []
         if quote_validation and quote_validation.warnings:
             response_warnings.extend(quote_validation.warnings)
 
         if result.total_price is not None and quote_validation:
             drift_warning, should_block = _check_price_drift(
-                quote_validation.quoted_price, result.total_price,
+                quote_validation.quoted_price,
+                result.total_price,
             )
             if should_block:
                 logger.error(
                     "Price drift BLOCKED order for quote %s: %s",
-                    quote_id, drift_warning,
+                    quote_id,
+                    drift_warning,
                 )
                 # Refund the payment since the order went through at a
                 # price the user did not agree to.
                 refund_warning = _refund_after_order_failure(
-                    pay_result, payment_hold_id,
+                    pay_result,
+                    payment_hold_id,
                 )
                 msg = drift_warning or "Price drift exceeded safety limit."
                 if refund_warning:
@@ -5259,7 +5354,8 @@ def fulfillment_order(
             if drift_warning:
                 logger.warning(
                     "Price drift detected for quote %s: %s",
-                    quote_id, drift_warning,
+                    quote_id,
+                    drift_warning,
                 )
                 response_warnings.append(drift_warning)
 
@@ -5358,15 +5454,15 @@ _GCODE_EXTENSIONS = {".gcode", ".gco", ".g"}
 _MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
 
 
-def _validate_local_file(file_path: str) -> Dict[str, Any]:
+def _validate_local_file(file_path: str) -> dict[str, Any]:
     """Validate a local G-code file without depending on octoprint_cli.
 
     Returns a dict with ``valid`` (bool), ``errors``, ``warnings``, and
     ``info`` keys.
     """
-    errors: List[str] = []
-    warnings: List[str] = []
-    info: Dict[str, Any] = {"size_bytes": 0, "extension": ""}
+    errors: list[str] = []
+    warnings: list[str] = []
+    info: dict[str, Any] = {"size_bytes": 0, "extension": ""}
 
     path = Path(file_path)
 
@@ -5391,10 +5487,7 @@ def _validate_local_file(file_path: str) -> Dict[str, Any]:
     ext = path.suffix.lower()
     info["extension"] = ext
     if ext not in _GCODE_EXTENSIONS:
-        errors.append(
-            f"Unsupported file extension '{ext}'. "
-            f"Expected one of: {', '.join(sorted(_GCODE_EXTENSIONS))}"
-        )
+        errors.append(f"Unsupported file extension '{ext}'. Expected one of: {', '.join(sorted(_GCODE_EXTENSIONS))}")
 
     try:
         size = path.stat().st_size
@@ -5407,15 +5500,9 @@ def _validate_local_file(file_path: str) -> Dict[str, Any]:
     if size == 0:
         errors.append("File is empty (0 bytes)")
     elif size >= _MAX_FILE_SIZE:
-        errors.append(
-            f"File is too large ({size} bytes). "
-            f"Maximum allowed size is {_MAX_FILE_SIZE} bytes."
-        )
+        errors.append(f"File is too large ({size} bytes). Maximum allowed size is {_MAX_FILE_SIZE} bytes.")
     elif size >= 500 * 1024 * 1024:
-        warnings.append(
-            f"File is very large ({size} bytes). "
-            "Upload may take a while."
-        )
+        warnings.append(f"File is very large ({size} bytes). Upload may take a while.")
 
     valid = len(errors) == 0
     return {"valid": valid, "errors": errors, "warnings": warnings, "info": info}
@@ -5450,7 +5537,8 @@ def kiln_health() -> dict:
     }
 
     try:
-        from kiln.printers.bambu import BambuAdapter as _Bambu
+        import kiln.printers.bambu  # noqa: F401 -- availability check only
+
         modules["bambu_available"] = True
     except ImportError:
         modules["bambu_available"] = False
@@ -5609,9 +5697,7 @@ def await_print_completion(
                 try:
                     job = _queue.get_job(job_id)
                 except JobNotFoundError:
-                    return _error_dict(
-                        f"Job {job_id!r} not found.", code="JOB_NOT_FOUND"
-                    )
+                    return _error_dict(f"Job {job_id!r} not found.", code="JOB_NOT_FOUND")
 
                 if job.status == JobStatus.COMPLETED:
                     return {
@@ -5650,10 +5736,12 @@ def await_print_completion(
 
             pct = job_progress.completion
             if pct is not None and pct != last_pct:
-                progress_log.append({
-                    "time": round(elapsed, 1),
-                    "completion": pct,
-                })
+                progress_log.append(
+                    {
+                        "time": round(elapsed, 1),
+                        "completion": pct,
+                    }
+                )
                 last_pct = pct
 
             if state.state == PrinterStatus.IDLE:
@@ -5720,7 +5808,7 @@ def compare_print_options(
         printer_wattage: Printer power consumption in watts (default 200).
         shipping_country: ISO country code for fulfillment shipping.
     """
-    result: Dict[str, Any] = {"success": True}
+    result: dict[str, Any] = {"success": True}
 
     # --- Local estimate ---------------------------------------------------
     local_estimate = None
@@ -5750,14 +5838,17 @@ def compare_print_options(
     if fulfillment_material_id:
         try:
             provider = _get_fulfillment()
-            quote = provider.get_quote(QuoteRequest(
-                file_path=file_path,
-                material_id=fulfillment_material_id,
-                quantity=quantity,
-                shipping_country=shipping_country,
-            ))
+            quote = provider.get_quote(
+                QuoteRequest(
+                    file_path=file_path,
+                    material_id=fulfillment_material_id,
+                    quantity=quantity,
+                    shipping_country=shipping_country,
+                )
+            )
             fee_calc = _billing.calculate_fee(
-                quote.total_price, currency=quote.currency,
+                quote.total_price,
+                currency=quote.currency,
             )
             fulfillment_quote_data = quote.to_dict()
             fulfillment_quote_data["kiln_fee"] = fee_calc.to_dict()
@@ -5840,10 +5931,7 @@ def analyze_print_failure(job_id: str) -> dict:
 
         # Gather related events for this job
         all_events = _event_bus.recent_events(limit=200)
-        job_events = [
-            e.to_dict() for e in all_events
-            if e.data.get("job_id") == job_id
-        ]
+        job_events = [e.to_dict() for e in all_events if e.data.get("job_id") == job_id]
 
         # Analyze symptoms
         symptoms: list[str] = []
@@ -5890,15 +5978,9 @@ def analyze_print_failure(job_id: str) -> dict:
             recommendations.append("Inspect filament spool for tangles or moisture")
 
         # Check progress events
-        progress_events = [
-            e for e in job_events
-            if e.get("type") == EventType.PRINT_PROGRESS.value
-        ]
+        progress_events = [e for e in job_events if e.get("type") == EventType.PRINT_PROGRESS.value]
         if progress_events:
-            max_pct = max(
-                e.get("data", {}).get("completion", 0)
-                for e in progress_events
-            )
+            max_pct = max(e.get("data", {}).get("completion", 0) for e in progress_events)
             symptoms.append(f"Reached {max_pct:.0f}% completion before failure")
             if max_pct < 5:
                 causes.append("First-layer adhesion failure or nozzle clog")
@@ -5983,7 +6065,7 @@ def validate_print_quality(
                 adapter = None
 
         # Capture snapshot
-        snapshot_info: Dict[str, Any] = {"available": False}
+        snapshot_info: dict[str, Any] = {"available": False}
         if adapter is not None:
             try:
                 image_data = adapter.get_snapshot()
@@ -6007,58 +6089,42 @@ def validate_print_quality(
                             f.write(image_data)
                         snapshot_info["saved_to"] = _safe
                     else:
-                        snapshot_info["image_base64"] = base64.b64encode(
-                            image_data
-                        ).decode("ascii")
+                        snapshot_info["image_base64"] = base64.b64encode(image_data).decode("ascii")
             except Exception as snap_exc:
                 snapshot_info = {"available": False, "error": str(snap_exc)}
 
         # Gather related events
         all_events = _event_bus.recent_events(limit=200)
-        job_events = [
-            e.to_dict() for e in all_events
-            if e.data.get("job_id") == target_job.id
-        ]
+        job_events = [e.to_dict() for e in all_events if e.data.get("job_id") == target_job.id]
 
         # Analyse quality indicators
         issues: list[str] = []
-        metrics: Dict[str, Any] = {}
+        metrics: dict[str, Any] = {}
         recommendations: list[str] = []
 
         # Duration analysis
         if target_job.elapsed_seconds is not None:
             metrics["print_duration_seconds"] = target_job.elapsed_seconds
-            metrics["print_duration_hours"] = round(
-                target_job.elapsed_seconds / 3600, 2
-            )
+            metrics["print_duration_hours"] = round(target_job.elapsed_seconds / 3600, 2)
 
         # Check for retries (may indicate intermittent problems)
-        retry_events = [
-            e for e in job_events if e.get("data", {}).get("retry")
-        ]
+        retry_events = [e for e in job_events if e.get("data", {}).get("retry")]
         if retry_events:
-            issues.append(
-                f"Job required {len(retry_events)} retry attempt(s) before completing"
-            )
+            issues.append(f"Job required {len(retry_events)} retry attempt(s) before completing")
             recommendations.append(
                 "Retries during a print may indicate connectivity or mechanical issues. "
                 "Inspect the print closely for layer shifts or gaps."
             )
 
         # Check progress consistency
-        progress_events = [
-            e for e in job_events
-            if e.get("type") in ("print.progress", "job.progress")
-        ]
+        progress_events = [e for e in job_events if e.get("type") in ("print.progress", "job.progress")]
         if progress_events:
-            completions = [
-                e.get("data", {}).get("completion", 0) for e in progress_events
-            ]
+            completions = [e.get("data", {}).get("completion", 0) for e in progress_events]
             # Detect non-monotonic progress (resets may indicate issues)
             for i in range(1, len(completions)):
                 if completions[i] < completions[i - 1] - 5:
                     issues.append(
-                        f"Progress dropped from {completions[i-1]:.0f}% to "
+                        f"Progress dropped from {completions[i - 1]:.0f}% to "
                         f"{completions[i]:.0f}% — possible restart or error recovery"
                     )
                     break
@@ -6073,8 +6139,7 @@ def validate_print_quality(
             )
         else:
             recommendations.append(
-                "No webcam available for visual inspection. Consider adding a "
-                "camera for automated quality checks."
+                "No webcam available for visual inspection. Consider adding a camera for automated quality checks."
             )
 
         # Overall quality grade
@@ -6117,19 +6182,21 @@ def resource_status() -> str:
     import json
 
     # Fleet
-    printers: List[Dict[str, Any]] = []
+    printers: list[dict[str, Any]] = []
     if _registry.count > 0:
         printers = _registry.get_fleet_status()
     elif _PRINTER_HOST:
         try:
             adapter = _get_adapter()
             state = adapter.get_state()
-            printers = [{
-                "name": "default",
-                "backend": adapter.name,
-                "connected": state.connected,
-                "state": state.state.value,
-            }]
+            printers = [
+                {
+                    "name": "default",
+                    "backend": adapter.name,
+                    "connected": state.connected,
+                    "state": state.state.value,
+                }
+            ]
         except Exception as exc:
             logger.debug("Failed to get default printer info for dashboard: %s", exc)
 
@@ -6139,17 +6206,20 @@ def resource_status() -> str:
     # Events
     events = _event_bus.recent_events(limit=10)
 
-    return json.dumps({
-        "printers": printers,
-        "printer_count": len(printers),
-        "queue": {
-            "counts": q_summary,
-            "pending": _queue.pending_count(),
-            "active": _queue.active_count(),
-            "total": _queue.total_count,
+    return json.dumps(
+        {
+            "printers": printers,
+            "printer_count": len(printers),
+            "queue": {
+                "counts": q_summary,
+                "pending": _queue.pending_count(),
+                "active": _queue.active_count(),
+                "total": _queue.total_count,
+            },
+            "recent_events": [e.to_dict() for e in events],
         },
-        "recent_events": [e.to_dict() for e in events],
-    }, default=str)
+        default=str,
+    )
 
 
 @mcp.resource("kiln://printers")
@@ -6167,11 +6237,14 @@ def resource_printers() -> str:
     printers = _registry.get_fleet_status() if _registry.count > 0 else []
     idle = _registry.get_idle_printers() if _registry.count > 0 else []
 
-    return json.dumps({
-        "printers": printers,
-        "count": len(printers),
-        "idle_printers": idle,
-    }, default=str)
+    return json.dumps(
+        {
+            "printers": printers,
+            "count": len(printers),
+            "idle_printers": idle,
+        },
+        default=str,
+    )
 
 
 @mcp.resource("kiln://printers/{printer_name}")
@@ -6184,13 +6257,16 @@ def resource_printer_detail(printer_name: str) -> str:
         state = adapter.get_state()
         job = adapter.get_job()
         caps = adapter.capabilities
-        return json.dumps({
-            "name": printer_name,
-            "backend": adapter.name,
-            "state": state.to_dict(),
-            "job": job.to_dict(),
-            "capabilities": caps.to_dict(),
-        }, default=str)
+        return json.dumps(
+            {
+                "name": printer_name,
+                "backend": adapter.name,
+                "state": state.to_dict(),
+                "job": job.to_dict(),
+                "capabilities": caps.to_dict(),
+            },
+            default=str,
+        )
     except PrinterNotFoundError:
         return json.dumps({"error": f"Printer {printer_name!r} not found"})
     except Exception as exc:
@@ -6206,14 +6282,17 @@ def resource_queue() -> str:
     next_job = _queue.next_job()
     recent = _queue.list_jobs(limit=20)
 
-    return json.dumps({
-        "counts": summary,
-        "pending": _queue.pending_count(),
-        "active": _queue.active_count(),
-        "total": _queue.total_count,
-        "next_job": next_job.to_dict() if next_job else None,
-        "recent_jobs": [j.to_dict() for j in recent],
-    }, default=str)
+    return json.dumps(
+        {
+            "counts": summary,
+            "pending": _queue.pending_count(),
+            "active": _queue.active_count(),
+            "total": _queue.total_count,
+            "next_job": next_job.to_dict() if next_job else None,
+            "recent_jobs": [j.to_dict() for j in recent],
+        },
+        default=str,
+    )
 
 
 @mcp.resource("kiln://queue/{job_id}")
@@ -6234,10 +6313,13 @@ def resource_events() -> str:
     import json
 
     events = _event_bus.recent_events(limit=50)
-    return json.dumps({
-        "events": [e.to_dict() for e in events],
-        "count": len(events),
-    }, default=str)
+    return json.dumps(
+        {
+            "events": [e.to_dict() for e in events],
+            "count": len(events),
+        },
+        default=str,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -6316,8 +6398,7 @@ def _get_generation_provider(provider: str = "meshy") -> GenerationProvider:
         inst = OpenSCADProvider()
     else:
         raise GenerationError(
-            f"Unknown generation provider: {provider!r}.  "
-            f"Supported: meshy, openscad.",
+            f"Unknown generation provider: {provider!r}.  Supported: meshy, openscad.",
             code="UNKNOWN_PROVIDER",
         )
 
@@ -6428,7 +6509,9 @@ def generate_model(
             "message": f"Generation job submitted to {gen.display_name}.",
         }
     except GenerationAuthError as exc:
-        return _error_dict(f"Failed to generate model (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR")
+        return _error_dict(
+            f"Failed to generate model (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR"
+        )
     except GenerationError as exc:
         return _error_dict(f"Failed to generate model: {exc}", code=exc.code or "GENERATION_ERROR")
     except Exception as exc:
@@ -6457,7 +6540,9 @@ def generation_status(
             "job": job.to_dict(),
         }
     except GenerationAuthError as exc:
-        return _error_dict(f"Failed to check generation status (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR")
+        return _error_dict(
+            f"Failed to check generation status (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR"
+        )
     except GenerationError as exc:
         return _error_dict(f"Failed to check generation status: {exc}", code=exc.code or "GENERATION_ERROR")
     except Exception as exc:
@@ -6537,7 +6622,10 @@ def download_generated_model(
             "message": f"Model downloaded to {result.local_path}.",
         }
     except GenerationAuthError as exc:
-        return _error_dict(f"Failed to download generated model (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR")
+        return _error_dict(
+            f"Failed to download generated model (auth): {exc}. Check that KILN_MESHY_API_KEY is set.",
+            code="AUTH_ERROR",
+        )
     except GenerationError as exc:
         return _error_dict(f"Failed to download generated model: {exc}", code=exc.code or "GENERATION_ERROR")
     except Exception as exc:
@@ -6584,11 +6672,13 @@ def await_generation(
 
             job = gen.get_job_status(job_id)
 
-            progress_log.append({
-                "time": round(elapsed, 1),
-                "status": job.status.value,
-                "progress": job.progress,
-            })
+            progress_log.append(
+                {
+                    "time": round(elapsed, 1),
+                    "status": job.status.value,
+                    "progress": job.progress,
+                }
+            )
 
             if job.status == GenerationStatus.SUCCEEDED:
                 return {
@@ -6619,7 +6709,9 @@ def await_generation(
             time.sleep(poll_interval)
 
     except GenerationAuthError as exc:
-        return _error_dict(f"Failed to await generation (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR")
+        return _error_dict(
+            f"Failed to await generation (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR"
+        )
     except GenerationError as exc:
         return _error_dict(f"Failed to await generation: {exc}", code=exc.code or "GENERATION_ERROR")
     except Exception as exc:
@@ -6761,9 +6853,14 @@ def generate_and_print(
             # Mandatory pre-flight safety gate before starting print.
             pf = preflight_check()
             if not pf.get("ready", False):
-                _audit("generate_and_print", "preflight_failed", details={
-                    "file": file_name, "summary": pf.get("summary", ""),
-                })
+                _audit(
+                    "generate_and_print",
+                    "preflight_failed",
+                    details={
+                        "file": file_name,
+                        "summary": pf.get("summary", ""),
+                    },
+                )
                 return _error_dict(
                     pf.get("summary", "Pre-flight checks failed"),
                     code="PREFLIGHT_FAILED",
@@ -6797,8 +6894,7 @@ def generate_and_print(
                 "Disable this setting unless you accept the risk."
             )
             resp["message"] = (
-                f"Generated '{prompt[:80]}' via {gen.display_name}, "
-                f"sliced, and started printing (auto-print ON)."
+                f"Generated '{prompt[:80]}' via {gen.display_name}, sliced, and started printing (auto-print ON)."
             )
         else:
             resp["ready_to_print"] = True
@@ -6817,13 +6913,13 @@ def generate_and_print(
 
         return resp
     except GenerationAuthError as exc:
-        return _error_dict(f"Failed to generate and print (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR")
+        return _error_dict(
+            f"Failed to generate and print (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR"
+        )
     except GenerationError as exc:
         return _error_dict(f"Failed to generate and print: {exc}", code=exc.code or "GENERATION_ERROR")
     except PrinterNotFoundError:
-        return _error_dict(
-            f"Printer {printer_name!r} not found.", code="NOT_FOUND"
-        )
+        return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to generate and print: {exc}. Check printer connection and slicer availability.")
     except Exception as exc:
@@ -6847,8 +6943,7 @@ def validate_generated_mesh(file_path: str) -> dict:
         return {
             "success": True,
             "validation": result.to_dict(),
-            "message": "Mesh is valid." if result.valid else
-                       f"Mesh has issues: {'; '.join(result.errors)}",
+            "message": "Mesh is valid." if result.valid else f"Mesh has issues: {'; '.join(result.errors)}",
         }
     except Exception as exc:
         logger.exception("Unexpected error in validate_generated_mesh")
@@ -6880,9 +6975,7 @@ def firmware_status() -> dict:
             )
         status = adapter.get_firmware_status()
         if status is None:
-            return _error_dict(
-                "Could not retrieve firmware status.", code="UNAVAILABLE"
-            )
+            return _error_dict("Could not retrieve firmware status.", code="UNAVAILABLE")
         return {
             "success": True,
             "busy": status.busy,
@@ -6970,7 +7063,9 @@ def rollback_firmware(component: str) -> dict:
             "component": result.component,
         }
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to rollback firmware: {exc}. Check firmware_status for available rollback versions.")
+        return _error_dict(
+            f"Failed to rollback firmware: {exc}. Check firmware_status for available rollback versions."
+        )
     except Exception as exc:
         logger.exception("Unexpected error in rollback_firmware")
         return _error_dict(f"Unexpected error in rollback_firmware: {exc}", code="INTERNAL_ERROR")
@@ -7133,7 +7228,7 @@ def monitor_print_vision(
         phase = _detect_phase(job.completion)
         hints = _PHASE_HINTS.get(phase, _PHASE_HINTS["unknown"])
 
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "success": True,
             "printer_state": state.to_dict(),
             "job_progress": job.to_dict(),
@@ -7159,7 +7254,7 @@ def monitor_print_vision(
                 if image_data and len(image_data) > 100:
                     import base64
 
-                    snap: Dict[str, Any] = {
+                    snap: dict[str, Any] = {
                         "available": True,
                         "size_bytes": len(image_data),
                         "captured_at": time.time(),
@@ -7207,18 +7302,20 @@ def monitor_print_vision(
                     auto_paused = True
                     result["failure_detection"]["auto_paused"] = True
                     result["failure_detection"]["message"] = (
-                        f"Print auto-paused due to detected {failure_type} "
-                        f"(confidence: {failure_confidence:.0%})"
+                        f"Print auto-paused due to detected {failure_type} (confidence: {failure_confidence:.0%})"
                     )
                     logger.warning(
                         "Vision auto-pause triggered: %s (confidence=%.2f) on printer %s",
-                        failure_type, failure_confidence, printer_name or "default",
+                        failure_type,
+                        failure_confidence,
+                        printer_name or "default",
                     )
                 except Exception as pause_exc:
                     result["failure_detection"]["auto_pause_error"] = str(pause_exc)
                     logger.error(
                         "Vision auto-pause failed: %s on printer %s",
-                        pause_exc, printer_name or "default",
+                        pause_exc,
+                        printer_name or "default",
                     )
 
         # Publish vision check event
@@ -7233,7 +7330,6 @@ def monitor_print_vision(
             },
             source="vision",
         )
-
 
         if auto_paused:
             _event_bus.publish(
@@ -7253,7 +7349,9 @@ def monitor_print_vision(
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
     except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to run vision monitoring: {exc}. Check that the printer is online and has a webcam.")
+        return _error_dict(
+            f"Failed to run vision monitoring: {exc}. Check that the printer is online and has a webcam."
+        )
     except Exception as exc:
         logger.exception("Unexpected error in monitor_print_vision")
         return _error_dict(f"Unexpected error in monitor_print_vision: {exc}", code="INTERNAL_ERROR")
@@ -7263,7 +7361,7 @@ def monitor_print_vision(
 # Background print watcher
 # ---------------------------------------------------------------------------
 
-_watchers: Dict[str, "_PrintWatcher"] = {}
+_watchers: dict[str, _PrintWatcher] = {}
 
 
 class _PrintWatcher:
@@ -7277,14 +7375,14 @@ class _PrintWatcher:
     def __init__(
         self,
         watch_id: str,
-        adapter: "PrinterAdapter",
+        adapter: PrinterAdapter,
         printer_name: str,
         *,
         snapshot_interval: int = 60,
         max_snapshots: int = 5,
         timeout: int = 7200,
         poll_interval: int = 15,
-        event_bus: "Optional[Any]" = None,
+        event_bus: Any | None = None,
         stall_timeout: int = 600,
         save_to_disk: bool = False,
     ) -> None:
@@ -7304,15 +7402,13 @@ class _PrintWatcher:
         self._snapshots: list[dict] = []
         self._progress_log: list[dict] = []
         self._snapshot_failures: int = 0
-        self._result: Optional[dict] = None
+        self._result: dict | None = None
         self._outcome: str = "running"
         self._start_time: float = 0.0
-        self._thread: Optional[threading.Thread] = None
-        self._save_dir: Optional[str] = None
+        self._thread: threading.Thread | None = None
+        self._save_dir: str | None = None
         if self._save_to_disk:
-            self._save_dir = os.path.join(
-                str(Path.home()), ".kiln", "timelapses", watch_id
-            )
+            self._save_dir = os.path.join(str(Path.home()), ".kiln", "timelapses", watch_id)
 
     # -- public API --------------------------------------------------------
 
@@ -7391,7 +7487,7 @@ class _PrintWatcher:
         last_snapshot_time = 0.0
 
         # Stall detection state
-        _last_completion: Optional[float] = None
+        _last_completion: float | None = None
         _last_progress_time: float = time.time()
 
         try:
@@ -7417,20 +7513,19 @@ class _PrintWatcher:
                 # Record progress
                 if job.completion is not None:
                     with self._lock:
-                        self._progress_log.append({
-                            "time": round(elapsed, 1),
-                            "completion": job.completion,
-                        })
+                        self._progress_log.append(
+                            {
+                                "time": round(elapsed, 1),
+                                "completion": job.completion,
+                            }
+                        )
 
                 # Stall detection — check if completion has changed
                 if job.completion is not None:
                     if _last_completion is None or abs(job.completion - _last_completion) > 0.1:
                         _last_completion = job.completion
                         _last_progress_time = time.time()
-                    elif (
-                        self._stall_timeout > 0
-                        and (time.time() - _last_progress_time) > self._stall_timeout
-                    ):
+                    elif self._stall_timeout > 0 and (time.time() - _last_progress_time) > self._stall_timeout:
                         stall_duration = round(time.time() - _last_progress_time, 1)
                         if self._event_bus is not None:
                             try:
@@ -7522,10 +7617,7 @@ class _PrintWatcher:
                         "snapshots": list(self._snapshots),
                         "snapshot_failures": self._snapshot_failures,
                         "final_state": state.to_dict(),
-                        "message": (
-                            "Print is paused. Call resume_print to continue, "
-                            "or cancel_print to abort."
-                        ),
+                        "message": ("Print is paused. Call resume_print to continue, or cancel_print to abort."),
                     }
                     self._finish(result)
                     return
@@ -7565,9 +7657,7 @@ class _PrintWatcher:
                                 try:
                                     os.makedirs(self._save_dir, exist_ok=True)
                                     frame_idx = len(self._snapshots)
-                                    fpath = os.path.join(
-                                        self._save_dir, f"frame_{frame_idx:04d}.jpg"
-                                    )
+                                    fpath = os.path.join(self._save_dir, f"frame_{frame_idx:04d}.jpg")
                                     with open(fpath, "wb") as f:
                                         f.write(image_data)
                                     snap["saved_path"] = fpath
@@ -7638,16 +7728,18 @@ class _PrintWatcher:
 
         except Exception as exc:
             logger.exception("Error in print watcher %s", self._watch_id)
-            self._finish({
-                "success": False,
-                "watch_id": self._watch_id,
-                "outcome": "error",
-                "error": str(exc),
-                "elapsed_seconds": round(time.time() - self._start_time, 1),
-                "progress_log": list(self._progress_log[-20:]),
-                "snapshots": list(self._snapshots),
-                "snapshot_failures": self._snapshot_failures,
-            })
+            self._finish(
+                {
+                    "success": False,
+                    "watch_id": self._watch_id,
+                    "outcome": "error",
+                    "error": str(exc),
+                    "elapsed_seconds": round(time.time() - self._start_time, 1),
+                    "progress_log": list(self._progress_log[-20:]),
+                    "snapshots": list(self._snapshots),
+                    "snapshot_failures": self._snapshot_failures,
+                }
+            )
 
 
 @mcp.tool()
@@ -7722,7 +7814,7 @@ def watch_print(
         _watchers[watch_id] = watcher
         watcher.start()
 
-        resp: Dict[str, Any] = {
+        resp: dict[str, Any] = {
             "success": True,
             "watch_id": watch_id,
             "status": "started",
@@ -7767,8 +7859,7 @@ def watch_print_status(watch_id: str) -> dict:
     watcher = _watchers.get(watch_id)
     if watcher is None:
         return _error_dict(
-            f"No active watcher with id {watch_id!r}. "
-            "It may have already been stopped or never existed.",
+            f"No active watcher with id {watch_id!r}. It may have already been stopped or never existed.",
             code="NOT_FOUND",
         )
     return {"success": True, **watcher.status()}
@@ -7789,8 +7880,7 @@ def stop_watch_print(watch_id: str) -> dict:
     watcher = _watchers.pop(watch_id, None)
     if watcher is None:
         return _error_dict(
-            f"No active watcher with id {watch_id!r}. "
-            "It may have already been stopped or never existed.",
+            f"No active watcher with id {watch_id!r}. It may have already been stopped or never existed.",
             code="NOT_FOUND",
         )
     result = watcher.stop()
@@ -7802,7 +7892,7 @@ def stop_watch_print(watch_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 # Store active first-layer monitors so agents can check progress.
-_first_layer_monitors: Dict[str, Any] = {}
+_first_layer_monitors: dict[str, Any] = {}
 
 
 @mcp.tool()
@@ -7848,9 +7938,14 @@ def start_monitored_print(
         # -- Automatic pre-flight safety gate (mandatory) --
         pf = preflight_check()
         if not pf.get("ready", False):
-            _audit("start_monitored_print", "preflight_failed", details={
-                "file": file_name, "summary": pf.get("summary", ""),
-            })
+            _audit(
+                "start_monitored_print",
+                "preflight_failed",
+                details={
+                    "file": file_name,
+                    "summary": pf.get("summary", ""),
+                },
+            )
             result = _error_dict(
                 pf.get("summary", "Pre-flight checks failed"),
                 code="PREFLIGHT_FAILED",
@@ -7918,8 +8013,7 @@ def first_layer_status(monitor_id: str) -> dict:
     monitor = _first_layer_monitors.get(monitor_id)
     if monitor is None:
         return _error_dict(
-            f"No active first-layer monitor with id {monitor_id!r}. "
-            "It may have already completed or never existed.",
+            f"No active first-layer monitor with id {monitor_id!r}. It may have already completed or never existed.",
             code="NOT_FOUND",
         )
     result = monitor.result()
@@ -7962,12 +8056,14 @@ def list_safety_profiles() -> dict:
         for pid in ids:
             try:
                 p = get_profile(pid)
-                profiles.append({
-                    "id": p.id,
-                    "display_name": p.display_name,
-                    "max_hotend_temp": p.max_hotend_temp,
-                    "max_bed_temp": p.max_bed_temp,
-                })
+                profiles.append(
+                    {
+                        "id": p.id,
+                        "display_name": p.display_name,
+                        "max_hotend_temp": p.max_hotend_temp,
+                        "max_bed_temp": p.max_bed_temp,
+                    }
+                )
             except KeyError:
                 continue
         return {"success": True, "count": len(profiles), "profiles": profiles}
@@ -8138,12 +8234,14 @@ def list_slicer_profiles_tool() -> dict:
         for pid in ids:
             try:
                 p = get_slicer_profile(pid)
-                profiles.append({
-                    "id": p.id,
-                    "display_name": p.display_name,
-                    "slicer": p.slicer,
-                    "tier": p.tier,
-                })
+                profiles.append(
+                    {
+                        "id": p.id,
+                        "display_name": p.display_name,
+                        "slicer": p.slicer,
+                        "tier": p.tier,
+                    }
+                )
             except KeyError:
                 continue
         return {"success": True, "count": len(profiles), "profiles": profiles}
@@ -8252,8 +8350,7 @@ def get_material_recommendation(
             intel = get_printer_intel(printer_id)
             available = list(intel.materials.keys())
             return _error_dict(
-                f"No settings for '{material}' on {intel.display_name}. "
-                f"Available: {', '.join(available)}",
+                f"No settings for '{material}' on {intel.display_name}. Available: {', '.join(available)}",
                 code="NOT_FOUND",
             )
         intel = get_printer_intel(printer_id)
@@ -8601,8 +8698,9 @@ def cache_model(
     if err := _check_auth("cache"):
         return err
     try:
-        from kiln.model_cache import get_model_cache
         import json as _json
+
+        from kiln.model_cache import get_model_cache
 
         tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
         dim_dict = _json.loads(dimensions) if dimensions else None
@@ -8675,9 +8773,7 @@ def get_cached_model(cache_id: str) -> dict:
 
         entry = get_model_cache().get(cache_id)
         if entry is None:
-            return _error_dict(
-                f"No cached model with id {cache_id!r}.", code="NOT_FOUND"
-            )
+            return _error_dict(f"No cached model with id {cache_id!r}.", code="NOT_FOUND")
         return {"success": True, "entry": entry.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in get_cached_model")
@@ -8722,15 +8818,11 @@ def delete_cached_model(cache_id: str) -> dict:
 
         deleted = get_model_cache().delete(cache_id)
         if not deleted:
-            return _error_dict(
-                f"No cached model with id {cache_id!r}.", code="NOT_FOUND"
-            )
+            return _error_dict(f"No cached model with id {cache_id!r}.", code="NOT_FOUND")
         return {"success": True, "cache_id": cache_id}
     except Exception as exc:
         logger.exception("Unexpected error in delete_cached_model")
         return _error_dict(f"Unexpected error in delete_cached_model: {exc}", code="INTERNAL_ERROR")
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -8802,8 +8894,6 @@ def verify_audit_integrity() -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in verify_audit_integrity")
         return _error_dict(f"Unexpected error in verify_audit_integrity: {exc}", code="INTERNAL_ERROR")
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -8904,6 +8994,7 @@ def main() -> None:
     # Load .env file if present (project root or ~/.kiln/.env).
     try:
         from dotenv import load_dotenv
+
         load_dotenv()  # loads .env from cwd first
         load_dotenv(Path.home() / ".kiln" / ".env")  # then ~/.kiln/.env
     except ImportError:
@@ -8931,22 +9022,22 @@ def main() -> None:
     # Auto-register marketplace adapters from env credentials
     _init_marketplace_registry()
     if _marketplace_registry.count > 0:
-        logger.info(
-            "Marketplace sources: %s", ", ".join(_marketplace_registry.connected)
-        )
+        logger.info("Marketplace sources: %s", ", ".join(_marketplace_registry.connected))
 
     # Subscribe bed level manager to job events
     _bed_level_mgr.subscribe_events()
 
     # Discover and activate third-party plugins (entry-point based)
     _plugin_mgr.discover()
-    _plugin_mgr.activate_all(PluginContext(
-        event_bus=_event_bus,
-        registry=_registry,
-        queue=_queue,
-        mcp=mcp,
-        db=get_db(),
-    ))
+    _plugin_mgr.activate_all(
+        PluginContext(
+            event_bus=_event_bus,
+            registry=_registry,
+            queue=_queue,
+            mcp=mcp,
+            db=get_db(),
+        )
+    )
 
     # Load internal tool plugins from kiln/plugins/.
     # Tools are being migrated to kiln/plugins/ for modularity — each
@@ -8959,9 +9050,11 @@ def main() -> None:
     _saved_sync = get_db().get_setting("cloud_sync_config")
     if _saved_sync:
         import json as _json
+
         try:
             _cloud_sync = CloudSyncManager(
-                db=get_db(), event_bus=_event_bus,
+                db=get_db(),
+                event_bus=_event_bus,
                 config=SyncConfig.from_dict(_json.loads(_saved_sync)),
             )
             _cloud_sync.start()
@@ -9041,7 +9134,7 @@ def main() -> None:
 def find_material_substitute(
     material: str,
     *,
-    reason: Optional[str] = None,
+    reason: str | None = None,
     min_score: float = 0.5,
 ) -> dict:
     """Find substitute filament materials when your preferred material is unavailable.
@@ -9127,11 +9220,11 @@ def save_print_checkpoint(
     printer_name: str,
     job_id: str,
     *,
-    z_height: Optional[float] = None,
-    layer_number: Optional[int] = None,
-    hotend_temp: Optional[float] = None,
-    bed_temp: Optional[float] = None,
-    filament_used_mm: Optional[float] = None,
+    z_height: float | None = None,
+    layer_number: int | None = None,
+    hotend_temp: float | None = None,
+    bed_temp: float | None = None,
+    filament_used_mm: float | None = None,
 ) -> dict:
     """Save a checkpoint during an active print for crash recovery.
 
@@ -9171,7 +9264,7 @@ def plan_print_recovery(
     printer_name: str,
     job_id: str,
     *,
-    failure_type: Optional[str] = None,
+    failure_type: str | None = None,
 ) -> dict:
     """Plan a recovery strategy after a print failure.
 
@@ -9208,7 +9301,7 @@ def firmware_resume_print(
     hotend_temp_c: float,
     bed_temp_c: float,
     file_name: str,
-    layer_number: Optional[int] = None,
+    layer_number: int | None = None,
     fan_speed_pct: float = 100.0,
     flow_rate_pct: float = 100.0,
     prime_length_mm: float = 30.0,
@@ -9266,7 +9359,8 @@ def firmware_resume_print(
         )
 
         # Log the recovery event
-        from kiln.recovery import get_recovery_manager, RecoveryStrategy
+        from kiln.recovery import RecoveryStrategy, get_recovery_manager
+
         mgr = get_recovery_manager()
         mgr.execute_recovery(job_id, RecoveryStrategy.RESUME_FROM_CHECKPOINT)
 
@@ -9349,9 +9443,9 @@ def stop_printer_health_monitoring(printer_name: str) -> dict:
 def estimate_print_progress(
     printer_name: str,
     *,
-    elapsed_seconds: Optional[float] = None,
-    total_layers: Optional[int] = None,
-    current_layer: Optional[int] = None,
+    elapsed_seconds: float | None = None,
+    total_layers: int | None = None,
+    current_layer: int | None = None,
 ) -> dict:
     """Estimate print progress with phase-aware time prediction.
 
@@ -9384,9 +9478,9 @@ def estimate_print_progress(
 def route_print_job(
     file_path: str,
     *,
-    material: Optional[str] = None,
-    quality: Optional[str] = None,
-    priority: Optional[str] = None,
+    material: str | None = None,
+    quality: str | None = None,
+    priority: str | None = None,
 ) -> dict:
     """Route a print job to the best available printer in the fleet.
 
@@ -9419,9 +9513,9 @@ def route_print_job(
 def fleet_submit_job(
     file_path: str,
     *,
-    printer_name: Optional[str] = None,
-    material: Optional[str] = None,
-    priority: Optional[str] = None,
+    printer_name: str | None = None,
+    material: str | None = None,
+    priority: str | None = None,
 ) -> dict:
     """Submit a print job to the fleet orchestrator.
 
@@ -9491,8 +9585,8 @@ def fleet_utilization() -> dict:
 def cache_design(
     file_path: str,
     *,
-    label: Optional[str] = None,
-    material: Optional[str] = None,
+    label: str | None = None,
+    material: str | None = None,
 ) -> dict:
     """Cache a 3D design file for faster access and version tracking.
 
@@ -9515,7 +9609,7 @@ def cache_design(
 @mcp.tool()
 def list_cached_designs(
     *,
-    material: Optional[str] = None,
+    material: str | None = None,
     limit: int = 50,
 ) -> dict:
     """List cached designs, optionally filtered by material.
@@ -9578,7 +9672,8 @@ def store_credential(
         label: Human-readable description.
     """
     try:
-        from kiln.credential_store import CredentialType, store_credential as _store
+        from kiln.credential_store import CredentialType
+        from kiln.credential_store import store_credential as _store
 
         try:
             ctype = CredentialType(credential_type)
@@ -9704,8 +9799,8 @@ def release_printer_lock(printer_name: str, *, holder: str = "agent") -> dict:
 def get_fulfillment_quote_cached(
     file_path: str,
     *,
-    provider: Optional[str] = None,
-    material: Optional[str] = None,
+    provider: str | None = None,
+    material: str | None = None,
 ) -> dict:
     """Get a cached fulfillment provider quote (or fetch fresh if expired).
 
@@ -9751,7 +9846,7 @@ def check_firmware_status(printer_name: str) -> dict:
 def update_printer_firmware(
     printer_name: str,
     *,
-    target_version: Optional[str] = None,
+    target_version: str | None = None,
 ) -> dict:
     """Start a firmware update on a printer.
 
@@ -9774,7 +9869,7 @@ def update_printer_firmware(
 def rollback_printer_firmware(
     printer_name: str,
     *,
-    target_version: Optional[str] = None,
+    target_version: str | None = None,
 ) -> dict:
     """Rollback printer firmware to a previous version.
 
@@ -9815,7 +9910,7 @@ def print_status_lite(printer_name: str | None = None) -> dict:
         state = adapter.get_state()
         job = adapter.get_job()
 
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "state": state.state.value,
             "completion_pct": job.completion,
             "file_name": job.file_name,

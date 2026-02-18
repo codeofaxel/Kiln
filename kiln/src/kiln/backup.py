@@ -18,7 +18,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +30,14 @@ _CREDENTIAL_COLUMNS: list[tuple[str, str]] = [
     ("settings", "value"),
 ]
 
-_SAFE_SETTINGS_KEYS: frozenset[str] = frozenset({
-    "active_printer",
-    "theme",
-    "log_level",
-    "units",
-})
+_SAFE_SETTINGS_KEYS: frozenset[str] = frozenset(
+    {
+        "active_printer",
+        "theme",
+        "log_level",
+        "units",
+    }
+)
 
 
 class BackupError(Exception):
@@ -44,7 +46,7 @@ class BackupError(Exception):
 
 def backup_database(
     db_path: str,
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
     *,
     redact_credentials: bool = True,
 ) -> str:
@@ -94,14 +96,12 @@ def _redact_credentials(db_path: str) -> None:
             if table == "settings" and column == "value":
                 placeholders = ",".join("?" for _ in _SAFE_SETTINGS_KEYS)
                 cur.execute(
-                    f"UPDATE {table} SET {column} = 'REDACTED' "
-                    f"WHERE key NOT IN ({placeholders})",
+                    f"UPDATE {table} SET {column} = 'REDACTED' WHERE key NOT IN ({placeholders})",
                     tuple(_SAFE_SETTINGS_KEYS),
                 )
             else:
                 cur.execute(
-                    f"UPDATE {table} SET {column} = 'REDACTED' "
-                    f"WHERE {column} IS NOT NULL AND {column} != ''",
+                    f"UPDATE {table} SET {column} = 'REDACTED' WHERE {column} IS NOT NULL AND {column} != ''",
                 )
 
         conn.commit()
@@ -131,10 +131,7 @@ def restore_database(
     _validate_sqlite(backup_path)
 
     if os.path.isfile(db_path) and not force:
-        raise BackupError(
-            f"Database already exists at {db_path}. "
-            "Use --force to overwrite."
-        )
+        raise BackupError(f"Database already exists at {db_path}. Use --force to overwrite.")
 
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
@@ -166,6 +163,7 @@ def _validate_sqlite(path: str) -> None:
 # Data models for scheduled backups
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ScheduledBackupResult:
     """Outcome of a single scheduled backup cycle.
@@ -181,7 +179,7 @@ class ScheduledBackupResult:
     path: str = ""
     size_bytes: int = 0
     timestamp: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -205,6 +203,7 @@ class IntegrityResult:
 # ---------------------------------------------------------------------------
 # Integrity verification
 # ---------------------------------------------------------------------------
+
 
 def verify_integrity(db_path: str) -> IntegrityResult:
     """Verify SQLite database integrity using ``PRAGMA integrity_check``.
@@ -232,6 +231,7 @@ def verify_integrity(db_path: str) -> IntegrityResult:
 # ---------------------------------------------------------------------------
 # VACUUM INTO snapshot helper
 # ---------------------------------------------------------------------------
+
 
 def _generate_backup_filename(db_path: str) -> str:
     """Generate a timestamped backup filename from the source database name."""
@@ -340,9 +340,7 @@ def snapshot_database(
     prefix = Path(db_path).stem
     _rotate_backups(backup_dir, keep=keep, prefix=prefix)
 
-    logger.info(
-        "Scheduled backup created: %s (%d bytes)", backup_path, size_bytes
-    )
+    logger.info("Scheduled backup created: %s (%d bytes)", backup_path, size_bytes)
 
     return ScheduledBackupResult(
         success=True,
@@ -384,8 +382,8 @@ class BackupScheduler:
         db_path: str,
         backup_dir: str,
         *,
-        interval_seconds: Optional[float] = None,
-        keep: Optional[int] = None,
+        interval_seconds: float | None = None,
+        keep: int | None = None,
     ) -> None:
         self._db_path = db_path
         self._backup_dir = backup_dir
@@ -405,7 +403,7 @@ class BackupScheduler:
             self._keep = int(env_keep) if env_keep else _DEFAULT_KEEP
 
         self._stop_event = threading.Event()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
 
     # -- Public lifecycle ----------------------------------------------------
 
@@ -424,7 +422,8 @@ class BackupScheduler:
         self._thread.start()
         logger.info(
             "Backup scheduler started (interval=%ds, keep=%d)",
-            self._interval, self._keep,
+            self._interval,
+            self._keep,
         )
 
     def stop(self) -> None:
@@ -452,13 +451,9 @@ class BackupScheduler:
                     keep=self._keep,
                 )
                 if result.success:
-                    logger.debug(
-                        "Scheduled backup completed: %s", result.path
-                    )
+                    logger.debug("Scheduled backup completed: %s", result.path)
                 else:
-                    logger.warning(
-                        "Scheduled backup failed: %s", result.error
-                    )
+                    logger.warning("Scheduled backup failed: %s", result.error)
             except Exception:
                 logger.exception("Unexpected error in backup scheduler")
 

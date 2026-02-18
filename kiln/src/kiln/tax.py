@@ -36,7 +36,7 @@ import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +45,10 @@ logger = logging.getLogger(__name__)
 # Enums
 # ---------------------------------------------------------------------------
 
+
 class TaxType(Enum):
     """Type of tax applied."""
+
     SALES_TAX = "sales_tax"
     VAT = "vat"
     GST = "gst"
@@ -58,6 +60,7 @@ class TaxType(Enum):
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class TaxJurisdiction:
@@ -72,6 +75,7 @@ class TaxJurisdiction:
         b2b_reverse_charge: Whether B2B reverse charge applies (buyer self-assesses).
         notes: Implementation notes.
     """
+
     code: str
     name: str
     tax_type: TaxType
@@ -80,7 +84,7 @@ class TaxJurisdiction:
     b2b_reverse_charge: bool = False
     notes: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "code": self.code,
             "name": self.name,
@@ -108,17 +112,18 @@ class TaxResult:
         reverse_charge: True if B2B reverse charge applies.
         business_tax_id: Buyer's tax ID if provided.
     """
+
     jurisdiction_code: str
     tax_type: TaxType
     tax_amount: float
     effective_rate: float
     taxable_amount: float
     exempt: bool = False
-    exempt_reason: Optional[str] = None
+    exempt_reason: str | None = None
     reverse_charge: bool = False
-    business_tax_id: Optional[str] = None
+    business_tax_id: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "jurisdiction_code": self.jurisdiction_code,
             "tax_type": self.tax_type.value,
@@ -141,7 +146,7 @@ class TaxResult:
 # we use the **base state rate** — a production system should integrate with
 # a tax API (Avalara, Stripe Tax) for precise local rates.
 
-_JURISDICTIONS: Dict[str, TaxJurisdiction] = {}
+_JURISDICTIONS: dict[str, TaxJurisdiction] = {}
 
 
 def _register(*jurisdictions: TaxJurisdiction) -> None:
@@ -152,99 +157,132 @@ def _register(*jurisdictions: TaxJurisdiction) -> None:
 # -- United States (sales tax on platform fees) ----------------------------
 _register(
     TaxJurisdiction(
-        code="US-CA", name="California", tax_type=TaxType.SALES_TAX,
+        code="US-CA",
+        name="California",
+        tax_type=TaxType.SALES_TAX,
         rate=0.0725,
         platform_fee_taxable=True,
         notes="Base rate 7.25%; local surcharges up to ~10.25%. "
-              "SaaS alone not taxable, but marketplace facilitator rules apply.",
+        "SaaS alone not taxable, but marketplace facilitator rules apply.",
     ),
     TaxJurisdiction(
-        code="US-TX", name="Texas", tax_type=TaxType.SALES_TAX,
+        code="US-TX",
+        name="Texas",
+        tax_type=TaxType.SALES_TAX,
         rate=0.0625,
         platform_fee_taxable=True,
-        notes="Base rate 6.25%; local up to 8.25%. "
-              "SaaS and data processing services are taxable.",
+        notes="Base rate 6.25%; local up to 8.25%. SaaS and data processing services are taxable.",
     ),
     TaxJurisdiction(
-        code="US-NY", name="New York", tax_type=TaxType.SALES_TAX,
+        code="US-NY",
+        name="New York",
+        tax_type=TaxType.SALES_TAX,
         rate=0.04,
         platform_fee_taxable=True,
-        notes="Base rate 4%; local up to 8.875%. "
-              "SaaS taxable as pre-written software.",
+        notes="Base rate 4%; local up to 8.875%. SaaS taxable as pre-written software.",
     ),
     TaxJurisdiction(
-        code="US-WA", name="Washington", tax_type=TaxType.SALES_TAX,
+        code="US-WA",
+        name="Washington",
+        tax_type=TaxType.SALES_TAX,
         rate=0.065,
         platform_fee_taxable=True,
-        notes="Base rate 6.5%; local up to 10.25%. "
-              "Digital services explicitly taxable since 2010.",
+        notes="Base rate 6.5%; local up to 10.25%. Digital services explicitly taxable since 2010.",
     ),
     TaxJurisdiction(
-        code="US-FL", name="Florida", tax_type=TaxType.SALES_TAX,
+        code="US-FL",
+        name="Florida",
+        tax_type=TaxType.SALES_TAX,
         rate=0.06,
         platform_fee_taxable=True,
-        notes="Base rate 6%; local up to 8.5%. "
-              "SaaS taxable as of 2024.",
+        notes="Base rate 6%; local up to 8.5%. SaaS taxable as of 2024.",
     ),
     TaxJurisdiction(
-        code="US-IL", name="Illinois", tax_type=TaxType.SALES_TAX,
+        code="US-IL",
+        name="Illinois",
+        tax_type=TaxType.SALES_TAX,
         rate=0.0625,
         platform_fee_taxable=True,
         notes="Base rate 6.25%; local up to 10.25%. "
-              "State: SaaS generally not taxable, but marketplace facilitator rules apply. "
-              "Chicago imposes 9% 'cloud tax'.",
+        "State: SaaS generally not taxable, but marketplace facilitator rules apply. "
+        "Chicago imposes 9% 'cloud tax'.",
     ),
     TaxJurisdiction(
-        code="US-MA", name="Massachusetts", tax_type=TaxType.SALES_TAX,
+        code="US-MA",
+        name="Massachusetts",
+        tax_type=TaxType.SALES_TAX,
         rate=0.0625,
         platform_fee_taxable=True,
         notes="Flat 6.25%. SaaS explicitly taxable since 2019.",
     ),
     TaxJurisdiction(
-        code="US-CO", name="Colorado", tax_type=TaxType.SALES_TAX,
+        code="US-CO",
+        name="Colorado",
+        tax_type=TaxType.SALES_TAX,
         rate=0.029,
         platform_fee_taxable=False,
         notes="Base rate 2.9%; local up to ~11.2%. "
-              "State-level: SaaS generally NOT taxable, but some home-rule cities tax it.",
+        "State-level: SaaS generally NOT taxable, but some home-rule cities tax it.",
     ),
 )
 
 # -- European Union (VAT on digital services) ------------------------------
 _register(
     TaxJurisdiction(
-        code="DE", name="Germany", tax_type=TaxType.VAT,
-        rate=0.19, b2b_reverse_charge=True,
+        code="DE",
+        name="Germany",
+        tax_type=TaxType.VAT,
+        rate=0.19,
+        b2b_reverse_charge=True,
         notes="19% standard VAT. B2B reverse charge for cross-border EU.",
     ),
     TaxJurisdiction(
-        code="FR", name="France", tax_type=TaxType.VAT,
-        rate=0.20, b2b_reverse_charge=True,
+        code="FR",
+        name="France",
+        tax_type=TaxType.VAT,
+        rate=0.20,
+        b2b_reverse_charge=True,
         notes="20% standard VAT. B2B reverse charge. "
-              "DST of 3% on marketplace revenue above EUR 25M (not applied here).",
+        "DST of 3% on marketplace revenue above EUR 25M (not applied here).",
     ),
     TaxJurisdiction(
-        code="NL", name="Netherlands", tax_type=TaxType.VAT,
-        rate=0.21, b2b_reverse_charge=True,
+        code="NL",
+        name="Netherlands",
+        tax_type=TaxType.VAT,
+        rate=0.21,
+        b2b_reverse_charge=True,
         notes="21% standard VAT. B2B reverse charge.",
     ),
     TaxJurisdiction(
-        code="IT", name="Italy", tax_type=TaxType.VAT,
-        rate=0.22, b2b_reverse_charge=True,
+        code="IT",
+        name="Italy",
+        tax_type=TaxType.VAT,
+        rate=0.22,
+        b2b_reverse_charge=True,
         notes="22% standard VAT. B2B reverse charge.",
     ),
     TaxJurisdiction(
-        code="ES", name="Spain", tax_type=TaxType.VAT,
-        rate=0.21, b2b_reverse_charge=True,
+        code="ES",
+        name="Spain",
+        tax_type=TaxType.VAT,
+        rate=0.21,
+        b2b_reverse_charge=True,
         notes="21% standard VAT. B2B reverse charge.",
     ),
     TaxJurisdiction(
-        code="SE", name="Sweden", tax_type=TaxType.VAT,
-        rate=0.25, b2b_reverse_charge=True,
+        code="SE",
+        name="Sweden",
+        tax_type=TaxType.VAT,
+        rate=0.25,
+        b2b_reverse_charge=True,
         notes="25% standard VAT. B2B reverse charge.",
     ),
     TaxJurisdiction(
-        code="PL", name="Poland", tax_type=TaxType.VAT,
-        rate=0.23, b2b_reverse_charge=True,
+        code="PL",
+        name="Poland",
+        tax_type=TaxType.VAT,
+        rate=0.23,
+        b2b_reverse_charge=True,
         notes="23% standard VAT. B2B reverse charge.",
     ),
 )
@@ -252,35 +290,43 @@ _register(
 # -- United Kingdom --------------------------------------------------------
 _register(
     TaxJurisdiction(
-        code="GB", name="United Kingdom", tax_type=TaxType.VAT,
-        rate=0.20, b2b_reverse_charge=True,
+        code="GB",
+        name="United Kingdom",
+        tax_type=TaxType.VAT,
+        rate=0.20,
+        b2b_reverse_charge=True,
         notes="20% standard VAT. B2B reverse charge for non-UK sellers. "
-              "No registration threshold for non-UK digital service providers.",
+        "No registration threshold for non-UK digital service providers.",
     ),
 )
 
 # -- Canada ----------------------------------------------------------------
 _register(
     TaxJurisdiction(
-        code="CA-ON", name="Ontario", tax_type=TaxType.HST,
+        code="CA-ON",
+        name="Ontario",
+        tax_type=TaxType.HST,
         rate=0.13,
-        notes="13% HST (combined federal GST + provincial). "
-              "Digital services taxable.",
+        notes="13% HST (combined federal GST + provincial). Digital services taxable.",
     ),
     TaxJurisdiction(
-        code="CA-BC", name="British Columbia", tax_type=TaxType.GST,
+        code="CA-BC",
+        name="British Columbia",
+        tax_type=TaxType.GST,
         rate=0.12,
-        notes="5% GST + 7% PST = 12% combined. "
-              "PST on software/digital services since April 2021.",
+        notes="5% GST + 7% PST = 12% combined. PST on software/digital services since April 2021.",
     ),
     TaxJurisdiction(
-        code="CA-QC", name="Quebec", tax_type=TaxType.GST,
+        code="CA-QC",
+        name="Quebec",
+        tax_type=TaxType.GST,
         rate=0.14975,
-        notes="5% GST + 9.975% QST ≈ 15% combined. "
-              "QST on digital services since Jan 2019.",
+        notes="5% GST + 9.975% QST ≈ 15% combined. QST on digital services since Jan 2019.",
     ),
     TaxJurisdiction(
-        code="CA-AB", name="Alberta", tax_type=TaxType.GST,
+        code="CA-AB",
+        name="Alberta",
+        tax_type=TaxType.GST,
         rate=0.05,
         notes="5% GST only. No provincial sales tax.",
     ),
@@ -289,20 +335,25 @@ _register(
 # -- Australia -------------------------------------------------------------
 _register(
     TaxJurisdiction(
-        code="AU", name="Australia", tax_type=TaxType.GST,
-        rate=0.10, b2b_reverse_charge=True,
+        code="AU",
+        name="Australia",
+        tax_type=TaxType.GST,
+        rate=0.10,
+        b2b_reverse_charge=True,
         notes="10% GST. B2B reverse charge when buyer is GST-registered. "
-              "Non-resident suppliers must register above AUD 75K threshold.",
+        "Non-resident suppliers must register above AUD 75K threshold.",
     ),
 )
 
 # -- Japan -----------------------------------------------------------------
 _register(
     TaxJurisdiction(
-        code="JP", name="Japan", tax_type=TaxType.JCT,
-        rate=0.10, b2b_reverse_charge=True,
-        notes="10% JCT (consumption tax). B2B reverse charge applies. "
-              "Qualified invoice system since Oct 2023.",
+        code="JP",
+        name="Japan",
+        tax_type=TaxType.JCT,
+        rate=0.10,
+        b2b_reverse_charge=True,
+        notes="10% JCT (consumption tax). B2B reverse charge applies. Qualified invoice system since Oct 2023.",
     ),
 )
 
@@ -313,7 +364,7 @@ _register(
 
 # Pattern: prefix + digits/alphanumeric.  These are format-only checks;
 # real validation requires VIES (EU), ABN lookup (AU), etc.
-_TAX_ID_PATTERNS: Dict[str, re.Pattern[str]] = {
+_TAX_ID_PATTERNS: dict[str, re.Pattern[str]] = {
     # EU VAT IDs: 2-letter country code + 2-12 alphanumeric chars
     "DE": re.compile(r"^DE\d{9}$"),
     "FR": re.compile(r"^FR[A-Z0-9]{2}\d{9}$"),
@@ -345,6 +396,7 @@ def _validate_tax_id_format(jurisdiction_code: str, tax_id: str) -> bool:
 # Tax calculator
 # ---------------------------------------------------------------------------
 
+
 class TaxCalculator:
     """Stateless tax calculator for Kiln platform fees.
 
@@ -357,7 +409,7 @@ class TaxCalculator:
         fee_amount: float,
         jurisdiction: str,
         *,
-        business_tax_id: Optional[str] = None,
+        business_tax_id: str | None = None,
     ) -> TaxResult:
         """Calculate tax on a Kiln platform fee.
 
@@ -421,8 +473,7 @@ class TaxCalculator:
                     taxable_amount=fee_amount,
                     exempt=True,
                     exempt_reason=(
-                        f"B2B reverse charge — buyer self-assesses "
-                        f"{jur.tax_type.value.upper()} in {jur.name}"
+                        f"B2B reverse charge — buyer self-assesses {jur.tax_type.value.upper()} in {jur.name}"
                     ),
                     reverse_charge=True,
                     business_tax_id=business_tax_id,
@@ -430,7 +481,8 @@ class TaxCalculator:
             else:
                 logger.warning(
                     "Invalid tax ID format %r for %s — charging tax normally",
-                    business_tax_id, jurisdiction,
+                    business_tax_id,
+                    jurisdiction,
                 )
 
         # Standard tax calculation.
@@ -450,21 +502,23 @@ class TaxCalculator:
         fee_amount: float,
         jurisdiction: str,
         *,
-        business_tax_id: Optional[str] = None,
+        business_tax_id: str | None = None,
     ) -> TaxResult:
         """Alias for :meth:`calculate_tax` — same logic, clearer intent for previews."""
         return self.calculate_tax(
-            fee_amount, jurisdiction, business_tax_id=business_tax_id,
+            fee_amount,
+            jurisdiction,
+            business_tax_id=business_tax_id,
         )
 
-    def get_jurisdiction(self, code: str) -> Optional[TaxJurisdiction]:
+    def get_jurisdiction(self, code: str) -> TaxJurisdiction | None:
         """Look up a jurisdiction by code."""
         return _JURISDICTIONS.get(code.upper().strip())
 
-    def list_jurisdictions(self) -> List[TaxJurisdiction]:
+    def list_jurisdictions(self) -> list[TaxJurisdiction]:
         """Return all supported jurisdictions."""
         return list(_JURISDICTIONS.values())
 
-    def list_jurisdiction_codes(self) -> List[str]:
+    def list_jurisdiction_codes(self) -> list[str]:
         """Return all supported jurisdiction codes."""
         return list(_JURISDICTIONS.keys())

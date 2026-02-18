@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import requests
 
@@ -62,8 +62,7 @@ class GrabCADAdapter(MarketplaceAdapter):
         self._api_token = api_token or os.environ.get("KILN_GRABCAD_TOKEN", "")
         if not self._api_token:
             raise MarketplaceAuthError(
-                "GrabCAD API token is required.  Set KILN_GRABCAD_TOKEN "
-                "or pass api_token= to GrabCADAdapter."
+                "GrabCAD API token is required.  Set KILN_GRABCAD_TOKEN or pass api_token= to GrabCADAdapter."
             )
         self._base_url = base_url.rstrip("/")
         self._session = session or requests.Session()
@@ -83,7 +82,7 @@ class GrabCADAdapter(MarketplaceAdapter):
         method: str,
         path: str,
         *,
-        params: Dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
         timeout: int = _REQUEST_TIMEOUT,
     ) -> Any:
         """Make an authenticated API request and return parsed JSON."""
@@ -95,7 +94,11 @@ class GrabCADAdapter(MarketplaceAdapter):
 
         try:
             resp = self._session.request(
-                method, url, params=params, headers=headers, timeout=timeout,
+                method,
+                url,
+                params=params,
+                headers=headers,
+                timeout=timeout,
             )
         except requests.ConnectionError as exc:
             raise MarketplaceError(
@@ -113,7 +116,8 @@ class GrabCADAdapter(MarketplaceAdapter):
             )
         if resp.status_code == 404:
             raise MarketplaceNotFoundError(
-                f"Resource not found: {path}", status_code=404,
+                f"Resource not found: {path}",
+                status_code=404,
             )
         if resp.status_code == 429:
             raise MarketplaceRateLimitError(
@@ -137,18 +141,22 @@ class GrabCADAdapter(MarketplaceAdapter):
         page: int = 1,
         per_page: int = 20,
         sort: str = "relevant",
-    ) -> List[ModelSummary]:
+    ) -> list[ModelSummary]:
         sort_map = {
             "relevant": "relevance",
             "popular": "popularity",
             "newest": "newest",
         }
-        data = self._request("GET", "/models", params={
-            "query": query,
-            "page": page,
-            "per_page": min(per_page, 100),
-            "sort": sort_map.get(sort, sort),
-        })
+        data = self._request(
+            "GET",
+            "/models",
+            params={
+                "query": query,
+                "page": page,
+                "per_page": min(per_page, 100),
+                "sort": sort_map.get(sort, sort),
+            },
+        )
         items = data.get("models", []) if isinstance(data, dict) else []
         return [self._parse_summary(item) for item in items if isinstance(item, dict)]
 
@@ -156,7 +164,7 @@ class GrabCADAdapter(MarketplaceAdapter):
         data = self._request("GET", f"/models/{model_id}")
         return self._parse_detail(data)
 
-    def get_files(self, model_id: str) -> List[ModelFile]:
+    def get_files(self, model_id: str) -> list[ModelFile]:
         data = self._request("GET", f"/models/{model_id}/files")
         items = data.get("files", []) if isinstance(data, dict) else []
         return [self._parse_file(f) for f in items if isinstance(f, dict)]
@@ -196,7 +204,7 @@ class GrabCADAdapter(MarketplaceAdapter):
     # -- parsing helpers ---------------------------------------------------
 
     @staticmethod
-    def _parse_summary(data: Dict[str, Any]) -> ModelSummary:
+    def _parse_summary(data: dict[str, Any]) -> ModelSummary:
         creator = data.get("creator", {}) or {}
         return ModelSummary(
             id=str(data.get("id", "")),
@@ -212,10 +220,10 @@ class GrabCADAdapter(MarketplaceAdapter):
         )
 
     @staticmethod
-    def _parse_detail(data: Dict[str, Any]) -> ModelDetail:
+    def _parse_detail(data: dict[str, Any]) -> ModelDetail:
         creator = data.get("creator", {}) or {}
         tags_raw = data.get("tags", []) or []
-        tag_strs: List[str] = []
+        tag_strs: list[str] = []
         for t in tags_raw:
             if isinstance(t, str):
                 tag_strs.append(t)
@@ -242,7 +250,7 @@ class GrabCADAdapter(MarketplaceAdapter):
         )
 
     @staticmethod
-    def _parse_file(data: Dict[str, Any]) -> ModelFile:
+    def _parse_file(data: dict[str, Any]) -> ModelFile:
         filename = data.get("file_name", "")
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         return ModelFile(

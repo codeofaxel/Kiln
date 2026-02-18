@@ -23,6 +23,7 @@ Example::
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -33,9 +34,9 @@ import stat
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, Sequence, Union
-
+from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ _DEFAULT_DB_DIR = os.path.join(str(Path.home()), ".kiln")
 _DEFAULT_DB_PATH = os.path.join(_DEFAULT_DB_DIR, "kiln.db")
 
 # SQL parameter type accepted by both sqlite3 and typical DB-API adapters.
-_SqlParams = Union[Sequence[Any], Dict[str, Any]]
+_SqlParams = Sequence[Any] | dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
@@ -64,14 +65,14 @@ class _CursorLike(Protocol):
     """
 
     @property
-    def lastrowid(self) -> Optional[int]: ...
+    def lastrowid(self) -> int | None: ...
 
     @property
     def rowcount(self) -> int: ...
 
-    def fetchone(self) -> Optional[Any]: ...
+    def fetchone(self) -> Any | None: ...
 
-    def fetchall(self) -> List[Any]: ...
+    def fetchall(self) -> list[Any]: ...
 
 
 class StorageBackend(Protocol):
@@ -86,15 +87,11 @@ class StorageBackend(Protocol):
     interface, keeping the contract small and easy to satisfy.
     """
 
-    def execute(
-        self, sql: str, parameters: _SqlParams = ..., /
-    ) -> _CursorLike:
+    def execute(self, sql: str, parameters: _SqlParams = ..., /) -> _CursorLike:
         """Execute a single SQL statement and return a cursor-like object."""
         ...
 
-    def executemany(
-        self, sql: str, seq_of_parameters: Sequence[_SqlParams], /
-    ) -> _CursorLike:
+    def executemany(self, sql: str, seq_of_parameters: Sequence[_SqlParams], /) -> _CursorLike:
         """Execute a SQL statement against all parameter sequences."""
         ...
 
@@ -125,7 +122,8 @@ class SQLiteBackend:
 
     def __init__(self, db_path: str) -> None:
         self._conn: sqlite3.Connection = sqlite3.connect(
-            db_path, check_same_thread=False,
+            db_path,
+            check_same_thread=False,
         )
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -133,14 +131,10 @@ class SQLiteBackend:
 
     # -- StorageBackend interface ------------------------------------------
 
-    def execute(
-        self, sql: str, parameters: _SqlParams = (), /
-    ) -> sqlite3.Cursor:
+    def execute(self, sql: str, parameters: _SqlParams = (), /) -> sqlite3.Cursor:
         return self._conn.execute(sql, parameters)
 
-    def executemany(
-        self, sql: str, seq_of_parameters: Sequence[_SqlParams], /
-    ) -> sqlite3.Cursor:
+    def executemany(self, sql: str, seq_of_parameters: Sequence[_SqlParams], /) -> sqlite3.Cursor:
         return self._conn.executemany(sql, seq_of_parameters)
 
     def executescript(self, sql_script: str, /) -> sqlite3.Cursor:
@@ -174,7 +168,7 @@ class _PgDictCursor:
 
     # -- Passthrough properties --
     @property
-    def lastrowid(self) -> Optional[int]:
+    def lastrowid(self) -> int | None:
         return self._cur.lastrowid if hasattr(self._cur, "lastrowid") else None
 
     @property
@@ -194,11 +188,11 @@ class _PgDictCursor:
         cols = [d[0] for d in self._cur.description]
         return _DictRow(cols, row)
 
-    def fetchone(self) -> Optional[Any]:
+    def fetchone(self) -> Any | None:
         row = self._cur.fetchone()
         return self._wrap_row(row)
 
-    def fetchall(self) -> List[Any]:
+    def fetchall(self) -> list[Any]:
         rows = self._cur.fetchall()
         if not rows or self._cur.description is None:
             return rows
@@ -213,7 +207,7 @@ class _DictRow:
 
     __slots__ = ("_cols", "_values")
 
-    def __init__(self, cols: List[str], values: tuple) -> None:
+    def __init__(self, cols: list[str], values: tuple) -> None:
         self._cols = cols
         self._values = values
 
@@ -232,14 +226,14 @@ class _DictRow:
     def __len__(self) -> int:
         return len(self._values)
 
-    def keys(self) -> List[str]:
+    def keys(self) -> list[str]:
         return list(self._cols)
 
     def values(self) -> tuple:
         return self._values
 
     def items(self):
-        return zip(self._cols, self._values)
+        return zip(self._cols, self._values, strict=False)
 
 
 class PostgresBackend:
@@ -255,20 +249,15 @@ class PostgresBackend:
     :raises ValueError: If no DSN is provided and the env var is unset.
     """
 
-    def __init__(self, dsn: Optional[str] = None) -> None:
+    def __init__(self, dsn: str | None = None) -> None:
         try:
             import psycopg2  # noqa: F811
         except ImportError:
-            raise RuntimeError(
-                "psycopg2 is required for PostgreSQL support: "
-                "pip install psycopg2-binary"
-            ) from None
+            raise RuntimeError("psycopg2 is required for PostgreSQL support: pip install psycopg2-binary") from None
 
         self._dsn = dsn or os.environ.get("KILN_POSTGRES_DSN", "")
         if not self._dsn:
-            raise ValueError(
-                "PostgreSQL DSN required — pass dsn= or set KILN_POSTGRES_DSN"
-            )
+            raise ValueError("PostgreSQL DSN required — pass dsn= or set KILN_POSTGRES_DSN")
 
         self._psycopg2 = psycopg2
         self._conn = psycopg2.connect(self._dsn)
@@ -283,7 +272,7 @@ class PostgresBackend:
         Skips ``?`` characters inside single-quoted string literals to avoid
         corrupting embedded text values.
         """
-        result: List[str] = []
+        result: list[str] = []
         in_string = False
         for ch in sql:
             if ch == "'" and not in_string:
@@ -352,9 +341,7 @@ class PostgresBackend:
             return sql
 
         # INSERT OR IGNORE → INSERT ... ON CONFLICT DO NOTHING
-        has_or_ignore = bool(
-            re.search(r"INSERT\s+OR\s+IGNORE\s+INTO", sql, re.IGNORECASE)
-        )
+        has_or_ignore = bool(re.search(r"INSERT\s+OR\s+IGNORE\s+INTO", sql, re.IGNORECASE))
         if has_or_ignore:
             sql = re.sub(
                 r"INSERT\s+OR\s+IGNORE\s+INTO",
@@ -374,9 +361,7 @@ class PostgresBackend:
 
     # -- StorageBackend interface ------------------------------------------
 
-    def execute(
-        self, sql: str, parameters: _SqlParams = (), /
-    ) -> _PgDictCursor:
+    def execute(self, sql: str, parameters: _SqlParams = (), /) -> _PgDictCursor:
         translated = self._translate_sql(sql)
         # Convert dict parameters with :name style to %(name)s for psycopg2.
         if isinstance(parameters, dict):
@@ -387,9 +372,7 @@ class PostgresBackend:
         cur.execute(translated, parameters)
         return _PgDictCursor(cur)
 
-    def executemany(
-        self, sql: str, seq_of_parameters: Sequence[_SqlParams], /
-    ) -> _PgDictCursor:
+    def executemany(self, sql: str, seq_of_parameters: Sequence[_SqlParams], /) -> _PgDictCursor:
         translated = self._translate_sql(sql)
         if seq_of_parameters and isinstance(seq_of_parameters[0], dict):
             import re
@@ -443,9 +426,9 @@ class KilnDB:
 
     def __init__(
         self,
-        db_path: Optional[str] = None,
+        db_path: str | None = None,
         *,
-        backend: Optional[StorageBackend] = None,
+        backend: StorageBackend | None = None,
     ) -> None:
         self._db_path = db_path or os.environ.get("KILN_DB_PATH", _DEFAULT_DB_PATH)
         self._is_postgres = False
@@ -482,8 +465,7 @@ class KilnDB:
         if self._is_postgres:
             # Postgres: query information_schema for existing columns.
             rows = self._conn.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name = 'agent_memory'",
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'agent_memory'",
             ).fetchall()
             columns = {row[0] for row in rows}
         else:
@@ -529,16 +511,13 @@ class KilnDB:
             file_mode = stat.S_IMODE(file_stat.st_mode)
             if file_mode & 0o077:
                 logger.warning(
-                    "Database file %s has overly permissive permissions "
-                    "(mode %04o). Fixing to 0600.",
+                    "Database file %s has overly permissive permissions (mode %04o). Fixing to 0600.",
                     self._db_path,
                     file_mode,
                 )
             os.chmod(self._db_path, 0o600)
         except OSError as exc:
-            logger.warning(
-                "Unable to set permissions on %s: %s", self._db_path, exc
-            )
+            logger.warning("Unable to set permissions on %s: %s", self._db_path, exc)
 
     # ------------------------------------------------------------------
     # Schema
@@ -829,14 +808,10 @@ class KilnDB:
             )
 
             # Add hmac_signature column to safety_audit_log if missing.
-            try:
-                self._conn.execute(
-                    "ALTER TABLE safety_audit_log ADD COLUMN hmac_signature TEXT"
-                )
-            except (sqlite3.OperationalError, Exception):
-                # sqlite3.OperationalError on SQLite, various DB errors on
-                # Postgres — column already exists in both cases.
-                pass
+            # sqlite3.OperationalError on SQLite, various DB errors on
+            # Postgres -- column already exists in both cases.
+            with contextlib.suppress(sqlite3.OperationalError, Exception):
+                self._conn.execute("ALTER TABLE safety_audit_log ADD COLUMN hmac_signature TEXT")
 
             self._conn.commit()
 
@@ -844,7 +819,7 @@ class KilnDB:
     # Jobs
     # ------------------------------------------------------------------
 
-    def save_job(self, job_dict: Dict[str, Any]) -> None:
+    def save_job(self, job_dict: dict[str, Any]) -> None:
         """Insert or replace a job record.
 
         The dict must contain at least ``id``, ``file_name``, ``status``,
@@ -877,20 +852,18 @@ class KilnDB:
             )
             self._conn.commit()
 
-    def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
         """Fetch a single job by ID, or ``None`` if not found."""
-        row = self._conn.execute(
-            "SELECT * FROM jobs WHERE id = ?", (job_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         if row is None:
             return None
         return dict(row)
 
     def list_jobs(
         self,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return jobs ordered by priority DESC then submitted_at ASC.
 
         Args:
@@ -899,14 +872,12 @@ class KilnDB:
         """
         if status is not None:
             rows = self._conn.execute(
-                "SELECT * FROM jobs WHERE status = ? "
-                "ORDER BY priority DESC, submitted_at ASC LIMIT ?",
+                "SELECT * FROM jobs WHERE status = ? ORDER BY priority DESC, submitted_at ASC LIMIT ?",
                 (status, limit),
             ).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT * FROM jobs "
-                "ORDER BY priority DESC, submitted_at ASC LIMIT ?",
+                "SELECT * FROM jobs ORDER BY priority DESC, submitted_at ASC LIMIT ?",
                 (limit,),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -918,9 +889,9 @@ class KilnDB:
     def log_event(
         self,
         event_type: str,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         source: str = "",
-        timestamp: Optional[float] = None,
+        timestamp: float | None = None,
     ) -> int:
         """Insert an event and return the row id."""
         ts = timestamp if timestamp is not None else time.time()
@@ -937,17 +908,16 @@ class KilnDB:
 
     def recent_events(
         self,
-        event_type: Optional[str] = None,
+        event_type: str | None = None,
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return recent events, newest first.
 
         The ``data`` column is deserialised from JSON back into a dict.
         """
         if event_type is not None:
             rows = self._conn.execute(
-                "SELECT * FROM events WHERE event_type = ? "
-                "ORDER BY id DESC LIMIT ?",
+                "SELECT * FROM events WHERE event_type = ? ORDER BY id DESC LIMIT ?",
                 (event_type, limit),
             ).fetchall()
         else:
@@ -956,7 +926,7 @@ class KilnDB:
                 (limit,),
             ).fetchall()
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for row in rows:
             d = dict(row)
             d["data"] = json.loads(d["data"])
@@ -972,7 +942,7 @@ class KilnDB:
         name: str,
         printer_type: str,
         host: str,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
     ) -> None:
         """Insert or replace a printer record."""
         now = time.time()
@@ -987,19 +957,15 @@ class KilnDB:
             )
             self._conn.commit()
 
-    def list_printers(self) -> List[Dict[str, Any]]:
+    def list_printers(self) -> list[dict[str, Any]]:
         """Return all registered printers."""
-        rows = self._conn.execute(
-            "SELECT * FROM printers ORDER BY name"
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM printers ORDER BY name").fetchall()
         return [dict(r) for r in rows]
 
     def remove_printer(self, name: str) -> bool:
         """Delete a printer by name.  Returns ``True`` if a row was deleted."""
         with self._write_lock:
-            cur = self._conn.execute(
-                "DELETE FROM printers WHERE name = ?", (name,)
-            )
+            cur = self._conn.execute("DELETE FROM printers WHERE name = ?", (name,))
             self._conn.commit()
             return cur.rowcount > 0
 
@@ -1010,12 +976,10 @@ class KilnDB:
     def get_setting(
         self,
         key: str,
-        default: Optional[str] = None,
-    ) -> Optional[str]:
+        default: str | None = None,
+    ) -> str | None:
         """Retrieve a setting value by key, or *default* if missing."""
-        row = self._conn.execute(
-            "SELECT value FROM settings WHERE key = ?", (key,)
-        ).fetchone()
+        row = self._conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
         if row is None:
             return default
         return row["value"]
@@ -1038,9 +1002,9 @@ class KilnDB:
         printer_name: str,
         tool_index: int,
         material_type: str,
-        color: Optional[str] = None,
-        spool_id: Optional[str] = None,
-        remaining_grams: Optional[float] = None,
+        color: str | None = None,
+        spool_id: str | None = None,
+        remaining_grams: float | None = None,
     ) -> None:
         """Insert or replace a loaded material record."""
         with self._write_lock:
@@ -1051,14 +1015,15 @@ class KilnDB:
                      spool_id, loaded_at, remaining_grams)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (printer_name, tool_index, material_type, color,
-                 spool_id, time.time(), remaining_grams),
+                (printer_name, tool_index, material_type, color, spool_id, time.time(), remaining_grams),
             )
             self._conn.commit()
 
     def get_material(
-        self, printer_name: str, tool_index: int = 0,
-    ) -> Optional[Dict[str, Any]]:
+        self,
+        printer_name: str,
+        tool_index: int = 0,
+    ) -> dict[str, Any] | None:
         """Fetch material loaded in a specific tool slot."""
         row = self._conn.execute(
             "SELECT * FROM printer_materials WHERE printer_name = ? AND tool_index = ?",
@@ -1066,7 +1031,7 @@ class KilnDB:
         ).fetchone()
         return dict(row) if row else None
 
-    def list_materials(self, printer_name: str) -> List[Dict[str, Any]]:
+    def list_materials(self, printer_name: str) -> list[dict[str, Any]]:
         """Return all material slots for a printer."""
         rows = self._conn.execute(
             "SELECT * FROM printer_materials WHERE printer_name = ? ORDER BY tool_index",
@@ -1075,13 +1040,15 @@ class KilnDB:
         return [dict(r) for r in rows]
 
     def update_material_remaining(
-        self, printer_name: str, tool_index: int, remaining_grams: float,
+        self,
+        printer_name: str,
+        tool_index: int,
+        remaining_grams: float,
     ) -> None:
         """Update remaining grams for a loaded material."""
         with self._write_lock:
             self._conn.execute(
-                "UPDATE printer_materials SET remaining_grams = ? "
-                "WHERE printer_name = ? AND tool_index = ?",
+                "UPDATE printer_materials SET remaining_grams = ? WHERE printer_name = ? AND tool_index = ?",
                 (remaining_grams, printer_name, tool_index),
             )
             self._conn.commit()
@@ -1090,7 +1057,7 @@ class KilnDB:
     # Spools
     # ------------------------------------------------------------------
 
-    def save_spool(self, spool: Dict[str, Any]) -> None:
+    def save_spool(self, spool: dict[str, Any]) -> None:
         """Insert or replace a spool record."""
         with self._write_lock:
             self._conn.execute(
@@ -1115,26 +1082,20 @@ class KilnDB:
             )
             self._conn.commit()
 
-    def get_spool(self, spool_id: str) -> Optional[Dict[str, Any]]:
+    def get_spool(self, spool_id: str) -> dict[str, Any] | None:
         """Fetch a spool by ID."""
-        row = self._conn.execute(
-            "SELECT * FROM spools WHERE id = ?", (spool_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM spools WHERE id = ?", (spool_id,)).fetchone()
         return dict(row) if row else None
 
-    def list_spools(self) -> List[Dict[str, Any]]:
+    def list_spools(self) -> list[dict[str, Any]]:
         """Return all spools."""
-        rows = self._conn.execute(
-            "SELECT * FROM spools ORDER BY material_type, color"
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM spools ORDER BY material_type, color").fetchall()
         return [dict(r) for r in rows]
 
     def remove_spool(self, spool_id: str) -> bool:
         """Delete a spool.  Returns ``True`` if a row was deleted."""
         with self._write_lock:
-            cur = self._conn.execute(
-                "DELETE FROM spools WHERE id = ?", (spool_id,)
-            )
+            cur = self._conn.execute("DELETE FROM spools WHERE id = ?", (spool_id,))
             self._conn.commit()
             return cur.rowcount > 0
 
@@ -1151,7 +1112,7 @@ class KilnDB:
     # Leveling history
     # ------------------------------------------------------------------
 
-    def save_leveling(self, record: Dict[str, Any]) -> int:
+    def save_leveling(self, record: dict[str, Any]) -> int:
         """Insert a leveling record and return the row id."""
         with self._write_lock:
             cur = self._conn.execute(
@@ -1174,11 +1135,10 @@ class KilnDB:
             self._conn.commit()
             return cur.lastrowid  # type: ignore[return-value]
 
-    def last_leveling(self, printer_name: str) -> Optional[Dict[str, Any]]:
+    def last_leveling(self, printer_name: str) -> dict[str, Any] | None:
         """Return the most recent leveling record for a printer."""
         row = self._conn.execute(
-            "SELECT * FROM leveling_history WHERE printer_name = ? "
-            "ORDER BY started_at DESC LIMIT 1",
+            "SELECT * FROM leveling_history WHERE printer_name = ? ORDER BY started_at DESC LIMIT 1",
             (printer_name,),
         ).fetchone()
         if row is None:
@@ -1191,8 +1151,7 @@ class KilnDB:
     def leveling_count_since(self, printer_name: str, since: float) -> int:
         """Count leveling events for a printer since a timestamp."""
         row = self._conn.execute(
-            "SELECT COUNT(*) AS cnt FROM leveling_history "
-            "WHERE printer_name = ? AND started_at >= ?",
+            "SELECT COUNT(*) AS cnt FROM leveling_history WHERE printer_name = ? AND started_at >= ?",
             (printer_name, since),
         ).fetchone()
         return row["cnt"] if row else 0
@@ -1220,7 +1179,7 @@ class KilnDB:
             )
             self._conn.commit()
 
-    def get_unsynced_jobs(self, since: float) -> List[Dict[str, Any]]:
+    def get_unsynced_jobs(self, since: float) -> list[dict[str, Any]]:
         """Return jobs submitted after *since* that have not been synced."""
         rows = self._conn.execute(
             """
@@ -1236,7 +1195,7 @@ class KilnDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_unsynced_events(self, since: float) -> List[Dict[str, Any]]:
+    def get_unsynced_events(self, since: float) -> list[dict[str, Any]]:
         """Return events logged after *since* that have not been synced."""
         rows = self._conn.execute(
             """
@@ -1250,14 +1209,14 @@ class KilnDB:
             """,
             (since,),
         ).fetchall()
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for row in rows:
             d = dict(row)
             d["data"] = json.loads(d["data"])
             results.append(d)
         return results
 
-    def mark_synced(self, entity_type: str, entity_ids: List[str]) -> None:
+    def mark_synced(self, entity_type: str, entity_ids: list[str]) -> None:
         """Mark entities as synced."""
         with self._write_lock:
             now = time.time()
@@ -1276,7 +1235,7 @@ class KilnDB:
     # Billing charges
     # ------------------------------------------------------------------
 
-    def save_billing_charge(self, charge: Dict[str, Any]) -> None:
+    def save_billing_charge(self, charge: dict[str, Any]) -> None:
         """Insert a billing charge record, ignoring duplicates on job_id."""
         with self._write_lock:
             self._conn.execute(
@@ -1309,11 +1268,9 @@ class KilnDB:
             )
             self._conn.commit()
 
-    def get_billing_charge(self, charge_id: str) -> Optional[Dict[str, Any]]:
+    def get_billing_charge(self, charge_id: str) -> dict[str, Any] | None:
         """Fetch a billing charge by ID."""
-        row = self._conn.execute(
-            "SELECT * FROM billing_charges WHERE id = ?", (charge_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM billing_charges WHERE id = ?", (charge_id,)).fetchone()
         if row is None:
             return None
         d = dict(row)
@@ -1323,15 +1280,16 @@ class KilnDB:
     def list_billing_charges(
         self,
         limit: int = 50,
-        month: Optional[int] = None,
-        year: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        month: int | None = None,
+        year: int | None = None,
+    ) -> list[dict[str, Any]]:
         """Return billing charges, newest first.
 
         Optionally filter by calendar month.
         """
         if month is not None and year is not None:
             from datetime import datetime, timezone
+
             start = datetime(year, month, 1, tzinfo=timezone.utc).timestamp()
             if month == 12:
                 end = datetime(year + 1, 1, 1, tzinfo=timezone.utc).timestamp()
@@ -1345,8 +1303,7 @@ class KilnDB:
             ).fetchall()
         else:
             rows = self._conn.execute(
-                "SELECT * FROM billing_charges "
-                "ORDER BY created_at DESC LIMIT ?",
+                "SELECT * FROM billing_charges ORDER BY created_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         results = []
@@ -1358,14 +1315,15 @@ class KilnDB:
 
     def monthly_billing_summary(
         self,
-        year: Optional[int] = None,
-        month: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        year: int | None = None,
+        month: int | None = None,
+    ) -> dict[str, Any]:
         """Aggregate billing data for a calendar month.
 
         Returns dict with ``total_fees``, ``job_count``, ``waived_count``.
         """
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
         target_year = year if year is not None else now.year
         target_month = month if month is not None else now.month
@@ -1395,6 +1353,7 @@ class KilnDB:
     def billing_charges_this_month(self) -> int:
         """Count billing charges in the current calendar month."""
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
         start = datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp()
         row = self._conn.execute(
@@ -1406,11 +1365,11 @@ class KilnDB:
     def monthly_fee_total(self) -> float:
         """Sum of fee_amount for billing charges in the current month."""
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
         start = datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp()
         row = self._conn.execute(
-            "SELECT COALESCE(SUM(fee_amount), 0.0) AS total "
-            "FROM billing_charges WHERE created_at >= ?",
+            "SELECT COALESCE(SUM(fee_amount), 0.0) AS total FROM billing_charges WHERE created_at >= ?",
             (start,),
         ).fetchone()
         return round(row["total"], 2) if row else 0.0
@@ -1419,9 +1378,9 @@ class KilnDB:
         self,
         charge_id: str,
         *,
-        payment_status: Optional[str] = None,
-        refund_reason: Optional[str] = None,
-        refunded_at: Optional[float] = None,
+        payment_status: str | None = None,
+        refund_reason: str | None = None,
+        refunded_at: float | None = None,
     ) -> None:
         """Update fields on an existing billing charge.
 
@@ -1433,7 +1392,7 @@ class KilnDB:
         """
         # Build dynamic update query based on provided fields.
         updates = []
-        params: Dict[str, Any] = {"id": charge_id}
+        params: dict[str, Any] = {"id": charge_id}
 
         if payment_status is not None:
             updates.append("payment_status = :payment_status")
@@ -1463,7 +1422,7 @@ class KilnDB:
         payment_status: str,
         *,
         limit: int = 1000,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return billing charges filtered by payment status.
 
         Args:
@@ -1474,9 +1433,7 @@ class KilnDB:
             List of charge dicts.
         """
         rows = self._conn.execute(
-            "SELECT * FROM billing_charges "
-            "WHERE payment_status = ? "
-            "ORDER BY created_at ASC LIMIT ?",
+            "SELECT * FROM billing_charges WHERE payment_status = ? ORDER BY created_at ASC LIMIT ?",
             (payment_status, limit),
         ).fetchall()
         results = []
@@ -1486,7 +1443,7 @@ class KilnDB:
             results.append(d)
         return results
 
-    def get_job_status(self, job_id: str) -> Optional[str]:
+    def get_job_status(self, job_id: str) -> str | None:
         """Get the status of a job by ID.
 
         Args:
@@ -1495,16 +1452,14 @@ class KilnDB:
         Returns:
             The job status string, or ``None`` if not found.
         """
-        row = self._conn.execute(
-            "SELECT status FROM jobs WHERE id = ?", (job_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT status FROM jobs WHERE id = ?", (job_id,)).fetchone()
         return row["status"] if row else None
 
     # ------------------------------------------------------------------
     # Payment methods
     # ------------------------------------------------------------------
 
-    def save_payment_method(self, method: Dict[str, Any]) -> None:
+    def save_payment_method(self, method: dict[str, Any]) -> None:
         """Insert or replace a saved payment method."""
         with self._write_lock:
             self._conn.execute(
@@ -1529,12 +1484,12 @@ class KilnDB:
             self._conn.commit()
 
     def get_default_payment_method(
-        self, user_id: str,
-    ) -> Optional[Dict[str, Any]]:
+        self,
+        user_id: str,
+    ) -> dict[str, Any] | None:
         """Return the default payment method for a user, or ``None``."""
         row = self._conn.execute(
-            "SELECT * FROM payment_methods "
-            "WHERE user_id = ? AND is_default = 1 LIMIT 1",
+            "SELECT * FROM payment_methods WHERE user_id = ? AND is_default = 1 LIMIT 1",
             (user_id,),
         ).fetchone()
         if row is None:
@@ -1544,8 +1499,9 @@ class KilnDB:
         return d
 
     def list_payment_methods(
-        self, user_id: str,
-    ) -> List[Dict[str, Any]]:
+        self,
+        user_id: str,
+    ) -> list[dict[str, Any]]:
         """Return all payment methods for a user."""
         rows = self._conn.execute(
             "SELECT * FROM payment_methods WHERE user_id = ? ORDER BY created_at",
@@ -1562,7 +1518,7 @@ class KilnDB:
     # Payments
     # ------------------------------------------------------------------
 
-    def save_payment(self, payment: Dict[str, Any]) -> None:
+    def save_payment(self, payment: dict[str, Any]) -> None:
         """Insert a payment transaction record."""
         now = time.time()
         with self._write_lock:
@@ -1595,14 +1551,13 @@ class KilnDB:
         self,
         payment_id: str,
         status: str,
-        tx_hash: Optional[str] = None,
+        tx_hash: str | None = None,
     ) -> None:
         """Update the status (and optionally tx_hash) of a payment."""
         with self._write_lock:
             if tx_hash is not None:
                 self._conn.execute(
-                    "UPDATE payments SET status = ?, tx_hash = ?, "
-                    "updated_at = ? WHERE id = ?",
+                    "UPDATE payments SET status = ?, tx_hash = ?, updated_at = ? WHERE id = ?",
                     (status, tx_hash, time.time(), payment_id),
                 )
             else:
@@ -1654,7 +1609,7 @@ class KilnDB:
             logger.info("Purged %d payment records older than %d days", count, retain_days)
         return count
 
-    def delete_user_billing_data(self, user_id: str) -> Dict[str, int]:
+    def delete_user_billing_data(self, user_id: str) -> dict[str, int]:
         """Delete all billing data for a user (GDPR right-to-erasure).
 
         Removes payment methods associated with the user.
@@ -1662,7 +1617,7 @@ class KilnDB:
         :param user_id: The user identifier.
         :returns: Dict with counts of deleted records by table.
         """
-        deleted: Dict[str, int] = {}
+        deleted: dict[str, int] = {}
         with self._write_lock:
             cursor = self._conn.execute(
                 "DELETE FROM payment_methods WHERE user_id = ?",
@@ -1674,7 +1629,8 @@ class KilnDB:
 
         logger.info(
             "Deleted billing data for user %s: %s",
-            user_id, deleted,
+            user_id,
+            deleted,
         )
         return deleted
 
@@ -1682,7 +1638,7 @@ class KilnDB:
     # Print history
     # ------------------------------------------------------------------
 
-    def save_print_record(self, record: Dict[str, Any]) -> int:
+    def save_print_record(self, record: dict[str, Any]) -> int:
         """Insert a print history record and return the row id."""
         with self._write_lock:
             cur = self._conn.execute(
@@ -1714,11 +1670,10 @@ class KilnDB:
             self._conn.commit()
             return cur.lastrowid  # type: ignore[return-value]
 
-    def get_print_record(self, job_id: str) -> Optional[Dict[str, Any]]:
+    def get_print_record(self, job_id: str) -> dict[str, Any] | None:
         """Fetch a print history record by job_id, or ``None`` if not found."""
         row = self._conn.execute(
-            "SELECT * FROM print_history WHERE job_id = ? "
-            "ORDER BY id DESC LIMIT 1",
+            "SELECT * FROM print_history WHERE job_id = ? ORDER BY id DESC LIMIT 1",
             (job_id,),
         ).fetchone()
         if row is None:
@@ -1730,10 +1685,10 @@ class KilnDB:
 
     def list_print_history(
         self,
-        printer_name: Optional[str] = None,
-        status: Optional[str] = None,
+        printer_name: str | None = None,
+        status: str | None = None,
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return print history records, newest first.
 
         Args:
@@ -1741,8 +1696,8 @@ class KilnDB:
             status: Filter by status string, or ``None`` for all.
             limit: Maximum rows to return.
         """
-        clauses: List[str] = []
-        params: List[Any] = []
+        clauses: list[str] = []
+        params: list[Any] = []
         if printer_name is not None:
             clauses.append("printer_name = ?")
             params.append(printer_name)
@@ -1756,12 +1711,11 @@ class KilnDB:
 
         params.append(limit)
         rows = self._conn.execute(
-            f"SELECT * FROM print_history {where} "
-            "ORDER BY completed_at DESC LIMIT ?",
+            f"SELECT * FROM print_history {where} ORDER BY completed_at DESC LIMIT ?",
             params,
         ).fetchall()
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for row in rows:
             d = dict(row)
             if d.get("metadata"):
@@ -1769,7 +1723,7 @@ class KilnDB:
             results.append(d)
         return results
 
-    def get_printer_stats(self, printer_name: str) -> Dict[str, Any]:
+    def get_printer_stats(self, printer_name: str) -> dict[str, Any]:
         """Aggregate statistics for a printer.
 
         Returns dict with ``total_prints``, ``success_rate``,
@@ -1823,7 +1777,7 @@ class KilnDB:
         key: str,
         value: Any,
         *,
-        ttl_seconds: Optional[int] = None,
+        ttl_seconds: int | None = None,
     ) -> None:
         """Insert or replace an agent memory entry.
 
@@ -1844,8 +1798,7 @@ class KilnDB:
         with self._write_lock:
             # Read current version for auto-increment
             row = self._conn.execute(
-                "SELECT version, created_at FROM agent_memory "
-                "WHERE agent_id = ? AND scope = ? AND key = ?",
+                "SELECT version, created_at FROM agent_memory WHERE agent_id = ? AND scope = ? AND key = ?",
                 (agent_id, scope, key),
             ).fetchone()
             if row is not None:
@@ -1862,8 +1815,7 @@ class KilnDB:
                      version, expires_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (agent_id, scope, key, json.dumps(value),
-                 original_created, now, new_version, expires_at),
+                (agent_id, scope, key, json.dumps(value), original_created, now, new_version, expires_at),
             )
             self._conn.commit()
 
@@ -1872,7 +1824,7 @@ class KilnDB:
         agent_id: str,
         scope: str,
         key: str,
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """Fetch a single agent memory value, or ``None`` if not found or expired."""
         row = self._conn.execute(
             "SELECT value FROM agent_memory "
@@ -1887,8 +1839,8 @@ class KilnDB:
     def list_memory(
         self,
         agent_id: str,
-        scope: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        scope: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Return all non-expired memory entries for an agent.
 
         Args:
@@ -1912,7 +1864,7 @@ class KilnDB:
                 "ORDER BY updated_at DESC",
                 (agent_id, now),
             ).fetchall()
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for row in rows:
             d = dict(row)
             d["value"] = json.loads(d["value"])
@@ -1931,8 +1883,7 @@ class KilnDB:
         """
         with self._write_lock:
             cur = self._conn.execute(
-                "DELETE FROM agent_memory "
-                "WHERE agent_id = ? AND scope = ? AND key = ?",
+                "DELETE FROM agent_memory WHERE agent_id = ? AND scope = ? AND key = ?",
                 (agent_id, scope, key),
             )
             self._conn.commit()
@@ -1945,8 +1896,7 @@ class KilnDB:
         """
         with self._write_lock:
             cur = self._conn.execute(
-                "DELETE FROM agent_memory "
-                "WHERE expires_at IS NOT NULL AND expires_at < ?",
+                "DELETE FROM agent_memory WHERE expires_at IS NOT NULL AND expires_at < ?",
                 (time.time(),),
             )
             self._conn.commit()
@@ -1956,7 +1906,7 @@ class KilnDB:
     # Print outcomes (cross-printer learning)
     # ------------------------------------------------------------------
 
-    def save_print_outcome(self, outcome: Dict[str, Any]) -> int:
+    def save_print_outcome(self, outcome: dict[str, Any]) -> int:
         """Save an agent-curated print outcome record.  Returns row id."""
         VALID_OUTCOMES = {"success", "failed", "partial"}
         outcome_val = outcome.get("outcome", "")
@@ -1965,9 +1915,18 @@ class KilnDB:
         if outcome.get("quality_grade") and outcome["quality_grade"] not in {"excellent", "good", "acceptable", "poor"}:
             raise ValueError(f"Invalid quality_grade {outcome['quality_grade']!r}")
         if outcome.get("failure_mode") and outcome["failure_mode"] not in {
-            "spaghetti", "layer_shift", "warping", "adhesion", "stringing",
-            "under_extrusion", "over_extrusion", "clog", "thermal_runaway",
-            "power_loss", "mechanical", "other",
+            "spaghetti",
+            "layer_shift",
+            "warping",
+            "adhesion",
+            "stringing",
+            "under_extrusion",
+            "over_extrusion",
+            "clog",
+            "thermal_runaway",
+            "power_loss",
+            "mechanical",
+            "other",
         }:
             raise ValueError(f"Invalid failure_mode {outcome['failure_mode']!r}")
 
@@ -2004,7 +1963,7 @@ class KilnDB:
                     raise ValueError(f"Outcome for job_id {outcome['job_id']!r} already recorded") from exc
                 raise
 
-    def get_print_outcome(self, job_id: str) -> Optional[Dict[str, Any]]:
+    def get_print_outcome(self, job_id: str) -> dict[str, Any] | None:
         """Return the outcome record for *job_id*, or ``None``."""
         row = self._conn.execute(
             "SELECT * FROM print_outcomes WHERE job_id = ? ORDER BY created_at DESC LIMIT 1",
@@ -2016,14 +1975,14 @@ class KilnDB:
 
     def list_print_outcomes(
         self,
-        printer_name: Optional[str] = None,
-        file_hash: Optional[str] = None,
-        outcome: Optional[str] = None,
+        printer_name: str | None = None,
+        file_hash: str | None = None,
+        outcome: str | None = None,
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return outcome records, optionally filtered."""
-        clauses: List[str] = []
-        params: List[Any] = []
+        clauses: list[str] = []
+        params: list[Any] = []
         if printer_name:
             clauses.append("printer_name = ?")
             params.append(printer_name)
@@ -2041,7 +2000,7 @@ class KilnDB:
         ).fetchall()
         return [self._outcome_row_to_dict(r) for r in rows]
 
-    def get_printer_learning_insights(self, printer_name: str) -> Dict[str, Any]:
+    def get_printer_learning_insights(self, printer_name: str) -> dict[str, Any]:
         """Return aggregated outcome insights for a single printer."""
         total = self._conn.execute(
             "SELECT COUNT(*) FROM print_outcomes WHERE printer_name = ?",
@@ -2091,7 +2050,7 @@ class KilnDB:
             "material_stats": material_stats,
         }
 
-    def get_file_outcomes(self, file_hash: str) -> Dict[str, Any]:
+    def get_file_outcomes(self, file_hash: str) -> dict[str, Any]:
         """Return outcome data for a specific file across all printers."""
         rows = self._conn.execute(
             "SELECT printer_name, "
@@ -2120,12 +2079,12 @@ class KilnDB:
 
     def suggest_printer_for_outcome(
         self,
-        file_hash: Optional[str] = None,
-        material_type: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        file_hash: str | None = None,
+        material_type: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Return printers ranked by success rate for the given criteria."""
-        clauses: List[str] = []
-        params: List[Any] = []
+        clauses: list[str] = []
+        params: list[Any] = []
         if file_hash:
             clauses.append("file_hash = ?")
             params.append(file_hash)
@@ -2144,12 +2103,14 @@ class KilnDB:
         ).fetchall()
         results = []
         for row in rows:
-            results.append({
-                "printer_name": row[0],
-                "total_prints": row[1],
-                "successes": row[2],
-                "success_rate": round(row[2] / row[1], 2) if row[1] else 0.0,
-            })
+            results.append(
+                {
+                    "printer_name": row[0],
+                    "total_prints": row[1],
+                    "successes": row[2],
+                    "success_rate": round(row[2] / row[1], 2) if row[1] else 0.0,
+                }
+            )
         return results
 
     def get_successful_settings(
@@ -2158,7 +2119,7 @@ class KilnDB:
         material_type: str | None = None,
         file_hash: str | None = None,
         limit: int = 20,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return settings from successful print outcomes.
 
         Filters by printer, material, and/or file hash. Returns only
@@ -2166,8 +2127,8 @@ class KilnDB:
         ordered by quality_grade (excellent > good > acceptable > poor)
         then by created_at descending.
         """
-        clauses: List[str] = ["outcome = 'success'", "settings IS NOT NULL"]
-        params: List[Any] = []
+        clauses: list[str] = ["outcome = 'success'", "settings IS NOT NULL"]
+        params: list[Any] = []
         if printer_name:
             clauses.append("printer_name = ?")
             params.append(printer_name)
@@ -2193,7 +2154,7 @@ class KilnDB:
         ).fetchall()
         return [self._outcome_row_to_dict(r) for r in rows]
 
-    def _outcome_row_to_dict(self, row) -> Dict[str, Any]:
+    def _outcome_row_to_dict(self, row) -> dict[str, Any]:
         """Convert a print_outcomes row to a dictionary."""
         d = dict(row)
         if d.get("settings"):
@@ -2201,7 +2162,6 @@ class KilnDB:
         if d.get("environment"):
             d["environment"] = json.loads(d["environment"])
         return d
-
 
     # ------------------------------------------------------------------
     # Model Cache
@@ -2214,6 +2174,7 @@ class KilnDB:
             entry: A :class:`ModelCacheEntry` dataclass instance.
         """
         import json as _json
+
         with self._write_lock:
             self._conn.execute(
                 """
@@ -2246,6 +2207,7 @@ class KilnDB:
     def _cache_row_to_entry(self, row):
         """Convert a model_cache row to a ModelCacheEntry."""
         from kiln.model_cache import ModelCacheEntry
+
         d = dict(row)
         tags = json.loads(d["tags"]) if d.get("tags") else []
         dimensions = json.loads(d["dimensions"]) if d.get("dimensions") else None
@@ -2269,9 +2231,7 @@ class KilnDB:
 
     def get_cache_entry(self, cache_id: str):
         """Return a ModelCacheEntry by cache_id, or ``None``."""
-        row = self._conn.execute(
-            "SELECT * FROM model_cache WHERE cache_id = ?", (cache_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM model_cache WHERE cache_id = ?", (cache_id,)).fetchone()
         if row is None:
             return None
         return self._cache_row_to_entry(row)
@@ -2289,20 +2249,18 @@ class KilnDB:
     def search_cache(
         self,
         *,
-        query: Optional[str] = None,
-        source: Optional[str] = None,
-        tags: Optional[List[str]] = None,
+        query: str | None = None,
+        source: str | None = None,
+        tags: list[str] | None = None,
         limit: int = 20,
     ):
         """Search cached models by name, source, tags, or prompt text."""
-        clauses: List[str] = []
-        params: List[Any] = []
+        clauses: list[str] = []
+        params: list[Any] = []
 
         if query:
             like_q = f"%{query}%"
-            clauses.append(
-                "(file_name LIKE ? OR prompt LIKE ? OR tags LIKE ?)"
-            )
+            clauses.append("(file_name LIKE ? OR prompt LIKE ? OR tags LIKE ?)")
             params.extend([like_q, like_q, like_q])
 
         if source:
@@ -2335,8 +2293,7 @@ class KilnDB:
         now = time.time()
         with self._write_lock:
             self._conn.execute(
-                "UPDATE model_cache SET print_count = print_count + 1, "
-                "last_printed_at = ? WHERE cache_id = ?",
+                "UPDATE model_cache SET print_count = print_count + 1, last_printed_at = ? WHERE cache_id = ?",
                 (now, cache_id),
             )
             self._conn.commit()
@@ -2344,9 +2301,7 @@ class KilnDB:
     def delete_cache_entry(self, cache_id: str) -> bool:
         """Delete a model cache entry by ID. Returns True if a row was deleted."""
         with self._write_lock:
-            cur = self._conn.execute(
-                "DELETE FROM model_cache WHERE cache_id = ?", (cache_id,)
-            )
+            cur = self._conn.execute("DELETE FROM model_cache WHERE cache_id = ?", (cache_id,))
             self._conn.commit()
             return cur.rowcount > 0
 
@@ -2354,7 +2309,7 @@ class KilnDB:
     # Cleanup & Maintenance
     # ------------------------------------------------------------------
 
-    def cleanup(self, max_age_days: int = 90) -> Dict[str, int]:
+    def cleanup(self, max_age_days: int = 90) -> dict[str, int]:
         """Delete old completed/failed jobs and events, then VACUUM.
 
         Parameters:
@@ -2369,8 +2324,7 @@ class KilnDB:
 
         with self._write_lock:
             cursor = self._conn.execute(
-                "DELETE FROM jobs WHERE status IN ('completed', 'failed', 'cancelled') "
-                "AND submitted_at < ?",
+                "DELETE FROM jobs WHERE status IN ('completed', 'failed', 'cancelled') AND submitted_at < ?",
                 (cutoff,),
             )
             jobs_deleted = cursor.rowcount
@@ -2393,13 +2347,11 @@ class KilnDB:
         except OSError:
             return 0
 
-
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
     # Safety audit log
     # ------------------------------------------------------------------
-
 
     def _get_hmac_key(self) -> bytes:
         """Return the HMAC key for audit log signing.
@@ -2412,7 +2364,7 @@ class KilnDB:
             return env_key.encode("utf-8")
         return hashlib.sha256(self._db_path.encode("utf-8")).digest()
 
-    def _compute_audit_hmac(self, row_data: Dict[str, Any]) -> str:
+    def _compute_audit_hmac(self, row_data: dict[str, Any]) -> str:
         """Compute an HMAC-SHA256 signature for an audit log row.
 
         :param row_data: Dict with keys: timestamp, tool_name, safety_level,
@@ -2438,9 +2390,9 @@ class KilnDB:
         tool_name: str,
         safety_level: str,
         action: str,
-        agent_id: Optional[str] = None,
-        printer_name: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        agent_id: str | None = None,
+        printer_name: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> int:
         """Record a safety audit event and return the row id.
 
@@ -2458,15 +2410,17 @@ class KilnDB:
         ts = time.time()
         with self._write_lock:
             details_json = json.dumps(details) if details else None
-            hmac_sig = self._compute_audit_hmac({
-                "timestamp": ts,
-                "tool_name": tool_name,
-                "safety_level": safety_level,
-                "action": action,
-                "agent_id": agent_id,
-                "printer_name": printer_name,
-                "details": details_json,
-            })
+            hmac_sig = self._compute_audit_hmac(
+                {
+                    "timestamp": ts,
+                    "tool_name": tool_name,
+                    "safety_level": safety_level,
+                    "action": action,
+                    "agent_id": agent_id,
+                    "printer_name": printer_name,
+                    "details": details_json,
+                }
+            )
             cur = self._conn.execute(
                 """
                 INSERT INTO safety_audit_log
@@ -2488,16 +2442,13 @@ class KilnDB:
             self._conn.commit()
             return cur.lastrowid  # type: ignore[return-value]
 
-
-    def verify_audit_log(self) -> Dict[str, Any]:
+    def verify_audit_log(self) -> dict[str, Any]:
         """Verify HMAC signatures on all audit log entries.
 
         :returns: Dict with ``total``, ``valid``, ``invalid`` counts
             and an ``integrity`` field (``"ok"`` or ``"compromised"``).
         """
-        rows = self._conn.execute(
-            "SELECT * FROM safety_audit_log ORDER BY id"
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM safety_audit_log ORDER BY id").fetchall()
         total = len(rows)
         valid = 0
         invalid = 0
@@ -2508,15 +2459,17 @@ class KilnDB:
                 # Legacy row without HMAC — count as invalid.
                 invalid += 1
                 continue
-            expected = self._compute_audit_hmac({
-                "timestamp": d["timestamp"],
-                "tool_name": d["tool_name"],
-                "safety_level": d["safety_level"],
-                "action": d["action"],
-                "agent_id": d.get("agent_id"),
-                "printer_name": d.get("printer_name"),
-                "details": d.get("details"),
-            })
+            expected = self._compute_audit_hmac(
+                {
+                    "timestamp": d["timestamp"],
+                    "tool_name": d["tool_name"],
+                    "safety_level": d["safety_level"],
+                    "action": d["action"],
+                    "agent_id": d.get("agent_id"),
+                    "printer_name": d.get("printer_name"),
+                    "details": d.get("details"),
+                }
+            )
             if hmac.compare_digest(stored_sig, expected):
                 valid += 1
             else:
@@ -2530,10 +2483,10 @@ class KilnDB:
 
     def query_audit(
         self,
-        action: Optional[str] = None,
-        tool_name: Optional[str] = None,
+        action: str | None = None,
+        tool_name: str | None = None,
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Query the safety audit log, newest first.
 
         Args:
@@ -2541,8 +2494,8 @@ class KilnDB:
             tool_name: Filter by tool name.
             limit: Maximum rows to return.
         """
-        clauses: List[str] = []
-        params: List[Any] = []
+        clauses: list[str] = []
+        params: list[Any] = []
         if action is not None:
             clauses.append("action = ?")
             params.append(action)
@@ -2560,7 +2513,7 @@ class KilnDB:
             params,
         ).fetchall()
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for row in rows:
             d = dict(row)
             if d.get("details"):
@@ -2568,7 +2521,7 @@ class KilnDB:
             results.append(d)
         return results
 
-    def audit_summary(self, window_seconds: float = 3600.0) -> Dict[str, Any]:
+    def audit_summary(self, window_seconds: float = 3600.0) -> dict[str, Any]:
         """Return a summary of audit activity within a time window.
 
         Args:
@@ -2576,8 +2529,7 @@ class KilnDB:
         """
         cutoff = time.time() - window_seconds
         rows = self._conn.execute(
-            "SELECT action, COUNT(*) as cnt FROM safety_audit_log "
-            "WHERE timestamp > ? GROUP BY action",
+            "SELECT action, COUNT(*) as cnt FROM safety_audit_log WHERE timestamp > ? GROUP BY action",
             (cutoff,),
         ).fetchall()
         counts = {row["action"]: row["cnt"] for row in rows}
@@ -2614,13 +2566,13 @@ class KilnDB:
         printer_name: str,
         image_path: str,
         *,
-        job_id: Optional[str] = None,
+        job_id: str | None = None,
         phase: str = "unknown",
-        image_size_bytes: Optional[int] = None,
-        analysis: Optional[str] = None,
-        agent_notes: Optional[str] = None,
-        confidence: Optional[float] = None,
-        completion_pct: Optional[float] = None,
+        image_size_bytes: int | None = None,
+        analysis: str | None = None,
+        agent_notes: str | None = None,
+        confidence: float | None = None,
+        completion_pct: float | None = None,
     ) -> int:
         """Persist a snapshot record and return its row ID.
 
@@ -2644,8 +2596,16 @@ class KilnDB:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    job_id, printer_name, phase, image_path, image_size_bytes,
-                    analysis, agent_notes, confidence, completion_pct, time.time(),
+                    job_id,
+                    printer_name,
+                    phase,
+                    image_path,
+                    image_size_bytes,
+                    analysis,
+                    agent_notes,
+                    confidence,
+                    completion_pct,
+                    time.time(),
                 ),
             )
             self._conn.commit()
@@ -2654,11 +2614,11 @@ class KilnDB:
     def get_snapshots(
         self,
         *,
-        job_id: Optional[str] = None,
-        printer_name: Optional[str] = None,
-        phase: Optional[str] = None,
+        job_id: str | None = None,
+        printer_name: str | None = None,
+        phase: str | None = None,
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Query snapshot records with optional filters.
 
         :param job_id: Filter by job ID.
@@ -2667,8 +2627,8 @@ class KilnDB:
         :param limit: Maximum number of records to return.
         :returns: List of snapshot dicts, newest first.
         """
-        clauses: List[str] = []
-        params: List[Any] = []
+        clauses: list[str] = []
+        params: list[Any] = []
         if job_id is not None:
             clauses.append("job_id = ?")
             params.append(job_id)
@@ -2689,8 +2649,8 @@ class KilnDB:
     def delete_snapshots(
         self,
         *,
-        job_id: Optional[str] = None,
-        older_than: Optional[float] = None,
+        job_id: str | None = None,
+        older_than: float | None = None,
     ) -> int:
         """Delete snapshot records matching filters. Returns count deleted.
 
@@ -2698,8 +2658,8 @@ class KilnDB:
         :param older_than: Delete snapshots created before this Unix timestamp.
         :returns: Number of rows deleted.
         """
-        clauses: List[str] = []
-        params: List[Any] = []
+        clauses: list[str] = []
+        params: list[Any] = []
         if job_id is not None:
             clauses.append("job_id = ?")
             params.append(job_id)
@@ -2718,7 +2678,7 @@ class KilnDB:
     # Fulfillment order helpers
     # ------------------------------------------------------------------
 
-    def list_active_fulfillment_orders(self) -> List[Dict[str, Any]]:
+    def list_active_fulfillment_orders(self) -> list[dict[str, Any]]:
         """Return fulfillment orders that are not yet delivered/failed/cancelled."""
         rows = self._conn.execute(
             "SELECT * FROM fulfillment_orders "
@@ -2752,7 +2712,7 @@ class KilnDB:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_db: Optional[KilnDB] = None
+_db: KilnDB | None = None
 
 
 def get_db() -> KilnDB:

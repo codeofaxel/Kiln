@@ -27,8 +27,9 @@ import os
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # FDM print phase definitions
 # ---------------------------------------------------------------------------
+
 
 class PrintPhase(str, enum.Enum):
     """Operational phases during an FDM print job.
@@ -55,7 +57,7 @@ class PrintPhase(str, enum.Enum):
     UNKNOWN = "unknown"
 
 
-_FDM_PHASE_THRESHOLDS: Dict[str, tuple[float, float]] = {
+_FDM_PHASE_THRESHOLDS: dict[str, tuple[float, float]] = {
     "first_layer": (0.0, 5.0),
     "infill": (5.0, 70.0),
     "perimeters": (70.0, 90.0),
@@ -63,7 +65,7 @@ _FDM_PHASE_THRESHOLDS: Dict[str, tuple[float, float]] = {
 }
 
 
-def detect_print_phase(completion: Optional[float], *, is_heating: bool = False) -> PrintPhase:
+def detect_print_phase(completion: float | None, *, is_heating: bool = False) -> PrintPhase:
     """Classify the FDM print phase from completion percentage.
 
     :param completion: Completion percentage (0.0--100.0), or ``None``.
@@ -91,6 +93,7 @@ def detect_print_phase(completion: Optional[float], *, is_heating: bool = False)
 # Monitor status
 # ---------------------------------------------------------------------------
 
+
 class MonitorStatus(str, enum.Enum):
     """Status of a monitoring session."""
 
@@ -105,6 +108,7 @@ class MonitorStatus(str, enum.Enum):
 # Health metric severity
 # ---------------------------------------------------------------------------
 
+
 class HealthSeverity(str, enum.Enum):
     """Severity level for health metric deviations."""
 
@@ -116,6 +120,7 @@ class HealthSeverity(str, enum.Enum):
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class HealthMetric:
@@ -141,9 +146,9 @@ class HealthMetric:
     timestamp: float
     severity: HealthSeverity = HealthSeverity.OK
     unit: str = ""
-    detail: Optional[str] = None
+    detail: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         data = asdict(self)
         data["severity"] = self.severity.value
@@ -163,13 +168,13 @@ class PrinterHealthReport:
     """
 
     printer_name: str
-    metrics: List[HealthMetric]
+    metrics: list[HealthMetric]
     overall_status: HealthSeverity
     checked_at: float
     phase: PrintPhase = PrintPhase.UNKNOWN
-    session_id: Optional[str] = None
+    session_id: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "printer_name": self.printer_name,
@@ -213,12 +218,12 @@ class MonitorPolicy:
     temp_drift_threshold: float = 5.0
     history_max_hours: int = 72
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> MonitorPolicy:
+    def from_dict(cls, data: dict[str, Any]) -> MonitorPolicy:
         """Construct a :class:`MonitorPolicy` from a plain dictionary.
 
         Unknown keys are silently ignored so forward-compatible config
@@ -245,7 +250,7 @@ class MonitorPolicy:
         """
         policy = cls()
 
-        _int_vars: List[tuple[str, str]] = [
+        _int_vars: list[tuple[str, str]] = [
             ("KILN_MONITOR_CHECK_DELAY", "check_delay_seconds"),
             ("KILN_MONITOR_CHECK_COUNT", "check_count"),
             ("KILN_MONITOR_CHECK_INTERVAL", "check_interval_seconds"),
@@ -260,7 +265,7 @@ class MonitorPolicy:
                 except ValueError:
                     logger.warning("Invalid %s=%r", env_name, env_val)
 
-        _bool_vars: List[tuple[str, str]] = [
+        _bool_vars: list[tuple[str, str]] = [
             ("KILN_MONITOR_AUTO_PAUSE", "auto_pause_on_failure"),
             ("KILN_MONITOR_REQUIRE_CAMERA", "require_camera"),
         ]
@@ -299,14 +304,14 @@ class MonitorSnapshot:
     printer_name: str
     phase: str
     completion_pct: float
-    hotend_temp: Optional[float] = None
-    hotend_target: Optional[float] = None
-    bed_temp: Optional[float] = None
-    bed_target: Optional[float] = None
-    image_b64: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    hotend_temp: float | None = None
+    hotend_target: float | None = None
+    bed_temp: float | None = None
+    bed_target: float | None = None
+    image_b64: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return asdict(self)
 
@@ -331,14 +336,14 @@ class MonitorSession:
     printer_name: str
     job_id: str
     policy: MonitorPolicy
-    snapshots: List[MonitorSnapshot] = field(default_factory=list)
-    health_reports: List[PrinterHealthReport] = field(default_factory=list)
+    snapshots: list[MonitorSnapshot] = field(default_factory=list)
+    health_reports: list[PrinterHealthReport] = field(default_factory=list)
     status: MonitorStatus = MonitorStatus.MONITORING
-    issues: List[Dict[str, Any]] = field(default_factory=list)
+    issues: list[dict[str, Any]] = field(default_factory=list)
     started_at: float = field(default_factory=time.time)
-    ended_at: Optional[float] = None
+    ended_at: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "session_id": self.session_id,
@@ -358,6 +363,7 @@ class MonitorSession:
 # Stall tracking
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _StallTracker:
     """Internal state for per-session stall detection.
@@ -366,7 +372,7 @@ class _StallTracker:
     progress last changed.
     """
 
-    last_progress: Optional[float] = None
+    last_progress: float | None = None
     last_progress_time: float = field(default_factory=time.time)
     stalled: bool = False
 
@@ -374,6 +380,7 @@ class _StallTracker:
 # ---------------------------------------------------------------------------
 # Background monitor thread state
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _BackgroundMonitor:
@@ -389,6 +396,7 @@ class _BackgroundMonitor:
 # ---------------------------------------------------------------------------
 # PrintHealthMonitor
 # ---------------------------------------------------------------------------
+
 
 class PrintHealthMonitor:
     """Manages real-time health monitoring sessions for FDM printers.
@@ -413,10 +421,10 @@ class PrintHealthMonitor:
     """
 
     def __init__(self) -> None:
-        self._sessions: Dict[str, MonitorSession] = {}
-        self._stall_state: Dict[str, _StallTracker] = {}
-        self._background_monitors: Dict[str, _BackgroundMonitor] = {}
-        self._health_history: Dict[str, List[PrinterHealthReport]] = {}
+        self._sessions: dict[str, MonitorSession] = {}
+        self._stall_state: dict[str, _StallTracker] = {}
+        self._background_monitors: dict[str, _BackgroundMonitor] = {}
+        self._health_history: dict[str, list[PrinterHealthReport]] = {}
         self._lock = threading.Lock()
 
     # -- public API: one-shot health check ---------------------------------
@@ -433,7 +441,7 @@ class PrintHealthMonitor:
         :raises KeyError: If *printer_name* is not in the registry.
         """
         now = time.time()
-        metrics: List[HealthMetric] = []
+        metrics: list[HealthMetric] = []
         policy = MonitorPolicy.from_env()
 
         # Lazy import to avoid circular dependency at module load time
@@ -459,21 +467,22 @@ class PrintHealthMonitor:
             elif hotend_warning:
                 hotend_severity = HealthSeverity.WARNING
                 hotend_detail = (
-                    f"Hotend temperature drifted {hotend_deviation:.1f}°C "
-                    f"from target {state.tool_temp_target:.0f}°C"
+                    f"Hotend temperature drifted {hotend_deviation:.1f}°C from target {state.tool_temp_target:.0f}°C"
                 )
 
-            metrics.append(HealthMetric(
-                metric_name="hotend_temperature",
-                current_value=state.tool_temp_actual,
-                expected_value=state.tool_temp_target,
-                deviation=round(hotend_deviation, 2),
-                is_warning=hotend_warning,
-                timestamp=now,
-                severity=hotend_severity,
-                unit="°C",
-                detail=hotend_detail,
-            ))
+            metrics.append(
+                HealthMetric(
+                    metric_name="hotend_temperature",
+                    current_value=state.tool_temp_actual,
+                    expected_value=state.tool_temp_target,
+                    deviation=round(hotend_deviation, 2),
+                    is_warning=hotend_warning,
+                    timestamp=now,
+                    severity=hotend_severity,
+                    unit="°C",
+                    detail=hotend_detail,
+                )
+            )
 
         # --- Bed temperature stability ---
         if state.bed_temp_actual is not None and state.bed_temp_target is not None:
@@ -490,37 +499,38 @@ class PrintHealthMonitor:
                 )
             elif bed_warning:
                 bed_severity = HealthSeverity.WARNING
-                bed_detail = (
-                    f"Bed temperature drifted {bed_deviation:.1f}°C "
-                    f"from target {state.bed_temp_target:.0f}°C"
-                )
+                bed_detail = f"Bed temperature drifted {bed_deviation:.1f}°C from target {state.bed_temp_target:.0f}°C"
 
-            metrics.append(HealthMetric(
-                metric_name="bed_temperature",
-                current_value=state.bed_temp_actual,
-                expected_value=state.bed_temp_target,
-                deviation=round(bed_deviation, 2),
-                is_warning=bed_warning,
-                timestamp=now,
-                severity=bed_severity,
-                unit="°C",
-                detail=bed_detail,
-            ))
+            metrics.append(
+                HealthMetric(
+                    metric_name="bed_temperature",
+                    current_value=state.bed_temp_actual,
+                    expected_value=state.bed_temp_target,
+                    deviation=round(bed_deviation, 2),
+                    is_warning=bed_warning,
+                    timestamp=now,
+                    severity=bed_severity,
+                    unit="°C",
+                    detail=bed_detail,
+                )
+            )
 
         # --- Print progress (layer completion rate) ---
         try:
             progress = adapter.get_job_progress()
             completion = progress.completion if progress.completion is not None else 0.0
-            metrics.append(HealthMetric(
-                metric_name="print_progress",
-                current_value=completion,
-                expected_value=100.0,
-                deviation=round(100.0 - completion, 2),
-                is_warning=False,
-                timestamp=now,
-                severity=HealthSeverity.OK,
-                unit="%",
-            ))
+            metrics.append(
+                HealthMetric(
+                    metric_name="print_progress",
+                    current_value=completion,
+                    expected_value=100.0,
+                    deviation=round(100.0 - completion, 2),
+                    is_warning=False,
+                    timestamp=now,
+                    severity=HealthSeverity.OK,
+                    unit="%",
+                )
+            )
         except Exception as exc:
             logger.debug("Could not read print progress for %s: %s", printer_name, exc)
 
@@ -544,17 +554,19 @@ class PrintHealthMonitor:
         connection_warning = not state.connected
         if not state.connected:
             connection_severity = HealthSeverity.CRITICAL
-        metrics.append(HealthMetric(
-            metric_name="connection_status",
-            current_value=1.0 if state.connected else 0.0,
-            expected_value=1.0,
-            deviation=0.0 if state.connected else 1.0,
-            is_warning=connection_warning,
-            timestamp=now,
-            severity=connection_severity,
-            unit="bool",
-            detail="Printer is offline — possible unexpected shutdown" if not state.connected else None,
-        ))
+        metrics.append(
+            HealthMetric(
+                metric_name="connection_status",
+                current_value=1.0 if state.connected else 0.0,
+                expected_value=1.0,
+                deviation=0.0 if state.connected else 1.0,
+                is_warning=connection_warning,
+                timestamp=now,
+                severity=connection_severity,
+                unit="bool",
+                detail="Printer is offline — possible unexpected shutdown" if not state.connected else None,
+            )
+        )
 
         # --- Determine overall status ---
         overall = HealthSeverity.OK
@@ -571,7 +583,7 @@ class PrintHealthMonitor:
             and state.tool_temp_actual is not None
             and state.tool_temp_actual < state.tool_temp_target - 10
         )
-        completion_for_phase: Optional[float] = None
+        completion_for_phase: float | None = None
         try:
             progress = adapter.get_job_progress()
             completion_for_phase = progress.completion
@@ -599,9 +611,9 @@ class PrintHealthMonitor:
         printer_name: str,
         interval_seconds: float = 30,
         *,
-        job_id: Optional[str] = None,
-        policy: Optional[MonitorPolicy] = None,
-        callback: Optional[Callable[[PrinterHealthReport], None]] = None,
+        job_id: str | None = None,
+        policy: MonitorPolicy | None = None,
+        callback: Callable[[PrinterHealthReport], None] | None = None,
     ) -> str:
         """Start background health monitoring for a printer.
 
@@ -618,10 +630,7 @@ class PrintHealthMonitor:
         """
         with self._lock:
             if printer_name in self._background_monitors:
-                raise ValueError(
-                    f"Printer {printer_name!r} already has an active "
-                    "monitoring session"
-                )
+                raise ValueError(f"Printer {printer_name!r} already has an active monitoring session")
 
             session_id = str(uuid.uuid4())
             resolved_policy = policy or MonitorPolicy.from_env()
@@ -656,7 +665,9 @@ class PrintHealthMonitor:
         thread.start()
         logger.info(
             "Started health monitoring for printer=%s session=%s interval=%.0fs",
-            printer_name, session_id, interval_seconds,
+            printer_name,
+            session_id,
+            interval_seconds,
         )
         return session_id
 
@@ -670,9 +681,7 @@ class PrintHealthMonitor:
         with self._lock:
             bg = self._background_monitors.pop(printer_name, None)
             if bg is None:
-                raise KeyError(
-                    f"No active monitoring session for printer {printer_name!r}"
-                )
+                raise KeyError(f"No active monitoring session for printer {printer_name!r}")
 
         # Signal the thread to stop and wait for it
         bg.stop_event.set()
@@ -686,7 +695,8 @@ class PrintHealthMonitor:
         self._stall_state.pop(bg.session_id, None)
         logger.info(
             "Stopped health monitoring for printer=%s session=%s",
-            printer_name, bg.session_id,
+            printer_name,
+            bg.session_id,
         )
         return session  # type: ignore[return-value]
 
@@ -696,7 +706,7 @@ class PrintHealthMonitor:
         self,
         printer_name: str,
         hours: float = 24,
-    ) -> List[PrinterHealthReport]:
+    ) -> list[PrinterHealthReport]:
         """Retrieve health report history for a printer.
 
         :param printer_name: Name of the printer.
@@ -721,21 +731,21 @@ class PrintHealthMonitor:
         try:
             return self._sessions[session_id]
         except KeyError:
-            raise KeyError(f"Monitoring session {session_id!r} not found")
+            raise KeyError(f"Monitoring session {session_id!r} not found") from None
 
     def list_sessions(
         self,
         *,
-        printer_name: Optional[str] = None,
-        status: Optional[MonitorStatus] = None,
-    ) -> List[MonitorSession]:
+        printer_name: str | None = None,
+        status: MonitorStatus | None = None,
+    ) -> list[MonitorSession]:
         """List monitoring sessions, optionally filtered.
 
         :param printer_name: If provided, only return sessions for this printer.
         :param status: If provided, only return sessions with this status.
         :returns: List of matching sessions.
         """
-        results: List[MonitorSession] = []
+        results: list[MonitorSession] = []
         for session in self._sessions.values():
             if printer_name is not None and session.printer_name != printer_name:
                 continue
@@ -750,13 +760,13 @@ class PrintHealthMonitor:
         self,
         session_id: str,
         *,
-        completion_pct: Optional[float] = None,
-        hotend_temp: Optional[float] = None,
-        hotend_target: Optional[float] = None,
-        bed_temp: Optional[float] = None,
-        bed_target: Optional[float] = None,
-        image_b64: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        completion_pct: float | None = None,
+        hotend_temp: float | None = None,
+        hotend_target: float | None = None,
+        bed_temp: float | None = None,
+        bed_target: float | None = None,
+        image_b64: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> MonitorSnapshot:
         """Capture a manual snapshot for an active monitoring session.
 
@@ -775,11 +785,7 @@ class PrintHealthMonitor:
         session = self._get_active_session(session_id)
         pct = completion_pct if completion_pct is not None else 0.0
 
-        is_heating = (
-            hotend_target is not None
-            and hotend_temp is not None
-            and hotend_temp < hotend_target - 10
-        )
+        is_heating = hotend_target is not None and hotend_temp is not None and hotend_temp < hotend_target - 10
         phase = detect_print_phase(pct, is_heating=is_heating)
 
         snapshot = MonitorSnapshot(
@@ -798,7 +804,10 @@ class PrintHealthMonitor:
         session.snapshots.append(snapshot)
         logger.debug(
             "Captured snapshot %d for session %s (phase=%s, pct=%.1f)",
-            len(session.snapshots), session_id, phase.value, pct,
+            len(session.snapshots),
+            session_id,
+            phase.value,
+            pct,
         )
 
         # Stall detection
@@ -814,8 +823,8 @@ class PrintHealthMonitor:
         issue_type: str,
         confidence: float,
         *,
-        detail: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        detail: str | None = None,
+    ) -> dict[str, Any]:
         """Report a detected issue during a monitoring session.
 
         If the session policy has ``auto_pause_on_failure`` enabled and
@@ -835,17 +844,12 @@ class PrintHealthMonitor:
             or if confidence is outside 0.0--1.0.
         """
         if not 0.0 <= confidence <= 1.0:
-            raise ValueError(
-                f"Confidence must be between 0.0 and 1.0, got {confidence}"
-            )
+            raise ValueError(f"Confidence must be between 0.0 and 1.0, got {confidence}")
 
         session = self._get_active_session(session_id)
-        auto_pause = (
-            session.policy.auto_pause_on_failure
-            and confidence >= session.policy.failure_confidence_threshold
-        )
+        auto_pause = session.policy.auto_pause_on_failure and confidence >= session.policy.failure_confidence_threshold
 
-        issue: Dict[str, Any] = {
+        issue: dict[str, Any] = {
             "issue_type": issue_type,
             "confidence": confidence,
             "detail": detail,
@@ -857,13 +861,18 @@ class PrintHealthMonitor:
         session.issues.append(issue)
         logger.info(
             "Issue reported for session %s: type=%s confidence=%.2f auto_pause=%s",
-            session_id, issue_type, confidence, auto_pause,
+            session_id,
+            issue_type,
+            confidence,
+            auto_pause,
         )
 
         if auto_pause:
             logger.warning(
                 "Auto-pause triggered for session %s (issue=%s, confidence=%.2f)",
-                session_id, issue_type, confidence,
+                session_id,
+                issue_type,
+                confidence,
             )
 
         return issue
@@ -876,7 +885,7 @@ class PrintHealthMonitor:
         printer_name: str,
         interval_seconds: float,
         stop_event: threading.Event,
-        callback: Optional[Callable[[PrinterHealthReport], None]],
+        callback: Callable[[PrinterHealthReport], None] | None,
     ) -> None:
         """Background thread loop that periodically checks printer health.
 
@@ -903,36 +912,30 @@ class PrintHealthMonitor:
                     except Exception as cb_err:
                         logger.warning(
                             "Health monitor callback error for %s: %s",
-                            printer_name, cb_err,
+                            printer_name,
+                            cb_err,
                         )
 
                 # Stall detection from health report progress metric
                 for m in report.metrics:
                     if m.metric_name == "print_progress":
-                        stall_result = self._check_stall(
-                            session_id, m.current_value
-                        )
+                        stall_result = self._check_stall(session_id, m.current_value)
                         if stall_result is not None:
                             self._publish_stall_event(stall_result)
                         break
 
                 # Auto-pause on critical health
-                if report.overall_status == HealthSeverity.CRITICAL:
-                    if session.policy.auto_pause_on_failure:
-                        self.report_issue(
-                            session_id,
-                            "health_critical",
-                            1.0,
-                            detail=(
-                                f"Critical health status detected on "
-                                f"{printer_name}: "
-                                + ", ".join(
-                                    m.metric_name
-                                    for m in report.metrics
-                                    if m.severity == HealthSeverity.CRITICAL
-                                )
-                            ),
-                        )
+                if report.overall_status == HealthSeverity.CRITICAL and session.policy.auto_pause_on_failure:
+                    self.report_issue(
+                        session_id,
+                        "health_critical",
+                        1.0,
+                        detail=(
+                            f"Critical health status detected on "
+                            f"{printer_name}: "
+                            + ", ".join(m.metric_name for m in report.metrics if m.severity == HealthSeverity.CRITICAL)
+                        ),
+                    )
 
             except KeyError:
                 logger.error(
@@ -946,7 +949,9 @@ class PrintHealthMonitor:
                 break
             except Exception as exc:
                 logger.error(
-                    "Health check failed for %s: %s", printer_name, exc,
+                    "Health check failed for %s: %s",
+                    printer_name,
+                    exc,
                 )
 
             checks_remaining -= 1
@@ -963,9 +968,7 @@ class PrintHealthMonitor:
 
     # -- health check helpers ----------------------------------------------
 
-    def _check_filament_sensor(
-        self, printer_name: str, timestamp: float
-    ) -> Optional[HealthMetric]:
+    def _check_filament_sensor(self, printer_name: str, timestamp: float) -> HealthMetric | None:
         """Check filament sensor status if available.
 
         Returns a metric if the adapter exposes filament sensor data,
@@ -1000,9 +1003,7 @@ class PrintHealthMonitor:
             logger.debug("Filament sensor check failed for %s: %s", printer_name, exc)
             return None
 
-    def _check_power_consumption(
-        self, printer_name: str, timestamp: float
-    ) -> Optional[HealthMetric]:
+    def _check_power_consumption(self, printer_name: str, timestamp: float) -> HealthMetric | None:
         """Check power consumption if telemetry is available.
 
         Returns a metric if the adapter or plugin reports wattage,
@@ -1029,16 +1030,10 @@ class PrintHealthMonitor:
             detail = None
             if power_watts < 10.0:
                 severity = HealthSeverity.CRITICAL
-                detail = (
-                    f"Power consumption anomaly: {power_watts:.0f}W — "
-                    "printer may have lost power"
-                )
+                detail = f"Power consumption anomaly: {power_watts:.0f}W — printer may have lost power"
             elif power_watts > 600.0:
                 severity = HealthSeverity.WARNING
-                detail = (
-                    f"Power consumption anomaly: {power_watts:.0f}W — "
-                    "unusually high draw, check heater PIDs"
-                )
+                detail = f"Power consumption anomaly: {power_watts:.0f}W — unusually high draw, check heater PIDs"
 
             return HealthMetric(
                 metric_name="power_consumption",
@@ -1055,9 +1050,7 @@ class PrintHealthMonitor:
             logger.debug("Power consumption check failed for %s: %s", printer_name, exc)
             return None
 
-    def _check_webcam_quality(
-        self, printer_name: str, timestamp: float
-    ) -> Optional[HealthMetric]:
+    def _check_webcam_quality(self, printer_name: str, timestamp: float) -> HealthMetric | None:
         """Check webcam feed availability and quality.
 
         Returns a metric if the printer has a camera configured.
@@ -1108,7 +1101,7 @@ class PrintHealthMonitor:
         self,
         session_id: str,
         completion_pct: float,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Check whether a session's print progress has stalled.
 
         Compares the current progress value against the last recorded
@@ -1133,10 +1126,7 @@ class PrintHealthMonitor:
         now = time.time()
 
         # Check if progress has advanced
-        if (
-            tracker.last_progress is None
-            or abs(completion_pct - tracker.last_progress) > 0.1
-        ):
+        if tracker.last_progress is None or abs(completion_pct - tracker.last_progress) > 0.1:
             tracker.last_progress = completion_pct
             tracker.last_progress_time = now
             return None
@@ -1153,7 +1143,7 @@ class PrintHealthMonitor:
         session.status = MonitorStatus.STALLED
         session.ended_at = now
 
-        alert_data: Dict[str, Any] = {
+        alert_data: dict[str, Any] = {
             "alert_type": "stall",
             "printer_name": session.printer_name,
             "session_id": session_id,
@@ -1170,28 +1160,31 @@ class PrintHealthMonitor:
 
         self._publish_stall_event(alert_data)
 
-        session.issues.append({
-            "issue_type": "stall_detected",
-            "confidence": 1.0,
-            "detail": alert_data["message"],
-            "auto_pause_triggered": session.policy.auto_pause_on_failure,
-            "reported_at": now,
-            "snapshot_count": len(session.snapshots),
-        })
+        session.issues.append(
+            {
+                "issue_type": "stall_detected",
+                "confidence": 1.0,
+                "detail": alert_data["message"],
+                "auto_pause_triggered": session.policy.auto_pause_on_failure,
+                "reported_at": now,
+                "snapshot_count": len(session.snapshots),
+            }
+        )
 
         logger.warning(
-            "Stall detected for session %s: printer=%s completion=%.1f%% "
-            "stalled for %.0fs",
-            session_id, session.printer_name, completion_pct,
+            "Stall detected for session %s: printer=%s completion=%.1f%% stalled for %.0fs",
+            session_id,
+            session.printer_name,
+            completion_pct,
             stall_duration_rounded,
         )
 
         return alert_data
 
-    def _publish_stall_event(self, alert_data: Dict[str, Any]) -> None:
+    def _publish_stall_event(self, alert_data: dict[str, Any]) -> None:
         """Best-effort publish of a stall detection event."""
         try:
-            from kiln.events import EventType, get_event_bus, Event
+            from kiln.events import Event, EventType, get_event_bus
 
             bus = get_event_bus()
             event = Event(
@@ -1206,9 +1199,7 @@ class PrintHealthMonitor:
 
     # -- history management ------------------------------------------------
 
-    def _append_history(
-        self, printer_name: str, report: PrinterHealthReport
-    ) -> None:
+    def _append_history(self, printer_name: str, report: PrinterHealthReport) -> None:
         """Append a health report to history, pruning old entries."""
         with self._lock:
             if printer_name not in self._health_history:
@@ -1220,9 +1211,7 @@ class PrintHealthMonitor:
             # Prune entries older than history_max_hours
             policy = MonitorPolicy.from_env()
             cutoff = time.time() - (policy.history_max_hours * 3600)
-            self._health_history[printer_name] = [
-                r for r in history if r.checked_at >= cutoff
-            ]
+            self._health_history[printer_name] = [r for r in history if r.checked_at >= cutoff]
 
     # -- internal helpers --------------------------------------------------
 
@@ -1234,10 +1223,7 @@ class PrintHealthMonitor:
         """
         session = self.get_session(session_id)
         if session.status != MonitorStatus.MONITORING:
-            raise ValueError(
-                f"Session {session_id!r} is not actively monitoring "
-                f"(status={session.status.value})"
-            )
+            raise ValueError(f"Session {session_id!r} is not actively monitoring (status={session.status.value})")
         return session
 
 
@@ -1245,7 +1231,7 @@ class PrintHealthMonitor:
 # Lazy singleton
 # ---------------------------------------------------------------------------
 
-_print_health_monitor: Optional[PrintHealthMonitor] = None
+_print_health_monitor: PrintHealthMonitor | None = None
 _singleton_lock = threading.Lock()
 
 

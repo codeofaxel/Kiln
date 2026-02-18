@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import quote as url_quote
 
 import requests
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "https://www.sculpteo.com/en/api"
 
-_STATUS_MAP: Dict[str, OrderStatus] = {
+_STATUS_MAP: dict[str, OrderStatus] = {
     "pending": OrderStatus.SUBMITTED,
     "submitted": OrderStatus.SUBMITTED,
     "confirmed": OrderStatus.PROCESSING,
@@ -76,28 +76,24 @@ class SculpteoProvider(FulfillmentProvider):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         timeout: int = 60,
     ) -> None:
         self._api_key = api_key or os.environ.get("KILN_SCULPTEO_API_KEY", "")
-        self._base_url = (
-            base_url
-            or os.environ.get("KILN_SCULPTEO_BASE_URL", _DEFAULT_BASE_URL)
-        ).rstrip("/")
+        self._base_url = (base_url or os.environ.get("KILN_SCULPTEO_BASE_URL", _DEFAULT_BASE_URL)).rstrip("/")
         self._timeout = timeout
 
         if not self._api_key:
-            raise ValueError(
-                "Sculpteo API key required. "
-                "Set KILN_SCULPTEO_API_KEY or pass api_key."
-            )
+            raise ValueError("Sculpteo API key required. Set KILN_SCULPTEO_API_KEY or pass api_key.")
 
         self._session = requests.Session()
-        self._session.headers.update({
-            "Authorization": f"Bearer {self._api_key}",
-            "Accept": "application/json",
-        })
+        self._session.headers.update(
+            {
+                "Authorization": f"Bearer {self._api_key}",
+                "Accept": "application/json",
+            }
+        )
 
     # -- FulfillmentProvider identity ----------------------------------------
 
@@ -110,7 +106,7 @@ class SculpteoProvider(FulfillmentProvider):
         return "Sculpteo"
 
     @property
-    def supported_technologies(self) -> List[str]:
+    def supported_technologies(self) -> list[str]:
         return ["FDM", "SLA", "SLS", "MJF", "DMLS", "CNC"]
 
     # -- Internal HTTP helpers -----------------------------------------------
@@ -123,11 +119,11 @@ class SculpteoProvider(FulfillmentProvider):
         method: str,
         path: str,
         *,
-        json: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        data: Optional[Any] = None,
-        files: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        json: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        data: Any | None = None,
+        files: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Execute an authenticated HTTP request to the Sculpteo API."""
         url = self._url(path)
         try:
@@ -142,8 +138,7 @@ class SculpteoProvider(FulfillmentProvider):
             )
             if not response.ok:
                 raise FulfillmentError(
-                    f"Sculpteo API returned HTTP {response.status_code} "
-                    f"for {method} {path}: {response.text[:300]}",
+                    f"Sculpteo API returned HTTP {response.status_code} for {method} {path}: {response.text[:300]}",
                     code=f"HTTP_{response.status_code}",
                 )
             try:
@@ -171,7 +166,7 @@ class SculpteoProvider(FulfillmentProvider):
 
     # -- FulfillmentProvider methods -----------------------------------------
 
-    def list_materials(self) -> List[Material]:
+    def list_materials(self) -> list[Material]:
         """Return available materials from Sculpteo.
 
         Calls ``GET /materials/3D/`` for the material catalog.
@@ -187,20 +182,22 @@ class SculpteoProvider(FulfillmentProvider):
         if not isinstance(materials_raw, list):
             return []
 
-        results: List[Material] = []
+        results: list[Material] = []
         for m in materials_raw:
             if not isinstance(m, dict):
                 continue
-            results.append(Material(
-                id=str(m.get("id", m.get("uuid", ""))),
-                name=m.get("name", m.get("title", "")),
-                technology=m.get("technology", ""),
-                color=m.get("color", ""),
-                finish=m.get("finish", m.get("finishing", "")),
-                min_wall_mm=m.get("min_wall_thickness", m.get("minimumWallThickness")),
-                price_per_cm3=m.get("price_per_cm3"),
-                currency=m.get("currency", "EUR"),
-            ))
+            results.append(
+                Material(
+                    id=str(m.get("id", m.get("uuid", ""))),
+                    name=m.get("name", m.get("title", "")),
+                    technology=m.get("technology", ""),
+                    color=m.get("color", ""),
+                    finish=m.get("finish", m.get("finishing", "")),
+                    min_wall_mm=m.get("min_wall_thickness", m.get("minimumWallThickness")),
+                    price_per_cm3=m.get("price_per_cm3"),
+                    currency=m.get("currency", "EUR"),
+                )
+            )
         return results
 
     def get_quote(self, request: QuoteRequest) -> Quote:
@@ -229,11 +226,7 @@ class SculpteoProvider(FulfillmentProvider):
                 code="PERMISSION_ERROR",
             ) from exc
 
-        design_uuid = (
-            upload_data.get("uuid")
-            or upload_data.get("design_uuid")
-            or upload_data.get("id", "")
-        )
+        design_uuid = upload_data.get("uuid") or upload_data.get("design_uuid") or upload_data.get("id", "")
         if not design_uuid:
             raise FulfillmentError(
                 "Sculpteo did not return a design UUID.",
@@ -256,8 +249,7 @@ class SculpteoProvider(FulfillmentProvider):
 
         if unit_price <= 0 and total_price <= 0:
             logger.warning(
-                "Sculpteo returned $0 pricing — API field names may have changed. "
-                "Response keys: %s",
+                "Sculpteo returned $0 pricing — API field names may have changed. Response keys: %s",
                 list(price_data.keys()),
             )
             raise FulfillmentError(
@@ -268,7 +260,7 @@ class SculpteoProvider(FulfillmentProvider):
             )
 
         # Parse shipping options
-        shipping: List[ShippingOption] = []
+        shipping: list[ShippingOption] = []
         shipping_raw = price_data.get("shipping_options", [])
         for s in shipping_raw:
             if not isinstance(s, dict):
@@ -280,13 +272,15 @@ class SculpteoProvider(FulfillmentProvider):
                     s.get("name", "unknown"),
                 )
                 continue
-            shipping.append(ShippingOption(
-                id=str(s.get("id", "")),
-                name=s.get("name", ""),
-                price=ship_price,
-                currency=s.get("currency", "EUR"),
-                estimated_days=s.get("estimated_days"),
-            ))
+            shipping.append(
+                ShippingOption(
+                    id=str(s.get("id", "")),
+                    name=s.get("name", ""),
+                    price=ship_price,
+                    currency=s.get("currency", "EUR"),
+                    estimated_days=s.get("estimated_days"),
+                )
+            )
 
         quote_id = f"sc-{design_uuid}-{request.material_id}"
 
@@ -319,7 +313,7 @@ class SculpteoProvider(FulfillmentProvider):
         design_uuid = parts[1]
         material_id = parts[2]
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "uuid": design_uuid,
             "material": material_id,
             "quantity": 1,
@@ -337,8 +331,7 @@ class SculpteoProvider(FulfillmentProvider):
         mapped_status = _STATUS_MAP.get(status_str)
         if mapped_status is None:
             logger.warning(
-                "Unknown Sculpteo order status %r — defaulting to SUBMITTED. "
-                "The API may have added new statuses.",
+                "Unknown Sculpteo order status %r — defaulting to SUBMITTED. The API may have added new statuses.",
                 status_str,
             )
             mapped_status = OrderStatus.SUBMITTED
@@ -346,8 +339,7 @@ class SculpteoProvider(FulfillmentProvider):
         order_id = str(data.get("order_id") or data.get("order_ref") or data.get("id", ""))
         if not order_id:
             raise FulfillmentError(
-                "Sculpteo order response missing order ID. "
-                f"Response keys: {list(data.keys())}",
+                f"Sculpteo order response missing order ID. Response keys: {list(data.keys())}",
                 code="MISSING_ORDER_ID",
             )
 
@@ -376,7 +368,8 @@ class SculpteoProvider(FulfillmentProvider):
         if mapped_status is None:
             logger.warning(
                 "Unknown Sculpteo order status %r for order %s — defaulting to SUBMITTED",
-                status_str, order_id,
+                status_str,
+                order_id,
             )
             mapped_status = OrderStatus.SUBMITTED
 
@@ -398,9 +391,7 @@ class SculpteoProvider(FulfillmentProvider):
         Calls ``POST /store/3D/order/<order_id>/cancel/``.
         """
         safe_id = url_quote(order_id, safe="")
-        data = self._request(
-            "POST", f"/store/3D/order/{safe_id}/cancel/"
-        )
+        data = self._request("POST", f"/store/3D/order/{safe_id}/cancel/")
 
         return OrderResult(
             success=True,

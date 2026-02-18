@@ -11,7 +11,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from kiln.events import EventBus
@@ -36,7 +36,7 @@ class OrderAlert:
     message: str
     created_at: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "order_id": self.order_id,
             "alert_type": self.alert_type,
@@ -58,7 +58,7 @@ class FulfillmentMonitor:
     def __init__(
         self,
         db: KilnDB,
-        event_bus: Optional[EventBus] = None,
+        event_bus: EventBus | None = None,
         *,
         poll_interval: int = _POLL_INTERVAL,
         stall_threshold: int = _STALL_THRESHOLD,
@@ -67,9 +67,9 @@ class FulfillmentMonitor:
         self._event_bus = event_bus
         self._poll_interval = poll_interval
         self._stall_threshold = stall_threshold
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
-        self._alerts: List[OrderAlert] = []
+        self._alerts: list[OrderAlert] = []
         self._alerts_lock = threading.Lock()
 
     def start(self) -> None:
@@ -101,7 +101,7 @@ class FulfillmentMonitor:
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def get_alerts(self) -> List[Dict[str, Any]]:
+    def get_alerts(self) -> list[dict[str, Any]]:
         """Return current unresolved alerts."""
         with self._alerts_lock:
             return [a.to_dict() for a in self._alerts]
@@ -137,7 +137,7 @@ class FulfillmentMonitor:
                     exc_info=True,
                 )
 
-    def _check_order(self, order: Dict[str, Any]) -> None:
+    def _check_order(self, order: dict[str, Any]) -> None:
         """Check a single order and emit events if status changed."""
         order_id = order["order_id"]
         stored_status = order.get("status", "")
@@ -165,42 +165,53 @@ class FulfillmentMonitor:
                     order_id=order_id,
                     alert_type="cancelled_by_provider",
                     message=(
-                        f"Order {order_id} was {current_str} by the "
-                        "manufacturing provider. A refund may be needed."
+                        f"Order {order_id} was {current_str} by the manufacturing provider. A refund may be needed."
                     ),
                     created_at=now,
                 )
                 self._add_alert(alert)
-                self._emit("FULFILLMENT_FAILED", {
-                    "order_id": order_id,
-                    "status": current_str,
-                    "message": alert.message,
-                })
+                self._emit(
+                    "FULFILLMENT_FAILED",
+                    {
+                        "order_id": order_id,
+                        "status": current_str,
+                        "message": alert.message,
+                    },
+                )
                 # Update local status.
                 self._db.update_fulfillment_order_status(
-                    order_id, current_str,
+                    order_id,
+                    current_str,
                 )
 
         # Detect delivery.
         elif current_str == "delivered":
             if stored_status != "delivered":
-                self._emit("FULFILLMENT_DELIVERED", {
-                    "order_id": order_id,
-                    "status": current_str,
-                })
+                self._emit(
+                    "FULFILLMENT_DELIVERED",
+                    {
+                        "order_id": order_id,
+                        "status": current_str,
+                    },
+                )
                 self._db.update_fulfillment_order_status(
-                    order_id, current_str,
+                    order_id,
+                    current_str,
                 )
 
         # Detect shipping.
         elif current_str == "shipping":
             if stored_status != "shipping":
-                self._emit("FULFILLMENT_SHIPPED", {
-                    "order_id": order_id,
-                    "status": current_str,
-                })
+                self._emit(
+                    "FULFILLMENT_SHIPPED",
+                    {
+                        "order_id": order_id,
+                        "status": current_str,
+                    },
+                )
                 self._db.update_fulfillment_order_status(
-                    order_id, current_str,
+                    order_id,
+                    current_str,
                 )
 
         # Detect stalled orders.
@@ -208,10 +219,7 @@ class FulfillmentMonitor:
             age = now - placed_at
             if age > self._stall_threshold:
                 # Only alert once per order.
-                existing = any(
-                    a.order_id == order_id and a.alert_type == "stalled"
-                    for a in self._alerts
-                )
+                existing = any(a.order_id == order_id and a.alert_type == "stalled" for a in self._alerts)
                 if not existing:
                     days = int(age / 86400)
                     alert = OrderAlert(
@@ -225,18 +233,21 @@ class FulfillmentMonitor:
                         created_at=now,
                     )
                     self._add_alert(alert)
-                    self._emit("FULFILLMENT_STALLED", {
-                        "order_id": order_id,
-                        "status": current_str,
-                        "days_elapsed": days,
-                    })
+                    self._emit(
+                        "FULFILLMENT_STALLED",
+                        {
+                            "order_id": order_id,
+                            "status": current_str,
+                            "days_elapsed": days,
+                        },
+                    )
 
     def _add_alert(self, alert: OrderAlert) -> None:
         with self._alerts_lock:
             self._alerts.append(alert)
         logger.warning("Fulfillment alert: %s", alert.message)
 
-    def _emit(self, event_name: str, data: Dict[str, Any]) -> None:
+    def _emit(self, event_name: str, data: dict[str, Any]) -> None:
         if self._event_bus is None:
             return
         try:

@@ -36,7 +36,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ _DEFAULT_CACHE_DIR = os.path.join(str(Path.home()), ".kiln", "cache", "designs")
 # File format -> printer type mapping
 # ---------------------------------------------------------------------------
 
-_FILE_FORMAT_TO_PRINTER_TYPE: Dict[str, str] = {
+_FILE_FORMAT_TO_PRINTER_TYPE: dict[str, str] = {
     # Model files (pre-slicing)
     "stl": "fdm",
     "3mf": "fdm",
@@ -104,18 +104,18 @@ class CachedDesign:
     file_size_bytes: int
     printer_type: str
     file_format: str
-    tags: List[str] = field(default_factory=list)
-    source: Optional[str] = None
-    filament_type: Optional[str] = None
-    estimated_print_time_s: Optional[float] = None
-    dimensions_mm: Optional[Dict[str, float]] = None
-    slicer_used: Optional[str] = None
+    tags: list[str] = field(default_factory=list)
+    source: str | None = None
+    filament_type: str | None = None
+    estimated_print_time_s: float | None = None
+    dimensions_mm: dict[str, float] | None = None
+    slicer_used: str | None = None
     created_at: float = 0.0
     last_used_at: float = 0.0
     use_count: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict suitable for JSON output."""
         return asdict(self)
 
@@ -128,13 +128,13 @@ class CacheStats:
     total_size_bytes: int
     cache_hits: int
     cache_misses: int
-    by_printer_type: Dict[str, int] = field(default_factory=dict)
-    by_format: Dict[str, int] = field(default_factory=dict)
-    by_filament_type: Dict[str, int] = field(default_factory=dict)
-    oldest_file: Optional[float] = None
-    newest_file: Optional[float] = None
+    by_printer_type: dict[str, int] = field(default_factory=dict)
+    by_format: dict[str, int] = field(default_factory=dict)
+    by_filament_type: dict[str, int] = field(default_factory=dict)
+    oldest_file: float | None = None
+    newest_file: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict suitable for JSON output."""
         return asdict(self)
 
@@ -159,7 +159,7 @@ def _extension_to_format(file_name: str) -> str:
     return ext.lstrip(".").lower()
 
 
-def _detect_printer_type(file_format: str) -> Optional[str]:
+def _detect_printer_type(file_format: str) -> str | None:
     """Return the printer type for a known file format, or ``None``."""
     return _FILE_FORMAT_TO_PRINTER_TYPE.get(file_format)
 
@@ -202,12 +202,10 @@ class DesignCache:
     def __init__(
         self,
         *,
-        cache_dir: Optional[str] = None,
+        cache_dir: str | None = None,
         max_size_mb: float = 500.0,
     ) -> None:
-        self._cache_dir = cache_dir or os.environ.get(
-            "KILN_CACHE_DIR", _DEFAULT_CACHE_DIR
-        )
+        self._cache_dir = cache_dir or os.environ.get("KILN_CACHE_DIR", _DEFAULT_CACHE_DIR)
         self._max_size_mb = max_size_mb
         self._lock = threading.Lock()
 
@@ -321,14 +319,14 @@ class DesignCache:
         self,
         file_path: str,
         *,
-        printer_type: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-        source: Optional[str] = None,
-        filament_type: Optional[str] = None,
-        estimated_print_time_s: Optional[float] = None,
-        dimensions_mm: Optional[Dict[str, float]] = None,
-        slicer_used: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        printer_type: str | None = None,
+        tags: list[str] | None = None,
+        source: str | None = None,
+        filament_type: str | None = None,
+        estimated_print_time_s: float | None = None,
+        dimensions_mm: dict[str, float] | None = None,
+        slicer_used: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> CachedDesign:
         """Add a file to the cache.
 
@@ -360,14 +358,10 @@ class DesignCache:
         resolved_type = printer_type or _detect_printer_type(file_format)
         if resolved_type is None:
             raise ValueError(
-                f"Cannot determine printer_type for format {file_format!r}. "
-                f"Provide printer_type explicitly."
+                f"Cannot determine printer_type for format {file_format!r}. Provide printer_type explicitly."
             )
         if resolved_type not in _VALID_PRINTER_TYPES:
-            raise ValueError(
-                f"Invalid printer_type {resolved_type!r}. "
-                f"Must be one of: {sorted(_VALID_PRINTER_TYPES)}"
-            )
+            raise ValueError(f"Invalid printer_type {resolved_type!r}. Must be one of: {sorted(_VALID_PRINTER_TYPES)}")
 
         file_hash = _compute_sha256(file_path)
 
@@ -457,28 +451,24 @@ class DesignCache:
         )
         return entry
 
-    def get(self, design_id: str) -> Optional[CachedDesign]:
+    def get(self, design_id: str) -> CachedDesign | None:
         """Look up a cached design by ID.
 
         Increments the cache hit counter on success or miss counter
         on failure.
         """
         with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM designs WHERE id = ?", (design_id,)
-            ).fetchone()
+            row = self._conn.execute("SELECT * FROM designs WHERE id = ?", (design_id,)).fetchone()
         if row is None:
             self._misses += 1
             return None
         self._hits += 1
         return self._row_to_cached_design(row)
 
-    def get_by_hash(self, file_hash: str) -> Optional[CachedDesign]:
+    def get_by_hash(self, file_hash: str) -> CachedDesign | None:
         """Look up by file hash (deduplication)."""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM designs WHERE file_hash = ?", (file_hash,)
-            ).fetchone()
+            row = self._conn.execute("SELECT * FROM designs WHERE file_hash = ?", (file_hash,)).fetchone()
         if row is None:
             return None
         return self._row_to_cached_design(row)
@@ -486,14 +476,14 @@ class DesignCache:
     def search(
         self,
         *,
-        printer_type: Optional[str] = None,
-        file_format: Optional[str] = None,
-        filament_type: Optional[str] = None,
-        slicer_used: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-        query: Optional[str] = None,
+        printer_type: str | None = None,
+        file_format: str | None = None,
+        filament_type: str | None = None,
+        slicer_used: str | None = None,
+        tags: list[str] | None = None,
+        query: str | None = None,
         limit: int = 50,
-    ) -> List[CachedDesign]:
+    ) -> list[CachedDesign]:
         """Search cached designs with filters.
 
         :param printer_type: Filter by printer type.
@@ -504,8 +494,8 @@ class DesignCache:
         :param query: Free-text search against file name and tags.
         :param limit: Maximum results to return.
         """
-        clauses: List[str] = []
-        params: List[Any] = []
+        clauses: list[str] = []
+        params: list[Any] = []
 
         if printer_type is not None:
             clauses.append("printer_type = ?")
@@ -531,8 +521,7 @@ class DesignCache:
         params.append(limit)
         with self._lock:
             rows = self._conn.execute(
-                f"SELECT * FROM designs {where} "
-                "ORDER BY last_used_at DESC LIMIT ?",
+                f"SELECT * FROM designs {where} ORDER BY last_used_at DESC LIMIT ?",
                 params,
             ).fetchall()
 
@@ -550,8 +539,7 @@ class DesignCache:
         now = time.time()
         with self._lock:
             self._conn.execute(
-                "UPDATE designs SET use_count = use_count + 1, "
-                "last_used_at = ? WHERE id = ?",
+                "UPDATE designs SET use_count = use_count + 1, last_used_at = ? WHERE id = ?",
                 (now, design_id),
             )
             self._conn.commit()
@@ -574,9 +562,7 @@ class DesignCache:
                 if os.path.isdir(parent) and not os.listdir(parent):
                     os.rmdir(parent)
         except OSError as exc:
-            logger.warning(
-                "Could not remove cached file %s: %s", entry.file_path, exc
-            )
+            logger.warning("Could not remove cached file %s: %s", entry.file_path, exc)
 
         with self._lock:
             self._conn.execute("DELETE FROM designs WHERE id = ?", (design_id,))
@@ -602,15 +588,13 @@ class DesignCache:
 
             # By printer type.
             type_rows = self._conn.execute(
-                "SELECT printer_type, COUNT(*) AS cnt FROM designs "
-                "GROUP BY printer_type"
+                "SELECT printer_type, COUNT(*) AS cnt FROM designs GROUP BY printer_type"
             ).fetchall()
             by_printer_type = {r["printer_type"]: r["cnt"] for r in type_rows}
 
             # By format.
             fmt_rows = self._conn.execute(
-                "SELECT file_format, COUNT(*) AS cnt FROM designs "
-                "GROUP BY file_format"
+                "SELECT file_format, COUNT(*) AS cnt FROM designs GROUP BY file_format"
             ).fetchall()
             by_format = {r["file_format"]: r["cnt"] for r in fmt_rows}
 
@@ -620,9 +604,7 @@ class DesignCache:
                 "WHERE filament_type IS NOT NULL "
                 "GROUP BY filament_type"
             ).fetchall()
-            by_filament_type = {
-                r["filament_type"]: r["cnt"] for r in filament_rows
-            }
+            by_filament_type = {r["filament_type"]: r["cnt"] for r in filament_rows}
 
         return CacheStats(
             total_files=total_files,
@@ -640,7 +622,7 @@ class DesignCache:
         self,
         *,
         max_age_days: float = 90,
-        max_size_mb: Optional[float] = None,
+        max_size_mb: float | None = None,
     ) -> int:
         """Remove old/excess files using LRU eviction.  Returns count removed.
 
@@ -654,8 +636,7 @@ class DesignCache:
         # Phase 1: remove by age.
         with self._lock:
             old_rows = self._conn.execute(
-                "SELECT id FROM designs WHERE last_used_at < ? "
-                "ORDER BY last_used_at ASC",
+                "SELECT id FROM designs WHERE last_used_at < ? ORDER BY last_used_at ASC",
                 (cutoff,),
             ).fetchall()
         for row in old_rows:
@@ -667,16 +648,13 @@ class DesignCache:
         max_bytes = effective_max * 1024 * 1024
 
         with self._lock:
-            current_size = self._conn.execute(
-                "SELECT COALESCE(SUM(file_size_bytes), 0) FROM designs"
-            ).fetchone()[0]
+            current_size = self._conn.execute("SELECT COALESCE(SUM(file_size_bytes), 0) FROM designs").fetchone()[0]
 
         if current_size > max_bytes:
             # Remove least-recently-used files until under limit.
             with self._lock:
                 lru_rows = self._conn.execute(
-                    "SELECT id, file_size_bytes FROM designs "
-                    "ORDER BY last_used_at ASC"
+                    "SELECT id, file_size_bytes FROM designs ORDER BY last_used_at ASC"
                 ).fetchall()
             for row in lru_rows:
                 if current_size <= max_bytes:
@@ -718,7 +696,7 @@ class DesignCache:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_design_cache: Optional[DesignCache] = None
+_design_cache: DesignCache | None = None
 
 
 def get_design_cache() -> DesignCache:

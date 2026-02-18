@@ -23,6 +23,7 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
@@ -30,7 +31,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -41,21 +42,21 @@ _MAX_HEADER_LINES: int = 300
 # File type / format mappings
 # ---------------------------------------------------------------------------
 
-_GCODE_EXTENSIONS: Dict[str, str] = {
+_GCODE_EXTENSIONS: dict[str, str] = {
     ".gcode": "gcode",
     ".gco": "gcode",
     ".g": "gcode",
 }
 
-_3MF_EXTENSIONS: Dict[str, str] = {
+_3MF_EXTENSIONS: dict[str, str] = {
     ".3mf": "3mf",
 }
 
-_UFP_EXTENSIONS: Dict[str, str] = {
+_UFP_EXTENSIONS: dict[str, str] = {
     ".ufp": "ufp",
 }
 
-_STL_EXTENSIONS: Dict[str, str] = {
+_STL_EXTENSIONS: dict[str, str] = {
     ".stl": "stl",
 }
 
@@ -68,23 +69,24 @@ _ALL_EXTENSIONS: frozenset[str] = frozenset(
 # Result dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FileMetadata:
     """Structured metadata extracted from an FDM 3D printing file."""
 
     file_path: str
     file_type: str = "unknown"
-    file_format: Optional[str] = None
+    file_format: str | None = None
     file_size_bytes: int = 0
-    estimated_time_seconds: Optional[int] = None
-    layer_count: Optional[int] = None
-    dimensions_mm: Optional[Dict[str, float]] = None
-    material_hint: Optional[str] = None
-    slicer_hint: Optional[str] = None
-    created_at: Optional[str] = None
-    extra: Dict[str, Any] = field(default_factory=dict)
+    estimated_time_seconds: int | None = None
+    layer_count: int | None = None
+    dimensions_mm: dict[str, float] | None = None
+    material_hint: str | None = None
+    slicer_hint: str | None = None
+    created_at: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dict, omitting ``None`` values."""
         raw = asdict(self)
         return {k: v for k, v in raw.items() if v is not None}
@@ -95,19 +97,24 @@ class FileMetadata:
 # ---------------------------------------------------------------------------
 
 _RE_ESTIMATED_TIME = re.compile(
-    r";\s*estimated\s*(?:printing\s*)?time\s*[:=]\s*(.+)", re.IGNORECASE,
+    r";\s*estimated\s*(?:printing\s*)?time\s*[:=]\s*(.+)",
+    re.IGNORECASE,
 )
 _RE_LAYER_COUNT = re.compile(
-    r";\s*(?:layer\s*count|total\s*layers)\s*[:=]\s*(\d+)", re.IGNORECASE,
+    r";\s*(?:layer\s*count|total\s*layers)\s*[:=]\s*(\d+)",
+    re.IGNORECASE,
 )
 _RE_MATERIAL = re.compile(
-    r";\s*(?:material|filament_type)\s*[:=]\s*(.+)", re.IGNORECASE,
+    r";\s*(?:material|filament_type)\s*[:=]\s*(.+)",
+    re.IGNORECASE,
 )
 _RE_SLICER = re.compile(
-    r";\s*(?:slicer|generated\s*(?:by|with))\s*[:=]?\s*(.+)", re.IGNORECASE,
+    r";\s*(?:slicer|generated\s*(?:by|with))\s*[:=]?\s*(.+)",
+    re.IGNORECASE,
 )
 _RE_DIMENSIONS = re.compile(
-    r";\s*dimensions?\s*[:=]\s*(.+)", re.IGNORECASE,
+    r";\s*dimensions?\s*[:=]\s*(.+)",
+    re.IGNORECASE,
 )
 _RE_BOUNDS_X = re.compile(
     r";\s*(?:x_min|min_x|bounds_x)\s*[:=]\s*(-?\d+\.?\d*)\s*[-,to]+\s*(-?\d+\.?\d*)",
@@ -124,31 +131,40 @@ _RE_BOUNDS_Z = re.compile(
 
 # FDM-specific header patterns
 _RE_FILAMENT_USED = re.compile(
-    r";\s*filament\s*(?:used|_used)\s*[:=]\s*(\d+\.?\d*)\s*(mm|g|m)?", re.IGNORECASE,
+    r";\s*filament\s*(?:used|_used)\s*[:=]\s*(\d+\.?\d*)\s*(mm|g|m)?",
+    re.IGNORECASE,
 )
 _RE_NOZZLE_DIAMETER = re.compile(
-    r";\s*nozzle_diameter\s*[:=]\s*(\d+\.?\d*)", re.IGNORECASE,
+    r";\s*nozzle_diameter\s*[:=]\s*(\d+\.?\d*)",
+    re.IGNORECASE,
 )
 _RE_LAYER_HEIGHT = re.compile(
-    r";\s*layer_height\s*[:=]\s*(\d+\.?\d*)", re.IGNORECASE,
+    r";\s*layer_height\s*[:=]\s*(\d+\.?\d*)",
+    re.IGNORECASE,
 )
 _RE_INFILL = re.compile(
-    r";\s*(?:fill_density|infill_density|infill)\s*[:=]\s*(\d+\.?\d*)\s*%?", re.IGNORECASE,
+    r";\s*(?:fill_density|infill_density|infill)\s*[:=]\s*(\d+\.?\d*)\s*%?",
+    re.IGNORECASE,
 )
 _RE_PRINT_SPEED = re.compile(
-    r";\s*(?:print_speed|speed)\s*[:=]\s*(\d+\.?\d*)", re.IGNORECASE,
+    r";\s*(?:print_speed|speed)\s*[:=]\s*(\d+\.?\d*)",
+    re.IGNORECASE,
 )
 _RE_BED_TEMP = re.compile(
-    r";\s*bed_temperature\s*[:=]\s*(\d+\.?\d*)", re.IGNORECASE,
+    r";\s*bed_temperature\s*[:=]\s*(\d+\.?\d*)",
+    re.IGNORECASE,
 )
 _RE_HOTEND_TEMP = re.compile(
-    r";\s*(?:temperature|nozzle_temperature)\s*[:=]\s*(\d+\.?\d*)", re.IGNORECASE,
+    r";\s*(?:temperature|nozzle_temperature)\s*[:=]\s*(\d+\.?\d*)",
+    re.IGNORECASE,
 )
 _RE_FEED_RATE = re.compile(
-    r";\s*feed\s*rate\s*[:=]\s*(\d+\.?\d*)", re.IGNORECASE,
+    r";\s*feed\s*rate\s*[:=]\s*(\d+\.?\d*)",
+    re.IGNORECASE,
 )
 _RE_PRINTER_MODEL = re.compile(
-    r";\s*printer_model\s*[:=]\s*(.+)", re.IGNORECASE,
+    r";\s*printer_model\s*[:=]\s*(.+)",
+    re.IGNORECASE,
 )
 
 
@@ -156,7 +172,8 @@ _RE_PRINTER_MODEL = re.compile(
 # Time string parsing
 # ---------------------------------------------------------------------------
 
-def _parse_time_string(raw: str) -> Optional[int]:
+
+def _parse_time_string(raw: str) -> int | None:
     """Parse time strings like ``1h 42m 30s``, ``6150``, ``1 hours 42 minutes``.
 
     :returns: Total seconds, or ``None`` if unparseable.
@@ -206,14 +223,15 @@ def _parse_time_string(raw: str) -> Optional[int]:
 # Dimension parsing from header comment
 # ---------------------------------------------------------------------------
 
-def _parse_dimensions_string(raw: str) -> Optional[Dict[str, float]]:
+
+def _parse_dimensions_string(raw: str) -> dict[str, float] | None:
     """Parse dimension strings like ``100x200x50`` or ``100 x 200 x 50``.
 
     :returns: Dict with ``x``, ``y``, ``z`` keys (or fewer), or ``None``.
     """
     raw = raw.strip()
     parts = re.split(r"\s*[xX,]\s*", raw)
-    dims: Dict[str, float] = {}
+    dims: dict[str, float] = {}
     keys = ("x", "y", "z")
     for i, part in enumerate(parts):
         if i >= len(keys):
@@ -228,6 +246,7 @@ def _parse_dimensions_string(raw: str) -> Optional[Dict[str, float]]:
 # ---------------------------------------------------------------------------
 # G-code header extraction (FDM printers)
 # ---------------------------------------------------------------------------
+
 
 def _extract_gcode_metadata(file_path: str) -> FileMetadata:
     """Parse G-code header comments for FDM printer metadata.
@@ -267,10 +286,8 @@ def _extract_gcode_metadata(file_path: str) -> FileMetadata:
         if meta.layer_count is None:
             m = _RE_LAYER_COUNT.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.layer_count = int(m.group(1))
-                except ValueError:
-                    pass
 
         # Material
         if meta.material_hint is None:
@@ -311,64 +328,50 @@ def _extract_gcode_metadata(file_path: str) -> FileMetadata:
         if "nozzle_diameter" not in meta.extra:
             m = _RE_NOZZLE_DIAMETER.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["nozzle_diameter"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         # Layer height
         if "layer_height" not in meta.extra:
             m = _RE_LAYER_HEIGHT.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["layer_height"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         # Infill density
         if "infill_pct" not in meta.extra:
             m = _RE_INFILL.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["infill_pct"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         # Print speed
         if "print_speed" not in meta.extra:
             m = _RE_PRINT_SPEED.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["print_speed"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         # Bed temperature
         if "bed_temp" not in meta.extra:
             m = _RE_BED_TEMP.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["bed_temp"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         # Hotend temperature
         if "hotend_temp" not in meta.extra:
             m = _RE_HOTEND_TEMP.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["hotend_temp"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         # Feed rate
         if "feed_rate" not in meta.extra:
             m = _RE_FEED_RATE.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["feed_rate"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         # Printer model
         if "printer_model" not in meta.extra:
@@ -385,9 +388,9 @@ def _extract_gcode_metadata(file_path: str) -> FileMetadata:
     return meta
 
 
-def _extract_bounds_from_lines(lines: List[str]) -> Optional[Dict[str, float]]:
+def _extract_bounds_from_lines(lines: list[str]) -> dict[str, float] | None:
     """Extract X/Y/Z dimensions from bound comments like ``; bounds_x = 0 - 100``."""
-    dims: Dict[str, float] = {}
+    dims: dict[str, float] = {}
     for line in lines:
         stripped = line.strip()
         if not stripped.startswith(";"):
@@ -410,6 +413,7 @@ def _extract_bounds_from_lines(lines: List[str]) -> Optional[Dict[str, float]]:
 # ---------------------------------------------------------------------------
 # 3MF metadata extraction
 # ---------------------------------------------------------------------------
+
 
 def _extract_3mf_metadata(file_path: str) -> FileMetadata:
     """Extract metadata from a 3MF file (ZIP archive with XML metadata).
@@ -443,7 +447,7 @@ def _extract_3mf_metadata(file_path: str) -> FileMetadata:
     return meta
 
 
-def _find_3mf_model_path(zf: zipfile.ZipFile) -> Optional[str]:
+def _find_3mf_model_path(zf: zipfile.ZipFile) -> str | None:
     """Locate the 3D model part inside the 3MF ZIP.
 
     Checks the standard path ``3D/3dmodel.model`` first, then falls back to
@@ -537,19 +541,15 @@ def _parse_config_text(content: str, meta: FileMetadata) -> None:
         if "layer_height" not in meta.extra:
             m = re.match(r"layer_height\s*=\s*(\d+\.?\d*)", stripped, re.IGNORECASE)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["layer_height"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         # nozzle_diameter = 0.4
         if "nozzle_diameter" not in meta.extra:
             m = re.match(r"nozzle_diameter\s*=\s*(\d+\.?\d*)", stripped, re.IGNORECASE)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["nozzle_diameter"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         # printer_model = MK3S
         if "printer_model" not in meta.extra:
@@ -561,6 +561,7 @@ def _parse_config_text(content: str, meta: FileMetadata) -> None:
 # ---------------------------------------------------------------------------
 # UFP metadata extraction
 # ---------------------------------------------------------------------------
+
 
 def _extract_ufp_metadata(file_path: str) -> FileMetadata:
     """Extract metadata from a UFP file (Ultimaker Format Package).
@@ -579,7 +580,7 @@ def _extract_ufp_metadata(file_path: str) -> FileMetadata:
     try:
         with zipfile.ZipFile(file_path, "r") as zf:
             # Find G-code file inside the package
-            gcode_path: Optional[str] = None
+            gcode_path: str | None = None
             for name in zf.namelist():
                 if name.lower().endswith((".gcode", ".gco")):
                     gcode_path = name
@@ -587,7 +588,7 @@ def _extract_ufp_metadata(file_path: str) -> FileMetadata:
 
             if gcode_path is not None:
                 with zf.open(gcode_path) as fh:
-                    lines: List[str] = []
+                    lines: list[str] = []
                     for i, raw_line in enumerate(fh):
                         if i >= _MAX_HEADER_LINES:
                             break
@@ -608,7 +609,7 @@ def _extract_ufp_metadata(file_path: str) -> FileMetadata:
     return meta
 
 
-def _extract_gcode_metadata_from_lines(lines: List[str]) -> FileMetadata:
+def _extract_gcode_metadata_from_lines(lines: list[str]) -> FileMetadata:
     """Parse G-code metadata from pre-read lines (used by UFP extraction).
 
     Returns a :class:`FileMetadata` with gcode-type fields populated.
@@ -628,10 +629,8 @@ def _extract_gcode_metadata_from_lines(lines: List[str]) -> FileMetadata:
         if meta.layer_count is None:
             m = _RE_LAYER_COUNT.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.layer_count = int(m.group(1))
-                except ValueError:
-                    pass
 
         if meta.material_hint is None:
             m = _RE_MATERIAL.match(stripped)
@@ -665,58 +664,44 @@ def _extract_gcode_metadata_from_lines(lines: List[str]) -> FileMetadata:
         if "nozzle_diameter" not in meta.extra:
             m = _RE_NOZZLE_DIAMETER.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["nozzle_diameter"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         if "layer_height" not in meta.extra:
             m = _RE_LAYER_HEIGHT.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["layer_height"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         if "infill_pct" not in meta.extra:
             m = _RE_INFILL.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["infill_pct"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         if "print_speed" not in meta.extra:
             m = _RE_PRINT_SPEED.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["print_speed"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         if "bed_temp" not in meta.extra:
             m = _RE_BED_TEMP.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["bed_temp"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         if "hotend_temp" not in meta.extra:
             m = _RE_HOTEND_TEMP.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["hotend_temp"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         if "feed_rate" not in meta.extra:
             m = _RE_FEED_RATE.match(stripped)
             if m:
-                try:
+                with contextlib.suppress(ValueError):
                     meta.extra["feed_rate"] = float(m.group(1))
-                except ValueError:
-                    pass
 
         if "printer_model" not in meta.extra:
             m = _RE_PRINTER_MODEL.match(stripped)
@@ -734,6 +719,7 @@ def _extract_gcode_metadata_from_lines(lines: List[str]) -> FileMetadata:
 # ---------------------------------------------------------------------------
 # STL metadata extraction
 # ---------------------------------------------------------------------------
+
 
 def _extract_stl_metadata(file_path: str) -> FileMetadata:
     """Extract minimal metadata from an STL file.
@@ -766,6 +752,7 @@ def _extract_stl_metadata(file_path: str) -> FileMetadata:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def extract_metadata(file_path: str) -> FileMetadata:
     """Extract metadata from an FDM printing file, auto-detecting type by extension.
@@ -818,10 +805,11 @@ def extract_metadata(file_path: str) -> FileMetadata:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _read_header_lines(file_path: str, *, max_lines: int = _MAX_HEADER_LINES) -> List[str]:
+
+def _read_header_lines(file_path: str, *, max_lines: int = _MAX_HEADER_LINES) -> list[str]:
     """Read the first *max_lines* lines from a text file."""
-    lines: List[str] = []
-    with open(file_path, "r", errors="replace") as fh:
+    lines: list[str] = []
+    with open(file_path, errors="replace") as fh:
         for i, line in enumerate(fh):
             if i >= max_lines:
                 break
@@ -837,7 +825,7 @@ def _safe_file_size(file_path: str) -> int:
         return 0
 
 
-def _safe_created_at(file_path: str) -> Optional[str]:
+def _safe_created_at(file_path: str) -> str | None:
     """Return file creation/modification time as ISO-8601 string, or ``None``."""
     try:
         stat = os.stat(file_path)

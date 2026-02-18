@@ -15,12 +15,13 @@ cannot interleave G-code commands.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from kiln.printers.base import (
     FirmwareComponent,
@@ -47,31 +48,22 @@ _MAX_RECONNECT_ATTEMPTS: int = 3
 
 # Regex for parsing M105 temperature responses.
 # Matches patterns like "T:210.0 /210.0 B:60.0 /60.0" and variants.
-_TEMP_RE = re.compile(
-    r"T:(?P<tool_actual>[\d.]+)\s*/(?P<tool_target>[\d.]+)"
-)
-_BED_TEMP_RE = re.compile(
-    r"B:(?P<bed_actual>[\d.]+)\s*/(?P<bed_target>[\d.]+)"
-)
+_TEMP_RE = re.compile(r"T:(?P<tool_actual>[\d.]+)\s*/(?P<tool_target>[\d.]+)")
+_BED_TEMP_RE = re.compile(r"B:(?P<bed_actual>[\d.]+)\s*/(?P<bed_target>[\d.]+)")
 
 # Regex for parsing M27 SD print progress.
 # Matches "SD printing byte 1234/5678" or "Not SD printing"
-_SD_PROGRESS_RE = re.compile(
-    r"SD printing byte\s+(?P<current>\d+)\s*/\s*(?P<total>\d+)"
-)
+_SD_PROGRESS_RE = re.compile(r"SD printing byte\s+(?P<current>\d+)\s*/\s*(?P<total>\d+)")
 
 # Regex for parsing M115 firmware info.
-_FIRMWARE_RE = re.compile(
-    r"FIRMWARE_NAME:(?P<name>[^\s]+)"
-)
-_FIRMWARE_VER_RE = re.compile(
-    r"FIRMWARE_VERSION:(?P<version>[^\s]+)"
-)
+_FIRMWARE_RE = re.compile(r"FIRMWARE_NAME:(?P<name>[^\s]+)")
+_FIRMWARE_VER_RE = re.compile(r"FIRMWARE_VERSION:(?P<version>[^\s]+)")
 
 
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
+
 
 class SerialPrinterAdapter(PrinterAdapter):
     """Concrete :class:`PrinterAdapter` backed by a USB serial connection.
@@ -122,12 +114,12 @@ class SerialPrinterAdapter(PrinterAdapter):
         self._timeout: float = timeout
         self._printer_name: str = printer_name
 
-        self._serial: Optional[Any] = None  # serial.Serial instance
+        self._serial: Any | None = None  # serial.Serial instance
         self._lock: threading.Lock = threading.Lock()
         self._connected: bool = False
 
         # Track active SD print file name (set by start_print).
-        self._current_file: Optional[str] = None
+        self._current_file: str | None = None
 
         # Track pause state (Marlin M27 doesn't distinguish paused from printing).
         self._paused: bool = False
@@ -196,8 +188,7 @@ class SerialPrinterAdapter(PrinterAdapter):
                 ) from exc
             if "no such file" in msg or "not found" in msg or "filenotfounderror" in msg:
                 raise PrinterError(
-                    f"Serial port {self._port} not found. "
-                    "Check USB cable and port path.",
+                    f"Serial port {self._port} not found. Check USB cable and port path.",
                     cause=exc,
                 ) from exc
             raise PrinterError(
@@ -283,8 +274,7 @@ class SerialPrinterAdapter(PrinterAdapter):
                     time.sleep(1.0 * attempt)  # Linear backoff
 
         raise PrinterError(
-            f"Lost connection to serial printer on {self._port} "
-            f"after {_MAX_RECONNECT_ATTEMPTS} reconnect attempts."
+            f"Lost connection to serial printer on {self._port} after {_MAX_RECONNECT_ATTEMPTS} reconnect attempts."
         )
 
     # ------------------------------------------------------------------
@@ -295,7 +285,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         self,
         command: str,
         *,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
         wait_for_ok: bool = True,
     ) -> str:
         """Send a single G-code command and collect the response.
@@ -387,19 +377,16 @@ class SerialPrinterAdapter(PrinterAdapter):
                 if lower.startswith("ok"):
                     return "\n".join(response_lines)
                 if lower.startswith("error:") or lower.startswith("error"):
-                    raise PrinterError(
-                        f"Firmware error for '{command}': {line}"
-                    )
+                    raise PrinterError(f"Firmware error for '{command}': {line}")
         finally:
             self._serial.timeout = old_timeout
 
         # Timeout exhausted without "ok".
         raise PrinterError(
-            f"Timeout ({timeout}s) waiting for response to '{command}'. "
-            f"Received so far: {' | '.join(response_lines)}"
+            f"Timeout ({timeout}s) waiting for response to '{command}'. Received so far: {' | '.join(response_lines)}"
         )
 
-    def _send_and_parse(self, command: str) -> Dict[str, Any]:
+    def _send_and_parse(self, command: str) -> dict[str, Any]:
         """Send a G-code command and parse key:value pairs from the response.
 
         Useful for commands like M105 that return ``T:210.0 /210.0 B:60.0 /60.0``.
@@ -411,9 +398,9 @@ class SerialPrinterAdapter(PrinterAdapter):
         return self._parse_response(response)
 
     @staticmethod
-    def _parse_response(response: str) -> Dict[str, Any]:
+    def _parse_response(response: str) -> dict[str, Any]:
         """Extract key:value pairs from a firmware response string."""
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
         # Parse temperature-style "KEY:VALUE" pairs.
         for token in response.split():
             if ":" in token and not token.startswith("ok"):
@@ -429,7 +416,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _parse_temps(response: str) -> Dict[str, Optional[float]]:
+    def _parse_temps(response: str) -> dict[str, float | None]:
         """Parse M105 temperature response into a structured dict.
 
         Handles formats like::
@@ -441,7 +428,7 @@ class SerialPrinterAdapter(PrinterAdapter):
             Dict with keys ``tool_actual``, ``tool_target``, ``bed_actual``,
             ``bed_target`` (values are ``None`` when not present).
         """
-        result: Dict[str, Optional[float]] = {
+        result: dict[str, float | None] = {
             "tool_actual": None,
             "tool_target": None,
             "bed_actual": None,
@@ -558,7 +545,7 @@ class SerialPrinterAdapter(PrinterAdapter):
             file_name=self._current_file,
         )
 
-    def list_files(self) -> List[PrinterFile]:
+    def list_files(self) -> list[PrinterFile]:
         """Return a list of files on the SD card.
 
         Sends ``M20`` to list SD card files.  Marlin responds with::
@@ -585,13 +572,13 @@ class SerialPrinterAdapter(PrinterAdapter):
         return self._parse_file_list(response)
 
     @staticmethod
-    def _parse_file_list(response: str) -> List[PrinterFile]:
+    def _parse_file_list(response: str) -> list[PrinterFile]:
         """Parse the M20 file listing response.
 
         Extracts file names between "Begin file list" and "End file list"
         markers.
         """
-        files: List[PrinterFile] = []
+        files: list[PrinterFile] = []
         in_list = False
 
         for line in response.split("\n"):
@@ -613,16 +600,16 @@ class SerialPrinterAdapter(PrinterAdapter):
             name = parts[0]
             size = None
             if len(parts) >= 2:
-                try:
+                with contextlib.suppress(ValueError):
                     size = int(parts[1])
-                except ValueError:
-                    pass
 
-            files.append(PrinterFile(
-                name=name,
-                path=name,
-                size_bytes=size,
-            ))
+            files.append(
+                PrinterFile(
+                    name=name,
+                    path=name,
+                    size_bytes=size,
+                )
+            )
 
         return files
 
@@ -667,7 +654,7 @@ class SerialPrinterAdapter(PrinterAdapter):
                 ) from exc
 
             try:
-                with open(abs_path, "r", encoding="utf-8", errors="replace") as fh:
+                with open(abs_path, encoding="utf-8", errors="replace") as fh:
                     line_count = 0
                     for line in fh:
                         stripped = line.strip()
@@ -684,9 +671,7 @@ class SerialPrinterAdapter(PrinterAdapter):
                             time.sleep(0.01)
 
                     self._serial.flush()
-                    logger.info(
-                        "Uploaded %d lines to SD card as %s", line_count, filename
-                    )
+                    logger.info("Uploaded %d lines to SD card as %s", line_count, filename)
             except PermissionError as exc:
                 raise PrinterError(
                     f"Permission denied reading file: {abs_path}",
@@ -838,8 +823,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         return PrintResult(
             success=m112_sent,
             message=(
-                "Emergency stop triggered (M112 sent). "
-                "Printer will need to be reset."
+                "Emergency stop triggered (M112 sent). Printer will need to be reset."
                 if m112_sent
                 else "Emergency stop failed: could not deliver M112 to printer."
             ),
@@ -889,7 +873,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # PrinterAdapter -- G-code
     # ------------------------------------------------------------------
 
-    def send_gcode(self, commands: List[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> bool:
         """Send one or more G-code commands to the printer.
 
         Args:
@@ -909,7 +893,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # PrinterAdapter -- firmware info (optional)
     # ------------------------------------------------------------------
 
-    def get_firmware_status(self) -> Optional[FirmwareStatus]:
+    def get_firmware_status(self) -> FirmwareStatus | None:
         """Query firmware version via ``M115``.
 
         Returns a :class:`FirmwareStatus` with the firmware name and version,
@@ -947,7 +931,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # Tool position (optional -- Marlin M114)
     # ------------------------------------------------------------------
 
-    def get_tool_position(self) -> Optional[Dict[str, float]]:
+    def get_tool_position(self) -> dict[str, float] | None:
         """Return current tool position via ``M114``.
 
         Marlin responds with something like::
@@ -963,7 +947,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         except PrinterError:
             return None
 
-        result: Dict[str, float] = {}
+        result: dict[str, float] = {}
         for axis in ("X", "Y", "Z", "E"):
             match = re.search(rf"{axis}:(-?[\d.]+)", response)
             if match:
@@ -982,7 +966,7 @@ class SerialPrinterAdapter(PrinterAdapter):
         hotend_temp_c: float,
         bed_temp_c: float,
         file_name: str,
-        layer_number: Optional[int] = None,
+        layer_number: int | None = None,
         fan_speed_pct: float = 100.0,
         flow_rate_pct: float = 100.0,
         prime_length_mm: float = 30.0,
@@ -1016,42 +1000,34 @@ class SerialPrinterAdapter(PrinterAdapter):
         """
         # -- parameter validation ------------------------------------------
         if z_height_mm <= 0:
-            raise PrinterError(
-                f"z_height_mm must be > 0, got {z_height_mm}."
-            )
+            raise PrinterError(f"z_height_mm must be > 0, got {z_height_mm}.")
         if hotend_temp_c <= 0:
-            raise PrinterError(
-                f"Hotend temperature must be > 0\u00b0C, got {hotend_temp_c}\u00b0C."
-            )
+            raise PrinterError(f"Hotend temperature must be > 0\u00b0C, got {hotend_temp_c}\u00b0C.")
         self._validate_temp(hotend_temp_c, _MAX_HOTEND_TEMP, "Hotend")
         self._validate_temp(bed_temp_c, _MAX_BED_TEMP, "Bed")
         if prime_length_mm < 0:
-            raise PrinterError(
-                f"prime_length_mm must be >= 0, got {prime_length_mm}."
-            )
+            raise PrinterError(f"prime_length_mm must be >= 0, got {prime_length_mm}.")
         if z_clearance_mm <= 0 or z_clearance_mm > 10:
-            raise PrinterError(
-                f"z_clearance_mm must be > 0 and <= 10, got {z_clearance_mm}."
-            )
+            raise PrinterError(f"z_clearance_mm must be > 0 and <= 10, got {z_clearance_mm}.")
 
         # -- build G-code sequence -----------------------------------------
         fan_pwm = int(fan_speed_pct * 2.55)
         commands = [
-            "M413 S0",                          # Disable Marlin power-loss recovery
-            "G28 X Y",                           # Home X/Y only (NEVER Z)
-            f"M140 S{bed_temp_c}",               # Start heating bed (non-blocking)
-            f"M104 S{hotend_temp_c}",            # Start heating hotend (non-blocking)
-            f"M190 S{bed_temp_c}",               # Wait for bed temp
-            f"M109 S{hotend_temp_c}",            # Wait for hotend temp
-            "G92 E0",                            # Reset extruder position
-            f"G92 Z{z_height_mm}",               # Set Z position without moving
-            "G91",                               # Relative positioning
-            f"G1 Z{z_clearance_mm} F300",        # Raise nozzle above part
-            "G90",                               # Absolute positioning
-            f"G1 E{prime_length_mm} F200",       # Prime nozzle
-            "G92 E0",                            # Reset extruder again
-            f"M106 S{fan_pwm}",                  # Set fan speed (0-255)
-            f"M221 S{int(flow_rate_pct)}",       # Set flow rate multiplier
+            "M413 S0",  # Disable Marlin power-loss recovery
+            "G28 X Y",  # Home X/Y only (NEVER Z)
+            f"M140 S{bed_temp_c}",  # Start heating bed (non-blocking)
+            f"M104 S{hotend_temp_c}",  # Start heating hotend (non-blocking)
+            f"M190 S{bed_temp_c}",  # Wait for bed temp
+            f"M109 S{hotend_temp_c}",  # Wait for hotend temp
+            "G92 E0",  # Reset extruder position
+            f"G92 Z{z_height_mm}",  # Set Z position without moving
+            "G91",  # Relative positioning
+            f"G1 Z{z_clearance_mm} F300",  # Raise nozzle above part
+            "G90",  # Absolute positioning
+            f"G1 E{prime_length_mm} F200",  # Prime nozzle
+            "G92 E0",  # Reset extruder again
+            f"M106 S{fan_pwm}",  # Set fan speed (0-255)
+            f"M221 S{int(flow_rate_pct)}",  # Set flow rate multiplier
         ]
 
         self.send_gcode(commands)

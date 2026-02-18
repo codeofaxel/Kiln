@@ -25,6 +25,7 @@ Usage::
         cached = cache_quote("sculpteo", "fdm_printing", "pla_white", 10,
                              quote.total_price_usd, "USD", quote.lead_time_days)
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -36,7 +37,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -113,8 +114,7 @@ class QuoteCacheConfig:
                 self.default_ttl_seconds = int(env_ttl)
             except ValueError:
                 logger.warning(
-                    "KILN_QUOTE_CACHE_TTL=%r is not a valid integer, "
-                    "using default %d",
+                    "KILN_QUOTE_CACHE_TTL=%r is not a valid integer, using default %d",
                     env_ttl,
                     self.default_ttl_seconds,
                 )
@@ -143,8 +143,8 @@ class QuoteCache:
     def __init__(
         self,
         *,
-        config: Optional[QuoteCacheConfig] = None,
-        db_path: Optional[str] = None,
+        config: QuoteCacheConfig | None = None,
+        db_path: str | None = None,
     ) -> None:
         self._config = config or QuoteCacheConfig()
         self._lock = threading.Lock()
@@ -153,7 +153,7 @@ class QuoteCache:
         self._misses: int = 0
 
         # Optional SQLite persistence.
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         if db_path is not None:
             self._conn = sqlite3.connect(db_path, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
@@ -201,9 +201,7 @@ class QuoteCache:
         if self._conn is None:
             return
         now = time.time()
-        rows = self._conn.execute(
-            "SELECT * FROM quote_cache WHERE expires_at > ?", (now,)
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM quote_cache WHERE expires_at > ?", (now,)).fetchall()
         for row in rows:
             d = dict(row)
             quote = CachedQuote(
@@ -255,18 +253,14 @@ class QuoteCache:
         """Remove a single entry from the SQLite store."""
         if self._conn is None:
             return
-        self._conn.execute(
-            "DELETE FROM quote_cache WHERE cache_key = ?", (cache_key,)
-        )
+        self._conn.execute("DELETE FROM quote_cache WHERE cache_key = ?", (cache_key,))
         self._conn.commit()
 
     def _delete_provider_from_db(self, provider: str) -> None:
         """Remove all entries for a provider from the SQLite store."""
         if self._conn is None:
             return
-        self._conn.execute(
-            "DELETE FROM quote_cache WHERE provider_name = ?", (provider,)
-        )
+        self._conn.execute("DELETE FROM quote_cache WHERE provider_name = ?", (provider,))
         self._conn.commit()
 
     def _clear_db(self) -> None:
@@ -295,12 +289,7 @@ class QuoteCache:
         :param quantity: Part quantity.
         :returns: SHA-256 hex digest of the normalised concatenation.
         """
-        raw = (
-            f"{provider.lower().strip()}|"
-            f"{service_type.lower().strip()}|"
-            f"{material.lower().strip()}|"
-            f"{quantity}"
-        )
+        raw = f"{provider.lower().strip()}|{service_type.lower().strip()}|{material.lower().strip()}|{quantity}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _get_ttl(self, provider: str, service_type: str) -> int:
@@ -324,9 +313,7 @@ class QuoteCache:
         Must be called while holding ``self._lock``.
         """
         while len(self._cache) > self._config.max_entries:
-            oldest_key = min(
-                self._cache, key=lambda k: self._cache[k].cached_at
-            )
+            oldest_key = min(self._cache, key=lambda k: self._cache[k].cached_at)
             evicted = self._cache.pop(oldest_key)
             self._delete_from_db(evicted.cache_key)
             logger.debug(
@@ -349,7 +336,7 @@ class QuoteCache:
         currency: str,
         lead_time_days: int,
         *,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> CachedQuote:
         """Cache a fulfillment provider quote.
 
@@ -404,7 +391,7 @@ class QuoteCache:
         service_type: str,
         material: str,
         quantity: int,
-    ) -> Optional[CachedQuote]:
+    ) -> CachedQuote | None:
         """Retrieve a cached quote if it exists and has not expired.
 
         Returns ``None`` if no matching quote is found or if the
@@ -459,7 +446,7 @@ class QuoteCache:
 
         return results
 
-    def get_by_quote_id(self, quote_id: str) -> Optional[CachedQuote]:
+    def get_by_quote_id(self, quote_id: str) -> CachedQuote | None:
         """Look up a cached quote by its provider-assigned quote ID.
 
         Unlike :meth:`get`, this does **not** auto-evict expired entries —
@@ -482,20 +469,14 @@ class QuoteCache:
         """
         removed = 0
         with self._lock:
-            keys_to_remove = [
-                key
-                for key, quote in self._cache.items()
-                if quote.provider_name == provider
-            ]
+            keys_to_remove = [key for key, quote in self._cache.items() if quote.provider_name == provider]
             for key in keys_to_remove:
                 del self._cache[key]
                 removed += 1
             self._delete_provider_from_db(provider)
 
         if removed:
-            logger.debug(
-                "Invalidated %d cached quotes for provider %s", removed, provider
-            )
+            logger.debug("Invalidated %d cached quotes for provider %s", removed, provider)
         return removed
 
     def invalidate_all(self) -> int:
@@ -529,9 +510,7 @@ class QuoteCache:
                 self._delete_from_db(key)
 
         if expired_keys:
-            logger.debug(
-                "Cleaned up %d expired quote cache entries", len(expired_keys)
-            )
+            logger.debug("Cleaned up %d expired quote cache entries", len(expired_keys))
         return len(expired_keys)
 
     def stats(self) -> dict[str, Any]:
@@ -545,13 +524,9 @@ class QuoteCache:
             expired = sum(1 for q in self._cache.values() if q.is_expired)
             by_provider: dict[str, int] = {}
             for quote in self._cache.values():
-                by_provider[quote.provider_name] = (
-                    by_provider.get(quote.provider_name, 0) + 1
-                )
+                by_provider[quote.provider_name] = by_provider.get(quote.provider_name, 0) + 1
             total_requests = self._hits + self._misses
-            hit_rate = (
-                self._hits / total_requests if total_requests > 0 else 0.0
-            )
+            hit_rate = self._hits / total_requests if total_requests > 0 else 0.0
 
         return {
             "total": total,
@@ -572,7 +547,7 @@ class QuoteCache:
 # Module-level singleton and convenience functions
 # ---------------------------------------------------------------------------
 
-_quote_cache: Optional[QuoteCache] = None
+_quote_cache: QuoteCache | None = None
 
 
 def get_quote_cache() -> QuoteCache:
@@ -597,7 +572,7 @@ def cache_quote(
     currency: str,
     lead_time_days: int,
     *,
-    metadata: Optional[dict[str, Any]] = None,
+    metadata: dict[str, Any] | None = None,
 ) -> CachedQuote:
     """Convenience wrapper to cache a quote via the singleton.
 
@@ -628,7 +603,7 @@ def get_cached_quote(
     service_type: str,
     material: str,
     quantity: int,
-) -> Optional[CachedQuote]:
+) -> CachedQuote | None:
     """Convenience wrapper to look up a cached quote via the singleton.
 
     :param provider: Provider name.
@@ -640,7 +615,7 @@ def get_cached_quote(
     return get_quote_cache().get(provider, service_type, material, quantity)
 
 
-def get_cached_quote_by_id(quote_id: str) -> Optional[CachedQuote]:
+def get_cached_quote_by_id(quote_id: str) -> CachedQuote | None:
     """Look up a cached quote by its provider-assigned quote ID.
 
     :param quote_id: The quote ID from the fulfillment provider.

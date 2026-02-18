@@ -34,9 +34,9 @@ import time
 import urllib.parse
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
-from kiln.events import Event, EventBus, EventType
+from kiln.events import Event, EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ def _get_webhook_redirect_policy() -> tuple[bool, int]:
     return allow, max_hops
 
 
-def _validate_webhook_url(url: str) -> Tuple[bool, str]:
+def _validate_webhook_url(url: str) -> tuple[bool, str]:
     """Validate a webhook URL to prevent SSRF attacks.
 
     Checks:
@@ -117,7 +117,7 @@ def _validate_webhook_url(url: str) -> Tuple[bool, str]:
     except socket.gaierror as exc:
         return False, f"DNS resolution failed for '{hostname}': {exc}"
 
-    for family, _type, _proto, _canonname, sockaddr in addrinfos:
+    for _family, _type, _proto, _canonname, sockaddr in addrinfos:
         ip_str = sockaddr[0]
         try:
             addr = ipaddress.ip_address(ip_str)
@@ -126,14 +126,13 @@ def _validate_webhook_url(url: str) -> Tuple[bool, str]:
         for network in _BLOCKED_NETWORKS:
             if addr in network:
                 return False, (
-                    f"Webhook URL resolves to private/reserved address {ip_str} "
-                    f"(in {network}); this is not allowed"
+                    f"Webhook URL resolves to private/reserved address {ip_str} (in {network}); this is not allowed"
                 )
 
     return True, ""
 
 
-def _mask_secret(secret: Optional[str]) -> Optional[str]:
+def _mask_secret(secret: str | None) -> str | None:
     """Return a masked version of a webhook secret for display.
 
     Shows only the last 4 characters, prefixed with asterisks.
@@ -152,13 +151,13 @@ class WebhookEndpoint:
 
     id: str
     url: str
-    events: Set[str]  # set of event type values like "job.completed"
-    secret: Optional[str] = None  # HMAC signing secret
+    events: set[str]  # set of event type values like "job.completed"
+    secret: str | None = None  # HMAC signing secret
     active: bool = True
     created_at: float = field(default_factory=time.time)
     description: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["events"] = sorted(self.events)
         return data
@@ -172,13 +171,13 @@ class DeliveryRecord:
     webhook_id: str
     event_type: str
     url: str
-    status_code: Optional[int] = None
+    status_code: int | None = None
     success: bool = False
-    error: Optional[str] = None
+    error: str | None = None
     attempts: int = 0
     timestamp: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -202,21 +201,21 @@ class WebhookManager:
         self._retry_delay = retry_delay
         self._delivery_timeout = delivery_timeout
 
-        self._endpoints: Dict[str, WebhookEndpoint] = {}
-        self._delivery_history: List[DeliveryRecord] = []
+        self._endpoints: dict[str, WebhookEndpoint] = {}
+        self._delivery_history: list[DeliveryRecord] = []
         self._max_history = 500
         self._lock = threading.Lock()
 
         self._delivery_queue: queue.Queue = queue.Queue(maxsize=10_000)
         self._running = False
-        self._thread: Optional[threading.Thread] = None
-        self._handler_ref: Optional[Any] = None
+        self._thread: threading.Thread | None = None
+        self._handler_ref: Any | None = None
 
         # HTTP sender (injectable for testing)
         self._send_func = self._default_send
 
         # Dead-letter queue for events that fail all retries
-        self._dead_letters: List[Dict[str, Any]] = []
+        self._dead_letters: list[dict[str, Any]] = []
         self._max_dead_letters = 1000
 
     @property
@@ -228,7 +227,7 @@ class WebhookManager:
     def register(
         self,
         url: str,
-        events: List[str] | None = None,
+        events: list[str] | None = None,
         secret: str | None = None,
         description: str = "",
     ) -> WebhookEndpoint:
@@ -278,7 +277,7 @@ class WebhookManager:
                 return True
             return False
 
-    def list_endpoints(self) -> List[WebhookEndpoint]:
+    def list_endpoints(self) -> list[WebhookEndpoint]:
         """Return all registered endpoints with secrets masked.
 
         The returned copies have their ``secret`` field replaced with
@@ -286,14 +285,14 @@ class WebhookManager:
         preserved internally for HMAC signing.
         """
         with self._lock:
-            results: List[WebhookEndpoint] = []
+            results: list[WebhookEndpoint] = []
             for ep in self._endpoints.values():
                 masked = copy.copy(ep)
                 masked.secret = _mask_secret(ep.secret)
                 results.append(masked)
             return results
 
-    def get_endpoint(self, endpoint_id: str) -> Optional[WebhookEndpoint]:
+    def get_endpoint(self, endpoint_id: str) -> WebhookEndpoint | None:
         """Return a specific endpoint by ID, with the secret masked."""
         with self._lock:
             ep = self._endpoints.get(endpoint_id)
@@ -354,7 +353,8 @@ class WebhookManager:
             except queue.Full:
                 logger.warning(
                     "Webhook delivery queue full, dropping event %s for endpoint %s",
-                    event_value, endpoint.url,
+                    event_value,
+                    endpoint.url,
                 )
 
     def _delivery_loop(self) -> None:
@@ -396,9 +396,7 @@ class WebhookManager:
         for attempt in range(1, self._max_retries + 1):
             record.attempts = attempt
             try:
-                status_code = self._send_func(
-                    endpoint.url, payload, headers, self._delivery_timeout
-                )
+                status_code = self._send_func(endpoint.url, payload, headers, self._delivery_timeout)
                 record.status_code = status_code
                 if 200 <= status_code < 300:
                     record.success = True
@@ -432,7 +430,7 @@ class WebhookManager:
                 record.error,
             )
             # Add to dead-letter list for later inspection
-            dead_entry: Dict[str, Any] = {
+            dead_entry: dict[str, Any] = {
                 "event_id": event_data["event_id"],
                 "event_type": event.type.value,
                 "webhook_id": endpoint.id,
@@ -444,7 +442,7 @@ class WebhookManager:
             with self._lock:
                 self._dead_letters.append(dead_entry)
                 if len(self._dead_letters) > self._max_dead_letters:
-                    self._dead_letters = self._dead_letters[-self._max_dead_letters:]
+                    self._dead_letters = self._dead_letters[-self._max_dead_letters :]
             logger.info(
                 "Dead-lettered event %s for webhook %s (%d total)",
                 event_data["event_id"],
@@ -454,7 +452,7 @@ class WebhookManager:
 
         return record
 
-    def get_dead_letters(self) -> List[Dict[str, Any]]:
+    def get_dead_letters(self) -> list[dict[str, Any]]:
         """Return the dead-letter list (failed deliveries after all retries)."""
         with self._lock:
             return list(self._dead_letters)
@@ -465,7 +463,7 @@ class WebhookManager:
         with self._lock:
             return len(self._dead_letters)
 
-    def recent_deliveries(self, limit: int = 50) -> List[DeliveryRecord]:
+    def recent_deliveries(self, limit: int = 50) -> list[DeliveryRecord]:
         """Return recent delivery records, newest first."""
         with self._lock:
             records = list(self._delivery_history)
@@ -474,14 +472,10 @@ class WebhookManager:
 
     def compute_signature(self, secret: str, payload: str) -> str:
         """Compute HMAC-SHA256 signature for verification."""
-        return "sha256=" + hmac.new(
-            secret.encode(), payload.encode(), hashlib.sha256
-        ).hexdigest()
+        return "sha256=" + hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
     @staticmethod
-    def _default_send(
-        url: str, payload: str, headers: Dict[str, str], timeout: float
-    ) -> int:
+    def _default_send(url: str, payload: str, headers: dict[str, str], timeout: float) -> int:
         """Default HTTP sender using requests with SSRF-safe redirect handling."""
         import requests
 
@@ -493,9 +487,7 @@ class WebhookManager:
             # Revalidate every outbound URL to defend against DNS rebinding and redirect pivots.
             valid, reason = _validate_webhook_url(current_url)
             if not valid:
-                raise RuntimeError(
-                    f"Webhook delivery blocked by URL validation for {current_url!r}: {reason}"
-                )
+                raise RuntimeError(f"Webhook delivery blocked by URL validation for {current_url!r}: {reason}")
 
             resp = requests.post(
                 current_url,
@@ -515,9 +507,7 @@ class WebhookManager:
                     "with per-hop SSRF validation."
                 )
             if hops >= max_hops:
-                raise RuntimeError(
-                    f"Webhook redirect limit exceeded (max {max_hops} hops)."
-                )
+                raise RuntimeError(f"Webhook redirect limit exceeded (max {max_hops} hops).")
 
             location = resp.headers.get("Location", "")
             if not location:
@@ -527,9 +517,7 @@ class WebhookManager:
             current_scheme = urllib.parse.urlparse(current_url).scheme.lower()
             next_scheme = urllib.parse.urlparse(next_url).scheme.lower()
             if current_scheme == "https" and next_scheme == "http":
-                raise RuntimeError(
-                    "Webhook redirect blocked: HTTPS to HTTP downgrade is not allowed."
-                )
+                raise RuntimeError("Webhook redirect blocked: HTTPS to HTTP downgrade is not allowed.")
 
             current_url = next_url
             hops += 1

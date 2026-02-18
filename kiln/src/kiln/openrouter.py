@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from typing import Any, Dict
+from typing import Any
 
 from kiln.agent_loop import AgentConfig, AgentResult, run_agent_loop
 
@@ -46,7 +46,7 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 # Model catalog -- curated list with tool-calling tier and context window
 # ---------------------------------------------------------------------------
 
-KNOWN_MODELS: Dict[str, Dict[str, Any]] = {
+KNOWN_MODELS: dict[str, dict[str, Any]] = {
     # ---- Tier: full (strong tool-calling) ----
     "anthropic/claude-sonnet-4": {"tier": "full", "context": 200_000},
     "anthropic/claude-opus-4": {"tier": "full", "context": 200_000},
@@ -54,13 +54,11 @@ KNOWN_MODELS: Dict[str, Dict[str, Any]] = {
     "openai/gpt-4-turbo": {"tier": "full", "context": 128_000},
     "google/gemini-pro-1.5": {"tier": "full", "context": 1_000_000},
     "google/gemini-2.0-flash": {"tier": "full", "context": 1_000_000},
-
     # ---- Tier: standard (decent tool-calling) ----
     "openai/gpt-4o-mini": {"tier": "standard", "context": 128_000},
     "google/gemini-flash-1.5": {"tier": "standard", "context": 1_000_000},
     "cohere/command-r-plus": {"tier": "standard", "context": 128_000},
     "mistralai/mistral-large": {"tier": "standard", "context": 128_000},
-
     # ---- Tier: essential (basic tool-calling) ----
     "meta-llama/llama-3.1-70b-instruct": {"tier": "essential", "context": 128_000},
     "meta-llama/llama-3.1-8b-instruct": {"tier": "essential", "context": 128_000},
@@ -75,7 +73,7 @@ KNOWN_MODELS: Dict[str, Dict[str, Any]] = {
 # ---------------------------------------------------------------------------
 
 
-def list_supported_models() -> Dict[str, Dict[str, Any]]:
+def list_supported_models() -> dict[str, dict[str, Any]]:
     """Return the known model catalog with tier and context info.
 
     Returns:

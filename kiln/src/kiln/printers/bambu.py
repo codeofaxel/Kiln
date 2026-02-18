@@ -18,6 +18,7 @@ the OctoPrint and Moonraker adapters.
 
 from __future__ import annotations
 
+import contextlib
 import ftplib
 import hashlib
 import hmac
@@ -33,7 +34,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import paho.mqtt.client as mqtt
 
@@ -70,15 +71,16 @@ _TLS_MODE_ENV = "KILN_BAMBU_TLS_MODE"
 _TLS_FINGERPRINT_ENV = "KILN_BAMBU_TLS_FINGERPRINT"
 
 # Backoff parameters for MQTT reconnection.
-_BACKOFF_INITIAL_DELAY: float = 1.0    # seconds
+_BACKOFF_INITIAL_DELAY: float = 1.0  # seconds
 _BACKOFF_MULTIPLIER: float = 2.0
-_BACKOFF_MAX_DELAY: float = 30.0       # seconds
-_STALE_STATE_MAX_AGE: float = 60.0     # seconds — max age before cached state is "too old"
+_BACKOFF_MAX_DELAY: float = 30.0  # seconds
+_STALE_STATE_MAX_AGE: float = 60.0  # seconds — max age before cached state is "too old"
 
 
 # ---------------------------------------------------------------------------
 # Backoff tracking
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _BackoffState:
@@ -120,8 +122,9 @@ class _BackoffState:
         """Return ``True`` if the backoff cooldown period has not yet elapsed."""
         return time.monotonic() < self.next_retry_time
 
+
 # Mapping from Bambu ``gcode_state`` strings to :class:`PrinterStatus`.
-_STATE_MAP: Dict[str, PrinterStatus] = {
+_STATE_MAP: dict[str, PrinterStatus] = {
     "idle": PrinterStatus.IDLE,
     "finish": PrinterStatus.IDLE,
     "running": PrinterStatus.PRINTING,
@@ -136,9 +139,14 @@ _STATE_MAP: Dict[str, PrinterStatus] = {
 }
 
 # States that indicate a print job is active or starting.
-_PRINT_ACTIVE_STATES: frozenset[str] = frozenset({
-    "running", "prepare", "slicing", "init",
-})
+_PRINT_ACTIVE_STATES: frozenset[str] = frozenset(
+    {
+        "running",
+        "prepare",
+        "slicing",
+        "init",
+    }
+)
 
 
 def _normalize_fingerprint(value: str) -> str:
@@ -146,7 +154,7 @@ def _normalize_fingerprint(value: str) -> str:
     return "".join(ch for ch in value.lower() if ch in "0123456789abcdef")
 
 
-def _find_ffmpeg() -> Optional[str]:
+def _find_ffmpeg() -> str | None:
     """Find ffmpeg binary on PATH or common install locations."""
     path = shutil.which("ffmpeg")
     if path:
@@ -228,6 +236,7 @@ class _ImplicitFTP_TLS(ftplib.FTP_TLS):
 # Adapter
 # ---------------------------------------------------------------------------
 
+
 class BambuAdapter(PrinterAdapter):
     """Concrete :class:`PrinterAdapter` backed by Bambu Lab MQTT + FTPS.
 
@@ -263,8 +272,8 @@ class BambuAdapter(PrinterAdapter):
         access_code: str,
         serial: str,
         timeout: int = 10,
-        tls_mode: Optional[str] = None,
-        tls_fingerprint: Optional[str] = None,
+        tls_mode: str | None = None,
+        tls_fingerprint: str | None = None,
     ) -> None:
         if not host:
             raise ValueError("host must not be empty")
@@ -279,20 +288,14 @@ class BambuAdapter(PrinterAdapter):
         self._timeout = timeout
         configured_tls_mode = (tls_mode or os.environ.get(_TLS_MODE_ENV, _DEFAULT_TLS_MODE)).strip().lower()
         if configured_tls_mode not in _VALID_TLS_MODES:
-            raise ValueError(
-                f"tls_mode must be one of {sorted(_VALID_TLS_MODES)}, got {configured_tls_mode!r}"
-            )
+            raise ValueError(f"tls_mode must be one of {sorted(_VALID_TLS_MODES)}, got {configured_tls_mode!r}")
         self._tls_mode = configured_tls_mode
         configured_fp = tls_fingerprint or os.environ.get(_TLS_FINGERPRINT_ENV, "")
         self._tls_fingerprint = _normalize_fingerprint(configured_fp)
         if configured_fp and not self._tls_fingerprint:
-            raise ValueError(
-                f"tls_fingerprint must be a SHA-256 fingerprint (64 hex chars), got {configured_fp!r}"
-            )
+            raise ValueError(f"tls_fingerprint must be a SHA-256 fingerprint (64 hex chars), got {configured_fp!r}")
         if self._tls_fingerprint and len(self._tls_fingerprint) != 64:
-            raise ValueError(
-                f"tls_fingerprint must be a SHA-256 fingerprint (64 hex chars), got {configured_fp!r}"
-            )
+            raise ValueError(f"tls_fingerprint must be a SHA-256 fingerprint (64 hex chars), got {configured_fp!r}")
         self._pin_store_path = os.environ.get(_TLS_PIN_FILE_ENV, _DEFAULT_BAMBU_PIN_FILE)
 
         # MQTT topic names.
@@ -301,13 +304,13 @@ class BambuAdapter(PrinterAdapter):
 
         # State cache -- updated by MQTT messages.
         self._state_lock = threading.Lock()
-        self._last_status: Dict[str, Any] = {}
+        self._last_status: dict[str, Any] = {}
         self._last_state_time: float = 0.0  # monotonic time of last accepted update
         self._connected = False
         self._sequence_id = 0
 
         # MQTT client.
-        self._mqtt_client: Optional[mqtt.Client] = None
+        self._mqtt_client: mqtt.Client | None = None
         self._mqtt_connected = threading.Event()
 
         # Exponential backoff for reconnection attempts.
@@ -331,20 +334,20 @@ class BambuAdapter(PrinterAdapter):
             ctx.verify_mode = ssl.CERT_NONE
         return ctx
 
-    def _load_pins(self) -> Dict[str, str]:
+    def _load_pins(self) -> dict[str, str]:
         """Load persisted host->fingerprint pins from disk."""
         path = self._pin_store_path
         if not os.path.isfile(path):
             return {}
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, encoding="utf-8") as fh:
                 raw = json.load(fh)
         except Exception as exc:
             logger.warning("Failed to read Bambu TLS pin store %s: %s", path, exc)
             return {}
         if not isinstance(raw, dict):
             return {}
-        pins: Dict[str, str] = {}
+        pins: dict[str, str] = {}
         for host, fp in raw.items():
             host_key = self._host_key(str(host))
             normalized = _normalize_fingerprint(str(fp))
@@ -352,7 +355,7 @@ class BambuAdapter(PrinterAdapter):
                 pins[host_key] = normalized
         return pins
 
-    def _save_pins(self, pins: Dict[str, str]) -> None:
+    def _save_pins(self, pins: dict[str, str]) -> None:
         """Persist host->fingerprint pins to disk with restrictive perms."""
         path = self._pin_store_path
         pin_dir = os.path.dirname(path)
@@ -366,13 +369,11 @@ class BambuAdapter(PrinterAdapter):
                     os.chmod(pin_dir, 0o700)
             except OSError:
                 pass
-            try:
+            with contextlib.suppress(OSError):
                 os.chmod(path, 0o600)
-            except OSError:
-                pass
 
     @staticmethod
-    def _extract_socket_cert(sock_obj: Any) -> Optional[bytes]:
+    def _extract_socket_cert(sock_obj: Any) -> bytes | None:
         """Return peer certificate in DER format from an SSL socket-like object."""
         if sock_obj is None or not hasattr(sock_obj, "getpeercert"):
             return None
@@ -420,14 +421,12 @@ class BambuAdapter(PrinterAdapter):
                 actual_fp[:12],
             )
 
-    def _validate_peer_certificate(self, cert_bytes: Optional[bytes], *, transport: str) -> None:
+    def _validate_peer_certificate(self, cert_bytes: bytes | None, *, transport: str) -> None:
         """Validate peer certificate according to TLS mode and pin policy."""
         if self._tls_mode == _TLS_MODE_INSECURE:
             return
         if not cert_bytes:
-            raise PrinterError(
-                f"{transport} TLS handshake for {self._host} did not expose a peer certificate."
-            )
+            raise PrinterError(f"{transport} TLS handshake for {self._host} did not expose a peer certificate.")
         actual_fp = hashlib.sha256(cert_bytes).hexdigest()
         self._enforce_pin_policy(actual_fp, transport=transport)
 
@@ -583,10 +582,15 @@ class BambuAdapter(PrinterAdapter):
             self._connected = True
 
         # Request a full status dump.
-        self._publish_command({"pushing": {
-            "sequence_id": "0",
-            "command": "pushall",
-        }}, client=client)
+        self._publish_command(
+            {
+                "pushing": {
+                    "sequence_id": "0",
+                    "command": "pushall",
+                }
+            },
+            client=client,
+        )
 
     def _on_disconnect(
         self,
@@ -642,8 +646,7 @@ class BambuAdapter(PrinterAdapter):
                                     last_ts_float = None
                                 if last_ts_float is not None and msg_ts_float < last_ts_float:
                                     logger.debug(
-                                        "Discarding stale MQTT update "
-                                        "(msg_ts=%.0f < last_ts=%.0f)",
+                                        "Discarding stale MQTT update (msg_ts=%.0f < last_ts=%.0f)",
                                         msg_ts_float,
                                         last_ts_float,
                                     )
@@ -653,9 +656,9 @@ class BambuAdapter(PrinterAdapter):
 
     def _publish_command(
         self,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         *,
-        client: Optional[mqtt.Client] = None,
+        client: mqtt.Client | None = None,
     ) -> None:
         """Publish an MQTT command to the printer.
 
@@ -686,14 +689,16 @@ class BambuAdapter(PrinterAdapter):
         Raises:
             PrinterError: If the command fails.
         """
-        self._publish_command({
-            "print": {
-                "sequence_id": self._next_seq(),
-                "command": command,
+        self._publish_command(
+            {
+                "print": {
+                    "sequence_id": self._next_seq(),
+                    "command": command,
+                }
             }
-        })
+        )
 
-    def _get_cached_status(self) -> Dict[str, Any]:
+    def _get_cached_status(self) -> dict[str, Any]:
         """Get the latest status from the cache, requesting a refresh if stale.
 
         Returns a copy of the cached status dict.
@@ -708,12 +713,14 @@ class BambuAdapter(PrinterAdapter):
                 need_refresh = False
 
         if need_refresh:
-            self._publish_command({
-                "pushing": {
-                    "sequence_id": self._next_seq(),
-                    "command": "pushall",
+            self._publish_command(
+                {
+                    "pushing": {
+                        "sequence_id": self._next_seq(),
+                        "command": "pushall",
+                    }
                 }
-            })
+            )
             # Give the printer a moment to respond.
             time.sleep(min(2.0, self._timeout / 2))
 
@@ -733,7 +740,7 @@ class BambuAdapter(PrinterAdapter):
         Raises:
             PrinterError: If connection fails.
         """
-        ftp: Optional[ftplib.FTP_TLS] = None
+        ftp: ftplib.FTP_TLS | None = None
         try:
             ctx = self._build_tls_context()
 
@@ -748,10 +755,8 @@ class BambuAdapter(PrinterAdapter):
             return ftp
         except Exception as exc:
             if ftp is not None:
-                try:
+                with contextlib.suppress(Exception):
                     ftp.close()
-                except Exception:
-                    pass
             raise PrinterError(
                 f"FTPS connection to {self._host}:{_FTPS_PORT} failed: {exc}",
                 cause=exc,
@@ -761,7 +766,7 @@ class BambuAdapter(PrinterAdapter):
     # PrinterAdapter -- state queries
     # ------------------------------------------------------------------
 
-    def _build_state_from_cache(self, status: Dict[str, Any]) -> PrinterState:
+    def _build_state_from_cache(self, status: dict[str, Any]) -> PrinterState:
         """Convert a cached status dict into a :class:`PrinterState`."""
         gcode_state = status.get("gcode_state", "unknown")
         if not isinstance(gcode_state, str):
@@ -801,9 +806,7 @@ class BambuAdapter(PrinterAdapter):
                         age,
                     )
                     return self._build_state_from_cache(dict(self._last_status))
-            logger.debug(
-                "In backoff cooldown with no recent cached state; returning OFFLINE"
-            )
+            logger.debug("In backoff cooldown with no recent cached state; returning OFFLINE")
             return PrinterState(
                 connected=False,
                 state=PrinterStatus.OFFLINE,
@@ -833,13 +836,13 @@ class BambuAdapter(PrinterAdapter):
         mc_percent = status.get("mc_percent")
         mc_remaining = status.get("mc_remaining_time")  # minutes
 
-        completion: Optional[float] = None
+        completion: float | None = None
         if mc_percent is not None:
             completion = float(mc_percent)
 
         # Estimate elapsed time from completion and remaining.
-        print_time_seconds: Optional[int] = None
-        print_time_left_seconds: Optional[int] = None
+        print_time_seconds: int | None = None
+        print_time_left_seconds: int | None = None
 
         if mc_remaining is not None:
             print_time_left_seconds = int(mc_remaining) * 60
@@ -858,7 +861,7 @@ class BambuAdapter(PrinterAdapter):
             print_time_left_seconds=print_time_left_seconds,
         )
 
-    def list_files(self) -> List[PrinterFile]:
+    def list_files(self) -> list[PrinterFile]:
         """Return a list of files stored on the printer's SD card.
 
         Uses FTPS to list the ``/sdcard/`` directory.  Tries MLSD first
@@ -900,9 +903,9 @@ class BambuAdapter(PrinterAdapter):
             except Exception as exc:
                 logger.debug("Failed to quit FTP session after listing files: %s", exc)
 
-    def _list_via_mlsd(self, ftp: ftplib.FTP_TLS) -> List[PrinterFile]:
+    def _list_via_mlsd(self, ftp: ftplib.FTP_TLS) -> list[PrinterFile]:
         """List files using MLSD (rich metadata: name, size, modify time)."""
-        entries: List[PrinterFile] = []
+        entries: list[PrinterFile] = []
         for name, facts in ftp.mlsd("/sdcard/"):
             if name in (".", ".."):
                 continue
@@ -913,7 +916,7 @@ class BambuAdapter(PrinterAdapter):
             size = int(size_str) if size_str else None
 
             modify = facts.get("modify")
-            date_ts: Optional[int] = None
+            date_ts: int | None = None
             if modify:
                 try:
                     import datetime
@@ -923,35 +926,39 @@ class BambuAdapter(PrinterAdapter):
                 except (ValueError, OSError):
                     pass
 
-            entries.append(PrinterFile(
-                name=name,
-                path=f"/sdcard/{name}",
-                size_bytes=size,
-                date=date_ts,
-            ))
+            entries.append(
+                PrinterFile(
+                    name=name,
+                    path=f"/sdcard/{name}",
+                    size_bytes=size,
+                    date=date_ts,
+                )
+            )
         return entries
 
-    def _list_via_nlst(self, ftp: ftplib.FTP_TLS) -> List[PrinterFile]:
+    def _list_via_nlst(self, ftp: ftplib.FTP_TLS) -> list[PrinterFile]:
         """List files using NLST (filenames only, no metadata)."""
         names = ftp.nlst("/sdcard/")
-        entries: List[PrinterFile] = []
+        entries: list[PrinterFile] = []
         for raw_name in names:
             name = raw_name.rsplit("/", 1)[-1] if "/" in raw_name else raw_name
             if name in (".", ".."):
                 continue
-            entries.append(PrinterFile(
-                name=name,
-                path=f"/sdcard/{name}",
-                size_bytes=None,
-                date=None,
-            ))
+            entries.append(
+                PrinterFile(
+                    name=name,
+                    path=f"/sdcard/{name}",
+                    size_bytes=None,
+                    date=None,
+                )
+            )
         return entries
 
-    def _list_via_list(self, ftp: ftplib.FTP_TLS) -> List[PrinterFile]:
+    def _list_via_list(self, ftp: ftplib.FTP_TLS) -> list[PrinterFile]:
         """List files using LIST (raw text, parse filenames from output)."""
-        lines: List[str] = []
+        lines: list[str] = []
         ftp.retrlines("LIST /sdcard/", lines.append)
-        entries: List[PrinterFile] = []
+        entries: list[PrinterFile] = []
         for line in lines:
             parts = line.split()
             if not parts:
@@ -962,18 +969,18 @@ class BambuAdapter(PrinterAdapter):
             # Skip directories (Unix-style listing: first char is 'd').
             if line.startswith("d"):
                 continue
-            size: Optional[int] = None
+            size: int | None = None
             if len(parts) >= 5:
-                try:
+                with contextlib.suppress(ValueError):
                     size = int(parts[4])
-                except ValueError:
-                    pass
-            entries.append(PrinterFile(
-                name=name,
-                path=f"/sdcard/{name}",
-                size_bytes=size,
-                date=None,
-            ))
+            entries.append(
+                PrinterFile(
+                    name=name,
+                    path=f"/sdcard/{name}",
+                    size_bytes=size,
+                    date=None,
+                )
+            )
         return entries
 
     # ------------------------------------------------------------------
@@ -1032,7 +1039,9 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _wait_for_print_start(
-        self, timeout: float = 15.0, poll_interval: float = 1.0,
+        self,
+        timeout: float = 15.0,
+        poll_interval: float = 1.0,
     ) -> str:
         """Poll MQTT cache until printer enters a print-active state.
 
@@ -1069,49 +1078,49 @@ class BambuAdapter(PrinterAdapter):
 
         # Check if already in a print-active state (skip wait).
         with self._state_lock:
-            already_active = str(
-                self._last_status.get("gcode_state", "")
-            ).lower() in _PRINT_ACTIVE_STATES
+            already_active = str(self._last_status.get("gcode_state", "")).lower() in _PRINT_ACTIVE_STATES
 
         if basename.lower().endswith(".3mf"):
-            self._publish_command({
-                "print": {
-                    "sequence_id": self._next_seq(),
-                    "command": "project_file",
-                    "param": "Metadata/plate_1.gcode",
-                    "subtask_name": basename,
-                    "url": f"file:///sdcard/{basename}",
-                    "bed_type": "auto",
-                    "timelapse": False,
-                    "bed_leveling": True,
-                    "flow_cali": True,
-                    "vibration_cali": True,
-                    "layer_inspect": False,
-                    "use_ams": False,
-                    "ams_mapping": [0],
-                    "profile_id": "0",
-                    "project_id": "0",
-                    "subtask_id": "0",
-                    "task_id": "0",
+            self._publish_command(
+                {
+                    "print": {
+                        "sequence_id": self._next_seq(),
+                        "command": "project_file",
+                        "param": "Metadata/plate_1.gcode",
+                        "subtask_name": basename,
+                        "url": f"file:///sdcard/{basename}",
+                        "bed_type": "auto",
+                        "timelapse": False,
+                        "bed_leveling": True,
+                        "flow_cali": True,
+                        "vibration_cali": True,
+                        "layer_inspect": False,
+                        "use_ams": False,
+                        "ams_mapping": [0],
+                        "profile_id": "0",
+                        "project_id": "0",
+                        "subtask_id": "0",
+                        "task_id": "0",
+                    }
                 }
-            })
+            )
         else:
             # Raw G-code file.
             if file_name.startswith("/"):
                 path = os.path.normpath(file_name)
                 if not (path.startswith("/sdcard/") or path.startswith("/cache/")):
-                    raise PrinterError(
-                        f"File path must be under /sdcard/ or /cache/, got: {file_name!r}"
-                    )
+                    raise PrinterError(f"File path must be under /sdcard/ or /cache/, got: {file_name!r}")
             else:
                 path = f"/sdcard/{basename}"
-            self._publish_command({
-                "print": {
-                    "sequence_id": self._next_seq(),
-                    "command": "gcode_file",
-                    "param": path,
+            self._publish_command(
+                {
+                    "print": {
+                        "sequence_id": self._next_seq(),
+                        "command": "gcode_file",
+                        "param": path,
+                    }
                 }
-            })
+            )
 
         # Wait for MQTT confirmation unless already active.
         if not already_active:
@@ -1188,7 +1197,7 @@ class BambuAdapter(PrinterAdapter):
     # PrinterAdapter -- G-code
     # ------------------------------------------------------------------
 
-    def send_gcode(self, commands: List[str]) -> bool:
+    def send_gcode(self, commands: list[str]) -> bool:
         """Send G-code commands to the Bambu printer via MQTT.
 
         Joins commands with newlines and sends as a ``gcode_line`` command.
@@ -1203,13 +1212,15 @@ class BambuAdapter(PrinterAdapter):
             PrinterError: If sending fails.
         """
         script = "\n".join(commands)
-        self._publish_command({
-            "print": {
-                "sequence_id": self._next_seq(),
-                "command": "gcode_line",
-                "param": script,
+        self._publish_command(
+            {
+                "print": {
+                    "sequence_id": self._next_seq(),
+                    "command": "gcode_line",
+                    "param": script,
+                }
             }
-        })
+        )
         return True
 
     # ------------------------------------------------------------------
@@ -1237,9 +1248,7 @@ class BambuAdapter(PrinterAdapter):
         # Sanitise path — only allow files under /sdcard/ or /cache/
         safe_path = os.path.normpath(file_path)
         if not safe_path.startswith("/sdcard/") and not safe_path.startswith("/cache/"):
-            raise PrinterError(
-                f"File path must be under /sdcard/ or /cache/, got: {file_path!r}"
-            )
+            raise PrinterError(f"File path must be under /sdcard/ or /cache/, got: {file_path!r}")
 
         try:
             ftp.delete(safe_path)
@@ -1259,7 +1268,7 @@ class BambuAdapter(PrinterAdapter):
     # Webcam (optional)
     # ------------------------------------------------------------------
 
-    def get_snapshot(self) -> Optional[bytes]:
+    def get_snapshot(self) -> bytes | None:
         """Capture a webcam snapshot via the RTSP stream.
 
         Uses ``ffmpeg`` to grab a single JPEG frame from the printer's
@@ -1286,11 +1295,16 @@ class BambuAdapter(PrinterAdapter):
                 [
                     ffmpeg,
                     "-y",
-                    "-rtsp_transport", "tcp",
-                    "-i", stream_url,
-                    "-frames:v", "1",
-                    "-f", "image2",
-                    "-vcodec", "mjpeg",
+                    "-rtsp_transport",
+                    "tcp",
+                    "-i",
+                    stream_url,
+                    "-frames:v",
+                    "1",
+                    "-f",
+                    "image2",
+                    "-vcodec",
+                    "mjpeg",
                     "pipe:1",
                 ],
                 capture_output=True,
@@ -1312,12 +1326,9 @@ class BambuAdapter(PrinterAdapter):
                 "on the LAN."
             ) from exc
         except Exception as exc:
-            raise PrinterError(
-                f"Camera snapshot failed: {exc}. Check camera and network "
-                f"connectivity."
-            ) from exc
+            raise PrinterError(f"Camera snapshot failed: {exc}. Check camera and network connectivity.") from exc
 
-    def get_stream_url(self) -> Optional[str]:
+    def get_stream_url(self) -> str | None:
         """Return the RTSP stream URL for the Bambu printer's camera.
 
         Bambu printers expose a TLS-encrypted RTSP stream at

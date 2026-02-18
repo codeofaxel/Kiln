@@ -12,6 +12,7 @@ Precedence (highest first):
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
@@ -19,14 +20,23 @@ import stat
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import yaml
 
 logger = logging.getLogger(__name__)
 
 # Valid top-level keys in the config file.  Used for schema validation.
-_KNOWN_KEYS: set[str] = {"printers", "active_printer", "settings", "billing", "licensing", "trusted_printers", "autonomy", "monitoring"}
+_KNOWN_KEYS: set[str] = {
+    "printers",
+    "active_printer",
+    "settings",
+    "billing",
+    "licensing",
+    "trusted_printers",
+    "autonomy",
+    "monitoring",
+}
 
 
 def get_config_path() -> Path:
@@ -97,10 +107,7 @@ def _validate_printer_url(url: str, *, printer_type: str = "octoprint") -> tuple
 
     # Scheme check (already handled by _normalize_host, but be explicit)
     if not re.match(r"^https?://", cleaned, re.IGNORECASE):
-        warnings.append(
-            f"URL missing http:// or https:// scheme: {cleaned!r}. "
-            "Prepending http://."
-        )
+        warnings.append(f"URL missing http:// or https:// scheme: {cleaned!r}. Prepending http://.")
         cleaned = "http://" + cleaned
 
     # Strip trailing path separators (beyond the authority)
@@ -110,10 +117,7 @@ def _validate_printer_url(url: str, *, printer_type: str = "octoprint") -> tuple
     scheme_end = cleaned.index("://") + 3
     authority = cleaned[scheme_end:]
     if "//" in authority:
-        warnings.append(
-            f"URL contains double slashes in path: {cleaned!r}. "
-            "This may indicate a malformed URL."
-        )
+        warnings.append(f"URL contains double slashes in path: {cleaned!r}. This may indicate a malformed URL.")
 
     # Check for obviously bad patterns
     if " " in cleaned:
@@ -124,6 +128,7 @@ def _validate_printer_url(url: str, *, printer_type: str = "octoprint") -> tuple
     # Connectivity check (best-effort, does not block)
     try:
         import requests
+
         requests.head(cleaned, timeout=5, verify=False, allow_redirects=True)
     except ImportError:
         pass  # requests not available in this context
@@ -152,8 +157,7 @@ def _check_file_permissions(path: Path) -> None:
         mode = path.stat().st_mode
         if mode & (stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH):
             logger.warning(
-                "Config file %s has overly permissive permissions "
-                "(mode %04o). Recommended: chmod 600 %s",
+                "Config file %s has overly permissive permissions (mode %04o). Recommended: chmod 600 %s",
                 path,
                 stat.S_IMODE(mode),
                 path,
@@ -173,8 +177,7 @@ def _check_dir_permissions(dir_path: Path) -> None:
         dir_mode = stat.S_IMODE(dir_path.stat().st_mode)
         if dir_mode & 0o077:
             logger.warning(
-                "~/.kiln/ directory has overly permissive permissions "
-                "(mode %04o). Run 'chmod 700 ~/.kiln/' to fix.",
+                "~/.kiln/ directory has overly permissive permissions (mode %04o). Run 'chmod 700 ~/.kiln/' to fix.",
                 dir_mode,
             )
         dir_path.chmod(0o700)
@@ -182,7 +185,7 @@ def _check_dir_permissions(dir_path: Path) -> None:
         pass
 
 
-def _validate_config_schema(data: Dict[str, Any], path: Path) -> None:
+def _validate_config_schema(data: dict[str, Any], path: Path) -> None:
     """Log warnings for unknown or missing keys in the config file."""
     if not data:
         return
@@ -206,7 +209,7 @@ def _validate_config_schema(data: Dict[str, Any], path: Path) -> None:
         )
 
 
-def _read_config_file(path: Path) -> Dict[str, Any]:
+def _read_config_file(path: Path) -> dict[str, Any]:
     """Read and parse the YAML config file; return ``{}`` on any failure."""
     if not path.is_file():
         return {}
@@ -221,8 +224,7 @@ def _read_config_file(path: Path) -> Dict[str, Any]:
         return data
     except yaml.YAMLError as exc:
         logger.warning(
-            "Config file %s has invalid YAML: %s — "
-            "run 'kiln setup' to regenerate, or fix manually.",
+            "Config file %s has invalid YAML: %s — run 'kiln setup' to regenerate, or fix manually.",
             path,
             exc,
         )
@@ -232,7 +234,7 @@ def _read_config_file(path: Path) -> Dict[str, Any]:
         return {}
 
 
-def _write_config_file(path: Path, data: Dict[str, Any]) -> None:
+def _write_config_file(path: Path, data: dict[str, Any]) -> None:
     """Write *data* to the YAML config file, creating dirs as needed.
 
     Sets file permissions to ``0600`` (owner read/write only) since the
@@ -244,17 +246,15 @@ def _write_config_file(path: Path, data: Dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as fh:
         yaml.safe_dump(data, fh, default_flow_style=False, sort_keys=False)
     if sys.platform != "win32":
-        try:
+        with contextlib.suppress(OSError):
             path.chmod(0o600)
-        except OSError:
-            pass
 
 
 def load_printer_config(
     printer_name: str | None = None,
     *,
     config_path: Path | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Resolve the configuration for a single printer.
 
     Resolution order:
@@ -351,14 +351,11 @@ def save_printer(
 
     cleaned_host, url_warnings = _validate_printer_url(host, printer_type=printer_type)
 
-    entry: Dict[str, Any] = {
+    entry: dict[str, Any] = {
         "type": printer_type,
         "host": cleaned_host,
     }
-    if printer_type == "octoprint":
-        if api_key:
-            entry["api_key"] = api_key
-    elif printer_type == "moonraker":
+    if printer_type == "octoprint" or printer_type == "moonraker":
         if api_key:
             entry["api_key"] = api_key
     elif printer_type == "bambu":
@@ -404,10 +401,7 @@ def set_active_printer(
     printers = raw.get("printers", {})
 
     if name not in printers:
-        raise ValueError(
-            f"Printer {name!r} not found.  "
-            f"Available: {', '.join(printers.keys()) or '(none)'}"
-        )
+        raise ValueError(f"Printer {name!r} not found.  Available: {', '.join(printers.keys()) or '(none)'}")
 
     raw["active_printer"] = name
     _write_config_file(path, raw)
@@ -416,23 +410,25 @@ def set_active_printer(
 def list_printers(
     *,
     config_path: Path | None = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Return a list of saved printers with name, type, host, active flag."""
     path = config_path or get_config_path()
     raw = _read_config_file(path)
     printers = raw.get("printers", {})
     active = raw.get("active_printer", "")
 
-    result: List[Dict[str, Any]] = []
+    result: list[dict[str, Any]] = []
     for name, cfg in printers.items():
         if not isinstance(cfg, dict):
             continue
-        result.append({
-            "name": name,
-            "type": cfg.get("type", "unknown"),
-            "host": cfg.get("host", ""),
-            "active": name == active,
-        })
+        result.append(
+            {
+                "name": name,
+                "type": cfg.get("type", "unknown"),
+                "host": cfg.get("host", ""),
+                "active": name == active,
+            }
+        )
     return result
 
 
@@ -465,7 +461,7 @@ def remove_printer(
 # ---------------------------------------------------------------------------
 
 
-def validate_printer_config(cfg: Dict[str, Any]) -> Tuple[bool, str | None]:
+def validate_printer_config(cfg: dict[str, Any]) -> tuple[bool, str | None]:
     """Check that a printer config dict has the required fields.
 
     Returns ``(True, None)`` or ``(False, error_message)``.
@@ -478,9 +474,8 @@ def validate_printer_config(cfg: Dict[str, Any]) -> Tuple[bool, str | None]:
     if not host:
         return False, "host is required"
 
-    if ptype == "octoprint":
-        if not cfg.get("api_key"):
-            return False, "api_key is required for OctoPrint printers"
+    if ptype == "octoprint" and not cfg.get("api_key"):
+        return False, "api_key is required for OctoPrint printers"
 
     if ptype == "bambu":
         if not cfg.get("access_code"):
@@ -499,7 +494,7 @@ def validate_printer_config(cfg: Dict[str, Any]) -> Tuple[bool, str | None]:
 def get_billing_config(
     *,
     config_path: Path | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return the ``billing`` section of the config file.
 
     Returns an empty dict if the section doesn't exist.  Environment
@@ -524,22 +519,18 @@ def get_billing_config(
     limits = billing.setdefault("spend_limits", {})
     env_max = os.environ.get("KILN_BILLING_MAX_PER_ORDER")
     if env_max:
-        try:
+        with contextlib.suppress(ValueError):
             limits["max_per_order_usd"] = float(env_max)
-        except ValueError:
-            pass
     env_cap = os.environ.get("KILN_BILLING_MONTHLY_CAP")
     if env_cap:
-        try:
+        with contextlib.suppress(ValueError):
             limits["monthly_cap_usd"] = float(env_cap)
-        except ValueError:
-            pass
 
     return billing
 
 
 def save_billing_config(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     *,
     config_path: Path | None = None,
 ) -> None:
@@ -575,7 +566,7 @@ def get_or_create_user_id(
 def get_trusted_printers(
     *,
     config_path: Path | None = None,
-) -> List[str]:
+) -> list[str]:
     """Return the list of trusted printer hostnames/IPs.
 
     Checks ``KILN_TRUSTED_PRINTERS`` env var first (comma-separated).

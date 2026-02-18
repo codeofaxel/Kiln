@@ -18,8 +18,7 @@ import os
 import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -77,10 +76,10 @@ class GenerationJob:
     progress: int = 0
     created_at: float = 0.0
     format: str = "stl"
-    style: Optional[str] = None
-    error: Optional[str] = None
+    style: str | None = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["status"] = self.status.value
         return data
@@ -97,7 +96,7 @@ class GenerationResult:
     file_size_bytes: int
     prompt: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -106,14 +105,14 @@ class MeshValidationResult:
     """Outcome of mesh validation checks."""
 
     valid: bool
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     triangle_count: int = 0
     vertex_count: int = 0
     is_manifold: bool = False
-    bounding_box: Optional[Dict[str, float]] = None
+    bounding_box: dict[str, float] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -197,7 +196,7 @@ class GenerationProvider(ABC):
             GenerationError: If the download fails or the job is not complete.
         """
 
-    def list_styles(self) -> List[str]:
+    def list_styles(self) -> list[str]:
         """Return available style options for this provider.
 
         Returns an empty list by default.  Override in providers that

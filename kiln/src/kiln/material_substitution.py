@@ -25,12 +25,12 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
+
 
 class SubstitutionReason(enum.Enum):
     """Reason for seeking a material substitution."""
@@ -46,6 +46,7 @@ class SubstitutionReason(enum.Enum):
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class MaterialSubstitution:
@@ -65,11 +66,11 @@ class MaterialSubstitution:
     substitute_material: str
     device_type: str
     compatibility_score: float
-    reasons: List[SubstitutionReason] = field(default_factory=list)
+    reasons: list[SubstitutionReason] = field(default_factory=list)
     trade_offs: str = ""
     cost_delta_pct: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "original_material": self.original_material,
@@ -86,13 +87,14 @@ class MaterialSubstitution:
 # Internal substitution rule type
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class _SubRule:
     """Internal representation of a single directional substitution rule."""
 
     substitute: str
     score: float
-    reasons: List[SubstitutionReason]
+    reasons: list[SubstitutionReason]
     trade_offs: str
     cost_delta_pct: float
 
@@ -100,6 +102,7 @@ class _SubRule:
 # ---------------------------------------------------------------------------
 # Substitution matrix
 # ---------------------------------------------------------------------------
+
 
 class SubstitutionMatrix:
     """Knowledge base of FDM filament substitution rules.
@@ -111,7 +114,7 @@ class SubstitutionMatrix:
 
     def __init__(self) -> None:
         # _rules[device_type][original_material] -> list[_SubRule]
-        self._rules: Dict[str, Dict[str, List[_SubRule]]] = {}
+        self._rules: dict[str, dict[str, list[_SubRule]]] = {}
         self._build_builtin_rules()
 
     # -------------------------------------------------------------------
@@ -124,7 +127,7 @@ class SubstitutionMatrix:
         original: str,
         substitute: str,
         score: float,
-        reasons: List[SubstitutionReason],
+        reasons: list[SubstitutionReason],
         trade_offs: str,
         cost_delta_pct: float,
     ) -> None:
@@ -134,13 +137,15 @@ class SubstitutionMatrix:
             self._rules[dt] = {}
         if original not in self._rules[dt]:
             self._rules[dt][original] = []
-        self._rules[dt][original].append(_SubRule(
-            substitute=substitute,
-            score=score,
-            reasons=reasons,
-            trade_offs=trade_offs,
-            cost_delta_pct=cost_delta_pct,
-        ))
+        self._rules[dt][original].append(
+            _SubRule(
+                substitute=substitute,
+                score=score,
+                reasons=reasons,
+                trade_offs=trade_offs,
+                cost_delta_pct=cost_delta_pct,
+            )
+        )
 
     def _add_bidirectional(
         self,
@@ -148,19 +153,29 @@ class SubstitutionMatrix:
         mat_a: str,
         mat_b: str,
         score: float,
-        reasons: List[SubstitutionReason],
+        reasons: list[SubstitutionReason],
         trade_offs_a_to_b: str,
         trade_offs_b_to_a: str,
         cost_delta_pct_a_to_b: float,
     ) -> None:
         """Register a bidirectional substitution (A <-> B)."""
         self._add_rule(
-            device_type, mat_a, mat_b, score, reasons,
-            trade_offs_a_to_b, cost_delta_pct_a_to_b,
+            device_type,
+            mat_a,
+            mat_b,
+            score,
+            reasons,
+            trade_offs_a_to_b,
+            cost_delta_pct_a_to_b,
         )
         self._add_rule(
-            device_type, mat_b, mat_a, score, reasons,
-            trade_offs_b_to_a, -cost_delta_pct_a_to_b,
+            device_type,
+            mat_b,
+            mat_a,
+            score,
+            reasons,
+            trade_offs_b_to_a,
+            -cost_delta_pct_a_to_b,
         )
 
     def _build_builtin_rules(self) -> None:
@@ -170,10 +185,13 @@ class SubstitutionMatrix:
         # PLA family
         # ---------------------------------------------------------------
         self._add_bidirectional(
-            "fdm", "pla", "pla_plus",
+            "fdm",
+            "pla",
+            "pla_plus",
             score=0.95,
             reasons=[
-                SubstitutionReason.UNAVAILABLE, SubstitutionReason.STRENGTH,
+                SubstitutionReason.UNAVAILABLE,
+                SubstitutionReason.STRENGTH,
             ],
             trade_offs_a_to_b=(
                 "PLA+ is tougher with better impact resistance and "
@@ -187,31 +205,35 @@ class SubstitutionMatrix:
         )
 
         self._add_bidirectional(
-            "fdm", "pla", "silk_pla",
+            "fdm",
+            "pla",
+            "silk_pla",
             score=0.90,
             reasons=[
-                SubstitutionReason.UNAVAILABLE, SubstitutionReason.FINISH_QUALITY,
+                SubstitutionReason.UNAVAILABLE,
+                SubstitutionReason.FINISH_QUALITY,
             ],
             trade_offs_a_to_b=(
                 "Silk PLA produces a glossy, metallic surface finish "
                 "but is slightly weaker and more brittle than standard PLA"
             ),
             trade_offs_b_to_a=(
-                "Standard PLA is stronger and more predictable to print, "
-                "but lacks the decorative sheen of Silk PLA"
+                "Standard PLA is stronger and more predictable to print, but lacks the decorative sheen of Silk PLA"
             ),
             cost_delta_pct_a_to_b=15.0,
         )
 
         self._add_bidirectional(
-            "fdm", "wood_pla", "pla",
+            "fdm",
+            "wood_pla",
+            "pla",
             score=0.85,
             reasons=[
-                SubstitutionReason.UNAVAILABLE, SubstitutionReason.FINISH_QUALITY,
+                SubstitutionReason.UNAVAILABLE,
+                SubstitutionReason.FINISH_QUALITY,
             ],
             trade_offs_a_to_b=(
-                "Standard PLA is stronger and easier to print, but "
-                "lacks the wood-grain texture and matte aesthetic"
+                "Standard PLA is stronger and easier to print, but lacks the wood-grain texture and matte aesthetic"
             ),
             trade_offs_b_to_a=(
                 "Wood PLA adds a natural wood-like texture and appearance, "
@@ -224,10 +246,13 @@ class SubstitutionMatrix:
         # PLA <-> PETG (cross-family, moderate compatibility)
         # ---------------------------------------------------------------
         self._add_bidirectional(
-            "fdm", "pla", "petg",
+            "fdm",
+            "pla",
+            "petg",
             score=0.75,
             reasons=[
-                SubstitutionReason.UNAVAILABLE, SubstitutionReason.STRENGTH,
+                SubstitutionReason.UNAVAILABLE,
+                SubstitutionReason.STRENGTH,
                 SubstitutionReason.HEAT_RESISTANCE,
             ],
             trade_offs_a_to_b=(
@@ -236,8 +261,7 @@ class SubstitutionMatrix:
                 "higher temps, and has a glossier finish"
             ),
             trade_offs_b_to_a=(
-                "PLA is easier to print with sharper detail and more "
-                "color options, but is brittle and softens at ~60C"
+                "PLA is easier to print with sharper detail and more color options, but is brittle and softens at ~60C"
             ),
             cost_delta_pct_a_to_b=15.0,
         )
@@ -246,10 +270,13 @@ class SubstitutionMatrix:
         # PLA <-> ABS (cross-family, low compatibility)
         # ---------------------------------------------------------------
         self._add_bidirectional(
-            "fdm", "pla", "abs",
+            "fdm",
+            "pla",
+            "abs",
             score=0.55,
             reasons=[
-                SubstitutionReason.UNAVAILABLE, SubstitutionReason.STRENGTH,
+                SubstitutionReason.UNAVAILABLE,
+                SubstitutionReason.STRENGTH,
                 SubstitutionReason.HEAT_RESISTANCE,
             ],
             trade_offs_a_to_b=(
@@ -268,7 +295,9 @@ class SubstitutionMatrix:
         # ABS <-> ASA
         # ---------------------------------------------------------------
         self._add_bidirectional(
-            "fdm", "abs", "asa",
+            "fdm",
+            "abs",
+            "asa",
             score=0.90,
             reasons=[
                 SubstitutionReason.UNAVAILABLE,
@@ -291,10 +320,13 @@ class SubstitutionMatrix:
         # PETG <-> ABS
         # ---------------------------------------------------------------
         self._add_bidirectional(
-            "fdm", "petg", "abs",
+            "fdm",
+            "petg",
+            "abs",
             score=0.70,
             reasons=[
-                SubstitutionReason.UNAVAILABLE, SubstitutionReason.STRENGTH,
+                SubstitutionReason.UNAVAILABLE,
+                SubstitutionReason.STRENGTH,
                 SubstitutionReason.HEAT_RESISTANCE,
             ],
             trade_offs_a_to_b=(
@@ -314,10 +346,13 @@ class SubstitutionMatrix:
         # PETG <-> Nylon
         # ---------------------------------------------------------------
         self._add_bidirectional(
-            "fdm", "petg", "nylon",
+            "fdm",
+            "petg",
+            "nylon",
             score=0.60,
             reasons=[
-                SubstitutionReason.UNAVAILABLE, SubstitutionReason.STRENGTH,
+                SubstitutionReason.UNAVAILABLE,
+                SubstitutionReason.STRENGTH,
             ],
             trade_offs_a_to_b=(
                 "Nylon is significantly stronger with excellent wear "
@@ -336,10 +371,13 @@ class SubstitutionMatrix:
         # Flex materials: TPU <-> TPE
         # ---------------------------------------------------------------
         self._add_bidirectional(
-            "fdm", "tpu", "tpe",
+            "fdm",
+            "tpu",
+            "tpe",
             score=0.85,
             reasons=[
-                SubstitutionReason.UNAVAILABLE, SubstitutionReason.STRENGTH,
+                SubstitutionReason.UNAVAILABLE,
+                SubstitutionReason.STRENGTH,
                 SubstitutionReason.FINISH_QUALITY,
             ],
             trade_offs_a_to_b=(
@@ -359,10 +397,13 @@ class SubstitutionMatrix:
         # Carbon fiber composites
         # ---------------------------------------------------------------
         self._add_bidirectional(
-            "fdm", "cf_pla", "cf_petg",
+            "fdm",
+            "cf_pla",
+            "cf_petg",
             score=0.80,
             reasons=[
-                SubstitutionReason.UNAVAILABLE, SubstitutionReason.STRENGTH,
+                SubstitutionReason.UNAVAILABLE,
+                SubstitutionReason.STRENGTH,
                 SubstitutionReason.HEAT_RESISTANCE,
             ],
             trade_offs_a_to_b=(
@@ -387,9 +428,9 @@ class SubstitutionMatrix:
         material: str,
         device_type: str,
         *,
-        reason: Optional[SubstitutionReason] = None,
+        reason: SubstitutionReason | None = None,
         min_score: float = 0.5,
-    ) -> List[MaterialSubstitution]:
+    ) -> list[MaterialSubstitution]:
         """Find substitute filaments for a given original.
 
         :param material: Original material identifier.
@@ -406,21 +447,23 @@ class SubstitutionMatrix:
         dt_rules = self._rules.get(dt, {})
         rules = dt_rules.get(mat, [])
 
-        results: List[MaterialSubstitution] = []
+        results: list[MaterialSubstitution] = []
         for rule in rules:
             if rule.score < min_score:
                 continue
             if reason is not None and reason not in rule.reasons:
                 continue
-            results.append(MaterialSubstitution(
-                original_material=mat,
-                substitute_material=rule.substitute,
-                device_type=dt,
-                compatibility_score=rule.score,
-                reasons=list(rule.reasons),
-                trade_offs=rule.trade_offs,
-                cost_delta_pct=rule.cost_delta_pct,
-            ))
+            results.append(
+                MaterialSubstitution(
+                    original_material=mat,
+                    substitute_material=rule.substitute,
+                    device_type=dt,
+                    compatibility_score=rule.score,
+                    reasons=list(rule.reasons),
+                    trade_offs=rule.trade_offs,
+                    cost_delta_pct=rule.cost_delta_pct,
+                )
+            )
 
         results.sort(key=lambda s: s.compatibility_score, reverse=True)
         return results
@@ -450,7 +493,7 @@ class SubstitutionMatrix:
         self,
         material: str,
         device_type: str,
-    ) -> Optional[MaterialSubstitution]:
+    ) -> MaterialSubstitution | None:
         """Return the highest-scored substitute for a filament.
 
         :param material: Original material identifier.
@@ -466,7 +509,7 @@ class SubstitutionMatrix:
 # Lazy singleton
 # ---------------------------------------------------------------------------
 
-_matrix_instance: Optional[SubstitutionMatrix] = None
+_matrix_instance: SubstitutionMatrix | None = None
 
 
 def get_substitution_matrix() -> SubstitutionMatrix:
@@ -490,13 +533,14 @@ def _reset_singleton() -> None:
 # Module-level convenience functions
 # ---------------------------------------------------------------------------
 
+
 def find_substitutes(
     material: str,
     device_type: str,
     *,
-    reason: Optional[SubstitutionReason] = None,
+    reason: SubstitutionReason | None = None,
     min_score: float = 0.5,
-) -> List[MaterialSubstitution]:
+) -> list[MaterialSubstitution]:
     """Find substitute filaments (delegates to the singleton matrix).
 
     :param material: Original material identifier.
@@ -506,14 +550,17 @@ def find_substitutes(
     :returns: List of :class:`MaterialSubstitution` sorted by score.
     """
     return get_substitution_matrix().find_substitutes(
-        material, device_type, reason=reason, min_score=min_score,
+        material,
+        device_type,
+        reason=reason,
+        min_score=min_score,
     )
 
 
 def get_best_substitute(
     material: str,
     device_type: str,
-) -> Optional[MaterialSubstitution]:
+) -> MaterialSubstitution | None:
     """Return the best substitute for a filament (delegates to singleton).
 
     :param material: Original material identifier.

@@ -1,0 +1,368 @@
+---
+import DocsLayout from '../layouts/DocsLayout.astro';
+import TOC from '../components/TOC.astro';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { marked } from 'marked';
+
+// Read the litepaper markdown at build time
+const mdPath = resolve(process.cwd(), '..', 'LITEPAPER.md');
+let rawMd = readFileSync(mdPath, 'utf-8');
+
+// Strip the centered logo image block and the h1 title + version line
+rawMd = rawMd.replace(/<p align="center">[\s\S]*?<\/p>\s*/, '');
+rawMd = rawMd.replace(/^# Kiln\s*\n*/m, '');
+rawMd = rawMd.replace(/^### Litepaper.*\n+---\s*\n*/m, '');
+
+// Custom renderer to generate heading IDs and collect headings for TOC
+interface Heading {
+  level: number;
+  text: string;
+  id: string;
+}
+
+const headings: Heading[] = [];
+
+const renderer = new marked.Renderer();
+renderer.heading = function({ tokens, depth }: { tokens: any[]; depth: number }) {
+  const text = this.parser.parseInline(tokens);
+  const id = text
+    .replace(/<[^>]*>/g, '')
+    .toLowerCase()
+    .replace(/[^\w]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+
+  if (depth === 2 || depth === 3) {
+    const cleanText = text.replace(/^\d+(\.\d+)*\.?\s*/, '');
+    headings.push({ level: depth, text: cleanText, id });
+  }
+
+  return `<h${depth} id="${id}">${text}</h${depth}>`;
+};
+
+marked.setOptions({ renderer });
+const htmlContent = await marked.parse(rawMd);
+---
+
+<DocsLayout
+  title="Kiln Litepaper — Non-Technical Overview"
+  description="A non-technical overview of Kiln, the open-source infrastructure that lets AI agents safely control 3D printers."
+  current="litepaper"
+>
+  <!-- Page Header -->
+  <header class="lp-header">
+    <a href="/" class="lp-breadcrumb">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <polyline points="15 18 9 12 15 6" />
+      </svg>
+      Home
+    </a>
+    <div class="lp-header-badge">Litepaper</div>
+    <h1 class="lp-title">Kiln: AI-Powered 3D Printing Infrastructure</h1>
+    <p class="lp-subtitle">Non-technical overview &mdash; February 2026</p>
+  </header>
+
+  <!-- Two-column layout -->
+  <div class="lp-layout">
+    <TOC headings={headings} />
+    <article class="lp-content" set:html={htmlContent} />
+  </div>
+</DocsLayout>
+
+<style>
+  /* ── Header ── */
+  .lp-header {
+    padding: 48px 0 40px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 48px;
+  }
+
+  .lp-breadcrumb {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+    margin-bottom: 20px;
+  }
+
+  .lp-breadcrumb:hover {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .lp-header-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    background: var(--accent-glow);
+    border: 1px solid rgba(255, 107, 43, 0.25);
+    padding: 4px 12px;
+    border-radius: 20px;
+    margin-bottom: 16px;
+  }
+
+  .lp-title {
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-bottom: 12px;
+    max-width: 720px;
+  }
+
+  .lp-subtitle {
+    font-size: 15px;
+    color: var(--text-muted);
+  }
+
+  /* ── Layout ── */
+  .lp-layout {
+    display: flex;
+    gap: 48px;
+    padding-bottom: 80px;
+    align-items: flex-start;
+  }
+
+  /* ── Article Prose ── */
+  .lp-content {
+    flex: 1;
+    min-width: 0;
+    max-width: 720px;
+    font-size: 17px;
+    line-height: 1.8;
+    color: var(--text);
+  }
+
+  /* Headings */
+  .lp-content :global(h2) {
+    font-size: 24px;
+    font-weight: 700;
+    margin-top: 56px;
+    margin-bottom: 20px;
+    padding-top: 32px;
+    border-top: 1px solid var(--border);
+    scroll-margin-top: 100px;
+  }
+
+  .lp-content :global(h2:first-child) {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .lp-content :global(h3) {
+    font-size: 19px;
+    font-weight: 600;
+    margin-top: 40px;
+    margin-bottom: 16px;
+    padding-left: 16px;
+    border-left: 3px solid var(--accent);
+    scroll-margin-top: 100px;
+  }
+
+  .lp-content :global(h4) {
+    font-size: 16px;
+    font-weight: 600;
+    margin-top: 32px;
+    margin-bottom: 12px;
+    scroll-margin-top: 100px;
+  }
+
+  /* Paragraphs */
+  .lp-content :global(p) {
+    margin-bottom: 20px;
+  }
+
+  /* Bold/Strong text */
+  .lp-content :global(strong) {
+    font-weight: 600;
+    color: #fff;
+  }
+
+  /* Links */
+  .lp-content :global(a) {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: rgba(255, 107, 43, 0.3);
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.15s;
+  }
+
+  .lp-content :global(a:hover) {
+    text-decoration-color: var(--accent);
+  }
+
+  /* Lists */
+  .lp-content :global(ul),
+  .lp-content :global(ol) {
+    margin-bottom: 20px;
+    padding-left: 24px;
+  }
+
+  .lp-content :global(li) {
+    margin-bottom: 8px;
+  }
+
+  .lp-content :global(li > ul),
+  .lp-content :global(li > ol) {
+    margin-top: 8px;
+    margin-bottom: 8px;
+  }
+
+  /* Code inline */
+  .lp-content :global(code) {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    border-radius: 4px;
+    color: #ccc;
+  }
+
+  /* Code blocks */
+  .lp-content :global(pre) {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    margin: 24px 0;
+  }
+
+  .lp-content :global(pre code) {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+    color: var(--text);
+    border-radius: 0;
+  }
+
+  /* Tables */
+  .lp-content :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 24px 0;
+    font-size: 15px;
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .lp-content :global(thead) {
+    background: var(--bg-card);
+  }
+
+  .lp-content :global(th) {
+    text-align: left;
+    font-weight: 600;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    white-space: nowrap;
+    color: #fff;
+    font-size: 14px;
+  }
+
+  .lp-content :global(td) {
+    padding: 10px 16px;
+    border: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  .lp-content :global(tr:nth-child(even)) {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .lp-content :global(tr:hover) {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  /* Blockquotes */
+  .lp-content :global(blockquote) {
+    margin: 24px 0;
+    padding: 16px 24px;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-glow);
+    border-radius: 0 8px 8px 0;
+    font-style: italic;
+    color: var(--text-muted);
+  }
+
+  .lp-content :global(blockquote p) {
+    margin-bottom: 0;
+  }
+
+  .lp-content :global(blockquote p + p) {
+    margin-top: 12px;
+  }
+
+  /* Horizontal rules */
+  .lp-content :global(hr) {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 48px 0;
+  }
+
+  /* Emphasis/italic */
+  .lp-content :global(em) {
+    color: var(--text-muted);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .lp-header {
+      padding: 32px 0 28px;
+      margin-bottom: 32px;
+    }
+
+    .lp-title {
+      font-size: 24px;
+    }
+
+    .lp-layout {
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .lp-content {
+      font-size: 16px;
+      max-width: 100%;
+    }
+
+    .lp-content :global(h2) {
+      font-size: 20px;
+      margin-top: 40px;
+      padding-top: 24px;
+    }
+
+    .lp-content :global(h3) {
+      font-size: 17px;
+      margin-top: 32px;
+    }
+
+    .lp-content :global(pre) {
+      padding: 16px;
+      font-size: 12px;
+      border-radius: 8px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .lp-title {
+      font-size: 21px;
+    }
+
+    .lp-content {
+      font-size: 15px;
+      line-height: 1.7;
+    }
+  }
+</style>

@@ -12,7 +12,7 @@ import json
 import math
 from datetime import datetime
 from io import StringIO
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 try:
     from rich.console import Console
@@ -30,7 +30,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
-def format_time(seconds: Optional[Union[int, float]]) -> str:
+def format_time(seconds: int | float | None) -> str:
     """Convert seconds to ``Xh Ym Zs``."""
     if seconds is None or seconds < 0:
         return "N/A"
@@ -46,7 +46,7 @@ def format_time(seconds: Optional[Union[int, float]]) -> str:
     return " ".join(parts)
 
 
-def format_bytes(size_bytes: Optional[Union[int, float]]) -> str:
+def format_bytes(size_bytes: int | float | None) -> str:
     """Convert bytes to ``1.2 MB``."""
     if size_bytes is None or size_bytes < 0:
         return "N/A"
@@ -54,15 +54,15 @@ def format_bytes(size_bytes: Optional[Union[int, float]]) -> str:
         return "0 B"
     units = ("B", "KB", "MB", "GB", "TB")
     exponent = min(int(math.log(size_bytes, 1024)), len(units) - 1)
-    value = size_bytes / (1024 ** exponent)
+    value = size_bytes / (1024**exponent)
     if exponent == 0:
         return f"{int(value)} B"
     return f"{value:.1f} {units[exponent]}"
 
 
 def format_temp(
-    actual: Optional[float],
-    target: Optional[float],
+    actual: float | None,
+    target: float | None,
 ) -> str:
     """Format temperatures like ``214.8°C / 220.0°C``."""
     actual_str = f"{actual:.1f}\u00b0C" if actual is not None else "N/A"
@@ -70,7 +70,7 @@ def format_temp(
     return f"{actual_str} \u2192 {target_str}"
 
 
-def progress_bar(completion: Optional[float], width: int = 20) -> str:
+def progress_bar(completion: float | None, width: int = 20) -> str:
     """ASCII progress bar: ``[████████░░░░] 42.3%``."""
     if completion is None:
         completion = 0.0
@@ -98,14 +98,14 @@ def _render(renderable: Any) -> str:
 
 def format_response(
     status: str,
-    data: Optional[Dict[str, Any]] = None,
-    error: Optional[Dict[str, Any]] = None,
+    data: dict[str, Any] | None = None,
+    error: dict[str, Any] | None = None,
     *,
     json_mode: bool = False,
 ) -> str:
     """Build a standard ``{status, data, error}`` response."""
     if json_mode:
-        envelope: Dict[str, Any] = {"status": status}
+        envelope: dict[str, Any] = {"status": status}
         if data is not None:
             envelope["data"] = data
         if error is not None:
@@ -152,11 +152,11 @@ def format_error(
 
 
 def format_status(
-    state: Dict[str, Any],
-    job: Dict[str, Any],
+    state: dict[str, Any],
+    job: dict[str, Any],
     *,
     json_mode: bool = False,
-    extra: Dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> str:
     """Format printer state + job progress.
 
@@ -165,7 +165,7 @@ def format_status(
     the top-level ``data`` dict in JSON mode.
     """
     if json_mode:
-        data: Dict[str, Any] = {"printer": state, "job": job}
+        data: dict[str, Any] = {"printer": state, "job": job}
         if extra:
             data.update(extra)
         return json.dumps(
@@ -190,8 +190,9 @@ def format_status(
         table.add_column("Key", style="bold cyan", no_wrap=True)
         table.add_column("Value")
 
-        color = {"idle": "green", "printing": "yellow", "paused": "yellow",
-                 "error": "red", "offline": "red"}.get(state_text, "white")
+        color = {"idle": "green", "printing": "yellow", "paused": "yellow", "error": "red", "offline": "red"}.get(
+            state_text, "white"
+        )
         table.add_row("State", f"[{color}]{state_text}[/{color}]")
         table.add_row("Connected", "yes" if connected else "[red]no[/red]")
         table.add_row("Hotend", format_temp(tool_actual, tool_target))
@@ -227,7 +228,7 @@ def format_status(
 
 
 def format_files(
-    files: List[Dict[str, Any]],
+    files: list[dict[str, Any]],
     *,
     json_mode: bool = False,
 ) -> str:
@@ -292,7 +293,7 @@ def format_files(
 
 def format_action(
     action: str,
-    result: Dict[str, Any],
+    result: dict[str, Any],
     *,
     json_mode: bool = False,
 ) -> str:
@@ -324,8 +325,7 @@ def format_action(
         border, text_style = "red", "bold red"
 
     if RICH_AVAILABLE:
-        return _render(Panel(Text(message, style=text_style),
-                             title=action.capitalize(), border_style=border))
+        return _render(Panel(Text(message, style=text_style), title=action.capitalize(), border_style=border))
     return message
 
 
@@ -335,7 +335,7 @@ def format_action(
 
 
 def format_printers(
-    printers: List[Dict[str, Any]],
+    printers: list[dict[str, Any]],
     *,
     json_mode: bool = False,
 ) -> str:
@@ -378,7 +378,7 @@ def format_printers(
 
 
 def format_history(
-    jobs: List[Dict[str, Any]],
+    jobs: list[dict[str, Any]],
     *,
     json_mode: bool = False,
 ) -> str:
@@ -409,9 +409,7 @@ def format_history(
 
         for j in jobs:
             status = j.get("status", "unknown")
-            color = {"completed": "green", "failed": "red", "cancelled": "yellow"}.get(
-                status, "white"
-            )
+            color = {"completed": "green", "failed": "red", "cancelled": "yellow"}.get(status, "white")
 
             # Duration from timestamps
             started = j.get("started_at")
@@ -465,7 +463,7 @@ def format_history(
 
 
 def format_discovered(
-    printers: List[Dict[str, Any]],
+    printers: list[dict[str, Any]],
     *,
     json_mode: bool = False,
 ) -> str:
@@ -488,17 +486,17 @@ def format_discovered(
             return _render(Panel(msg, border_style="yellow"))
         return msg
 
-    def _type(p: Dict[str, Any]) -> str:
+    def _type(p: dict[str, Any]) -> str:
         return p.get("printer_type") or p.get("type") or ""
 
-    def _host_display(p: Dict[str, Any]) -> str:
+    def _host_display(p: dict[str, Any]) -> str:
         host = p.get("host", "")
         port = p.get("port")
         if port and port not in (80, 443):
             return f"{host}:{port}"
         return host
 
-    def _api_badge(p: Dict[str, Any]) -> str:
+    def _api_badge(p: dict[str, Any]) -> str:
         avail = p.get("api_available")
         if avail is None:
             return ""
@@ -531,10 +529,7 @@ def format_discovered(
         return _render(table)
 
     # Plain-text fallback
-    header = (
-        f"{'Name':<25} {'Type':<12} {'Host':<25} {'Version':<12} "
-        f"{'API':<5} {'Method'}"
-    )
+    header = f"{'Name':<25} {'Type':<12} {'Host':<25} {'Version':<12} {'API':<5} {'Method'}"
     lines = [header, "-" * len(header)]
     for p in printers:
         lines.append(
@@ -551,7 +546,7 @@ def format_discovered(
 
 
 def format_quote(
-    quote: Dict[str, Any],
+    quote: dict[str, Any],
     *,
     json_mode: bool = False,
 ) -> str:
@@ -587,7 +582,9 @@ def format_quote(
         if fee_info:
             fee_amt = fee_info.get("fee_amount", 0)
             if fee_info.get("waived"):
-                table.add_row("Kiln fee", f"[dim]{currency} 0.00 (waived — {fee_info.get('waiver_reason', 'free tier')})[/dim]")
+                table.add_row(
+                    "Kiln fee", f"[dim]{currency} 0.00 (waived — {fee_info.get('waiver_reason', 'free tier')})[/dim]"
+                )
             else:
                 table.add_row("Kiln fee", f"{currency} {fee_amt:.2f}")
             total_with_fee = quote.get("total_with_fee", total)
@@ -631,7 +628,7 @@ def format_quote(
 
 
 def format_order(
-    order: Dict[str, Any],
+    order: dict[str, Any],
     *,
     json_mode: bool = False,
 ) -> str:
@@ -648,8 +645,13 @@ def format_order(
 
     status = order.get("status", "unknown")
     color = {
-        "submitted": "yellow", "processing": "yellow", "printing": "blue",
-        "shipping": "cyan", "delivered": "green", "cancelled": "red", "failed": "red",
+        "submitted": "yellow",
+        "processing": "yellow",
+        "printing": "blue",
+        "shipping": "cyan",
+        "delivered": "green",
+        "cancelled": "red",
+        "failed": "red",
     }.get(status, "white")
 
     if RICH_AVAILABLE:
@@ -705,7 +707,7 @@ def format_order(
 
 
 def format_materials(
-    materials: List[Dict[str, Any]],
+    materials: list[dict[str, Any]],
     *,
     json_mode: bool = False,
 ) -> str:
@@ -769,7 +771,7 @@ def format_materials(
 
 
 def format_fleet_status(
-    printers: List[Dict[str, Any]],
+    printers: list[dict[str, Any]],
     *,
     json_mode: bool = False,
 ) -> str:
@@ -802,8 +804,9 @@ def format_fleet_status(
 
         for p in printers:
             state = p.get("state", "unknown")
-            color = {"idle": "green", "printing": "yellow", "paused": "yellow",
-                     "error": "red", "offline": "red"}.get(state, "white")
+            color = {"idle": "green", "printing": "yellow", "paused": "yellow", "error": "red", "offline": "red"}.get(
+                state, "white"
+            )
 
             hotend = format_temp(p.get("tool_temp_actual"), p.get("tool_temp_target"))
             bed = format_temp(p.get("bed_temp_actual"), p.get("bed_temp_target"))
@@ -839,7 +842,7 @@ def format_fleet_status(
 
 
 def format_queue_summary(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     *,
     json_mode: bool = False,
 ) -> str:
@@ -865,9 +868,7 @@ def format_queue_summary(
         parts: list = []
 
         parts.append(
-            f"[bold]Queue:[/bold] {total} total — "
-            f"[green]{pending} pending[/green], "
-            f"[yellow]{active} active[/yellow]"
+            f"[bold]Queue:[/bold] {total} total — [green]{pending} pending[/green], [yellow]{active} active[/yellow]"
         )
 
         if counts:
@@ -875,10 +876,7 @@ def format_queue_summary(
             parts.append(f"[bold]Breakdown:[/bold] {breakdown}")
 
         if next_job:
-            parts.append(
-                f"[bold]Next up:[/bold] {next_job.get('file_name', '?')} "
-                f"(job {next_job.get('id', '?')[:8]})"
-            )
+            parts.append(f"[bold]Next up:[/bold] {next_job.get('file_name', '?')} (job {next_job.get('id', '?')[:8]})")
 
         content = "\n".join(parts)
         result = _render(Panel(content, title="Queue Summary", border_style="blue"))
@@ -908,7 +906,7 @@ def format_queue_summary(
 
 
 def format_job_detail(
-    job: Dict[str, Any],
+    job: dict[str, Any],
     *,
     json_mode: bool = False,
 ) -> str:
@@ -925,8 +923,12 @@ def format_job_detail(
 
     status = job.get("status", "unknown")
     color = {
-        "queued": "cyan", "starting": "yellow", "printing": "yellow",
-        "completed": "green", "failed": "red", "cancelled": "red",
+        "queued": "cyan",
+        "starting": "yellow",
+        "printing": "yellow",
+        "completed": "green",
+        "failed": "red",
+        "cancelled": "red",
     }.get(status, "white")
 
     if RICH_AVAILABLE:
@@ -988,7 +990,7 @@ def format_job_detail(
 
 
 def format_billing_status(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     *,
     json_mode: bool = False,
 ) -> str:
@@ -1014,9 +1016,7 @@ def format_billing_status(
 
         # Payment method
         if default:
-            parts.append(
-                f"[bold]Payment method:[/bold] {default.get('label', default.get('rail', 'unknown'))}"
-            )
+            parts.append(f"[bold]Payment method:[/bold] {default.get('label', default.get('rail', 'unknown'))}")
         elif methods:
             parts.append(f"[bold]Payment methods:[/bold] {len(methods)} linked")
         else:
@@ -1027,10 +1027,7 @@ def format_billing_status(
         jobs = revenue.get("job_count", 0)
         waived = revenue.get("waived_count", 0)
         cap = limits.get("monthly_cap_usd", 2000.0)
-        parts.append(
-            f"[bold]Monthly spend:[/bold] ${total:.2f} / ${cap:.2f} cap  "
-            f"({jobs} orders, {waived} waived)"
-        )
+        parts.append(f"[bold]Monthly spend:[/bold] ${total:.2f} / ${cap:.2f} cap  ({jobs} orders, {waived} waived)")
 
         # Fee policy
         parts.append(
@@ -1064,7 +1061,7 @@ def format_billing_status(
 
 
 def format_billing_history(
-    charges: List[Dict[str, Any]],
+    charges: list[dict[str, Any]],
     *,
     json_mode: bool = False,
 ) -> str:
@@ -1154,10 +1151,7 @@ def format_billing_setup(
                 f"on each outsourced manufacturing order."
             )
         else:
-            content = (
-                f"Setup URL for [bold]{rail}[/bold]:\n\n"
-                f"  [bold blue]{url}[/bold blue]"
-            )
+            content = f"Setup URL for [bold]{rail}[/bold]:\n\n  [bold blue]{url}[/bold blue]"
         return _render(Panel(content, title="Billing Setup", border_style="green"))
 
     lines = [f"Billing Setup ({rail})", "=" * 40, "", url, ""]

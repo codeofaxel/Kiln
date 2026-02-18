@@ -16,47 +16,44 @@ Usage::
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional, Type
+from typing import Any
 
 from kiln.fulfillment.base import FulfillmentProvider
 
 # Registry populated at module load via _register_builtins().
-_REGISTRY: Dict[str, Type[FulfillmentProvider]] = {}
+_REGISTRY: dict[str, type[FulfillmentProvider]] = {}
 
 # Env var name → provider name, for auto-detection of which provider is
 # configured when KILN_FULFILLMENT_PROVIDER is not set explicitly.
-_ENV_HINTS: Dict[str, str] = {
+_ENV_HINTS: dict[str, str] = {
     "KILN_CRAFTCLOUD_API_KEY": "craftcloud",
     "KILN_SCULPTEO_API_KEY": "sculpteo",
 }
 
 
-def register(name: str, cls: Type[FulfillmentProvider]) -> None:
+def register(name: str, cls: type[FulfillmentProvider]) -> None:
     """Register a provider class under *name* (lowercase)."""
     _REGISTRY[name.lower()] = cls
 
 
-def list_providers() -> List[str]:
+def list_providers() -> list[str]:
     """Return sorted list of registered provider names."""
     _ensure_builtins()
     return sorted(_REGISTRY)
 
 
-def get_provider_class(name: str) -> Type[FulfillmentProvider]:
+def get_provider_class(name: str) -> type[FulfillmentProvider]:
     """Return the class for *name*, or raise ``KeyError``."""
     _ensure_builtins()
     try:
         return _REGISTRY[name.lower()]
     except KeyError:
         available = ", ".join(sorted(_REGISTRY))
-        raise KeyError(
-            f"Unknown fulfillment provider {name!r}. "
-            f"Available: {available}"
-        ) from None
+        raise KeyError(f"Unknown fulfillment provider {name!r}. Available: {available}") from None
 
 
 def get_provider(
-    name: Optional[str] = None,
+    name: str | None = None,
     **kwargs: Any,
 ) -> FulfillmentProvider:
     """Instantiate and return a fulfillment provider.

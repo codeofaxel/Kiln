@@ -11,6 +11,7 @@ no manual imports needed.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import time
@@ -24,18 +25,29 @@ _logger = logging.getLogger(__name__)
 
 _VALID_OUTCOMES = frozenset({"success", "failed", "partial"})
 _VALID_QUALITY_GRADES = frozenset({"excellent", "good", "acceptable", "poor"})
-_VALID_FAILURE_MODES = frozenset({
-    "spaghetti", "layer_shift", "warping", "adhesion", "stringing",
-    "under_extrusion", "over_extrusion", "clog", "thermal_runaway",
-    "power_loss", "mechanical", "other",
-})
+_VALID_FAILURE_MODES = frozenset(
+    {
+        "spaghetti",
+        "layer_shift",
+        "warping",
+        "adhesion",
+        "stringing",
+        "under_extrusion",
+        "over_extrusion",
+        "clog",
+        "thermal_runaway",
+        "power_loss",
+        "mechanical",
+        "other",
+    }
+)
 
 # Hard safety limits — recorded settings cannot exceed these.
 # Prevents malicious agents from poisoning the learning database
 # with dangerous temperature data that could damage printers.
-_MAX_SAFE_TOOL_TEMP: float = 320.0   # Above this, even high-temp materials are dangerous
+_MAX_SAFE_TOOL_TEMP: float = 320.0  # Above this, even high-temp materials are dangerous
 _MAX_SAFE_BED_TEMP: float = 140.0
-_MAX_SAFE_SPEED: float = 500.0       # mm/s — beyond any consumer printer
+_MAX_SAFE_SPEED: float = 500.0  # mm/s — beyond any consumer printer
 
 _LEARNING_SAFETY_NOTICE = (
     "These insights are advisory only. They do NOT override safety limits. "
@@ -103,14 +115,12 @@ def record_print_outcome(
         )
     if quality_grade and quality_grade not in _VALID_QUALITY_GRADES:
         return _srv._error_dict(
-            f"Invalid quality_grade {quality_grade!r}. "
-            f"Must be one of: {', '.join(sorted(_VALID_QUALITY_GRADES))}",
+            f"Invalid quality_grade {quality_grade!r}. Must be one of: {', '.join(sorted(_VALID_QUALITY_GRADES))}",
             code="VALIDATION_ERROR",
         )
     if failure_mode and failure_mode not in _VALID_FAILURE_MODES:
         return _srv._error_dict(
-            f"Invalid failure_mode {failure_mode!r}. "
-            f"Must be one of: {', '.join(sorted(_VALID_FAILURE_MODES))}",
+            f"Invalid failure_mode {failure_mode!r}. Must be one of: {', '.join(sorted(_VALID_FAILURE_MODES))}",
             code="VALIDATION_ERROR",
         )
 
@@ -153,21 +163,23 @@ def record_print_outcome(
         printer_name = "unknown"
 
     try:
-        row_id = get_db().save_print_outcome({
-            "job_id": job_id,
-            "printer_name": printer_name,
-            "file_name": file_name,
-            "file_hash": file_hash,
-            "material_type": material_type,
-            "outcome": outcome,
-            "quality_grade": quality_grade,
-            "failure_mode": failure_mode,
-            "settings": settings,
-            "environment": environment,
-            "notes": notes,
-            "agent_id": "mcp",
-            "created_at": time.time(),
-        })
+        row_id = get_db().save_print_outcome(
+            {
+                "job_id": job_id,
+                "printer_name": printer_name,
+                "file_name": file_name,
+                "file_hash": file_hash,
+                "material_type": material_type,
+                "outcome": outcome,
+                "quality_grade": quality_grade,
+                "failure_mode": failure_mode,
+                "settings": settings,
+                "environment": environment,
+                "notes": notes,
+                "agent_id": "mcp",
+                "created_at": time.time(),
+            }
+        )
         return {
             "success": True,
             "outcome_id": row_id,
@@ -246,20 +258,14 @@ def recommend_settings(
             _settings = o.get("settings") or {}
             if isinstance(_settings, dict):
                 if "temp_tool" in _settings:
-                    try:
+                    with contextlib.suppress(ValueError, TypeError):
                         temp_tools.append(float(_settings["temp_tool"]))
-                    except (ValueError, TypeError):
-                        pass
                 if "temp_bed" in _settings:
-                    try:
+                    with contextlib.suppress(ValueError, TypeError):
                         temp_beds.append(float(_settings["temp_bed"]))
-                    except (ValueError, TypeError):
-                        pass
                 if "speed" in _settings:
-                    try:
+                    with contextlib.suppress(ValueError, TypeError):
                         speeds.append(float(_settings["speed"]))
-                    except (ValueError, TypeError):
-                        pass
                 if "slicer_profile" in _settings:
                     slicer_profiles.append(str(_settings["slicer_profile"]))
             if o.get("quality_grade"):
@@ -278,6 +284,7 @@ def recommend_settings(
             if not vals:
                 return None
             from collections import Counter
+
             return Counter(vals).most_common(1)[0][0]
 
         recommended = {}
@@ -526,7 +533,8 @@ class _LearningToolsPlugin:
                 return err
             try:
                 ranked = get_db().suggest_printer_for_outcome(
-                    file_hash=file_hash, material_type=material_type,
+                    file_hash=file_hash,
+                    material_type=material_type,
                 )
 
                 # Cross-reference availability from registry
@@ -541,14 +549,16 @@ class _LearningToolsPlugin:
                     pname = entry["printer_name"]
                     rate = entry["success_rate"]
                     total = entry["total_prints"]
-                    suggestions.append({
-                        "printer_name": pname,
-                        "success_rate": rate,
-                        "total_prints": total,
-                        "score": round(rate * (1 - 1 / (1 + total)), 2),
-                        "reason": f"{int(rate * 100)}% success rate ({total} prints)",
-                        "currently_available": pname in idle,
-                    })
+                    suggestions.append(
+                        {
+                            "printer_name": pname,
+                            "success_rate": rate,
+                            "total_prints": total,
+                            "score": round(rate * (1 - 1 / (1 + total)), 2),
+                            "reason": f"{int(rate * 100)}% success rate ({total} prints)",
+                            "currently_available": pname in idle,
+                        }
+                    )
 
                 # Sort by score descending
                 suggestions.sort(key=lambda s: s["score"], reverse=True)

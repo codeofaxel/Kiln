@@ -12,7 +12,7 @@ is the extraction target.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 _logger = logging.getLogger(__name__)
 
@@ -44,8 +44,8 @@ class _NetworkToolsPlugin:
         def network_register_printer(
             name: str,
             location: str,
-            capabilities: Optional[Dict[str, Any]] = None,
-            price_per_gram: Optional[float] = None,
+            capabilities: dict[str, Any] | None = None,
+            price_per_gram: float | None = None,
         ) -> dict:
             """Register a local printer on the 3DOS distributed manufacturing network.
 
@@ -59,7 +59,7 @@ class _NetworkToolsPlugin:
             Makes this printer available for remote print jobs from the 3DOS
             network.  Requires ``KILN_3DOS_API_KEY`` to be set.
             """
-            from kiln.gateway.threedos import ThreeDOSClient, ThreeDOSError
+            from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
 
             try:
@@ -91,7 +91,7 @@ class _NetworkToolsPlugin:
                 printer_id: ID of the registered printer.
                 available: Whether the printer is available for new jobs.
             """
-            from kiln.gateway.threedos import ThreeDOSClient, ThreeDOSError
+            from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
 
             try:
@@ -115,7 +115,7 @@ class _NetworkToolsPlugin:
             Returns all printers that this Kiln instance has registered,
             including their current availability status and pricing.
             """
-            from kiln.gateway.threedos import ThreeDOSClient, ThreeDOSError
+            from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
 
             try:
@@ -135,7 +135,7 @@ class _NetworkToolsPlugin:
         @mcp.tool()
         def network_find_printers(
             material: str,
-            location: Optional[str] = None,
+            location: str | None = None,
         ) -> dict:
             """Search for available printers on the 3DOS network.
 
@@ -147,7 +147,7 @@ class _NetworkToolsPlugin:
             printer ``id`` from the results with ``network_submit_job`` to
             target a specific printer.
             """
-            from kiln.gateway.threedos import ThreeDOSClient, ThreeDOSError
+            from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
 
             try:
@@ -168,7 +168,7 @@ class _NetworkToolsPlugin:
         def network_submit_job(
             file_url: str,
             material: str,
-            printer_id: Optional[str] = None,
+            printer_id: str | None = None,
         ) -> dict:
             """Submit a print job to the 3DOS distributed manufacturing network.
 
@@ -181,7 +181,7 @@ class _NetworkToolsPlugin:
             Returns the network job with ID, status, and estimated cost.
             Use ``network_job_status`` to track progress.
             """
-            from kiln.gateway.threedos import ThreeDOSClient, ThreeDOSError
+            from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
 
             try:
@@ -208,7 +208,7 @@ class _NetworkToolsPlugin:
             Args:
                 job_id: Job ID from ``network_submit_job``.
             """
-            from kiln.gateway.threedos import ThreeDOSClient, ThreeDOSError
+            from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
 
             try:

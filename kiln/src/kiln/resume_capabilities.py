@@ -8,12 +8,12 @@ make informed decisions about unattended operation viability.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Dataclass
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ResumeCapability:
@@ -35,10 +35,10 @@ class ResumeCapability:
     supports_z_offset_resume: bool
     supports_layer_resume: bool
     supports_filament_change: bool
-    recovery_methods: List[str] = field(default_factory=list)
-    limitations: List[str] = field(default_factory=list)
+    recovery_methods: list[str] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
         return {
             "adapter_type": self.adapter_type,
@@ -56,7 +56,7 @@ class ResumeCapability:
 # Recovery plan templates keyed by failure type
 # ---------------------------------------------------------------------------
 
-_RECOVERY_PLANS: Dict[str, Dict[str, List[str]]] = {
+_RECOVERY_PLANS: dict[str, dict[str, list[str]]] = {
     "filament_runout": {
         "octoprint": [
             "Pause print via OctoPrint API",
@@ -249,7 +249,7 @@ class ResumeCapabilityRegistry:
     """Pre-populated registry of resume/recovery capabilities per adapter."""
 
     def __init__(self) -> None:
-        self._capabilities: Dict[str, ResumeCapability] = {
+        self._capabilities: dict[str, ResumeCapability] = {
             "octoprint": ResumeCapability(
                 adapter_type="octoprint",
                 supports_pause_resume=True,
@@ -352,16 +352,14 @@ class ResumeCapabilityRegistry:
             ),
         }
 
-    def get_capabilities(self, adapter_type: str) -> Optional[ResumeCapability]:
+    def get_capabilities(self, adapter_type: str) -> ResumeCapability | None:
         """Return capabilities for an adapter, or ``None`` if unknown.
 
         :param adapter_type: Adapter identifier (e.g. ``"octoprint"``).
         """
         return self._capabilities.get(adapter_type)
 
-    def get_recovery_plan(
-        self, adapter_type: str, *, failure_type: str
-    ) -> List[str]:
+    def get_recovery_plan(self, adapter_type: str, *, failure_type: str) -> list[str]:
         """Return ordered recovery steps for a failure on a given adapter.
 
         :param adapter_type: Adapter identifier.
@@ -388,8 +386,4 @@ class ResumeCapabilityRegistry:
         cap = self._capabilities.get(adapter_type)
         if cap is None:
             return False
-        return (
-            cap.supports_pause_resume
-            and cap.supports_firmware_recovery
-            and cap.supports_filament_change
-        )
+        return cap.supports_pause_resume and cap.supports_firmware_recovery and cap.supports_filament_change

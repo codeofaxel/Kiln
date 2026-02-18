@@ -11,6 +11,7 @@ from ``PATH`` or macOS application bundle.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
@@ -20,7 +21,7 @@ import sys
 import tempfile
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from kiln.generation.base import (
     GenerationError,
@@ -32,11 +33,7 @@ from kiln.generation.base import (
 
 logger = logging.getLogger(__name__)
 
-_MACOS_APP_PATH = (
-    "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
-    if sys.platform == "darwin"
-    else ""
-)
+_MACOS_APP_PATH = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD" if sys.platform == "darwin" else ""
 
 
 def _find_openscad(explicit_path: str | None = None) -> str:
@@ -99,8 +96,8 @@ class OpenSCADProvider(GenerationProvider):
     ) -> None:
         self._binary = _find_openscad(binary_path)
         self._timeout = timeout
-        self._jobs: Dict[str, GenerationJob] = {}
-        self._paths: Dict[str, str] = {}
+        self._jobs: dict[str, GenerationJob] = {}
+        self._paths: dict[str, str] = {}
 
     @property
     def name(self) -> str:
@@ -145,10 +142,10 @@ class OpenSCADProvider(GenerationProvider):
 
         # Block dangerous OpenSCAD functions that could access the filesystem
         _DANGEROUS_PATTERNS = [
-            r'\bimport\s*\(',      # import() can read arbitrary files
-            r'\bsurface\s*\(',     # surface() reads files from disk
-            r'\binclude\s*<',      # include <file> reads files
-            r'\buse\s*<',          # use <file> reads files
+            r"\bimport\s*\(",  # import() can read arbitrary files
+            r"\bsurface\s*\(",  # surface() reads files from disk
+            r"\binclude\s*<",  # include <file> reads files
+            r"\buse\s*<",  # use <file> reads files
         ]
         for pattern in _DANGEROUS_PATTERNS:
             if re.search(pattern, prompt, re.IGNORECASE):
@@ -193,7 +190,7 @@ class OpenSCADProvider(GenerationProvider):
                     raise GenerationError(
                         f"Failed to run OpenSCAD: {exc}",
                         code="OPENSCAD_EXEC_ERROR",
-                    )
+                    ) from exc
             finally:
                 shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -241,10 +238,8 @@ class OpenSCADProvider(GenerationProvider):
 
         finally:
             # Clean up temp .scad file.
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(scad_path)
-            except OSError:
-                pass
 
     def get_job_status(self, job_id: str) -> GenerationJob:
         """Return the stored job state.
@@ -254,9 +249,7 @@ class OpenSCADProvider(GenerationProvider):
         """
         job = self._jobs.get(job_id)
         if not job:
-            raise GenerationError(
-                f"Job {job_id!r} not found.", code="JOB_NOT_FOUND"
-            )
+            raise GenerationError(f"Job {job_id!r} not found.", code="JOB_NOT_FOUND")
         return job
 
     def download_result(
@@ -271,9 +264,7 @@ class OpenSCADProvider(GenerationProvider):
         """
         path = self._paths.get(job_id)
         if not path or not os.path.isfile(path):
-            raise GenerationError(
-                f"No generated file for job {job_id!r}.", code="NO_RESULT"
-            )
+            raise GenerationError(f"No generated file for job {job_id!r}.", code="NO_RESULT")
 
         job = self._jobs.get(job_id)
         prompt = job.prompt if job else ""
@@ -287,5 +278,5 @@ class OpenSCADProvider(GenerationProvider):
             prompt=prompt,
         )
 
-    def list_styles(self) -> List[str]:
+    def list_styles(self) -> list[str]:
         return []

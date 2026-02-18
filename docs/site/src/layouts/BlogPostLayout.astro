@@ -1,0 +1,289 @@
+---
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  description: string;
+  date: string;
+  tags?: string[];
+}
+
+const { title, description, date, tags = [] } = Astro.props;
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title} — Kiln Blog</title>
+  <meta name="description" content={description}>
+
+  <meta property="og:title" content={title}>
+  <meta property="og:description" content={description}>
+  <meta property="og:image" content="https://kiln3d.com/assets/kiln-social-preview.png">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content={Astro.url.href}>
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content={title}>
+  <meta name="twitter:description" content={description}>
+  <meta name="twitter:image" content="https://kiln3d.com/assets/kiln-social-preview.png">
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <Nav current="blog" />
+  <main>
+    <article class="blog-post">
+      <div class="container">
+        <header class="post-header">
+          <a href="/blog" class="back-link">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            All posts
+          </a>
+          {tags.length > 0 && (
+            <div class="post-tags">
+              {tags.map((tag) => (
+                <span class="tag">{tag}</span>
+              ))}
+            </div>
+          )}
+          <h1 class="post-title">{title}</h1>
+          <div class="post-meta">
+            <time>{date}</time>
+          </div>
+        </header>
+
+        <div class="post-body">
+          <slot />
+        </div>
+      </div>
+    </article>
+  </main>
+  <Footer />
+</body>
+</html>
+
+<style>
+  .blog-post {
+    padding: 0 0 96px;
+  }
+
+  .container {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* ── Header ── */
+  .post-header {
+    padding: 48px 0 40px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 48px;
+  }
+
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-decoration: none;
+    margin-bottom: 24px;
+  }
+
+  .back-link:hover {
+    color: var(--accent);
+  }
+
+  .post-tags {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .tag {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    background: var(--accent-glow);
+    border: 1px solid rgba(255, 107, 43, 0.25);
+    padding: 3px 10px;
+    border-radius: 12px;
+  }
+
+  .post-title {
+    font-size: 36px;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-bottom: 16px;
+  }
+
+  .post-meta {
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  /* ── Body ── */
+  .post-body {
+    font-size: 17px;
+    line-height: 1.8;
+    color: var(--text);
+  }
+
+  .post-body :global(h2) {
+    font-size: 24px;
+    font-weight: 700;
+    margin-top: 56px;
+    margin-bottom: 20px;
+    padding-top: 32px;
+    border-top: 1px solid var(--border);
+  }
+
+  .post-body :global(h3) {
+    font-size: 19px;
+    font-weight: 600;
+    margin-top: 40px;
+    margin-bottom: 16px;
+  }
+
+  .post-body :global(p) {
+    margin-bottom: 20px;
+  }
+
+  .post-body :global(strong) {
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .post-body :global(em) {
+    color: var(--text-muted);
+  }
+
+  .post-body :global(a) {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: rgba(255, 107, 43, 0.3);
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.15s;
+  }
+
+  .post-body :global(a:hover) {
+    text-decoration-color: var(--accent);
+  }
+
+  .post-body :global(ul),
+  .post-body :global(ol) {
+    margin-bottom: 20px;
+    padding-left: 24px;
+  }
+
+  .post-body :global(li) {
+    margin-bottom: 8px;
+  }
+
+  .post-body :global(li > ul),
+  .post-body :global(li > ol) {
+    margin-top: 8px;
+    margin-bottom: 8px;
+  }
+
+  .post-body :global(code) {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    border-radius: 4px;
+    color: #ccc;
+  }
+
+  .post-body :global(pre) {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    margin: 24px 0;
+  }
+
+  .post-body :global(pre code) {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+    color: var(--text);
+    border-radius: 0;
+  }
+
+  .post-body :global(blockquote) {
+    margin: 24px 0;
+    padding: 16px 24px;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-glow);
+    border-radius: 0 8px 8px 0;
+    font-style: italic;
+    color: var(--text-muted);
+  }
+
+  .post-body :global(blockquote p) {
+    margin-bottom: 0;
+  }
+
+  .post-body :global(hr) {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 48px 0;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .post-header {
+      padding: 32px 0 28px;
+      margin-bottom: 32px;
+    }
+
+    .post-title {
+      font-size: 28px;
+    }
+
+    .post-body {
+      font-size: 16px;
+    }
+
+    .post-body :global(h2) {
+      font-size: 20px;
+      margin-top: 40px;
+      padding-top: 24px;
+    }
+
+    .post-body :global(pre) {
+      padding: 16px;
+      font-size: 12px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .post-title {
+      font-size: 24px;
+    }
+
+    .post-body {
+      font-size: 15px;
+      line-height: 1.7;
+    }
+  }
+</style>

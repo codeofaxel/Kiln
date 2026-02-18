@@ -12,7 +12,6 @@ to enable automatic deduplication.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
 import secrets
@@ -20,7 +19,7 @@ import shutil
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from kiln.persistence import KilnDB
 
@@ -39,16 +38,16 @@ class ModelCacheEntry:
     file_hash: str
     file_size_bytes: int
     source: str
-    source_id: Optional[str] = None
-    prompt: Optional[str] = None
-    tags: List[str] = field(default_factory=list)
-    dimensions: Optional[Dict[str, float]] = None
+    source_id: str | None = None
+    prompt: str | None = None
+    tags: list[str] = field(default_factory=list)
+    dimensions: dict[str, float] | None = None
     print_count: int = 0
-    last_printed_at: Optional[float] = None
+    last_printed_at: float | None = None
     created_at: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict suitable for JSON output."""
         d = asdict(self)
         return d
@@ -72,11 +71,9 @@ class ModelCache:
             ``KILN_MODEL_CACHE_DIR`` or ``~/.kiln/model_cache/``.
     """
 
-    def __init__(self, db: KilnDB, cache_dir: Optional[str] = None) -> None:
+    def __init__(self, db: KilnDB, cache_dir: str | None = None) -> None:
         self._db = db
-        self._cache_dir = cache_dir or os.environ.get(
-            "KILN_MODEL_CACHE_DIR", _DEFAULT_CACHE_DIR
-        )
+        self._cache_dir = cache_dir or os.environ.get("KILN_MODEL_CACHE_DIR", _DEFAULT_CACHE_DIR)
         os.makedirs(self._cache_dir, exist_ok=True)
 
     @property
@@ -89,11 +86,11 @@ class ModelCache:
         file_path: str,
         *,
         source: str,
-        source_id: Optional[str] = None,
-        prompt: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-        dimensions: Optional[Dict[str, float]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        source_id: str | None = None,
+        prompt: str | None = None,
+        tags: list[str] | None = None,
+        dimensions: dict[str, float] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ModelCacheEntry:
         """Add a model file to the cache.
 
@@ -168,22 +165,22 @@ class ModelCache:
         logger.info("Cached model %s (%s, %d bytes)", cache_id, file_name, file_size)
         return entry
 
-    def get(self, cache_id: str) -> Optional[ModelCacheEntry]:
+    def get(self, cache_id: str) -> ModelCacheEntry | None:
         """Return a cache entry by ID, or ``None`` if not found."""
         return self._db.get_cache_entry(cache_id)
 
-    def get_by_hash(self, file_hash: str) -> Optional[ModelCacheEntry]:
+    def get_by_hash(self, file_hash: str) -> ModelCacheEntry | None:
         """Return a cache entry by file hash (dedup check), or ``None``."""
         return self._db.get_cache_entry_by_hash(file_hash)
 
     def search(
         self,
         *,
-        query: Optional[str] = None,
-        source: Optional[str] = None,
-        tags: Optional[List[str]] = None,
+        query: str | None = None,
+        source: str | None = None,
+        tags: list[str] | None = None,
         limit: int = 20,
-    ) -> List[ModelCacheEntry]:
+    ) -> list[ModelCacheEntry]:
         """Search cached models by name, tags, source, or prompt text.
 
         Args:
@@ -193,7 +190,10 @@ class ModelCache:
             limit: Maximum results to return.
         """
         return self._db.search_cache(
-            query=query, source=source, tags=tags, limit=limit,
+            query=query,
+            source=source,
+            tags=tags,
+            limit=limit,
         )
 
     def record_print(self, cache_id: str) -> None:
@@ -224,7 +224,7 @@ class ModelCache:
         logger.info("Deleted cached model %s (%s)", cache_id, entry.file_name)
         return True
 
-    def list_all(self, *, limit: int = 50, offset: int = 0) -> List[ModelCacheEntry]:
+    def list_all(self, *, limit: int = 50, offset: int = 0) -> list[ModelCacheEntry]:
         """List all cached models, newest first."""
         return self._db.list_cache_entries(limit=limit, offset=offset)
 
@@ -233,7 +233,7 @@ class ModelCache:
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
-_model_cache: Optional[ModelCache] = None
+_model_cache: ModelCache | None = None
 
 
 def get_model_cache() -> ModelCache:
@@ -245,5 +245,6 @@ def get_model_cache() -> ModelCache:
     global _model_cache
     if _model_cache is None:
         from kiln.persistence import get_db
+
         _model_cache = ModelCache(db=get_db())
     return _model_cache

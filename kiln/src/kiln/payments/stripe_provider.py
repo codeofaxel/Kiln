@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from kiln.payments.base import (
     Currency,
@@ -32,7 +32,7 @@ from kiln.payments.base import (
 logger = logging.getLogger(__name__)
 
 # Stripe status string -> internal PaymentStatus
-_STATUS_MAP: Dict[str, PaymentStatus] = {
+_STATUS_MAP: dict[str, PaymentStatus] = {
     "succeeded": PaymentStatus.COMPLETED,
     "processing": PaymentStatus.PROCESSING,
     "requires_capture": PaymentStatus.AUTHORIZED,
@@ -42,15 +42,13 @@ _STATUS_MAP: Dict[str, PaymentStatus] = {
 }
 
 # Map Stripe decline codes to actionable user-facing messages.
-_DECLINE_MESSAGES: Dict[str, str] = {
+_DECLINE_MESSAGES: dict[str, str] = {
     "insufficient_funds": "Insufficient funds. Please use a different card or add funds.",
     "lost_card": "Card reported lost. Please use a different payment method.",
     "stolen_card": "Card reported stolen. Please use a different payment method.",
     "expired_card": "Card has expired. Update your payment method with 'billing_setup_url'.",
     "incorrect_cvc": "Incorrect CVC code. Please retry with the correct CVC.",
-    "card_declined": (
-        "Card was declined by your bank. Try a different card or contact your bank."
-    ),
+    "card_declined": ("Card was declined by your bank. Try a different card or contact your bank."),
     "processing_error": "Card processor error. Please try again in a few minutes.",
 }
 
@@ -70,31 +68,26 @@ class StripeProvider(PaymentProvider):
 
     def __init__(
         self,
-        secret_key: Optional[str] = None,
-        customer_id: Optional[str] = None,
-        payment_method_id: Optional[str] = None,
+        secret_key: str | None = None,
+        customer_id: str | None = None,
+        payment_method_id: str | None = None,
     ) -> None:
-        self._secret_key = secret_key or os.environ.get(
-            "KILN_STRIPE_SECRET_KEY", ""
-        )
+        self._secret_key = secret_key or os.environ.get("KILN_STRIPE_SECRET_KEY", "")
         if not self._secret_key:
             raise PaymentError(
-                "Stripe secret key required. "
-                "Set KILN_STRIPE_SECRET_KEY or pass secret_key.",
+                "Stripe secret key required. Set KILN_STRIPE_SECRET_KEY or pass secret_key.",
                 code="MISSING_KEY",
             )
 
         self._customer_id = customer_id
         self._payment_method_id = payment_method_id
-        self._pending_setup_intent_id: Optional[str] = None
+        self._pending_setup_intent_id: str | None = None
 
     def set_payment_method(self, payment_method_id: str) -> None:
         """Update the default payment method for future charges."""
         self._payment_method_id = payment_method_id
 
-    def poll_setup_intent(
-        self, setup_intent_id: Optional[str] = None
-    ) -> Optional[str]:
+    def poll_setup_intent(self, setup_intent_id: str | None = None) -> str | None:
         """Check if a SetupIntent has completed and return the payment_method_id.
 
         Args:
@@ -123,7 +116,7 @@ class StripeProvider(PaymentProvider):
         return "stripe"
 
     @property
-    def supported_currencies(self) -> List[Currency]:
+    def supported_currencies(self) -> list[Currency]:
         return [Currency.USD, Currency.EUR]
 
     @property
@@ -145,8 +138,7 @@ class StripeProvider(PaymentProvider):
             import stripe  # type: ignore[import-untyped]
         except ImportError as exc:
             raise PaymentError(
-                "stripe package not installed. "
-                "Install it with: pip install stripe",
+                "stripe package not installed. Install it with: pip install stripe",
                 code="MISSING_DEPENDENCY",
             ) from exc
 
@@ -155,9 +147,7 @@ class StripeProvider(PaymentProvider):
 
     # -- Setup -----------------------------------------------------------------
 
-    def create_setup_url(
-        self, return_url: str = "https://kiln.dev/billing/done"
-    ) -> str:
+    def create_setup_url(self, return_url: str = "https://kiln.dev/billing/done") -> str:
         """Create a URL the user can visit to save a payment method.
 
         If no ``customer_id`` was provided at construction time a new Stripe
@@ -201,10 +191,7 @@ class StripeProvider(PaymentProvider):
             # Build the URL -- Stripe Checkout or a hosted page.  For
             # simplicity we return the SetupIntent's client_secret in a
             # redirect-style URL that the frontend can consume.
-            url = (
-                f"https://checkout.stripe.com/setup/{setup_intent.client_secret}"
-                f"?return_url={return_url}"
-            )
+            url = f"https://checkout.stripe.com/setup/{setup_intent.client_secret}?return_url={return_url}"
             return url
 
         except stripe.error.StripeError as exc:
@@ -221,9 +208,9 @@ class StripeProvider(PaymentProvider):
         *,
         success_url: str = "https://kiln3d.com/pro/success?session_id={CHECKOUT_SESSION_ID}",
         cancel_url: str = "https://kiln3d.com/pricing",
-        customer_email: Optional[str] = None,
-        metadata: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, str]:
+        customer_email: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> dict[str, str]:
         """Create a Stripe Checkout Session for a one-time license purchase.
 
         :param price_id: Stripe Price ID (``price_...``) for the tier.
@@ -278,8 +265,7 @@ class StripeProvider(PaymentProvider):
 
         if not self._customer_id or not self._payment_method_id:
             raise PaymentError(
-                "Customer and payment method must be set before creating "
-                "a payment. Call create_setup_url() first.",
+                "Customer and payment method must be set before creating a payment. Call create_setup_url() first.",
                 code="NO_PAYMENT_METHOD",
             )
 
@@ -320,10 +306,7 @@ class StripeProvider(PaymentProvider):
 
         except stripe.error.CardError as exc:
             decline_code = (
-                exc.error.decline_code
-                if hasattr(exc, "error")
-                and hasattr(exc.error, "decline_code")
-                else "unknown"
+                exc.error.decline_code if hasattr(exc, "error") and hasattr(exc.error, "decline_code") else "unknown"
             )
             message = _DECLINE_MESSAGES.get(
                 decline_code,
@@ -332,7 +315,9 @@ class StripeProvider(PaymentProvider):
             )
             logger.warning(
                 "Card declined for job %s (code=%s): %s",
-                request.job_id, decline_code, exc,
+                request.job_id,
+                decline_code,
+                exc,
             )
             return PaymentResult(
                 success=False,
@@ -461,8 +446,7 @@ class StripeProvider(PaymentProvider):
 
         if not self._customer_id or not self._payment_method_id:
             raise PaymentError(
-                "Customer and payment method must be set before authorizing. "
-                "Call create_setup_url() first.",
+                "Customer and payment method must be set before authorizing. Call create_setup_url() first.",
                 code="NO_PAYMENT_METHOD",
             )
 
@@ -486,7 +470,9 @@ class StripeProvider(PaymentProvider):
             status = _STATUS_MAP.get(intent.status, PaymentStatus.PENDING)
             logger.info(
                 "Authorized PaymentIntent %s status=%s for job %s",
-                intent.id, intent.status, request.job_id,
+                intent.id,
+                intent.status,
+                request.job_id,
             )
 
             return PaymentResult(
@@ -500,10 +486,7 @@ class StripeProvider(PaymentProvider):
 
         except stripe.error.CardError as exc:
             decline_code = (
-                exc.error.decline_code
-                if hasattr(exc, "error")
-                and hasattr(exc.error, "decline_code")
-                else "unknown"
+                exc.error.decline_code if hasattr(exc, "error") and hasattr(exc.error, "decline_code") else "unknown"
             )
             message = _DECLINE_MESSAGES.get(
                 decline_code,
@@ -512,7 +495,9 @@ class StripeProvider(PaymentProvider):
             )
             logger.warning(
                 "Card declined during auth for job %s (code=%s): %s",
-                request.job_id, decline_code, exc,
+                request.job_id,
+                decline_code,
+                exc,
             )
             return PaymentResult(
                 success=False,
@@ -553,7 +538,8 @@ class StripeProvider(PaymentProvider):
             status = _STATUS_MAP.get(intent.status, PaymentStatus.PENDING)
             logger.info(
                 "Captured PaymentIntent %s status=%s",
-                intent.id, intent.status,
+                intent.id,
+                intent.status,
             )
 
             return PaymentResult(
@@ -589,7 +575,8 @@ class StripeProvider(PaymentProvider):
             intent = stripe.PaymentIntent.cancel(payment_id)
             logger.info(
                 "Cancelled PaymentIntent %s status=%s",
-                intent.id, intent.status,
+                intent.id,
+                intent.status,
             )
 
             return PaymentResult(
@@ -609,7 +596,4 @@ class StripeProvider(PaymentProvider):
 
     def __repr__(self) -> str:
         key_hint = self._secret_key[:7] + "..." if self._secret_key else "unset"
-        return (
-            f"<StripeProvider key={key_hint!r} "
-            f"customer={self._customer_id!r}>"
-        )
+        return f"<StripeProvider key={key_hint!r} customer={self._customer_id!r}>"

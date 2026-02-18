@@ -84,7 +84,7 @@ Notes: Both slicers are invoked via their `--export-gcode` CLI flag for headless
 
 ## Supported Printer Models (Safety Profiles)
 
-Kiln ships 26 curated safety profiles with per-printer temperature limits, feedrate limits, volumetric flow limits, and build volumes:
+Kiln ships 28 curated safety profiles with per-printer temperature limits, feedrate limits, volumetric flow limits, and build volumes:
 
 | Profile ID | Display Name | Max Hotend | Max Bed | Build Volume |
 |---|---|---|---|---|

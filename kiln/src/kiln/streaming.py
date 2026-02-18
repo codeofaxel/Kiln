@@ -10,14 +10,13 @@ dependencies.
 
 from __future__ import annotations
 
-import io
 import logging
 import os
 import threading
 import time
-from dataclasses import asdict, dataclass, field
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Any, Dict, Optional
+from dataclasses import asdict, dataclass
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any
 
 import requests
 
@@ -32,25 +31,27 @@ _CONTENT_TYPE = f"multipart/x-mixed-replace; boundary={_BOUNDARY.decode()}"
 # Dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class StreamInfo:
     """Status information for the MJPEG proxy."""
 
     active: bool
-    local_url: Optional[str] = None
-    source_url: Optional[str] = None
-    printer_name: Optional[str] = None
+    local_url: str | None = None
+    source_url: str | None = None
+    printer_name: str | None = None
     connected_clients: int = 0
     frames_served: int = 0
     uptime_seconds: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 # ---------------------------------------------------------------------------
 # MJPEG proxy
 # ---------------------------------------------------------------------------
+
 
 class MJPEGProxy:
     """Background HTTP server that proxies an upstream MJPEG stream.
@@ -64,16 +65,16 @@ class MJPEGProxy:
     """
 
     def __init__(self) -> None:
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[threading.Thread] = None
-        self._source_url: Optional[str] = None
-        self._printer_name: Optional[str] = None
-        self._started_at: Optional[float] = None
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
+        self._source_url: str | None = None
+        self._printer_name: str | None = None
+        self._started_at: float | None = None
         self._port: int = 8081
         self._lock = threading.RLock()
 
         # Shared state for the handler
-        self._latest_frame: Optional[bytes] = None
+        self._latest_frame: bytes | None = None
         self._frame_lock = threading.Lock()
         self._frame_event = threading.Event()
         self._connected_clients: int = 0
@@ -82,7 +83,7 @@ class MJPEGProxy:
         self._stop_event = threading.Event()
 
         # Upstream reader thread
-        self._reader_thread: Optional[threading.Thread] = None
+        self._reader_thread: threading.Thread | None = None
 
     @property
     def active(self) -> bool:
@@ -92,9 +93,9 @@ class MJPEGProxy:
         self,
         source_url: str,
         port: int = 8081,
-        printer_name: Optional[str] = None,
+        printer_name: str | None = None,
         *,
-        host: Optional[str] = None,
+        host: str | None = None,
     ) -> StreamInfo:
         """Start the proxy server.
 
@@ -153,12 +154,8 @@ class MJPEGProxy:
 
                         try:
                             self.wfile.write(_BOUNDARY + b"\r\n")
-                            self.wfile.write(
-                                b"Content-Type: image/jpeg\r\n"
-                            )
-                            self.wfile.write(
-                                f"Content-Length: {len(frame)}\r\n\r\n".encode()
-                            )
+                            self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                            self.wfile.write(f"Content-Length: {len(frame)}\r\n\r\n".encode())
                             self.wfile.write(frame)
                             self.wfile.write(b"\r\n")
                             self.wfile.flush()
@@ -169,7 +166,8 @@ class MJPEGProxy:
                 finally:
                     with proxy._lock:
                         proxy._connected_clients = max(
-                            0, proxy._connected_clients - 1,
+                            0,
+                            proxy._connected_clients - 1,
                         )
 
             def log_message(self, format: str, *args: Any) -> None:
@@ -194,7 +192,9 @@ class MJPEGProxy:
         self._reader_thread.start()
 
         logger.info(
-            "MJPEG proxy started on port %d -> %s", port, source_url,
+            "MJPEG proxy started on port %d -> %s",
+            port,
+            source_url,
         )
         return self.status()
 
@@ -237,10 +237,7 @@ class MJPEGProxy:
                 uptime = time.time() - self._started_at
             return StreamInfo(
                 active=self._running,
-                local_url=(
-                    f"http://localhost:{self._port}/stream"
-                    if self._running else None
-                ),
+                local_url=(f"http://localhost:{self._port}/stream" if self._running else None),
                 source_url=self._source_url,
                 printer_name=self._printer_name,
                 connected_clients=self._connected_clients,
@@ -256,11 +253,14 @@ class MJPEGProxy:
         while self._running:
             try:
                 resp = requests.get(
-                    self._source_url, stream=True, timeout=10,
+                    self._source_url,
+                    stream=True,
+                    timeout=10,
                 )
                 if not resp.ok:
                     logger.warning(
-                        "Upstream stream returned %d", resp.status_code,
+                        "Upstream stream returned %d",
+                        resp.status_code,
                     )
                     self._stop_event.wait(2.0)
                     continue
@@ -298,7 +298,7 @@ class MJPEGProxy:
 
                         # Extract complete JPEG frame
                         frame = bytes(buf[: end + 2])
-                        buf = buf[end + 2:]
+                        buf = buf[end + 2 :]
                         in_frame = False
 
                         if len(frame) > _MAX_FRAME_SIZE:

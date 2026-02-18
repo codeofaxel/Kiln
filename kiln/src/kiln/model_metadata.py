@@ -27,7 +27,7 @@ import logging
 import os
 import xml.etree.ElementTree as ET
 import zipfile
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ _MODEL_PATH = "3D/3dmodel.model"
 _NS_3MF = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
 
 
-def extract_3mf_metadata(file_path: str) -> Dict[str, Any]:
+def extract_3mf_metadata(file_path: str) -> dict[str, Any]:
     """Extract material and print-settings metadata from a .3mf file.
 
     Args:
@@ -55,7 +55,7 @@ def extract_3mf_metadata(file_path: str) -> Dict[str, Any]:
     The function never raises on bad input — it returns empty/None values
     with a logged warning so callers can proceed gracefully.
     """
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "materials": [],
         "colors": [],
         "print_settings": None,
@@ -89,10 +89,10 @@ def extract_3mf_metadata(file_path: str) -> Dict[str, Any]:
     return result
 
 
-def _parse_model_materials(zf: zipfile.ZipFile) -> tuple[List[str], List[str]]:
+def _parse_model_materials(zf: zipfile.ZipFile) -> tuple[list[str], list[str]]:
     """Parse <basematerials> from 3D/3dmodel.model inside the ZIP."""
-    materials: List[str] = []
-    colors: List[str] = []
+    materials: list[str] = []
+    colors: list[str] = []
 
     if _MODEL_PATH not in zf.namelist():
         logger.debug("No %s found in 3MF archive", _MODEL_PATH)
@@ -119,14 +119,14 @@ def _parse_model_materials(zf: zipfile.ZipFile) -> tuple[List[str], List[str]]:
     return materials, colors
 
 
-def _parse_metadata_settings(zf: zipfile.ZipFile) -> Optional[Dict[str, str]]:
+def _parse_metadata_settings(zf: zipfile.ZipFile) -> dict[str, str] | None:
     """Extract print settings from Metadata/ XML files in the archive.
 
     Many slicers (PrusaSlicer, OrcaSlicer, Cura) embed print settings as
     ``<metadata>`` elements inside the model XML or as separate files under
     ``Metadata/``.  This function collects key-value pairs from both sources.
     """
-    settings: Dict[str, str] = {}
+    settings: dict[str, str] = {}
 
     # --- Check model-level <metadata> elements ---
     if _MODEL_PATH in zf.namelist():
@@ -144,8 +144,7 @@ def _parse_metadata_settings(zf: zipfile.ZipFile) -> Optional[Dict[str, str]]:
 
     # --- Check Metadata/ directory entries ---
     metadata_files = [
-        name for name in zf.namelist()
-        if name.lower().startswith("metadata/") and name.lower().endswith(".xml")
+        name for name in zf.namelist() if name.lower().startswith("metadata/") and name.lower().endswith(".xml")
     ]
     for meta_file in metadata_files:
         try:
@@ -164,13 +163,13 @@ def _parse_metadata_settings(zf: zipfile.ZipFile) -> Optional[Dict[str, str]]:
     return settings if settings else None
 
 
-def _find_elements(parent: ET.Element, local_name: str) -> List[ET.Element]:
+def _find_elements(parent: ET.Element, local_name: str) -> list[ET.Element]:
     """Find child elements by local name, ignoring XML namespace prefixes.
 
     This handles both namespaced (``{http://...}basematerials``) and
     non-namespaced (``basematerials``) elements in the 3MF XML.
     """
-    results: List[ET.Element] = []
+    results: list[ET.Element] = []
     # Try with 3MF namespace
     results.extend(parent.findall(f"{{{_NS_3MF}}}{local_name}"))
     # Try without namespace

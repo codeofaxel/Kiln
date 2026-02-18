@@ -8,7 +8,6 @@ triggers re-acceptance during ``kiln setup``.
 from __future__ import annotations
 
 import time
-from typing import Optional
 
 _CURRENT_TERMS_VERSION = "1.1"
 
@@ -35,10 +34,11 @@ _TERMS_SUMMARY = """\
   Privacy policy: https://github.com/codeofaxel/Kiln/blob/main/PRIVACY.md"""
 
 
-def get_accepted_version(*, db=None) -> Optional[str]:
+def get_accepted_version(*, db=None) -> str | None:
     """Return the accepted terms version, or ``None`` if never accepted."""
     if db is None:
         from kiln.persistence import get_db
+
         db = get_db()
     return db.get_setting(_SETTINGS_KEY_VERSION)
 
@@ -52,6 +52,7 @@ def record_acceptance(*, db=None) -> None:
     """Record that the user accepted the current terms version."""
     if db is None:
         from kiln.persistence import get_db
+
         db = get_db()
     db.set_setting(_SETTINGS_KEY_VERSION, _CURRENT_TERMS_VERSION)
     db.set_setting(_SETTINGS_KEY_TIMESTAMP, str(time.time()))
