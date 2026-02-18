@@ -16,8 +16,22 @@
 ---
 
 <p align="center">
+  <img src="docs/site/public/demo/chris-wren-chat.jpg" alt="Kiln agent completing a print job over chat" width="380">
+</p>
+
+<p align="center">
+  <em>Ask your agent to print something. It just does it — start to finish.</em><br>
+  <a href="https://kiln3d.com">Watch the demo →</a>
+</p>
+
+<details>
+<summary>CLI demo (terminal)</summary>
+
+<p align="center">
   <img src="demo/kiln-demo.gif" alt="Kiln CLI Demo" width="800">
 </p>
+
+</details>
 
 Kiln lets AI agents design, queue, and execute physical manufacturing jobs on real 3D printers with zero human intervention. It exposes printer control through both a **CLI** and the **Model Context Protocol (MCP)**, making any MCP-compatible agent (Claude, GPT, custom) a first-class operator of your print farm.
 

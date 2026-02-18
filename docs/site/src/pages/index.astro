@@ -36,6 +36,73 @@ $ kiln compare-cost model.gcode --fulfillment-material pla_standard --json
   <PrinterGrid />
   <ComparisonTable />
 
+  <!-- Real Prints — social proof -->
+  <section class="real-prints bordered">
+    <div class="container">
+      <h2>Real prints. Real agents.</h2>
+      <p class="lead">Two users. Two printers. Zero manual steps.</p>
+
+      <div class="demo-video-wrap">
+        <video
+          src="/demo/kiln-demo-real.mp4"
+          autoplay
+          muted
+          loop
+          playsinline
+          controls
+          aria-label="Demo: Chris and Dillon use AI agents to print coasters end-to-end"
+        ></video>
+      </div>
+
+      <div class="testimonial-grid">
+        <!-- Chris -->
+        <div class="testimonial-card">
+          <div class="tcard-img-wrap">
+            <img
+              src="/demo/chris-wren-chat.jpg"
+              alt="Chris asking his Wren agent to print a coaster via chat"
+              loading="lazy"
+            >
+          </div>
+          <div class="tcard-body">
+            <div class="tcard-meta">
+              <span class="tcard-name">Chris</span>
+              <span class="tcard-printer">Bambu Lab A1 Mini</span>
+              <span class="tcard-agent">Agent: Wren</span>
+            </div>
+            <blockquote>"Yo actually can you print me another coaster"</blockquote>
+            <p class="tcard-result">Agent sent the gcode, started the job, monitored it, and pinged Chris when done — <strong>all done. 100% complete.</strong></p>
+          </div>
+        </div>
+
+        <!-- Dillon -->
+        <div class="testimonial-card">
+          <div class="tcard-img-wrap">
+            <img
+              src="/demo/dillon-clawd-monitor.jpg"
+              alt="Clawdence agent sending webcam snapshots with live print progress to Dillon"
+              loading="lazy"
+            >
+          </div>
+          <div class="tcard-body">
+            <div class="tcard-meta">
+              <span class="tcard-name">Dillon</span>
+              <span class="tcard-printer">Prusa Mini</span>
+              <span class="tcard-agent">Agent: Clawdence</span>
+            </div>
+            <blockquote>Asked his agent to print. Got live webcam updates with progress every 30 minutes.</blockquote>
+            <p class="tcard-result">Print completed. Dillon walked over, popped the coaster off, and cracked open a sparkling water.</p>
+          </div>
+        </div>
+      </div>
+
+      <p class="proof-note">
+        Different agents. Different printer brands. Same Kiln.
+        <a href="/blog/first-real-prints">Read the full story →</a>
+      </p>
+    </div>
+  </section>
+
   <!-- Code example -->
   <section class="bordered">
     <div class="container">
@@ -53,4 +120,112 @@ $ kiln compare-cost model.gcode --fulfillment-material pla_standard --json
   .bordered {
     border-top: 1px solid var(--border);
   }
+
+  /* Real Prints section */
+  .real-prints { padding: 80px 0; }
+  .real-prints h2 {
+    font-size: clamp(24px, 4vw, 40px);
+    font-weight: 700;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+  .real-prints .lead {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 18px;
+    margin-bottom: 48px;
+  }
+
+  .demo-video-wrap {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    margin-bottom: 48px;
+    background: #000;
+  }
+  .demo-video-wrap video {
+    width: 100%;
+    display: block;
+    max-height: 500px;
+    object-fit: contain;
+  }
+
+  .testimonial-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 32px;
+  }
+  @media (max-width: 700px) {
+    .testimonial-grid { grid-template-columns: 1fr; }
+  }
+
+  .testimonial-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .tcard-img-wrap {
+    height: 220px;
+    overflow: hidden;
+    background: #000;
+  }
+  .tcard-img-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: top;
+    display: block;
+  }
+  .tcard-body {
+    padding: 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .tcard-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .tcard-name {
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .tcard-printer, .tcard-agent {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: var(--mono);
+  }
+  .tcard-body blockquote {
+    font-style: italic;
+    color: var(--text-muted);
+    border-left: 2px solid var(--accent);
+    padding-left: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .tcard-result {
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-muted);
+    margin-top: auto;
+  }
+  .tcard-result strong { color: var(--text); }
+
+  .proof-note {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 15px;
+  }
+  .proof-note a { color: var(--accent); }
 </style>

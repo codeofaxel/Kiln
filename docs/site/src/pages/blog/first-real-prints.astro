@@ -1,0 +1,181 @@
+---
+import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
+---
+
+<BlogPostLayout
+  title="Our First Real Prints: Two Users, Two Printers, Zero Manual Steps"
+  description="Chris and Dillon used AI agents to print coasters end-to-end — different agents, different printer brands, no human intervention. Here's what happened."
+  date="February 18, 2026"
+  tags={["demo", "real hardware", "community"]}
+>
+
+<p>
+  Last week, two people we know ran Kiln on their own printers for the first time. No hand-holding, no prepared environment — just their machines, their agents, and a casual text message. Both got coasters. Here's what happened.
+</p>
+
+<div class="demo-video">
+  <video
+    src="/demo/kiln-demo-real.mp4"
+    controls
+    muted
+    playsinline
+    aria-label="Chris and Dillon demo video — end-to-end prints via AI agent"
+  ></video>
+  <p class="caption">Chris (Bambu Lab A1 Mini) and Dillon (Prusa Mini) — both printing with AI agents, no manual intervention.</p>
+</div>
+
+<h2>Chris: "Yo actually can you print me another coaster"</h2>
+
+<p>
+  Chris has a <strong>Bambu Lab A1 Mini</strong>. He was already using an agent called <strong>Wren</strong> for other tasks. At 12:49 PM, he sent it a message:
+</p>
+
+<blockquote>
+  <p>Yo actually can you print me another coaster</p>
+</blockquote>
+
+<p>
+  One minute later, Wren responded: <em>"On it. Sending coaster.gcode.3mf to Kiln now."</em> Followed immediately by: <em>"Print job started. Should be heating up now."</em>
+</p>
+
+<p>
+  Chris asked Wren to monitor it and check in when done. Wren replied that it was running <code>kiln wait</code> in the background. Then nothing — Wren just quietly watched the job.
+</p>
+
+<div class="asset-img">
+  <img
+    src="/demo/chris-wren-chat.jpg"
+    alt="Screenshot of Chris chatting with his Wren agent — print job started, monitored, and completed"
+    loading="lazy"
+  >
+  <p class="caption">The whole story in one screenshot. Casual ask → agent acts → agent monitors → agent reports done.</p>
+</div>
+
+<p>
+  At 1:31 PM — 42 minutes later — Chris texted "How is it looking." Wren had already beaten him to it: <em>"All done. 100% complete — your coaster's ready to go."</em>
+</p>
+
+<p>
+  Chris: <em>"Sweet let me come check."</em> Wren: <em>"Cool. Let me know how it came out."</em>
+</p>
+
+<div class="asset-img">
+  <img
+    src="/demo/chris-finished-coaster.jpg"
+    alt="Finished 3D printed coaster sitting on Chris's Bambu Lab A1 Mini print bed"
+    loading="lazy"
+  >
+  <p class="caption">The finished coaster on the Bambu Lab A1 Mini bed. 100% complete.</p>
+</div>
+
+<p>
+  That's the whole interaction. A text message, an agent that handled everything underneath — file transfer, print start, monitoring, completion notification — and a coaster sitting on the bed when Chris walked over.
+</p>
+
+<h2>Dillon: Live webcam updates, every 30 minutes</h2>
+
+<p>
+  Dillon runs a <strong>Prusa Mini</strong>. His agent is called <strong>Clawdence</strong>. Same idea — ask the agent to print, let it handle the rest. But Dillon's setup added something extra: Clawdence used Kiln's webcam snapshot tool to check in on the printer periodically and send Dillon actual photos of the job in progress.
+</p>
+
+<div class="asset-img">
+  <img
+    src="/demo/dillon-clawd-monitor.jpg"
+    alt="Clawdence agent sending Dillon live webcam snapshots with print progress stats"
+    loading="lazy"
+  >
+  <p class="caption">Clawdence at 4:28 PM: Status Printing, 24%, hotend at 215.4°C, ~3h 11m remaining. Then again at 4:58 PM: 36%. The agent just kept checking in.</p>
+</div>
+
+<p>
+  Every update included the real printer data — hotend temperature, bed temperature, progress percentage, time remaining. Not a guess. Not a cached value. Pulled live from the Prusa, formatted, and sent directly to Dillon's phone.
+</p>
+
+<div class="asset-img">
+  <img
+    src="/demo/dillon-finished-coaster.jpg"
+    alt="Finished textured coaster on Dillon's Prusa Mini print bed, Prusa screen showing FINISHED"
+    loading="lazy"
+  >
+  <p class="caption">Prusa Mini screen says FINISHED. The textured coaster came out clean.</p>
+</div>
+
+<p>
+  When the job finished, Dillon walked over, popped the coaster off the magnetic bed, and put it to immediate use.
+</p>
+
+<div class="demo-video">
+  <video
+    src="/demo/dillon-demo.mp4"
+    controls
+    muted
+    loop
+    playsinline
+    aria-label="Dillon's full demo — agent request, printer running, finished coaster and sparkling water"
+  ></video>
+  <p class="caption">Dillon's full demo: agent request → print job → coaster → sparkling water. The best part is at the end.</p>
+</div>
+
+<h2>What this proves</h2>
+
+<p>
+  A few things stood out watching these two runs:
+</p>
+
+<ul>
+  <li><strong>Different agents, same Kiln.</strong> Wren and Clawdence are completely different AI agents built by different people. Both talk to Kiln through the same MCP tools. The agent doesn't matter — if it speaks MCP, it works.</li>
+  <li><strong>Different printers, same interface.</strong> Bambu Lab uses a proprietary MQTT protocol. Prusa uses Prusa Link's REST API. Kiln normalizes both into the same set of tools. The agent calls <code>get_printer_status</code> and gets the same shape of response regardless of what's underneath.</li>
+  <li><strong>Monitoring is built in.</strong> Dillon didn't have to write any polling logic. Clawdence used <code>kiln wait</code> and Kiln's webcam tools out of the box. The agent just had to decide to use them.</li>
+  <li><strong>The interaction is just a text message.</strong> Neither Chris nor Dillon opened OctoPrint, Bambu Studio, or PrusaSlicer. They texted their agents. That's the interface.</li>
+</ul>
+
+<h2>Try it yourself</h2>
+
+<p>
+  Kiln is free and open-source. If you have a 3D printer running OctoPrint, Moonraker, Bambu Lab firmware, or Prusa Link — you can hook it up to your agent today.
+</p>
+
+<p>
+  <a href="/install">Install Kiln →</a> ·
+  <a href="https://github.com/codeofaxel/Kiln">GitHub →</a> ·
+  <a href="/docs">Docs →</a>
+</p>
+
+<p>
+  If you print something with Kiln, share it. We want to see what you make.
+</p>
+
+</BlogPostLayout>
+
+<style>
+  .demo-video {
+    margin: 32px 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #000;
+  }
+  .demo-video video {
+    width: 100%;
+    display: block;
+    max-height: 460px;
+    object-fit: contain;
+  }
+  .asset-img {
+    margin: 32px 0;
+  }
+  .asset-img img {
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    display: block;
+  }
+  .caption {
+    margin-top: 10px !important;
+    font-size: 13px !important;
+    color: var(--text-muted);
+    text-align: center;
+    line-height: 1.5;
+    margin-bottom: 0 !important;
+  }
+</style>
