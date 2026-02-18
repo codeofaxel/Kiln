@@ -96,12 +96,12 @@ Comprehensive reference for deploying Kiln as a hosted REST API service or local
 | `KILN_AGENT_ID` | No | `default` | Agent identifier for event attribution and memory |
 | `KILN_LLM_PRIVACY_MODE` | No | `1` (enabled) | Redact secrets from LLM context. Set `0` to disable |
 
-### 3DOS Gateway
+### Distributed Manufacturing Network *(Coming Soon)*
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `KILN_3DOS_API_KEY` | No | `""` | 3DOS gateway API key |
-| `KILN_3DOS_BASE_URL` | No | 3DOS default | Override 3DOS API base URL |
+| `KILN_NETWORK_API_KEY` | No | `""` | Distributed network gateway API key |
+| `KILN_NETWORK_BASE_URL` | No | — | Override network API base URL |
 
 ### Safety & Confirmation
 

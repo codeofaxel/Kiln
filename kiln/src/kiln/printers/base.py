@@ -8,6 +8,7 @@ through a single, uniform API.
 
 from __future__ import annotations
 
+import asyncio
 import enum
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
@@ -588,6 +589,33 @@ class PrinterAdapter(ABC):
         Raises:
             PrinterError: If deletion fails.
         """
+
+    # -- async wrappers (hot-path methods) --------------------------------
+
+    async def async_get_state(self) -> PrinterState:
+        """Async wrapper for :meth:`get_state` via :func:`asyncio.to_thread`."""
+        return await asyncio.to_thread(self.get_state)
+
+    async def async_start_print(self, file_name: str) -> PrintResult:
+        """Async wrapper for :meth:`start_print` via :func:`asyncio.to_thread`."""
+        return await asyncio.to_thread(self.start_print, file_name)
+
+    async def async_cancel_print(self) -> PrintResult:
+        """Async wrapper for :meth:`cancel_print` via :func:`asyncio.to_thread`."""
+        return await asyncio.to_thread(self.cancel_print)
+
+    async def async_get_job_status(self) -> JobProgress:
+        """Async wrapper for :meth:`get_job` via :func:`asyncio.to_thread`."""
+        return await asyncio.to_thread(self.get_job)
+
+    async def async_get_temperatures(self) -> PrinterState:
+        """Async wrapper returning temperature data from :meth:`get_state`.
+
+        Returns the full :class:`PrinterState` (which includes all temperature
+        fields) without an HTTP round-trip beyond what :meth:`get_state` already
+        does.
+        """
+        return await asyncio.to_thread(self.get_state)
 
     # -- convenience / dunder helpers -----------------------------------
 
