@@ -98,3 +98,64 @@ class TestAuditHMAC:
         )
         result = db.verify_audit_log()
         assert result["valid"] == 1
+
+
+class TestSessionLog:
+    """Tests for per-session audit log grouping."""
+
+    @pytest.fixture()
+    def db(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+        return KilnDB(db_path=db_path)
+
+    def test_log_audit_stores_session_id(self, db):
+        row_id = db.log_audit(
+            tool_name="start_print",
+            safety_level="guarded",
+            action="executed",
+            session_id="session-abc",
+        )
+        row = db._conn.execute(
+            "SELECT session_id FROM safety_audit_log WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        assert row["session_id"] == "session-abc"
+
+    def test_query_audit_filters_by_session_id(self, db):
+        db.log_audit(tool_name="start_print", safety_level="guarded", action="executed", session_id="sess-1")
+        db.log_audit(tool_name="cancel_print", safety_level="confirm", action="executed", session_id="sess-1")
+        db.log_audit(tool_name="printer_status", safety_level="safe", action="executed", session_id="sess-2")
+
+        sess1 = db.query_audit(session_id="sess-1")
+        assert len(sess1) == 2
+        assert all(e["session_id"] == "sess-1" for e in sess1)
+
+        sess2 = db.query_audit(session_id="sess-2")
+        assert len(sess2) == 1
+        assert sess2[0]["tool_name"] == "printer_status"
+
+    def test_query_audit_session_id_no_match(self, db):
+        db.log_audit(tool_name="start_print", safety_level="guarded", action="executed", session_id="sess-1")
+        result = db.query_audit(session_id="nonexistent-session")
+        assert result == []
+
+    def test_session_id_none_by_default(self, db):
+        row_id = db.log_audit(
+            tool_name="printer_status",
+            safety_level="safe",
+            action="executed",
+        )
+        row = db._conn.execute(
+            "SELECT session_id FROM safety_audit_log WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        assert row["session_id"] is None
+
+    def test_query_audit_session_and_action_combined(self, db):
+        db.log_audit(tool_name="start_print", safety_level="guarded", action="executed", session_id="sess-1")
+        db.log_audit(tool_name="send_gcode", safety_level="confirm", action="blocked", session_id="sess-1")
+        db.log_audit(tool_name="start_print", safety_level="guarded", action="executed", session_id="sess-2")
+
+        result = db.query_audit(session_id="sess-1", action="blocked")
+        assert len(result) == 1
+        assert result[0]["tool_name"] == "send_gcode"

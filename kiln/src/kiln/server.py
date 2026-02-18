@@ -565,6 +565,12 @@ try:
 except (FileNotFoundError, ValueError):
     pass
 
+# Per-process session ID — groups all tool calls from one server run together.
+# A new UUID is generated each time the MCP server starts.
+import uuid as _uuid_mod
+
+_SESSION_ID: str = str(_uuid_mod.uuid4())
+
 
 def _get_safety_level(tool_name: str) -> str:
     """Return the safety classification for a tool (default ``"safe"``)."""
@@ -589,6 +595,7 @@ def _audit(
             action=action,
             printer_name=_PRINTER_MODEL or None,
             details=details,
+            session_id=_SESSION_ID,
         )
     except Exception:
         logger.debug("Failed to write audit log for %s/%s", tool_name, action)
@@ -2408,6 +2415,39 @@ def safety_audit(
     except Exception as exc:
         logger.exception("Unexpected error in safety_audit")
         return _error_dict(f"Unexpected error in safety_audit: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def get_session_log(
+    session_id: str | None = None,
+    limit: int = 100,
+) -> dict:
+    """Return the full audit log for an agent session.
+
+    Every tool call made by an agent is recorded with a session ID — a UUID
+    generated when the MCP server starts.  Use this tool to replay exactly
+    what an agent issued during a session: every command, every safety check
+    that fired, every blocked attempt.
+
+    Args:
+        session_id: Session UUID to query.  Omit to use the current session.
+        limit: Maximum records to return (default 100, max 500).
+    """
+    limit = min(max(1, limit), 500)
+    sid = session_id or _SESSION_ID
+    try:
+        db = get_db()
+        entries = db.query_audit(session_id=sid, limit=limit)
+        return {
+            "success": True,
+            "session_id": sid,
+            "current_session": sid == _SESSION_ID,
+            "count": len(entries),
+            "entries": entries,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in get_session_log")
+        return _error_dict(f"Unexpected error in get_session_log: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------

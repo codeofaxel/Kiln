@@ -813,6 +813,14 @@ class KilnDB:
             with contextlib.suppress(sqlite3.OperationalError, Exception):
                 self._conn.execute("ALTER TABLE safety_audit_log ADD COLUMN hmac_signature TEXT")
 
+            # Add session_id column to safety_audit_log if missing.
+            with contextlib.suppress(sqlite3.OperationalError, Exception):
+                self._conn.execute("ALTER TABLE safety_audit_log ADD COLUMN session_id TEXT")
+            with contextlib.suppress(sqlite3.OperationalError, Exception):
+                self._conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_audit_session ON safety_audit_log(session_id)"
+                )
+
             self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -2393,6 +2401,7 @@ class KilnDB:
         agent_id: str | None = None,
         printer_name: str | None = None,
         details: dict[str, Any] | None = None,
+        session_id: str | None = None,
     ) -> int:
         """Record a safety audit event and return the row id.
 
@@ -2406,6 +2415,7 @@ class KilnDB:
             agent_id: Optional identifier for the calling agent.
             printer_name: Optional printer name involved.
             details: Optional dict of extra context (args, error messages).
+            session_id: Optional UUID grouping all tool calls in one agent session.
         """
         ts = time.time()
         with self._write_lock:
@@ -2425,8 +2435,8 @@ class KilnDB:
                 """
                 INSERT INTO safety_audit_log
                     (timestamp, tool_name, safety_level, action,
-                     agent_id, printer_name, details, hmac_signature)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     agent_id, printer_name, details, hmac_signature, session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ts,
@@ -2437,6 +2447,7 @@ class KilnDB:
                     printer_name,
                     details_json,
                     hmac_sig,
+                    session_id,
                 ),
             )
             self._conn.commit()
@@ -2485,6 +2496,7 @@ class KilnDB:
         self,
         action: str | None = None,
         tool_name: str | None = None,
+        session_id: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         """Query the safety audit log, newest first.
@@ -2492,6 +2504,7 @@ class KilnDB:
         Args:
             action: Filter by action type (e.g. ``"blocked"``).
             tool_name: Filter by tool name.
+            session_id: Filter by agent session UUID.
             limit: Maximum rows to return.
         """
         clauses: list[str] = []
@@ -2502,6 +2515,9 @@ class KilnDB:
         if tool_name is not None:
             clauses.append("tool_name = ?")
             params.append(tool_name)
+        if session_id is not None:
+            clauses.append("session_id = ?")
+            params.append(session_id)
 
         where = ""
         if clauses:

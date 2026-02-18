@@ -122,6 +122,7 @@ READ_ONLY_TOOLS: Set[str] = {
 
     # Safety / audit (read-only inspections)
     "safety_audit",
+    "get_session_log",
     "safety_status",
     "safety_settings",
     "get_autonomy_level",
