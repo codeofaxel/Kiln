@@ -83,6 +83,33 @@ _community_cache: dict[str, SafetyProfile] = {}
 _loaded: bool = False
 _community_loaded: bool = False
 
+_locked_profiles: set[str] = set()
+_LOCK_FILE = _COMMUNITY_DIR / "locked_profiles.json"
+_locks_loaded: bool = False
+
+
+def _load_locks() -> None:
+    """Load the set of admin-locked profile IDs."""
+    global _locks_loaded
+    if _locks_loaded:
+        return
+    if not _LOCK_FILE.exists():
+        _locks_loaded = True
+        return
+    try:
+        data = json.loads(_LOCK_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            _locked_profiles.update(data)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.error("Failed to load locked profiles: %s", exc)
+    _locks_loaded = True
+
+
+def _save_locks() -> None:
+    """Persist locked profile IDs to disk."""
+    _COMMUNITY_DIR.mkdir(parents=True, exist_ok=True)
+    _LOCK_FILE.write_text(json.dumps(sorted(_locked_profiles), indent=2), encoding="utf-8")
+
 
 def _parse_profiles(raw: dict[str, Any], target: dict[str, SafetyProfile]) -> None:
     """Parse raw JSON profile entries into *target* dict."""
@@ -383,6 +410,14 @@ def add_community_profile(
     :raises ValueError: If validation fails.
     """
     _load_community()
+    _load_locks()
+
+    normalised_check = printer_model.lower().replace("-", "_").strip()
+    if normalised_check in _locked_profiles:
+        raise ValueError(
+            f"Safety profile '{printer_model}' is admin-locked. "
+            f"An admin must unlock it before modifications are allowed."
+        )
 
     errors = validate_safety_profile(profile)
     if errors:
@@ -434,3 +469,67 @@ def list_community_profiles() -> list[str]:
     """Return model names from the user's community profile file."""
     _load_community()
     return sorted(_community_cache.keys())
+
+
+# ---------------------------------------------------------------------------
+# Lockable safety profiles (Enterprise)
+# ---------------------------------------------------------------------------
+
+
+def lock_safety_profile(printer_model: str) -> bool:
+    """Lock a safety profile so agents cannot modify its limits.
+
+    When locked, calls to ``add_community_profile`` for this model
+    are rejected. Only an admin can unlock.
+
+    Args:
+        printer_model: Profile identifier to lock.
+
+    Returns:
+        ``True`` if the profile was locked (or was already locked).
+    """
+    _load_locks()
+    normalised = printer_model.lower().replace("-", "_").strip()
+    _locked_profiles.add(normalised)
+    _save_locks()
+    logger.info("Locked safety profile '%s'", normalised)
+    return True
+
+
+def unlock_safety_profile(printer_model: str) -> bool:
+    """Unlock a previously locked safety profile.
+
+    Args:
+        printer_model: Profile identifier to unlock.
+
+    Returns:
+        ``True`` if the profile was unlocked, ``False`` if it wasn't locked.
+    """
+    _load_locks()
+    normalised = printer_model.lower().replace("-", "_").strip()
+    if normalised not in _locked_profiles:
+        return False
+    _locked_profiles.discard(normalised)
+    _save_locks()
+    logger.info("Unlocked safety profile '%s'", normalised)
+    return True
+
+
+def is_profile_locked(printer_model: str) -> bool:
+    """Check whether a safety profile is admin-locked.
+
+    Args:
+        printer_model: Profile identifier.
+
+    Returns:
+        ``True`` if the profile is locked.
+    """
+    _load_locks()
+    normalised = printer_model.lower().replace("-", "_").strip()
+    return normalised in _locked_profiles
+
+
+def list_locked_profiles() -> list[str]:
+    """Return all admin-locked profile IDs."""
+    _load_locks()
+    return sorted(_locked_profiles)

@@ -30,6 +30,7 @@ import os
 import secrets
 import time
 from dataclasses import asdict, dataclass, field
+from enum import Enum
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,30 @@ _KEY_PREFIX = "sk_kiln_"
 
 # Default grace period for key rotation (24 hours)
 _DEFAULT_GRACE_PERIOD = 86400  # seconds
+
+
+# ---------------------------------------------------------------------------
+# Role-based access control (Enterprise)
+# ---------------------------------------------------------------------------
+
+class Role(str, Enum):
+    """Named roles for team members.
+
+    Each role maps to a fixed set of scopes. Enterprise tier only.
+    """
+
+    ADMIN = "admin"
+    ENGINEER = "engineer"
+    OPERATOR = "operator"
+
+
+#: Scopes granted to each role.  Admin is a superset of engineer,
+#: which is a superset of operator.
+ROLE_SCOPES: dict[Role, set[str]] = {
+    Role.ADMIN: {"read", "write", "admin"},
+    Role.ENGINEER: {"read", "write"},
+    Role.OPERATOR: {"read"},
+}
 
 
 @dataclass
@@ -54,6 +79,7 @@ class ApiKey:
     last_used_at: float | None = None
     deprecated_at: float | None = None
     expires_at: float | None = None
+    role: str | None = None  # Role name when RBAC is active
 
     @property
     def status(self) -> Literal["active", "deprecated", "expired", "revoked"]:
@@ -340,3 +366,46 @@ class AuthManager:
                 "auth_enabled": True,
                 "error": str(exc),
             }
+
+    def create_key_with_role(
+        self,
+        name: str,
+        role: Role,
+    ) -> tuple[ApiKey, str]:
+        """Create an API key with role-derived scopes (Enterprise).
+
+        Args:
+            name: Human-readable label for this key.
+            role: The role to assign (admin, engineer, operator).
+
+        Returns:
+            (ApiKey metadata, raw key string).
+        """
+        scopes = ROLE_SCOPES.get(role, set())
+        api_key, raw_key = self.create_key(name, scopes=list(scopes))
+        api_key.role = role.value
+        return api_key, raw_key
+
+    def get_key_role(self, key: str) -> str | None:
+        """Return the role name for a key, or None if no role is assigned."""
+        key_hash = self._hash_key(key)
+        api_key = self._keys.get(key_hash)
+        if api_key is None:
+            return None
+        return api_key.role
+
+
+def resolve_role_scopes(role_name: str) -> set[str]:
+    """Resolve a role name string to its scope set.
+
+    Args:
+        role_name: One of "admin", "engineer", "operator".
+
+    Returns:
+        Set of scope strings. Empty set if role is unknown.
+    """
+    try:
+        role = Role(role_name)
+    except ValueError:
+        return set()
+    return ROLE_SCOPES.get(role, set())

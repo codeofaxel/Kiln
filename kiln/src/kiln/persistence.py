@@ -2597,6 +2597,70 @@ class KilnDB:
             "total": sum(counts.values()),
         }
 
+    def export_audit_trail(
+        self,
+        *,
+        start_time: float | None = None,
+        end_time: float | None = None,
+        format: str = "json",
+        tool_name: str | None = None,
+        action: str | None = None,
+        session_id: str | None = None,
+    ) -> str:
+        """Export audit trail entries as JSON or CSV.
+
+        Args:
+            start_time: Unix timestamp lower bound (inclusive).
+            end_time: Unix timestamp upper bound (inclusive).
+            format: ``"json"`` or ``"csv"``.
+            tool_name: Filter by tool name.
+            action: Filter by action type.
+            session_id: Filter by session ID.
+
+        Returns:
+            Formatted string (JSON array or CSV with headers).
+        """
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if start_time is not None:
+            conditions.append("timestamp >= ?")
+            params.append(start_time)
+        if end_time is not None:
+            conditions.append("timestamp <= ?")
+            params.append(end_time)
+        if tool_name:
+            conditions.append("tool_name = ?")
+            params.append(tool_name)
+        if action:
+            conditions.append("action = ?")
+            params.append(action)
+        if session_id:
+            conditions.append("session_id = ?")
+            params.append(session_id)
+
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        sql = f"SELECT * FROM safety_audit_log{where} ORDER BY timestamp DESC"
+
+        rows = self._conn.execute(sql, params).fetchall()
+        row_dicts = [dict(r) for r in rows]
+
+        if format == "csv":
+            import csv
+            import io
+
+            output = io.StringIO()
+            if row_dicts:
+                writer = csv.DictWriter(output, fieldnames=row_dicts[0].keys())
+                writer.writeheader()
+                writer.writerows(row_dicts)
+            return output.getvalue()
+
+        # Default: JSON
+        import json as json_mod
+
+        return json_mod.dumps(row_dicts, indent=2, default=str)
+
     # ------------------------------------------------------------------
     # Snapshot persistence
     # ------------------------------------------------------------------
