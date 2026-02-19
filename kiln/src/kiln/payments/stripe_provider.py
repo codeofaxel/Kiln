@@ -594,6 +594,133 @@ class StripeProvider(PaymentProvider):
                 code="STRIPE_CANCEL_ERROR",
             ) from exc
 
+    # -- Subscription Checkout -------------------------------------------------
+
+    def create_subscription_session(
+        self,
+        price_id: str,
+        *,
+        success_url: str = "https://kiln3d.com/pro/success?session_id={CHECKOUT_SESSION_ID}",
+        cancel_url: str = "https://kiln3d.com/pricing",
+        customer_email: str | None = None,
+        metadata: dict[str, str] | None = None,
+        metered_price_id: str | None = None,
+    ) -> dict[str, str]:
+        """Create a Stripe Checkout Session for a recurring subscription.
+
+        :param price_id: Stripe Price ID for the base subscription.
+        :param success_url: Redirect URL after successful payment.
+        :param cancel_url: Redirect URL if user cancels.
+        :param customer_email: Pre-fill the checkout email field.
+        :param metadata: Extra metadata to attach to the session.
+        :param metered_price_id: Optional metered price (e.g. printer overage)
+            to attach as a second line item on the subscription.
+        :returns: Dict with ``session_id`` and ``checkout_url``.
+        :raises PaymentError: On Stripe API errors.
+        """
+        stripe = self._import_stripe()
+
+        line_items: list[dict[str, Any]] = [{"price": price_id, "quantity": 1}]
+        if metered_price_id:
+            line_items.append({"price": metered_price_id})
+
+        try:
+            session = stripe.checkout.Session.create(
+                mode="subscription",
+                line_items=line_items,
+                success_url=success_url,
+                cancel_url=cancel_url,
+                customer_email=customer_email,
+                metadata=metadata or {},
+            )
+
+            logger.info(
+                "Created subscription Checkout Session %s for price %s",
+                session.id,
+                price_id,
+            )
+
+            return {"session_id": session.id, "checkout_url": session.url}
+
+        except stripe.error.StripeError as exc:
+            raise PaymentError(
+                f"Failed to create subscription checkout: {exc}",
+                code="STRIPE_SUBSCRIPTION_ERROR",
+            ) from exc
+
+    # -- Lookup key resolution -------------------------------------------------
+
+    def resolve_price_by_lookup_key(self, lookup_key: str) -> str | None:
+        """Resolve a Stripe lookup key to a price ID.
+
+        :param lookup_key: The lookup key set on the price in Stripe Dashboard.
+        :returns: The ``price_...`` ID, or ``None`` if not found.
+        """
+        stripe = self._import_stripe()
+
+        try:
+            prices = stripe.Price.list(lookup_keys=[lookup_key], limit=1)
+            if prices.data:
+                return prices.data[0].id
+            return None
+        except stripe.error.StripeError:
+            logger.warning("Failed to resolve lookup key %r", lookup_key)
+            return None
+
+    # -- Metered usage reporting -----------------------------------------------
+
+    def report_printer_usage(
+        self,
+        subscription_item_id: str,
+        overage_count: int,
+        *,
+        timestamp: int | None = None,
+    ) -> dict[str, Any]:
+        """Report metered printer overage usage to Stripe.
+
+        Reports the number of printers **above** the 20 included in the
+        Enterprise base.  The caller is responsible for subtracting the
+        included allowance before calling this method.
+
+        :param subscription_item_id: The ``si_...`` ID for the metered line
+            item on the customer's subscription.
+        :param overage_count: Number of printers over the included 20.
+            Pass 0 if within allowance.
+        :param timestamp: Unix timestamp for the usage event.  Defaults to
+            current time.
+        :returns: Dict with ``id`` and ``quantity`` from Stripe.
+        :raises PaymentError: On Stripe API errors.
+        """
+        stripe = self._import_stripe()
+
+        if overage_count < 0:
+            overage_count = 0
+
+        try:
+            kwargs: dict[str, Any] = {
+                "subscription_item": subscription_item_id,
+                "quantity": overage_count,
+                "action": "set",
+            }
+            if timestamp:
+                kwargs["timestamp"] = timestamp
+
+            record = stripe.SubscriptionItem.create_usage_record(**kwargs)
+
+            logger.info(
+                "Reported printer usage: %d overage printers for si=%s",
+                overage_count,
+                subscription_item_id,
+            )
+
+            return {"id": record.id, "quantity": record.quantity}
+
+        except stripe.error.StripeError as exc:
+            raise PaymentError(
+                f"Failed to report printer usage: {exc}",
+                code="STRIPE_USAGE_ERROR",
+            ) from exc
+
     def __repr__(self) -> str:
         key_hint = self._secret_key[:7] + "..." if self._secret_key else "unset"
         return f"<StripeProvider key={key_hint!r} customer={self._customer_id!r}>"

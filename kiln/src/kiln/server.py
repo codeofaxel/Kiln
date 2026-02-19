@@ -3385,27 +3385,42 @@ def activate_license(key: str) -> dict:
 
 
 @mcp.tool()
-def get_upgrade_url(tier: str = "pro", email: str = "") -> dict:
-    """Get a Stripe Checkout URL to purchase a Kiln Pro or Business license.
+def get_upgrade_url(tier: str = "pro", billing: str = "monthly", email: str = "") -> dict:
+    """Get a Stripe Checkout URL to purchase or subscribe to a Kiln license.
 
     Opens a payment page.  After completing payment, the license key can
     be retrieved with ``kiln upgrade --session <session_id>`` in the CLI.
 
     Args:
-        tier: ``"pro"`` or ``"business"``.
+        tier: ``"pro"``, ``"business"``, or ``"enterprise"``.
+        billing: ``"monthly"`` or ``"annual"``.
         email: Pre-fill the checkout email field (optional).
     """
     tier_lower = tier.lower().strip()
-    if tier_lower not in ("pro", "business"):
-        return _error_dict(f"Invalid tier: {tier!r}. Use 'pro' or 'business'.", code="INVALID_INPUT")
+    billing_lower = billing.lower().strip()
 
-    price_env = "KILN_STRIPE_PRICE_PRO" if tier_lower == "pro" else "KILN_STRIPE_PRICE_BUSINESS"
-    price_id = os.environ.get(price_env, "")
-    if not price_id:
+    if tier_lower not in ("pro", "business", "enterprise"):
         return _error_dict(
-            f"Stripe price not configured. Set {price_env} environment variable.",
-            code="CONFIG_MISSING",
+            f"Invalid tier: {tier!r}. Use 'pro', 'business', or 'enterprise'.",
+            code="INVALID_INPUT",
         )
+    if billing_lower not in ("monthly", "annual"):
+        return _error_dict(
+            f"Invalid billing period: {billing!r}. Use 'monthly' or 'annual'.",
+            code="INVALID_INPUT",
+        )
+
+    # Env var name -> lookup key mapping for each tier+billing combo.
+    _PRICE_MAP: dict[tuple[str, str], tuple[str, str]] = {
+        ("pro", "monthly"): ("KILN_STRIPE_PRICE_PRO", "pro_monthly"),
+        ("pro", "annual"): ("KILN_STRIPE_PRICE_PRO_ANNUAL", "pro_annual"),
+        ("business", "monthly"): ("KILN_STRIPE_PRICE_BUSINESS", "business_monthly"),
+        ("business", "annual"): ("KILN_STRIPE_PRICE_BUSINESS_ANNUAL", "business_annual"),
+        ("enterprise", "monthly"): ("KILN_STRIPE_PRICE_ENTERPRISE", "enterprise_monthly"),
+        ("enterprise", "annual"): ("KILN_STRIPE_PRICE_ENTERPRISE_ANNUAL", "enterprise_annual"),
+    }
+
+    price_env, lookup_key = _PRICE_MAP[(tier_lower, billing_lower)]
 
     stripe_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
     if not stripe_key:
@@ -3415,16 +3430,43 @@ def get_upgrade_url(tier: str = "pro", email: str = "") -> dict:
         from kiln.payments.stripe_provider import StripeProvider
 
         provider = StripeProvider(secret_key=stripe_key)
-        result = provider.create_checkout_session(
-            price_id=price_id,
-            customer_email=email or None,
-            metadata={"tier": tier_lower},
-        )
+
+        # Resolve price: env var first, then lookup key fallback.
+        price_id = os.environ.get(price_env, "")
+        if not price_id:
+            price_id = provider.resolve_price_by_lookup_key(lookup_key) or ""
+        if not price_id:
+            return _error_dict(
+                f"Stripe price not configured. Set {price_env} or add lookup key '{lookup_key}' in Stripe.",
+                code="CONFIG_MISSING",
+            )
+
+        # Enterprise uses subscription mode (recurring) with optional metered overage.
+        # Pro and Business use one-time payment mode.
+        if tier_lower == "enterprise":
+            overage_price_id = os.environ.get("KILN_STRIPE_PRICE_PRINTER_OVERAGE", "")
+            if not overage_price_id:
+                overage_price_id = provider.resolve_price_by_lookup_key("enterprise_printer_overage") or ""
+
+            result = provider.create_subscription_session(
+                price_id=price_id,
+                customer_email=email or None,
+                metadata={"tier": tier_lower, "billing": billing_lower},
+                metered_price_id=overage_price_id or None,
+            )
+        else:
+            result = provider.create_checkout_session(
+                price_id=price_id,
+                customer_email=email or None,
+                metadata={"tier": tier_lower, "billing": billing_lower},
+            )
+
         return {
             "success": True,
             "checkout_url": result["checkout_url"],
             "session_id": result["session_id"],
             "tier": tier_lower,
+            "billing": billing_lower,
             "next_step": (
                 "Open checkout_url in a browser to complete payment. "
                 "After payment, run 'kiln upgrade --session <session_id>' to activate."
@@ -10272,6 +10314,47 @@ def encryption_status() -> dict:
     except Exception as exc:
         logger.exception("Error in encryption_status")
         return _error_dict(f"Failed to get encryption status: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def report_printer_overage(subscription_item_id: str, active_printer_count: int) -> dict:
+    """Report metered printer usage to Stripe for Enterprise billing.
+
+    Enterprise feature. Reports the current active printer count to Stripe's
+    metered billing system. The first 20 printers are included in the base
+    Enterprise price; this tool reports the overage (count minus 20, minimum 0).
+
+    Args:
+        subscription_item_id: The Stripe SubscriptionItem ID (``si_...``) for
+            the metered printer overage line item on the customer's subscription.
+        active_printer_count: Total number of active printers in the fleet.
+    """
+    if err := _check_auth("admin"):
+        return err
+    try:
+        from kiln.payments.stripe_provider import StripeProvider
+        from kiln.printer_billing import INCLUDED_PRINTERS
+
+        stripe_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
+        if not stripe_key:
+            return _error_dict("Stripe not configured. Set KILN_STRIPE_SECRET_KEY.", code="CONFIG_MISSING")
+
+        provider = StripeProvider(secret_key=stripe_key)
+        overage = max(0, active_printer_count - INCLUDED_PRINTERS)
+        result = provider.report_printer_usage(subscription_item_id, overage)
+
+        return {
+            "success": True,
+            "active_printers": active_printer_count,
+            "included": INCLUDED_PRINTERS,
+            "overage": overage,
+            "overage_cost": f"${overage * 15:.2f}/mo",
+            "stripe_usage_record": result,
+        }
+    except Exception as exc:
+        logger.exception("Error in report_printer_overage")
+        return _error_dict(f"Failed to report usage: {exc}", code="PAYMENT_ERROR")
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Enterprise base includes 20 printers.
 _ENTERPRISE_INCLUDED_PRINTERS: int = 20
+INCLUDED_PRINTERS: int = _ENTERPRISE_INCLUDED_PRINTERS  # Public alias for MCP tools.
 
 # Per-printer overage rate (USD/month).
 _OVERAGE_RATE_USD: float = 15.0

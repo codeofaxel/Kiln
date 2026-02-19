@@ -87,6 +87,13 @@ Comprehensive reference for deploying Kiln as a hosted REST API service or local
 |---|---|---|---|
 | `KILN_STRIPE_SECRET_KEY` | No | `""` | Stripe secret API key for payment processing |
 | `KILN_STRIPE_WEBHOOK_SECRET` | No | `""` | Stripe webhook signing secret for event verification |
+| `KILN_STRIPE_PRICE_PRO` | No | `""` | Stripe Price ID for Pro monthly. Falls back to lookup key `pro_monthly`. |
+| `KILN_STRIPE_PRICE_PRO_ANNUAL` | No | `""` | Stripe Price ID for Pro annual. Falls back to lookup key `pro_annual`. |
+| `KILN_STRIPE_PRICE_BUSINESS` | No | `""` | Stripe Price ID for Business monthly. Falls back to lookup key `business_monthly`. |
+| `KILN_STRIPE_PRICE_BUSINESS_ANNUAL` | No | `""` | Stripe Price ID for Business annual. Falls back to lookup key `business_annual`. |
+| `KILN_STRIPE_PRICE_ENTERPRISE` | No | `""` | Stripe Price ID for Enterprise monthly. Falls back to lookup key `enterprise_monthly`. |
+| `KILN_STRIPE_PRICE_ENTERPRISE_ANNUAL` | No | `""` | Stripe Price ID for Enterprise annual. Falls back to lookup key `enterprise_annual`. |
+| `KILN_STRIPE_PRICE_PRINTER_OVERAGE` | No | `""` | Stripe Price ID for metered printer overage ($15/printer/mo). Falls back to lookup key `enterprise_printer_overage`. |
 | `KILN_CIRCLE_API_KEY` | No | `""` | Circle API key for crypto payments |
 
 ### AI / Agent
