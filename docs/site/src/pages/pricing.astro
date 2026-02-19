@@ -35,7 +35,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
         <!-- Pro Tier -->
         <div class="card pricing-card featured">
-          <div class="badge">Coming Soon</div>
+          <div class="badge">Most Popular</div>
           <div class="card-header">
             <h3>Pro</h3>
             <div class="price">
@@ -53,7 +53,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
             <li><span class="check">&#10003;</span> 5 fulfillment orders/month free</li>
             <li><span class="check">&#10003;</span> 5% platform fee on fulfillment</li>
           </ul>
-          <span class="btn card-cta disabled">Coming Soon</span>
+          <a href="/install" class="btn card-cta">Get Pro &#8594;</a>
+          <p class="upgrade-note">Install Kiln, then run <code>kiln upgrade</code></p>
         </div>
 
         <!-- Business Tier -->
@@ -72,7 +73,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
             <li><span class="check">&#10003;</span> Priority support</li>
             <li><span class="check">&#10003;</span> Custom safety profiles</li>
           </ul>
-          <a href="mailto:hello@kiln3d.com" class="btn btn-ghost card-cta">Contact Us</a>
+          <a href="/install" class="btn btn-ghost card-cta">Get Business &#8594;</a>
+          <p class="upgrade-note">Install Kiln, then run <code>kiln upgrade</code></p>
         </div>
       </div>
     </div>
@@ -213,17 +215,20 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     white-space: nowrap;
   }
 
-  /* Disabled CTA */
-  .card-cta.disabled {
-    display: inline-block;
-    padding: 14px 32px;
-    font-weight: 600;
-    font-size: 15px;
-    border-radius: 8px;
-    background: var(--border);
+  /* Upgrade note under CTA */
+  .upgrade-note {
+    text-align: center;
+    font-size: 12px;
     color: var(--text-muted);
-    cursor: default;
-    pointer-events: none;
+    margin-top: 10px;
+    margin-bottom: 0;
+  }
+  .upgrade-note code {
+    font-size: 12px;
+    background: var(--bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
   }
 
   /* FAQ */
