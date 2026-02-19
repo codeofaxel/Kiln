@@ -35,6 +35,7 @@ import json as _json
 import logging
 import math
 import os
+import sys
 import threading
 import time as _time
 from collections import defaultdict
@@ -278,6 +279,12 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
         load_dotenv(_P.home() / ".kiln" / ".env")
     except ImportError:
         pass
+
+    # If kiln.server was already imported (e.g. by a transitive import),
+    # its module-level env reads are stale.  Refresh them defensively.
+    _server_mod = sys.modules.get("kiln.server")
+    if _server_mod is not None and hasattr(_server_mod, "_reload_env_config"):
+        _server_mod._reload_env_config()
 
     try:
         from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile

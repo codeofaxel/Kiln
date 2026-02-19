@@ -511,3 +511,21 @@ class ProjectCostTracker:
                 "client": client,
             },
         }
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton
+# ---------------------------------------------------------------------------
+
+_tracker: ProjectCostTracker | None = None
+_tracker_lock = threading.Lock()
+
+
+def get_project_cost_tracker() -> ProjectCostTracker:
+    """Return the module-level :class:`ProjectCostTracker` singleton."""
+    global _tracker  # noqa: PLW0603
+    if _tracker is None:
+        with _tracker_lock:
+            if _tracker is None:
+                _tracker = ProjectCostTracker()
+    return _tracker

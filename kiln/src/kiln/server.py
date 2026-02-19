@@ -2945,6 +2945,238 @@ def discover_printers(timeout: float = 5.0) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Fleet site grouping tools (Enterprise)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def list_fleet_sites() -> dict:
+    """List all fleet sites/locations with printer counts.
+
+    Returns the distinct sites defined across registered printers.
+    Useful for multi-site fleet dashboards.
+
+    Requires Enterprise license.
+    """
+    try:
+        sites = _registry.list_sites()
+        site_data = []
+        for site in sites:
+            printers = _registry.get_printers_by_site(site)
+            site_data.append({"site": site, "printer_count": len(printers), "printers": printers})
+        return {"success": True, "sites": site_data, "count": len(site_data)}
+    except Exception as exc:
+        logger.exception("Unexpected error in list_fleet_sites")
+        return _error_dict(f"Unexpected error in list_fleet_sites: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def fleet_status_by_site() -> dict:
+    """Get fleet status grouped by physical site/location.
+
+    Returns printer statuses organized by site, making it easy to see
+    which printers are idle, busy, or offline at each location.
+    Printers without a site are grouped under ``"unassigned"``.
+
+    Requires Enterprise license.
+    """
+    try:
+        grouped = _registry.get_fleet_status_by_site()
+        result = {}
+        for site, statuses in grouped.items():
+            result[site] = {
+                "printers": statuses,
+                "count": len(statuses),
+                "idle": [p["name"] for p in statuses if str(p.get("state", "")).lower() == "idle"],
+                "busy": [p["name"] for p in statuses if str(p.get("state", "")).lower() in {"printing", "busy", "paused"}],
+            }
+        return {"success": True, "sites": result, "site_count": len(result)}
+    except Exception as exc:
+        logger.exception("Unexpected error in fleet_status_by_site")
+        return _error_dict(f"Unexpected error in fleet_status_by_site: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def update_printer_site(
+    name: str,
+    site: str,
+    tags: str | None = None,
+) -> dict:
+    """Assign a printer to a physical site/location with optional tags.
+
+    Args:
+        name: Registered printer name.
+        site: Physical site or location label (e.g. ``"nyc-lab"``,
+            ``"chicago-floor-2"``).
+        tags: Comma-separated key=value pairs for metadata
+            (e.g. ``"building=A,floor=3,owner=team-alpha"``).
+
+    Requires Enterprise license.
+    """
+    if err := _check_auth("admin"):
+        return err
+    try:
+        parsed_tags: dict[str, str] | None = None
+        if tags:
+            parsed_tags = {}
+            for pair in tags.split(","):
+                pair = pair.strip()
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    parsed_tags[k.strip()] = v.strip()
+
+        _registry.update_printer_metadata(name, site=site, tags=parsed_tags)
+        meta = _registry.get_metadata(name)
+        return {
+            "success": True,
+            "message": f"Printer {name!r} assigned to site {site!r}.",
+            "metadata": meta.to_dict(),
+        }
+    except PrinterNotFoundError:
+        return _error_dict(f"Printer {name!r} not registered.", code="NOT_FOUND")
+    except Exception as exc:
+        logger.exception("Unexpected error in update_printer_site")
+        return _error_dict(f"Unexpected error in update_printer_site: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Per-project cost tracking tools (Enterprise)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def create_project(
+    name: str,
+    client: str,
+    description: str = "",
+    budget: float | None = None,
+) -> dict:
+    """Create a project for cost tracking.
+
+    Manufacturing bureaus use projects to allocate printer time, material
+    costs, and fulfillment fees to specific client engagements.
+
+    Args:
+        name: Project name (e.g. ``"Widget Batch 42"``).
+        client: Client or cost-center identifier.
+        description: Optional project description.
+        budget: Optional budget cap in the configured currency.
+
+    Requires Enterprise license.
+    """
+    if err := _check_auth("write"):
+        return err
+    try:
+        from kiln.project_costs import get_project_cost_tracker
+
+        tracker = get_project_cost_tracker()
+        info = tracker.create_project(name=name, client=client, description=description, budget=budget)
+        return {"success": True, "project": info.to_dict(), "message": f"Project {name!r} created."}
+    except Exception as exc:
+        logger.exception("Unexpected error in create_project")
+        return _error_dict(f"Unexpected error in create_project: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def log_project_cost(
+    project_id: str,
+    category: str,
+    amount: float,
+    description: str = "",
+    printer_name: str | None = None,
+    job_id: str | None = None,
+) -> dict:
+    """Log a cost entry against a project.
+
+    Args:
+        project_id: The project ID returned by ``create_project``.
+        category: Cost category — ``"material"``, ``"printer_time"``,
+            ``"fulfillment_fee"``, ``"labor"``, or ``"other"``.
+        amount: Cost amount in the configured currency.
+        description: What this cost entry is for.
+        printer_name: Optional printer that incurred the cost.
+        job_id: Optional job ID for traceability.
+
+    Requires Enterprise license.
+    """
+    if err := _check_auth("write"):
+        return err
+    try:
+        from kiln.project_costs import get_project_cost_tracker
+
+        tracker = get_project_cost_tracker()
+        entry = tracker.log_cost(
+            project_id=project_id,
+            category=category,
+            amount=amount,
+            description=description,
+            printer_name=printer_name,
+            job_id=job_id,
+        )
+        return {"success": True, "entry": entry.to_dict(), "message": "Cost logged."}
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        logger.exception("Unexpected error in log_project_cost")
+        return _error_dict(f"Unexpected error in log_project_cost: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def project_cost_summary(project_id: str) -> dict:
+    """Get cost breakdown for a project.
+
+    Returns total costs, per-category breakdown, and budget utilization
+    for a given project.
+
+    Args:
+        project_id: The project ID returned by ``create_project``.
+
+    Requires Enterprise license.
+    """
+    try:
+        from kiln.project_costs import get_project_cost_tracker
+
+        tracker = get_project_cost_tracker()
+        summary = tracker.project_summary(project_id)
+        return {"success": True, "summary": summary.to_dict()}
+    except ValueError as exc:
+        return _error_dict(str(exc), code="NOT_FOUND")
+    except Exception as exc:
+        logger.exception("Unexpected error in project_cost_summary")
+        return _error_dict(f"Unexpected error in project_cost_summary: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def client_cost_report(client: str) -> dict:
+    """Get a cost report for all projects belonging to a client.
+
+    Aggregates costs across all projects for a given client identifier,
+    useful for invoicing and chargeback.
+
+    Args:
+        client: Client or cost-center identifier.
+
+    Requires Enterprise license.
+    """
+    try:
+        from kiln.project_costs import get_project_cost_tracker
+
+        tracker = get_project_cost_tracker()
+        report = tracker.client_summary(client)
+        return {"success": True, "client": client, "report": report}
+    except Exception as exc:
+        logger.exception("Unexpected error in client_cost_report")
+        return _error_dict(f"Unexpected error in client_cost_report: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
 # Queue tools — moved to plugins/queue_tools.py
 # ---------------------------------------------------------------------------
 

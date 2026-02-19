@@ -108,7 +108,9 @@ def _flatten_files(entries: list[dict[str, Any]], prefix: str = "") -> list[dict
 # SockJS push monitor
 # ---------------------------------------------------------------------------
 
-_PUSH_MONITORING_ENABLED: bool = os.environ.get("KILN_PUSH_MONITORING", "0") == "1"
+def _push_monitoring_enabled() -> bool:
+    """Check whether push monitoring is enabled (read at call time, not import time)."""
+    return os.environ.get("KILN_PUSH_MONITORING", "0") == "1"
 
 # Maximum reconnect backoff in seconds.
 _MAX_RECONNECT_BACKOFF: float = 30.0
@@ -354,7 +356,7 @@ class OctoPrintAdapter(PrinterAdapter):
 
         # Push monitoring (SockJS) -- disabled by default.
         self._sockjs_monitor: OctoPrintSockJSMonitor | None = None
-        if _PUSH_MONITORING_ENABLED:
+        if _push_monitoring_enabled():
             self.enable_push_monitoring()
 
     # -- PrinterAdapter identity properties ---------------------------------
