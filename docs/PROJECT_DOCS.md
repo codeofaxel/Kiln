@@ -65,7 +65,7 @@ All three modes use the same MCP tools and CLI commands.
 
 **HeaterWatchdog** — Background daemon that monitors heater state and auto-cools idle heaters after a configurable timeout (default 30 min). Prevents heaters from being left on when no print is active.
 
-**LicenseManager** — Offline-first license tier management. Resolves tier from key prefix (`kiln_pro_`, `kiln_biz_`) with cached remote validation fallback. Never blocks printer operations.
+**LicenseManager** — Offline-first license tier management. Resolves tier from key prefix (`kiln_pro_`, `kiln_biz_`, `kiln_ent_`) with cached remote validation fallback. Supports Free, Pro, Business, and Enterprise tiers. Never blocks printer operations.
 
 ---
 
@@ -849,7 +849,7 @@ kiln/src/kiln/
     streaming.py         # MJPEG webcam proxy
     cloud_sync.py        # Cloud sync manager
     heater_watchdog.py   # Auto-cooldown watchdog for idle heaters
-    licensing.py         # License tier management (Free/Pro/Business)
+    licensing.py         # License tier management (Free/Pro/Business/Enterprise)
     model_metadata.py    # Model metadata management
     wallets.py           # Crypto wallet configuration (Solana/Ethereum donations)
     plugins.py           # Plugin system

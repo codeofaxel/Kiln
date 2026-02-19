@@ -65,8 +65,9 @@ Local printing with Kiln is free and always will be. The core software is releas
 Revenue comes from optional services:
 
 - **Free tier** -- All local printing features, up to 2 printers and a 10-job queue. No cost, no account required.
-- **Pro ($29/month)** -- Unlimited printers, fleet orchestration, analytics, and cloud sync for remote access.
-- **Business ($99/month)** -- Fulfillment brokering to outside manufacturers, hosted deployment, and priority support.
+- **Pro ($29/month)** -- Unlimited printers, fleet orchestration, analytics, and cloud sync. Annual: $23/mo.
+- **Business ($99/month)** -- Up to 50 printers, 5 team seats, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles. Annual: $79/mo.
+- **Enterprise (from $499/month)** -- Unlimited printers and seats, dedicated single-tenant MCP server, on-prem deployment, SSO, audit trail export, role-based access, lockable safety profiles, 99.9% uptime SLA, dedicated support channel. Annual: $399/mo.
 
 Outsourced manufacturing orders carry a 5% platform fee (first 3 per month are free, with a $0.25 minimum and $200 maximum per order).
 

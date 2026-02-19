@@ -855,8 +855,9 @@ The fee is shown transparently in every quote before you commit.
 | Tier | Price | What You Get |
 |------|-------|-------------|
 | **Free** | $0 | All local printing, slicing, marketplace, safety profiles. Job queue (10 jobs). Up to 2 printers. Billing visibility. |
-| **Pro** | $29/mo | Unlimited printers + fleet orchestration, fleet analytics, unlimited queue depth, cloud sync, priority scheduler. |
-| **Business** | $99/mo | Everything in Pro + unlimited fulfillment orders (5% fee), hosted deployment, priority support. |
+| **Pro** | $29/mo | Unlimited printers + fleet orchestration, fleet analytics, unlimited queue depth, cloud sync, priority scheduler. Annual: $23/mo ($276/yr). |
+| **Business** | $99/mo | Everything in Pro + up to 50 printers, 5 team seats, unlimited fulfillment orders (5% fee), shared hosted MCP server, priority support, custom safety profiles, webhook integrations. Annual: $79/mo ($948/yr). |
+| **Enterprise** | From $499/mo | Everything in Business + unlimited printers (20 included, $15/mo each after), unlimited seats, role-based access control, dedicated single-tenant MCP server, on-prem/cloud/hybrid deployment, SSO (SAML/OIDC), full audit trail with export, lockable safety profiles, encrypted G-code at rest, 99.9% uptime SLA, dedicated Slack channel. Annual: $399/mo ($4,788/yr). |
 
 Run `kiln upgrade` to activate a license key.
 

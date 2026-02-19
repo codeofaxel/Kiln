@@ -12,6 +12,15 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
   <section class="pricing-cards">
     <div class="container-wide">
+      <div class="billing-toggle">
+        <span class="toggle-label" data-period="monthly">Monthly</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="billing-toggle" />
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label" data-period="annual">Annual <span class="save-badge">Save 20%</span></span>
+      </div>
+
       <div class="cards-grid">
         <!-- Free Tier -->
         <div class="card pricing-card">
@@ -30,7 +39,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
             <li><span class="check">&#10003;</span> 3 fulfillment orders/month free</li>
             <li><span class="check">&#10003;</span> 5% platform fee on fulfillment</li>
           </ul>
-          <a href="/install" class="btn card-cta">Let's build →</a>
+          <a href="/install" class="btn card-cta">Let's build &#8594;</a>
         </div>
 
         <!-- Pro Tier -->
@@ -39,8 +48,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <div class="card-header">
             <h3>Pro</h3>
             <div class="price">
-              <span class="amount">$29</span>
-              <span class="period">/ month</span>
+              <span class="amount monthly-price">$29</span>
+              <span class="amount annual-price" style="display:none">$23</span>
+              <span class="period monthly-period">/ month</span>
+              <span class="period annual-period" style="display:none">/ mo, billed annually</span>
             </div>
           </div>
           <ul class="features">
@@ -62,19 +73,53 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <div class="card-header">
             <h3>Business</h3>
             <div class="price">
-              <span class="amount">$99</span>
-              <span class="period">/ month</span>
+              <span class="amount monthly-price">$99</span>
+              <span class="amount annual-price" style="display:none">$79</span>
+              <span class="period monthly-period">/ month</span>
+              <span class="period annual-period" style="display:none">/ mo, billed annually</span>
             </div>
           </div>
           <ul class="features">
             <li><span class="check">&#10003;</span> Everything in Pro</li>
+            <li><span class="check">&#10003;</span> Up to 50 printers</li>
+            <li><span class="check">&#10003;</span> 5 team seats</li>
             <li><span class="check">&#10003;</span> Unlimited fulfillment orders</li>
-            <li><span class="check">&#10003;</span> Hosted MCP server</li>
+            <li><span class="check">&#10003;</span> Shared hosted MCP server</li>
             <li><span class="check">&#10003;</span> Priority support</li>
             <li><span class="check">&#10003;</span> Custom safety profiles</li>
+            <li><span class="check">&#10003;</span> Webhook integrations</li>
           </ul>
           <a href="/install" class="btn card-cta">Get Business &#8594;</a>
           <p class="upgrade-note">Install Kiln, then run <code>kiln upgrade</code></p>
+        </div>
+
+        <!-- Enterprise Tier -->
+        <div class="card pricing-card enterprise-card">
+          <div class="card-header">
+            <h3>Enterprise</h3>
+            <div class="price">
+              <span class="amount monthly-price">$499</span>
+              <span class="amount annual-price" style="display:none">$399</span>
+              <span class="period monthly-price-period">/ mo base</span>
+              <span class="period annual-price-period" style="display:none">/ mo base, billed annually</span>
+            </div>
+            <p class="price-note">20 printers included, then $15/printer/mo</p>
+          </div>
+          <ul class="features">
+            <li><span class="check">&#10003;</span> Everything in Business</li>
+            <li><span class="check">&#10003;</span> Unlimited printers</li>
+            <li><span class="check">&#10003;</span> Unlimited team seats</li>
+            <li><span class="check">&#10003;</span> Role-based access control</li>
+            <li><span class="check">&#10003;</span> Dedicated single-tenant MCP server</li>
+            <li><span class="check">&#10003;</span> On-prem, cloud, or hybrid deployment</li>
+            <li><span class="check">&#10003;</span> SSO (SAML/OIDC)</li>
+            <li><span class="check">&#10003;</span> Full audit trail with export</li>
+            <li><span class="check">&#10003;</span> Lockable safety profiles</li>
+            <li><span class="check">&#10003;</span> Encrypted G-code at rest</li>
+            <li><span class="check">&#10003;</span> 99.9% uptime SLA</li>
+            <li><span class="check">&#10003;</span> Dedicated Slack channel + onboarding</li>
+          </ul>
+          <a href="mailto:adam@kiln3d.com?subject=Kiln%20Enterprise" class="btn card-cta enterprise-cta">Talk to us &#8594;</a>
         </div>
       </div>
     </div>
@@ -98,12 +143,39 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         </details>
         <details>
           <summary>Do I need a paid plan for multiple printers?</summary>
-          <p>Free tier supports 2 printers. For 3+ printers, you need Pro.</p>
+          <p>Free tier supports 2 printers. For 3+ printers, you need Pro or above.</p>
+        </details>
+        <details>
+          <summary>What does annual billing save?</summary>
+          <p>Annual plans save roughly 20% compared to monthly. Pro drops from $29/mo to $23/mo ($276/yr). Business drops from $99/mo to $79/mo ($948/yr). Enterprise drops from $499/mo to $399/mo ($4,788/yr). You can switch between monthly and annual at any time.</p>
+        </details>
+        <details>
+          <summary>What's included in Enterprise?</summary>
+          <p>Enterprise is for teams running production print operations. It includes a dedicated single-tenant MCP server, SSO, role-based access control, full audit trails, lockable safety profiles, and a 99.9% uptime SLA. Base price includes 20 printers, with additional printers at $15/mo each.</p>
+        </details>
+        <details>
+          <summary>Can I try Enterprise before committing?</summary>
+          <p>Yes. We offer a pilot program for qualified teams. Email adam@kiln3d.com and we'll set you up with full Enterprise access to evaluate.</p>
         </details>
       </div>
     </div>
   </section>
 </BaseLayout>
+
+<script>
+  const toggle = document.getElementById('billing-toggle');
+  if (toggle) {
+    toggle.addEventListener('change', () => {
+      const isAnnual = toggle.checked;
+      document.querySelectorAll('.monthly-price, .monthly-period, .monthly-price-period').forEach(el => {
+        (el as HTMLElement).style.display = isAnnual ? 'none' : '';
+      });
+      document.querySelectorAll('.annual-price, .annual-period, .annual-price-period').forEach(el => {
+        (el as HTMLElement).style.display = isAnnual ? '' : 'none';
+      });
+    });
+  }
+</script>
 
 <style>
   .pricing-hero {
@@ -123,14 +195,80 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     line-height: 1.6;
   }
 
+  /* Billing toggle */
+  .billing-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 32px;
+  }
+  .toggle-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .save-badge {
+    background: var(--accent);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+  }
+  .toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+  }
+  .toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--border);
+    border-radius: 24px;
+    transition: 0.2s;
+  }
+  .toggle-slider::before {
+    content: '';
+    position: absolute;
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: 0.2s;
+  }
+  .toggle-switch input:checked + .toggle-slider {
+    background: var(--accent);
+  }
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(20px);
+  }
+
   /* Cards grid */
   .pricing-cards {
     padding: 20px 0 80px;
   }
   .cards-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 24px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
     align-items: start;
   }
 
@@ -139,10 +277,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     position: relative;
     display: flex;
     flex-direction: column;
-    padding: 36px 32px;
+    padding: 32px 28px;
   }
   .pricing-card .card-header {
-    margin-bottom: 28px;
+    margin-bottom: 24px;
   }
   .pricing-card h3 {
     font-size: 20px;
@@ -156,14 +294,20 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     gap: 4px;
   }
   .price .amount {
-    font-size: 44px;
+    font-size: 40px;
     font-weight: 700;
     color: var(--text);
     line-height: 1;
   }
   .price .period {
-    font-size: 15px;
+    font-size: 14px;
     color: var(--text-muted);
+  }
+  .price-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    margin-bottom: 0;
   }
 
   /* Features list */
@@ -173,8 +317,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     flex: 1;
   }
   .features li {
-    padding: 7px 0;
-    font-size: 14px;
+    padding: 6px 0;
+    font-size: 13px;
     color: var(--text-muted);
     display: flex;
     align-items: flex-start;
@@ -184,7 +328,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
   .features .check {
     color: var(--accent);
     font-weight: 600;
-    font-size: 14px;
+    font-size: 13px;
     flex-shrink: 0;
     margin-top: 1px;
   }
@@ -213,6 +357,18 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     padding: 4px 16px;
     border-radius: 20px;
     white-space: nowrap;
+  }
+
+  /* Enterprise card */
+  .enterprise-card {
+    border-color: var(--text-muted);
+  }
+  .enterprise-cta {
+    background: var(--text);
+    color: var(--bg);
+  }
+  .enterprise-cta:hover {
+    opacity: 0.9;
   }
 
   /* Upgrade note under CTA */
@@ -283,17 +439,21 @@ import BaseLayout from '../layouts/BaseLayout.astro';
   }
 
   /* Responsive */
-  @media (max-width: 900px) {
+  @media (max-width: 1100px) {
+    .cards-grid {
+      grid-template-columns: repeat(2, 1fr);
+      max-width: 700px;
+      margin: 0 auto;
+    }
+  }
+  @media (max-width: 640px) {
     .cards-grid {
       grid-template-columns: 1fr;
       max-width: 420px;
-      margin: 0 auto;
     }
     .pricing-card.featured {
       order: -1;
     }
-  }
-  @media (max-width: 640px) {
     .pricing-hero {
       padding: 70px 0 24px;
     }

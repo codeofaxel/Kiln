@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 _KEY_PREFIX_PRO = "kiln_pro_"
 _KEY_PREFIX_BUSINESS = "kiln_biz_"
+_KEY_PREFIX_ENTERPRISE = "kiln_ent_"
 
 # Cache validity: how long a remote validation result is trusted (7 days).
 _CACHE_TTL_SECONDS: float = 7 * 24 * 3600
@@ -82,21 +83,22 @@ class LicenseTier(enum.Enum):
     FREE = "free"
     PRO = "pro"
     BUSINESS = "business"
+    ENTERPRISE = "enterprise"
 
     def __ge__(self, other: LicenseTier) -> bool:
-        order = {LicenseTier.FREE: 0, LicenseTier.PRO: 1, LicenseTier.BUSINESS: 2}
+        order = {LicenseTier.FREE: 0, LicenseTier.PRO: 1, LicenseTier.BUSINESS: 2, LicenseTier.ENTERPRISE: 3}
         return order[self] >= order[other]
 
     def __gt__(self, other: LicenseTier) -> bool:
-        order = {LicenseTier.FREE: 0, LicenseTier.PRO: 1, LicenseTier.BUSINESS: 2}
+        order = {LicenseTier.FREE: 0, LicenseTier.PRO: 1, LicenseTier.BUSINESS: 2, LicenseTier.ENTERPRISE: 3}
         return order[self] > order[other]
 
     def __le__(self, other: LicenseTier) -> bool:
-        order = {LicenseTier.FREE: 0, LicenseTier.PRO: 1, LicenseTier.BUSINESS: 2}
+        order = {LicenseTier.FREE: 0, LicenseTier.PRO: 1, LicenseTier.BUSINESS: 2, LicenseTier.ENTERPRISE: 3}
         return order[self] <= order[other]
 
     def __lt__(self, other: LicenseTier) -> bool:
-        order = {LicenseTier.FREE: 0, LicenseTier.PRO: 1, LicenseTier.BUSINESS: 2}
+        order = {LicenseTier.FREE: 0, LicenseTier.PRO: 1, LicenseTier.BUSINESS: 2, LicenseTier.ENTERPRISE: 3}
         return order[self] < order[other]
 
 
@@ -270,6 +272,9 @@ class LicenseManager:
             if tier_part == "biz" and payload_tier != "business":
                 logger.warning("License key tier mismatch: prefix=%s payload=%s", tier_part, payload_tier)
                 return None
+            if tier_part == "ent" and payload_tier != "enterprise":
+                logger.warning("License key tier mismatch: prefix=%s payload=%s", tier_part, payload_tier)
+                return None
 
             return payload
 
@@ -295,6 +300,8 @@ class LicenseManager:
             tier_str = payload.get("tier", "").lower()
             if tier_str == "business":
                 return LicenseTier.BUSINESS, payload.get("expires_at")
+            if tier_str == "enterprise":
+                return LicenseTier.ENTERPRISE, payload.get("expires_at")
             if tier_str == "pro":
                 return LicenseTier.PRO, payload.get("expires_at")
             logger.warning("Unknown tier in validated payload: %s", tier_str)
@@ -316,6 +323,21 @@ class LicenseManager:
                     "Allowing legacy prefix-based tier (BUSINESS). Consider upgrading to a signed key."
                 )
             return LicenseTier.BUSINESS, None
+
+        if key.startswith(_KEY_PREFIX_ENTERPRISE):
+            if payload is None and not offline_mode:
+                logger.warning(
+                    "License key uses legacy prefix format. Signature validation failed. "
+                    "Set KILN_LICENSE_OFFLINE=1 to allow legacy keys, or upgrade to a signed key. "
+                    "Defaulting to FREE tier for security."
+                )
+                return LicenseTier.FREE, None
+            if payload is None and offline_mode:
+                logger.warning(
+                    "License key signature validation failed, but KILN_LICENSE_OFFLINE=1 is set. "
+                    "Allowing legacy prefix-based tier (ENTERPRISE). Consider upgrading to a signed key."
+                )
+            return LicenseTier.ENTERPRISE, None
 
         if key.startswith(_KEY_PREFIX_PRO):
             if payload is None and not offline_mode:
@@ -578,6 +600,13 @@ FEATURE_TIERS: dict[str, LicenseTier] = {
     # Business tier
     "fulfillment_order": LicenseTier.BUSINESS,
     "fulfillment_cancel": LicenseTier.BUSINESS,
+    # Enterprise tier
+    "dedicated_mcp_server": LicenseTier.ENTERPRISE,
+    "sso_authentication": LicenseTier.ENTERPRISE,
+    "audit_trail_export": LicenseTier.ENTERPRISE,
+    "role_based_access": LicenseTier.ENTERPRISE,
+    "lockable_safety_profiles": LicenseTier.ENTERPRISE,
+    "on_prem_deployment": LicenseTier.ENTERPRISE,
 }
 
 # ---------------------------------------------------------------------------
@@ -628,6 +657,7 @@ def generate_license_key(
         LicenseTier.FREE: "free",
         LicenseTier.PRO: "pro",
         LicenseTier.BUSINESS: "biz",
+        LicenseTier.ENTERPRISE: "ent",
     }
     prefix = _TIER_PREFIXES[tier]
     return f"kiln_{prefix}_{payload_b64}_{signature_b64}"
@@ -644,3 +674,9 @@ FREE_TIER_MAX_PRINTERS: int = 2
 #: Maximum queued jobs for a single-printer FREE-tier user.
 #: PRO and above get unlimited queue depth.
 FREE_TIER_MAX_QUEUED_JOBS: int = 10
+
+#: Maximum printers for a BUSINESS-tier user. Enterprise is unlimited.
+BUSINESS_TIER_MAX_PRINTERS: int = 50
+
+#: Number of team seats included in BUSINESS tier.
+BUSINESS_TIER_MAX_SEATS: int = 5
