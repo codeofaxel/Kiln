@@ -1160,6 +1160,11 @@ class TestSendGcodeWithValidation:
 class TestFleetStatus:
     """Tests for the fleet_status MCP tool."""
 
+    @pytest.fixture(autouse=True)
+    def _bypass_license(self, monkeypatch):
+        """Bypass PRO tier check so fleet tests can exercise the tool logic."""
+        monkeypatch.setattr("kiln.licensing.check_tier", lambda _tier: (True, None))
+
     def test_empty_registry_no_env(self, monkeypatch):
         """Empty registry with no env adapter returns empty list."""
         import kiln.server as mod

@@ -189,6 +189,12 @@ READ_ONLY_TOOLS: Set[str] = {
     "list_snapshots",
     "fleet_job_status",
     "check_printer_health",
+
+    # Fleet site grouping / cost reporting (read-only)
+    "list_fleet_sites",
+    "fleet_status_by_site",
+    "project_cost_summary",
+    "client_cost_report",
 }
 
 

@@ -176,7 +176,8 @@ class TestVerify:
         result = mgr.verify("anything")
         assert result.id == "none"
         assert result.name == "auth-disabled"
-        assert "admin" in result.scopes
+        assert "read" in result.scopes
+        assert "write" in result.scopes
 
     def test_disabled_ignores_key_content(self):
         mgr = AuthManager(enabled=False)

@@ -22,10 +22,30 @@ from kiln.licensing import (
     _KEY_PREFIX_BUSINESS,
     _KEY_PREFIX_PRO,
     check_tier,
+    generate_license_key,
     get_license_manager,
     get_tier,
     requires_tier,
 )
+
+# ---------------------------------------------------------------------------
+# Test signing secret — used to generate valid signed keys for tests
+# ---------------------------------------------------------------------------
+
+_TEST_SIGNING_SECRET = "test-signing-secret-for-unit-tests"
+
+
+def _signed_key(tier: LicenseTier, email: str = "test@example.com") -> str:
+    """Generate a properly signed license key for testing."""
+    return generate_license_key(tier, email, signing_key=_TEST_SIGNING_SECRET)
+
+
+def _env_with_signing(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Return a minimal env dict with the test signing secret set."""
+    env = {"KILN_LICENSE_SIGNING_SECRET": _TEST_SIGNING_SECRET}
+    if extra:
+        env.update(extra)
+    return env
 
 
 # ---------------------------------------------------------------------------
@@ -118,9 +138,9 @@ class TestLicenseManagerDefaults:
             assert mgr.get_tier() == LicenseTier.FREE
 
     def test_pro_from_env_var(self, tmp_path):
-        """KILN_LICENSE_KEY with pro prefix resolves to PRO."""
-        key = f"{_KEY_PREFIX_PRO}test_key_123456"
-        with mock.patch.dict(os.environ, {"KILN_LICENSE_KEY": key, "KILN_LICENSE_OFFLINE": "1"}, clear=True):
+        """KILN_LICENSE_KEY with signed pro key resolves to PRO."""
+        key = _signed_key(LicenseTier.PRO)
+        with mock.patch.dict(os.environ, _env_with_signing({"KILN_LICENSE_KEY": key}), clear=True):
             mgr = LicenseManager(
                 license_path=tmp_path / "license",
                 cache_path=tmp_path / "cache.json",
@@ -128,9 +148,9 @@ class TestLicenseManagerDefaults:
             assert mgr.get_tier() == LicenseTier.PRO
 
     def test_business_from_env_var(self, tmp_path):
-        """KILN_LICENSE_KEY with business prefix resolves to BUSINESS."""
-        key = f"{_KEY_PREFIX_BUSINESS}test_key_789012"
-        with mock.patch.dict(os.environ, {"KILN_LICENSE_KEY": key, "KILN_LICENSE_OFFLINE": "1"}, clear=True):
+        """KILN_LICENSE_KEY with signed business key resolves to BUSINESS."""
+        key = _signed_key(LicenseTier.BUSINESS)
+        with mock.patch.dict(os.environ, _env_with_signing({"KILN_LICENSE_KEY": key}), clear=True):
             mgr = LicenseManager(
                 license_path=tmp_path / "license",
                 cache_path=tmp_path / "cache.json",
@@ -139,13 +159,14 @@ class TestLicenseManagerDefaults:
 
     def test_pro_from_constructor(self, tmp_path):
         """Explicit license_key arg takes priority."""
-        key = f"{_KEY_PREFIX_PRO}direct_key_abcdef"
-        mgr = LicenseManager(
-            license_key=key,
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
-        assert mgr.get_tier() == LicenseTier.PRO
+        key = _signed_key(LicenseTier.PRO)
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            mgr = LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            assert mgr.get_tier() == LicenseTier.PRO
 
     def test_unknown_prefix_defaults_to_free(self, tmp_path):
         """A key with an unrecognised prefix defaults to FREE."""
@@ -161,10 +182,10 @@ class TestLicenseManagerFromFile:
     def test_reads_license_from_file(self, tmp_path):
         """License key is loaded from the license file."""
         license_file = tmp_path / "license"
-        key = f"{_KEY_PREFIX_PRO}file_key_abcdef"
+        key = _signed_key(LicenseTier.PRO)
         license_file.write_text(key, encoding="utf-8")
 
-        with mock.patch.dict(os.environ, {"KILN_LICENSE_OFFLINE": "1"}, clear=True):
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
             mgr = LicenseManager(
                 license_path=license_file,
                 cache_path=tmp_path / "cache.json",
@@ -174,10 +195,11 @@ class TestLicenseManagerFromFile:
     def test_env_var_overrides_file(self, tmp_path):
         """Env var takes priority over license file."""
         license_file = tmp_path / "license"
-        license_file.write_text(f"{_KEY_PREFIX_PRO}file_key", encoding="utf-8")
+        pro_key = _signed_key(LicenseTier.PRO)
+        license_file.write_text(pro_key, encoding="utf-8")
 
-        env_key = f"{_KEY_PREFIX_BUSINESS}env_key_123456"
-        with mock.patch.dict(os.environ, {"KILN_LICENSE_KEY": env_key, "KILN_LICENSE_OFFLINE": "1"}, clear=True):
+        biz_key = _signed_key(LicenseTier.BUSINESS)
+        with mock.patch.dict(os.environ, _env_with_signing({"KILN_LICENSE_KEY": biz_key}), clear=True):
             mgr = LicenseManager(
                 license_path=license_file,
                 cache_path=tmp_path / "cache.json",
@@ -234,36 +256,39 @@ class TestCheckTier:
             assert "kiln upgrade" in msg
 
     def test_pro_meets_pro(self, tmp_path):
-        key = f"{_KEY_PREFIX_PRO}check_key_abcdef"
-        mgr = LicenseManager(
-            license_key=key,
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
-        ok, msg = mgr.check_tier(LicenseTier.PRO)
-        assert ok is True
-        assert msg is None
+        key = _signed_key(LicenseTier.PRO)
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            mgr = LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            ok, msg = mgr.check_tier(LicenseTier.PRO)
+            assert ok is True
+            assert msg is None
 
     def test_business_meets_pro(self, tmp_path):
-        key = f"{_KEY_PREFIX_BUSINESS}biz_key_123456"
-        mgr = LicenseManager(
-            license_key=key,
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
-        ok, msg = mgr.check_tier(LicenseTier.PRO)
-        assert ok is True
+        key = _signed_key(LicenseTier.BUSINESS)
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            mgr = LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            ok, msg = mgr.check_tier(LicenseTier.PRO)
+            assert ok is True
 
     def test_pro_fails_business(self, tmp_path):
-        key = f"{_KEY_PREFIX_PRO}pro_key_123456"
-        mgr = LicenseManager(
-            license_key=key,
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
-        ok, msg = mgr.check_tier(LicenseTier.BUSINESS)
-        assert ok is False
-        assert "Business" in msg
+        key = _signed_key(LicenseTier.PRO)
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            mgr = LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            ok, msg = mgr.check_tier(LicenseTier.BUSINESS)
+            assert ok is False
+            assert "Business" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -274,51 +299,56 @@ class TestCheckTier:
 class TestActivateDeactivate:
     def test_activate_license(self, tmp_path):
         """Activating a key writes it to file and updates tier."""
-        mgr = LicenseManager(
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
-        assert mgr.get_tier() == LicenseTier.FREE
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            mgr = LicenseManager(
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            assert mgr.get_tier() == LicenseTier.FREE
 
-        key = f"{_KEY_PREFIX_PRO}new_key_abcdef"
-        info = mgr.activate_license(key)
-        assert info.tier == LicenseTier.PRO
-        assert mgr.get_tier() == LicenseTier.PRO
+            key = _signed_key(LicenseTier.PRO)
+            info = mgr.activate_license(key)
+            assert info.tier == LicenseTier.PRO
+            assert mgr.get_tier() == LicenseTier.PRO
 
-        # Verify file was written
-        content = (tmp_path / "license").read_text(encoding="utf-8")
-        assert content == key
+            # Verify file was written
+            content = (tmp_path / "license").read_text(encoding="utf-8")
+            assert content == key
 
     def test_deactivate_license(self, tmp_path):
         """Deactivating removes the key file and resets to FREE."""
         license_file = tmp_path / "license"
-        license_file.write_text(f"{_KEY_PREFIX_PRO}old_key", encoding="utf-8")
+        key = _signed_key(LicenseTier.PRO)
+        license_file.write_text(key, encoding="utf-8")
 
-        mgr = LicenseManager(
-            license_path=license_file,
-            cache_path=tmp_path / "cache.json",
-        )
-        assert mgr.get_tier() == LicenseTier.PRO
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            mgr = LicenseManager(
+                license_path=license_file,
+                cache_path=tmp_path / "cache.json",
+            )
+            assert mgr.get_tier() == LicenseTier.PRO
 
-        mgr.deactivate_license()
-        assert mgr.get_tier() == LicenseTier.FREE
-        assert not license_file.exists()
+            mgr.deactivate_license()
+            assert mgr.get_tier() == LicenseTier.FREE
+            assert not license_file.exists()
 
     def test_activate_overwrites_previous(self, tmp_path):
         """Activating a new key replaces the old one."""
         license_file = tmp_path / "license"
-        license_file.write_text(f"{_KEY_PREFIX_PRO}old_key_123456", encoding="utf-8")
+        pro_key = _signed_key(LicenseTier.PRO)
+        license_file.write_text(pro_key, encoding="utf-8")
 
-        mgr = LicenseManager(
-            license_path=license_file,
-            cache_path=tmp_path / "cache.json",
-        )
-        assert mgr.get_tier() == LicenseTier.PRO
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            mgr = LicenseManager(
+                license_path=license_file,
+                cache_path=tmp_path / "cache.json",
+            )
+            assert mgr.get_tier() == LicenseTier.PRO
 
-        new_key = f"{_KEY_PREFIX_BUSINESS}biz_key_abcdef"
-        info = mgr.activate_license(new_key)
-        assert info.tier == LicenseTier.BUSINESS
-        assert mgr.get_tier() == LicenseTier.BUSINESS
+            biz_key = _signed_key(LicenseTier.BUSINESS)
+            info = mgr.activate_license(biz_key)
+            assert info.tier == LicenseTier.BUSINESS
+            assert mgr.get_tier() == LicenseTier.BUSINESS
 
 
 # ---------------------------------------------------------------------------
@@ -330,18 +360,19 @@ class TestLicenseCache:
     def test_writes_cache_on_resolve(self, tmp_path):
         """Resolving a tier writes a cache file."""
         cache_file = tmp_path / "cache.json"
-        key = f"{_KEY_PREFIX_PRO}cache_test_key_1"
-        mgr = LicenseManager(
-            license_key=key,
-            license_path=tmp_path / "license",
-            cache_path=cache_file,
-        )
-        mgr.get_tier()
-        assert cache_file.exists()
+        key = _signed_key(LicenseTier.PRO)
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            mgr = LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=cache_file,
+            )
+            mgr.get_tier()
+            assert cache_file.exists()
 
-        data = json.loads(cache_file.read_text(encoding="utf-8"))
-        assert data["tier"] == "pro"
-        assert data["key_hint"] == key[-6:]
+            data = json.loads(cache_file.read_text(encoding="utf-8"))
+            assert data["tier"] == "pro"
+            assert data["key_hint"] == key[-6:]
 
     def test_no_cache_for_free_tier(self, tmp_path):
         """No cache is written when there's no license key."""
@@ -355,7 +386,7 @@ class TestLicenseCache:
         assert not cache_file.exists()
 
     def test_cache_used_for_unknown_prefix(self, tmp_path):
-        """Cache is consulted for keys with unrecognised prefixes."""
+        """Unknown prefix without signing secret or offline mode defaults to FREE."""
         cache_file = tmp_path / "cache.json"
         key = "custom_format_key_xyzabc"
         cache_data = {
@@ -365,12 +396,14 @@ class TestLicenseCache:
         }
         cache_file.write_text(json.dumps(cache_data), encoding="utf-8")
 
-        mgr = LicenseManager(
-            license_key=key,
-            license_path=tmp_path / "license",
-            cache_path=cache_file,
-        )
-        assert mgr.get_tier() == LicenseTier.PRO
+        with mock.patch.dict(os.environ, {}, clear=True):
+            mgr = LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=cache_file,
+            )
+            # No signing secret, no offline mode, non-kiln prefix → FREE
+            assert mgr.get_tier() == LicenseTier.FREE
 
     def test_expired_cache_ignored(self, tmp_path):
         """Cache past TTL is not used."""
@@ -399,20 +432,21 @@ class TestLicenseCache:
 
 class TestGetInfo:
     def test_returns_license_info(self, tmp_path):
-        key = f"{_KEY_PREFIX_PRO}info_test_abcdef"
-        mgr = LicenseManager(
-            license_key=key,
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
-        info = mgr.get_info()
-        assert isinstance(info, LicenseInfo)
-        assert info.tier == LicenseTier.PRO
-        assert info.license_key_hint == key[-6:]
+        key = _signed_key(LicenseTier.PRO)
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            mgr = LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            info = mgr.get_info()
+            assert isinstance(info, LicenseInfo)
+            assert info.tier == LicenseTier.PRO
+            assert info.license_key_hint == key[-6:]
 
     def test_source_env(self, tmp_path):
-        key = f"{_KEY_PREFIX_PRO}env_source_abcdef"
-        with mock.patch.dict(os.environ, {"KILN_LICENSE_KEY": key}, clear=True):
+        key = _signed_key(LicenseTier.PRO)
+        with mock.patch.dict(os.environ, _env_with_signing({"KILN_LICENSE_KEY": key}), clear=True):
             mgr = LicenseManager(
                 license_path=tmp_path / "license",
                 cache_path=tmp_path / "cache.json",
@@ -422,10 +456,10 @@ class TestGetInfo:
 
     def test_source_file(self, tmp_path):
         license_file = tmp_path / "license"
-        key = f"{_KEY_PREFIX_PRO}file_source_abcdef"
+        key = _signed_key(LicenseTier.PRO)
         license_file.write_text(key, encoding="utf-8")
 
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
             mgr = LicenseManager(
                 license_path=license_file,
                 cache_path=tmp_path / "cache.json",
@@ -451,21 +485,22 @@ class TestGetInfo:
 class TestRequiresTierDecorator:
     def test_allows_when_tier_met(self, tmp_path):
         """Decorator passes through when tier is sufficient."""
-        key = f"{_KEY_PREFIX_PRO}decorator_test_1"
+        key = _signed_key(LicenseTier.PRO)
 
-        # Patch the module-level singleton
-        with mock.patch("kiln.licensing._manager", LicenseManager(
-            license_key=key,
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )):
-            @requires_tier(LicenseTier.PRO)
-            def my_tool():
-                return {"success": True, "data": "hello"}
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            # Patch the module-level singleton
+            with mock.patch("kiln.licensing._manager", LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )):
+                @requires_tier(LicenseTier.PRO)
+                def my_tool():
+                    return {"success": True, "data": "hello"}
 
-            result = my_tool()
-            assert result["success"] is True
-            assert result["data"] == "hello"
+                result = my_tool()
+                assert result["success"] is True
+                assert result["data"] == "hello"
 
     def test_blocks_when_tier_insufficient(self, tmp_path):
         """Decorator returns error dict when tier is insufficient."""
@@ -495,35 +530,37 @@ class TestRequiresTierDecorator:
 
     def test_passes_args_through(self, tmp_path):
         """Decorator passes args and kwargs to the wrapped function."""
-        key = f"{_KEY_PREFIX_PRO}args_test_abcdef"
-        with mock.patch("kiln.licensing._manager", LicenseManager(
-            license_key=key,
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )):
-            @requires_tier(LicenseTier.FREE)
-            def my_tool(job_id: str, limit: int = 10):
-                return {"job_id": job_id, "limit": limit}
+        key = _signed_key(LicenseTier.PRO)
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            with mock.patch("kiln.licensing._manager", LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )):
+                @requires_tier(LicenseTier.FREE)
+                def my_tool(job_id: str, limit: int = 10):
+                    return {"job_id": job_id, "limit": limit}
 
-            result = my_tool("abc", limit=5)
-            assert result["job_id"] == "abc"
-            assert result["limit"] == 5
+                result = my_tool("abc", limit=5)
+                assert result["job_id"] == "abc"
+                assert result["limit"] == 5
 
     def test_business_gate(self, tmp_path):
         """Business tier gate blocks PRO users."""
-        key = f"{_KEY_PREFIX_PRO}biz_gate_abcdef"
-        with mock.patch("kiln.licensing._manager", LicenseManager(
-            license_key=key,
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )):
-            @requires_tier(LicenseTier.BUSINESS)
-            def business_tool():
-                return {"success": True}
+        key = _signed_key(LicenseTier.PRO)
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            with mock.patch("kiln.licensing._manager", LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )):
+                @requires_tier(LicenseTier.BUSINESS)
+                def business_tool():
+                    return {"success": True}
 
-            result = business_tool()
-            assert result["success"] is False
-            assert result["required_tier"] == "business"
+                result = business_tool()
+                assert result["success"] is False
+                assert result["required_tier"] == "business"
 
 
 # ---------------------------------------------------------------------------
@@ -617,10 +654,10 @@ class TestEdgeCases:
     def test_whitespace_in_key_stripped(self, tmp_path):
         """Keys with leading/trailing whitespace are handled."""
         license_file = tmp_path / "license"
-        key = f"  {_KEY_PREFIX_PRO}whitespace_key  \n"
-        license_file.write_text(key, encoding="utf-8")
+        key = _signed_key(LicenseTier.PRO)
+        license_file.write_text(f"  {key}  \n", encoding="utf-8")
 
-        with mock.patch.dict(os.environ, {"KILN_LICENSE_OFFLINE": "1"}, clear=True):
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
             mgr = LicenseManager(
                 license_path=license_file,
                 cache_path=tmp_path / "cache.json",
@@ -629,55 +666,67 @@ class TestEdgeCases:
 
     def test_repeated_get_tier_returns_cached(self, tmp_path):
         """get_tier() doesn't re-resolve on every call."""
-        key = f"{_KEY_PREFIX_PRO}cache_test_abcdef"
-        mgr = LicenseManager(
-            license_key=key,
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
-        tier1 = mgr.get_tier()
-        tier2 = mgr.get_tier()
-        assert tier1 == tier2 == LicenseTier.PRO
+        key = _signed_key(LicenseTier.PRO)
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            mgr = LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            tier1 = mgr.get_tier()
+            tier2 = mgr.get_tier()
+            assert tier1 == tier2 == LicenseTier.PRO
 
     def test_corrupted_cache_file_handled(self, tmp_path):
         """Corrupted cache file doesn't crash, falls back gracefully."""
         cache_file = tmp_path / "cache.json"
         cache_file.write_text("not valid json {{{{", encoding="utf-8")
 
-        mgr = LicenseManager(
-            license_key=f"{_KEY_PREFIX_PRO}corrupt_test_1",
-            license_path=tmp_path / "license",
-            cache_path=cache_file,
-        )
-        # Should still work — key prefix detection doesn't need cache
-        assert mgr.get_tier() == LicenseTier.PRO
+        key = _signed_key(LicenseTier.PRO)
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            mgr = LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=cache_file,
+            )
+            assert mgr.get_tier() == LicenseTier.PRO
 
     def test_readonly_filesystem_cache_write_handled(self, tmp_path):
         """Cache write failure doesn't crash."""
-        # Point cache to a non-writable location
-        key = f"{_KEY_PREFIX_PRO}readonly_test_1"
-        mgr = LicenseManager(
-            license_key=key,
-            license_path=tmp_path / "license",
-            cache_path=Path("/dev/null/impossible/cache.json"),
-        )
-        # Should still resolve tier without crashing
-        assert mgr.get_tier() == LicenseTier.PRO
+        key = _signed_key(LicenseTier.PRO)
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            mgr = LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=Path("/dev/null/impossible/cache.json"),
+            )
+            assert mgr.get_tier() == LicenseTier.PRO
 
     def test_expired_license_falls_back_to_free(self, tmp_path):
         """An expired resolved license returns FREE on subsequent checks."""
-        key = f"{_KEY_PREFIX_PRO}expired_test_1"
-        mgr = LicenseManager(
-            license_key=key,
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
-        # First resolve: PRO
-        assert mgr.get_tier() == LicenseTier.PRO
+        key = _signed_key(LicenseTier.PRO)
+        with mock.patch.dict(os.environ, _env_with_signing(), clear=True):
+            mgr = LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            assert mgr.get_tier() == LicenseTier.PRO
 
-        # Manually expire the resolved license
-        mgr._resolved.expires_at = time.time() - 1
-        assert mgr.get_tier() == LicenseTier.FREE
+            # Manually expire the resolved license
+            mgr._resolved.expires_at = time.time() - 1
+            assert mgr.get_tier() == LicenseTier.FREE
+
+    def test_unsigned_key_with_pro_prefix_defaults_to_free(self, tmp_path):
+        """An unsigned key with a pro prefix (no signing secret) defaults to FREE."""
+        key = f"{_KEY_PREFIX_PRO}unsigned_test_key"
+        with mock.patch.dict(os.environ, {}, clear=True):
+            mgr = LicenseManager(
+                license_key=key,
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            assert mgr.get_tier() == LicenseTier.FREE
 
 
 # ---------------------------------------------------------------------------

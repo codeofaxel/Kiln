@@ -683,31 +683,35 @@ class TestLicenseCommands:
 
     def test_upgrade_activates_pro_key(self, runner, tmp_path):
         """kiln upgrade --key activates a Pro license."""
-        from kiln.licensing import LicenseManager, _KEY_PREFIX_PRO
+        from kiln.licensing import LicenseManager, LicenseTier, generate_license_key
 
+        _secret = "test-cli-signing-secret"
         license_file = tmp_path / "license"
-        mgr = LicenseManager(
-            license_path=license_file,
-            cache_path=tmp_path / "cache.json",
-        )
-        key = f"{_KEY_PREFIX_PRO}test_activate_abcdef"
-        with patch("kiln.licensing._manager", mgr):
-            result = runner.invoke(cli, ["upgrade", "--key", key])
+        key = generate_license_key(LicenseTier.PRO, "test@example.com", signing_key=_secret)
+        with patch.dict("os.environ", {"KILN_LICENSE_SIGNING_SECRET": _secret}, clear=False):
+            mgr = LicenseManager(
+                license_path=license_file,
+                cache_path=tmp_path / "cache.json",
+            )
+            with patch("kiln.licensing._manager", mgr):
+                result = runner.invoke(cli, ["upgrade", "--key", key])
         assert result.exit_code == 0
         assert "Pro" in result.output
         assert license_file.exists()
 
     def test_upgrade_activates_key_json_mode(self, runner, tmp_path):
         """kiln upgrade --key --json returns valid JSON."""
-        from kiln.licensing import LicenseManager, _KEY_PREFIX_PRO
+        from kiln.licensing import LicenseManager, LicenseTier, generate_license_key
 
-        mgr = LicenseManager(
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
-        key = f"{_KEY_PREFIX_PRO}json_test_abcdef"
-        with patch("kiln.licensing._manager", mgr):
-            result = runner.invoke(cli, ["upgrade", "--key", key, "--json"])
+        _secret = "test-cli-signing-secret"
+        key = generate_license_key(LicenseTier.PRO, "test@example.com", signing_key=_secret)
+        with patch.dict("os.environ", {"KILN_LICENSE_SIGNING_SECRET": _secret}, clear=False):
+            mgr = LicenseManager(
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            with patch("kiln.licensing._manager", mgr):
+                result = runner.invoke(cli, ["upgrade", "--key", key, "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["success"] is True
@@ -715,19 +719,20 @@ class TestLicenseCommands:
 
     def test_upgrade_shows_active_for_pro_user(self, runner, tmp_path):
         """kiln upgrade for existing Pro user shows active status."""
-        from kiln.licensing import LicenseManager, _KEY_PREFIX_PRO
+        from kiln.licensing import LicenseManager, LicenseTier, generate_license_key
 
+        _secret = "test-cli-signing-secret"
         license_file = tmp_path / "license"
-        key = f"{_KEY_PREFIX_PRO}existing_pro_key"
+        key = generate_license_key(LicenseTier.PRO, "test@example.com", signing_key=_secret)
         license_file.write_text(key, encoding="utf-8")
 
-        mgr = LicenseManager(
-            license_path=license_file,
-            cache_path=tmp_path / "cache.json",
-        )
-        with patch("kiln.licensing._manager", mgr), \
-             patch.dict("os.environ", {"KILN_LICENSE_OFFLINE": "1"}, clear=True):
-            result = runner.invoke(cli, ["upgrade"])
+        with patch.dict("os.environ", {"KILN_LICENSE_SIGNING_SECRET": _secret}, clear=False):
+            mgr = LicenseManager(
+                license_path=license_file,
+                cache_path=tmp_path / "cache.json",
+            )
+            with patch("kiln.licensing._manager", mgr):
+                result = runner.invoke(cli, ["upgrade"])
         assert result.exit_code == 0
         assert "Pro" in result.output
         assert "Active" in result.output or "valid" in result.output.lower()
@@ -740,6 +745,10 @@ class TestLicenseCommands:
 
 class TestFleetCLI:
     """Tests for kiln fleet CLI commands."""
+
+    def _license_pass(self):
+        """Context manager that bypasses the PRO tier check for fleet commands."""
+        return patch("kiln.licensing.check_tier", return_value=(True, None))
 
     def test_fleet_status_success(self, runner):
         """kiln fleet status shows fleet printers."""
@@ -760,7 +769,7 @@ class TestFleetCLI:
             "count": 1,
             "idle_printers": ["voron-350"],
         }
-        with patch("kiln.cli.main._fleet_status", return_value=mock_result, create=True), \
+        with self._license_pass(), \
              patch("kiln.server.fleet_status", return_value=mock_result):
             result = runner.invoke(cli, ["fleet", "status"])
         assert result.exit_code == 0
@@ -773,7 +782,8 @@ class TestFleetCLI:
             "printers": [],
             "count": 0,
         }
-        with patch("kiln.server.fleet_status", return_value=mock_result):
+        with self._license_pass(), \
+             patch("kiln.server.fleet_status", return_value=mock_result):
             result = runner.invoke(cli, ["fleet", "status", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -788,7 +798,8 @@ class TestFleetCLI:
             "count": 0,
             "message": "No printers registered.",
         }
-        with patch("kiln.server.fleet_status", return_value=mock_result):
+        with self._license_pass(), \
+             patch("kiln.server.fleet_status", return_value=mock_result):
             result = runner.invoke(cli, ["fleet", "status"])
         assert result.exit_code == 0
         assert "No printers" in result.output or "fleet" in result.output.lower()
@@ -800,7 +811,8 @@ class TestFleetCLI:
             "error": "Internal error",
             "code": "INTERNAL_ERROR",
         }
-        with patch("kiln.server.fleet_status", return_value=mock_result):
+        with self._license_pass(), \
+             patch("kiln.server.fleet_status", return_value=mock_result):
             result = runner.invoke(cli, ["fleet", "status"])
         assert result.exit_code != 0
         assert "Internal error" in result.output
