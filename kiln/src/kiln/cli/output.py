@@ -1036,7 +1036,7 @@ def format_billing_status(
             f"max ${policy.get('max_fee_usd', 50):.2f})"
         )
 
-        free_left = max(0, policy.get("free_tier_jobs", 5) - data.get("network_jobs_this_month", 0))
+        free_left = max(0, policy.get("free_tier_jobs", 3) - data.get("network_jobs_this_month", 0))
         parts.append(f"[bold]Free tier:[/bold] {free_left} free orders remaining this month")
 
         # Available rails

@@ -89,7 +89,7 @@ class FeePolicy:
     network_fee_percent: float = 5.0
     min_fee_usd: float = 0.25
     max_fee_usd: float = 200.0
-    free_tier_jobs: int = 5
+    free_tier_jobs: int = 3
     currency: str = "USD"
 
 
@@ -556,6 +556,23 @@ class BillingLedger:
         count = 0
         with self._lock:
             for entry in self._charges:
+                ts = datetime.fromtimestamp(entry["timestamp"], tz=timezone.utc)
+                if ts.year == now.year and ts.month == now.month:
+                    count += 1
+        return count
+
+    def network_jobs_this_month_for_user(self, user_email: str) -> int:
+        """Count orders for a specific user in the current calendar month."""
+        if self._db is not None:
+            return self._db.billing_charges_this_month_for_user(user_email)
+
+        # In-memory fallback.
+        now = datetime.now(timezone.utc)
+        count = 0
+        with self._lock:
+            for entry in self._charges:
+                if entry.get("user_email") != user_email:
+                    continue
                 ts = datetime.fromtimestamp(entry["timestamp"], tz=timezone.utc)
                 if ts.year == now.year and ts.month == now.month:
                     count += 1

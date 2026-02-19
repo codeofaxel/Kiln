@@ -48,7 +48,7 @@ providers), Kiln charges a platform fee:
 - **Network fee**: 5% of the manufacturing provider's quoted price.
 - **Minimum fee**: $0.25 per order.
 - **Maximum fee**: $200.00 per order.
-- **Free tier**: Your first 5 fulfillment orders each calendar month are
+- **Free tier**: Your first 3 fulfillment orders each calendar month are
   fee-free to help you get started.
 
 Fees are charged at the time the order is placed with the manufacturing provider.

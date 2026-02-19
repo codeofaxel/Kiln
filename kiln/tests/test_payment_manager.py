@@ -151,7 +151,7 @@ def _waived_fee() -> FeeCalculation:
         total_cost=50.0,
         currency="USD",
         waived=True,
-        waiver_reason="Free tier: job 1 of 5 free this month",
+        waiver_reason="Free tier: job 1 of 3 free this month",
     )
 
 

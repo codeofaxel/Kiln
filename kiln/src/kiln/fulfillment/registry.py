@@ -82,11 +82,10 @@ def get_provider(
                 break
 
     if not name:
-        raise RuntimeError(
-            "No fulfillment provider configured.  "
-            "Set KILN_FULFILLMENT_PROVIDER or a provider-specific API key "
-            "environment variable (e.g. KILN_CRAFTCLOUD_API_KEY)."
-        )
+        # Default to the proxy adapter — routes through api.kiln3d.com
+        # with server-side fee enforcement.  Users who set provider-specific
+        # env vars (e.g. KILN_CRAFTCLOUD_BASE_URL) bypass the proxy.
+        name = "proxy"
 
     cls = get_provider_class(name)
     return cls(**kwargs)
@@ -107,7 +106,9 @@ def _ensure_builtins() -> None:
     _BUILTINS_LOADED = True
 
     from kiln.fulfillment.craftcloud import CraftcloudProvider
+    from kiln.fulfillment.proxy import ProxyProvider
     from kiln.fulfillment.sculpteo import SculpteoProvider
 
     register("craftcloud", CraftcloudProvider)
+    register("proxy", ProxyProvider)
     register("sculpteo", SculpteoProvider)

@@ -4983,6 +4983,96 @@ def upgrade(ctx: click.Context, key: str | None, session: str | None, json_mode:
 
 
 @cli.command()
+@click.option(
+    "--email",
+    "-e",
+    default=None,
+    help="Email address for registration.",
+)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def register(email: str | None, json_mode: bool) -> None:
+    """Register for a free Kiln license key.
+
+    Sends your email to api.kiln3d.com and saves the returned license key.
+    Required for outsourced manufacturing via the fulfillment proxy.
+    If you already have a license key, shows your current tier.
+    """
+    from kiln.licensing import get_license_manager
+
+    mgr = get_license_manager()
+    info = mgr.get_info()
+
+    # If user already has a valid key, show it and exit.
+    if info.is_valid and info.tier.value != "free":
+        if json_mode:
+            import json as _json
+
+            click.echo(_json.dumps({"success": True, "already_registered": True, **info.to_dict()}, indent=2))
+        else:
+            click.echo(f"\n  Already registered: Kiln {info.tier.value.title()}")
+            if info.license_key_hint:
+                click.echo(f"  Key: ...{info.license_key_hint}")
+        return
+
+    # Prompt for email if not provided.
+    if not email:
+        email = click.prompt("  Email address", type=str)
+
+    if not email or "@" not in email:
+        click.echo(format_error("Valid email address required.", code="INVALID_EMAIL", json_mode=json_mode))
+        sys.exit(1)
+
+    # Call registration endpoint.
+    proxy_url = os.environ.get("KILN_PROXY_URL", "https://api.kiln3d.com").rstrip("/")
+    try:
+        import requests
+
+        resp = requests.post(
+            f"{proxy_url}/api/license/register",
+            json={"email": email},
+            timeout=15,
+        )
+        if not resp.ok:
+            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            error_msg = body.get("error", f"HTTP {resp.status_code}")
+            click.echo(format_error(f"Registration failed: {error_msg}", code="REGISTER_ERROR", json_mode=json_mode))
+            sys.exit(1)
+
+        data = resp.json()
+        license_key = data.get("license_key", "")
+        if not license_key:
+            click.echo(format_error("Server returned no license key.", code="REGISTER_ERROR", json_mode=json_mode))
+            sys.exit(1)
+
+        # Activate locally.
+        activated = mgr.activate_license(license_key)
+        if json_mode:
+            import json as _json
+
+            click.echo(_json.dumps({"success": True, **activated.to_dict()}, indent=2))
+        else:
+            click.echo(f"\n  ✓ Registered! Kiln {activated.tier.value.title()} license saved.")
+            if activated.license_key_hint:
+                click.echo(f"    Key: ...{activated.license_key_hint}")
+            click.echo(f"    Email: {email}")
+            click.echo("\n  You can now use outsourced manufacturing via Kiln.")
+            click.echo("  Upgrade anytime: kiln upgrade --key <pro-or-business-key>")
+
+    except ImportError:
+        click.echo(
+            format_error(
+                "requests package not installed. Install with: pip install requests",
+                code="MISSING_DEPENDENCY",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(f"Registration failed: {exc}", code="REGISTER_ERROR", json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def license_info(json_mode: bool) -> None:
     """Show current license tier and details."""

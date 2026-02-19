@@ -35,7 +35,7 @@ class TestFeePolicy:
         assert policy.network_fee_percent == 5.0
         assert policy.min_fee_usd == 0.25
         assert policy.max_fee_usd == 200.0
-        assert policy.free_tier_jobs == 5
+        assert policy.free_tier_jobs == 3
         assert policy.currency == "USD"
 
     def test_custom_values(self):
@@ -106,7 +106,7 @@ class TestFeeCalculation:
             total_cost=50.0,
             currency="USD",
             waived=True,
-            waiver_reason="Free tier: job 1 of 5 free this month",
+            waiver_reason="Free tier: job 1 of 3 free this month",
         )
         d = fc.to_dict()
         assert d["waived"] is True
@@ -335,11 +335,11 @@ class TestFreeTier:
 
     def test_waiver_reason_includes_count(self):
         """Waiver reason should include the current and max count."""
-        policy = FeePolicy(free_tier_jobs=5)
+        policy = FeePolicy(free_tier_jobs=3)
         ledger = BillingLedger(fee_policy=policy)
 
         fc = ledger.calculate_fee(job_cost=50.0)
-        assert fc.waiver_reason == "Free tier: job 1 of 5 free this month"
+        assert fc.waiver_reason == "Free tier: job 1 of 3 free this month"
 
 
 # ---------------------------------------------------------------------------
@@ -492,7 +492,7 @@ class TestDefaultPolicy:
 
     def test_default_policy_applied(self):
         ledger = BillingLedger()
-        # Default policy: 5 free-tier jobs, so the first job is waived
+        # Default policy: 3 free-tier jobs, so the first job is waived
         fc = ledger.calculate_fee(job_cost=100.0)
         assert fc.waived is True
 

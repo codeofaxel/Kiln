@@ -36,11 +36,13 @@ class TestGenerateLicenseKey:
         parts = key.split("_")
         assert len(parts) == 4
 
-    def test_free_tier_raises(self):
-        with pytest.raises(ValueError, match="FREE"):
-            generate_license_key(
-                LicenseTier.FREE, "free@example.com", signing_key="secret"
-            )
+    def test_generates_free_key(self):
+        key = generate_license_key(
+            LicenseTier.FREE, "free@example.com", signing_key="secret"
+        )
+        assert key.startswith("kiln_free_")
+        parts = key.split("_")
+        assert len(parts) == 4
 
     def test_missing_signing_key_raises(self):
         with mock.patch.dict(os.environ, {}, clear=True):

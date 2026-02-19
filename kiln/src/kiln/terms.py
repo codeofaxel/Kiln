@@ -26,7 +26,7 @@ _TERMS_SUMMARY = """\
   4. Third-party content (marketplaces, fulfillment) is governed by
      those providers' own terms.
   5. Fulfillment orders incur a 5% platform fee (min $0.25, max $200).
-     Your first 5 orders each month are fee-free. Local printing is
+     Your first 3 orders each month are fee-free. Local printing is
      always free.
   6. Kiln is provided "as is" without warranty of any kind.
 

@@ -119,12 +119,18 @@ class TestGetProvider:
         provider = get_provider()
         assert isinstance(provider, SculpteoProvider)
 
-    def test_no_provider_configured(self, monkeypatch):
+    def test_no_provider_configured_defaults_to_proxy(self, monkeypatch, tmp_path):
+        from unittest.mock import patch
+
+        from kiln.fulfillment.proxy import ProxyProvider
+
         monkeypatch.delenv("KILN_FULFILLMENT_PROVIDER", raising=False)
         monkeypatch.delenv("KILN_CRAFTCLOUD_API_KEY", raising=False)
+        monkeypatch.delenv("KILN_CRAFTCLOUD_BASE_URL", raising=False)
         monkeypatch.delenv("KILN_SCULPTEO_API_KEY", raising=False)
-        with pytest.raises(RuntimeError, match="No fulfillment provider configured"):
-            get_provider()
+        monkeypatch.setenv("KILN_LICENSE_KEY", "test-key")
+        provider = get_provider()
+        assert isinstance(provider, ProxyProvider)
 
     def test_unknown_provider_name(self, monkeypatch):
         monkeypatch.setenv("KILN_FULFILLMENT_PROVIDER", "nonexistent")

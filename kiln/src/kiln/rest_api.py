@@ -39,6 +39,7 @@ import threading
 import time as _time
 from collections import defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request  # module-level so PEP 563 deferred annotations resolve
@@ -279,7 +280,7 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
         pass
 
     try:
-        from fastapi import Depends, FastAPI, HTTPException
+        from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import JSONResponse
     except ImportError:
@@ -379,6 +380,23 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
             )
 
     _auth_dep = Depends(verify_auth)
+
+    async def verify_license(request: Request) -> dict:
+        """Extract and validate license key from Authorization header."""
+        from kiln.fulfillment.proxy_server import get_orchestrator
+
+        auth = request.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="License key required. Run 'kiln register' to get a free key.")
+        key = auth[7:].strip()
+        if not key:
+            raise HTTPException(status_code=401, detail="Empty license key")
+
+        orch = get_orchestrator()
+        result = orch.validate_license(key)
+        if not result.get("valid", False):
+            raise HTTPException(status_code=401, detail=result.get("error", "Invalid license key"))
+        return result
 
     # ----- Health check ---------------------------------------------------
 
@@ -651,6 +669,248 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
                 )
 
         return {"received": True}
+
+    # ----- Fulfillment proxy endpoints ---------------------------------------
+
+    @app.get("/api/fulfillment/materials")
+    async def fulfillment_materials(
+        provider: str = "craftcloud",
+        license_info: dict = Depends(verify_license),
+    ):
+        from kiln.fulfillment.proxy_server import get_orchestrator
+
+        try:
+            orch = get_orchestrator()
+            materials = orch.handle_materials(provider)
+            return JSONResponse({"success": True, "materials": materials, "provider": provider})
+        except Exception as exc:
+            logger.exception("Proxy materials error")
+            return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
+
+    @app.post("/api/fulfillment/quote")
+    async def fulfillment_quote(
+        file: UploadFile = File(...),
+        material_id: str = Form(...),
+        quantity: int = Form(1),
+        shipping_country: str = Form("US"),
+        provider: str = Form("craftcloud"),
+        license_info: dict = Depends(verify_license),
+    ):
+        import tempfile
+
+        from kiln.fulfillment.base import QuoteRequest
+        from kiln.fulfillment.proxy_server import get_orchestrator
+
+        # Validate file extension
+        _ALLOWED_EXTENSIONS = {".stl", ".obj", ".3mf", ".step", ".stp", ".iges", ".igs"}
+        suffix = Path(file.filename).suffix.lower() if file.filename else ".stl"
+        if suffix not in _ALLOWED_EXTENSIONS:
+            return JSONResponse(
+                {"success": False, "error": f"Unsupported file type: {suffix}. Allowed: {', '.join(sorted(_ALLOWED_EXTENSIONS))}"},
+                status_code=400,
+            )
+
+        # Read with size limit (100 MB)
+        _MAX_FILE_SIZE = 100 * 1024 * 1024
+        content = await file.read()
+        if len(content) > _MAX_FILE_SIZE:
+            return JSONResponse(
+                {"success": False, "error": f"File too large ({len(content) / (1024 * 1024):.1f} MB). Maximum is 100 MB."},
+                status_code=413,
+            )
+
+        # Save uploaded file to temp location
+        tmp_path = None
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        try:
+            orch = get_orchestrator()
+            request = QuoteRequest(
+                file_path=tmp_path,
+                material_id=material_id,
+                quantity=quantity,
+                shipping_country=shipping_country,
+            )
+            result = orch.handle_quote(
+                provider,
+                tmp_path,
+                request,
+                user_email=license_info.get("email", ""),
+            )
+            return JSONResponse({"success": True, **result})
+        except Exception as exc:
+            # Import FulfillmentError lazily to handle it
+            try:
+                from kiln.fulfillment.base import FulfillmentError
+
+                if isinstance(exc, FulfillmentError):
+                    return JSONResponse({"success": False, "error": str(exc), "code": exc.code}, status_code=400)
+            except ImportError:
+                pass
+            logger.exception("Proxy quote error")
+            return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
+        finally:
+            if tmp_path:
+                Path(tmp_path).unlink(missing_ok=True)
+
+    @app.post("/api/fulfillment/order")
+    async def fulfillment_order(
+        request: Request,
+        license_info: dict = Depends(verify_license),
+    ):
+        from kiln.fulfillment.base import OrderRequest
+        from kiln.fulfillment.proxy_server import get_orchestrator
+        from kiln.licensing import LicenseTier
+
+        body = await request.json()
+        provider = body.get("provider", "craftcloud")
+
+        try:
+            orch = get_orchestrator()
+            order_req = OrderRequest(
+                quote_id=body["quote_id"],
+                shipping_option_id=body.get("shipping_option_id", ""),
+                shipping_address=body.get("shipping_address", {}),
+                notes=body.get("notes", ""),
+            )
+            # Convert tier string back to enum
+            tier_str = license_info.get("tier", "free")
+            try:
+                user_tier = LicenseTier(tier_str)
+            except ValueError:
+                user_tier = LicenseTier.FREE
+            quote_token = body.get("quote_token", "")
+            if not quote_token:
+                return JSONResponse(
+                    {"success": False, "error": "quote_token is required. Get one from POST /api/fulfillment/quote.", "code": "MISSING_QUOTE_TOKEN"},
+                    status_code=400,
+                )
+            result = orch.handle_order(
+                provider,
+                order_req,
+                user_email=license_info.get("email", ""),
+                user_tier=user_tier,
+                quote_token=quote_token,
+            )
+            return JSONResponse({"success": True, **result})
+        except Exception as exc:
+            # Import error types lazily
+            try:
+                from kiln.fulfillment.base import FulfillmentError
+                from kiln.payments import PaymentError
+
+                if isinstance(exc, FulfillmentError):
+                    status = 402 if exc.code == "FREE_TIER_LIMIT" else 400
+                    return JSONResponse({"success": False, "error": str(exc), "code": exc.code}, status_code=status)
+                if isinstance(exc, PaymentError):
+                    return JSONResponse(
+                        {"success": False, "error": str(exc), "code": getattr(exc, "code", "PAYMENT_ERROR")},
+                        status_code=402,
+                    )
+            except ImportError:
+                pass
+            logger.exception("Proxy order error")
+            return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
+
+    @app.get("/api/fulfillment/order/{order_id}/status")
+    async def fulfillment_order_status(
+        order_id: str,
+        provider: str = "craftcloud",
+        license_info: dict = Depends(verify_license),
+    ):
+        from kiln.fulfillment.proxy_server import get_orchestrator
+
+        try:
+            orch = get_orchestrator()
+            result = orch.handle_status(provider, order_id)
+            return JSONResponse({"success": True, "order": result})
+        except Exception as exc:
+            try:
+                from kiln.fulfillment.base import FulfillmentError
+
+                if isinstance(exc, FulfillmentError):
+                    return JSONResponse({"success": False, "error": str(exc), "code": exc.code}, status_code=400)
+            except ImportError:
+                pass
+            logger.exception("Proxy status error")
+            return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
+
+    @app.post("/api/fulfillment/order/{order_id}/cancel")
+    async def fulfillment_cancel(
+        order_id: str,
+        request: Request,
+        license_info: dict = Depends(verify_license),
+    ):
+        from kiln.fulfillment.proxy_server import get_orchestrator
+        from kiln.licensing import LicenseTier
+
+        body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+        provider = body.get("provider", "craftcloud")
+        try:
+            orch = get_orchestrator()
+            tier_str = license_info.get("tier", "free")
+            try:
+                user_tier = LicenseTier(tier_str)
+            except ValueError:
+                user_tier = LicenseTier.FREE
+            result = orch.handle_cancel(provider, order_id, user_tier=user_tier)
+            return JSONResponse({"success": True, "order": result})
+        except Exception as exc:
+            try:
+                from kiln.fulfillment.base import FulfillmentError
+
+                if isinstance(exc, FulfillmentError):
+                    return JSONResponse({"success": False, "error": str(exc), "code": exc.code}, status_code=400)
+            except ImportError:
+                pass
+            logger.exception("Proxy cancel error")
+            return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
+
+    # ----- License endpoints -------------------------------------------------
+
+    @app.post("/api/license/validate")
+    async def license_validate(request: Request):
+        from kiln.fulfillment.proxy_server import get_orchestrator
+
+        body = await request.json()
+        key = body.get("license_key", "")
+        if not key:
+            return JSONResponse({"valid": False, "error": "No license key provided"}, status_code=400)
+
+        orch = get_orchestrator()
+        result = orch.validate_license(key)
+        # Add usage stats
+        if result.get("valid") and result.get("email"):
+            ledger = orch._ledger
+            result["usage"] = {
+                "orders_this_month": ledger.network_jobs_this_month_for_user(result["email"]),
+                "orders_limit": ledger._policy.free_tier_jobs,
+            }
+        # Serialize tier enum for JSON
+        if "tier" in result:
+            result["tier"] = result["tier"].value if hasattr(result["tier"], "value") else str(result["tier"])
+        if "info" in result:
+            result.pop("info")  # LicenseInfo not JSON-serializable
+        return JSONResponse(result)
+
+    @app.post("/api/license/register")
+    async def license_register(request: Request):
+        from kiln.fulfillment.proxy_server import get_orchestrator
+
+        body = await request.json()
+        email = body.get("email", "").strip()
+        if not email or "@" not in email:
+            return JSONResponse({"success": False, "error": "Valid email required"}, status_code=400)
+
+        try:
+            orch = get_orchestrator()
+            result = orch.register_user(email)
+            return JSONResponse({"success": True, **result})
+        except Exception as exc:
+            logger.exception("License registration error")
+            return JSONResponse({"success": False, "error": "Registration failed. Please try again."}, status_code=500)
 
     return app
 

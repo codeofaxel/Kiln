@@ -594,16 +594,13 @@ def generate_license_key(
 ) -> str:
     """Generate a cryptographically signed license key.
 
-    :param tier: License tier (PRO or BUSINESS).
-    :param email: Buyer's email address.
+    :param tier: License tier (FREE, PRO, or BUSINESS).
+    :param email: Buyer's email address (or registrant for FREE).
     :param signing_key: HMAC secret. Falls back to ``KILN_LICENSE_PUBLIC_KEY``.
     :param ttl_seconds: Key validity duration in seconds (default 1 year).
-    :returns: Signed key string ``kiln_{tier}_{payload_b64}_{signature_b64}``.
-    :raises ValueError: If tier is FREE or signing key is missing.
+    :returns: Signed key string ``kiln_{prefix}_{payload_b64}_{signature_b64}``.
+    :raises ValueError: If signing key is missing.
     """
-    if tier is LicenseTier.FREE:
-        raise ValueError("Cannot generate a license key for the FREE tier")
-
     if signing_key is None:
         signing_key = os.environ.get("KILN_LICENSE_PUBLIC_KEY", "").strip()
     if not signing_key:
@@ -627,7 +624,12 @@ def generate_license_key(
 
     signature_b64 = base64.b64encode(signature).rstrip(b"=").decode("ascii")
 
-    prefix = "pro" if tier is LicenseTier.PRO else "biz"
+    _TIER_PREFIXES = {
+        LicenseTier.FREE: "free",
+        LicenseTier.PRO: "pro",
+        LicenseTier.BUSINESS: "biz",
+    }
+    prefix = _TIER_PREFIXES[tier]
     return f"kiln_{prefix}_{payload_b64}_{signature_b64}"
 
 

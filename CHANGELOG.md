@@ -86,7 +86,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Cloud sync for printer configs and job history
 - Plugin system with entry-point discovery
 - API key authentication with scope-based access
-- Billing/fee tracking for fulfillment orders (5% platform fee, first 5 free/month)
+- Billing/fee tracking for fulfillment orders (5% platform fee, first 3 free/month)
 - Multi-model agent support via OpenRouter (any OpenAI-compatible LLM)
 - REST API wrapper (FastAPI) exposing all MCP tools as HTTP endpoints
 - Tool tiers: essential (15), standard (43), full (101+)
