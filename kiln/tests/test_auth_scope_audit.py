@@ -195,6 +195,9 @@ READ_ONLY_TOOLS: Set[str] = {
     "fleet_status_by_site",
     "project_cost_summary",
     "client_cost_report",
+
+    # Database / infrastructure status (read-only)
+    "database_status",
 }
 
 
