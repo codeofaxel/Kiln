@@ -1,8 +1,9 @@
 """API key authentication for the Kiln MCP server.
 
 Provides a simple, optional authentication layer. When enabled, clients
-must provide a valid API key to use MCP tools. Keys are stored locally
-in the SQLite database.
+must provide a valid API key to use MCP tools. Keys are stored in memory
+for the lifetime of the process (session-only — keys do not persist
+across restarts).
 
 Authentication is disabled by default. Set KILN_AUTH_ENABLED=1 and
 KILN_AUTH_KEY=<your-key> to enable. When enabled without an explicit
@@ -19,6 +20,13 @@ Key rotation is supported with a configurable grace period:
     auth.rotate_key("sk_old_key...", "sk_new_key...", grace_period=86400)
     auth.list_keys()     # shows status: active / deprecated / expired
     auth.revoke_key("sk_old_key...")  # immediately invalidate
+
+.. note::
+
+   Created/rotated/revoked keys are session-only and will be lost on
+   restart. The ``KILN_AUTH_KEY`` env var key is always available across
+   restarts. SQLite persistence for managed keys is planned for a future
+   release.
 """
 
 from __future__ import annotations
@@ -109,8 +117,8 @@ class AuthManager:
     """Manages API keys and authentication.
 
     Supports two modes:
-    1. Simple mode: Single key via KILN_AUTH_KEY env var
-    2. Multi-key mode: Multiple keys stored in memory (extensible to SQLite)
+    1. Simple mode: Single key via KILN_AUTH_KEY env var (persists via env)
+    2. Multi-key mode: Multiple keys stored in memory (session-only)
     """
 
     def __init__(self, enabled: bool | None = None) -> None:

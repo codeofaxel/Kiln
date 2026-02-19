@@ -38,12 +38,13 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
-import os
 import threading
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
+
+from kiln import parse_int_env
 
 logger = logging.getLogger(__name__)
 
@@ -422,7 +423,7 @@ class AsyncEventBus:
         size = (
             queue_size
             if queue_size is not None
-            else int(os.environ.get("KILN_EVENT_QUEUE_SIZE", str(_DEFAULT_QUEUE_SIZE)))
+            else parse_int_env("KILN_EVENT_QUEUE_SIZE", _DEFAULT_QUEUE_SIZE)
         )
         self._queue: asyncio.Queue[Event | None] = asyncio.Queue(maxsize=size)
         self._handlers: dict[EventType, list[tuple[AsyncEventHandler, EventFilter | None]]] = {}

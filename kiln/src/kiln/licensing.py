@@ -117,6 +117,7 @@ class LicenseInfo:
     validated_at: float | None = None
     expires_at: float | None = None
     source: str = "default"  # "env", "file", "default"
+    email: str = ""  # Email from signed payload (empty for legacy/unsigned keys)
 
     @property
     def is_expired(self) -> bool:
@@ -286,28 +287,30 @@ class LicenseManager:
             logger.debug("License key signature validation failed: %s", exc)
             return None
 
-    def _infer_tier_from_key(self, key: str) -> tuple[LicenseTier, float | None]:
+    def _infer_tier_from_key(self, key: str) -> tuple[LicenseTier, float | None, str]:
         """Infer the license tier from the key, validating signature if present.
 
         This provides instant, offline tier resolution without needing
         to contact any remote API.
 
         Returns:
-            (tier, expires_at) tuple. expires_at is None for legacy keys or free tier.
+            (tier, expires_at, email) tuple. expires_at is None for legacy
+            keys or free tier. email is empty for unsigned/legacy keys.
         """
         if not key:
-            return LicenseTier.FREE, None
+            return LicenseTier.FREE, None, ""
 
         # Try cryptographic validation first
         payload = self._validate_key_signature(key)
         if payload:
             tier_str = payload.get("tier", "").lower()
+            email = payload.get("email", "")
             if tier_str == "business":
-                return LicenseTier.BUSINESS, payload.get("expires_at")
+                return LicenseTier.BUSINESS, payload.get("expires_at"), email
             if tier_str == "enterprise":
-                return LicenseTier.ENTERPRISE, payload.get("expires_at")
+                return LicenseTier.ENTERPRISE, payload.get("expires_at"), email
             if tier_str == "pro":
-                return LicenseTier.PRO, payload.get("expires_at")
+                return LicenseTier.PRO, payload.get("expires_at"), email
             logger.warning("Unknown tier in validated payload: %s", tier_str)
 
         # Signature validation failed — check offline cache before rejecting.
@@ -321,7 +324,7 @@ class LicenseManager:
                     "Set KILN_LICENSE_OFFLINE=1 to allow cached offline validation, "
                     "or upgrade to a properly signed key. Defaulting to FREE tier for security."
                 )
-            return LicenseTier.FREE, None
+            return LicenseTier.FREE, None, ""
 
         # Offline mode: only accept keys that have a valid cached validation.
         # Never accept prefix-only — a previous successful validation must exist.
@@ -334,7 +337,7 @@ class LicenseManager:
                     key[-6:],
                     cached_tier.value,
                 )
-                return cached_tier, cached.get("expires_at")
+                return cached_tier, cached.get("expires_at"), ""
             except (KeyError, ValueError):
                 pass
 
@@ -343,7 +346,7 @@ class LicenseManager:
             "KILN_LICENSE_OFFLINE=1 requires a previous successful online validation. "
             "Defaulting to FREE tier for security."
         )
-        return LicenseTier.FREE, None
+        return LicenseTier.FREE, None, ""
 
     def _key_source(self) -> str:
         """Determine where the license key came from."""
@@ -459,7 +462,7 @@ class LicenseManager:
             # License expired, fall back to free
             return LicenseTier.FREE
 
-        tier, expires_at = self._infer_tier_from_key(self._raw_key)
+        tier, expires_at, email = self._infer_tier_from_key(self._raw_key)
         key_hint = self._raw_key[-6:] if self._raw_key else ""
 
         self._resolved = LicenseInfo(
@@ -468,6 +471,7 @@ class LicenseManager:
             validated_at=time.time(),
             expires_at=expires_at,
             source=self._key_source(),
+            email=email,
         )
 
         # Update cache if we have a real key

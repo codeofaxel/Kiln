@@ -47,12 +47,13 @@ from __future__ import annotations
 
 import enum
 import logging
-import os
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
+
+from kiln import parse_float_env, parse_int_env
 
 logger = logging.getLogger(__name__)
 
@@ -295,9 +296,9 @@ class RecoveryManager:
         max_retries: int | None = None,
         checkpoint_interval_s: float | None = None,
     ) -> None:
-        self._max_retries = max_retries or int(os.environ.get("KILN_RECOVERY_MAX_RETRIES", "3"))
-        self._checkpoint_interval_s = checkpoint_interval_s or float(
-            os.environ.get("KILN_RECOVERY_CHECKPOINT_INTERVAL", "30.0")
+        self._max_retries = max_retries or parse_int_env("KILN_RECOVERY_MAX_RETRIES", 3)
+        self._checkpoint_interval_s = checkpoint_interval_s or parse_float_env(
+            "KILN_RECOVERY_CHECKPOINT_INTERVAL", 30.0
         )
         self._lock = threading.Lock()
         # job_id -> list of checkpoints (newest last)

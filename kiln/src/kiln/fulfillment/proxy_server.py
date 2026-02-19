@@ -100,7 +100,7 @@ class ProxyOrchestrator:
             info = mgr.get_info()
             return {
                 "tier": tier.value,
-                "email": "",  # Not stored in license key payload currently
+                "email": info.email,
                 "valid": info.is_valid,
                 "info": info.to_dict(),
             }

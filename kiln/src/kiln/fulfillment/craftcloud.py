@@ -64,6 +64,7 @@ try:
 except ImportError:  # pragma: no cover
     _WS_AVAILABLE = False
 
+from kiln import parse_float_env, parse_int_env
 from kiln.fulfillment.base import (
     FulfillmentError,
     FulfillmentProvider,
@@ -141,12 +142,12 @@ class CraftcloudProvider(FulfillmentProvider):
         self._poll_interval = (
             poll_interval
             if poll_interval is not None
-            else float(os.environ.get("KILN_CRAFTCLOUD_POLL_INTERVAL", _DEFAULT_POLL_INTERVAL))
+            else parse_float_env("KILN_CRAFTCLOUD_POLL_INTERVAL", _DEFAULT_POLL_INTERVAL)
         )
         self._max_poll_attempts = (
             max_poll_attempts
             if max_poll_attempts is not None
-            else int(os.environ.get("KILN_CRAFTCLOUD_MAX_POLL_ATTEMPTS", _DEFAULT_MAX_POLL_ATTEMPTS))
+            else parse_int_env("KILN_CRAFTCLOUD_MAX_POLL_ATTEMPTS", _DEFAULT_MAX_POLL_ATTEMPTS)
         )
 
         if use_websocket is not None:

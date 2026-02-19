@@ -36,6 +36,8 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from kiln import parse_int_env
+
 logger = logging.getLogger(__name__)
 
 
@@ -168,7 +170,7 @@ class JobStateMachine:
 
 
 # Stuck job timeout — configurable via environment variable.
-_STUCK_JOB_TIMEOUT_MINUTES: int = int(os.environ.get("KILN_STUCK_JOB_TIMEOUT_MINUTES", "30"))
+_STUCK_JOB_TIMEOUT_MINUTES: int = parse_int_env("KILN_STUCK_JOB_TIMEOUT_MINUTES", 30)
 
 
 class PrintQueue:
