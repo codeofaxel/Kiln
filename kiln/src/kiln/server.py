@@ -10712,17 +10712,29 @@ def database_status() -> dict:
 
 @mcp.tool()
 @requires_tier(LicenseTier.ENTERPRISE)
-def report_printer_overage(subscription_item_id: str, active_printer_count: int) -> dict:
+def report_printer_overage(
+    subscription_item_id: str,
+    active_printer_count: int | None = None,
+) -> dict:
     """Report metered printer usage to Stripe for Enterprise billing.
 
-    Enterprise feature. Reports the current active printer count to Stripe's
-    metered billing system. The first 20 printers are included in the base
-    Enterprise price; this tool reports the overage (count minus 20, minimum 0).
+    Enterprise feature. The first 20 printers are included in the base
+    Enterprise price ($499/mo). This tool **automatically subtracts** the
+    20 included printers and reports only the overage count to Stripe's
+    ``active_printers`` meter at $15/printer/month.
+
+    If *active_printer_count* is omitted, the fleet registry is queried
+    automatically — no manual counting needed.
 
     Args:
         subscription_item_id: The Stripe SubscriptionItem ID (``si_...``) for
             the metered printer overage line item on the customer's subscription.
-        active_printer_count: Total number of active printers in the fleet.
+        active_printer_count: Total number of active printers.  Leave empty
+            to auto-detect from the fleet registry.
+
+    Example:
+        With 25 registered printers, this reports **5** to Stripe
+        (25 − 20 included = 5 overage × $15 = $75/mo).
     """
     if err := _check_auth("admin"):
         return err
@@ -10734,6 +10746,15 @@ def report_printer_overage(subscription_item_id: str, active_printer_count: int)
         if not stripe_key:
             return _error_dict("Stripe not configured. Set KILN_STRIPE_SECRET_KEY.", code="CONFIG_MISSING")
 
+        # Auto-detect fleet size if not provided.
+        if active_printer_count is None:
+            active_printer_count = _registry.count
+            if active_printer_count == 0:
+                return _error_dict(
+                    "No printers registered in the fleet. Register printers first or pass active_printer_count explicitly.",
+                    code="NO_PRINTERS",
+                )
+
         provider = StripeProvider(secret_key=stripe_key)
         overage = max(0, active_printer_count - INCLUDED_PRINTERS)
         result = provider.report_printer_usage(subscription_item_id, overage)
@@ -10742,9 +10763,10 @@ def report_printer_overage(subscription_item_id: str, active_printer_count: int)
             "success": True,
             "active_printers": active_printer_count,
             "included": INCLUDED_PRINTERS,
-            "overage": overage,
+            "overage_reported_to_stripe": overage,
             "overage_cost": f"${overage * 15:.2f}/mo",
             "stripe_usage_record": result,
+            "note": f"Reported {overage} overage printers to Stripe (total {active_printer_count} minus {INCLUDED_PRINTERS} included).",
         }
     except Exception as exc:
         logger.exception("Error in report_printer_overage")
