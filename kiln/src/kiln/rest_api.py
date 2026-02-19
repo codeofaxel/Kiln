@@ -398,6 +398,9 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=401, detail=result.get("error", "Invalid license key"))
         return result
 
+    _license_dep = Depends(verify_license)
+    _file_upload = File(...)
+
     # ----- Health check ---------------------------------------------------
 
     @app.get("/api/health")
@@ -675,7 +678,7 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
     @app.get("/api/fulfillment/materials")
     async def fulfillment_materials(
         provider: str = "craftcloud",
-        license_info: dict = Depends(verify_license),
+        license_info: dict = _license_dep,
     ):
         from kiln.fulfillment.proxy_server import get_orchestrator
 
@@ -683,18 +686,18 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
             orch = get_orchestrator()
             materials = orch.handle_materials(provider)
             return JSONResponse({"success": True, "materials": materials, "provider": provider})
-        except Exception as exc:
+        except Exception:
             logger.exception("Proxy materials error")
             return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
 
     @app.post("/api/fulfillment/quote")
     async def fulfillment_quote(
-        file: UploadFile = File(...),
+        file: UploadFile = _file_upload,
         material_id: str = Form(...),
         quantity: int = Form(1),
         shipping_country: str = Form("US"),
         provider: str = Form("craftcloud"),
-        license_info: dict = Depends(verify_license),
+        license_info: dict = _license_dep,
     ):
         import tempfile
 
@@ -758,7 +761,7 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
     @app.post("/api/fulfillment/order")
     async def fulfillment_order(
         request: Request,
-        license_info: dict = Depends(verify_license),
+        license_info: dict = _license_dep,
     ):
         from kiln.fulfillment.base import OrderRequest
         from kiln.fulfillment.proxy_server import get_orchestrator
@@ -818,7 +821,7 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
     async def fulfillment_order_status(
         order_id: str,
         provider: str = "craftcloud",
-        license_info: dict = Depends(verify_license),
+        license_info: dict = _license_dep,
     ):
         from kiln.fulfillment.proxy_server import get_orchestrator
 
@@ -841,7 +844,7 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
     async def fulfillment_cancel(
         order_id: str,
         request: Request,
-        license_info: dict = Depends(verify_license),
+        license_info: dict = _license_dep,
     ):
         from kiln.fulfillment.proxy_server import get_orchestrator
         from kiln.licensing import LicenseTier
@@ -908,7 +911,7 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
             orch = get_orchestrator()
             result = orch.register_user(email)
             return JSONResponse({"success": True, **result})
-        except Exception as exc:
+        except Exception:
             logger.exception("License registration error")
             return JSONResponse({"success": False, "error": "Registration failed. Please try again."}, status_code=500)
 
