@@ -48,10 +48,10 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 ### Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link. Manage a mixed fleet from one place.
-- **AI-native** — 198 MCP tools built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — 209 MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
 - **Search → Slice → Print** — Browse MyMiniFactory/Cults3D (and legacy Thingiverse), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
-- **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs.
+- **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest, lockable profiles, RBAC, and SSO.
 
 ## Architecture
 
@@ -432,7 +432,7 @@ pip install kiln3d[rest]
 
 When binding REST to non-localhost addresses (for hosted deployments), set `KILN_API_AUTH_TOKEN` or pass `--auth-token`.
 
-Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 198 tools are available via MCP (`kiln serve`).
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 209 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -451,7 +451,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **198 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **209 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
 
 | Tool | Description |
 |------|-------------|
@@ -592,6 +592,18 @@ The Kiln MCP server (`kiln serve`) exposes **198 tools** to agents. Key tools ar
 | `fulfillment_reorder` | Look up past order details for easy reordering |
 | `fulfillment_insurance_options` | Shipping insurance/protection options with pricing |
 | `supported_shipping_countries` | List countries supported for fulfillment shipping |
+| `export_audit_trail` | Export audit trail as JSON/CSV with date range, tool, action, and session filters (Enterprise) |
+| `lock_safety_profile` | Admin-lock a safety profile to prevent agent modifications (Enterprise) |
+| `unlock_safety_profile` | Unlock a previously locked safety profile (Enterprise) |
+| `manage_team_member` | Add, remove, or update team member roles (admin/engineer/operator) (Enterprise) |
+| `printer_usage_summary` | Per-printer usage summary for overage billing (Enterprise) |
+| `uptime_report` | Rolling uptime metrics (1h/24h/7d/30d) with SLA tracking (Enterprise) |
+| `encryption_status` | Check G-code encryption status and key configuration (Enterprise) |
+| `report_printer_overage` | Report printer overage billing details (Enterprise) |
+| `configure_sso` | Configure SSO provider (OIDC/SAML) with IdP settings (Enterprise) |
+| `sso_login_url` | Generate SSO login URL for OIDC/SAML authentication (Enterprise) |
+| `sso_exchange_code` | Exchange authorization code for session token via SSO (Enterprise) |
+| `sso_status` | Check SSO configuration and provider status (Enterprise) |
 
 ## Supported Printers
 
@@ -656,9 +668,15 @@ The server also exposes read-only resources that agents can use for context:
 | `payments/` | Payment processing (Stripe, Circle USDC, crypto rails) |
 | `gateway/` | Distributed manufacturing network gateway *(coming soon)* |
 | `heater_watchdog.py` | Auto-cooldown watchdog for idle heaters |
-| `licensing.py` | License tier management (Free/Pro/Business, offline-first) |
+| `licensing.py` | License tier management (Free/Pro/Business/Enterprise, offline-first) |
+| `sso.py` | SSO authentication (OIDC/SAML) with IdP role mapping and email domain allowlists |
+| `gcode_encryption.py` | G-code encryption at rest (Fernet/PBKDF2 via KILN_ENCRYPTION_KEY) |
+| `printer_billing.py` | Per-printer overage billing (20 included, $15/mo each additional) |
+| `teams.py` | Team seat management with RBAC (admin/engineer/operator roles) |
+| `uptime.py` | Rolling uptime health monitoring (1h/24h/7d/30d windows, 99.9% SLA target) |
 | `wallets.py` | Crypto wallet configuration (Solana/Ethereum for donations and fees) |
-| `cli/` | Click CLI with 80+ subcommands and JSON output |
+| `cli/` | Click CLI with 88+ subcommands and JSON output |
+| `deploy/` | Kubernetes manifests and Helm chart for on-prem Enterprise deployment |
 
 ## Authentication (Optional)
 
@@ -834,8 +852,8 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (5,287 total)
-cd kiln && python3 -m pytest tests/ -v        # 5,064 tests
+# Run tests (5,366 total)
+cd kiln && python3 -m pytest tests/ -v        # 5,143 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 223 tests
 ```
 

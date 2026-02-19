@@ -65,7 +65,7 @@ All three modes use the same MCP tools and CLI commands.
 
 **HeaterWatchdog** — Background daemon that monitors heater state and auto-cools idle heaters after a configurable timeout (default 30 min). Prevents heaters from being left on when no print is active.
 
-**LicenseManager** — Offline-first license tier management. Resolves tier from key prefix (`kiln_pro_`, `kiln_biz_`, `kiln_ent_`) with cached remote validation fallback. Supports Free, Pro, Business, and Enterprise tiers. Never blocks printer operations.
+**LicenseManager** — Offline-first license tier management. Resolves tier from key prefix (`kiln_pro_`, `kiln_biz_`, `kiln_ent_`) with cached remote validation fallback. Supports Free, Pro, Business, and Enterprise tiers. Enterprise unlocks RBAC, SSO (OIDC/SAML), audit trail export, lockable safety profiles, encrypted G-code at rest, per-printer overage billing, uptime SLA monitoring, and on-prem deployment. Never blocks printer operations.
 
 ---
 
@@ -269,7 +269,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **198 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **209 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
 
 #### Printer Control
 
@@ -537,6 +537,23 @@ Kiln provides structured monitoring data (webcam snapshots, temperatures, print 
 | `trust_printer` | `printer_name`, `fingerprint` | Trust confirmation |
 | `untrust_printer` | `printer_name` | Removal confirmation |
 
+#### Enterprise Features (Enterprise Tier)
+
+| Tool | Input | Output |
+|---|---|---|
+| `export_audit_trail` | `format` (json/csv), `start_date`, `end_date`, `tool`, `action`, `session_id` | Audit trail export (JSON or CSV) |
+| `lock_safety_profile` | `profile_name` | Lock confirmation (prevents agent modifications) |
+| `unlock_safety_profile` | `profile_name` | Unlock confirmation |
+| `manage_team_member` | `email`, `role` (admin/engineer/operator), `action` (add/remove/update) | Team member status |
+| `printer_usage_summary` | — | Per-printer usage counts and overage billing details |
+| `uptime_report` | — | Rolling uptime metrics (1h/24h/7d/30d) with SLA compliance |
+| `encryption_status` | — | G-code encryption status and key configuration |
+| `report_printer_overage` | — | Printer overage billing breakdown (20 included, $15/mo each additional) |
+| `configure_sso` | `provider_type` (oidc/saml), IdP settings | SSO configuration confirmation |
+| `sso_login_url` | `provider_type` | Authorization URL for SSO login |
+| `sso_exchange_code` | `code`, `state` | Session token |
+| `sso_status` | — | SSO configuration and provider connectivity status |
+
 ### MCP Resources
 
 Read-only resources for agent context:
@@ -787,6 +804,11 @@ settings:
 | `KILN_CULTS3D_API_KEY` | Cults3D API key |
 | `KILN_AUTH_ENABLED` | Enable API key auth (1/0) |
 | `KILN_AUTH_KEY` | Secret key for auth |
+| `KILN_ENCRYPTION_KEY` | Encryption key for G-code at rest (Enterprise) |
+| `KILN_SSO_PROVIDER` | SSO provider type: `oidc` or `saml` (Enterprise) |
+| `KILN_SSO_ISSUER` | OIDC issuer URL or SAML IdP metadata URL (Enterprise) |
+| `KILN_SSO_CLIENT_ID` | OIDC client ID (Enterprise) |
+| `KILN_SSO_CLIENT_SECRET` | OIDC client secret (Enterprise) |
 
 ### Precedence
 
@@ -808,7 +830,7 @@ pip install -e "./octoprint-cli[dev]"
 ### Running Tests
 
 ```bash
-cd kiln && python3 -m pytest tests/ -v    # 5,064 tests
+cd kiln && python3 -m pytest tests/ -v    # 5,143 tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 223 tests
 ```
 
@@ -850,6 +872,11 @@ kiln/src/kiln/
     cloud_sync.py        # Cloud sync manager
     heater_watchdog.py   # Auto-cooldown watchdog for idle heaters
     licensing.py         # License tier management (Free/Pro/Business/Enterprise)
+    sso.py               # SSO authentication (OIDC/SAML, IdP role mapping, email domain allowlists)
+    gcode_encryption.py  # G-code encryption at rest (Fernet/PBKDF2)
+    printer_billing.py   # Per-printer overage billing (metered via Stripe)
+    teams.py             # Team seat management with RBAC (admin/engineer/operator)
+    uptime.py            # Rolling uptime health monitoring (1h/24h/7d/30d, 99.9% SLA)
     model_metadata.py    # Model metadata management
     wallets.py           # Crypto wallet configuration (Solana/Ethereum donations)
     plugins.py           # Plugin system
@@ -889,4 +916,8 @@ kiln/src/kiln/
         config.py        # Config management
         discovery.py     # mDNS printer scanning
         output.py        # JSON/text formatting
+
+deploy/                  # On-prem Enterprise deployment
+    k8s/                 # Kubernetes manifests (9 files: namespace, deployment, service, ingress, configmap, secrets, PVC, network policies, HPA)
+    helm/kiln/           # Helm chart (12 files: Chart.yaml, values.yaml, templates/)
 ```

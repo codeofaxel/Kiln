@@ -211,6 +211,10 @@ The most consequential class of vulnerability in a manufacturing protocol is one
 
 Authentication is optional and disabled by default for local-only deployments. When enabled (`KILN_AUTH_ENABLED=1`), the `AuthManager` enforces API key verification on every MCP tool call and REST endpoint. Keys are SHA-256 hashed at rest and never stored in plaintext. Each key carries a set of scopes (`read`, `write`, `admin`) that gate access to tool categories — a read-scoped key cannot start prints or send G-code. The key lifecycle supports generation (with a `sk_kiln_` prefix), rotation with a configurable grace period (default 24 hours of dual-key validity), deprecation, and immediate revocation. When authentication is enabled without an explicit key, Kiln auto-generates a session key and logs it at startup, ensuring the system is never accidentally left unprotected.
 
+**Enterprise SSO.** Enterprise deployments can authenticate users via OIDC or SAML identity providers (Okta, Google Workspace, Azure AD, Auth0, and others). The `sso` module implements the full OIDC authorization code flow with PKCE, and basic SAML assertion parsing. IdP role mapping translates external group claims to Kiln's three-role RBAC model (admin, engineer, operator), enabling centralized access management. Email domain allowlists restrict which domains can authenticate, preventing unauthorized access. SSO sessions are validated server-side with configurable expiry.
+
+**Role-Based Access Control.** Enterprise tier introduces hierarchical RBAC with three roles: `admin` (full access including SSO configuration, safety profile locking, team management, and audit export), `engineer` (print operations, fleet management, slicing, and job scheduling), and `operator` (read-only monitoring, status checks, and snapshot capture). Role assignments are enforced at the MCP tool boundary — each tool declares its required minimum role, and requests from insufficiently privileged users are rejected with a structured error.
+
 ### 8.3 Network Security
 
 The REST API layer (`rest_api.py`) implements a sliding-window rate limiter that tracks per-client request timestamps and enforces configurable limits (default 60 requests/minute via `KILN_RATE_LIMIT`). Exceeded clients receive `429` responses with standard `Retry-After` and `X-RateLimit-Reset` headers. CORS origins are explicitly whitelisted — no wildcard origins are permitted. Webhook delivery includes SSRF prevention: before dispatching an event payload, `_validate_webhook_url` resolves the target hostname and checks the resulting IP against a block list of private and reserved networks (RFC 1918, link-local, loopback, and IPv6 equivalents). Webhook payloads are signed with HMAC-SHA256 when a secret is provided, allowing receivers to verify authenticity and integrity.
@@ -223,11 +227,25 @@ Tool results returned from printer APIs may contain arbitrary strings that, if p
 
 All SQL queries in the persistence layer use parameterized statements — no string interpolation touches query construction. The codebase contains no calls to `eval()` or `exec()`. The plugin system enforces an explicit allow-list: only plugins named in the user's configuration are loaded, preventing arbitrary code execution from unexpected entry points. Plugin hooks run inside fault-isolation wrappers so that exceptions in third-party code do not crash the host process or corrupt shared state. Credentials and API keys stored in `~/.kiln/config.yaml` are checked for file permissions at load time, with a warning emitted if the file is world-readable.
 
+**Encrypted G-code at Rest (Enterprise).** G-code files stored on disk can be encrypted using Fernet symmetric encryption with keys derived via PBKDF2 from the `KILN_ENCRYPTION_KEY` environment variable. Encryption is transparent to the rest of the system — files are decrypted in memory on demand and never written to disk in plaintext after initial encryption. This protects proprietary geometry and manufacturing instructions from unauthorized access on shared or compromised storage.
+
+**Lockable Safety Profiles (Enterprise).** Administrators can lock safety profiles to prevent modification by agents or non-admin users. A locked profile's temperature limits, feedrate bounds, and flow constraints cannot be altered through MCP tools until an administrator explicitly unlocks it. This ensures that safety-critical parameters in production environments remain under human control, even when autonomous agents are operating the fleet.
+
 ### 8.6 Audit Trail
 
 Safety-critical operations are recorded through two mechanisms. The event bus persists all significant state changes — job transitions, printer status changes, temperature warnings — to SQLite, providing a queryable history of system behavior. A dedicated `safety_audit` tool reviews recent safety-relevant actions (guarded commands, emergency stops, temperature limit rejections) and surfaces them to agents or operators on demand. Together, these provide a tamper-evident record of every physical action the system has taken.
 
 Each server process is assigned a unique session UUID at startup. Every tool call, G-code command, safety check, and blocked attempt is tagged with this session ID. The `get_session_log` tool returns the complete ordered record of what an agent issued during a session — enabling full replay and post-hoc accountability. Session logs are HMAC-SHA256 signed to detect tampering.
+
+**Enterprise Audit Export.** Enterprise deployments can export the full audit trail in JSON or CSV format with filters for date range, tool name, action type, and session ID. This supports compliance workflows, incident investigation, and integration with external SIEM systems. The `export_audit_trail` MCP tool and corresponding CLI command provide programmatic access to the export pipeline.
+
+### 8.7 Enterprise Deployment
+
+Enterprise customers can deploy Kiln on-premises using the provided Kubernetes manifests and Helm chart (`deploy/k8s/` and `deploy/helm/kiln/`). The deployment package includes namespace isolation, network policies restricting inter-pod communication to essential paths, persistent volume claims for SQLite data, horizontal pod autoscaling, and configurable resource limits. Air-gapped environments are supported — all container images and dependencies can be pre-pulled and loaded from a private registry. The Helm chart exposes values for TLS termination, ingress configuration, replica count, and all `KILN_*` environment variables. Enterprise deployments run a dedicated single-tenant MCP server instance, physically isolated from other customers' infrastructure.
+
+### 8.8 Uptime Monitoring
+
+Enterprise deployments include rolling uptime tracking across four windows (1 hour, 24 hours, 7 days, 30 days). The `uptime` module records service availability checks and computes uptime percentages against the 99.9% SLA target. The `uptime_report` MCP tool surfaces these metrics to agents and operators, enabling proactive monitoring and SLA compliance verification.
 
 ## 9. Agent-Delegated Vision Monitoring
 

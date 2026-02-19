@@ -67,11 +67,15 @@ Revenue comes from optional services:
 - **Free tier** -- All local printing features, up to 2 printers and a 10-job queue. No cost, no account required.
 - **Pro ($29/month)** -- Unlimited printers, fleet orchestration, analytics, and cloud sync. Annual: $23/mo.
 - **Business ($99/month)** -- Up to 50 printers, 5 team seats, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles. Annual: $79/mo.
-- **Enterprise (from $499/month)** -- Unlimited printers and seats, dedicated single-tenant MCP server, on-prem deployment, SSO, audit trail export, role-based access, lockable safety profiles, 99.9% uptime SLA, dedicated support channel. Annual: $399/mo.
+- **Enterprise (from $499/month)** -- Unlimited printers (20 included, $15/mo each additional) and unlimited team seats, dedicated single-tenant MCP server, on-premises deployment via Kubernetes and Helm (air-gapped support included), single sign-on via OIDC and SAML (works with Okta, Google Workspace, Azure AD, Auth0), role-based access control (admin/engineer/operator), full audit trail with JSON/CSV export, lockable safety profiles that prevent agent modifications, encrypted G-code at rest, per-printer overage billing via Stripe, 99.9% uptime SLA with rolling health monitoring, and dedicated support channel with onboarding. Annual: $399/mo.
 
 Outsourced manufacturing orders carry a 5% platform fee (first 3 per month are free, with a $0.25 minimum and $200 maximum per order).
 
 Crypto donations are also accepted at kiln3d.sol (Solana) and kiln3d.eth (Ethereum).
+
+## Enterprise
+
+For organizations running production print farms, the Enterprise tier adds the controls that IT and compliance teams require: single sign-on through existing identity providers, role-based access so operators can monitor but not modify, admin-lockable safety profiles that agents cannot override, encrypted G-code protecting proprietary designs, and a full audit trail exportable for compliance review. The entire system can be deployed on-premises using the included Kubernetes manifests and Helm chart, with air-gapped environments fully supported. A 99.9% uptime SLA with rolling health monitoring ensures production reliability.
 
 ## Get Started
 
