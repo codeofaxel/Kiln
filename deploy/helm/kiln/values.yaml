@@ -58,7 +58,7 @@ secrets:
   # MUST be set -- generate with: openssl rand -hex 32
   KILN_ENCRYPTION_KEY: ""
   # Uncomment for PostgreSQL (required for multi-replica)
-  # KILN_DB_URL: "postgresql://kiln:password@postgres:5432/kiln"
+  # KILN_POSTGRES_DSN: "postgresql://kiln:password@postgres:5432/kiln"
   # Uncomment for SSO
   # KILN_SSO_ISSUER: "https://idp.example.com"
   # KILN_SSO_CLIENT_ID: ""
@@ -121,7 +121,7 @@ resources:
     cpu: "500m"
 
 # -- Horizontal Pod Autoscaler
-# WARNING: Requires PostgreSQL backend (KILN_DB_URL). SQLite cannot handle
+# WARNING: Requires PostgreSQL backend (KILN_POSTGRES_DSN). SQLite cannot handle
 # concurrent writers from multiple replicas.
 autoscaling:
   enabled: false

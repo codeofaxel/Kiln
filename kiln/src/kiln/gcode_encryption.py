@@ -193,21 +193,99 @@ class GcodeEncryption:
 
     @property
     def supports_rotation(self) -> bool:
-        """Whether this encryption backend supports key rotation.
+        """Whether this encryption backend supports key rotation."""
+        return self._available
 
-        Currently returns ``False``.  Key rotation would require
-        re-encrypting all stored G-code files with a new passphrase.
-        A future implementation of ``rotate_key()`` should:
+    def rotate_key(
+        self,
+        old_passphrase: str,
+        new_passphrase: str,
+        directory: str,
+        *,
+        pattern: str = "*.gcode",
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Re-encrypt all G-code files in *directory* from *old_passphrase* to *new_passphrase*.
 
-        1. Derive the old Fernet key from *old_passphrase*.
-        2. Derive a new Fernet key from *new_passphrase*.
-        3. Iterate all encrypted blobs, decrypt with old, re-encrypt with new.
-        4. Persist the new salt and update the singleton.
+        Walks *directory* recursively, finds files matching *pattern* that
+        carry the ``KILN_ENC_V1:`` header, decrypts with the old key, and
+        re-encrypts with the new key.  Unencrypted files are skipped.
 
-        Until that is implemented, manual rotation requires re-uploading
-        encrypted G-code files after changing ``KILN_ENCRYPTION_KEY``.
+        Args:
+            old_passphrase: The current ``KILN_ENCRYPTION_KEY`` value.
+            new_passphrase: The new passphrase to encrypt with.
+            directory: Root directory to scan for encrypted G-code files.
+            pattern: Glob pattern for G-code files (default ``"*.gcode"``).
+            dry_run: When ``True``, scan and report without modifying files.
+
+        Returns:
+            Dict with ``rotated``, ``skipped``, ``failed``, and ``errors`` counts.
+
+        Raises:
+            GcodeEncryptionError: If the ``cryptography`` library is unavailable.
         """
-        return False
+        try:
+            from cryptography.fernet import Fernet
+            from cryptography.hazmat.primitives import hashes
+            from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+        except ImportError:
+            raise GcodeEncryptionError(
+                "cryptography library required for key rotation: pip install cryptography"
+            ) from None
+
+        salt = _get_or_create_salt()
+
+        def _derive(passphrase: str) -> Fernet:
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(), length=32, salt=salt, iterations=600_000,
+            )
+            return Fernet(base64.urlsafe_b64encode(kdf.derive(passphrase.encode("utf-8"))))
+
+        old_fernet = _derive(old_passphrase)
+        new_fernet = _derive(new_passphrase)
+
+        rotated = 0
+        skipped = 0
+        failed = 0
+        errors: list[str] = []
+
+        root = Path(directory)
+        if not root.is_dir():
+            raise GcodeEncryptionError(f"Directory not found: {directory}")
+
+        for filepath in root.rglob(pattern):
+            if not filepath.is_file():
+                continue
+            try:
+                data = filepath.read_bytes()
+                if not data.startswith(_HEADER):
+                    skipped += 1
+                    continue
+
+                encrypted_payload = data[len(_HEADER):]
+                plaintext = old_fernet.decrypt(encrypted_payload)
+
+                if dry_run:
+                    rotated += 1
+                    continue
+
+                re_encrypted = new_fernet.encrypt(plaintext)
+                filepath.write_bytes(_HEADER + re_encrypted)
+                rotated += 1
+                logger.info("Rotated encryption key for %s", filepath)
+            except Exception as exc:
+                failed += 1
+                errors.append(f"{filepath}: {exc}")
+                logger.warning("Failed to rotate %s: %s", filepath, exc)
+
+        return {
+            "rotated": rotated,
+            "skipped": skipped,
+            "failed": failed,
+            "errors": errors,
+            "dry_run": dry_run,
+            "directory": str(directory),
+        }
 
     def status(self) -> dict[str, Any]:
         """Return encryption status for diagnostics."""

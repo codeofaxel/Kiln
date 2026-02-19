@@ -10621,6 +10621,97 @@ def encryption_status() -> dict:
 
 @mcp.tool()
 @requires_tier(LicenseTier.ENTERPRISE)
+def rotate_encryption_key(
+    old_passphrase: str,
+    new_passphrase: str,
+    directory: str,
+    pattern: str = "*.gcode",
+    dry_run: bool = True,
+) -> dict:
+    """Rotate the G-code encryption key by re-encrypting all files.
+
+    Scans *directory* recursively for encrypted G-code files, decrypts
+    with the old passphrase, and re-encrypts with the new one.
+
+    **Run with ``dry_run=True`` first** to preview which files would be
+    affected.  Then call again with ``dry_run=False`` to execute.
+
+    After rotation, update the ``KILN_ENCRYPTION_KEY`` environment
+    variable to the new passphrase and restart the server.
+
+    Args:
+        old_passphrase: The current KILN_ENCRYPTION_KEY value.
+        new_passphrase: The new passphrase to encrypt with.
+        directory: Root directory to scan for encrypted G-code files.
+        pattern: Glob pattern for files to process (default ``"*.gcode"``).
+        dry_run: Preview only — don't modify files (default ``True``).
+
+    Requires Enterprise license and admin scope.
+    """
+    if err := _check_auth("admin"):
+        return err
+    try:
+        from kiln.gcode_encryption import GcodeEncryption
+
+        enc = GcodeEncryption()
+        result = enc.rotate_key(
+            old_passphrase=old_passphrase,
+            new_passphrase=new_passphrase,
+            directory=directory,
+            pattern=pattern,
+            dry_run=dry_run,
+        )
+        msg = f"{'Dry run: would rotate' if dry_run else 'Rotated'} {result['rotated']} file(s)."
+        if result["failed"]:
+            msg += f" {result['failed']} file(s) failed."
+        return {"success": result["failed"] == 0, "message": msg, **result}
+    except Exception as exc:
+        logger.exception("Error in rotate_encryption_key")
+        return _error_dict(f"Key rotation failed: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def database_status() -> dict:
+    """Check database backend status and configuration.
+
+    Reports whether Kiln is using SQLite or PostgreSQL, the connection
+    status, and key metrics.  Useful for verifying a PostgreSQL migration
+    or diagnosing connectivity issues.
+
+    Requires Enterprise license.
+    """
+    try:
+        db = get_db()
+        backend = "postgresql" if db._is_postgres else "sqlite"
+        info: dict[str, Any] = {
+            "success": True,
+            "backend": backend,
+        }
+        if backend == "sqlite":
+            info["db_path"] = db._db_path
+            info["note"] = (
+                "SQLite is single-writer. Set KILN_POSTGRES_DSN for multi-replica HA."
+            )
+        else:
+            info["note"] = "PostgreSQL backend active. Multi-replica scaling supported."
+
+        # Quick health check — count audit entries as a connectivity test.
+        try:
+            row = db._conn.execute("SELECT COUNT(*) FROM safety_audit_log").fetchone()
+            info["audit_entries"] = row[0] if row else 0
+            info["connected"] = True
+        except Exception:
+            info["connected"] = False
+
+        return info
+    except Exception as exc:
+        logger.exception("Error in database_status")
+        return _error_dict(f"Failed to get database status: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
 def report_printer_overage(subscription_item_id: str, active_printer_count: int) -> dict:
     """Report metered printer usage to Stripe for Enterprise billing.
 

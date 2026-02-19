@@ -504,19 +504,34 @@ For clusters without internet access:
 
 **SQLite limitations**: SQLite supports only a single writer at a time. Running multiple replicas with SQLite will cause write conflicts and data corruption. Always switch to PostgreSQL before enabling the HPA or setting `replicaCount > 1`.
 
-To switch to PostgreSQL:
+### Switching to PostgreSQL
+
+Kiln includes a built-in PostgreSQL backend that automatically translates all SQL from SQLite dialect to PostgreSQL. The switch is a **one-line config change** — set the `KILN_POSTGRES_DSN` environment variable:
 
 ```yaml
 # In secrets (Helm values or secret.yaml)
-KILN_DB_URL: "postgresql://kiln:password@postgres.kiln.svc:5432/kiln"
+KILN_POSTGRES_DSN: "postgresql://kiln:password@postgres.kiln.svc:5432/kiln"
 
-# In config (remove SQLite path)
-# KILN_DB_PATH is ignored when KILN_DB_URL is set
-
-# Update deployment strategy
+# Update deployment strategy to RollingUpdate (SQLite required Recreate)
 strategy:
   type: RollingUpdate
 ```
+
+**What happens automatically:**
+- All SQLite DDL is translated to PostgreSQL equivalents (`AUTOINCREMENT` → `SERIAL`, `DATETIME` → `TIMESTAMP`, etc.)
+- `?` placeholders are converted to `%s`
+- `INSERT OR REPLACE` becomes `INSERT ... ON CONFLICT DO UPDATE`
+- `INSERT OR IGNORE` becomes `INSERT ... ON CONFLICT DO NOTHING`
+- Tables are created on first connection — no manual schema migration needed
+
+**Prerequisites:**
+- PostgreSQL 14+ recommended
+- `psycopg2-binary` Python package (included in `pip install kiln[postgres]`)
+- Create the database: `CREATE DATABASE kiln;`
+
+**Verification:** After setting `KILN_POSTGRES_DSN`, use the `database_status` MCP tool or check the server logs for `"KilnDB using PostgreSQL backend"`.
+
+> **Note:** `KILN_DB_PATH` (SQLite file path) is ignored when `KILN_POSTGRES_DSN` is set. Data from an existing SQLite database is **not** migrated automatically — use `pg_dump`-style tooling or re-populate from the fleet.
 
 ### External Secrets Management
 

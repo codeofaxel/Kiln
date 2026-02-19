@@ -21,7 +21,7 @@ Kiln has been deployed successfully.
 {{- if not .Values.autoscaling.enabled }}
 
 NOTE: Autoscaling is disabled. The deployment is running {{ .Values.replicaCount }} replica(s)
-with SQLite. To scale beyond 1 replica, set secrets.KILN_DB_URL to a PostgreSQL
+with SQLite. To scale beyond 1 replica, set secrets.KILN_POSTGRES_DSN to a PostgreSQL
 connection string and enable autoscaling in values.yaml.
 {{- end }}
 

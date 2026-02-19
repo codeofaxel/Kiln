@@ -20,7 +20,7 @@ spec:
         target:
           type: Utilization
           averageUtilization: 70
-  # NOTE: Multi-replica requires PostgreSQL backend (KILN_DB_URL).
+  # NOTE: Multi-replica requires PostgreSQL backend (KILN_POSTGRES_DSN).
   # SQLite does not support concurrent writers -- using HPA with SQLite
-  # will cause write conflicts. Set KILN_DB_URL to a PostgreSQL connection
+  # will cause write conflicts. Set KILN_POSTGRES_DSN to a PostgreSQL connection
   # string before enabling autoscaling.
