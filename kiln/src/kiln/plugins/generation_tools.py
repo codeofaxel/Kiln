@@ -492,7 +492,7 @@ class _GenerationToolsPlugin:
                 # Step 5: Slice
                 from kiln.slicer import slice_file
 
-                effective_printer_id, effective_profile, printer_preset = (
+                effective_printer_id, effective_profile = (
                     _srv._resolve_slice_profile_context(
                         profile=profile,
                         printer_id=printer_id,
@@ -501,7 +501,6 @@ class _GenerationToolsPlugin:
                 slice_result = slice_file(
                     result.local_path,
                     profile=effective_profile,
-                    printer_preset=printer_preset,
                 )
 
                 # Step 6: Upload (but do NOT auto-start — require explicit start_print)
@@ -563,7 +562,6 @@ class _GenerationToolsPlugin:
                     "file_name": file_name,
                     "printer_id": effective_printer_id,
                     "profile_path": effective_profile,
-                    "printer_preset": printer_preset,
                     "validation": gen_validation,
                     "dimensions": gen_dimensions,
                     "experimental": True,

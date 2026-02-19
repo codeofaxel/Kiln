@@ -181,13 +181,19 @@ def resolve_slicer_profile(
     ini_content = _settings_to_ini(merged, profile.display_name)
 
     tmp_dir = os.path.join(tempfile.gettempdir(), "kiln_slicer_profiles")
-    os.makedirs(tmp_dir, exist_ok=True)
+    os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
 
-    filename = f"{profile.id}_{_settings_hash(merged)[:8]}.ini"
-    path = os.path.join(tmp_dir, filename)
-
-    with open(path, "w", encoding="utf-8") as fh:
+    # Atomic write via NamedTemporaryFile to prevent symlink attacks
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=tmp_dir,
+        prefix=f"{profile.id}_",
+        suffix=".ini",
+        delete=False,
+    ) as fh:
         fh.write(ini_content)
+        path = fh.name
 
     _temp_cache[cache_key] = path
     logger.debug("Wrote slicer profile %s → %s", profile.id, path)
@@ -321,4 +327,4 @@ def _settings_hash(settings: dict[str, str]) -> str:
     import hashlib
 
     raw = json.dumps(settings, sort_keys=True).encode()
-    return hashlib.md5(raw).hexdigest()
+    return hashlib.sha256(raw).hexdigest()

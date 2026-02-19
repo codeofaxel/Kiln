@@ -195,19 +195,6 @@ def _extract_model_hints(payload: dict[str, Any]) -> list[str]:
     return hints
 
 
-def _prusaslicer_preset_for_profile(profile_id: str | None) -> str | None:
-    """Return a PrusaSlicer preset name for a known profile ID."""
-    if profile_id == "prusa_mini":
-        return "Original Prusa MINI & MINI+"
-    if profile_id == "prusa_mk3s":
-        return "Original Prusa i3 MK3S & MK3S+"
-    if profile_id == "prusa_mk4":
-        return "Original Prusa MK4"
-    if profile_id == "prusa_xl":
-        return "Original Prusa XL"
-    return None
-
-
 def _autodetect_printer_profile_id(ctx: click.Context) -> str | None:
     """Best-effort profile auto-detection from env, config, and backend APIs."""
     env_model = os.environ.get("KILN_PRINTER_MODEL")
@@ -1461,13 +1448,11 @@ def slice(
             except Exception as exc:
                 logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
 
-        printer_preset = _prusaslicer_preset_for_profile(effective_printer_id)
         result = slice_file(
             input_file,
             output_dir=output_dir,
             output_name=output_name,
             profile=effective_profile,
-            printer_preset=printer_preset,
             slicer_path=slicer,
         )
 
@@ -1480,16 +1465,12 @@ def slice(
                     payload["printer_id"] = effective_printer_id
                 if effective_profile:
                     payload["profile_path"] = effective_profile
-                if printer_preset:
-                    payload["printer_preset"] = printer_preset
                 click.echo(_json.dumps({"status": "success", "data": payload}, indent=2))
             else:
                 click.echo(result.message)
                 click.echo(f"Output: {result.output_path}")
                 if effective_printer_id:
                     click.echo(f"Profile: {effective_printer_id}")
-                if printer_preset:
-                    click.echo(f"Printer preset: {printer_preset}")
             return
 
         # --print-after: upload and start

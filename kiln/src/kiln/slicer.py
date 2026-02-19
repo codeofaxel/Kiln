@@ -21,6 +21,7 @@ Example::
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import shutil
@@ -207,7 +208,6 @@ def slice_file(
     output_dir: str | None = None,
     output_name: str | None = None,
     profile: str | None = None,
-    printer_preset: str | None = None,
     slicer_path: str | None = None,
     extra_args: list[str] | None = None,
     timeout: int = 300,
@@ -221,8 +221,6 @@ def slice_file(
         output_name: Override the output file name.  Defaults to the
             input file's stem with ``.gcode`` extension.
         profile: Path to a slicer profile/config file (.ini or .json).
-        printer_preset: Optional slicer printer preset name (primarily
-            for PrusaSlicer), e.g. ``"Original Prusa MINI & MINI+"``.
         slicer_path: Explicit slicer binary path.  Auto-detected if omitted.
         extra_args: Additional CLI arguments to pass to the slicer.
         timeout: Maximum slicing time in seconds (default 300).
@@ -238,7 +236,7 @@ def slice_file(
     # Validate input
     input_abs = os.path.abspath(input_path)
     if not os.path.isfile(input_abs):
-        raise FileNotFoundError(f"Input file not found: {input_abs}")
+        raise FileNotFoundError(f"Input file not found: {os.path.basename(input_abs)}")
 
     ext = Path(input_abs).suffix.lower()
     if ext not in _INPUT_EXTENSIONS:
@@ -249,16 +247,19 @@ def slice_file(
 
     # Prepare output
     out_dir = output_dir or _DEFAULT_OUTPUT_DIR
-    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(out_dir, mode=0o700, exist_ok=True)
 
     if output_name:
-        # Sanitise: only allow a simple filename, no directory traversal
-        safe_name = os.path.basename(output_name)
-        if not safe_name or safe_name != output_name:
+        # Strict filename sanitisation: basename, null bytes, length, reserveds
+        safe_name = output_name.replace("\x00", "")
+        safe_name = os.path.basename(safe_name)
+        if not safe_name or safe_name != output_name.replace("\x00", "") or safe_name in {".", ".."}:
             raise ValueError(
                 f"output_name must be a plain filename without path separators "
                 f"or traversal sequences, got: {output_name!r}"
             )
+        if len(safe_name) > 255:
+            raise ValueError(f"output_name too long ({len(safe_name)} chars, max 255)")
         out_file = os.path.join(out_dir, safe_name)
     else:
         stem = Path(input_abs).stem
@@ -273,14 +274,9 @@ def slice_file(
         out_file,
     ]
 
-    # PrusaSlicer preset selection helps enforce printer-specific machine
-    # metadata/start G-code (e.g. model compatibility checks).
-    if printer_preset and "prusa" in slicer.name.lower():
-        cmd.extend(["--printer", printer_preset])
-
     if profile:
         if not os.path.isfile(profile):
-            raise SlicerError(f"Profile file not found: {profile}")
+            raise SlicerError(f"Profile file not found: {os.path.basename(profile)}")
         cmd.extend(["--load", profile])
 
     if extra_args:
@@ -297,6 +293,9 @@ def slice_file(
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
+        # Clean up partial output on timeout
+        with contextlib.suppress(OSError):
+            os.unlink(out_file)
         raise SlicerError(
             f"Slicing timed out after {timeout}s. The model may be too complex or the slicer is hanging."
         ) from None
@@ -310,7 +309,8 @@ def slice_file(
     # Verify output exists
     if not os.path.isfile(out_file):
         raise SlicerError(
-            f"Slicer completed but output file not found: {out_file}. stdout: {(result.stdout or '').strip()[:200]}"
+            f"Slicer completed but output file was not created. "
+            f"stdout: {(result.stdout or '').strip()[:200]}"
         )
 
     return SliceResult(

@@ -4374,24 +4374,11 @@ def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
     return None
 
 
-def _prusaslicer_preset_for_profile(profile_id: str | None) -> str | None:
-    """Return PrusaSlicer preset name for a bundled profile ID."""
-    if profile_id == "prusa_mini":
-        return "Original Prusa MINI & MINI+"
-    if profile_id == "prusa_mk3s":
-        return "Original Prusa i3 MK3S & MK3S+"
-    if profile_id == "prusa_mk4":
-        return "Original Prusa MK4"
-    if profile_id == "prusa_xl":
-        return "Original Prusa XL"
-    return None
-
-
 def _resolve_slice_profile_context(
     profile: str | None,
     printer_id: str | None,
-) -> tuple[str | None, str | None, str | None]:
-    """Resolve effective profile path and Prusa preset for slicing."""
+) -> tuple[str | None, str | None]:
+    """Resolve effective profile path for slicing."""
     effective_printer_id = _map_printer_hint_to_profile_id(printer_id) or _map_printer_hint_to_profile_id(
         _PRINTER_MODEL
     )
@@ -4401,8 +4388,7 @@ def _resolve_slice_profile_context(
             effective_profile = resolve_slicer_profile(effective_printer_id)
         except Exception as exc:
             logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
-    printer_preset = _prusaslicer_preset_for_profile(effective_printer_id)
-    return effective_printer_id, effective_profile, printer_preset
+    return effective_printer_id, effective_profile
 
 
 @mcp.tool()
@@ -4432,7 +4418,7 @@ def slice_model(
     try:
         from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
 
-        effective_printer_id, effective_profile, printer_preset = _resolve_slice_profile_context(
+        effective_printer_id, effective_profile = _resolve_slice_profile_context(
             profile=profile,
             printer_id=printer_id,
         )
@@ -4440,7 +4426,6 @@ def slice_model(
             input_path,
             output_dir=output_dir,
             profile=effective_profile,
-            printer_preset=printer_preset,
             slicer_path=slicer_path,
         )
         response: dict[str, Any] = {
@@ -4451,8 +4436,6 @@ def slice_model(
             response["printer_id"] = effective_printer_id
         if effective_profile:
             response["profile_path"] = effective_profile
-        if printer_preset:
-            response["printer_preset"] = printer_preset
 
         # Cross-check slicer profile against printer safety limits
         if _PRINTER_MODEL and effective_profile:
@@ -4534,14 +4517,13 @@ def slice_and_print(
     try:
         from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
 
-        effective_printer_id, effective_profile, printer_preset = _resolve_slice_profile_context(
+        effective_printer_id, effective_profile = _resolve_slice_profile_context(
             profile=profile,
             printer_id=printer_id,
         )
         result = slice_file(
             input_path,
             profile=effective_profile,
-            printer_preset=printer_preset,
         )
 
         if printer_name:
@@ -4578,7 +4560,6 @@ def slice_and_print(
             "print": print_result.to_dict(),
             "printer_id": effective_printer_id,
             "profile_path": effective_profile,
-            "printer_preset": printer_preset,
             "message": f"Sliced, uploaded, and started printing {os.path.basename(input_path)}.",
         }
     except SlicerNotFoundError as exc:
@@ -6868,14 +6849,13 @@ def generate_and_print(
         # Step 5: Slice
         from kiln.slicer import slice_file
 
-        effective_printer_id, effective_profile, printer_preset = _resolve_slice_profile_context(
+        effective_printer_id, effective_profile = _resolve_slice_profile_context(
             profile=profile,
             printer_id=printer_id,
         )
         slice_result = slice_file(
             result.local_path,
             profile=effective_profile,
-            printer_preset=printer_preset,
         )
 
         # Step 6: Upload (but do NOT auto-start — require explicit start_print)
@@ -6937,7 +6917,6 @@ def generate_and_print(
             "file_name": file_name,
             "printer_id": effective_printer_id,
             "profile_path": effective_profile,
-            "printer_preset": printer_preset,
             "validation": gen_validation,
             "dimensions": gen_dimensions,
             "experimental": True,

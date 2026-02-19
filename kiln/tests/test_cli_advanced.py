@@ -352,7 +352,6 @@ class TestSlice:
             output_dir=None,
             output_name=None,
             profile="/tmp/prusa_mini.ini",
-            printer_preset="Original Prusa MINI & MINI+",
             slicer_path=None,
         )
 
@@ -372,7 +371,6 @@ class TestSlice:
         assert result.exit_code == 0
         kwargs = mock_slice.call_args.kwargs
         assert kwargs["profile"] == "/tmp/prusa_mini.ini"
-        assert kwargs["printer_preset"] == "Original Prusa MINI & MINI+"
 
 
 # ---------------------------------------------------------------------------
