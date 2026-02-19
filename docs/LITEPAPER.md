@@ -68,7 +68,7 @@ Revenue comes from optional services:
 - **Pro ($29/month)** -- Unlimited printers, fleet orchestration, analytics, and cloud sync for remote access.
 - **Business ($99/month)** -- Fulfillment brokering to outside manufacturers, hosted deployment, and priority support.
 
-Outsourced manufacturing orders carry a 5% platform fee (first 5 per month are free, with a $0.25 minimum and $200 maximum per order).
+Outsourced manufacturing orders carry a 5% platform fee (first 3 per month are free, with a $0.25 minimum and $200 maximum per order).
 
 Crypto donations are also accepted at kiln3d.sol (Solana) and kiln3d.eth (Ethereum).
 

@@ -845,7 +845,7 @@ All local printing is **free forever** — status checks, file management, slici
 
 Kiln charges a **5% platform fee** on orders placed through external manufacturing services (`kiln order` / fulfillment MCP tools), with:
 
-- First 5 outsourced orders per month **free**
+- First 3 outsourced orders per month **free**
 - $0.25 minimum / $200 maximum per-order cap
 
 The fee is shown transparently in every quote before you commit.
