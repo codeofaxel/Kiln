@@ -33,6 +33,26 @@ const { title, description, current = '' } = Astro.props;
   <meta name="twitter:description" content={description}>
   <meta name="twitter:image" content="https://kiln3d.com/assets/kiln-social-preview.png">
 
+  <!-- Structured Data (Schema.org) -->
+  <script type="application/ld+json" set:html={JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Kiln",
+    "alternateName": "kiln3d",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Linux, macOS, Windows",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "description": "Open-source MCP server and CLI that lets AI agents safely control 3D printers, manage print farms, and outsource manufacturing. 230 MCP tools for OctoPrint, Moonraker, Bambu Lab, Prusa Link, and Elegoo.",
+    "url": "https://kiln3d.com",
+    "downloadUrl": "https://pypi.org/project/kiln3d/",
+    "softwareVersion": "0.1.0",
+    "license": "https://opensource.org/licenses/MIT",
+    "codeRepository": "https://github.com/codeofaxel/Kiln",
+    "programmingLanguage": "Python",
+    "keywords": ["3D printing", "MCP", "AI agent", "OctoPrint", "Moonraker", "Klipper", "Bambu Lab", "Prusa Link", "print farm", "manufacturing automation", "Model Context Protocol"],
+    "author": { "@type": "Organization", "name": "Kiln Contributors", "url": "https://github.com/codeofaxel/Kiln" }
+  })} />
+
   <!-- Favicon -->
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 

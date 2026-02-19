@@ -1,3 +1,7 @@
 User-agent: *
 Allow: /
 Sitemap: https://kiln3d.com/sitemap-index.xml
+
+# LLM / AI agent metadata
+# See https://llmstxt.org for the llms.txt specification
+LLMs-Txt: https://kiln3d.com/llms.txt
