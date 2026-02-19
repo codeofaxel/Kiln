@@ -23,7 +23,6 @@ from kiln.fulfillment.base import (
     ShippingOption,
 )
 from kiln.fulfillment.craftcloud import CraftcloudProvider
-from kiln.fulfillment.proxy import ProxyProvider
 from kiln.fulfillment.intelligence import (
     BatchQuote,
     BatchQuoteItem,
@@ -49,6 +48,7 @@ from kiln.fulfillment.intelligence import (
     place_order_with_retry,
     validate_quote_for_order,
 )
+from kiln.fulfillment.proxy import ProxyProvider
 from kiln.fulfillment.registry import (
     get_provider,
     get_provider_class,
@@ -81,8 +81,8 @@ __all__ = [
     "QuoteComparison",
     "QuoteRequest",
     "QuoteValidation",
-    "RetryResult",
     "ProxyProvider",
+    "RetryResult",
     "SculpteoProvider",
     "ShippingOption",
     "batch_quote",
