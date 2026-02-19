@@ -269,7 +269,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **209 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **230 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
 
 #### Printer Control
 
@@ -553,6 +553,15 @@ Kiln provides structured monitoring data (webcam snapshots, temperatures, print 
 | `sso_login_url` | `provider_type` | Authorization URL for SSO login |
 | `sso_exchange_code` | `code`, `state` | Session token |
 | `sso_status` | — | SSO configuration and provider connectivity status |
+| `rotate_encryption_key` | `old_passphrase`, `new_passphrase`, `directory` | Key rotation results (rotated/skipped/failed counts) |
+| `database_status` | — | Database backend health (SQLite/PostgreSQL), connection info |
+| `list_fleet_sites` | — | All physical sites with printer counts |
+| `fleet_status_by_site` | — | Fleet status grouped by physical site |
+| `update_printer_site` | `printer_name`, `site` | Site assignment confirmation |
+| `create_project` | `project_id`, `name`, `client`, `budget_usd` | Project creation confirmation |
+| `log_project_cost` | `project_id`, `category`, `amount`, `description` | Cost entry confirmation |
+| `project_cost_summary` | `project_id` | Aggregate costs with category breakdown and budget tracking |
+| `client_cost_report` | `client` | Cross-project cost aggregation for a client |
 
 ### MCP Resources
 
@@ -830,8 +839,8 @@ pip install -e "./octoprint-cli[dev]"
 ### Running Tests
 
 ```bash
-cd kiln && python3 -m pytest tests/ -v    # 5,143 tests
-cd ../octoprint-cli && python3 -m pytest tests/ -v  # 223 tests
+cd kiln && python3 -m pytest tests/ -v    # 5,687 tests
+cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
 ### Adding a New Printer Adapter
@@ -877,6 +886,7 @@ kiln/src/kiln/
     printer_billing.py   # Per-printer overage billing (metered via Stripe)
     teams.py             # Team seat management with RBAC (admin/engineer/operator)
     uptime.py            # Rolling uptime health monitoring (1h/24h/7d/30d, 99.9% SLA)
+    project_costs.py     # Per-project cost tracking for manufacturing bureaus
     model_metadata.py    # Model metadata management
     wallets.py           # Crypto wallet configuration (Solana/Ethereum donations)
     plugins.py           # Plugin system

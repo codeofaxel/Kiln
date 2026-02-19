@@ -48,10 +48,10 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 ### Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link. Manage a mixed fleet from one place.
-- **AI-native** — 209 MCP tools built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — 230 MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
 - **Search → Slice → Print** — Browse MyMiniFactory/Cults3D (and legacy Thingiverse), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
-- **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest, lockable profiles, RBAC, and SSO.
+- **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
 
 ## Architecture
 
@@ -432,7 +432,7 @@ pip install kiln3d[rest]
 
 When binding REST to non-localhost addresses (for hosted deployments), set `KILN_API_AUTH_TOKEN` or pass `--auth-token`.
 
-Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 209 tools are available via MCP (`kiln serve`).
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 230 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -451,7 +451,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **209 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **230 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
 
 | Tool | Description |
 |------|-------------|
@@ -604,6 +604,15 @@ The Kiln MCP server (`kiln serve`) exposes **209 tools** to agents. Key tools ar
 | `sso_login_url` | Generate SSO login URL for OIDC/SAML authentication (Enterprise) |
 | `sso_exchange_code` | Exchange authorization code for session token via SSO (Enterprise) |
 | `sso_status` | Check SSO configuration and provider status (Enterprise) |
+| `rotate_encryption_key` | Re-encrypt all G-code files with a new key (Enterprise) |
+| `database_status` | Check database backend (SQLite/PostgreSQL) health and config (Enterprise) |
+| `list_fleet_sites` | List all physical sites in the fleet with printer counts (Enterprise) |
+| `fleet_status_by_site` | Fleet status grouped by physical site (Enterprise) |
+| `update_printer_site` | Assign a printer to a physical site/location (Enterprise) |
+| `create_project` | Create a client project for cost allocation (Enterprise) |
+| `log_project_cost` | Log a cost entry (material, printer time, labor, etc.) against a project (Enterprise) |
+| `project_cost_summary` | Aggregate cost summary with budget tracking for a project (Enterprise) |
+| `client_cost_report` | Cross-project cost report for a client (Enterprise) |
 
 ## Supported Printers
 
@@ -674,8 +683,9 @@ The server also exposes read-only resources that agents can use for context:
 | `printer_billing.py` | Per-printer overage billing (20 included, $15/mo each additional) |
 | `teams.py` | Team seat management with RBAC (admin/engineer/operator roles) |
 | `uptime.py` | Rolling uptime health monitoring (1h/24h/7d/30d windows, 99.9% SLA target) |
+| `project_costs.py` | Per-project cost tracking for manufacturing bureaus (material, labor, printer time, fulfillment) |
 | `wallets.py` | Crypto wallet configuration (Solana/Ethereum for donations and fees) |
-| `cli/` | Click CLI with 88+ subcommands and JSON output |
+| `cli/` | Click CLI with 107 commands and JSON output |
 | `deploy/` | Kubernetes manifests and Helm chart for on-prem Enterprise deployment |
 
 ## Authentication (Optional)
@@ -852,9 +862,9 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (5,366 total)
-cd kiln && python3 -m pytest tests/ -v        # 5,143 tests
-cd ../octoprint-cli && python3 -m pytest tests/ -v  # 223 tests
+# Run tests (5,926 total)
+cd kiln && python3 -m pytest tests/ -v        # 5,687 tests
+cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
 ## Revenue Model
