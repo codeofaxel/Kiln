@@ -50,6 +50,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid as _uuid_mod
 from pathlib import Path
 from typing import Any
 
@@ -567,8 +568,6 @@ except (FileNotFoundError, ValueError):
 
 # Per-process session ID — groups all tool calls from one server run together.
 # A new UUID is generated each time the MCP server starts.
-import uuid as _uuid_mod
-
 _SESSION_ID: str = str(_uuid_mod.uuid4())
 
 

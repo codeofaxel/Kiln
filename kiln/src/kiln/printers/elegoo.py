@@ -34,7 +34,6 @@ import json
 import logging
 import os
 import socket
-import struct
 import threading
 import time
 import uuid
@@ -318,10 +317,8 @@ class ElegooAdapter(PrinterAdapter):
         with self._ws_lock:
             # Tear down stale connection.
             if self._ws is not None:
-                try:
+                with contextlib.suppress(Exception):
                     self._ws.close()
-                except Exception:
-                    pass
                 self._ws = None
 
             try:
@@ -412,7 +409,6 @@ class ElegooAdapter(PrinterAdapter):
                     event.set()
 
         # Extract status fields from push updates.
-        cmd = data.get("Cmd")
         status_data = data.get("Data", data.get("Status", {}))
         if isinstance(status_data, dict):
             with self._state_lock:
@@ -831,10 +827,8 @@ class ElegooAdapter(PrinterAdapter):
         SDCP does not have a dedicated emergency stop command,
         so we cancel the print and send M112 via G-code if available.
         """
-        try:
+        with contextlib.suppress(PrinterError):
             self._send_command(_CMD_CANCEL_PRINT)
-        except PrinterError:
-            pass
 
         # Attempt G-code emergency stop as well.
         with contextlib.suppress(PrinterError):
@@ -981,7 +975,7 @@ class ElegooAdapter(PrinterAdapter):
             while time.monotonic() < deadline:
                 try:
                     data, addr = sock.recvfrom(4096)
-                except socket.timeout:
+                except TimeoutError:
                     break
 
                 try:
