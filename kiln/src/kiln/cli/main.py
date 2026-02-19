@@ -5784,6 +5784,158 @@ def watch(printer: str | None, delay: int, checks: int, interval: int, use_json:
 
 
 # ---------------------------------------------------------------------------
+# Enterprise commands
+# ---------------------------------------------------------------------------
+
+
+@cli.command("audit-export")
+@click.option("--format", "fmt", type=click.Choice(["json", "csv"]), default="json", help="Output format.")
+@click.option("--start", "start_time", default=None, type=float, help="Start timestamp (Unix).")
+@click.option("--end", "end_time", default=None, type=float, help="End timestamp (Unix).")
+@click.option("--tool", "tool_name", default=None, help="Filter by tool name.")
+@click.option("--action", default=None, help="Filter by action (executed, blocked, etc.).")
+@click.option("--session", "session_id", default=None, help="Filter by session ID.")
+@click.option("--json", "json_mode", is_flag=True, help="Wrap output in JSON envelope.")
+def audit_export(
+    fmt: str,
+    start_time: float | None,
+    end_time: float | None,
+    tool_name: str | None,
+    action: str | None,
+    session_id: str | None,
+    json_mode: bool,
+) -> None:
+    """Export the safety audit trail as JSON or CSV (Enterprise)."""
+    try:
+        from kiln.persistence import get_db
+
+        db = get_db()
+        exported = db.export_audit_trail(
+            start_time=start_time,
+            end_time=end_time,
+            format=fmt,
+            tool_name=tool_name,
+            action=action,
+            session_id=session_id,
+        )
+        if json_mode:
+            click.echo(format_response("success", data={"format": fmt, "export": exported}, json_mode=True))
+        else:
+            click.echo(exported)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.group("team")
+def team_group() -> None:
+    """Manage team members and seats (Business/Enterprise)."""
+    pass
+
+
+@team_group.command("add")
+@click.argument("email")
+@click.option("--role", type=click.Choice(["admin", "engineer", "operator"]), default="engineer", help="Member role.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def team_add(email: str, role: str, json_mode: bool) -> None:
+    """Add a team member."""
+    try:
+        from kiln.licensing import get_tier
+        from kiln.teams import TeamManager
+
+        mgr = TeamManager()
+        tier = get_tier().value
+        member = mgr.add_member(email, role=role, tier=tier)
+        if json_mode:
+            click.echo(format_response("success", data=member.to_dict(), json_mode=True))
+        else:
+            click.echo(f"Added {email} as {role}.")
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@team_group.command("remove")
+@click.argument("email")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def team_remove(email: str, json_mode: bool) -> None:
+    """Remove a team member."""
+    try:
+        from kiln.teams import TeamManager
+
+        mgr = TeamManager()
+        removed = mgr.remove_member(email)
+        if not removed:
+            click.echo(format_error(f"No active member: {email}", json_mode=json_mode))
+            sys.exit(1)
+        if json_mode:
+            click.echo(format_response("success", data={"removed": email}, json_mode=True))
+        else:
+            click.echo(f"Removed {email}.")
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@team_group.command("list")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def team_list(json_mode: bool) -> None:
+    """List team members and seat usage."""
+    try:
+        from kiln.licensing import get_tier
+        from kiln.teams import TeamManager
+
+        mgr = TeamManager()
+        tier = get_tier().value
+        members = mgr.list_members()
+        seats = mgr.seat_status(tier=tier)
+
+        if json_mode:
+            click.echo(format_response(
+                "success",
+                data={"members": [m.to_dict() for m in members], "seats": seats},
+                json_mode=True,
+            ))
+        else:
+            click.echo(f"Team ({seats['used']} seats used):")
+            for m in members:
+                click.echo(f"  {m.email} [{m.role}]")
+            limit = seats.get("limit")
+            if limit:
+                click.echo(f"Seat limit: {seats['used']}/{limit}")
+            else:
+                click.echo("Seats: unlimited (Enterprise)")
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.command()
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def uptime(json_mode: bool) -> None:
+    """Show uptime statistics and SLA status (Enterprise)."""
+    try:
+        from kiln.uptime import get_uptime_tracker
+
+        tracker = get_uptime_tracker()
+        report = tracker.uptime_report()
+
+        if json_mode:
+            click.echo(format_response("success", data=report, json_mode=True))
+        else:
+            for window in ("1h", "24h", "7d", "30d"):
+                val = report.get(f"uptime_{window}")
+                label = f"Uptime ({window}):"
+                click.echo(f"  {label:<18} {val:.2f}%" if val is not None else f"  {label:<18} N/A")
+            sla = report.get("sla_met")
+            click.echo(f"  SLA (99.9%):       {'MET' if sla else 'NOT MET'}")
+            click.echo(f"  Total checks:      {report.get('total_checks', 0)}")
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

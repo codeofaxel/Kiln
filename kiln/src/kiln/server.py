@@ -10018,5 +10018,261 @@ def list_snapshots(
         return _error_dict(f"Failed to list snapshots: {exc}", code="INTERNAL_ERROR")
 
 
+# ---------------------------------------------------------------------------
+# Enterprise tier tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def export_audit_trail(
+    start_time: float = 0,
+    end_time: float = 0,
+    format: str = "json",
+    tool_name: str = "",
+    action: str = "",
+    session_id: str = "",
+) -> dict:
+    """Export the safety audit trail as JSON or CSV.
+
+    Enterprise feature. Returns the full audit log with optional filters
+    for date range, tool name, action type, and session ID.
+
+    Args:
+        start_time: Unix timestamp lower bound (0 = no filter).
+        end_time: Unix timestamp upper bound (0 = no filter).
+        format: Output format, ``"json"`` or ``"csv"``.
+        tool_name: Filter by MCP tool name.
+        action: Filter by action (executed, blocked, etc.).
+        session_id: Filter by agent session ID.
+    """
+    if err := _check_auth("admin"):
+        return err
+    try:
+        db = get_db()
+        exported = db.export_audit_trail(
+            start_time=start_time if start_time > 0 else None,
+            end_time=end_time if end_time > 0 else None,
+            format=format,
+            tool_name=tool_name or None,
+            action=action or None,
+            session_id=session_id or None,
+        )
+        return {
+            "success": True,
+            "format": format,
+            "data": exported,
+        }
+    except Exception as exc:
+        logger.exception("Error in export_audit_trail")
+        return _error_dict(f"Failed to export audit trail: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def lock_safety_profile(printer_model: str) -> dict:
+    """Lock a safety profile so agents cannot modify its limits.
+
+    Enterprise feature. When locked, community profile updates for this
+    printer model are rejected. Only an admin can unlock.
+
+    Args:
+        printer_model: Profile identifier to lock (e.g. "ender3").
+    """
+    if err := _check_auth("admin"):
+        return err
+    try:
+        from kiln.safety_profiles import lock_safety_profile as _lock
+
+        _lock(printer_model)
+        return {
+            "success": True,
+            "message": f"Safety profile '{printer_model}' is now locked.",
+            "printer_model": printer_model,
+        }
+    except Exception as exc:
+        logger.exception("Error in lock_safety_profile")
+        return _error_dict(f"Failed to lock safety profile: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def unlock_safety_profile(printer_model: str) -> dict:
+    """Unlock a previously locked safety profile.
+
+    Enterprise feature. Allows community profile modifications for
+    this printer model again.
+
+    Args:
+        printer_model: Profile identifier to unlock.
+    """
+    if err := _check_auth("admin"):
+        return err
+    try:
+        from kiln.safety_profiles import unlock_safety_profile as _unlock
+
+        unlocked = _unlock(printer_model)
+        if not unlocked:
+            return {
+                "success": True,
+                "message": f"Profile '{printer_model}' was not locked.",
+                "printer_model": printer_model,
+            }
+        return {
+            "success": True,
+            "message": f"Safety profile '{printer_model}' is now unlocked.",
+            "printer_model": printer_model,
+        }
+    except Exception as exc:
+        logger.exception("Error in unlock_safety_profile")
+        return _error_dict(f"Failed to unlock safety profile: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def manage_team_member(
+    action: str,
+    email: str,
+    role: str = "engineer",
+) -> dict:
+    """Add, remove, or update a team member.
+
+    Enterprise feature. Manages team seats and role assignments.
+    Business tier supports up to 5 seats; Enterprise is unlimited.
+
+    Args:
+        action: One of ``"add"``, ``"remove"``, ``"set_role"``, ``"list"``.
+        email: Member email address (ignored for ``"list"``).
+        role: Role for add/set_role: ``"admin"``, ``"engineer"``, ``"operator"``.
+    """
+    if err := _check_auth("admin"):
+        return err
+    try:
+        from kiln.licensing import get_tier
+        from kiln.teams import TeamManager
+
+        mgr = TeamManager()
+        tier = get_tier().value
+
+        if action == "list":
+            members = mgr.list_members()
+            seat_info = mgr.seat_status(tier=tier)
+            return {
+                "success": True,
+                "members": [m.to_dict() for m in members],
+                "seats": seat_info,
+            }
+        elif action == "add":
+            member = mgr.add_member(email, role=role, tier=tier)
+            return {
+                "success": True,
+                "message": f"Added {email} as {role}.",
+                "member": member.to_dict(),
+            }
+        elif action == "remove":
+            removed = mgr.remove_member(email)
+            if not removed:
+                return _error_dict(f"No active member with email {email!r}.", code="NOT_FOUND")
+            return {
+                "success": True,
+                "message": f"Removed {email} from team.",
+            }
+        elif action == "set_role":
+            member = mgr.set_member_role(email, role)
+            return {
+                "success": True,
+                "message": f"Updated {email} role to {role}.",
+                "member": member.to_dict(),
+            }
+        else:
+            return _error_dict(
+                f"Unknown action: {action!r}. Use add, remove, set_role, or list.",
+                code="INVALID_INPUT",
+            )
+    except Exception as exc:
+        logger.exception("Error in manage_team_member")
+        return _error_dict(f"Team management failed: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def printer_usage_summary() -> dict:
+    """Show printer count, included allowance, and overage charges.
+
+    Enterprise feature. Enterprise base includes 20 printers.
+    Additional printers are $15/month each.
+    """
+    if err := _check_auth("read"):
+        return err
+    try:
+        from kiln.printer_billing import PrinterUsageBilling
+
+        billing = PrinterUsageBilling()
+        active_count = _registry.count if _registry else 0
+        usage = billing.usage_summary(active_count)
+        estimate = billing.estimate_monthly_cost(active_count)
+
+        return {
+            "success": True,
+            "usage": usage.to_dict(),
+            "cost_estimate": estimate,
+        }
+    except Exception as exc:
+        logger.exception("Error in printer_usage_summary")
+        return _error_dict(f"Failed to get printer usage: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def uptime_report() -> dict:
+    """Get rolling uptime statistics and SLA status.
+
+    Enterprise feature. Shows uptime percentages for 1h, 24h, 7d,
+    and 30d windows, average response times, and whether the 99.9%
+    SLA target is being met.
+    """
+    if err := _check_auth("read"):
+        return err
+    try:
+        from kiln.uptime import get_uptime_tracker
+
+        tracker = get_uptime_tracker()
+        report = tracker.uptime_report()
+        incidents = tracker.recent_incidents(limit=5)
+
+        return {
+            "success": True,
+            "uptime": report,
+            "recent_incidents": incidents,
+        }
+    except Exception as exc:
+        logger.exception("Error in uptime_report")
+        return _error_dict(f"Failed to get uptime report: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def encryption_status() -> dict:
+    """Check G-code encryption status and configuration.
+
+    Enterprise feature. Reports whether encryption is active,
+    whether the encryption key is configured, and whether the
+    cryptography library is installed.
+    """
+    if err := _check_auth("read"):
+        return err
+    try:
+        from kiln.gcode_encryption import get_gcode_encryption
+
+        enc = get_gcode_encryption()
+        return {
+            "success": True,
+            "encryption": enc.status(),
+        }
+    except Exception as exc:
+        logger.exception("Error in encryption_status")
+        return _error_dict(f"Failed to get encryption status: {exc}", code="INTERNAL_ERROR")
+
+
 if __name__ == "__main__":
     main()
