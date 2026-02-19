@@ -23,6 +23,8 @@ spec:
       labels:
         {{- include "kiln.selectorLabels" . | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "kiln.fullname" . }}
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

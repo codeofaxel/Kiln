@@ -68,9 +68,12 @@ spec:
         - protocol: TCP
           port: 8883   # Bambu MQTT/TLS
     # Allow PostgreSQL (if using external DB)
+    # CHANGE: Set to your PostgreSQL server IP/subnet (e.g., 10.1.2.0/24).
+    # The default 10.0.0.0/8 is a placeholder -- restrict to the narrowest
+    # CIDR that covers your database servers.
     - to:
         - ipBlock:
-            cidr: 0.0.0.0/0
+            cidr: 10.0.0.0/8
       ports:
         - protocol: TCP
           port: 5432

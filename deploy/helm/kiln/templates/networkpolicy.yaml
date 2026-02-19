@@ -61,9 +61,10 @@ spec:
           port: 8883
     {{- end }}
     # PostgreSQL (if using external DB)
+    # Restrict networkPolicy.postgresqlCIDR to your database server IP/subnet
     - to:
         - ipBlock:
-            cidr: 0.0.0.0/0
+            cidr: {{ .Values.networkPolicy.postgresqlCIDR | default "10.0.0.0/8" }}
       ports:
         - protocol: TCP
           port: 5432

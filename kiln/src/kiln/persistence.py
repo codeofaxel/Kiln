@@ -2388,13 +2388,39 @@ class KilnDB:
     def _get_hmac_key(self) -> bytes:
         """Return the HMAC key for audit log signing.
 
-        Uses ``KILN_AUDIT_HMAC_KEY`` env var if set, otherwise derives
-        a per-installation key from the database path.
+        Uses ``KILN_AUDIT_HMAC_KEY`` env var if set, otherwise loads (or
+        generates) a random 32-byte key persisted at
+        ``~/.kiln/audit_hmac.key`` with ``0o600`` permissions.
         """
         env_key = os.environ.get("KILN_AUDIT_HMAC_KEY", "")
         if env_key:
             return env_key.encode("utf-8")
-        return hashlib.sha256(self._db_path.encode("utf-8")).digest()
+
+        key_path = os.path.join(str(Path.home()), ".kiln", "audit_hmac.key")
+        try:
+            if os.path.isfile(key_path):
+                with open(key_path, "rb") as fh:
+                    key = fh.read()
+                if len(key) >= 32:
+                    return key
+
+            # Generate a new random HMAC key.
+            key = os.urandom(32)
+            key_dir = os.path.dirname(key_path)
+            os.makedirs(key_dir, mode=0o700, exist_ok=True)
+            with open(key_path, "wb") as fh:
+                fh.write(key)
+            os.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+            logger.info("Generated new audit HMAC key at %s", key_path)
+            return key
+        except OSError as exc:
+            logger.warning(
+                "Could not read/write HMAC key file %s (%s); "
+                "falling back to db-path-derived key",
+                key_path,
+                exc,
+            )
+            return hashlib.sha256(self._db_path.encode("utf-8")).digest()
 
     def _compute_audit_hmac(self, row_data: dict[str, Any]) -> str:
         """Compute an HMAC-SHA256 signature for an audit log row.
@@ -2428,6 +2454,15 @@ class KilnDB:
         session_id: str | None = None,
     ) -> int:
         """Record a safety audit event and return the row id.
+
+        Each row is signed with an HMAC-SHA256 digest computed over its
+        fields.  This allows :meth:`verify_audit_log` to detect *modification*
+        of individual entries.  However, individual-entry HMACs cannot detect
+        *deletion* of rows — a malicious actor could remove entries without
+        breaking the remaining signatures.  A future version should add
+        chained HMACs (each row's HMAC includes the previous row's HMAC)
+        to create an append-only chain where any deletion breaks integrity
+        verification for all subsequent rows.
 
         Args:
             tool_name: MCP tool name (e.g. ``"start_print"``).
@@ -2479,6 +2514,12 @@ class KilnDB:
 
     def verify_audit_log(self) -> dict[str, Any]:
         """Verify HMAC signatures on all audit log entries.
+
+        This checks each row's HMAC independently.  It can detect
+        *modification* of existing entries but **not deletion** — if rows
+        are removed, the remaining signatures will still verify.  A future
+        version should add chained HMACs (where each row's HMAC incorporates
+        the previous row's HMAC) to detect deletions as well.
 
         :returns: Dict with ``total``, ``valid``, ``invalid`` counts
             and an ``integrity`` field (``"ok"`` or ``"compromised"``).
@@ -2597,6 +2638,18 @@ class KilnDB:
             "total": sum(counts.values()),
         }
 
+    @staticmethod
+    def _sanitize_csv_value(value: Any) -> Any:
+        """Prefix cell values that could trigger spreadsheet formula injection.
+
+        Values starting with ``=``, ``+``, ``-``, ``@``, ``\\t``, or ``\\r``
+        are prefixed with a single-quote to neutralise formula evaluation in
+        Excel / Google Sheets / LibreOffice Calc.
+        """
+        if isinstance(value, str) and value and value[0] in ("=", "+", "-", "@", "\t", "\r"):
+            return "'" + value
+        return value
+
     def export_audit_trail(
         self,
         *,
@@ -2606,6 +2659,8 @@ class KilnDB:
         tool_name: str | None = None,
         action: str | None = None,
         session_id: str | None = None,
+        limit: int = 10000,
+        offset: int = 0,
     ) -> str:
         """Export audit trail entries as JSON or CSV.
 
@@ -2616,10 +2671,22 @@ class KilnDB:
             tool_name: Filter by tool name.
             action: Filter by action type.
             session_id: Filter by session ID.
+            limit: Maximum number of rows to return (default 10 000).
+            offset: Number of rows to skip for pagination (default 0).
 
         Returns:
             Formatted string (JSON array or CSV with headers).
+
+        Raises:
+            ValueError: If *format* is not ``"json"`` or ``"csv"``.
         """
+        _VALID_FORMATS = ("json", "csv")
+        if format not in _VALID_FORMATS:
+            raise ValueError(
+                f"Unsupported export format {format!r}. "
+                f"Expected one of: {', '.join(_VALID_FORMATS)}"
+            )
+
         conditions: list[str] = []
         params: list[Any] = []
 
@@ -2640,7 +2707,8 @@ class KilnDB:
             params.append(session_id)
 
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-        sql = f"SELECT * FROM safety_audit_log{where} ORDER BY timestamp DESC"
+        sql = f"SELECT * FROM safety_audit_log{where} ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
 
         rows = self._conn.execute(sql, params).fetchall()
         row_dicts = [dict(r) for r in rows]
@@ -2651,9 +2719,14 @@ class KilnDB:
 
             output = io.StringIO()
             if row_dicts:
-                writer = csv.DictWriter(output, fieldnames=row_dicts[0].keys())
+                # Sanitise cell values against formula injection.
+                sanitised = [
+                    {k: self._sanitize_csv_value(v) for k, v in row.items()}
+                    for row in row_dicts
+                ]
+                writer = csv.DictWriter(output, fieldnames=sanitised[0].keys())
                 writer.writeheader()
-                writer.writerows(row_dicts)
+                writer.writerows(sanitised)
             return output.getvalue()
 
         # Default: JSON

@@ -22,6 +22,8 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import stat
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,40 @@ _ENCRYPTION_KEY_ENV = "KILN_ENCRYPTION_KEY"
 _SALT_ENV = "KILN_ENCRYPTION_SALT"
 _DEFAULT_SALT = b"kiln-gcode-encryption-v1"
 _HEADER = b"KILN_ENC_V1:"
+_SALT_FILE = os.path.join(str(Path.home()), ".kiln", "encryption_salt")
+
+
+def _get_or_create_salt() -> bytes:
+    """Load or generate a random PBKDF2 salt, persisted to ``~/.kiln/encryption_salt``.
+
+    On first run, generates 16 random bytes and writes them to disk with
+    ``0o600`` permissions.  On subsequent runs, reads the persisted salt.
+    Falls back to :data:`_DEFAULT_SALT` only if the file cannot be created
+    (e.g. read-only filesystem).
+    """
+    try:
+        if os.path.isfile(_SALT_FILE):
+            with open(_SALT_FILE, "rb") as fh:
+                salt = fh.read()
+            if len(salt) >= 16:
+                return salt
+            # File exists but is too short — regenerate.
+
+        salt = os.urandom(16)
+        salt_dir = os.path.dirname(_SALT_FILE)
+        os.makedirs(salt_dir, mode=0o700, exist_ok=True)
+        with open(_SALT_FILE, "wb") as fh:
+            fh.write(salt)
+        os.chmod(_SALT_FILE, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+        logger.info("Generated new PBKDF2 salt at %s", _SALT_FILE)
+        return salt
+    except OSError as exc:
+        logger.warning(
+            "Could not read/write salt file %s (%s); falling back to default salt",
+            _SALT_FILE,
+            exc,
+        )
+        return _DEFAULT_SALT
 
 
 class GcodeEncryptionError(Exception):
@@ -67,7 +103,8 @@ class GcodeEncryption:
             )
             return
 
-        salt = os.environ.get(_SALT_ENV, "").encode("utf-8") or _DEFAULT_SALT
+        env_salt = os.environ.get(_SALT_ENV, "").strip()
+        salt = env_salt.encode("utf-8") if env_salt else _get_or_create_salt()
 
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
@@ -108,22 +145,33 @@ class GcodeEncryption:
         except Exception as exc:
             raise GcodeEncryptionError(f"Encryption failed: {exc}") from exc
 
-    def decrypt(self, data: bytes) -> bytes:
+    def decrypt(self, data: bytes, *, expect_encrypted: bool = False) -> bytes:
         """Decrypt G-code data.
 
         If the data doesn't have the encryption header, returns it unchanged
-        (passthrough for unencrypted files).
+        (passthrough for unencrypted files) unless *expect_encrypted* is set.
 
         Args:
             data: Possibly encrypted G-code bytes.
+            expect_encrypted: When ``True``, raise :class:`GcodeEncryptionError`
+                if the data does not carry the encryption header.  Useful when
+                the caller knows the data *must* be encrypted and wants to
+                reject plaintext that may indicate tampering or misconfiguration.
 
         Returns:
             Decrypted G-code bytes.
 
         Raises:
-            GcodeEncryptionError: If decryption fails on encrypted data.
+            GcodeEncryptionError: If decryption fails on encrypted data, or
+                if *expect_encrypted* is ``True`` and the header is missing.
         """
         if not data.startswith(_HEADER):
+            if expect_encrypted:
+                raise GcodeEncryptionError(
+                    "Expected encrypted data (KILN_ENC_V1 header) but received "
+                    "unencrypted payload. The data may have been tampered with "
+                    "or encryption was not applied."
+                )
             return data  # Not encrypted, passthrough
 
         if not self._available:
@@ -133,7 +181,7 @@ class GcodeEncryption:
             )
 
         try:
-            encrypted_payload = data[len(_HEADER):]
+            encrypted_payload = data[len(_HEADER) :]
             return self._fernet.decrypt(encrypted_payload)
         except Exception as exc:
             raise GcodeEncryptionError(f"Decryption failed: {exc}") from exc
@@ -143,12 +191,31 @@ class GcodeEncryption:
         """Check if data has the Kiln encryption header."""
         return data.startswith(_HEADER)
 
+    @property
+    def supports_rotation(self) -> bool:
+        """Whether this encryption backend supports key rotation.
+
+        Currently returns ``False``.  Key rotation would require
+        re-encrypting all stored G-code files with a new passphrase.
+        A future implementation of ``rotate_key()`` should:
+
+        1. Derive the old Fernet key from *old_passphrase*.
+        2. Derive a new Fernet key from *new_passphrase*.
+        3. Iterate all encrypted blobs, decrypt with old, re-encrypt with new.
+        4. Persist the new salt and update the singleton.
+
+        Until that is implemented, manual rotation requires re-uploading
+        encrypted G-code files after changing ``KILN_ENCRYPTION_KEY``.
+        """
+        return False
+
     def status(self) -> dict[str, Any]:
         """Return encryption status for diagnostics."""
         return {
             "available": self._available,
             "key_configured": bool(os.environ.get(_ENCRYPTION_KEY_ENV, "").strip()),
             "library_installed": _check_cryptography_installed(),
+            "supports_rotation": self.supports_rotation,
         }
 
 
@@ -171,6 +238,7 @@ def _check_cryptography_installed() -> bool:
     """Check if the cryptography library is importable."""
     try:
         import cryptography  # noqa: F401
+
         return True
     except ImportError:
         return False

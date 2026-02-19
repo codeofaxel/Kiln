@@ -5,10 +5,13 @@ Connect (primary) and SAML 2.0 (secondary). SSO tokens coexist with
 API keys -- the auth layer tries both.
 
 OIDC JWT validation is handled manually using the ``cryptography``
-package (no authlib dependency). SAML support is basic; production
-deployments requiring full spec compliance should use python-saml2.
+package (no authlib dependency). SAML support requires
+``KILN_SSO_SAML_ALLOW_UNSIGNED=1`` for testing; production SAML
+deployments should use python-saml2 for signature validation.
 
-SSO configuration is persisted to ``~/.kiln/sso.json``.
+SSO configuration is persisted to ``~/.kiln/sso.json``.  The
+``client_secret`` is stored separately in ``~/.kiln/sso_secret``
+with restricted permissions.
 
 Usage::
 
@@ -23,32 +26,46 @@ Usage::
         allowed_domains=["openmind.ai"],
         role_mapping={"admins": "admin", "engineers": "engineer"},
     ))
-    url = mgr.get_oidc_authorize_url(state="random-state")
-    user = mgr.exchange_oidc_code(code="auth-code-from-callback")
+    url = mgr.get_oidc_authorize_url()
+    user = mgr.exchange_oidc_code(code="auth-code-from-callback", state=...)
 """
 
 from __future__ import annotations
 
 import base64
+import calendar
+import contextlib
+import hashlib
 import json
 import logging
 import os
+import secrets
+import threading
 import time
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
 import zlib
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
+try:
+    import defusedxml.ElementTree as ET  # type: ignore[import-untyped]
+except ImportError:  # pragma: no cover
+    import xml.etree.ElementTree as ET  # type: ignore[no-redef]
+
+    logging.getLogger(__name__).warning(
+        "defusedxml not installed — SAML XML parsing may be vulnerable "
+        "to XXE attacks.  Install defusedxml: pip install defusedxml"
+    )
+
 logger = logging.getLogger(__name__)
 
 _SSO_DIR = Path.home() / ".kiln"
 _SSO_FILE = _SSO_DIR / "sso.json"
 
-# JWKS cache TTL: 1 hour.
+# JWKS / discovery cache TTL: 1 hour.
 _JWKS_CACHE_TTL: float = 3600
 
 
@@ -201,6 +218,9 @@ class SSOManager:
         self._jwks_cache: dict[str, Any] = {}
         self._jwks_cached_at: float = 0.0
         self._oidc_discovery_cache: dict[str, Any] = {}
+        self._oidc_discovery_cached_at: dict[str, float] = {}
+        # PKCE: code_verifier + nonce stored per state for the active flow.
+        self._pending_flows: dict[str, dict[str, str]] = {}
         self._load_config()
 
     # ------------------------------------------------------------------
@@ -213,16 +233,26 @@ class SSOManager:
         self._apply_env_overrides()
 
     def _load_config_from_file(self) -> SSOConfig | None:
-        """Read config JSON from disk."""
+        """Read config JSON from disk.
+
+        The ``client_secret`` is loaded from a separate file
+        (``sso_secret``) if present.
+        """
         if not self._config_path.exists():
             return None
         try:
             data = json.loads(self._config_path.read_text(encoding="utf-8"))
+            # Load client_secret from separate file (preferred) or inline (legacy).
+            client_secret = data.get("client_secret")
+            secret_path = self._config_path.parent / "sso_secret"
+            if secret_path.exists():
+                with contextlib.suppress(OSError):
+                    client_secret = secret_path.read_text(encoding="utf-8").strip()
             return SSOConfig(
                 protocol=SSOProtocol(data.get("protocol", "oidc")),
                 issuer_url=data.get("issuer_url", ""),
                 client_id=data.get("client_id", ""),
-                client_secret=data.get("client_secret"),
+                client_secret=client_secret,
                 redirect_uri=data.get("redirect_uri", "http://localhost:8741/sso/callback"),
                 allowed_domains=data.get("allowed_domains", []),
                 role_mapping=data.get("role_mapping", {}),
@@ -278,11 +308,31 @@ class SSOManager:
                 logger.warning("KILN_SSO_ROLE_MAPPING is not valid JSON, ignoring")
 
     def _save_config(self, config: SSOConfig) -> None:
-        """Persist config to disk."""
+        """Persist config to disk with restrictive permissions.
+
+        The ``client_secret`` is stored in a separate file
+        (``sso_secret``) to limit exposure.
+        """
         self._config_path.parent.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            self._config_path.parent.chmod(0o700)
+
         data = config.to_dict()
         data["updated_at"] = time.time()
+        # Never persist client_secret in the main config file.
+        secret = data.pop("client_secret", None)
         self._config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        with contextlib.suppress(OSError):
+            self._config_path.chmod(0o600)
+
+        # Store client_secret in a separate restricted file.
+        secret_path = self._config_path.parent / "sso_secret"
+        if secret:
+            secret_path.write_text(secret, encoding="utf-8")
+            with contextlib.suppress(OSError):
+                secret_path.chmod(0o600)
+        elif secret_path.exists():
+            secret_path.unlink()
 
     def configure(self, config: SSOConfig) -> None:
         """Set and persist an SSO configuration.
@@ -296,6 +346,7 @@ class SSOManager:
         self._jwks_cache = {}
         self._jwks_cached_at = 0.0
         self._oidc_discovery_cache = {}
+        self._oidc_discovery_cached_at = {}
         logger.info(
             "SSO configured: protocol=%s issuer=%s",
             config.protocol.value,
@@ -316,8 +367,13 @@ class SSOManager:
         self._jwks_cache = {}
         self._jwks_cached_at = 0.0
         self._oidc_discovery_cache = {}
+        self._oidc_discovery_cached_at = {}
         if self._config_path.exists():
             self._config_path.unlink()
+            # Also remove the separate secret file.
+            secret_path = self._config_path.parent / "sso_secret"
+            if secret_path.exists():
+                secret_path.unlink()
             logger.info("Removed SSO config at %s", self._config_path)
             return True
         return False
@@ -343,12 +399,17 @@ class SSOManager:
         Returns:
             The parsed discovery document.
         """
-        if issuer_url in self._oidc_discovery_cache:
+        now = time.time()
+        cached_at = self._oidc_discovery_cached_at.get(issuer_url, 0.0)
+        if issuer_url in self._oidc_discovery_cache and (now - cached_at) < _JWKS_CACHE_TTL:
             return self._oidc_discovery_cache[issuer_url]
 
         url = issuer_url.rstrip("/") + "/.well-known/openid-configuration"
+        if not url.startswith(("https://", "http://localhost")):
+            raise SSOError("OIDC issuer URL must use HTTPS")
         doc = _http_get_json(url)
         self._oidc_discovery_cache[issuer_url] = doc
+        self._oidc_discovery_cached_at[issuer_url] = now
         return doc
 
     # ------------------------------------------------------------------
@@ -378,12 +439,15 @@ class SSOManager:
     def _get_jwks_uri(self, config: SSOConfig) -> str:
         """Resolve the JWKS URI, using discovery if needed."""
         if config.jwks_uri:
-            return config.jwks_uri
-        discovery = self._discover_oidc(config.issuer_url)
-        jwks_uri = discovery.get("jwks_uri")
-        if not jwks_uri:
+            uri = config.jwks_uri
+        else:
+            discovery = self._discover_oidc(config.issuer_url)
+            uri = discovery.get("jwks_uri", "")
+        if not uri:
             raise SSOError("JWKS URI not found in OIDC discovery document")
-        return jwks_uri
+        if not uri.startswith(("https://", "http://localhost")):
+            raise SSOError("JWKS URI must use HTTPS")
+        return uri
 
     # ------------------------------------------------------------------
     # JWT Validation (RS256 via cryptography)
@@ -473,22 +537,33 @@ class SSOManager:
         self,
         payload: dict[str, Any],
         config: SSOConfig,
+        *,
+        expected_nonce: str | None = None,
     ) -> None:
-        """Validate standard JWT claims (exp, iss, aud).
+        """Validate standard JWT claims (exp, nbf, iss, aud, nonce).
 
         Args:
             payload: Decoded JWT payload.
             config: Current SSO configuration.
+            expected_nonce: If set, the ``nonce`` claim must match.
 
         Raises:
             SSOError: If any claim validation fails.
         """
         now = time.time()
+        clock_skew = 60  # seconds
 
-        # Check expiration
+        # Expiration is REQUIRED per OIDC Core spec.
         exp = payload.get("exp")
-        if exp is not None and now >= exp:
+        if exp is None:
+            raise SSOError("JWT missing required 'exp' claim")
+        if now >= exp + clock_skew:
             raise SSOError("JWT has expired")
+
+        # Not-before (optional but enforced if present).
+        nbf = payload.get("nbf")
+        if nbf is not None and now < nbf - clock_skew:
+            raise SSOError("JWT is not yet valid (nbf claim)")
 
         # Check issuer
         iss = payload.get("iss", "")
@@ -496,15 +571,21 @@ class SSOManager:
         if iss.rstrip("/") != expected_issuer:
             raise SSOError(f"JWT issuer mismatch: expected {expected_issuer!r}, got {iss!r}")
 
-        # Check audience
+        # Audience is REQUIRED per OIDC Core spec.
         aud = payload.get("aud")
-        if aud is not None:
-            # aud can be a string or a list
-            audiences = aud if isinstance(aud, list) else [aud]
-            if config.client_id not in audiences:
-                raise SSOError(
-                    f"JWT audience mismatch: {config.client_id!r} not in {audiences!r}"
-                )
+        if aud is None:
+            raise SSOError("JWT missing required 'aud' claim")
+        audiences = aud if isinstance(aud, list) else [aud]
+        if config.client_id not in audiences:
+            raise SSOError(
+                f"JWT audience mismatch: {config.client_id!r} not in {audiences!r}"
+            )
+
+        # Nonce validation (anti-replay for OIDC).
+        if expected_nonce is not None:
+            token_nonce = payload.get("nonce")
+            if token_nonce != expected_nonce:
+                raise SSOError("JWT nonce mismatch — possible replay attack")
 
     def _validate_email_domain(self, email: str, config: SSOConfig) -> None:
         """Verify the email domain is in the allowed list.
@@ -517,7 +598,8 @@ class SSOManager:
             SSOError: If the domain is not allowed.
         """
         if not config.allowed_domains:
-            return  # No domain restriction
+            logger.warning("SSO allowed_domains is empty — any email domain will be accepted")
+            return
 
         domain = email.rsplit("@", 1)[-1].lower() if "@" in email else ""
         allowed = [d.lower() for d in config.allowed_domains]
@@ -634,8 +716,13 @@ class SSOManager:
     def get_oidc_authorize_url(self, state: str | None = None) -> str:
         """Build the OIDC authorization URL for the IdP.
 
+        Generates a cryptographic ``state`` (if not provided), ``nonce``,
+        and PKCE ``code_challenge``. These are stored internally so
+        :meth:`exchange_oidc_code` can validate them.
+
         Args:
-            state: An opaque value for CSRF protection.
+            state: An opaque value for CSRF protection. Auto-generated if
+                omitted.
 
         Returns:
             The full authorization URL to redirect the user to.
@@ -647,22 +734,41 @@ class SSOManager:
         if not auth_endpoint:
             raise SSOError("Authorization endpoint not found in OIDC discovery")
 
+        # Generate PKCE code_verifier + code_challenge (S256).
+        code_verifier = secrets.token_urlsafe(64)
+        challenge_digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+        code_challenge = _base64url_encode(challenge_digest)
+
+        # Auto-generate state and nonce if not supplied.
+        flow_state = state or secrets.token_urlsafe(32)
+        nonce = secrets.token_urlsafe(32)
+
+        # Store flow params for validation in exchange_oidc_code.
+        self._pending_flows[flow_state] = {
+            "code_verifier": code_verifier,
+            "nonce": nonce,
+        }
+
         params: dict[str, str] = {
             "response_type": "code",
             "client_id": config.client_id,
             "redirect_uri": config.redirect_uri,
             "scope": "openid email profile groups",
+            "state": flow_state,
+            "nonce": nonce,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
         }
-        if state:
-            params["state"] = state
 
         return f"{auth_endpoint}?{urllib.parse.urlencode(params)}"
 
-    def exchange_oidc_code(self, code: str) -> SSOUser:
+    def exchange_oidc_code(self, code: str, *, state: str | None = None) -> SSOUser:
         """Exchange an authorization code for tokens and extract user info.
 
         Args:
             code: The authorization code from the callback.
+            state: The ``state`` value returned by the IdP callback. Must
+                match the value generated by :meth:`get_oidc_authorize_url`.
 
         Returns:
             The authenticated :class:`SSOUser`.
@@ -671,6 +777,13 @@ class SSOManager:
             SSOError: If the token exchange or validation fails.
         """
         config = self._require_config()
+
+        # Validate state and retrieve stored flow params (PKCE + nonce).
+        flow_params: dict[str, str] | None = None
+        if state:
+            flow_params = self._pending_flows.pop(state, None)
+            if flow_params is None:
+                raise SSOError("Invalid or expired OIDC state — possible CSRF attack")
 
         discovery = self._discover_oidc(config.issuer_url)
         token_endpoint = discovery.get("token_endpoint")
@@ -686,6 +799,9 @@ class SSOManager:
         }
         if config.client_secret:
             token_data["client_secret"] = config.client_secret
+        # Include PKCE code_verifier.
+        if flow_params and "code_verifier" in flow_params:
+            token_data["code_verifier"] = flow_params["code_verifier"]
 
         token_response = _http_post_form(token_endpoint, token_data)
 
@@ -693,16 +809,24 @@ class SSOManager:
         if not id_token:
             raise SSOError("No id_token in token response")
 
-        return self.validate_oidc_token(id_token)
+        expected_nonce = flow_params.get("nonce") if flow_params else None
+        return self.validate_oidc_token(id_token, expected_nonce=expected_nonce)
 
-    def validate_oidc_token(self, id_token: str) -> SSOUser:
+    def validate_oidc_token(
+        self,
+        id_token: str,
+        *,
+        expected_nonce: str | None = None,
+    ) -> SSOUser:
         """Validate an OIDC ID token and extract user info.
 
         Performs full JWT validation: signature verification via JWKS,
-        claim validation (exp, iss, aud), and email domain checks.
+        claim validation (exp, nbf, iss, aud, nonce), and email domain
+        checks.
 
         Args:
             id_token: The raw JWT ID token string.
+            expected_nonce: If set, the ``nonce`` claim must match.
 
         Returns:
             The authenticated :class:`SSOUser`.
@@ -720,7 +844,7 @@ class SSOManager:
         payload = self._validate_jwt_signature(id_token, jwks)
 
         # Validate standard claims
-        self._validate_claims(payload, config)
+        self._validate_claims(payload, config, expected_nonce=expected_nonce)
 
         # Extract user
         return self._extract_user(payload, config)
@@ -820,10 +944,9 @@ class SSOManager:
         """Parse a SAML response and extract the authenticated user.
 
         .. warning::
-            This is a basic implementation that parses XML and extracts
-            NameID and attributes. Production SAML deployments should
-            use ``python-saml2`` for full spec compliance including
-            XML signature validation and replay protection.
+            SAML signature validation is not implemented in the built-in
+            parser.  Set ``KILN_SSO_SAML_ALLOW_UNSIGNED=1`` for testing
+            only.  Production SAML deployments must use ``python-saml2``.
 
         Args:
             saml_response: Base64-encoded SAML response from the IdP.
@@ -836,10 +959,19 @@ class SSOManager:
         """
         config = self._require_config()
 
+        # SECURITY: SAML responses MUST be signature-validated.
+        allow_unsigned = os.environ.get("KILN_SSO_SAML_ALLOW_UNSIGNED", "0") == "1"
+        if not allow_unsigned:
+            raise SSOError(
+                "SAML signature validation is not available. "
+                "Install python-saml2 for production SAML, or set "
+                "KILN_SSO_SAML_ALLOW_UNSIGNED=1 for testing only. "
+                "WARNING: Unsigned SAML responses can be trivially forged."
+            )
+
         logger.warning(
-            "Processing SAML response with basic parser. "
-            "Production deployments should use python-saml2 for full "
-            "SAML spec compliance (signature validation, replay protection)."
+            "Processing SAML response WITHOUT signature validation. "
+            "This is only safe for development/testing."
         )
 
         # Decode the SAML response
@@ -889,7 +1021,6 @@ class SSOManager:
 
         # Map attributes to user fields
         email = name_id  # NameID is often the email
-        # Check common attribute names for email
         for attr_key in (
             "email",
             "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
@@ -947,18 +1078,29 @@ class SSOManager:
         claims: dict[str, Any] = {"groups": groups, "email": email}
         roles = self._map_roles(claims)
 
-        # Determine expiry from conditions
+        # Determine expiry from conditions and enforce NotOnOrAfter.
         expires_at = 0.0
         conditions_elem = root.find(".//saml:Conditions", ns)
         if conditions_elem is not None:
             not_on_or_after = conditions_elem.get("NotOnOrAfter", "")
             if not_on_or_after:
                 try:
-                    # Parse ISO 8601 timestamp
-                    import calendar
-
                     t = time.strptime(not_on_or_after, "%Y-%m-%dT%H:%M:%SZ")
                     expires_at = float(calendar.timegm(t))
+                except (ValueError, OverflowError):
+                    pass
+            # Reject expired assertions.
+            if expires_at > 0 and time.time() >= expires_at:
+                raise SSOError("SAML assertion has expired (NotOnOrAfter)")
+
+            # Enforce NotBefore if present.
+            not_before = conditions_elem.get("NotBefore", "")
+            if not_before:
+                try:
+                    t = time.strptime(not_before, "%Y-%m-%dT%H:%M:%SZ")
+                    nbf_ts = float(calendar.timegm(t))
+                    if time.time() < nbf_ts - 60:
+                        raise SSOError("SAML assertion is not yet valid (NotBefore)")
                 except (ValueError, OverflowError):
                     pass
 
@@ -1004,11 +1146,14 @@ def map_sso_user_to_role(user: SSOUser) -> str:
 # ---------------------------------------------------------------------------
 
 _sso_manager: SSOManager | None = None
+_sso_lock = threading.Lock()
 
 
 def get_sso_manager() -> SSOManager:
-    """Return the module-level SSOManager singleton."""
+    """Return the module-level SSOManager singleton (thread-safe)."""
     global _sso_manager  # noqa: PLW0603
     if _sso_manager is None:
-        _sso_manager = SSOManager()
+        with _sso_lock:
+            if _sso_manager is None:
+                _sso_manager = SSOManager()
     return _sso_manager

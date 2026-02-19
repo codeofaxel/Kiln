@@ -42,6 +42,7 @@ import logging
 import os
 import sys
 import time
+import warnings
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -228,10 +229,13 @@ class LicenseManager:
         payload_b64 = parts[2]
         signature_b64 = parts[3]
 
-        # Get verification key — must be set via env var; no default shipped in source.
-        verification_key = os.environ.get("KILN_LICENSE_PUBLIC_KEY", "").strip()
+        # Get verification key — prefer KILN_LICENSE_SIGNING_SECRET, fall back
+        # to legacy KILN_LICENSE_PUBLIC_KEY.
+        verification_key = os.environ.get("KILN_LICENSE_SIGNING_SECRET", "").strip()
         if not verification_key:
-            logger.debug("KILN_LICENSE_PUBLIC_KEY not set — signature verification unavailable")
+            verification_key = os.environ.get("KILN_LICENSE_PUBLIC_KEY", "").strip()
+        if not verification_key:
+            logger.debug("KILN_LICENSE_SIGNING_SECRET not set — signature verification unavailable")
             return None
 
         try:
@@ -306,62 +310,39 @@ class LicenseManager:
                 return LicenseTier.PRO, payload.get("expires_at")
             logger.warning("Unknown tier in validated payload: %s", tier_str)
 
-        # Fallback: legacy prefix-based validation
+        # Signature validation failed — check offline cache before rejecting.
         offline_mode = os.environ.get(_OFFLINE_MODE_ENV_VAR, "0") == "1"
 
-        if key.startswith(_KEY_PREFIX_BUSINESS):
-            if payload is None and not offline_mode:
+        if not offline_mode:
+            # Online mode: signature is mandatory for non-free tiers.
+            if key.startswith((_KEY_PREFIX_PRO, _KEY_PREFIX_BUSINESS, _KEY_PREFIX_ENTERPRISE)):
                 logger.warning(
-                    "License key uses legacy prefix format. Signature validation failed. "
-                    "Set KILN_LICENSE_OFFLINE=1 to allow legacy keys, or upgrade to a signed key. "
-                    "Defaulting to FREE tier for security."
+                    "License key signature validation failed. "
+                    "Set KILN_LICENSE_OFFLINE=1 to allow cached offline validation, "
+                    "or upgrade to a properly signed key. Defaulting to FREE tier for security."
                 )
-                return LicenseTier.FREE, None
-            if payload is None and offline_mode:
-                logger.warning(
-                    "License key signature validation failed, but KILN_LICENSE_OFFLINE=1 is set. "
-                    "Allowing legacy prefix-based tier (BUSINESS). Consider upgrading to a signed key."
-                )
-            return LicenseTier.BUSINESS, None
+            return LicenseTier.FREE, None
 
-        if key.startswith(_KEY_PREFIX_ENTERPRISE):
-            if payload is None and not offline_mode:
-                logger.warning(
-                    "License key uses legacy prefix format. Signature validation failed. "
-                    "Set KILN_LICENSE_OFFLINE=1 to allow legacy keys, or upgrade to a signed key. "
-                    "Defaulting to FREE tier for security."
-                )
-                return LicenseTier.FREE, None
-            if payload is None and offline_mode:
-                logger.warning(
-                    "License key signature validation failed, but KILN_LICENSE_OFFLINE=1 is set. "
-                    "Allowing legacy prefix-based tier (ENTERPRISE). Consider upgrading to a signed key."
-                )
-            return LicenseTier.ENTERPRISE, None
-
-        if key.startswith(_KEY_PREFIX_PRO):
-            if payload is None and not offline_mode:
-                logger.warning(
-                    "License key uses legacy prefix format. Signature validation failed. "
-                    "Set KILN_LICENSE_OFFLINE=1 to allow legacy keys, or upgrade to a signed key. "
-                    "Defaulting to FREE tier for security."
-                )
-                return LicenseTier.FREE, None
-            if payload is None and offline_mode:
-                logger.warning(
-                    "License key signature validation failed, but KILN_LICENSE_OFFLINE=1 is set. "
-                    "Allowing legacy prefix-based tier (PRO). Consider upgrading to a signed key."
-                )
-            return LicenseTier.PRO, None
-
-        # Unknown prefix but non-empty key — check cache before defaulting.
+        # Offline mode: only accept keys that have a valid cached validation.
+        # Never accept prefix-only — a previous successful validation must exist.
         cached = self._read_cache()
         if cached and cached.get("key_hint") == key[-6:]:
             try:
-                return LicenseTier(cached["tier"]), cached.get("expires_at")
+                cached_tier = LicenseTier(cached["tier"])
+                logger.info(
+                    "Offline mode: using cached validation for key hint ...%s (tier=%s)",
+                    key[-6:],
+                    cached_tier.value,
+                )
+                return cached_tier, cached.get("expires_at")
             except (KeyError, ValueError):
                 pass
 
+        logger.warning(
+            "License key signature validation failed and no cached validation found. "
+            "KILN_LICENSE_OFFLINE=1 requires a previous successful online validation. "
+            "Defaulting to FREE tier for security."
+        )
         return LicenseTier.FREE, None
 
     def _key_source(self) -> str:
@@ -382,14 +363,42 @@ class LicenseManager:
     # Cache (offline fallback)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _get_cache_signing_key() -> str:
+        """Return the key used to HMAC-sign the license cache.
+
+        Uses ``KILN_LICENSE_SIGNING_SECRET`` (preferred) falling back to
+        ``KILN_LICENSE_PUBLIC_KEY`` for backwards compatibility.
+        """
+        key = os.environ.get("KILN_LICENSE_SIGNING_SECRET", "").strip()
+        if not key:
+            key = os.environ.get("KILN_LICENSE_PUBLIC_KEY", "").strip()
+        return key
+
     def _read_cache(self) -> dict[str, Any] | None:
-        """Read the local validation cache."""
+        """Read and verify the HMAC-signed local validation cache."""
         try:
             if not self._cache_path.is_file():
                 return None
             data = json.loads(self._cache_path.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
                 return None
+
+            # Verify HMAC integrity before trusting cache contents.
+            signing_key = self._get_cache_signing_key()
+            if signing_key:
+                stored_mac = data.pop("hmac", None)
+                if not stored_mac:
+                    logger.warning("License cache missing HMAC — discarding")
+                    return None
+                json_bytes = json.dumps(data, sort_keys=True).encode("utf-8")
+                expected_mac = hmac.new(
+                    signing_key.encode("utf-8"), json_bytes, hashlib.sha256
+                ).hexdigest()
+                if not hmac.compare_digest(stored_mac, expected_mac):
+                    logger.warning("License cache HMAC mismatch — discarding")
+                    return None
+
             # Check TTL
             validated_at = data.get("validated_at", 0)
             if time.time() - validated_at > _CACHE_TTL_SECONDS:
@@ -399,15 +408,22 @@ class LicenseManager:
             return None
 
     def _write_cache(self, tier: LicenseTier, key_hint: str, expires_at: float | None = None) -> None:
-        """Write validation result to local cache."""
+        """Write HMAC-signed validation result to local cache."""
         try:
             self._cache_path.parent.mkdir(parents=True, exist_ok=True)
-            data = {
+            data: dict[str, Any] = {
                 "tier": tier.value,
                 "key_hint": key_hint,
                 "validated_at": time.time(),
                 "expires_at": expires_at,
             }
+            # Sign the cache contents so tampering is detectable.
+            signing_key = self._get_cache_signing_key()
+            if signing_key:
+                json_bytes = json.dumps(data, sort_keys=True).encode("utf-8")
+                data["hmac"] = hmac.new(
+                    signing_key.encode("utf-8"), json_bytes, hashlib.sha256
+                ).hexdigest()
             self._cache_path.write_text(json.dumps(data), encoding="utf-8")
             # Secure permissions
             if sys.platform != "win32":
@@ -423,8 +439,20 @@ class LicenseManager:
         """Return the current license tier.
 
         Resolution is instant and offline — uses cryptographic signature
-        validation with legacy prefix detection as a fallback.
+        validation with cached offline fallback.
         """
+        # Emit deprecation warning if only the legacy env var name is set.
+        if (
+            os.environ.get("KILN_LICENSE_PUBLIC_KEY", "").strip()
+            and not os.environ.get("KILN_LICENSE_SIGNING_SECRET", "").strip()
+        ):
+            warnings.warn(
+                "KILN_LICENSE_PUBLIC_KEY is deprecated — use KILN_LICENSE_SIGNING_SECRET instead. "
+                "KILN_LICENSE_PUBLIC_KEY will be removed in a future release.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         if self._resolved is not None:
             if self._resolved.is_valid:
                 return self._resolved.tier
@@ -631,9 +659,11 @@ def generate_license_key(
     :raises ValueError: If signing key is missing.
     """
     if signing_key is None:
-        signing_key = os.environ.get("KILN_LICENSE_PUBLIC_KEY", "").strip()
+        signing_key = os.environ.get("KILN_LICENSE_SIGNING_SECRET", "").strip()
+        if not signing_key:
+            signing_key = os.environ.get("KILN_LICENSE_PUBLIC_KEY", "").strip()
     if not signing_key:
-        raise ValueError("Signing key is required: pass signing_key or set KILN_LICENSE_PUBLIC_KEY")
+        raise ValueError("Signing key is required: pass signing_key or set KILN_LICENSE_SIGNING_SECRET")
 
     now = time.time()
     payload = {

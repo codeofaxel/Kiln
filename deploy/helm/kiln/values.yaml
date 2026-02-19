@@ -6,8 +6,8 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/codeofaxel/kiln
-  tag: "latest"
-  pullPolicy: Always
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
 
 # -- Image pull secrets for private registries
 imagePullSecrets: []
@@ -42,13 +42,21 @@ config:
   KILN_HEATER_TIMEOUT: "30"
 
 # -- Kiln secrets. Values here are base64-encoded into a Secret.
+# WARNING: All secret values MUST be set before deploying.
+# Empty strings are placeholders -- never deploy with empty values.
+# Generate strong keys with: openssl rand -hex 32
 # For production, use an external secret manager (Vault, Sealed Secrets, etc.)
 secrets:
-  KILN_API_AUTH_TOKEN: "CHANGE_ME_generate_a_strong_random_key"
-  KILN_AUTH_KEY: "CHANGE_ME_generate_a_strong_random_key"
-  KILN_PRINTER_API_KEY: "CHANGE_ME_your_printer_api_key"
-  KILN_LICENSE_KEY: "kiln_ent_CHANGE_ME"
-  KILN_ENCRYPTION_KEY: "CHANGE_ME_64_hex_chars"
+  # MUST be set -- generate with: openssl rand -hex 32
+  KILN_API_AUTH_TOKEN: ""
+  # MUST be set -- generate with: openssl rand -hex 32
+  KILN_AUTH_KEY: ""
+  # MUST be set -- your printer API key
+  KILN_PRINTER_API_KEY: ""
+  # MUST be set -- Enterprise license key (format: kiln_ent_...)
+  KILN_LICENSE_KEY: ""
+  # MUST be set -- generate with: openssl rand -hex 32
+  KILN_ENCRYPTION_KEY: ""
   # Uncomment for PostgreSQL (required for multi-replica)
   # KILN_DB_URL: "postgresql://kiln:password@postgres:5432/kiln"
   # Uncomment for SSO
@@ -76,6 +84,12 @@ ingress:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains; preload";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
   hosts:
     - host: kiln.example.com
@@ -117,12 +131,16 @@ autoscaling:
 
 # -- Network policy
 networkPolicy:
-  enabled: false
+  enabled: true
   # -- Additional CIDR ranges allowed for printer egress
   printerCIDRs:
     - 10.0.0.0/8
     - 172.16.0.0/12
     - 192.168.0.0/16
+  # -- PostgreSQL egress CIDR. Restrict to your database server IP/subnet.
+  # Default 10.0.0.0/8 is a placeholder -- narrow this to the smallest CIDR
+  # that covers your PostgreSQL servers.
+  postgresqlCIDR: "10.0.0.0/8"
 
 # -- Pod security context
 podSecurityContext:
@@ -138,6 +156,8 @@ securityContext:
   capabilities:
     drop:
       - ALL
+  seccompProfile:
+    type: RuntimeDefault
 
 # -- Readiness probe
 readinessProbe:
@@ -171,3 +191,8 @@ affinity: {}
 # -- Deployment strategy. Use Recreate for SQLite, RollingUpdate for PostgreSQL.
 strategy:
   type: Recreate
+
+# -- PodDisruptionBudget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

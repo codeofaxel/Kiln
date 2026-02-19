@@ -641,7 +641,8 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
 
             from kiln.licensing import LicenseTier, generate_license_key
 
-            tier = LicenseTier.BUSINESS if tier_str == "business" else LicenseTier.PRO
+            tier_map = {"business": LicenseTier.BUSINESS, "enterprise": LicenseTier.ENTERPRISE}
+            tier = tier_map.get(tier_str, LicenseTier.PRO)
 
             try:
                 license_key = generate_license_key(tier=tier, email=customer_email)
@@ -652,12 +653,15 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
                     status_code=500,
                 )
 
-            # Store the key on the Stripe session metadata for later retrieval
+            # Store only a hash of the key on the Stripe session (never the full key).
+            import hashlib as _hashlib
+
+            license_key_hash = _hashlib.sha256(license_key.encode("utf-8")).hexdigest()[:12]
             try:
                 _stripe_mod.api_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
                 _stripe_mod.checkout.Session.modify(
                     session_obj["id"],
-                    metadata={**session_metadata, "license_key": license_key},
+                    metadata={**session_metadata, "license_key_hash": license_key_hash},
                 )
                 logger.info(
                     "License key generated for session %s (%s, %s)",

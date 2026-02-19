@@ -376,6 +376,7 @@ Kiln Enterprise supports on-premises deployment via raw Kubernetes manifests or 
 
    ```bash
    kubectl apply -f deploy/k8s/namespace.yaml
+   kubectl apply -f deploy/k8s/serviceaccount.yaml
    kubectl apply -f deploy/k8s/configmap.yaml
    kubectl apply -f deploy/k8s/secret-local.yaml
    kubectl apply -f deploy/k8s/pvc.yaml
@@ -469,9 +470,9 @@ For clusters without internet access:
 
 1. Mirror the container image to your internal registry:
    ```bash
-   docker pull ghcr.io/codeofaxel/kiln:latest
-   docker tag ghcr.io/codeofaxel/kiln:latest registry.internal/kiln:latest
-   docker push registry.internal/kiln:latest
+   docker pull ghcr.io/codeofaxel/kiln:0.1.0
+   docker tag ghcr.io/codeofaxel/kiln:0.1.0 registry.internal/kiln:0.1.0
+   docker push registry.internal/kiln:0.1.0
    ```
 
 2. Update the image reference:
@@ -479,7 +480,7 @@ For clusters without internet access:
    # Helm values
    image:
      repository: registry.internal/kiln
-     tag: "latest"
+     tag: "0.1.0"
      pullPolicy: IfNotPresent
    ```
 
@@ -535,3 +536,6 @@ strategy:
 - [ ] Restrict printer network egress CIDRs to only the subnets containing your printers
 - [ ] Regularly rotate `KILN_API_AUTH_TOKEN` and `KILN_ENCRYPTION_KEY`
 - [ ] Audit Kubernetes RBAC -- Kiln pods need no special cluster permissions
+- [ ] Create a dedicated ServiceAccount for Kiln pods (do not use the `default` ServiceAccount). Set `automountServiceAccountToken: false` on both the ServiceAccount and the pod spec to prevent unnecessary API server access.
+- [ ] Enable a seccomp profile on all containers (`seccompProfile: type: RuntimeDefault`). This restricts the set of syscalls available to the container, reducing kernel attack surface.
+- [ ] Rotate secrets regularly. Establish a rotation schedule for `KILN_API_AUTH_TOKEN`, `KILN_AUTH_KEY`, `KILN_ENCRYPTION_KEY`, and printer API keys. For zero-downtime rotation: create a new secret, update the Kubernetes Secret resource, then perform a rolling restart (`kubectl rollout restart deployment/kiln -n kiln`). Revoke the old credential after all pods have restarted.

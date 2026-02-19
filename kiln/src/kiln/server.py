@@ -56,6 +56,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from kiln import parse_float_env, parse_int_env
 from kiln.auth import AuthManager
 from kiln.backup import BackupError
 from kiln.backup import backup_database as _backup_db
@@ -256,11 +257,47 @@ _AUTO_PRINT_MARKETPLACE: bool = os.environ.get("KILN_AUTO_PRINT_MARKETPLACE", ""
 _AUTO_PRINT_GENERATED: bool = os.environ.get("KILN_AUTO_PRINT_GENERATED", "").lower() in ("1", "true", "yes")
 
 # Heater watchdog: minutes of idle heater time before auto-cooldown (0=disabled).
-_HEATER_TIMEOUT_MIN: float = float(os.environ.get("KILN_HEATER_TIMEOUT", "30"))
+_HEATER_TIMEOUT_MIN: float = parse_float_env("KILN_HEATER_TIMEOUT", 30.0)
 
 # Default snapshot directory — use ~/.kiln/snapshots/ instead of /tmp to
 # avoid macOS periodic /tmp cleanup deleting saved snapshots.
 _DEFAULT_SNAPSHOT_DIR = os.path.join(os.path.expanduser("~"), ".kiln", "snapshots")
+
+
+def _reload_env_config() -> None:
+    """Re-read env-backed configuration globals after .env has been loaded.
+
+    Module-level env reads happen at import time, which is before
+    ``main()`` calls ``load_dotenv()``.  This function refreshes them
+    so that settings from ``.env`` files are picked up correctly.
+    """
+    global _PRINTER_HOST, _PRINTER_API_KEY, _PRINTER_TYPE  # noqa: PLW0603
+    global _PRINTER_SERIAL, _PRINTER_MODEL  # noqa: PLW0603
+    global _CONFIRM_UPLOAD, _CONFIRM_MODE  # noqa: PLW0603
+    global _THINGIVERSE_TOKEN, _MMF_API_KEY  # noqa: PLW0603
+    global _CULTS3D_USERNAME, _CULTS3D_API_KEY, _CRAFTCLOUD_API_KEY  # noqa: PLW0603
+    global _FULFILLMENT_PROVIDER, _MESHY_API_KEY  # noqa: PLW0603
+    global _AUTO_PRINT_MARKETPLACE, _AUTO_PRINT_GENERATED  # noqa: PLW0603
+    global _HEATER_TIMEOUT_MIN  # noqa: PLW0603
+
+    _PRINTER_HOST = os.environ.get("KILN_PRINTER_HOST", "")
+    _PRINTER_API_KEY = os.environ.get("KILN_PRINTER_API_KEY", "")
+    _PRINTER_TYPE = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
+    _PRINTER_SERIAL = os.environ.get("KILN_PRINTER_SERIAL", "")
+    _PRINTER_MODEL = os.environ.get("KILN_PRINTER_MODEL", "")
+    _CONFIRM_UPLOAD = os.environ.get("KILN_CONFIRM_UPLOAD", "").lower() in ("1", "true", "yes")
+    _CONFIRM_MODE = os.environ.get("KILN_CONFIRM_MODE", "").lower() in ("1", "true", "yes")
+    _THINGIVERSE_TOKEN = os.environ.get("KILN_THINGIVERSE_TOKEN", "")
+    _MMF_API_KEY = os.environ.get("KILN_MMF_API_KEY", "")
+    _CULTS3D_USERNAME = os.environ.get("KILN_CULTS3D_USERNAME", "")
+    _CULTS3D_API_KEY = os.environ.get("KILN_CULTS3D_API_KEY", "")
+    _CRAFTCLOUD_API_KEY = os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
+    _FULFILLMENT_PROVIDER = os.environ.get("KILN_FULFILLMENT_PROVIDER", "")
+    _MESHY_API_KEY = os.environ.get("KILN_MESHY_API_KEY", "")
+    _AUTO_PRINT_MARKETPLACE = os.environ.get("KILN_AUTO_PRINT_MARKETPLACE", "").lower() in ("1", "true", "yes")
+    _AUTO_PRINT_GENERATED = os.environ.get("KILN_AUTO_PRINT_GENERATED", "").lower() in ("1", "true", "yes")
+    _HEATER_TIMEOUT_MIN = parse_float_env("KILN_HEATER_TIMEOUT", 30.0)
+
 
 # ---------------------------------------------------------------------------
 # MCP server instance
@@ -373,7 +410,7 @@ def _get_adapter() -> PrinterAdapter:
                 "KILN_PRINTER_PORT environment variable is not set.  "
                 "Set it to the serial port path (e.g. /dev/ttyUSB0, /dev/ttyACM0, COM3)."
             )
-        baudrate = int(os.environ.get("KILN_PRINTER_BAUDRATE", "115200"))
+        baudrate = parse_int_env("KILN_PRINTER_BAUDRATE", 115200)
         _adapter = SerialPrinterAdapter(port=port, baudrate=baudrate)
     else:
         raise RuntimeError(
@@ -9079,6 +9116,10 @@ def main() -> None:
         load_dotenv(Path.home() / ".kiln" / ".env")  # then ~/.kiln/.env
     except ImportError:
         pass
+
+    # Re-snapshot env-backed config vars — they were read at import time
+    # before .env was loaded, so they may have stale defaults.
+    _reload_env_config()
 
     # Configure structured logging if requested (before any log calls).
     _configure_logging()

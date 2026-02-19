@@ -20,7 +20,8 @@ spec:
         app.kubernetes.io/name: kiln
         app.kubernetes.io/component: server
     spec:
-      serviceAccountName: default
+      serviceAccountName: kiln
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -28,8 +29,8 @@ spec:
         fsGroup: 1000
       containers:
         - name: kiln
-          image: ghcr.io/codeofaxel/kiln:latest
-          imagePullPolicy: Always
+          image: ghcr.io/codeofaxel/kiln:0.1.0
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8741
@@ -72,6 +73,8 @@ spec:
             capabilities:
               drop:
                 - ALL
+            seccompProfile:
+              type: RuntimeDefault
       volumes:
         - name: kiln-data
           persistentVolumeClaim:
