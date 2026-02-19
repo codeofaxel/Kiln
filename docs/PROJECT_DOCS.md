@@ -13,7 +13,7 @@ Kiln is agentic infrastructure for physical fabrication. It provides a unified i
 **Three ways to print:**
 
 - **🖨️ Your printers.** Control OctoPrint, Moonraker, Bambu Lab, or Prusa Link machines on your LAN — or remotely via Bambu Cloud.
-- **🏭 Fulfillment centers.** Outsource to Craftcloud (150+ services — works without an API key) or Sculpteo *(API access required — in partner onboarding)* (75+ materials). No printer required — or use alongside local printers for overflow and specialty materials.
+- **🏭 Fulfillment centers.** Outsource to Craftcloud (150+ services — no API key required). No printer required — or use alongside local printers for overflow and specialty materials. More providers coming soon.
 - **🌐 Distributed network.** *(Coming soon.)* Route jobs to decentralized peer-to-peer printer networks, or register your own printer to earn revenue.
 
 All three modes use the same MCP tools and CLI commands.
@@ -878,7 +878,7 @@ kiln/src/kiln/
         base.py          # Fulfillment adapter interface
         registry.py      # Provider registry and factory
         craftcloud.py    # Craftcloud v5 API client (upload → price → cart → order)
-        sculpteo.py      # Sculpteo partner API client
+        sculpteo.py      # Sculpteo partner API client (pending partner credentials)
     marketplaces/
         base.py          # Marketplace adapter interface
         myminifactory.py # MyMiniFactory API client (primary)

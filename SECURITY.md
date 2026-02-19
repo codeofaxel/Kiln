@@ -92,7 +92,7 @@ Kiln implements defense in depth across five layers:
 - The REST API server (`kiln rest`)
 - Printer adapters (OctoPrint, Moonraker, Bambu, Prusa Link)
 - Payment processing (Stripe, Circle)
-- Fulfillment service integrations (Craftcloud, Sculpteo)
+- Fulfillment service integrations (Craftcloud)
 - 3DOS network gateway
 - G-code validation and safety profiles
 - Authentication and authorization logic

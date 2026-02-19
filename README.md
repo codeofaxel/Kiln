@@ -40,7 +40,7 @@ Kiln lets AI agents design, queue, and execute physical manufacturing jobs on re
 | Mode | What it is | You need |
 |------|-----------|----------|
 | **🖨️ Your printer** | Control OctoPrint, Moonraker, Bambu, or Prusa Link printers on your LAN — or remotely via Bambu Cloud | A 3D printer |
-| **🏭 Fulfillment centers** | Outsource to Craftcloud (150+ services — works without an API key), Sculpteo *(API access required)*, or other providers. Kiln handles quoting, ordering, and tracking | Nothing — no printer required |
+| **🏭 Fulfillment centers** | Outsource to Craftcloud (150+ services — no API key required). Kiln handles quoting, ordering, and tracking. More providers coming soon | Nothing — no printer required |
 | **🌐 Distributed network** *(coming soon)* | Route jobs to decentralized peer-to-peer printer networks, or register your own printer to earn revenue | Nothing — or a printer to earn |
 
 All three modes use the same MCP tools and CLI commands. An agent can seamlessly fall back from a busy local printer to a fulfillment center — all in one workflow.
@@ -72,7 +72,6 @@ graph TD
     C --> E5["Elegoo"]
 
     F --> F1["Craftcloud"]
-    F --> F2["Sculpteo"]
 
     N --> N1["Remote Printers"]
 
@@ -491,7 +490,7 @@ The Kiln MCP server (`kiln serve`) exposes **198 tools** to agents. Key tools ar
 | `find_slicer_tool` | Detect installed slicer (PrusaSlicer/OrcaSlicer) |
 | `slice_and_print` | Slice a model then upload and print in one step |
 | `printer_snapshot` | Capture a webcam snapshot from the printer |
-| `fulfillment_materials` | List materials from external print services (Craftcloud, Sculpteo) |
+| `fulfillment_materials` | List materials from external print services (Craftcloud) |
 | `fulfillment_quote` | Get a manufacturing quote for a 3D model |
 | `fulfillment_order` | Place an order based on a quote |
 | `fulfillment_order_status` | Track a fulfillment order |
@@ -636,7 +635,7 @@ The server also exposes read-only resources that agents can use for context:
 | `discovery.py` | Network printer discovery (mDNS + HTTP probe) |
 | `generation/` | Text-to-model generation providers (Meshy AI, OpenSCAD) with mesh validation |
 | `consumer.py` | Consumer workflow for non-printer users (address validation, material recommendations, timeline/price estimation, onboarding) |
-| `fulfillment/` | External manufacturing service adapters (Craftcloud, Sculpteo) with intelligence layer (provider health, multi-provider comparison, batch quoting, retry/fallback, order history, shipping insurance) |
+| `fulfillment/` | External manufacturing service adapters (Craftcloud) with intelligence layer (provider health, multi-provider comparison, batch quoting, retry/fallback, order history, shipping insurance) |
 | `cost_estimator.py` | Print cost estimation from G-code analysis |
 | `materials.py` | Multi-material and spool tracking |
 | `bed_leveling.py` | Automated bed leveling trigger system |
@@ -819,11 +818,8 @@ export KILN_CRAFTCLOUD_USE_WEBSOCKET=1
 # Craftcloud staging (for testing)
 export KILN_CRAFTCLOUD_BASE_URL=https://api-stg.craftcloud3d.com
 
-# Sculpteo (requires API access — in partner onboarding)
-export KILN_SCULPTEO_API_KEY=your_key
-
 # Optional: explicitly select a provider
-export KILN_FULFILLMENT_PROVIDER=craftcloud  # or sculpteo
+export KILN_FULFILLMENT_PROVIDER=craftcloud
 ```
 
 Agents use the consumer workflow MCP tools: `consumer_onboarding` for guided setup, `recommend_material` for material selection, `estimate_price` / `estimate_timeline` for quick estimates, `fulfillment_compare_providers` for cross-provider quotes, `fulfillment_batch_quote` for multi-part assemblies, and `fulfillment_order_history` / `fulfillment_reorder` for repeat orders.

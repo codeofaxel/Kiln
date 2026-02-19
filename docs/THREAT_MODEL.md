@@ -14,7 +14,7 @@ This threat model covers the following components of the Kiln system:
 | CLI (`kiln`, `octoprint-cli`) | Click commands | Local process |
 | Printer Adapters | OctoPrint (HTTP), Moonraker (HTTP), Bambu Lab (MQTT/FTPS), Prusa Link (HTTP) | LAN or WAN |
 | Payment Processing | Stripe (HTTPS), Circle USDC (HTTPS), on-chain (Solana, Ethereum, Base L2) | HTTPS / RPC |
-| Fulfillment Providers | Craftcloud (HTTPS), Sculpteo (HTTPS) | HTTPS |
+| Fulfillment Providers | Craftcloud (HTTPS) | HTTPS |
 | Webhook Delivery | Outbound HTTP POST to registered endpoints | HTTPS |
 | Cloud Sync | Outbound HTTPS to remote API | HTTPS |
 | Plugin System | Python entry points (`kiln.plugins` group) | In-process |
@@ -69,8 +69,8 @@ This threat model covers the following components of the Kiln system:
   └─────────┼───────────────┼───────┘
             │               │
      ┌──────┴───────┐  ┌───┴──────────┐
-     │ Stripe/Circle│  │ Craftcloud/  │
-     │ Solana/Base  │  │ Sculpteo     │
+     │ Stripe/Circle│  │ Craftcloud   │
+     │ Solana/Base  │  │              │
      └──────────────┘  └──────────────┘
 
                     TRUST BOUNDARY 4: Kiln ↔ Local Filesystem

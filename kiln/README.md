@@ -88,7 +88,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 - **Model marketplaces** — search/download from MyMiniFactory, Cults3D (Thingiverse deprecated — acquired by MMF, Feb 2026)
 - **Slicer integration** — PrusaSlicer and OrcaSlicer with auto-detection
 - **Text-to-model generation** — Meshy AI and OpenSCAD providers
-- **Fulfillment services** — outsource to Craftcloud or Sculpteo
+- **Fulfillment services** — outsource to Craftcloud (150+ print services, no API key required)
 - **Safety first** — pre-flight checks, G-code validation, temperature limits, optional auth
 - **Webhooks** — HMAC-signed event notifications for job lifecycle
 - **OTA firmware updates** — check, update, and rollback printer firmware

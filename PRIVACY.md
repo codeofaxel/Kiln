@@ -21,7 +21,7 @@ explicitly use features that connect to external services.
 
 | Feature | Data shared | Third party |
 |---------|-------------|-------------|
-| Fulfillment orders | Model file, shipping address, material choice | Craftcloud, Sculpteo (manufacturing providers) |
+| Fulfillment orders | Model file, shipping address, material choice | Craftcloud (manufacturing provider) |
 | Card payments | Payment amount, currency | Stripe |
 | USDC payments | Wallet address, payment amount | Circle |
 | Marketplace browsing | Search queries | MyMiniFactory, Cults3D, Thingiverse (deprecated) |

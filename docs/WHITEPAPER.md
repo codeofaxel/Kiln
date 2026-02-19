@@ -8,7 +8,7 @@
 
 ## Abstract
 
-We present Kiln, a protocol and reference implementation that enables autonomous AI agents to control physical manufacturing hardware — specifically 3D printers — through a unified adapter interface. Kiln bridges the gap between digital intelligence and physical fabrication by exposing three co-equal manufacturing paths through a single interface: (1) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link adapters; (2) outsourced manufacturing through fulfillment providers such as Craftcloud and Sculpteo; and (3) distributed peer-to-peer manufacturing via decentralized printer networks (coming soon). All three modes are accessible through the Model Context Protocol (MCP) and a conventional CLI, allowing agents to seamlessly route jobs based on material availability, capacity, cost, or geographic proximity. The system enforces safety invariants at the protocol level to prevent physical damage. We describe the adapter abstraction that normalizes disparate printer APIs, the fulfillment and distributed manufacturing integrations, the safety validation layer, and the scheduling architecture that enables multi-printer job dispatch.
+We present Kiln, a protocol and reference implementation that enables autonomous AI agents to control physical manufacturing hardware — specifically 3D printers — through a unified adapter interface. Kiln bridges the gap between digital intelligence and physical fabrication by exposing three co-equal manufacturing paths through a single interface: (1) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link adapters; (2) outsourced manufacturing through fulfillment providers such as Craftcloud; and (3) distributed peer-to-peer manufacturing via decentralized printer networks (coming soon). All three modes are accessible through the Model Context Protocol (MCP) and a conventional CLI, allowing agents to seamlessly route jobs based on material availability, capacity, cost, or geographic proximity. The system enforces safety invariants at the protocol level to prevent physical damage. We describe the adapter abstraction that normalizes disparate printer APIs, the fulfillment and distributed manufacturing integrations, the safety validation layer, and the scheduling architecture that enables multi-printer job dispatch.
 
 ## 1. Introduction
 
@@ -48,9 +48,9 @@ Kiln solves both problems simultaneously:
              /                 |                 \
    [Your Printers]     [Fulfillment]     [Distributed Network]
     /   |   \  \  \       /       \           |
-  OP  MR  BL  PL  EG  Craftcloud  Sculpteo  Remote Printers
-   |   |   |   |   |      |          |           |
-  HTTP HTTP MQTT HTTP WS  HTTPS     HTTPS       HTTPS
+  OP  MR  BL  PL  EG  Craftcloud  Remote Printers
+   |   |   |   |   |      |           |
+  HTTP HTTP MQTT HTTP WS  HTTPS       HTTPS
    |   |   |   |   |      |          |           |
   🖨️  🖨️  🖨️  🖨️  🖨️   150+ svcs  75+ mats   P2P fleet
 
@@ -193,7 +193,7 @@ Kiln supports third-party extensions through a plugin system based on Python ent
 
 ## 7. Revenue Model
 
-Local printer control is free and unrestricted. Kiln charges a 5% platform fee on orders placed through external manufacturing services (Craftcloud, Sculpteo, and distributed manufacturing networks), with the first 5 outsourced orders per month free and a $0.25 minimum / $200 maximum per-order cap. The fee is surfaced transparently in every quote response before the user commits to an order.
+Local printer control is free and unrestricted. Kiln charges a 5% platform fee on orders placed through external manufacturing services (Craftcloud and distributed manufacturing networks), with the first 5 outsourced orders per month free and a $0.25 minimum / $200 maximum per-order cap. The fee is surfaced transparently in every quote response before the user commits to an order.
 
 Kiln uses a three-tier licensing model: **Free** (all local printing, up to 2 printers, 10-job queue, billing visibility), **Pro** ($29/mo — unlimited printers, fleet orchestration, analytics, unlimited queue, cloud sync), and **Business** ($99/mo — fulfillment brokering, hosted deployment, priority support). The free tier is designed to be excellent for solo operators, with the paywall boundary at multi-printer fleet orchestration rather than individual feature gating. License keys are validated offline-first via key prefix detection (`kiln_pro_`, `kiln_biz_`) with cached remote validation. The licensing system never blocks printer operations if the validation API is unreachable. Billing is tracked through a `BillingLedger` with `FeeCalculation` structs that record fee type, amount, and associated order metadata.
 
