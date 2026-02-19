@@ -1,7 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.codeofaxel/kiln",
-  "description": "MCP server for AI agents to control 3D printers (OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo). 230 tools for print farm automation, model search, STL slicing, job queuing, safety validation, fleet management, and manufacturing fulfillment.",
+  "title": "Kiln",
+  "description": "MCP server for AI agents to control 3D printers (OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo). 232 tools for print farm automation, model search, STL slicing, job queuing, safety validation, fleet management, and manufacturing fulfillment.",
   "version": "0.1.0",
   "repository": {
     "url": "https://github.com/codeofaxel/Kiln",
@@ -15,41 +16,26 @@
       "transport": {
         "type": "stdio"
       },
-      "runtime": "python",
-      "command": "python3",
-      "args": ["-m", "kiln"]
-    }
-  ],
-  "environmentVariables": [
-    {
-      "name": "KILN_PRINTER_HOST",
-      "description": "URL of your 3D printer (OctoPrint, Moonraker, or Prusa Link)",
-      "required": false
-    },
-    {
-      "name": "KILN_PRINTER_API_KEY",
-      "description": "API key for your printer's REST API",
-      "required": false
-    },
-    {
-      "name": "KILN_PRINTER_TYPE",
-      "description": "Printer type: octoprint, moonraker, bambu, prusalink, or elegoo",
-      "required": false
-    },
-    {
-      "name": "KILN_BAMBU_IP",
-      "description": "IP address for Bambu Lab printer (MQTT/FTPS)",
-      "required": false
-    },
-    {
-      "name": "KILN_BAMBU_SERIAL",
-      "description": "Serial number of Bambu Lab printer",
-      "required": false
-    },
-    {
-      "name": "KILN_BAMBU_ACCESS_CODE",
-      "description": "Access code for Bambu Lab printer",
-      "required": false
+      "environmentVariables": [
+        {
+          "name": "KILN_PRINTER_HOST",
+          "description": "URL of your 3D printer (OctoPrint, Moonraker, or Prusa Link)",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "KILN_PRINTER_API_KEY",
+          "description": "API key for your printer's REST API",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "KILN_PRINTER_TYPE",
+          "description": "Printer type: octoprint, moonraker, bambu, prusalink, or elegoo",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
     }
   ]
 }
