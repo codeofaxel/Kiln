@@ -36,10 +36,12 @@ import base64
 import calendar
 import contextlib
 import hashlib
+import ipaddress
 import json
 import logging
 import os
 import secrets
+import socket
 import threading
 import time
 import urllib.parse
@@ -67,6 +69,21 @@ _SSO_FILE = _SSO_DIR / "sso.json"
 
 # JWKS / discovery cache TTL: 1 hour.
 _JWKS_CACHE_TTL: float = 3600
+
+# Pending OIDC flow limits.
+_MAX_PENDING_FLOWS: int = 100
+_FLOW_EXPIRY_SECONDS: float = 600  # 10 minutes
+
+# Private/reserved IP networks for SSRF protection.
+_SSRF_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +183,46 @@ def _base64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
+def _validate_url_no_ssrf(url: str) -> None:
+    """Reject URLs that resolve to private/reserved IP addresses.
+
+    Prevents SSRF attacks by resolving the hostname and checking
+    against known private IP ranges.  Allows localhost when
+    ``KILN_SSO_ALLOW_LOCALHOST=1`` is set (development use).
+
+    Args:
+        url: The URL to validate.
+
+    Raises:
+        SSOError: If the URL resolves to a private/reserved IP.
+    """
+    parsed = urllib.parse.urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        raise SSOError(f"Cannot extract hostname from URL: {url}")
+
+    allow_localhost = os.environ.get("KILN_SSO_ALLOW_LOCALHOST", "0") == "1"
+
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as exc:
+        raise SSOError(f"Cannot resolve hostname {hostname!r}: {exc}") from exc
+
+    for _family, _type, _proto, _canonname, sockaddr in addr_infos:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if allow_localhost and ip.is_loopback:
+            continue
+        for network in _SSRF_BLOCKED_NETWORKS:
+            if ip in network:
+                raise SSOError(
+                    f"URL {url!r} resolves to private/reserved IP {ip} "
+                    f"— request blocked (SSRF protection)"
+                )
+
+
 def _http_get_json(url: str, *, timeout: float = 10) -> dict[str, Any]:
     """Fetch JSON from a URL using urllib."""
+    _validate_url_no_ssrf(url)
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -183,6 +238,7 @@ def _http_post_form(
     timeout: float = 10,
 ) -> dict[str, Any]:
     """POST form-encoded data and return JSON response."""
+    _validate_url_no_ssrf(url)
     encoded = urllib.parse.urlencode(data).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -219,8 +275,8 @@ class SSOManager:
         self._jwks_cached_at: float = 0.0
         self._oidc_discovery_cache: dict[str, Any] = {}
         self._oidc_discovery_cached_at: dict[str, float] = {}
-        # PKCE: code_verifier + nonce stored per state for the active flow.
-        self._pending_flows: dict[str, dict[str, str]] = {}
+        # PKCE: code_verifier + nonce + created_at stored per state.
+        self._pending_flows: dict[str, dict[str, Any]] = {}
         self._load_config()
 
     # ------------------------------------------------------------------
@@ -385,6 +441,37 @@ class SSOManager:
         if not self._config.enabled:
             raise SSOError("SSO is disabled. Enable it in the SSO configuration.")
         return self._config
+
+    # ------------------------------------------------------------------
+    # Pending Flow Cleanup
+    # ------------------------------------------------------------------
+
+    def _cleanup_expired_flows(self) -> None:
+        """Remove expired pending OIDC flows and cap at max size.
+
+        Evicts entries older than ``_FLOW_EXPIRY_SECONDS`` first, then
+        evicts the oldest entries if the count still exceeds
+        ``_MAX_PENDING_FLOWS``.
+        """
+        now = time.time()
+        # Remove expired entries.
+        expired_states = [
+            state
+            for state, flow in self._pending_flows.items()
+            if now - flow.get("created_at", 0.0) > _FLOW_EXPIRY_SECONDS
+        ]
+        for state in expired_states:
+            del self._pending_flows[state]
+
+        # Cap at max size — evict oldest first.
+        if len(self._pending_flows) >= _MAX_PENDING_FLOWS:
+            sorted_states = sorted(
+                self._pending_flows,
+                key=lambda s: self._pending_flows[s].get("created_at", 0.0),
+            )
+            evict_count = len(self._pending_flows) - _MAX_PENDING_FLOWS + 1
+            for state in sorted_states[:evict_count]:
+                del self._pending_flows[state]
 
     # ------------------------------------------------------------------
     # OIDC Discovery
@@ -602,6 +689,20 @@ class SSOManager:
             return
 
         domain = email.rsplit("@", 1)[-1].lower() if "@" in email else ""
+
+        # IDN homograph attack prevention: reject non-ASCII domains unless
+        # explicitly allowed via KILN_SSO_ALLOW_IDN=1.
+        try:
+            domain.encode("ascii")
+        except UnicodeEncodeError:
+            allow_idn = os.environ.get("KILN_SSO_ALLOW_IDN", "0") == "1"
+            if not allow_idn:
+                raise SSOError(
+                    f"Email domain {domain!r} contains non-ASCII characters "
+                    f"(possible IDN homograph attack). Set KILN_SSO_ALLOW_IDN=1 "
+                    f"to allow internationalized domain names."
+                ) from None
+
         allowed = [d.lower() for d in config.allowed_domains]
         if domain not in allowed:
             raise SSOError(
@@ -729,6 +830,9 @@ class SSOManager:
         """
         config = self._require_config()
 
+        # Evict expired / excess pending flows before adding a new one.
+        self._cleanup_expired_flows()
+
         discovery = self._discover_oidc(config.issuer_url)
         auth_endpoint = discovery.get("authorization_endpoint")
         if not auth_endpoint:
@@ -747,6 +851,7 @@ class SSOManager:
         self._pending_flows[flow_state] = {
             "code_verifier": code_verifier,
             "nonce": nonce,
+            "created_at": time.time(),
         }
 
         params: dict[str, str] = {
@@ -779,11 +884,17 @@ class SSOManager:
         config = self._require_config()
 
         # Validate state and retrieve stored flow params (PKCE + nonce).
-        flow_params: dict[str, str] | None = None
+        flow_params: dict[str, Any] | None = None
         if state:
             flow_params = self._pending_flows.pop(state, None)
             if flow_params is None:
                 raise SSOError("Invalid or expired OIDC state — possible CSRF attack")
+            # Check that the flow hasn't expired.
+            created_at = flow_params.get("created_at", 0.0)
+            if time.time() - created_at > _FLOW_EXPIRY_SECONDS:
+                raise SSOError(
+                    "OIDC authorization flow has expired — please restart login"
+                )
 
         discovery = self._discover_oidc(config.issuer_url)
         token_endpoint = discovery.get("token_endpoint")

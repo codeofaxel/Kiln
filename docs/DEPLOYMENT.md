@@ -518,6 +518,31 @@ strategy:
   type: RollingUpdate
 ```
 
+### External Secrets Management
+
+For production deployments, avoid storing secrets directly in Kubernetes Secret manifests.
+Use an external secrets operator to sync secrets from your organization's secret store:
+
+**Recommended tools:**
+- [External Secrets Operator](https://external-secrets.io/) — syncs from AWS Secrets Manager, HashiCorp Vault, GCP Secret Manager, Azure Key Vault
+- [Sealed Secrets](https://sealed-secrets.netlify.app/) — encrypt secrets in Git, decrypt in-cluster
+- [HashiCorp Vault](https://www.vaultproject.io/) with the Vault Agent Injector
+
+**Environment variables that contain secrets:**
+- `KILN_STRIPE_SECRET_KEY` — Stripe API key
+- `KILN_STRIPE_WEBHOOK_SECRET` — Stripe webhook signing secret
+- `KILN_ENCRYPTION_KEY` — G-code encryption passphrase
+- `KILN_SSO_CLIENT_SECRET` — SSO/OIDC client secret
+- `KILN_LICENSE_PUBLIC_KEY` — License validation key
+- `KILN_API_AUTH_TOKEN` — REST API bearer token
+- `KILN_CIRCLE_API_KEY` — Circle USDC API key
+
+**Never commit plaintext secrets to Git.** The default `secret.yaml` ships with empty values as a template.
+
+> **Note:** Environment variable secrets are visible in `/proc/<pid>/environ` inside the container.
+> For maximum security, mount secrets as files using `volumeMounts` and read them at startup.
+> The External Secrets Operator supports both methods.
+
 ### Security Hardening Checklist
 
 - [ ] Replace **all** `CHANGE_ME` values in secrets before deploying

@@ -308,7 +308,7 @@ class AuthManager:
         """
         if not self._enabled:
             # Auth disabled -- return a permissive stub
-            return ApiKey(id="none", name="auth-disabled", key_hash="", scopes={"admin"})
+            return ApiKey(id="none", name="auth-disabled", key_hash="", scopes={"read", "write"})
 
         if not key:
             raise AuthError("API key required")

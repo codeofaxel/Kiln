@@ -37,6 +37,36 @@ Environment variables
     marketplace auto-print** — generated geometry is experimental.
 """
 
+# SECURITY NOTE — Mutating tools without explicit auth checks (2026-02-19):
+# These tools perform write operations but rely on transport-level auth
+# (MCP protocol auth) rather than key-based auth:
+#   - confirm_action: executes previously confirmed destructive actions
+#   - activate_license: writes license key to ~/.kiln/license
+#   - get_upgrade_url: creates Stripe checkout sessions
+#   - billing_check_setup: activates payment methods, saves billing config
+#   - download_model: downloads marketplace files to local filesystem
+#   - slice_model: runs slicer binary, writes G-code output files
+#   - set_material: records material changes for a printer
+#   - add_spool: adds filament spool to inventory
+#   - remove_spool: removes filament spool from inventory
+#   - trigger_bed_level: sends bed-leveling G-code to the printer
+#   - set_leveling_policy: modifies auto-leveling policy config
+#   - set_autonomy_level: changes agent autonomy tier, writes config file
+#   - cloud_sync_now: triggers an immediate cloud sync cycle
+#   - cloud_sync_configure: configures cloud sync endpoint with API key
+#   - save_print_checkpoint: persists checkpoint data for crash recovery
+#   - firmware_resume_print: sends G-code sequence to resume a failed print
+#   - start_printer_health_monitoring: starts background health monitoring thread
+#   - stop_printer_health_monitoring: stops background health monitoring thread
+#   - fleet_submit_job: submits a print job to the fleet orchestrator
+#   - cache_design: caches design files for version tracking
+#   - store_credential: encrypts and stores secrets (API keys, tokens)
+#   - acquire_printer_lock: acquires exclusive printer lock
+#   - release_printer_lock: releases exclusive printer lock
+#   - update_printer_firmware: starts firmware update on a printer
+#   - rollback_printer_firmware: rolls back printer firmware
+# When KILN_AUTH_ENABLED=1, consider adding _check_auth("write") to these.
+
 from __future__ import annotations
 
 import atexit

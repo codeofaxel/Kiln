@@ -822,6 +822,12 @@ class KilnDB:
                     "CREATE INDEX IF NOT EXISTS idx_audit_session ON safety_audit_log(session_id)"
                 )
 
+            # Add prev_hash column for tamper-evident hash chain.
+            with contextlib.suppress(sqlite3.OperationalError, Exception):
+                self._conn.execute(
+                    "ALTER TABLE safety_audit_log ADD COLUMN prev_hash TEXT DEFAULT ''"
+                )
+
             # Add user_email column to billing_charges if missing (added for
             # per-user free-tier tracking in the fulfillment proxy).
             with contextlib.suppress(sqlite3.OperationalError, Exception):
@@ -2456,13 +2462,10 @@ class KilnDB:
         """Record a safety audit event and return the row id.
 
         Each row is signed with an HMAC-SHA256 digest computed over its
-        fields.  This allows :meth:`verify_audit_log` to detect *modification*
-        of individual entries.  However, individual-entry HMACs cannot detect
-        *deletion* of rows — a malicious actor could remove entries without
-        breaking the remaining signatures.  A future version should add
-        chained HMACs (each row's HMAC includes the previous row's HMAC)
-        to create an append-only chain where any deletion breaks integrity
-        verification for all subsequent rows.
+        fields **and** linked to the previous row via a SHA-256 hash chain
+        stored in the ``prev_hash`` column.  The HMAC detects modification
+        of individual entries, while the hash chain detects *deletion* —
+        removing any row breaks the chain for all subsequent entries.
 
         Args:
             tool_name: MCP tool name (e.g. ``"start_print"``).
@@ -2477,6 +2480,7 @@ class KilnDB:
             session_id: Optional UUID grouping all tool calls in one agent session.
         """
         ts = time.time()
+        ts_str = str(ts)
         with self._write_lock:
             details_json = json.dumps(details) if details else None
             hmac_sig = self._compute_audit_hmac(
@@ -2490,12 +2494,30 @@ class KilnDB:
                     "details": details_json,
                 }
             )
+
+            # Fetch the hash of the most recent entry to form the chain.
+            prev_row = self._conn.execute(
+                "SELECT prev_hash FROM safety_audit_log ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            last_hash = dict(prev_row).get("prev_hash", "") if prev_row else ""
+
+            # Compute chain hash: sha256(prev_hash | tool | action | session_id | timestamp)
+            chain_input = "|".join([
+                last_hash,
+                tool_name,
+                action,
+                session_id or "",
+                ts_str,
+            ])
+            chain_hash = hashlib.sha256(chain_input.encode("utf-8")).hexdigest()
+
             cur = self._conn.execute(
                 """
                 INSERT INTO safety_audit_log
                     (timestamp, tool_name, safety_level, action,
-                     agent_id, printer_name, details, hmac_signature, session_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     agent_id, printer_name, details, hmac_signature,
+                     session_id, prev_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ts,
@@ -2507,54 +2529,87 @@ class KilnDB:
                     details_json,
                     hmac_sig,
                     session_id,
+                    chain_hash,
                 ),
             )
             self._conn.commit()
             return cur.lastrowid  # type: ignore[return-value]
 
     def verify_audit_log(self) -> dict[str, Any]:
-        """Verify HMAC signatures on all audit log entries.
+        """Verify HMAC signatures **and** the SHA-256 hash chain.
 
-        This checks each row's HMAC independently.  It can detect
-        *modification* of existing entries but **not deletion** — if rows
-        are removed, the remaining signatures will still verify.  A future
-        version should add chained HMACs (where each row's HMAC incorporates
-        the previous row's HMAC) to detect deletions as well.
+        HMAC verification detects *modification* of individual entries.
+        Hash-chain verification detects *deletion* — removing any row
+        breaks the chain for all subsequent entries.
 
-        :returns: Dict with ``total``, ``valid``, ``invalid`` counts
-            and an ``integrity`` field (``"ok"`` or ``"compromised"``).
+        :returns: Dict with ``total``, ``valid``, ``invalid`` counts,
+            ``integrity`` (``"ok"`` or ``"compromised"``), plus
+            ``verified`` (bool), ``total_entries`` (int),
+            ``broken_at`` (int or None), and ``hash_chain_intact`` (bool).
         """
         rows = self._conn.execute("SELECT * FROM safety_audit_log ORDER BY id").fetchall()
         total = len(rows)
         valid = 0
         invalid = 0
-        for row in rows:
+
+        # Hash chain state
+        hash_chain_intact = True
+        broken_at: int | None = None
+        last_hash = ""
+
+        for idx, row in enumerate(rows):
             d = dict(row)
+
+            # --- HMAC verification (existing) ---
             stored_sig = d.get("hmac_signature")
             if stored_sig is None:
-                # Legacy row without HMAC — count as invalid.
                 invalid += 1
-                continue
-            expected = self._compute_audit_hmac(
-                {
-                    "timestamp": d["timestamp"],
-                    "tool_name": d["tool_name"],
-                    "safety_level": d["safety_level"],
-                    "action": d["action"],
-                    "agent_id": d.get("agent_id"),
-                    "printer_name": d.get("printer_name"),
-                    "details": d.get("details"),
-                }
-            )
-            if hmac.compare_digest(stored_sig, expected):
-                valid += 1
             else:
-                invalid += 1
+                expected = self._compute_audit_hmac(
+                    {
+                        "timestamp": d["timestamp"],
+                        "tool_name": d["tool_name"],
+                        "safety_level": d["safety_level"],
+                        "action": d["action"],
+                        "agent_id": d.get("agent_id"),
+                        "printer_name": d.get("printer_name"),
+                        "details": d.get("details"),
+                    }
+                )
+                if hmac.compare_digest(stored_sig, expected):
+                    valid += 1
+                else:
+                    invalid += 1
+
+            # --- Hash chain verification ---
+            stored_hash = d.get("prev_hash", "")
+            if stored_hash:
+                # Recompute expected chain hash from previous hash + row fields.
+                chain_input = "|".join([
+                    last_hash,
+                    d["tool_name"],
+                    d["action"],
+                    d.get("session_id") or "",
+                    str(d["timestamp"]),
+                ])
+                expected_hash = hashlib.sha256(chain_input.encode("utf-8")).hexdigest()
+                if stored_hash != expected_hash and hash_chain_intact:
+                    hash_chain_intact = False
+                    broken_at = idx
+                last_hash = stored_hash
+            else:
+                # Legacy row without prev_hash — reset chain baseline.
+                last_hash = ""
+
         return {
             "total": total,
             "valid": valid,
             "invalid": invalid,
-            "integrity": "ok" if invalid == 0 else "compromised",
+            "integrity": "ok" if invalid == 0 and hash_chain_intact else "compromised",
+            "verified": invalid == 0 and hash_chain_intact,
+            "total_entries": total,
+            "broken_at": broken_at,
+            "hash_chain_intact": hash_chain_intact,
         }
 
     def query_audit(

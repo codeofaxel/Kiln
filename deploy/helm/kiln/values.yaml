@@ -196,3 +196,11 @@ strategy:
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
+
+# -- External secrets integration (uncomment to use)
+# externalSecrets:
+#   enabled: false
+#   secretStore:
+#     name: vault-backend
+#     kind: ClusterSecretStore
+#   refreshInterval: "1h"

@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import TypeVar
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
 
 from kiln.printers.base import PrinterAdapter, PrinterStatus
 
@@ -30,6 +32,27 @@ _T = TypeVar("_T")
 
 # Per-printer timeout for fleet queries (seconds).
 _FLEET_QUERY_TIMEOUT: float = 10.0
+
+
+@dataclass
+class PrinterMetadata:
+    """Metadata for a registered printer.
+
+    :param site: Physical site/location name (e.g. ``"Building A"``).
+    :param tags: Arbitrary key-value tags for filtering.
+    :param registered_at: Unix timestamp of registration.
+    """
+
+    site: str = ""
+    tags: dict[str, str] = field(default_factory=dict)
+    registered_at: float = field(default_factory=time.time)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "site": self.site,
+            "tags": dict(self.tags),
+            "registered_at": self.registered_at,
+        }
 
 
 class PrinterNotFoundError(KeyError):
@@ -49,6 +72,7 @@ class PrinterRegistry:
 
     def __init__(self) -> None:
         self._printers: dict[str, PrinterAdapter] = {}
+        self._metadata: dict[str, PrinterMetadata] = {}
         self._lock = threading.Lock()
         self._printer_locks: dict[str, threading.Lock] = {}
 
@@ -56,18 +80,30 @@ class PrinterRegistry:
     # Registration
     # ------------------------------------------------------------------
 
-    def register(self, name: str, adapter: PrinterAdapter) -> None:
+    def register(
+        self,
+        name: str,
+        adapter: PrinterAdapter,
+        *,
+        site: str = "",
+        tags: dict[str, str] | None = None,
+    ) -> None:
         """Add or replace a printer in the registry.
 
-        Args:
-            name: Unique human-readable name for this printer.
-            adapter: A fully-configured :class:`PrinterAdapter` instance.
+        :param name: Unique human-readable name for this printer.
+        :param adapter: A fully-configured :class:`PrinterAdapter` instance.
+        :param site: Physical site/location name (e.g. ``"Building A"``).
+        :param tags: Arbitrary key-value tags for filtering.
         """
         with self._lock:
             self._printers[name] = adapter
+            self._metadata[name] = PrinterMetadata(
+                site=site,
+                tags=dict(tags) if tags else {},
+            )
             if name not in self._printer_locks:
                 self._printer_locks[name] = threading.Lock()
-            logger.info("Registered printer %r (%s)", name, adapter.name)
+            logger.info("Registered printer %r (%s) at site %r", name, adapter.name, site)
 
     def unregister(self, name: str) -> None:
         """Remove a printer from the registry.
@@ -79,6 +115,7 @@ class PrinterRegistry:
             if name not in self._printers:
                 raise PrinterNotFoundError(name)
             del self._printers[name]
+            self._metadata.pop(name, None)
             logger.info("Unregistered printer %r", name)
 
     # ------------------------------------------------------------------
@@ -171,12 +208,19 @@ class PrinterRegistry:
         Queries are executed in parallel for speed.
         """
         printers = self.list_all()
+        with self._lock:
+            metadata_snapshot = dict(self._metadata)
+
+        def _site_for(name: str) -> str:
+            meta = metadata_snapshot.get(name)
+            return meta.site if meta else ""
 
         def _query(name: str, adapter: PrinterAdapter) -> dict:
             state = adapter.get_state()
             return {
                 "name": name,
                 "backend": adapter.name,
+                "site": _site_for(name),
                 "connected": state.connected,
                 "state": state.state.value,
                 "tool_temp_actual": state.tool_temp_actual,
@@ -190,6 +234,7 @@ class PrinterRegistry:
             return {
                 "name": name,
                 "backend": adapter.name,
+                "site": _site_for(name),
                 "connected": False,
                 "state": PrinterStatus.OFFLINE.value,
                 "tool_temp_actual": None,
@@ -235,6 +280,71 @@ class PrinterRegistry:
 
         results = self._query_printers_parallel(printers, _query, _error)
         return sorted(name for name, matched in results if matched)
+
+    # ------------------------------------------------------------------
+    # Site / metadata queries
+    # ------------------------------------------------------------------
+
+    def get_metadata(self, name: str) -> PrinterMetadata:
+        """Return metadata for a printer.
+
+        :raises PrinterNotFoundError: If *name* is not registered.
+        """
+        with self._lock:
+            if name not in self._printers:
+                raise PrinterNotFoundError(name)
+            return self._metadata[name]
+
+    def list_sites(self) -> list[str]:
+        """Return sorted list of unique site names (excluding empty)."""
+        with self._lock:
+            return sorted({m.site for m in self._metadata.values() if m.site})
+
+    def get_printers_by_site(self, site: str) -> list[str]:
+        """Return sorted printer names at a given site."""
+        with self._lock:
+            return sorted(
+                name for name, meta in self._metadata.items() if meta.site == site
+            )
+
+    def get_fleet_status_by_site(self) -> dict[str, list[dict]]:
+        """Query all printers and group results by site.
+
+        Returns a dict mapping site name to a list of printer status dicts.
+        Printers with no site are grouped under ``"unassigned"``.
+        """
+        statuses = self.get_fleet_status()
+        grouped: dict[str, list[dict]] = {}
+        for entry in statuses:
+            site_key = entry.get("site") or "unassigned"
+            grouped.setdefault(site_key, []).append(entry)
+        return grouped
+
+    def update_printer_metadata(
+        self,
+        name: str,
+        *,
+        site: str | None = None,
+        tags: dict[str, str] | None = None,
+    ) -> PrinterMetadata:
+        """Update metadata for a registered printer.
+
+        Only the provided fields are changed; others are left intact.
+
+        :param name: Printer name.
+        :param site: New site name, or *None* to leave unchanged.
+        :param tags: New tags dict, or *None* to leave unchanged.
+        :raises PrinterNotFoundError: If *name* is not registered.
+        """
+        with self._lock:
+            if name not in self._printers:
+                raise PrinterNotFoundError(name)
+            meta = self._metadata[name]
+            if site is not None:
+                meta.site = site
+            if tags is not None:
+                meta.tags = dict(tags)
+            return meta
 
     # ------------------------------------------------------------------
     # Per-printer mutex
