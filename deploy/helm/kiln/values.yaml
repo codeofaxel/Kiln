@@ -1,0 +1,173 @@
+# -- Kiln Helm Chart Default Values --
+# Override these in your own values file or via --set flags.
+
+# -- Number of replicas. Set to 1 for SQLite; increase only with PostgreSQL.
+replicaCount: 1
+
+image:
+  repository: ghcr.io/codeofaxel/kiln
+  tag: "latest"
+  pullPolicy: Always
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+# - name: ghcr-credentials
+
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Kiln server configuration (non-secret values)
+config:
+  # Printer connection
+  KILN_PRINTER_HOST: "http://octopi.local"
+  KILN_PRINTER_TYPE: "octoprint"
+  KILN_PRINTER_MODEL: ""
+
+  # Server
+  KILN_LOG_FORMAT: "json"
+  KILN_RATE_LIMIT: "60"
+
+  # Storage -- path inside the container; mount a PVC here
+  KILN_DB_PATH: "/data/kiln.db"
+
+  # Security
+  KILN_AUTH_ENABLED: "true"
+  KILN_PLUGIN_POLICY: "strict"
+  KILN_ALLOWED_PLUGINS: ""
+  KILN_CONFIRM_MODE: "true"
+  KILN_LLM_PRIVACY_MODE: "1"
+
+  # Safety
+  KILN_STRICT_MATERIAL_CHECK: "true"
+  KILN_HEATER_TIMEOUT: "30"
+
+# -- Kiln secrets. Values here are base64-encoded into a Secret.
+# For production, use an external secret manager (Vault, Sealed Secrets, etc.)
+secrets:
+  KILN_API_AUTH_TOKEN: "CHANGE_ME_generate_a_strong_random_key"
+  KILN_AUTH_KEY: "CHANGE_ME_generate_a_strong_random_key"
+  KILN_PRINTER_API_KEY: "CHANGE_ME_your_printer_api_key"
+  KILN_LICENSE_KEY: "kiln_ent_CHANGE_ME"
+  KILN_ENCRYPTION_KEY: "CHANGE_ME_64_hex_chars"
+  # Uncomment for PostgreSQL (required for multi-replica)
+  # KILN_DB_URL: "postgresql://kiln:password@postgres:5432/kiln"
+  # Uncomment for SSO
+  # KILN_SSO_ISSUER: "https://idp.example.com"
+  # KILN_SSO_CLIENT_ID: ""
+  # KILN_SSO_CLIENT_SECRET: ""
+  # Uncomment for Stripe
+  # KILN_STRIPE_SECRET_KEY: ""
+  # KILN_STRIPE_WEBHOOK_SECRET: ""
+
+# -- Existing secret name. If set, the chart will NOT create a Secret resource
+# and will use this existing secret for env vars instead.
+existingSecret: ""
+
+# -- Service configuration
+service:
+  type: ClusterIP
+  port: 8741
+
+# -- Ingress configuration
+ingress:
+  enabled: false
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: kiln.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: kiln-tls
+      hosts:
+        - kiln.example.com
+
+# -- Persistence for SQLite database
+persistence:
+  enabled: true
+  # -- Storage class (empty string = cluster default)
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 1Gi
+  # -- Use an existing PVC instead of creating one
+  existingClaim: ""
+
+# -- Resource requests and limits
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "250m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+# -- Horizontal Pod Autoscaler
+# WARNING: Requires PostgreSQL backend (KILN_DB_URL). SQLite cannot handle
+# concurrent writers from multiple replicas.
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+# -- Network policy
+networkPolicy:
+  enabled: false
+  # -- Additional CIDR ranges allowed for printer egress
+  printerCIDRs:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+
+# -- Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# -- Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# -- Readiness probe
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# -- Liveness probe
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 5
+
+# -- Node selector
+nodeSelector: {}
+
+# -- Tolerations
+tolerations: []
+
+# -- Affinity rules
+affinity: {}
+
+# -- Deployment strategy. Use Recreate for SQLite, RollingUpdate for PostgreSQL.
+strategy:
+  type: Recreate

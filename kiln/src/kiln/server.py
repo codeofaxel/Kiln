@@ -10357,5 +10357,197 @@ def report_printer_overage(subscription_item_id: str, active_printer_count: int)
         return _error_dict(f"Failed to report usage: {exc}", code="PAYMENT_ERROR")
 
 
+# ---------------------------------------------------------------------------
+# SSO (Enterprise)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def configure_sso(
+    issuer_url: str,
+    client_id: str,
+    protocol: str = "oidc",
+    client_secret: str = "",
+    redirect_uri: str = "",
+    allowed_domains: str = "",
+    role_mapping: str = "",
+) -> dict:
+    """Configure SSO (OIDC or SAML) for Enterprise authentication.
+
+    Enterprise feature. Sets up single sign-on with your identity provider
+    (Okta, Google Workspace, Azure AD, Auth0, etc.).
+
+    Args:
+        issuer_url: IdP issuer URL (e.g. ``https://accounts.google.com``).
+        client_id: OIDC client ID or SAML entity ID.
+        protocol: ``"oidc"`` or ``"saml"``.
+        client_secret: OIDC client secret (optional for public clients).
+        redirect_uri: Callback URL after auth. Default: ``http://localhost:8741/sso/callback``.
+        allowed_domains: Comma-separated email domains (e.g. ``"acme.com,partner.org"``).
+        role_mapping: JSON string mapping IdP groups to Kiln roles
+            (e.g. ``'{"admins":"admin","devs":"engineer"}'``).
+    """
+    if err := _check_auth("admin"):
+        return err
+    try:
+        from kiln.sso import SSOConfig, SSOProtocol, get_sso_manager
+
+        try:
+            proto = SSOProtocol(protocol.lower())
+        except ValueError:
+            return _error_dict(
+                f"Invalid protocol: {protocol!r}. Use 'oidc' or 'saml'.",
+                code="INVALID_INPUT",
+            )
+
+        domains = [d.strip() for d in allowed_domains.split(",") if d.strip()] if allowed_domains else []
+        mapping: dict[str, str] = {}
+        if role_mapping:
+            import json as _json
+
+            try:
+                mapping = _json.loads(role_mapping)
+            except _json.JSONDecodeError:
+                return _error_dict("role_mapping must be valid JSON.", code="INVALID_INPUT")
+
+        config = SSOConfig(
+            protocol=proto,
+            issuer_url=issuer_url,
+            client_id=client_id,
+            client_secret=client_secret or None,
+            redirect_uri=redirect_uri or "http://localhost:8741/sso/callback",
+            allowed_domains=domains,
+            role_mapping=mapping,
+        )
+
+        mgr = get_sso_manager()
+        mgr.configure(config)
+
+        return {
+            "success": True,
+            "protocol": proto.value,
+            "issuer_url": issuer_url,
+            "allowed_domains": domains,
+            "next_step": (
+                "SSO configured. Use 'sso_login_url' to get the IdP login URL, "
+                "then exchange the auth code with 'sso_exchange_code'."
+            ),
+        }
+    except Exception as exc:
+        logger.exception("Error in configure_sso")
+        return _error_dict(f"Failed to configure SSO: {exc}", code="SSO_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def sso_login_url(state: str = "") -> dict:
+    """Get the SSO login URL to redirect users to the identity provider.
+
+    Enterprise feature. Returns the IdP authorization URL for OIDC or
+    the SAML AuthnRequest redirect URL.
+
+    Args:
+        state: Optional opaque state parameter for CSRF protection.
+    """
+    if err := _check_auth("read"):
+        return err
+    try:
+        from kiln.sso import SSOProtocol, get_sso_manager
+
+        mgr = get_sso_manager()
+        config = mgr.get_config()
+        if config is None:
+            return _error_dict("SSO not configured. Use 'configure_sso' first.", code="CONFIG_MISSING")
+
+        if config.protocol == SSOProtocol.OIDC:
+            url = mgr.get_oidc_authorize_url(state=state or None)
+        else:
+            url = mgr.get_saml_login_url()
+
+        return {
+            "success": True,
+            "login_url": url,
+            "protocol": config.protocol.value,
+            "next_step": "Redirect the user to login_url. After auth, exchange the code with 'sso_exchange_code'.",
+        }
+    except Exception as exc:
+        logger.exception("Error in sso_login_url")
+        return _error_dict(f"Failed to generate login URL: {exc}", code="SSO_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def sso_exchange_code(code: str) -> dict:
+    """Exchange an SSO authorization code for user identity and role.
+
+    Enterprise feature. After the user completes IdP login, exchange
+    the auth code to get their identity, email, groups, and mapped
+    Kiln role.
+
+    Args:
+        code: The authorization code from the IdP callback.
+    """
+    if err := _check_auth("read"):
+        return err
+    try:
+        from kiln.sso import get_sso_manager, map_sso_user_to_role
+
+        mgr = get_sso_manager()
+        config = mgr.get_config()
+        if config is None:
+            return _error_dict("SSO not configured. Use 'configure_sso' first.", code="CONFIG_MISSING")
+
+        user = mgr.exchange_oidc_code(code)
+        kiln_role = map_sso_user_to_role(user)
+
+        return {
+            "success": True,
+            "user": user.to_dict(),
+            "kiln_role": kiln_role,
+            "next_step": f"User authenticated as {user.email} with role '{kiln_role}'.",
+        }
+    except Exception as exc:
+        logger.exception("Error in sso_exchange_code")
+        return _error_dict(f"SSO authentication failed: {exc}", code="SSO_ERROR")
+
+
+@mcp.tool()
+@requires_tier(LicenseTier.ENTERPRISE)
+def sso_status() -> dict:
+    """Check current SSO configuration status.
+
+    Enterprise feature. Returns whether SSO is configured, the protocol,
+    issuer, allowed domains, and role mapping.
+    """
+    if err := _check_auth("read"):
+        return err
+    try:
+        from kiln.sso import get_sso_manager
+
+        mgr = get_sso_manager()
+        config = mgr.get_config()
+        if config is None:
+            return {
+                "success": True,
+                "configured": False,
+                "next_step": "SSO not configured. Use 'configure_sso' to set up OIDC or SAML.",
+            }
+
+        return {
+            "success": True,
+            "configured": True,
+            "protocol": config.protocol.value,
+            "issuer_url": config.issuer_url,
+            "client_id": config.client_id,
+            "allowed_domains": config.allowed_domains,
+            "role_mapping": config.role_mapping,
+            "redirect_uri": config.redirect_uri,
+        }
+    except Exception as exc:
+        logger.exception("Error in sso_status")
+        return _error_dict(f"Failed to get SSO status: {exc}", code="SSO_ERROR")
+
+
 if __name__ == "__main__":
     main()

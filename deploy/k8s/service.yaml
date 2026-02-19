@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kiln
+  namespace: kiln
+  labels:
+    app.kubernetes.io/name: kiln
+    app.kubernetes.io/component: server
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8741
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: kiln
+    app.kubernetes.io/component: server

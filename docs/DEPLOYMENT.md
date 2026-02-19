@@ -344,3 +344,194 @@ docker inspect --format='{{json .State.Health}}' kiln-hosted
 - [ ] Never commit `.env` files or API keys to version control
 - [ ] Set `KILN_LLM_PRIVACY_MODE=1` (default) to redact secrets from LLM context
 - [ ] Set `KILN_CONFIRM_MODE=true` for hosted deployments to require confirmation for destructive operations
+
+---
+
+## On-Premises Deployment (Enterprise)
+
+Kiln Enterprise supports on-premises deployment via raw Kubernetes manifests or a Helm chart. All resources are in the `deploy/` directory.
+
+### Prerequisites
+
+- Kubernetes 1.25+ cluster
+- Helm 3.x (for Helm-based deployment)
+- `kubectl` configured with cluster access
+- Container registry access to `ghcr.io/codeofaxel/kiln` (or a mirror for air-gapped environments)
+- A valid Enterprise license key (`KILN_LICENSE_KEY=kiln_ent_...`)
+
+### Quick Start: Raw Kubernetes Manifests
+
+1. **Edit secrets and config:**
+
+   ```bash
+   # Copy and edit the secret template -- replace all CHANGE_ME values
+   cp deploy/k8s/secret.yaml deploy/k8s/secret-local.yaml
+   # Edit deploy/k8s/secret-local.yaml with real values
+
+   # Edit the configmap to match your printer network
+   vi deploy/k8s/configmap.yaml
+   ```
+
+2. **Apply all manifests:**
+
+   ```bash
+   kubectl apply -f deploy/k8s/namespace.yaml
+   kubectl apply -f deploy/k8s/configmap.yaml
+   kubectl apply -f deploy/k8s/secret-local.yaml
+   kubectl apply -f deploy/k8s/pvc.yaml
+   kubectl apply -f deploy/k8s/deployment.yaml
+   kubectl apply -f deploy/k8s/service.yaml
+
+   # Optional: ingress, HPA, network policy
+   kubectl apply -f deploy/k8s/ingress.yaml
+   kubectl apply -f deploy/k8s/hpa.yaml
+   kubectl apply -f deploy/k8s/networkpolicy.yaml
+   ```
+
+3. **Verify:**
+
+   ```bash
+   kubectl get pods -n kiln
+   kubectl port-forward svc/kiln 8741:8741 -n kiln
+   curl http://localhost:8741/health
+   ```
+
+### Quick Start: Helm
+
+1. **Create a custom values file:**
+
+   ```bash
+   cp deploy/helm/kiln/values.yaml my-values.yaml
+   # Edit my-values.yaml with your configuration
+   ```
+
+2. **Install:**
+
+   ```bash
+   helm install kiln deploy/helm/kiln/ \
+     --namespace kiln --create-namespace \
+     -f my-values.yaml
+   ```
+
+3. **Upgrade after config changes:**
+
+   ```bash
+   helm upgrade kiln deploy/helm/kiln/ \
+     --namespace kiln \
+     -f my-values.yaml
+   ```
+
+4. **Verify:**
+
+   ```bash
+   helm status kiln -n kiln
+   kubectl get pods -n kiln
+   ```
+
+### Key Configuration
+
+#### Database Persistence
+
+By default, Kiln uses SQLite stored on a PersistentVolumeClaim at `/data/kiln.db`. This is suitable for single-replica deployments.
+
+- **PVC size**: 1Gi default (configurable via `persistence.size` in Helm or `pvc.yaml`)
+- **Storage class**: Uses cluster default. Set `persistence.storageClass` for specific backends.
+- **Existing PVC**: Set `persistence.existingClaim` in Helm values to reuse a pre-provisioned PVC.
+
+#### TLS Termination
+
+The included Ingress manifest supports TLS via cert-manager:
+
+- Annotated with `cert-manager.io/cluster-issuer: letsencrypt-prod`
+- Uses nginx ingress class by default
+- Set `ingress.hosts[0].host` to your domain and `ingress.tls[0].secretName` to your TLS secret
+
+For environments without cert-manager, provision a TLS secret manually:
+
+```bash
+kubectl create secret tls kiln-tls \
+  --cert=tls.crt --key=tls.key \
+  -n kiln
+```
+
+#### Network Policies
+
+When `networkPolicy.enabled: true`, Kiln pods are restricted to:
+
+- **Ingress**: Only from within the `kiln` namespace and the `ingress-nginx` namespace
+- **Egress**: DNS, HTTPS to external APIs (443), HTTP/HTTPS/MQTT to printer networks (configurable CIDRs), and PostgreSQL (5432)
+
+Adjust `networkPolicy.printerCIDRs` to match your printer subnet layout.
+
+#### Air-Gapped Deployments
+
+For clusters without internet access:
+
+1. Mirror the container image to your internal registry:
+   ```bash
+   docker pull ghcr.io/codeofaxel/kiln:latest
+   docker tag ghcr.io/codeofaxel/kiln:latest registry.internal/kiln:latest
+   docker push registry.internal/kiln:latest
+   ```
+
+2. Update the image reference:
+   ```yaml
+   # Helm values
+   image:
+     repository: registry.internal/kiln
+     tag: "latest"
+     pullPolicy: IfNotPresent
+   ```
+
+3. If your registry requires authentication, create an image pull secret:
+   ```bash
+   kubectl create secret docker-registry ghcr-credentials \
+     --docker-server=registry.internal \
+     --docker-username=user \
+     --docker-password=token \
+     -n kiln
+   ```
+   Then set `imagePullSecrets` in your values file.
+
+### Scaling Considerations
+
+| Replicas | Database Backend | Deployment Strategy | Notes |
+|---|---|---|---|
+| 1 | SQLite (default) | `Recreate` | Simplest setup. No concurrent write issues. |
+| 2-10 | PostgreSQL | `RollingUpdate` | Set `KILN_DB_URL` to a PostgreSQL connection string. |
+| 10+ | PostgreSQL + read replicas | `RollingUpdate` | Consider connection pooling (PgBouncer). |
+
+**SQLite limitations**: SQLite supports only a single writer at a time. Running multiple replicas with SQLite will cause write conflicts and data corruption. Always switch to PostgreSQL before enabling the HPA or setting `replicaCount > 1`.
+
+To switch to PostgreSQL:
+
+```yaml
+# In secrets (Helm values or secret.yaml)
+KILN_DB_URL: "postgresql://kiln:password@postgres.kiln.svc:5432/kiln"
+
+# In config (remove SQLite path)
+# KILN_DB_PATH is ignored when KILN_DB_URL is set
+
+# Update deployment strategy
+strategy:
+  type: RollingUpdate
+```
+
+### Security Hardening Checklist
+
+- [ ] Replace **all** `CHANGE_ME` values in secrets before deploying
+- [ ] Generate strong keys with `openssl rand -hex 32`
+- [ ] Use an external secret manager (Vault, Sealed Secrets, AWS Secrets Manager) instead of Kubernetes Secret manifests in production
+- [ ] Enable network policies (`networkPolicy.enabled: true`)
+- [ ] Enable TLS via Ingress -- never expose Kiln over plain HTTP in production
+- [ ] Set `KILN_AUTH_ENABLED=true` and configure `KILN_API_AUTH_TOKEN`
+- [ ] Set `KILN_ENCRYPTION_KEY` for data-at-rest encryption (Enterprise)
+- [ ] Configure SSO via `KILN_SSO_*` environment variables (Enterprise)
+- [ ] Run as non-root (default in both manifests and Helm chart)
+- [ ] Enable read-only root filesystem (default in security context)
+- [ ] Drop all capabilities (default in security context)
+- [ ] Set resource limits to prevent noisy-neighbor issues
+- [ ] Use `KILN_LOG_FORMAT=json` for structured logging to your SIEM
+- [ ] Restrict printer network egress CIDRs to only the subnets containing your printers
+- [ ] Regularly rotate `KILN_API_AUTH_TOKEN` and `KILN_ENCRYPTION_KEY`
+- [ ] Audit Kubernetes RBAC -- Kiln pods need no special cluster permissions

@@ -1,0 +1,32 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kiln
+  namespace: kiln
+  labels:
+    app.kubernetes.io/name: kiln
+    app.kubernetes.io/component: server
+  annotations:
+    # nginx-ingress controller annotations
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    # cert-manager TLS automation
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - kiln.example.com
+      secretName: kiln-tls
+  rules:
+    - host: kiln.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kiln
+                port:
+                  number: 8741

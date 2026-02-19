@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kiln-data
+  namespace: kiln
+  labels:
+    app.kubernetes.io/name: kiln
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # Uncomment to specify a StorageClass (otherwise uses cluster default)
+  # storageClassName: standard

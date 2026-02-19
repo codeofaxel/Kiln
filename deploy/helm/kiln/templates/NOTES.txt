@@ -1,0 +1,29 @@
+
+Kiln has been deployed successfully.
+
+1. Get the application URL:
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+  https://{{ $host.host }}
+{{- end }}
+{{- else if contains "ClusterIP" .Values.service.type }}
+  kubectl port-forward svc/{{ include "kiln.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }} -n {{ .Release.Namespace }}
+  Then visit: http://localhost:{{ .Values.service.port }}
+{{- end }}
+
+2. Verify the deployment:
+  kubectl get pods -n {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "kiln.name" . }}"
+  curl http://localhost:{{ .Values.service.port }}/health
+
+3. Check logs:
+  kubectl logs -n {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "kiln.name" . }}" -f
+
+{{- if not .Values.autoscaling.enabled }}
+
+NOTE: Autoscaling is disabled. The deployment is running {{ .Values.replicaCount }} replica(s)
+with SQLite. To scale beyond 1 replica, set secrets.KILN_DB_URL to a PostgreSQL
+connection string and enable autoscaling in values.yaml.
+{{- end }}
+
+IMPORTANT: Replace all CHANGE_ME values in your secrets before going to production.
+  Generate strong keys with: openssl rand -hex 32

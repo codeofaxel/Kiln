@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kiln
+  namespace: kiln
+  labels:
+    app.kubernetes.io/name: kiln
+    app.kubernetes.io/component: server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kiln
+      app.kubernetes.io/component: server
+  strategy:
+    type: Recreate  # Required for SQLite (single-writer). Switch to RollingUpdate with PostgreSQL.
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kiln
+        app.kubernetes.io/component: server
+    spec:
+      serviceAccountName: default
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: kiln
+          image: ghcr.io/codeofaxel/kiln:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8741
+              protocol: TCP
+          command: ["kiln", "rest", "--host", "0.0.0.0", "--port", "8741"]
+          envFrom:
+            - configMapRef:
+                name: kiln-config
+            - secretRef:
+                name: kiln-secrets
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: kiln-data
+              mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: kiln-data
+          persistentVolumeClaim:
+            claimName: kiln-data
+      # Uncomment for private registries
+      # imagePullSecrets:
+      #   - name: ghcr-credentials

@@ -1,0 +1,26 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kiln
+  namespace: kiln
+  labels:
+    app.kubernetes.io/name: kiln
+    app.kubernetes.io/component: server
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kiln
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  # NOTE: Multi-replica requires PostgreSQL backend (KILN_DB_URL).
+  # SQLite does not support concurrent writers -- using HPA with SQLite
+  # will cause write conflicts. Set KILN_DB_URL to a PostgreSQL connection
+  # string before enabling autoscaling.

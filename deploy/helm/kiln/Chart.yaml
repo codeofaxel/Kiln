@@ -1,0 +1,17 @@
+apiVersion: v2
+name: kiln
+description: Kiln -- AI-native 3D printer management platform (MCP server + CLI)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - 3d-printing
+  - mcp
+  - printer-management
+  - octoprint
+  - moonraker
+  - bambu
+home: https://github.com/codeofaxel/kiln
+maintainers:
+  - name: Kiln Team
+    url: https://github.com/codeofaxel/kiln

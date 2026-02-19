@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kiln-config
+  namespace: kiln
+  labels:
+    app.kubernetes.io/name: kiln
+    app.kubernetes.io/component: config
+data:
+  # --- Printer Connection ---
+  KILN_PRINTER_HOST: "http://octopi.local"
+  KILN_PRINTER_TYPE: "octoprint"
+  KILN_PRINTER_MODEL: ""
+
+  # --- Server ---
+  KILN_LOG_FORMAT: "json"
+  KILN_RATE_LIMIT: "60"
+
+  # --- Storage ---
+  # SQLite path inside the container (mount a PVC here)
+  KILN_DB_PATH: "/data/kiln.db"
+
+  # --- Security ---
+  KILN_AUTH_ENABLED: "true"
+  KILN_PLUGIN_POLICY: "strict"
+  KILN_ALLOWED_PLUGINS: ""
+  KILN_CONFIRM_MODE: "true"
+  KILN_LLM_PRIVACY_MODE: "1"
+
+  # --- Safety ---
+  KILN_STRICT_MATERIAL_CHECK: "true"
+  KILN_HEATER_TIMEOUT: "30"
