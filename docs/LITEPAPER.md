@@ -22,7 +22,7 @@ Kiln acts as a universal translator between AI agents and 3D printers. One inter
 
 1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Bambu Lab, Elegoo (Centauri Carbon, Saturn, Mars via SDCP; Neptune 4 and OrangeStorm Giga via Moonraker), or Prusa Link machines on your local network -- or remotely via Bambu Cloud. Your agent doesn't need to know which firmware a printer runs; Kiln handles the translation.
 
-2. **Fulfillment centers.** *(API access required — in partner onboarding.)* Send jobs to professional manufacturing services. Craftcloud aggregates quotes from over 150 print services worldwide across FDM, SLA, SLS, MJF, and metal (DMLS). Sculpteo provides direct access to 75+ materials with professional finishing. No printer required -- but printer owners use this too for overflow, specialty materials, or production-quality parts.
+2. **Fulfillment centers.** Send jobs to professional manufacturing services. Craftcloud aggregates quotes from over 150 print services worldwide across FDM, SLA, SLS, MJF, and metal (DMLS) — works out of the box with no API key required. Sculpteo *(API access required — in partner onboarding)* provides direct access to 75+ materials with professional finishing. No printer required -- but printer owners use this too for overflow, specialty materials, or production-quality parts.
 
 3. **Distributed network.** *(Coming soon.)* Route jobs to decentralized peer-to-peer printer networks, or register your own printer to earn revenue from incoming jobs. Agents search the network by material, location, and machine type.
 

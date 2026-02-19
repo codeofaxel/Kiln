@@ -1,0 +1,80 @@
+---
+import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
+---
+
+<BlogPostLayout
+  title="Craftcloud Integration Is Live"
+  description="Kiln now supports outsourced 3D printing through Craftcloud's network of 150+ print services — no API key required."
+  date="February 18, 2026"
+  tags={["integration", "fulfillment", "craftcloud"]}
+>
+
+<p>
+  I was up until 4am last night shipping v0.1.0. Got home, crashed for a few hours, and woke up to an email from the Craftcloud team answering every question I'd sent them. So naturally I sat back down and finished the integration this evening.
+</p>
+
+<p>
+  <strong>Kiln now supports outsourced 3D printing through Craftcloud</strong> — their network of 150+ print services across FDM, SLA, SLS, MJF, and metal (DMLS). Your AI agent can get quotes, compare materials, place orders, and track shipments through the same MCP tools and CLI commands used for local printing.
+</p>
+
+<h2>What's different about this integration</h2>
+
+<p>
+  Most API integrations require you to get credentials before you can do anything. Craftcloud's public endpoints work without an API key — meaning you can start getting quotes and placing orders right now, no onboarding required. If you want orders tied to a Craftcloud account, you can set an API key, but it's optional.
+</p>
+
+<p>
+  We also added WebSocket support for price polling. Craftcloud's recommendation is to use <code>wss://</code> connections with msgpack-encoded payloads instead of polling their REST endpoint. Kiln supports both — set <code>KILN_CRAFTCLOUD_USE_WEBSOCKET=1</code> to use the WebSocket path, or leave it off to use standard HTTP polling. Either way, pricing updates stream in as vendors respond.
+</p>
+
+<h2>How it works</h2>
+
+<p>
+  The Craftcloud v5 flow is: upload your model, wait for it to parse, request prices from their vendor network, pick a quote and shipping option, create a cart, and place the order. Kiln handles all of this behind a single <code>fulfillment_quote</code> / <code>fulfillment_order</code> interface. Your agent doesn't need to know the Craftcloud API — it just says "get me a quote for this STL in SLS Nylon" and Kiln handles the rest.
+</p>
+
+<p>
+  The full adapter covers:
+</p>
+
+<ul>
+  <li>Model upload and async parsing (<code>POST /v5/model</code>)</li>
+  <li>Price polling via HTTP or WebSocket (<code>GET /v5/price/{id}</code> or <code>wss://</code>)</li>
+  <li>Material catalog with 6 technologies and dozens of materials/finishes</li>
+  <li>Cart creation and order placement with full address handling</li>
+  <li>Order status tracking and cancellation</li>
+  <li>81 tests covering the complete flow</li>
+</ul>
+
+<h2>Quick start</h2>
+
+<p>
+  If you already have Kiln installed, Craftcloud works out of the box:
+</p>
+
+<pre><code># No API key needed — just set the provider
+export KILN_FULFILLMENT_PROVIDER=craftcloud
+
+# Get a quote
+kiln order quote model.stl --material "SLS Nylon PA12"
+
+# Or let your agent handle it via MCP
+# → fulfillment_quote, fulfillment_order, fulfillment_materials</code></pre>
+
+<h2>Thanks to the Craftcloud team</h2>
+
+<p>
+  Shoutout to the Craftcloud team for being quick and helpful. We sent them a follow-up email with technical questions about their v5 API and got a clear, detailed response that let us finish the integration the same day. That's the kind of responsiveness that makes building on someone's platform actually enjoyable.
+</p>
+
+<p>
+  Sculpteo integration is also built and waiting on partner credentials. More fulfillment providers coming soon.
+</p>
+
+<hr />
+
+<p>
+  <strong>Get started:</strong> <code>pip install kiln3d</code> &mdash; <a href="https://github.com/codeofaxel/Kiln">GitHub</a> &mdash; <a href="https://kiln3d.com">kiln3d.com</a>
+</p>
+
+</BlogPostLayout>

@@ -38,7 +38,6 @@ from kiln.fulfillment.base import (
 )
 from kiln.fulfillment.craftcloud import CraftcloudProvider
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -282,9 +281,14 @@ class TestDataclasses:
 
 
 class TestConstructor:
-    def test_no_api_key_raises(self):
-        with pytest.raises(ValueError, match="API key required"):
-            CraftcloudProvider(api_key="")
+    def test_no_api_key_works(self):
+        p = CraftcloudProvider(api_key="")
+        assert p._api_key == ""
+        assert "X-API-Key" not in p._session.headers
+
+    def test_no_api_key_no_env(self):
+        p = CraftcloudProvider()
+        assert p._api_key == ""
 
     def test_env_var_api_key(self, monkeypatch):
         monkeypatch.setenv("KILN_CRAFTCLOUD_API_KEY", "env-key")
@@ -295,18 +299,20 @@ class TestConstructor:
         p = _provider(base_url="https://api-stg.craftcloud3d.com/")
         assert p._base_url == "https://api-stg.craftcloud3d.com"
 
-    def test_api_key_in_session(self):
+    def test_api_key_in_session_when_provided(self):
         p = _provider()
         assert p._session.headers.get("X-API-Key") == "test-key"
 
+    def test_no_api_key_header_when_empty(self):
+        p = CraftcloudProvider(api_key="")
+        assert "X-API-Key" not in p._session.headers
+
     def test_poll_interval_from_env(self, monkeypatch):
-        monkeypatch.setenv("KILN_CRAFTCLOUD_API_KEY", "k")
         monkeypatch.setenv("KILN_CRAFTCLOUD_POLL_INTERVAL", "5.0")
         p = CraftcloudProvider()
         assert p._poll_interval == 5.0
 
     def test_max_poll_attempts_from_env(self, monkeypatch):
-        monkeypatch.setenv("KILN_CRAFTCLOUD_API_KEY", "k")
         monkeypatch.setenv("KILN_CRAFTCLOUD_MAX_POLL_ATTEMPTS", "100")
         p = CraftcloudProvider()
         assert p._max_poll_attempts == 100
@@ -315,6 +321,32 @@ class TestConstructor:
         monkeypatch.setenv("KILN_CRAFTCLOUD_POLL_INTERVAL", "10")
         p = _provider(poll_interval=0.5)
         assert p._poll_interval == 0.5
+
+    def test_use_websocket_from_env(self, monkeypatch):
+        monkeypatch.setenv("KILN_CRAFTCLOUD_USE_WEBSOCKET", "1")
+        p = CraftcloudProvider()
+        assert p._use_websocket is True
+
+    def test_use_websocket_default_false(self):
+        p = CraftcloudProvider()
+        assert p._use_websocket is False
+
+    def test_use_websocket_kwarg(self):
+        p = _provider(use_websocket=True)
+        assert p._use_websocket is True
+
+    def test_payment_mode_default(self):
+        p = CraftcloudProvider()
+        assert p._payment_mode == "craftcloud"
+
+    def test_payment_mode_from_env(self, monkeypatch):
+        monkeypatch.setenv("KILN_CRAFTCLOUD_PAYMENT_MODE", "partner")
+        p = CraftcloudProvider()
+        assert p._payment_mode == "partner"
+
+    def test_payment_mode_kwarg(self):
+        p = _provider(payment_mode="partner")
+        assert p._payment_mode == "partner"
 
 
 # ---------------------------------------------------------------------------
@@ -561,9 +593,8 @@ class TestRequestPrices:
         incomplete = _mock_response(json_data={"allComplete": False})
         with patch.object(p._session, "request", side_effect=[
             post_resp, incomplete, incomplete,
-        ]):
-            with pytest.raises(FulfillmentError, match="did not complete"):
-                p._request_prices("model-1")
+        ]), pytest.raises(FulfillmentError, match="did not complete"):
+            p._request_prices("model-1")
 
     def test_prices_no_price_id(self):
         p = _provider()
@@ -607,12 +638,11 @@ class TestGetQuote:
 
         with patch.object(p._session, "request", side_effect=[
             upload_resp, price_post, price_get,
-        ]):
-            with patch.object(p._session, "get", return_value=model_ready):
-                quote = p.get_quote(QuoteRequest(
-                    file_path=str(model),
-                    material_id="a97a2a21-0e71-51d1-b642-93b168660053",
-                ))
+        ]), patch.object(p._session, "get", return_value=model_ready):
+            quote = p.get_quote(QuoteRequest(
+                file_path=str(model),
+                material_id="a97a2a21-0e71-51d1-b642-93b168660053",
+            ))
 
         assert quote.quote_id == "bf2b604ae33685f"  # Cheapest quote
         assert quote.unit_price == 72.03
@@ -633,12 +663,11 @@ class TestGetQuote:
 
         with patch.object(p._session, "request", side_effect=[
             upload_resp, price_post, price_get,
-        ]):
-            with patch.object(p._session, "get", return_value=model_ready):
-                quote = p.get_quote(QuoteRequest(
-                    file_path=str(model),
-                    material_id="a97a2a21-0e71-51d1-b642-93b168660053",
-                ))
+        ]), patch.object(p._session, "get", return_value=model_ready):
+            quote = p.get_quote(QuoteRequest(
+                file_path=str(model),
+                material_id="a97a2a21-0e71-51d1-b642-93b168660053",
+            ))
 
         # wenext ($72.03) is cheaper than shapeways ($95.00).
         assert quote.quote_id == "bf2b604ae33685f"
@@ -656,12 +685,11 @@ class TestGetQuote:
 
         with patch.object(p._session, "request", side_effect=[
             upload_resp, price_post, price_get,
-        ]):
-            with patch.object(p._session, "get", return_value=model_ready):
-                quote = p.get_quote(QuoteRequest(
-                    file_path=str(model),
-                    material_id="a97a2a21-0e71-51d1-b642-93b168660053",
-                ))
+        ]), patch.object(p._session, "get", return_value=model_ready):
+            quote = p.get_quote(QuoteRequest(
+                file_path=str(model),
+                material_id="a97a2a21-0e71-51d1-b642-93b168660053",
+            ))
 
         # Only wenext shipping (2 options), not shapeways.
         assert len(quote.shipping_options) == 2
@@ -683,12 +711,11 @@ class TestGetQuote:
 
         with patch.object(p._session, "request", side_effect=[
             upload_resp, price_post, price_get,
-        ]):
-            with patch.object(p._session, "get", return_value=model_ready):
-                quote = p.get_quote(QuoteRequest(
-                    file_path=str(model),
-                    material_id="a97a2a21-0e71-51d1-b642-93b168660053",
-                ))
+        ]), patch.object(p._session, "get", return_value=model_ready):
+            quote = p.get_quote(QuoteRequest(
+                file_path=str(model),
+                material_id="a97a2a21-0e71-51d1-b642-93b168660053",
+            ))
 
         # 1658972807453ms → 1658972807.453s
         assert quote.expires_at == pytest.approx(1658972807.453, rel=1e-3)
@@ -716,13 +743,12 @@ class TestGetQuote:
 
         with patch.object(p._session, "request", side_effect=[
             upload_resp, price_post, price_get,
-        ]):
-            with patch.object(p._session, "get", return_value=model_ready):
-                with pytest.raises(FulfillmentError, match="no quotes"):
-                    p.get_quote(QuoteRequest(
-                        file_path=str(model),
-                        material_id="nonexistent-material",
-                    ))
+        ]), patch.object(p._session, "get", return_value=model_ready):
+            with pytest.raises(FulfillmentError, match="no quotes"):
+                p.get_quote(QuoteRequest(
+                    file_path=str(model),
+                    material_id="nonexistent-material",
+                ))
 
     def test_get_quote_no_matching_material(self, tmp_path):
         model = tmp_path / "model.stl"
@@ -737,13 +763,12 @@ class TestGetQuote:
 
         with patch.object(p._session, "request", side_effect=[
             upload_resp, price_post, price_get,
-        ]):
-            with patch.object(p._session, "get", return_value=model_ready):
-                with pytest.raises(FulfillmentError, match="No valid priced quotes"):
-                    p.get_quote(QuoteRequest(
-                        file_path=str(model),
-                        material_id="wrong-material-id",
-                    ))
+        ]), patch.object(p._session, "get", return_value=model_ready):
+            with pytest.raises(FulfillmentError, match="No valid priced quotes"):
+                p.get_quote(QuoteRequest(
+                    file_path=str(model),
+                    material_id="wrong-material-id",
+                ))
 
 
 # ---------------------------------------------------------------------------
@@ -1010,6 +1035,125 @@ class TestCancelOrder:
         with patch.object(p._session, "request", return_value=status_resp):
             with pytest.raises(FulfillmentError, match="no vendor entries"):
                 p.cancel_order("o-456")
+
+
+# ---------------------------------------------------------------------------
+# WebSocket price polling
+# ---------------------------------------------------------------------------
+
+
+class TestWebSocketPricePolling:
+    def test_ws_not_available_raises(self):
+        p = _provider(use_websocket=True)
+        with patch("kiln.fulfillment.craftcloud._WS_AVAILABLE", False):
+            with pytest.raises(FulfillmentError, match="websockets.*msgpack"):
+                p._poll_prices_websocket("price-123")
+
+    def test_ws_poll_complete(self):
+        import kiln.fulfillment.craftcloud as cc_mod
+
+        p = _provider(use_websocket=True)
+        complete_data = {
+            "allComplete": True,
+            "quotes": [{"quoteId": "q1", "price": 50.0}],
+        }
+        mock_conn = MagicMock()
+        mock_conn.recv.return_value = b"msgpack-data"
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+
+        mock_ws_sync = MagicMock()
+        mock_ws_sync.connect.return_value = mock_conn
+        mock_msgpack = MagicMock()
+        mock_msgpack.unpackb.return_value = complete_data
+
+        original_ws = getattr(cc_mod, "ws_sync", None)
+        original_mp = getattr(cc_mod, "msgpack", None)
+        try:
+            cc_mod.ws_sync = mock_ws_sync
+            cc_mod.msgpack = mock_msgpack
+            with patch.object(cc_mod, "_WS_AVAILABLE", True):
+                result = p._poll_prices_websocket("price-123")
+        finally:
+            if original_ws is not None:
+                cc_mod.ws_sync = original_ws
+            elif hasattr(cc_mod, "ws_sync"):
+                delattr(cc_mod, "ws_sync")
+            if original_mp is not None:
+                cc_mod.msgpack = original_mp
+            elif hasattr(cc_mod, "msgpack"):
+                delattr(cc_mod, "msgpack")
+
+        assert result["allComplete"] is True
+        assert result["quotes"][0]["quoteId"] == "q1"
+
+    def test_ws_poll_text_frame(self):
+        import kiln.fulfillment.craftcloud as cc_mod
+
+        p = _provider(use_websocket=True)
+        complete_data = {"allComplete": True, "quotes": []}
+        mock_conn = MagicMock()
+        mock_conn.recv.return_value = json.dumps(complete_data)
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+
+        mock_ws_sync = MagicMock()
+        mock_ws_sync.connect.return_value = mock_conn
+
+        original_ws = getattr(cc_mod, "ws_sync", None)
+        try:
+            cc_mod.ws_sync = mock_ws_sync
+            with patch.object(cc_mod, "_WS_AVAILABLE", True):
+                result = p._poll_prices_websocket("price-123")
+        finally:
+            if original_ws is not None:
+                cc_mod.ws_sync = original_ws
+            elif hasattr(cc_mod, "ws_sync"):
+                delattr(cc_mod, "ws_sync")
+
+        assert result["allComplete"] is True
+
+    def test_ws_connection_error(self):
+        import kiln.fulfillment.craftcloud as cc_mod
+
+        p = _provider(use_websocket=True)
+        mock_ws_sync = MagicMock()
+        mock_ws_sync.connect.side_effect = ConnectionRefusedError("refused")
+
+        original_ws = getattr(cc_mod, "ws_sync", None)
+        try:
+            cc_mod.ws_sync = mock_ws_sync
+            with patch.object(cc_mod, "_WS_AVAILABLE", True):
+                with pytest.raises(FulfillmentError, match="WebSocket error"):
+                    p._poll_prices_websocket("price-123")
+        finally:
+            if original_ws is not None:
+                cc_mod.ws_sync = original_ws
+            elif hasattr(cc_mod, "ws_sync"):
+                delattr(cc_mod, "ws_sync")
+
+    def test_get_quote_uses_websocket_when_enabled(self, tmp_path):
+        model = tmp_path / "model.stl"
+        model.write_text("solid model")
+
+        p = _provider(use_websocket=True)
+        upload_resp = _mock_response(json_data=[{"modelId": "m-1"}])
+        model_ready = MagicMock(spec=requests.Response)
+        model_ready.status_code = 200
+        price_post = _mock_response(json_data={"priceId": "p-ws"})
+
+        ws_result = _PRICE_RESPONSE.copy()
+
+        with patch.object(p._session, "request", side_effect=[upload_resp, price_post]):
+            with patch.object(p._session, "get", return_value=model_ready):
+                with patch.object(p, "_poll_prices_websocket", return_value=ws_result) as ws_mock:
+                    quote = p.get_quote(QuoteRequest(
+                        file_path=str(model),
+                        material_id="a97a2a21-0e71-51d1-b642-93b168660053",
+                    ))
+
+        ws_mock.assert_called_once_with("p-ws")
+        assert quote.quote_id == "bf2b604ae33685f"
 
 
 # ---------------------------------------------------------------------------

@@ -25,8 +25,11 @@ _REGISTRY: dict[str, type[FulfillmentProvider]] = {}
 
 # Env var name → provider name, for auto-detection of which provider is
 # configured when KILN_FULFILLMENT_PROVIDER is not set explicitly.
+# Craftcloud works without auth, so we also check for explicit provider
+# selection or presence of any Craftcloud-specific env var.
 _ENV_HINTS: dict[str, str] = {
     "KILN_CRAFTCLOUD_API_KEY": "craftcloud",
+    "KILN_CRAFTCLOUD_BASE_URL": "craftcloud",
     "KILN_SCULPTEO_API_KEY": "sculpteo",
 }
 

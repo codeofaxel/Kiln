@@ -11,14 +11,22 @@ The adapter follows the v5 flow:
 2. Poll until parsed → ``GET /v5/model/{modelId}`` (200 = ready, 206 = parsing)
 3. Request prices → ``POST /v5/price`` (async)
 4. Poll prices → ``GET /v5/price/{priceId}`` until ``allComplete`` is true
+   (or via WebSocket at ``wss://<host>/price/{priceId}``, msgpack-encoded)
 5. Create cart → ``POST /v5/cart`` (select quote + shipping)
 6. Place order → ``POST /v5/order`` (cart + shipping/billing address)
 7. Track order → ``GET /v5/order/{orderId}/status``
 
+.. note::
+
+    Public endpoints (upload, price, cart, order) work without
+    authentication.  Set ``KILN_CRAFTCLOUD_API_KEY`` only if orders
+    should be associated with a Craftcloud account.
+
 Environment variables
 ---------------------
 ``KILN_CRAFTCLOUD_API_KEY``
-    API key for authenticating with the Craftcloud API (partner endpoints).
+    Optional API key for associating orders with a Craftcloud account.
+    Public endpoints work without authentication.
 ``KILN_CRAFTCLOUD_BASE_URL``
     Base URL of the Craftcloud API (defaults to production).
 ``KILN_CRAFTCLOUD_MATERIAL_CATALOG_URL``
@@ -27,6 +35,13 @@ Environment variables
     Seconds between price polling requests (default 2).
 ``KILN_CRAFTCLOUD_MAX_POLL_ATTEMPTS``
     Maximum polling attempts before timeout (default 60).
+``KILN_CRAFTCLOUD_USE_WEBSOCKET``
+    Set to ``1`` to use WebSocket price polling instead of HTTP
+    (recommended by Craftcloud).  Requires ``websockets`` and ``msgpack``.
+``KILN_CRAFTCLOUD_PAYMENT_MODE``
+    Payment handling mode: ``"craftcloud"`` (Craftcloud handles payment
+    via their checkout — default) or ``"partner"`` (platform handles
+    payment separately under a partner billing arrangement).
 """
 
 from __future__ import annotations
@@ -40,6 +55,14 @@ from urllib.parse import quote as url_quote
 import requests
 from requests.exceptions import ConnectionError as ReqConnectionError
 from requests.exceptions import RequestException, Timeout
+
+try:
+    import msgpack
+    import websockets.sync.client as ws_sync
+
+    _WS_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _WS_AVAILABLE = False
 
 from kiln.fulfillment.base import (
     FulfillmentError,
@@ -56,9 +79,10 @@ from kiln.fulfillment.base import (
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "https://api.craftcloud3d.com"
-_DEFAULT_MATERIAL_CATALOG_URL = "http://customer-api.craftcloud3d.com/material-catalog"
+_DEFAULT_MATERIAL_CATALOG_URL = "https://customer-api.craftcloud3d.com/material-catalog"
 _DEFAULT_POLL_INTERVAL = 2.0
 _DEFAULT_MAX_POLL_ATTEMPTS = 60
+_DEFAULT_WS_TIMEOUT = 120.0  # seconds to wait for WebSocket price completion
 
 # Craftcloud v5 order status types → internal OrderStatus.
 _STATUS_MAP: dict[str, OrderStatus] = {
@@ -76,17 +100,20 @@ class CraftcloudProvider(FulfillmentProvider):
     """Concrete :class:`FulfillmentProvider` backed by the Craftcloud v5 API.
 
     Args:
-        api_key: Craftcloud API key.  If not provided, reads from
-            ``KILN_CRAFTCLOUD_API_KEY``.
+        api_key: Optional Craftcloud API key.  If provided (or set via
+            ``KILN_CRAFTCLOUD_API_KEY``), orders will be associated with
+            a Craftcloud account.  Public endpoints work without auth.
         base_url: Base URL of the Craftcloud API.
         material_catalog_url: URL for material catalog retrieval
             (materialConfigIds).
         timeout: Per-request timeout in seconds.
         poll_interval: Seconds between async price polling requests.
         max_poll_attempts: Maximum polling iterations before giving up.
-
-    Raises:
-        ValueError: If no API key is available.
+        use_websocket: Use WebSocket for price polling instead of HTTP.
+            Recommended by Craftcloud.  Requires ``websockets`` + ``msgpack``.
+        payment_mode: ``"craftcloud"`` (default) — Craftcloud handles
+            payment via their checkout flow.  ``"partner"`` — payment
+            is handled separately under a partner billing arrangement.
     """
 
     def __init__(
@@ -98,6 +125,8 @@ class CraftcloudProvider(FulfillmentProvider):
         *,
         poll_interval: float | None = None,
         max_poll_attempts: int | None = None,
+        use_websocket: bool | None = None,
+        payment_mode: str | None = None,
     ) -> None:
         self._api_key = api_key or os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
         self._base_url = (base_url or os.environ.get("KILN_CRAFTCLOUD_BASE_URL", _DEFAULT_BASE_URL)).rstrip("/")
@@ -120,16 +149,20 @@ class CraftcloudProvider(FulfillmentProvider):
             else int(os.environ.get("KILN_CRAFTCLOUD_MAX_POLL_ATTEMPTS", _DEFAULT_MAX_POLL_ATTEMPTS))
         )
 
-        if not self._api_key:
-            raise ValueError("Craftcloud API key required. Set KILN_CRAFTCLOUD_API_KEY or pass api_key.")
+        if use_websocket is not None:
+            self._use_websocket = use_websocket
+        else:
+            self._use_websocket = os.environ.get("KILN_CRAFTCLOUD_USE_WEBSOCKET", "").strip() == "1"
+
+        self._payment_mode = (
+            payment_mode
+            or os.environ.get("KILN_CRAFTCLOUD_PAYMENT_MODE", "craftcloud").strip().lower()
+        )
 
         self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "Accept": "application/json",
-                "X-API-Key": self._api_key,
-            }
-        )
+        self._session.headers.update({"Accept": "application/json"})
+        if self._api_key:
+            self._session.headers["X-API-Key"] = self._api_key
 
     # -- FulfillmentProvider identity ----------------------------------------
 
@@ -422,6 +455,55 @@ class CraftcloudProvider(FulfillmentProvider):
             code="PRICE_POLL_TIMEOUT",
         )
 
+    def _poll_prices_websocket(self, price_id: str) -> dict[str, Any]:
+        """Poll prices via WebSocket (recommended by Craftcloud).
+
+        Connects to ``wss://<host>/price/{priceId}`` and reads
+        msgpack-encoded frames until ``allComplete`` is true.
+        """
+        if not _WS_AVAILABLE:
+            raise FulfillmentError(
+                "WebSocket price polling requires 'websockets' and 'msgpack' packages. "
+                "Install them with: pip install websockets msgpack",
+                code="MISSING_DEPENDENCY",
+            )
+
+        # Derive WSS URL from base URL (https://api.x.com → wss://api.x.com).
+        ws_base = self._base_url.replace("https://", "wss://").replace("http://", "ws://")
+        ws_url = f"{ws_base}/price/{url_quote(str(price_id), safe='')}"
+
+        try:
+            with ws_sync.connect(ws_url, close_timeout=10) as conn:
+                conn.recv_bufsize = 65536
+                deadline = time.monotonic() + _DEFAULT_WS_TIMEOUT
+                while time.monotonic() < deadline:
+                    raw = conn.recv(timeout=self._timeout)
+                    if isinstance(raw, str):
+                        # Unexpected text frame — try JSON.
+                        import json
+
+                        data = json.loads(raw)
+                    else:
+                        data = msgpack.unpackb(raw, raw=False)
+
+                    if not isinstance(data, dict):
+                        continue
+
+                    if data.get("allComplete", False):
+                        return data
+
+                raise FulfillmentError(
+                    f"WebSocket price polling for {price_id} timed out after {_DEFAULT_WS_TIMEOUT:.0f}s.",
+                    code="WS_PRICE_TIMEOUT",
+                )
+        except FulfillmentError:
+            raise
+        except Exception as exc:
+            raise FulfillmentError(
+                f"WebSocket error polling price {price_id}: {exc}",
+                code="WS_ERROR",
+            ) from exc
+
     # -- v5 cart + order -----------------------------------------------------
 
     def _create_cart(
@@ -637,13 +719,31 @@ class CraftcloudProvider(FulfillmentProvider):
 
         # Step 3-4: Request and poll prices.
         material_filter = [request.material_id] if request.material_id else None
-        price_data = self._request_prices(
-            model_id,
-            quantity=request.quantity,
-            currency="USD",
-            country_code=request.shipping_country,
-            material_config_ids=material_filter,
-        )
+        if self._use_websocket:
+            # WebSocket flow: POST to initiate, then stream via WSS.
+            payload: dict[str, Any] = {
+                "currency": "USD",
+                "countryCode": request.shipping_country,
+                "models": [{"modelId": model_id, "quantity": request.quantity, "scale": 1}],
+            }
+            if material_filter:
+                payload["materialConfigIds"] = material_filter
+            init_resp = self._request("POST", "/v5/price", json=payload)
+            price_id = init_resp.get("priceId", "") if isinstance(init_resp, dict) else ""
+            if not price_id:
+                raise FulfillmentError(
+                    f"Craftcloud price request did not return a priceId. Response: {init_resp}",
+                    code="PRICE_REQUEST_ERROR",
+                )
+            price_data = self._poll_prices_websocket(price_id)
+        else:
+            price_data = self._request_prices(
+                model_id,
+                quantity=request.quantity,
+                currency="USD",
+                country_code=request.shipping_country,
+                material_config_ids=material_filter,
+            )
 
         # Parse quotes — find the cheapest for the requested material.
         quotes_raw = price_data.get("quotes", [])
@@ -749,6 +849,14 @@ class CraftcloudProvider(FulfillmentProvider):
 
         1. Create cart → ``POST /v5/cart`` with quoteId + shippingId
         2. Place order → ``POST /v5/order`` with cartId + user info
+
+        Payment handling depends on ``payment_mode``:
+
+        - ``"craftcloud"`` (default) — Craftcloud handles payment via
+          their checkout.  The returned ``OrderResult.raw`` will
+          contain a ``checkoutUrl`` if Craftcloud provides one.
+        - ``"partner"`` — payment is handled separately under a partner
+          billing arrangement; no payment step is needed here.
         """
         if not request.quote_id:
             raise FulfillmentError(
@@ -796,6 +904,16 @@ class CraftcloudProvider(FulfillmentProvider):
             else None
         )
         currency = total_data.get("currency", "USD") if isinstance(total_data, dict) else "USD"
+
+        # When Craftcloud handles payment, the response may include a
+        # checkout URL that the user/agent must visit to complete payment.
+        checkout_url = data.get("checkoutUrl") or data.get("paymentUrl")
+        if checkout_url and self._payment_mode == "craftcloud":
+            logger.info(
+                "Craftcloud order %s requires payment at: %s",
+                order_id,
+                checkout_url,
+            )
 
         return OrderResult(
             success=True,

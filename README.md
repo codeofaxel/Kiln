@@ -40,7 +40,7 @@ Kiln lets AI agents design, queue, and execute physical manufacturing jobs on re
 | Mode | What it is | You need |
 |------|-----------|----------|
 | **🖨️ Your printer** | Control OctoPrint, Moonraker, Bambu, or Prusa Link printers on your LAN — or remotely via Bambu Cloud | A 3D printer |
-| **🏭 Fulfillment centers** *(API access required)* | Outsource to Craftcloud (150+ services), Sculpteo (75+ materials), or other providers. Kiln handles quoting, ordering, and tracking | Nothing — no printer required |
+| **🏭 Fulfillment centers** | Outsource to Craftcloud (150+ services — works without an API key), Sculpteo *(API access required)*, or other providers. Kiln handles quoting, ordering, and tracking | Nothing — no printer required |
 | **🌐 Distributed network** *(coming soon)* | Route jobs to decentralized peer-to-peer printer networks, or register your own printer to earn revenue | Nothing — or a printer to earn |
 
 All three modes use the same MCP tools and CLI commands. An agent can seamlessly fall back from a busy local printer to a fulfillment center — all in one workflow.
@@ -804,18 +804,22 @@ kiln order history
 kiln order countries
 ```
 
-Configure your fulfillment provider (requires API access from Craftcloud/Sculpteo — see [Getting Access](#getting-access)):
+Configure your fulfillment provider:
 
 ```bash
-# Option 1: Auto-detect from API key (Craftcloud is default)
+# Craftcloud — works out of the box (no API key required for public endpoints)
+export KILN_FULFILLMENT_PROVIDER=craftcloud
+
+# Optional: API key to associate orders with a Craftcloud account
 export KILN_CRAFTCLOUD_API_KEY=your_key
-export KILN_CRAFTCLOUD_BASE_URL=https://api.craftcloud3d.com
-export KILN_CRAFTCLOUD_MATERIAL_CATALOG_URL=http://customer-api.craftcloud3d.com/material-catalog
+
+# Optional: WebSocket price polling (recommended by Craftcloud, requires pip install websockets msgpack)
+export KILN_CRAFTCLOUD_USE_WEBSOCKET=1
 
 # Craftcloud staging (for testing)
 export KILN_CRAFTCLOUD_BASE_URL=https://api-stg.craftcloud3d.com
 
-# Option 2: Sculpteo
+# Sculpteo (requires API access — in partner onboarding)
 export KILN_SCULPTEO_API_KEY=your_key
 
 # Optional: explicitly select a provider
