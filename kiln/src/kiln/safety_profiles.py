@@ -36,7 +36,7 @@ _COMMUNITY_FILE = _COMMUNITY_DIR / "community_profiles.json"
 
 # Validation constants
 _MAX_TEMP_CEILING = 500.0
-_MAX_FEEDRATE_CEILING = 2000.0  # mm/s (not mm/min — this is the user-facing limit)
+_MAX_FEEDRATE_CEILING = 50000.0  # mm/min — matches units used in all bundled profiles
 _REQUIRED_FIELDS = ("max_hotend_temp", "max_bed_temp", "max_feedrate", "build_volume")
 
 
@@ -322,7 +322,7 @@ def validate_safety_profile(profile: dict[str, Any]) -> list[str]:
     - All required fields are present (``max_hotend_temp``,
       ``max_bed_temp``, ``max_feedrate``, ``build_volume``).
     - Temperature values are numeric and within ``[0, 500]``.
-    - Feedrate is numeric and within ``[0, 2000]`` mm/s.
+    - Feedrate is numeric and within ``[0, 50000]`` mm/min.
     - Build volume is a list of 3 positive numbers.
     """
     errors: list[str] = []

@@ -12,6 +12,7 @@
     "max_feedrate": 10000.0,
     "min_safe_z": 0.0,
     "max_volumetric_flow": null,
+    "build_volume": [220, 220, 250],
     "notes": "Conservative defaults suitable for most FDM printers."
   },
   "ender3": {
@@ -53,11 +54,11 @@
     "min_safe_z": 0.0,
     "max_volumetric_flow": 12.0,
     "build_volume": [
-      350,
-      350,
-      400
+      220,
+      220,
+      300
     ],
-    "notes": "CoreXY-style with PTFE hotend \u2014 same hotend caution as Ender 3."
+    "notes": "Standard Ender 5 dimensions (220x220x300). Ender 5 Plus users should create a custom profile with 350x350x400. PTFE hotend \u2014 same hotend caution as Ender 3."
   },
   "cr10": {
     "display_name": "Creality CR-10 / CR-10S",
@@ -83,11 +84,11 @@
     "min_safe_z": 0.0,
     "max_volumetric_flow": 32.0,
     "build_volume": [
-      300,
-      300,
-      300
+      220,
+      220,
+      250
     ],
-    "notes": "High-speed CoreXY. Enclosed chamber. All-metal hotend."
+    "notes": "Standard K1 dimensions (220x220x250). K1 Max users should create a custom profile with 300x300x300. High-speed CoreXY. Enclosed chamber. All-metal hotend."
   },
   "prusa_mk3s": {
     "display_name": "Prusa i3 MK3S / MK3S+",

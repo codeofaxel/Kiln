@@ -139,9 +139,9 @@ class TestValidateSafetyProfile:
 
     def test_feedrate_too_high(self):
         profile = _valid_profile()
-        profile["max_feedrate"] = 2001.0
+        profile["max_feedrate"] = 50001.0
         errors = validate_safety_profile(profile)
-        assert any("max_feedrate" in e and "2000" in e for e in errors)
+        assert any("max_feedrate" in e and "50000" in e for e in errors)
 
     def test_feedrate_negative(self):
         profile = _valid_profile()

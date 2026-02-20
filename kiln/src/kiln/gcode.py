@@ -553,8 +553,9 @@ def _validate_single_with_profile(
                 errors.append(f"{cmd} S{temp:g} has negative temperature -- temperatures must be >= 0")
                 blocked.append(cleaned)
                 return None
-            if limit is not None and temp > limit:
-                errors.append(f"{cmd} S{temp:g} exceeds {profile.display_name} max chamber temperature ({limit:g}°C)")
+            effective_limit = limit if limit is not None else _MAX_CHAMBER_TEMP
+            if temp > effective_limit:
+                errors.append(f"{cmd} S{temp:g} exceeds {profile.display_name} max chamber temperature ({effective_limit:g}°C)")
                 blocked.append(cleaned)
                 return None
 
