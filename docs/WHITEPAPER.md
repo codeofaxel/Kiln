@@ -114,7 +114,7 @@ The `slice_and_print` operation combines slicing, upload, and print start into a
 
 ### 3.3 Model Generation
 
-Kiln extends beyond model discovery with text-to-3D generation. A `GenerationProvider` abstract base class mirrors the marketplace adapter pattern, defining `generate()`, `get_job_status()`, and `download_result()` methods. A `GenerationRegistry` auto-discovers providers from environment variables at startup — set `KILN_MESHY_API_KEY` and the Meshy provider is available immediately. Four concrete providers ship:
+Kiln extends beyond model discovery with text-to-3D generation. A `GenerationProvider` abstract base class mirrors the marketplace adapter pattern, defining `generate()`, `get_job_status()`, and `download_result()` methods. A `GenerationRegistry` auto-discovers providers from environment variables at startup — set `KILN_MESHY_API_KEY` and the Meshy provider is available immediately. Five concrete providers ship:
 
 **Meshy (cloud).** Integrates with the Meshy API for AI-powered text-to-3D generation. The provider submits preview tasks via REST, polls for completion, and downloads the resulting mesh. Jobs are asynchronous (typically 30s–5min). The `await_generation` MCP tool handles polling with configurable timeouts, matching the pattern established by `await_print_completion`.
 
@@ -122,9 +122,11 @@ Kiln extends beyond model discovery with text-to-3D generation. A `GenerationPro
 
 **Stability AI (cloud).** Synchronous 3D generation via the Stability AI API. The endpoint returns the model directly in the response body — no polling required. Returns GLB format. Includes retry with backoff for rate limits and server errors.
 
+**Gemini Deep Think (cloud + local).** Uses Google's Gemini API with deep reasoning to convert natural language or napkin-sketch descriptions into OpenSCAD code, which is then compiled locally to STL. This two-stage pipeline (AI reasoning → local compilation) produces precise, parametric, watertight meshes ideal for 3D printing. Gemini reasons deeply about geometry, proportions, and printability constraints before generating code. Supports style hints (organic, mechanical, decorative). Jobs are synchronous — set `KILN_GEMINI_API_KEY` to enable.
+
 **OpenSCAD (local).** For parametric and geometric models, agents can write OpenSCAD code directly. The provider compiles `.scad` scripts to STL using the local OpenSCAD binary, auto-detected from PATH or macOS application bundles. Jobs are synchronous — the result is available immediately. This path has zero API cost and produces deterministic, parametric geometry ideal for mechanical parts.
 
-The registry pattern means new providers (including Google's Gemini Deep Think for sketch-to-3D) can be integrated in under 100 lines by implementing the `GenerationProvider` interface.
+The registry pattern means new providers can be integrated in under 100 lines by implementing the `GenerationProvider` interface.
 
 A mesh validation pipeline runs after generation, checking structural integrity without external dependencies. It parses binary and ASCII STL files using Python's `struct` module, validates triangle counts, computes bounding boxes, and performs manifold (watertight) analysis via edge counting. Validation issues are categorized as fatal errors (unparseable, zero triangles) or warnings (non-manifold, extreme dimensions) — allowing agents to make informed decisions about print readiness.
 

@@ -47,7 +47,7 @@ All three modes use the same MCP tools and CLI commands.
 
 **MarketplaceRegistry** — Manages connected marketplace adapters. Provides `search_all()` for parallel fan-out search across all sources with round-robin result interleaving.
 
-**GenerationProvider** — Abstract base class for text-to-3D model generation backends. Implements: generate, get_job_status, download_result. Concrete providers for Meshy (cloud AI), Tripo3D (cloud AI), Stability AI (synchronous cloud), and OpenSCAD (local parametric). A `GenerationRegistry` auto-discovers providers from `KILN_*_API_KEY` environment variables.
+**GenerationProvider** — Abstract base class for text-to-3D model generation backends. Implements: generate, get_job_status, download_result. Concrete providers for Meshy (cloud AI), Tripo3D (cloud AI), Stability AI (synchronous cloud), Gemini Deep Think (AI-reasoned text/sketch-to-3D via Gemini + OpenSCAD), and OpenSCAD (local parametric). A `GenerationRegistry` auto-discovers providers from `KILN_*_API_KEY` environment variables.
 
 **Mesh Validation** — Pipeline that checks generated STL/OBJ files for 3D-printing readiness: geometry parsing, manifold checks, dimension limits, polygon count validation. Uses pure Python (no external mesh libraries).
 

@@ -20,6 +20,7 @@ _ENV_PROVIDER_MAP: dict[str, tuple[str, str]] = {
     "KILN_MESHY_API_KEY": ("kiln.generation.meshy", "MeshyProvider"),
     "KILN_TRIPO3D_API_KEY": ("kiln.generation.tripo3d", "Tripo3DProvider"),
     "KILN_STABILITY_API_KEY": ("kiln.generation.stability", "StabilityProvider"),
+    "KILN_GEMINI_API_KEY": ("kiln.generation.gemini", "GeminiDeepThinkProvider"),
 }
 
 
@@ -78,8 +79,9 @@ class GenerationRegistry:
     def auto_discover(self) -> list[str]:
         """Auto-register providers whose API key env vars are set.
 
-        Checks ``KILN_MESHY_API_KEY``, ``KILN_TRIPO3D_API_KEY``, and
-        ``KILN_STABILITY_API_KEY``.  For each env var that has a non-empty
+        Checks ``KILN_MESHY_API_KEY``, ``KILN_TRIPO3D_API_KEY``,
+        ``KILN_STABILITY_API_KEY``, and ``KILN_GEMINI_API_KEY``.
+        For each env var that has a non-empty
         value, the corresponding provider class is imported and instantiated.
 
         :returns: List of provider names that were successfully registered.

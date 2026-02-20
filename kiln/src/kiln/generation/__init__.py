@@ -14,6 +14,8 @@ Providers
     Cloud-based text-to-3D via the Tripo3D API.
 :class:`StabilityProvider`
     Cloud-based text-to-3D via the Stability AI API.
+:class:`GeminiDeepThinkProvider`
+    AI-reasoned text-to-3D via Google Gemini + OpenSCAD.
 
 Registry
 --------
@@ -32,6 +34,7 @@ from kiln.generation.base import (
     GenerationValidationError,
     MeshValidationResult,
 )
+from kiln.generation.gemini import GeminiDeepThinkProvider
 from kiln.generation.meshy import MeshyProvider
 from kiln.generation.openscad import OpenSCADProvider
 from kiln.generation.registry import GenerationRegistry
@@ -40,6 +43,7 @@ from kiln.generation.tripo3d import Tripo3DProvider
 from kiln.generation.validation import convert_to_stl, validate_mesh
 
 __all__ = [
+    "GeminiDeepThinkProvider",
     "GenerationAuthError",
     "GenerationError",
     "GenerationJob",

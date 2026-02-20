@@ -117,6 +117,7 @@ from kiln.gateway.threedos import ThreeDOSClient
 from kiln.gcode import validate_gcode as _validate_gcode_impl
 from kiln.gcode import validate_gcode_for_printer
 from kiln.generation import (
+    GeminiDeepThinkProvider,
     GenerationAuthError,
     GenerationError,
     GenerationProvider,
@@ -279,6 +280,7 @@ _CULTS3D_API_KEY: str = os.environ.get("KILN_CULTS3D_API_KEY", "")
 _CRAFTCLOUD_API_KEY: str = os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
 _FULFILLMENT_PROVIDER: str = os.environ.get("KILN_FULFILLMENT_PROVIDER", "")
 _MESHY_API_KEY: str = os.environ.get("KILN_MESHY_API_KEY", "")
+_GEMINI_API_KEY: str = os.environ.get("KILN_GEMINI_API_KEY", "")
 
 # Auto-print toggles: OFF by default for safety.  Generated models are
 # higher risk than marketplace downloads — two independent toggles let
@@ -324,6 +326,7 @@ def _reload_env_config() -> None:
     _CRAFTCLOUD_API_KEY = os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
     _FULFILLMENT_PROVIDER = os.environ.get("KILN_FULFILLMENT_PROVIDER", "")
     _MESHY_API_KEY = os.environ.get("KILN_MESHY_API_KEY", "")
+    _GEMINI_API_KEY = os.environ.get("KILN_GEMINI_API_KEY", "")
     _AUTO_PRINT_MARKETPLACE = os.environ.get("KILN_AUTO_PRINT_MARKETPLACE", "").lower() in ("1", "true", "yes")
     _AUTO_PRINT_GENERATED = os.environ.get("KILN_AUTO_PRINT_GENERATED", "").lower() in ("1", "true", "yes")
     _HEATER_TIMEOUT_MIN = parse_float_env("KILN_HEATER_TIMEOUT", 30.0)
@@ -1045,6 +1048,7 @@ _SECRET_ENV_VARS = (
     "KILN_MMF_API_KEY",
     "KILN_CULTS3D_API_KEY",
     "KILN_MESHY_API_KEY",
+    "KILN_GEMINI_API_KEY",
     "KILN_CRAFTCLOUD_API_KEY",
     "KILN_PRINTER_ACCESS_CODE",
     "KILN_CIRCLE_API_KEY",
@@ -6777,9 +6781,11 @@ def _get_generation_provider(provider: str = "meshy") -> GenerationProvider:
         inst = MeshyProvider(api_key=_MESHY_API_KEY)
     elif provider == "openscad":
         inst = OpenSCADProvider()
+    elif provider == "gemini":
+        inst = GeminiDeepThinkProvider(api_key=_GEMINI_API_KEY)
     else:
         raise GenerationError(
-            f"Unknown generation provider: {provider!r}.  Supported: meshy, openscad.",
+            f"Unknown generation provider: {provider!r}.  Supported: meshy, openscad, gemini.",
             code="UNKNOWN_PROVIDER",
         )
 
@@ -6821,6 +6827,22 @@ def list_generation_providers() -> dict:
             "styles": [],
             "async": False,
             "typical_time_seconds": 5,
+        },
+        {
+            "name": "gemini",
+            "display_name": "Gemini Deep Think",
+            "description": (
+                "AI-reasoned text-to-3D via Google Gemini.  Gemini deeply "
+                "reasons about geometry and produces OpenSCAD code, compiled "
+                "locally to STL.  Supports natural language and napkin-sketch "
+                "descriptions.  Requires KILN_GEMINI_API_KEY."
+            ),
+            "requires_api_key": True,
+            "api_key_env": "KILN_GEMINI_API_KEY",
+            "api_key_set": bool(_GEMINI_API_KEY),
+            "styles": ["organic", "mechanical", "decorative"],
+            "async": False,
+            "typical_time_seconds": 30,
         },
     ]
     return {
@@ -6891,7 +6913,7 @@ def generate_model(
         }
     except GenerationAuthError as exc:
         return _error_dict(
-            f"Failed to generate model (auth): {exc}. Check that KILN_MESHY_API_KEY is set.", code="AUTH_ERROR"
+            f"Failed to generate model (auth): {exc}. Check your provider API key is set (KILN_MESHY_API_KEY, KILN_GEMINI_API_KEY).", code="AUTH_ERROR"
         )
     except GenerationError as exc:
         return _error_dict(f"Failed to generate model: {exc}", code=exc.code or "GENERATION_ERROR")
