@@ -8,9 +8,11 @@ interface Props {
   description: string;
   date: string;
   tags?: string[];
+  image?: string;
 }
 
-const { title, description, date, tags = [] } = Astro.props;
+const { title, description, date, tags = [], image } = Astro.props;
+const ogImage = image ? `https://kiln3d.com${image}` : 'https://kiln3d.com/assets/kiln-social-preview.png';
 ---
 
 <!DOCTYPE html>
@@ -23,14 +25,14 @@ const { title, description, date, tags = [] } = Astro.props;
 
   <meta property="og:title" content={title}>
   <meta property="og:description" content={description}>
-  <meta property="og:image" content="https://kiln3d.com/assets/kiln-social-preview.png">
+  <meta property="og:image" content={ogImage}>
   <meta property="og:type" content="article">
   <meta property="og:url" content={Astro.url.href}>
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content={title}>
   <meta name="twitter:description" content={description}>
-  <meta name="twitter:image" content="https://kiln3d.com/assets/kiln-social-preview.png">
+  <meta name="twitter:image" content={ogImage}>
 
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -61,6 +63,10 @@ const { title, description, date, tags = [] } = Astro.props;
             <time>{date}</time>
           </div>
         </header>
+
+        {image && (
+          <img src={image} alt={title} class="post-hero" width="1200" height="630" loading="eager" />
+        )}
 
         <div class="post-body">
           <slot />
@@ -132,6 +138,15 @@ const { title, description, date, tags = [] } = Astro.props;
   .post-meta {
     font-size: 14px;
     color: var(--text-muted);
+  }
+
+  /* ── Hero image ── */
+  .post-hero {
+    width: 100%;
+    height: auto;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    margin-bottom: 48px;
   }
 
   /* ── Body ── */

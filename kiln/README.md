@@ -82,7 +82,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ## Features
 
-- **270+ MCP tools** for full printer control, fleet management, slicing, model generation, marketplace publishing, and fulfillment
+- **273 MCP tools** for full printer control, fleet management, slicing, model generation, marketplace publishing, and fulfillment
 - **107 CLI commands** with `--json` output for agent consumption
 - **Multi-printer fleet** management with job queue and background scheduler
 - **Model marketplaces** — search/download from MyMiniFactory, Cults3D (Thingiverse deprecated — acquired by MMF, Feb 2026)
@@ -125,7 +125,7 @@ Prusa   Voron    X1C/P1S  MK4/XL
 
 ```bash
 pip install -e ".[dev]"
-cd kiln && python -m pytest tests/ -v  # 6,094 tests
+cd kiln && python -m pytest tests/ -v  # 6,339 tests
 ```
 
 ## License

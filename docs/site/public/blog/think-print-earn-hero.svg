@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0a"/>
+      <stop offset="100%" style="stop-color:#1a1a2e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#ff6b2b"/>
+      <stop offset="100%" style="stop-color:#ff9a5c"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#ff6b2b;stop-opacity:0.3"/>
+      <stop offset="50%" style="stop-color:#ff6b2b;stop-opacity:0.1"/>
+      <stop offset="100%" style="stop-color:#ff6b2b;stop-opacity:0.3"/>
+    </linearGradient>
+    <filter id="glowFilter">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Subtle grid pattern -->
+  <g opacity="0.04">
+    <line x1="0" y1="0" x2="0" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="60" y1="0" x2="60" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="120" y1="0" x2="120" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="180" y1="0" x2="180" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="240" y1="0" x2="240" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="300" y1="0" x2="300" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="360" y1="0" x2="360" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="420" y1="0" x2="420" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="480" y1="0" x2="480" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="540" y1="0" x2="540" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="600" y1="0" x2="600" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="660" y1="0" x2="660" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="720" y1="0" x2="720" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="780" y1="0" x2="780" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="840" y1="0" x2="840" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="900" y1="0" x2="900" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="960" y1="0" x2="960" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="1020" y1="0" x2="1020" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="1080" y1="0" x2="1080" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="1140" y1="0" x2="1140" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="1200" y1="0" x2="1200" y2="630" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="60" x2="1200" y2="60" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="120" x2="1200" y2="120" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="180" x2="1200" y2="180" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="240" x2="1200" y2="240" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="300" x2="1200" y2="300" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="360" x2="1200" y2="360" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="420" x2="1200" y2="420" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="480" x2="1200" y2="480" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="540" x2="1200" y2="540" stroke="#fff" stroke-width="1"/>
+  </g>
+
+  <!-- Ambient glow behind the pipeline -->
+  <ellipse cx="600" cy="315" rx="500" ry="180" fill="#ff6b2b" opacity="0.03"/>
+
+  <!-- Main title -->
+  <text x="600" y="155" text-anchor="middle" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="58" font-weight="700" letter-spacing="-1">
+    Think
+    <tspan fill="#ff6b2b"> → </tspan>
+    Print
+    <tspan fill="#ff6b2b"> → </tspan>
+    Earn
+  </text>
+
+  <!-- Subtitle -->
+  <text x="600" y="195" text-anchor="middle" fill="#888888" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="400">
+    12 new subsystems ship today
+  </text>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- Pipeline: 3 cards with connecting arrows   -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <!-- Card 1: Think (AI Generation) -->
+  <g>
+    <rect x="95" y="255" width="270" height="195" rx="12" fill="#111118" stroke="#2a2a3a" stroke-width="1.5"/>
+    <!-- Icon: brain/sparkle -->
+    <circle cx="230" cy="310" r="28" fill="none" stroke="#ff6b2b" stroke-width="2" opacity="0.8"/>
+    <text x="230" y="318" text-anchor="middle" fill="#ff6b2b" font-size="28">✦</text>
+    <!-- Label -->
+    <text x="230" y="370" text-anchor="middle" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="22" font-weight="600">Think</text>
+    <text x="230" y="395" text-anchor="middle" fill="#666666" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13">AI generates 3D models</text>
+    <text x="230" y="415" text-anchor="middle" fill="#666666" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13">from text or sketches</text>
+    <!-- Provider badges -->
+    <text x="230" y="440" text-anchor="middle" fill="#444444" font-family="monospace" font-size="10">Gemini · Stability · Tripo3D · Meshy</text>
+  </g>
+
+  <!-- Arrow 1→2 -->
+  <g filter="url(#glowFilter)">
+    <line x1="380" y1="352" x2="440" y2="352" stroke="#ff6b2b" stroke-width="2" opacity="0.6"/>
+    <polygon points="440,346 455,352 440,358" fill="#ff6b2b" opacity="0.6"/>
+  </g>
+
+  <!-- Card 2: Print (Validate + Print) -->
+  <g>
+    <rect x="465" y="255" width="270" height="195" rx="12" fill="#111118" stroke="#ff6b2b" stroke-width="1.5" opacity="1"/>
+    <!-- Brighter border glow -->
+    <rect x="465" y="255" width="270" height="195" rx="12" fill="none" stroke="#ff6b2b" stroke-width="1" opacity="0.3" filter="url(#softGlow)"/>
+    <!-- Icon: printer/layers -->
+    <rect x="210" y="280" width="40" height="4" rx="2" fill="#ff6b2b" opacity="0.7" transform="translate(390, 0)"/>
+    <rect x="205" y="290" width="50" height="4" rx="2" fill="#ff6b2b" opacity="0.5" transform="translate(390, 0)"/>
+    <rect x="200" y="300" width="60" height="4" rx="2" fill="#ff6b2b" opacity="0.4" transform="translate(390, 0)"/>
+    <rect x="195" y="310" width="70" height="4" rx="2" fill="#ff6b2b" opacity="0.3" transform="translate(390, 0)"/>
+    <rect x="190" y="320" width="80" height="4" rx="2" fill="#ff6b2b" opacity="0.2" transform="translate(390, 0)"/>
+    <!-- Label -->
+    <text x="600" y="370" text-anchor="middle" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="22" font-weight="600">Print</text>
+    <text x="600" y="395" text-anchor="middle" fill="#666666" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13">Validate, orient, slice, print</text>
+    <text x="600" y="415" text-anchor="middle" fill="#666666" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13">with failure recovery</text>
+    <!-- Feature badges -->
+    <text x="600" y="440" text-anchor="middle" fill="#444444" font-family="monospace" font-size="10">Printability A–F · Auto-orient · DNA</text>
+  </g>
+
+  <!-- Arrow 2→3 -->
+  <g filter="url(#glowFilter)">
+    <line x1="750" y1="352" x2="810" y2="352" stroke="#ff6b2b" stroke-width="2" opacity="0.6"/>
+    <polygon points="810,346 825,352 810,358" fill="#ff6b2b" opacity="0.6"/>
+  </g>
+
+  <!-- Card 3: Earn (Marketplace + Revenue) -->
+  <g>
+    <rect x="835" y="255" width="270" height="195" rx="12" fill="#111118" stroke="#2a2a3a" stroke-width="1.5"/>
+    <!-- Icon: dollar/chart -->
+    <text x="970" y="320" text-anchor="middle" fill="#ff6b2b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="32" font-weight="700" opacity="0.8">$</text>
+    <!-- Label -->
+    <text x="970" y="370" text-anchor="middle" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="22" font-weight="600">Earn</text>
+    <text x="970" y="395" text-anchor="middle" fill="#666666" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13">Publish with print certificate</text>
+    <text x="970" y="415" text-anchor="middle" fill="#666666" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13">and track revenue</text>
+    <!-- Marketplace badges -->
+    <text x="970" y="440" text-anchor="middle" fill="#444444" font-family="monospace" font-size="10">Thingiverse · MyMiniFactory · Thangs</text>
+  </g>
+
+  <!-- Stats bar at bottom -->
+  <g>
+    <line x1="100" y1="510" x2="1100" y2="510" stroke="#1a1a2a" stroke-width="1"/>
+
+    <text x="200" y="550" text-anchor="middle" fill="#ff6b2b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="28" font-weight="700">273</text>
+    <text x="200" y="572" text-anchor="middle" fill="#555555" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="500">MCP TOOLS</text>
+
+    <text x="400" y="550" text-anchor="middle" fill="#ff6b2b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="28" font-weight="700">12</text>
+    <text x="400" y="572" text-anchor="middle" fill="#555555" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="500">NEW SUBSYSTEMS</text>
+
+    <text x="600" y="550" text-anchor="middle" fill="#ff6b2b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="28" font-weight="700">6,339</text>
+    <text x="600" y="572" text-anchor="middle" fill="#555555" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="500">TESTS PASSING</text>
+
+    <text x="800" y="550" text-anchor="middle" fill="#ff6b2b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="28" font-weight="700">5</text>
+    <text x="800" y="572" text-anchor="middle" fill="#555555" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="500">PRINTERS SUPPORTED</text>
+
+    <text x="1000" y="550" text-anchor="middle" fill="#ff6b2b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="28" font-weight="700">MIT</text>
+    <text x="1000" y="572" text-anchor="middle" fill="#555555" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="500">OPEN SOURCE</text>
+  </g>
+
+  <!-- Kiln branding bottom-right -->
+  <text x="1155" y="610" text-anchor="end" fill="#333333" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="600">kiln3d.com</text>
+
+</svg>
