@@ -805,6 +805,152 @@ class KilnDB:
                     ON snapshots(printer_name);
                 CREATE INDEX IF NOT EXISTS idx_snapshots_phase
                     ON snapshots(phase);
+
+                CREATE TABLE IF NOT EXISTS published_models (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_hash       TEXT NOT NULL,
+                    marketplace     TEXT NOT NULL,
+                    listing_id      TEXT,
+                    listing_url     TEXT,
+                    title           TEXT NOT NULL,
+                    published_at    REAL NOT NULL,
+                    certificate     TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_published_models_hash
+                    ON published_models(file_hash);
+                CREATE INDEX IF NOT EXISTS idx_published_models_marketplace
+                    ON published_models(marketplace);
+
+                CREATE TABLE IF NOT EXISTS revenue (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_id        TEXT NOT NULL,
+                    marketplace     TEXT NOT NULL,
+                    amount_usd      REAL NOT NULL,
+                    currency        TEXT DEFAULT 'USD',
+                    transaction_type TEXT NOT NULL,
+                    description     TEXT,
+                    timestamp       REAL NOT NULL,
+                    platform_fee_usd REAL DEFAULT 0.0,
+                    creator_net_usd  REAL DEFAULT 0.0
+                );
+                CREATE INDEX IF NOT EXISTS idx_revenue_model
+                    ON revenue(model_id);
+                CREATE INDEX IF NOT EXISTS idx_revenue_marketplace
+                    ON revenue(marketplace);
+                CREATE INDEX IF NOT EXISTS idx_revenue_timestamp
+                    ON revenue(timestamp);
+
+                CREATE TABLE IF NOT EXISTS print_service_orders (
+                    id              TEXT PRIMARY KEY,
+                    status          TEXT NOT NULL,
+                    request         TEXT NOT NULL,
+                    model_path      TEXT,
+                    material        TEXT,
+                    provider        TEXT,
+                    printer_name    TEXT,
+                    tracking_url    TEXT,
+                    cost_usd        REAL DEFAULT 0,
+                    created_at      REAL NOT NULL,
+                    updated_at      REAL NOT NULL,
+                    steps_completed TEXT,
+                    current_step    TEXT,
+                    error           TEXT,
+                    callback_url    TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_print_service_orders_status
+                    ON print_service_orders(status);
+                CREATE INDEX IF NOT EXISTS idx_print_service_orders_created
+                    ON print_service_orders(created_at);
+
+                CREATE TABLE IF NOT EXISTS print_dna (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_hash       TEXT NOT NULL,
+                    geometric_signature TEXT NOT NULL,
+                    triangle_count  INTEGER,
+                    bounding_box    TEXT,
+                    surface_area    REAL,
+                    volume          REAL,
+                    overhang_ratio  REAL,
+                    complexity_score REAL,
+                    printer_model   TEXT,
+                    material        TEXT,
+                    settings        TEXT,
+                    outcome         TEXT NOT NULL,
+                    quality_grade   TEXT DEFAULT 'B',
+                    failure_mode    TEXT,
+                    print_time_seconds INTEGER DEFAULT 0,
+                    timestamp       REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_print_dna_file_hash
+                    ON print_dna(file_hash);
+                CREATE INDEX IF NOT EXISTS idx_print_dna_geometric_sig
+                    ON print_dna(geometric_signature);
+                CREATE INDEX IF NOT EXISTS idx_print_dna_outcome
+                    ON print_dna(outcome);
+                CREATE INDEX IF NOT EXISTS idx_print_dna_printer
+                    ON print_dna(printer_model);
+
+                CREATE TABLE IF NOT EXISTS community_prints (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    geometric_signature TEXT NOT NULL,
+                    printer_model   TEXT NOT NULL,
+                    material        TEXT NOT NULL,
+                    settings_hash   TEXT,
+                    settings        TEXT,
+                    outcome         TEXT NOT NULL,
+                    quality_grade   TEXT DEFAULT 'B',
+                    failure_mode    TEXT,
+                    print_time_seconds INTEGER DEFAULT 0,
+                    region          TEXT DEFAULT 'anonymous',
+                    timestamp       REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_community_prints_sig
+                    ON community_prints(geometric_signature);
+                CREATE INDEX IF NOT EXISTS idx_community_prints_printer
+                    ON community_prints(printer_model);
+                CREATE INDEX IF NOT EXISTS idx_community_prints_material
+                    ON community_prints(material);
+                CREATE INDEX IF NOT EXISTS idx_community_prints_outcome
+                    ON community_prints(outcome);
+
+                CREATE TABLE IF NOT EXISTS failure_records (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id          TEXT,
+                    printer_name    TEXT,
+                    failure_type    TEXT NOT NULL,
+                    confidence      REAL,
+                    progress_at_failure REAL,
+                    recovery_action TEXT,
+                    settings_adjustments TEXT,
+                    evidence        TEXT,
+                    resolved        BOOLEAN DEFAULT 0,
+                    timestamp       REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_failure_records_printer
+                    ON failure_records(printer_name);
+                CREATE INDEX IF NOT EXISTS idx_failure_records_type
+                    ON failure_records(failure_type);
+
+                CREATE TABLE IF NOT EXISTS split_plans (
+                    id              TEXT PRIMARY KEY,
+                    original_file   TEXT,
+                    split_type      TEXT NOT NULL,
+                    parts           TEXT NOT NULL,
+                    total_printers  INTEGER,
+                    created_at      REAL NOT NULL,
+                    status          TEXT DEFAULT 'pending'
+                );
+
+                CREATE TABLE IF NOT EXISTS feedback_loops (
+                    model_id        TEXT PRIMARY KEY,
+                    original_prompt TEXT NOT NULL,
+                    iterations      TEXT NOT NULL,
+                    current_iteration INTEGER DEFAULT 0,
+                    resolved        BOOLEAN DEFAULT 0,
+                    best_iteration  INTEGER,
+                    created_at      REAL NOT NULL,
+                    updated_at      REAL NOT NULL
+                );
                 """
             )
 
