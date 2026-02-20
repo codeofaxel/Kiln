@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import requests as requests_lib
@@ -19,14 +18,11 @@ from kiln.generation.base import (
     GenerationStatus,
 )
 from kiln.generation.gemini import (
-    GeminiDeepThinkProvider,
-    _DANGEROUS_PATTERNS,
     _GEMINI_API_URL,
-    _SYSTEM_PROMPT,
+    GeminiDeepThinkProvider,
     _extract_openscad_code,
     _find_openscad,
 )
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -144,6 +140,7 @@ def gemini_provider(mock_openscad):
 
 
 class TestFindOpenSCAD:
+    """Locate openscad binary: explicit path, PATH lookup, missing."""
     def test_explicit_path_valid(self, mock_openscad):
         assert _find_openscad(mock_openscad) == mock_openscad
 
@@ -153,10 +150,12 @@ class TestFindOpenSCAD:
             _find_openscad(bad_path)
 
     def test_no_openscad_anywhere(self):
-        with patch("shutil.which", return_value=None):
-            with patch("os.path.isfile", return_value=False):
-                with pytest.raises(GenerationError, match="not found"):
-                    _find_openscad()
+        with (
+            patch("shutil.which", return_value=None),
+            patch("os.path.isfile", return_value=False),
+            pytest.raises(GenerationError, match="not found"),
+        ):
+            _find_openscad()
 
 
 # ===================================================================
@@ -165,6 +164,7 @@ class TestFindOpenSCAD:
 
 
 class TestExtractOpenSCADCode:
+    """Extract OpenSCAD code from Gemini responses: plain, fenced, mixed, empty."""
     def test_plain_code(self):
         code = "cube([10, 10, 10]);"
         assert _extract_openscad_code(code) == code
@@ -208,6 +208,7 @@ class TestExtractOpenSCADCode:
 
 
 class TestGeminiDeepThinkProviderInit:
+    """Constructor: API key required, env fallback, explicit override, OpenSCAD required."""
     def test_requires_api_key(self):
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("KILN_GEMINI_API_KEY", None)
@@ -228,9 +229,11 @@ class TestGeminiDeepThinkProviderInit:
             assert provider._api_key == "explicit"
 
     def test_requires_openscad(self):
-        with patch("kiln.generation.gemini._find_openscad", side_effect=GenerationError("not found")):
-            with pytest.raises(GenerationError, match="not found"):
-                GeminiDeepThinkProvider(api_key="key")
+        with (
+            patch("kiln.generation.gemini._find_openscad", side_effect=GenerationError("not found")),
+            pytest.raises(GenerationError, match="not found"),
+        ):
+            GeminiDeepThinkProvider(api_key="key")
 
 
 # ===================================================================
@@ -239,6 +242,7 @@ class TestGeminiDeepThinkProviderInit:
 
 
 class TestGeminiDeepThinkProviderProperties:
+    """Provider name, display_name, and list_styles."""
     def test_name(self, gemini_provider):
         assert gemini_provider.name == "gemini"
 
@@ -258,6 +262,7 @@ class TestGeminiDeepThinkProviderProperties:
 
 
 class TestGeminiDeepThinkProviderGenerate:
+    """Generate flow: success, fenced responses, styles, empty, dangerous code, compilation failures."""
     @responses.activate
     def test_generate_success(self, gemini_provider, tmp_path):
         responses.add(
@@ -367,6 +372,32 @@ class TestGeminiDeepThinkProviderGenerate:
         assert "blocked" in job.error.lower()
 
     @responses.activate
+    @pytest.mark.parametrize(
+        "dangerous_code",
+        [
+            'import("evil.stl");',
+            'surface("heightmap.dat");',
+            'include <secrets.scad>',
+            'use <library.scad>',
+        ],
+        ids=["import", "surface", "include", "use"],
+    )
+    def test_all_dangerous_patterns_blocked(self, mock_openscad, tmp_path, dangerous_code):
+        resp = {
+            "candidates": [
+                {"content": {"parts": [{"text": dangerous_code}]}}
+            ]
+        }
+        responses.add(responses.POST, GENERATE_URL, json=resp)
+        provider = GeminiDeepThinkProvider(
+            api_key=GEMINI_API_KEY,
+            openscad_path=mock_openscad,
+        )
+        job = provider.generate("test", output_dir=str(tmp_path))
+        assert job.status == GenerationStatus.FAILED
+        assert "blocked" in job.error.lower()
+
+    @responses.activate
     def test_generate_compilation_failure(self, failing_openscad, tmp_path):
         responses.add(
             responses.POST,
@@ -409,6 +440,7 @@ class TestGeminiDeepThinkProviderGenerate:
 
 
 class TestGeminiDeepThinkProviderGetJobStatus:
+    """Job status retrieval: existing jobs, not-found errors."""
     @responses.activate
     def test_get_job_status_existing(self, gemini_provider, tmp_path):
         responses.add(
@@ -435,6 +467,7 @@ class TestGeminiDeepThinkProviderGetJobStatus:
 
 
 class TestGeminiDeepThinkProviderDownloadResult:
+    """Download result: success path, file not found."""
     @responses.activate
     def test_download_result_success(self, gemini_provider, tmp_path):
         responses.add(
@@ -464,6 +497,7 @@ class TestGeminiDeepThinkProviderDownloadResult:
 
 
 class TestGeminiDeepThinkProviderGetScadCode:
+    """SCAD code retrieval: stored code, not-found returns None."""
     @responses.activate
     def test_get_scad_code(self, gemini_provider, tmp_path):
         responses.add(
@@ -489,6 +523,7 @@ class TestGeminiDeepThinkProviderGetScadCode:
 
 
 class TestGeminiDeepThinkProviderErrors:
+    """Error handling: auth (401/403), rate limits (429), 500, connection, timeout."""
     @responses.activate
     def test_401_raises_auth_error(self, gemini_provider, tmp_path):
         responses.add(
@@ -592,6 +627,7 @@ class TestGeminiDeepThinkProviderErrors:
 
 
 class TestGeminiDeepThinkProviderRetry:
+    """Retry logic: transient 502/503 retried, exhaustion raises error."""
     @responses.activate
     def test_retries_on_502(self, gemini_provider, tmp_path):
         responses.add(
@@ -629,3 +665,17 @@ class TestGeminiDeepThinkProviderRetry:
                 output_dir=str(tmp_path),
             )
         assert job.status == GenerationStatus.SUCCEEDED
+
+    @responses.activate
+    def test_retry_exhaustion_raises(self, gemini_provider, tmp_path):
+        for _ in range(5):
+            responses.add(
+                responses.POST,
+                GENERATE_URL,
+                status=502,
+            )
+        with patch("time.sleep"), pytest.raises(GenerationError, match="HTTP 502"):
+            gemini_provider.generate(
+                "a cube",
+                output_dir=str(tmp_path),
+            )
