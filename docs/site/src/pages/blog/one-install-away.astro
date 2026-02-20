@@ -1,0 +1,81 @@
+---
+import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
+---
+
+<BlogPostLayout
+  title="Kiln is Now One Install Away from Any AI Agent"
+  description="Kiln v0.2.1 ships to PyPI, ClawHub, and the MCP Registry simultaneously — 273 tools for 3D printer control, one command to install."
+  date="February 20, 2026"
+  tags={["release", "pypi", "mcp", "clawhub", "v0.2.1"]}
+>
+
+<img src="/blog/one-install-away-square.png" alt="One Install Away from Any Agent" style="width:100%;border-radius:12px;margin-bottom:32px;" />
+
+<p>
+  Today Kiln shipped to three agent distribution channels simultaneously — making it the easiest way to give any AI agent control of a 3D printer.
+</p>
+
+<p>
+  <a href="https://pypi.org/project/kiln3d/">PyPI</a> ·
+  <a href="https://github.com/codeofaxel/Kiln">GitHub</a> ·
+  <a href="/install">Install</a> ·
+  <a href="/docs">Docs</a>
+</p>
+
+<h2>Three registries, one tool</h2>
+
+<p>
+  Before today, setting up Kiln meant cloning a repo, installing dependencies, and wiring up environment variables by hand. Now it's a single command — regardless of which agent platform you're on.
+</p>
+
+<ul>
+  <li><strong>PyPI</strong> — <code>pip install kiln3d</code> works globally. Any Python environment, any CI pipeline, any agent that can run pip or uv.</li>
+  <li><strong>ClawHub</strong> — <code>clawhub install kiln</code> for OpenClaw agents. One command and your agent has 273 MCP tools pre-configured, with env var gating for optional features.</li>
+  <li><strong>MCP Registry</strong> — Listed on the official Model Context Protocol registry. Claude Desktop, Cursor, Windsurf, and any MCP-compatible client can discover and install Kiln directly from their built-in server browser.</li>
+</ul>
+
+<p>
+  All three paths end at the same place: 273 tools for controlling printers, searching model marketplaces, generating 3D models from text or sketches, and outsourcing manufacturing to fulfillment services when your printer is busy or unavailable.
+</p>
+
+<h2>Install</h2>
+
+<pre><code># PyPI — any Python agent
+pip install kiln3d
+
+# ClawHub — OpenClaw agents
+clawhub install kiln
+
+# MCP Registry — Claude Desktop, Cursor, Windsurf
+# Search "kiln" in your MCP client's server browser</code></pre>
+
+<p>
+  After install, point Kiln at your printer:
+</p>
+
+<pre><code>export KILN_PRINTER_HOST="http://your-printer-ip"
+export KILN_PRINTER_API_KEY="your_key"
+kiln status --json</code></pre>
+
+<p>
+  That's it. Your agent can now print.
+</p>
+
+<h2>What's in v0.2.1</h2>
+
+<ul>
+  <li><strong>273 MCP tools</strong> and <strong>107 CLI commands</strong></li>
+  <li><strong>5 printer adapters</strong> — OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo</li>
+  <li><strong>Text and sketch to 3D generation</strong> — Gemini Deep Think, Meshy, Tripo3D, Stability AI, OpenSCAD</li>
+  <li><strong>6 model marketplaces</strong> — Thingiverse, MyMiniFactory, Thangs, Cults3D, GrabCAD, Etsy</li>
+  <li><strong>Outsourced manufacturing</strong> — Craftcloud and Sculpteo fulfillment</li>
+  <li><strong>Safety enforcement</strong> — per-printer temperature and speed limits for 28 printer models</li>
+  <li><strong>Fleet management</strong> — multi-printer job queue with smart routing and failure rerouting</li>
+  <li><strong>Autonomy tiers</strong> — configurable agent autonomy from confirm-all to full trust</li>
+</ul>
+
+<p>
+  Kiln is MIT licensed and fully open source on <a href="https://github.com/codeofaxel/Kiln">GitHub</a>.
+</p>
+
+</BlogPostLayout>

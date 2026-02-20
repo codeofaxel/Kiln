@@ -1,0 +1,185 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0a"/>
+      <stop offset="100%" style="stop-color:#1a1a2e"/>
+    </linearGradient>
+    <filter id="glowFilter">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1080" height="1080" fill="url(#bg)"/>
+
+  <!-- Subtle grid -->
+  <g opacity="0.04">
+    <line x1="60" y1="0" x2="60" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="120" y1="0" x2="120" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="180" y1="0" x2="180" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="240" y1="0" x2="240" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="300" y1="0" x2="300" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="360" y1="0" x2="360" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="420" y1="0" x2="420" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="480" y1="0" x2="480" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="540" y1="0" x2="540" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="600" y1="0" x2="600" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="660" y1="0" x2="660" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="720" y1="0" x2="720" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="780" y1="0" x2="780" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="840" y1="0" x2="840" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="900" y1="0" x2="900" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="960" y1="0" x2="960" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="1020" y1="0" x2="1020" y2="1080" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="60" x2="1080" y2="60" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="120" x2="1080" y2="120" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="180" x2="1080" y2="180" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="240" x2="1080" y2="240" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="300" x2="1080" y2="300" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="360" x2="1080" y2="360" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="420" x2="1080" y2="420" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="480" x2="1080" y2="480" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="540" x2="1080" y2="540" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="600" x2="1080" y2="600" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="660" x2="1080" y2="660" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="720" x2="1080" y2="720" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="780" x2="1080" y2="780" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="840" x2="1080" y2="840" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="900" x2="1080" y2="900" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="960" x2="1080" y2="960" stroke="#fff" stroke-width="1"/>
+    <line x1="0" y1="1020" x2="1080" y2="1020" stroke="#fff" stroke-width="1"/>
+  </g>
+
+  <!-- Ambient glow -->
+  <ellipse cx="540" cy="480" rx="400" ry="260" fill="#ff6b2b" opacity="0.03"/>
+
+  <!-- Title -->
+  <text x="540" y="170" text-anchor="middle" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="64" font-weight="700" letter-spacing="-1">One Install Away</text>
+  <text x="540" y="248" text-anchor="middle" fill="#ff6b2b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="64" font-weight="700" letter-spacing="-1">from Any Agent</text>
+
+  <!-- Subtitle -->
+  <text x="540" y="305" text-anchor="middle" fill="#888888" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="21" font-weight="400">Kiln is now on PyPI · ClawHub · MCP Registry</text>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- Three install cards                             -->
+  <!-- ═══════════════════════════════════════════════ -->
+
+  <!-- Card 1: PyPI -->
+  <g>
+    <rect x="80" y="370" width="280" height="310" rx="14" fill="#111118" stroke="#2a2a3a" stroke-width="1.5"/>
+    <!-- Python logo shape (simplified snake eye) -->
+    <rect x="175" y="410" width="90" height="26" rx="8" fill="#3572A5" opacity="0.9"/>
+    <rect x="175" y="444" width="90" height="26" rx="8" fill="#FFD43B" opacity="0.9"/>
+    <text x="220" y="530" text-anchor="middle" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="600">PyPI</text>
+    <text x="220" y="560" text-anchor="middle" fill="#666666" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13">Any Python agent</text>
+    <!-- Code line -->
+    <rect x="100" y="590" width="240" height="34" rx="6" fill="#0d0d14" stroke="#222230" stroke-width="1"/>
+    <text x="220" y="612" text-anchor="middle" fill="#ff6b2b" font-family="monospace" font-size="12">pip install kiln3d</text>
+    <text x="220" y="660" text-anchor="middle" fill="#444444" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11">pip · uv · conda</text>
+  </g>
+
+  <!-- Arrow 1→2 -->
+  <g filter="url(#glowFilter)">
+    <line x1="370" y1="525" x2="398" y2="525" stroke="#ff6b2b" stroke-width="2" opacity="0.6"/>
+    <polygon points="396,519 410,525 396,531" fill="#ff6b2b" opacity="0.6"/>
+  </g>
+
+  <!-- Card 2: ClawHub (center, highlighted) -->
+  <g>
+    <rect x="400" y="370" width="280" height="310" rx="14" fill="#111118" stroke="#ff6b2b" stroke-width="1.5"/>
+    <rect x="400" y="370" width="280" height="310" rx="14" fill="none" stroke="#ff6b2b" stroke-width="1" opacity="0.2" filter="url(#softGlow)"/>
+    <!-- Claw icon — three curved lines -->
+    <path d="M500 430 Q490 450 498 470" stroke="#ff6b2b" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.9"/>
+    <path d="M540 425 Q540 450 540 472" stroke="#ff6b2b" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.9"/>
+    <path d="M580 430 Q590 450 582 470" stroke="#ff6b2b" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.9"/>
+    <ellipse cx="540" cy="480" rx="42" ry="12" fill="none" stroke="#ff6b2b" stroke-width="2" opacity="0.5"/>
+    <text x="540" y="530" text-anchor="middle" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="600">ClawHub</text>
+    <text x="540" y="560" text-anchor="middle" fill="#666666" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13">OpenClaw agents</text>
+    <rect x="420" y="590" width="240" height="34" rx="6" fill="#0d0d14" stroke="#222230" stroke-width="1"/>
+    <text x="540" y="612" text-anchor="middle" fill="#ff6b2b" font-family="monospace" font-size="12">clawhub install kiln</text>
+    <text x="540" y="660" text-anchor="middle" fill="#444444" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11">273 MCP tools · auto-configured</text>
+  </g>
+
+  <!-- Arrow 2→3 -->
+  <g filter="url(#glowFilter)">
+    <line x1="690" y1="525" x2="718" y2="525" stroke="#ff6b2b" stroke-width="2" opacity="0.6"/>
+    <polygon points="716,519 730,525 716,531" fill="#ff6b2b" opacity="0.6"/>
+  </g>
+
+  <!-- Card 3: MCP Registry -->
+  <g>
+    <rect x="720" y="370" width="280" height="310" rx="14" fill="#111118" stroke="#2a2a3a" stroke-width="1.5"/>
+    <!-- MCP hexagon icon -->
+    <polygon points="860,410 880,422 880,446 860,458 840,446 840,422" fill="none" stroke="#7b61ff" stroke-width="2" opacity="0.8"/>
+    <text x="860" y="442" text-anchor="middle" fill="#7b61ff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="700" opacity="0.9">MCP</text>
+    <text x="860" y="530" text-anchor="middle" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="600">MCP Registry</text>
+    <text x="860" y="560" text-anchor="middle" fill="#666666" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13">Claude · Cursor · Windsurf</text>
+    <rect x="740" y="590" width="240" height="34" rx="6" fill="#0d0d14" stroke="#222230" stroke-width="1"/>
+    <text x="860" y="609" text-anchor="middle" fill="#7b61ff" font-family="monospace" font-size="11">registry.modelcontextprotocol.io</text>
+    <text x="860" y="660" text-anchor="middle" fill="#444444" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11">search "kiln" in your MCP client</text>
+  </g>
+
+  <!-- Convergence arrows pointing down to printer -->
+  <g filter="url(#glowFilter)" opacity="0.5">
+    <line x1="220" y1="690" x2="470" y2="790" stroke="#ff6b2b" stroke-width="1.5"/>
+    <line x1="540" y1="690" x2="540" y2="790" stroke="#ff6b2b" stroke-width="1.5"/>
+    <line x1="860" y1="690" x2="610" y2="790" stroke="#ff6b2b" stroke-width="1.5"/>
+    <polygon points="534,788 540,802 546,788" fill="#ff6b2b"/>
+  </g>
+
+  <!-- Printer silhouette -->
+  <g transform="translate(440, 800)">
+    <!-- Base platform -->
+    <rect x="0" y="100" width="200" height="12" rx="4" fill="#ff6b2b" opacity="0.6"/>
+    <!-- Body -->
+    <rect x="30" y="30" width="140" height="72" rx="6" fill="#1a1a28" stroke="#333344" stroke-width="1.5"/>
+    <!-- Print head arm -->
+    <rect x="25" y="20" width="8" height="90" rx="3" fill="#ff6b2b" opacity="0.7"/>
+    <rect x="25" y="20" width="90" height="8" rx="3" fill="#ff6b2b" opacity="0.7"/>
+    <!-- Print head nozzle -->
+    <rect x="108" y="22" width="10" height="20" rx="2" fill="#ff6b2b" opacity="0.9"/>
+    <!-- Extruding filament -->
+    <line x1="113" y1="42" x2="113" y2="62" stroke="#ff6b2b" stroke-width="2.5" stroke-dasharray="4,3" opacity="0.6"/>
+    <!-- Bed -->
+    <rect x="20" y="98" width="160" height="6" rx="2" fill="#222233" stroke="#333344" stroke-width="1"/>
+    <!-- Object being printed (small layers) -->
+    <rect x="90" y="72" width="40" height="8" rx="1" fill="#ff6b2b" opacity="0.25"/>
+    <rect x="92" y="64" width="36" height="8" rx="1" fill="#ff6b2b" opacity="0.18"/>
+    <rect x="94" y="56" width="32" height="8" rx="1" fill="#ff6b2b" opacity="0.12"/>
+  </g>
+
+  <!-- Stats row -->
+  <g>
+    <line x1="80" y1="955" x2="1000" y2="955" stroke="#1a1a2a" stroke-width="1"/>
+
+    <text x="200" y="995" text-anchor="middle" fill="#ff6b2b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="30" font-weight="700">273</text>
+    <text x="200" y="1018" text-anchor="middle" fill="#555555" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" font-weight="500">MCP TOOLS</text>
+
+    <text x="390" y="995" text-anchor="middle" fill="#ff6b2b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="30" font-weight="700">107</text>
+    <text x="390" y="1018" text-anchor="middle" fill="#555555" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" font-weight="500">CLI COMMANDS</text>
+
+    <text x="580" y="995" text-anchor="middle" fill="#ff6b2b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="30" font-weight="700">5</text>
+    <text x="580" y="1018" text-anchor="middle" fill="#555555" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" font-weight="500">PRINTER ADAPTERS</text>
+
+    <text x="770" y="995" text-anchor="middle" fill="#ff6b2b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="30" font-weight="700">3</text>
+    <text x="770" y="1018" text-anchor="middle" fill="#555555" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" font-weight="500">REGISTRIES</text>
+
+    <text x="960" y="995" text-anchor="middle" fill="#ff6b2b" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="30" font-weight="700">MIT</text>
+    <text x="960" y="1018" text-anchor="middle" fill="#555555" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" font-weight="500">OPEN SOURCE</text>
+  </g>
+
+  <!-- Branding -->
+  <text x="540" y="1058" text-anchor="middle" fill="#333333" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="15" font-weight="600">kiln3d.com</text>
+
+</svg>
