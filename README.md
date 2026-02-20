@@ -51,7 +51,7 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link. Manage a mixed fleet from one place.
 - **AI-native** — 273 MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
-- **Search → Slice → Print** — Browse MyMiniFactory/Cults3D (and legacy Thingiverse), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
+- **Search → Slice → Print** — Browse MyMiniFactory, Cults3D, Thangs, GrabCAD, Etsy (and legacy Thingiverse), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
 - **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
 
 ## Architecture
@@ -78,6 +78,9 @@ graph TD
 
     D --> I["MyMiniFactory"]
     D --> J["Cults3D"]
+    D --> K["Thangs"]
+    D --> L["GrabCAD"]
+    D --> M["Etsy"]
     D --> H["Thingiverse (deprecated)"]
 
     style A fill:#1a1a2e,stroke:#e94560,color:#fff
@@ -478,7 +481,7 @@ The Kiln MCP server (`kiln serve`) exposes **273 tools** to agents. Key tools ar
 | `register_webhook` | Register a webhook for event notifications |
 | `list_webhooks` | List all registered webhooks |
 | `delete_webhook` | Remove a webhook endpoint |
-| `search_all_models` | Search MyMiniFactory, Cults3D, and Thingiverse (deprecated) simultaneously |
+| `search_all_models` | Search MyMiniFactory, Cults3D, Thangs, GrabCAD, Etsy, and Thingiverse (deprecated) simultaneously |
 | `marketplace_info` | Show connected marketplaces and setup hints |
 | `search_models` | Search a single marketplace for 3D models |
 | `model_details` | Get details for a marketplace model |
@@ -644,7 +647,7 @@ The server also exposes read-only resources that agents can use for context:
 |---|---|
 | `server.py` | MCP server with tools, resources, and subsystem wiring |
 | `printers/` | Printer adapter abstraction (OctoPrint, Moonraker, Bambu, Elegoo, Prusa Link) |
-| `marketplaces/` | Model marketplace adapters (MyMiniFactory, Cults3D, Thingiverse — deprecated) |
+| `marketplaces/` | Model marketplace adapters (MyMiniFactory, Cults3D, Thangs, GrabCAD, Etsy, Thingiverse — deprecated) |
 | `slicer.py` | Slicer integration (PrusaSlicer, OrcaSlicer) with auto-detection |
 | `registry.py` | Fleet registry for multi-printer management |
 | `queue.py` | Priority job queue with status tracking |
@@ -752,6 +755,9 @@ Kiln includes adapters for discovering and downloading 3D models from popular ma
 |---|---|---|
 | **MyMiniFactory** | Stable | Search, details, download. *Primary marketplace — recommended for new integrations.* |
 | **Cults3D** | Stable | Search, details (metadata-only, no direct download) |
+| **Thangs** | Stable | Search, details, download. Geometric search across multiple sources. |
+| **GrabCAD** | Stable | Search, details, download. Engineering-focused CAD model library. |
+| **Etsy** | Stable | Search, details, download. Digital download 3D-printable listings. |
 | **Thingiverse** | Deprecated | Search, browse, download, categories. *Acquired by MyMiniFactory (Feb 2026). API may be sunset or merged; prefer MyMiniFactory adapter.* |
 
 Configure credentials for the marketplaces you use:
@@ -761,6 +767,9 @@ export KILN_THINGIVERSE_TOKEN=your_token       # Thingiverse (deprecated — acq
 export KILN_MMF_API_KEY=your_key               # MyMiniFactory
 export KILN_CULTS3D_USERNAME=your_username      # Cults3D
 export KILN_CULTS3D_API_KEY=your_key            # Cults3D
+export KILN_THANGS_API_KEY=your_key             # Thangs
+export KILN_GRABCAD_API_KEY=your_key            # GrabCAD
+export KILN_ETSY_API_KEY=your_key               # Etsy
 ```
 
 All configured marketplaces are searched simultaneously via `search_all_models`. Agents can inspect details, download files, and upload directly to a printer — enabling a full design-to-print workflow without human intervention.

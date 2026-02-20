@@ -43,7 +43,7 @@ All three modes use the same MCP tools and CLI commands.
 
 **MCP Tools** — Typed functions exposed to agents via the Model Context Protocol. Each tool has a defined input schema and returns structured JSON.
 
-**MarketplaceAdapter** — Abstract base class for 3D model repositories. Implements: search, details, files, download. Concrete adapters for MyMiniFactory, Cults3D, and Thingiverse (deprecated — acquired by MyMiniFactory, Feb 2026).
+**MarketplaceAdapter** — Abstract base class for 3D model repositories. Implements: search, details, files, download. Concrete adapters for MyMiniFactory, Cults3D, Thangs, GrabCAD, Etsy, and Thingiverse (deprecated — acquired by MyMiniFactory, Feb 2026).
 
 **MarketplaceRegistry** — Manages connected marketplace adapters. Provides `search_all()` for parallel fan-out search across all sources with round-robin result interleaving.
 
@@ -676,21 +676,27 @@ Kiln provides a `MarketplaceAdapter` interface (mirroring the printer adapter pa
 
 ### Supported Marketplaces
 
-| Marketplace | Protocol | Auth | Download Support |
-|---|---|---|---|
+| Marketplace | Protocol | Auth | Download Support | Notes |
+|---|---|---|---|---|
+| MyMiniFactory | HTTP REST v2 | API key (`?key=`) | Yes | *Primary marketplace — recommended for new integrations.* |
+| Cults3D | GraphQL | HTTP Basic | No (metadata-only) | |
+| Thangs | HTTP REST | API key | Yes | Geometric search across multiple sources. |
+| GrabCAD | HTTP REST | API key | Yes | Engineering-focused CAD model library. |
+| Etsy | HTTP REST (Open API v3) | API key | Yes | Digital download 3D-printable listings. |
 | Thingiverse | HTTP REST | Bearer token | Yes | *Deprecated — acquired by MyMiniFactory (Feb 2026). API may be sunset or merged. Prefer MyMiniFactory adapter for new integrations.* |
-| MyMiniFactory | HTTP REST v2 | API key (`?key=`) | Yes |
-| Cults3D | GraphQL | HTTP Basic | No (metadata-only) |
 
 ### Configuration
 
 Set environment variables for each marketplace you want to enable:
 
 ```bash
-export KILN_THINGIVERSE_TOKEN=your_token       # Deprecated — Thingiverse acquired by MyMiniFactory (Feb 2026)
 export KILN_MMF_API_KEY=your_key               # MyMiniFactory developer key
 export KILN_CULTS3D_USERNAME=your_username      # Cults3D account username
 export KILN_CULTS3D_API_KEY=your_key            # https://cults3d.com/en/api/keys
+export KILN_THANGS_API_KEY=your_key             # Thangs
+export KILN_GRABCAD_API_KEY=your_key            # GrabCAD
+export KILN_ETSY_API_KEY=your_key               # Etsy Open API v3
+export KILN_THINGIVERSE_TOKEN=your_token        # Deprecated — Thingiverse acquired by MyMiniFactory (Feb 2026)
 ```
 
 Adapters are auto-registered at server startup based on available credentials. Only configured marketplaces participate in searches.
@@ -809,10 +815,13 @@ settings:
 | `KILN_PRINTER_API_KEY` | API key for OctoPrint |
 | `KILN_PRINTER_TYPE` | Backend type |
 | `KILN_SLICER_PATH` | Explicit path to slicer binary |
-| `KILN_THINGIVERSE_TOKEN` | Thingiverse API token *(deprecated — acquired by MyMiniFactory, Feb 2026)* |
 | `KILN_MMF_API_KEY` | MyMiniFactory API key |
 | `KILN_CULTS3D_USERNAME` | Cults3D account username |
 | `KILN_CULTS3D_API_KEY` | Cults3D API key |
+| `KILN_THANGS_API_KEY` | Thangs API key |
+| `KILN_GRABCAD_API_KEY` | GrabCAD API key |
+| `KILN_ETSY_API_KEY` | Etsy Open API v3 key |
+| `KILN_THINGIVERSE_TOKEN` | Thingiverse API token *(deprecated — acquired by MyMiniFactory, Feb 2026)* |
 | `KILN_AUTH_ENABLED` | Enable API key auth (1/0) |
 | `KILN_AUTH_KEY` | Secret key for auth |
 | `KILN_ENCRYPTION_KEY` | Encryption key for G-code at rest (Enterprise) |
@@ -922,6 +931,9 @@ kiln/src/kiln/
         base.py          # Marketplace adapter interface
         myminifactory.py # MyMiniFactory API client (primary)
         cults3d.py       # Cults3D API client
+        thangs.py        # Thangs API client
+        grabcad.py       # GrabCAD API client
+        etsy.py          # Etsy Open API v3 client
         thingiverse.py   # Thingiverse API client (deprecated — acquired by MMF)
     cli/
         main.py          # Click CLI entry point

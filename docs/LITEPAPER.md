@@ -30,7 +30,7 @@ An agent can start a PLA prototype on your desk printer, send the SLA version to
 
 **Beyond printing:**
 
-- **Full print workflow.** An agent can search for 3D models across MyMiniFactory, Cults3D, and other marketplaces; slice them into printer-ready files; upload to a printer; start, monitor, and cancel prints -- all without human intervention.
+- **Full print workflow.** An agent can search for 3D models across MyMiniFactory, Cults3D, Thangs, GrabCAD, Etsy, and other marketplaces; slice them into printer-ready files; upload to a printer; start, monitor, and cancel prints -- all without human intervention.
 
 - **Agent-designed models.** Kiln's universal generation adapter auto-discovers text-to-3D providers from environment variables. Cloud providers include Meshy, Tripo3D, and Stability AI -- each turning a natural-language description into a printable mesh. Google Gemini Deep Think uses AI reasoning to convert text or napkin-sketch descriptions into precise OpenSCAD geometry, compiled locally to STL. For fully parametric parts, the OpenSCAD provider lets agents write code directly. New providers can be added in under 100 lines. Generated models are automatically validated for printability -- manifold checks, triangle counts, bounding box dimensions -- before they ever reach a slicer. An agent can go from "I need a 40mm fan duct with a 30-degree deflection" to a sliced, printing G-code file with no human in the loop.
 
