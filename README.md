@@ -336,7 +336,7 @@ kiln level [--status] [--trigger] [--json]    # Bed leveling triggers
 kiln stream [--port 8081] [--stop] [--json]   # Webcam MJPEG proxy
 kiln sync status|now|configure                # Cloud sync
 kiln plugins list|info                        # Plugin management
-kiln generate "a phone stand" --provider meshy --json   # Generate 3D model from text
+kiln generate "a phone stand" --provider meshy --json   # Generate 3D model from text (meshy/tripo3d/stability/openscad)
 kiln generate-status <job_id> --json                    # Check generation status
 kiln generate-download <job_id> -o ./models --json      # Download generated model
 kiln firmware status --json                # Check for firmware updates
@@ -517,7 +517,7 @@ The Kiln MCP server (`kiln serve`) exposes **273 tools** to agents. Key tools ar
 | `compare_print_options` | Side-by-side local vs. fulfillment cost comparison |
 | `analyze_print_failure` | Diagnose a failed print job with causes and recommendations |
 | `validate_print_quality` | Post-print quality assessment with snapshot and event analysis |
-| `generate_model` | Generate a 3D model from a text description (Meshy AI or OpenSCAD) |
+| `generate_model` | Generate a 3D model from text (Meshy, Tripo3D, Stability AI, or OpenSCAD) |
 | `generation_status` | Check the status of a model generation job |
 | `download_generated_model` | Download a completed generated model with mesh validation |
 | `await_generation` | Wait for a generation job to complete (polling) |
@@ -655,7 +655,7 @@ The server also exposes read-only resources that agents can use for context:
 | `auth.py` | Optional API key authentication with scope-based access |
 | `billing.py` | Fee tracking for fulfillment and network-routed jobs |
 | `discovery.py` | Network printer discovery (mDNS + HTTP probe) |
-| `generation/` | Text-to-model generation providers (Meshy AI, OpenSCAD) with mesh validation |
+| `generation/` | Text-to-model generation providers (Meshy, Tripo3D, Stability AI, OpenSCAD) with auto-discovery, mesh validation, and printability analysis |
 | `consumer.py` | Consumer workflow for non-printer users (address validation, material recommendations, timeline/price estimation, onboarding) |
 | `fulfillment/` | External manufacturing service adapters (Craftcloud) with intelligence layer (provider health, multi-provider comparison, batch quoting, retry/fallback, order history, shipping insurance) |
 | `cost_estimator.py` | Print cost estimation from G-code analysis |
@@ -764,6 +764,27 @@ export KILN_CULTS3D_API_KEY=your_key            # Cults3D
 ```
 
 All configured marketplaces are searched simultaneously via `search_all_models`. Agents can inspect details, download files, and upload directly to a printer — enabling a full design-to-print workflow without human intervention.
+
+## AI Model Generation
+
+Kiln's universal generation adapter auto-discovers text-to-3D providers from environment variables. Set any of the following and the provider is available instantly:
+
+```bash
+export KILN_MESHY_API_KEY=your_key         # Meshy — cloud text-to-3D
+export KILN_TRIPO3D_API_KEY=your_key       # Tripo3D — high-quality cloud text-to-3D
+export KILN_STABILITY_API_KEY=your_key     # Stability AI — synchronous 3D generation
+```
+
+OpenSCAD is also available for local parametric generation (no API key needed — just install the `openscad` binary).
+
+| Provider | Type | Async | Output Formats |
+|---|---|---|---|
+| **Meshy** | Cloud | Yes | STL, OBJ, GLB |
+| **Tripo3D** | Cloud | Yes | STL, OBJ, GLB |
+| **Stability AI** | Cloud | No (synchronous) | GLB |
+| **OpenSCAD** | Local | No (synchronous) | STL |
+
+Generated models are automatically validated for printability (manifold check, triangle count, bounding box dimensions) before printing. The registry pattern means new providers can be added in under 100 lines.
 
 ## Slicer Integration
 

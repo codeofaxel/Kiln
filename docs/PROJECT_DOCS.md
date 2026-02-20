@@ -47,7 +47,7 @@ All three modes use the same MCP tools and CLI commands.
 
 **MarketplaceRegistry** — Manages connected marketplace adapters. Provides `search_all()` for parallel fan-out search across all sources with round-robin result interleaving.
 
-**GenerationProvider** — Abstract base class for text-to-3D model generation backends. Implements: generate, get_job_status, download_result. Concrete providers for Meshy (cloud AI) and OpenSCAD (local parametric).
+**GenerationProvider** — Abstract base class for text-to-3D model generation backends. Implements: generate, get_job_status, download_result. Concrete providers for Meshy (cloud AI), Tripo3D (cloud AI), Stability AI (synchronous cloud), and OpenSCAD (local parametric). A `GenerationRegistry` auto-discovers providers from `KILN_*_API_KEY` environment variables.
 
 **Mesh Validation** — Pipeline that checks generated STL/OBJ files for 3D-printing readiness: geometry parsing, manifold checks, dimension limits, polygon count validation. Uses pure Python (no external mesh libraries).
 
@@ -454,6 +454,8 @@ Kiln exposes **273 MCP tools** in total. The most commonly used tools are docume
 | `supported_shipping_countries` | — | Supported shipping countries (23+ countries) |
 
 #### Model Generation
+
+Supported providers: `meshy`, `tripo3d`, `stability`, `openscad`. Set `KILN_MESHY_API_KEY`, `KILN_TRIPO3D_API_KEY`, or `KILN_STABILITY_API_KEY` to enable cloud providers.
 
 | Tool | Input | Output |
 |---|---|---|

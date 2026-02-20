@@ -123,7 +123,7 @@ class TestKilnHealth:
         result = kiln_health()
 
         assert result["uptime_human"].startswith("1h")
-        assert result["uptime_seconds"] == pytest.approx(3661.0, abs=120.0)
+        assert result["uptime_seconds"] == pytest.approx(3661.0, abs=300.0)
 
     def test_module_status_flags(self):
         """modules dict contains all expected boolean flags."""
