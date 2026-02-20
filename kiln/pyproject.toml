@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kiln3d"
-version = "0.2.0"
+version = "0.2.1"
 description = "MCP server + CLI for AI agents to control 3D printers (OctoPrint, Moonraker, Bambu Lab, Prusa Link) — 273 tools for print farm automation"
 readme = "README.md"
 license = {text = "MIT"}

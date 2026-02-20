@@ -1,5 +1,7 @@
 # Kiln
 
+<!-- mcp-name: io.github.codeofaxel/kiln -->
+
 Agentic infrastructure for physical fabrication. Kiln enables AI agents to design, slice, queue, monitor, and fulfill 3D print jobs through a unified MCP (Model Context Protocol) server and CLI.
 
 ## What Kiln Does
