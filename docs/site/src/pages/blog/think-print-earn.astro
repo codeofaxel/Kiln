@@ -1,0 +1,109 @@
+---
+import BlogPostLayout from '../../layouts/BlogPostLayout.astro';
+---
+
+<BlogPostLayout
+  title="Think → Print → Earn: 12 New Subsystems Ship Today"
+  description="Kiln now covers the entire loop — from AI-generated 3D models to validated prints to marketplace revenue. 12 new subsystems, 409 new tests, zero compromises."
+  date="February 19, 2026"
+  tags={["features", "generation", "marketplace", "revenue", "printability"]}
+>
+
+<p>
+  Google's Gemini Deep Think can sketch a 3D-printable model from a napkin drawing. Stability AI and Tripo3D can generate mesh from text. The generation side of the equation is solved — or close enough. What's missing is the bridge between "I have a 3D model" and "I have a physical object that earns money." Today, Kiln becomes that bridge.
+</p>
+
+<p>
+  We shipped 12 new subsystems in a single push. Here's what they do and why they matter.
+</p>
+
+<h2>The generation pipeline</h2>
+
+<p>
+  <strong>Universal Generation Adapter.</strong> Kiln now auto-discovers your text-to-3D providers from environment variables. Set <code>KILN_TRIPO3D_API_KEY</code> or <code>KILN_STABILITY_API_KEY</code> and they're available instantly — alongside our existing Meshy integration. The registry pattern means new providers can be added in under 100 lines.
+</p>
+
+<p>
+  <strong>Printability Analysis Engine.</strong> A generated model isn't a printable model. Our new analysis engine checks for overhangs, thin walls, bridging issues, bed adhesion, and support requirements — then gives the model an A-through-F grade. Before a single gram of filament is wasted, the agent knows whether this model will actually print.
+</p>
+
+<p>
+  <strong>Auto-Orient.</strong> The engine tests 24 candidate orientations and picks the one that minimizes supports, maximizes bed contact, and reduces print height. Then it writes the reoriented STL. No human intervention.
+</p>
+
+<p>
+  <strong>Generation Feedback Loop.</strong> If a print fails, Kiln analyzes what went wrong and generates an improved prompt with printability constraints baked in. The agent doesn't just retry — it retries smarter. This closes the loop between generation and physical reality.
+</p>
+
+<h2>The intelligence network</h2>
+
+<p>
+  <strong>Print DNA.</strong> Every model that passes through Kiln gets a geometric fingerprint — SHA-256 hash plus structural signature (vertex count, surface area, volume, overhang ratio, complexity score). When you print a model that's geometrically similar to one that's been printed before, Kiln predicts the best settings from historical data. Three tiers: exact match, similar geometry, material default.
+</p>
+
+<p>
+  <strong>Community Print Registry.</strong> Opt-in crowd-sourced print settings. If 50 people have printed a model with similar geometry and 45 of them used PLA at 210C with 20% infill, that's intelligence worth sharing. Think Waze, but for 3D printing. Confidence levels scale with data: under 5 prints is "low," over 20 is "high."
+</p>
+
+<p>
+  <strong>Smart Material Routing.</strong> Tell the agent what you care about — "strong," "flexible," "cheap," "outdoor" — and Kiln recommends the right material from 8 built-in options. It factors in your printer's capabilities (heated bed, enclosure) and your budget. No more guessing whether PETG or ASA is better for your use case.
+</p>
+
+<h2>The marketplace pipeline</h2>
+
+<p>
+  <strong>Publish-to-Marketplace.</strong> AI generates a model. Kiln validates it. You print it. It works. One click publishes it to Thingiverse, MyMiniFactory, or Thangs — with a print "birth certificate" attached. The certificate proves the model was printed successfully, on which printers, with which materials, at what success rate. It's proof of printability, not just a download.
+</p>
+
+<p>
+  <strong>Revenue Tracking.</strong> If your published model earns royalties on a marketplace, Kiln tracks that. Per-model, per-marketplace, monthly trends, CSV export. Kiln becomes the creator's dashboard.
+</p>
+
+<p>
+  We take a 2.5% platform fee on revenue from models published through Kiln's pipeline. Configurable via <code>KILN_PLATFORM_FEE_PCT</code>. Only applies to models that went through our publish flow — we don't touch revenue from models published elsewhere. This is how we sustain the project while keeping the core MIT-licensed.
+</p>
+
+<p>
+  <strong>Print-as-a-Service.</strong> Don't have a printer? Kiln quotes both local printing and fulfillment side-by-side, recommends the best option for your budget and timeline, and manages the order lifecycle from receipt to delivery.
+</p>
+
+<h2>Reliability</h2>
+
+<p>
+  <strong>Intelligent Failure Recovery.</strong> Nine classified failure types — spaghetti, layer shift, adhesion loss, nozzle clog, stringing, thermal runaway, power loss, filament runout, warping. Each gets an automated recovery plan tailored to what the printer can actually do. The agent doesn't just report "print failed" — it reports why and what to do next.
+</p>
+
+<p>
+  <strong>Multi-Printer Job Splitting.</strong> Got a fleet? Kiln can split a job across multiple printers — round-robin for copies, assembly-based for multi-part models. It generates assembly instructions so you know what came from where.
+</p>
+
+<h2>By the numbers</h2>
+
+<ul>
+  <li>12 new subsystems</li>
+  <li>14 new source files, 4 new plugin files</li>
+  <li>8 new database tables</li>
+  <li>40 new MCP tools (270+ total)</li>
+  <li>409 new tests (6,094 total passing)</li>
+  <li>Full whitehat audit with race condition, input validation, and JSON safety fixes</li>
+</ul>
+
+<p>
+  Every model published through Kiln carries a <em>"Powered by Kiln — the open-source bridge between AI and 3D printing"</em> attribution. We want the world to know where the good prints come from.
+</p>
+
+<h2>What this means</h2>
+
+<p>
+  The "think → print → earn" loop is real. An AI agent can now generate a 3D model from text, validate its printability, orient it optimally, print it on the best available printer with the right material, recover from failures automatically, publish the proven model to a marketplace, and track the revenue it generates — all through Kiln's MCP tools.
+</p>
+
+<p>
+  No other platform does this. Not because it's impossible, but because nobody else has built the middleware that connects every step. That's Kiln.
+</p>
+
+<p style="margin-top:40px;font-style:italic;">
+  — Adam
+</p>
+
+</BlogPostLayout>
