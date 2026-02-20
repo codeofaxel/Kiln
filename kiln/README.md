@@ -82,12 +82,22 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ## Features
 
-- **79+ MCP tools** for full printer control, fleet management, slicing, model generation, and fulfillment
-- **25+ CLI commands** with `--json` output for agent consumption
+- **270+ MCP tools** for full printer control, fleet management, slicing, model generation, marketplace publishing, and fulfillment
+- **107 CLI commands** with `--json` output for agent consumption
 - **Multi-printer fleet** management with job queue and background scheduler
 - **Model marketplaces** — search/download from MyMiniFactory, Cults3D (Thingiverse deprecated — acquired by MMF, Feb 2026)
 - **Slicer integration** — PrusaSlicer and OrcaSlicer with auto-detection
-- **Text-to-model generation** — Meshy AI and OpenSCAD providers
+- **Text-to-model generation** — Meshy AI, Tripo3D, Stability AI, OpenSCAD with auto-discovery registry
+- **Printability analysis** — overhang detection, thin wall analysis, auto-orientation, support estimation
+- **Print DNA** — model fingerprinting, crowd-sourced print settings, intelligent settings prediction
+- **Marketplace publish** — one-click publish to Thingiverse/MyMiniFactory/Thangs with print "birth certificate"
+- **Revenue tracking** — per-model creator analytics, 2.5% platform fee on Kiln-published models
+- **Print-as-a-Service** — local vs fulfillment cost comparison, order lifecycle management
+- **Failure recovery** — 9 failure types classified, automated recovery planning
+- **Multi-printer splitting** — round-robin and assembly-based job distribution across fleets
+- **Generation feedback loop** — failed print → improved prompt with printability constraints
+- **Smart material routing** — intent-based material recommendations (8 materials, printer capability aware)
+- **Community print registry** — opt-in crowd-sourced settings ("Waze for 3D printing")
 - **Fulfillment services** — outsource to Craftcloud (150+ print services, no API key required)
 - **Safety first** — pre-flight checks, G-code validation, temperature limits, optional auth
 - **Webhooks** — HMAC-signed event notifications for job lifecycle
@@ -115,7 +125,7 @@ Prusa   Voron    X1C/P1S  MK4/XL
 
 ```bash
 pip install -e ".[dev]"
-cd kiln && python -m pytest tests/ -v  # 5,004 tests
+cd kiln && python -m pytest tests/ -v  # 6,094 tests
 ```
 
 ## License
