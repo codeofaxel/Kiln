@@ -194,7 +194,7 @@ class TestBillingCheckSetup:
         mock_mgr = MagicMock()
         mock_mgr.get_provider.return_value = mock_provider
 
-        with patch("kiln.server._check_auth", return_value=None), \
+        with patch("kiln.server._check_billing_auth", return_value=None), \
              patch("kiln.server._get_payment_mgr", return_value=mock_mgr), \
              patch("kiln.cli.config.save_billing_config") as mock_save:
             result = billing_check_setup()
@@ -217,7 +217,7 @@ class TestBillingCheckSetup:
         mock_mgr = MagicMock()
         mock_mgr.get_provider.return_value = mock_provider
 
-        with patch("kiln.server._check_auth", return_value=None), \
+        with patch("kiln.server._check_billing_auth", return_value=None), \
              patch("kiln.server._get_payment_mgr", return_value=mock_mgr):
             result = billing_check_setup()
 
@@ -231,7 +231,7 @@ class TestBillingCheckSetup:
         mock_mgr = MagicMock()
         mock_mgr.get_provider.return_value = None
 
-        with patch("kiln.server._check_auth", return_value=None), \
+        with patch("kiln.server._check_billing_auth", return_value=None), \
              patch("kiln.server._get_payment_mgr", return_value=mock_mgr):
             result = billing_check_setup()
 
@@ -246,7 +246,7 @@ class TestBillingCheckSetup:
         mock_mgr = MagicMock()
         mock_mgr.get_provider.return_value = mock_provider
 
-        with patch("kiln.server._check_auth", return_value=None), \
+        with patch("kiln.server._check_billing_auth", return_value=None), \
              patch("kiln.server._get_payment_mgr", return_value=mock_mgr):
             result = billing_check_setup()
 
@@ -257,7 +257,8 @@ class TestBillingCheckSetup:
         """When _get_payment_mgr raises, the tool returns INTERNAL_ERROR."""
         from kiln.server import billing_check_setup
 
-        with patch("kiln.server._get_payment_mgr", side_effect=RuntimeError("config missing")):
+        with patch("kiln.server._check_billing_auth", return_value=None), \
+             patch("kiln.server._get_payment_mgr", side_effect=RuntimeError("config missing")):
             result = billing_check_setup()
 
         assert result["success"] is False
@@ -272,7 +273,7 @@ class TestBillingCheckSetup:
         mock_mgr = MagicMock()
         mock_mgr.get_provider.return_value = mock_provider
 
-        with patch("kiln.server._check_auth", return_value=None), \
+        with patch("kiln.server._check_billing_auth", return_value=None), \
              patch("kiln.server._get_payment_mgr", return_value=mock_mgr):
             result = billing_check_setup()
 

@@ -375,7 +375,7 @@ def _install_mcp_request_context_capture() -> None:
             _current_mcp_request_context.reset(token)
 
     tool_mgr.call_tool = MethodType(_call_tool_with_context, tool_mgr)
-    setattr(tool_mgr, "_kiln_request_context_capture_installed", True)
+    tool_mgr._kiln_request_context_capture_installed = True
 
 
 _install_mcp_request_context_capture()
