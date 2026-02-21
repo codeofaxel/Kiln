@@ -945,3 +945,5 @@ deploy/                  # On-prem Enterprise deployment
     k8s/                 # Kubernetes manifests (9 files: namespace, deployment, service, ingress, configmap, secrets, PVC, network policies, HPA)
     helm/kiln/           # Helm chart (12 files: Chart.yaml, values.yaml, templates/)
 ```
+
+*Kiln is a project of Hadron Labs Inc.*

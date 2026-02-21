@@ -111,6 +111,7 @@ const htmlContent = await marked.parse(markdown);
       <div class="page-header">
         <h1>Documentation</h1>
         <p class="subtitle">Complete reference for the Kiln CLI, MCP server, adapters, and configuration.</p>
+        <p class="parent-company">Kiln is a project of Hadron Labs Inc.</p>
       </div>
       <article class="prose" set:html={htmlContent} />
     </main>
@@ -174,6 +175,13 @@ const htmlContent = await marked.parse(markdown);
     font-size: 16px;
     line-height: 1.6;
     max-width: 560px;
+  }
+
+  .page-header .parent-company {
+    margin-top: 10px;
+    color: var(--text-muted);
+    font-size: 12px;
+    opacity: 0.85;
   }
 
   /* ------------------------------------------------ */
