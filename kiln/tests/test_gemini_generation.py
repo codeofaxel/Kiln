@@ -29,7 +29,7 @@ from kiln.generation.gemini import (
 # ---------------------------------------------------------------------------
 
 GEMINI_API_KEY = "test-gemini-key-abc123"
-TEST_MODEL = "gemini-2.0-flash"
+TEST_MODEL = "gemini-2.5-flash"
 GENERATE_URL = f"{_GEMINI_API_URL}/{TEST_MODEL}:generateContent"
 
 SAMPLE_SCAD_CODE = """\

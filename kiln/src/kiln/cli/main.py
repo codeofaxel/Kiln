@@ -390,7 +390,7 @@ def _run_prusa_diagnostics(cfg: dict[str, Any]) -> dict[str, Any]:
     envvar="KILN_PRINTER",
     help="Printer name to use (overrides active printer).",
 )
-@click.version_option(package_name="kiln")
+@click.version_option(package_name="kiln3d")
 @click.pass_context
 def cli(ctx: click.Context, printer: str | None) -> None:
     """Kiln — agent-friendly 3D printer control."""
@@ -1414,6 +1414,13 @@ def remove(name: str) -> None:
     "--printer-id", default=None, help="Printer model ID for bundled profile auto-selection (e.g. prusa_mini)."
 )
 @click.option("--slicer", default=None, help="Explicit path to slicer binary.")
+@click.option(
+    "--material",
+    "-m",
+    default=None,
+    type=click.Choice(["PLA", "PETG", "ABS", "TPU", "ASA", "Nylon", "PC"]),
+    help="Material type — auto-sets temperatures in slicer profile.",
+)
 @click.option("--print-after", is_flag=True, help="Upload and start printing after slicing.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
@@ -1425,6 +1432,7 @@ def slice(
     profile: str | None,
     printer_id: str | None,
     slicer: str | None,
+    material: str | None,
     print_after: bool,
     json_mode: bool,
 ) -> None:
@@ -1444,7 +1452,27 @@ def slice(
         effective_profile = profile
         if effective_profile is None and effective_printer_id:
             try:
-                effective_profile = resolve_slicer_profile(effective_printer_id)
+                overrides: dict[str, str] | None = None
+                if material:
+                    _mat_temps: dict[str, tuple[int, int, int, int]] = {
+                        "PLA": (200, 210, 60, 60),
+                        "PETG": (240, 245, 80, 80),
+                        "ABS": (250, 255, 100, 100),
+                        "TPU": (225, 230, 50, 50),
+                        "ASA": (250, 255, 100, 100),
+                        "Nylon": (260, 265, 70, 70),
+                        "PC": (280, 285, 110, 110),
+                    }
+                    temps = _mat_temps.get(material)
+                    if temps:
+                        nozzle, first_nozzle, bed, first_bed = temps
+                        overrides = {
+                            "temperature": str(nozzle),
+                            "first_layer_temperature": str(first_nozzle),
+                            "bed_temperature": str(bed),
+                            "first_layer_bed_temperature": str(first_bed),
+                        }
+                effective_profile = resolve_slicer_profile(effective_printer_id, overrides=overrides)
             except Exception as exc:
                 logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
 
@@ -1535,11 +1563,59 @@ def slice(
 # ---------------------------------------------------------------------------
 
 
+def _fetch_external_snapshot(source: str) -> bytes | None:
+    """Fetch a snapshot from an external camera source.
+
+    Supports HTTP/HTTPS URLs and shell commands prefixed with ``cmd:``.
+    """
+    import subprocess
+
+    if source.startswith(("http://", "https://")):
+        import urllib.request
+
+        try:
+            with urllib.request.urlopen(source, timeout=10) as resp:
+                return resp.read()
+        except Exception as exc:
+            logger.warning("External snapshot fetch failed: %s", exc)
+            return None
+    elif source.startswith("cmd:"):
+        cmd = source[4:].strip()
+        if not cmd:
+            return None
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                timeout=30,
+            )
+            if result.returncode == 0 and result.stdout:
+                return result.stdout
+            logger.warning("External snapshot command failed (exit %d)", result.returncode)
+            return None
+        except subprocess.TimeoutExpired:
+            logger.warning("External snapshot command timed out")
+            return None
+        except OSError as exc:
+            logger.warning("External snapshot command error: %s", exc)
+            return None
+    else:
+        logger.warning("Unknown snapshot source format: %s", source)
+        return None
+
+
 @cli.command()
 @click.option("--output", "-o", default=None, type=click.Path(), help="Save snapshot to file.")
+@click.option(
+    "--source",
+    "-s",
+    default=None,
+    help="External camera source: URL (http://...) or shell command (cmd:ffmpeg ...).",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON (base64 encoded).")
 @click.pass_context
-def snapshot(ctx: click.Context, output: str | None, json_mode: bool) -> None:
+def snapshot(ctx: click.Context, output: str | None, source: str | None, json_mode: bool) -> None:
     """Capture a webcam snapshot from the printer.
 
     Saves the image to a file (--output) or prints base64-encoded data
@@ -1548,8 +1624,14 @@ def snapshot(ctx: click.Context, output: str | None, json_mode: bool) -> None:
     import base64
 
     try:
-        adapter = _get_adapter_from_ctx(ctx)
-        image_data = adapter.get_snapshot()
+        if source is None:
+            source = os.environ.get("KILN_CAMERA_SOURCE", "").strip() or None
+
+        if source:
+            image_data = _fetch_external_snapshot(source)
+        else:
+            adapter = _get_adapter_from_ctx(ctx)
+            image_data = adapter.get_snapshot()
 
         if image_data is None:
             click.echo(
@@ -3976,7 +4058,7 @@ def serve() -> None:
 
 
 @cli.command()
-@click.option("--host", default="0.0.0.0", help="Bind address.")
+@click.option("--host", default="127.0.0.1", help="Bind address.")
 @click.option("--port", default=8420, type=int, help="Port number.")
 @click.option(
     "--auth-token",
@@ -4093,7 +4175,7 @@ def agent(model: str, tier: str | None, base_url: str) -> None:
     "--provider",
     "-p",
     default="meshy",
-    type=click.Choice(["meshy", "openscad"]),
+    type=click.Choice(["meshy", "openscad", "gemini", "tripo3d", "stability"]),
     help="Generation provider (default: meshy).",
 )
 @click.option("--style", "-s", default=None, help="Style hint (e.g. realistic, sculpture).")
@@ -4132,15 +4214,17 @@ def generate(
         OpenSCADProvider,
         validate_mesh,
     )
+    from kiln.generation.registry import GenerationRegistry
 
     try:
-        if provider == "meshy":
-            gen = MeshyProvider()
-        elif provider == "openscad":
+        if provider == "openscad":
             gen = OpenSCADProvider()
+        elif provider == "meshy":
+            gen = MeshyProvider()
         else:
-            click.echo(format_error(f"Unknown provider: {provider!r}", json_mode=json_mode))
-            sys.exit(1)
+            registry = GenerationRegistry()
+            registry.auto_discover()
+            gen = registry.get(provider)
 
         job = gen.generate(prompt, format="stl", style=style)
 
@@ -4275,7 +4359,7 @@ def generate(
 @cli.command("generate-status")
 @click.argument("job_id")
 @click.option(
-    "--provider", "-p", default="meshy", type=click.Choice(["meshy", "openscad"]), help="Generation provider."
+    "--provider", "-p", default="meshy", type=click.Choice(["meshy", "openscad", "gemini", "tripo3d", "stability"]), help="Generation provider."
 )
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
@@ -4289,12 +4373,17 @@ def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
         MeshyProvider,
         OpenSCADProvider,
     )
+    from kiln.generation.registry import GenerationRegistry
 
     try:
-        if provider == "meshy":
+        if provider == "openscad":
+            gen = OpenSCADProvider()
+        elif provider == "meshy":
             gen = MeshyProvider()
         else:
-            gen = OpenSCADProvider()
+            registry = GenerationRegistry()
+            registry.auto_discover()
+            gen = registry.get(provider)
 
         job = gen.get_job_status(job_id)
 
@@ -4331,7 +4420,7 @@ def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
 @cli.command("generate-download")
 @click.argument("job_id")
 @click.option(
-    "--provider", "-p", default="meshy", type=click.Choice(["meshy", "openscad"]), help="Generation provider."
+    "--provider", "-p", default="meshy", type=click.Choice(["meshy", "openscad", "gemini", "tripo3d", "stability"]), help="Generation provider."
 )
 @click.option(
     "--output-dir", "-o", default=os.path.join(tempfile.gettempdir(), "kiln_generated"), help="Output directory."
@@ -4356,12 +4445,17 @@ def generate_download(
         OpenSCADProvider,
         validate_mesh,
     )
+    from kiln.generation.registry import GenerationRegistry
 
     try:
-        if provider == "meshy":
+        if provider == "openscad":
+            gen = OpenSCADProvider()
+        elif provider == "meshy":
             gen = MeshyProvider()
         else:
-            gen = OpenSCADProvider()
+            registry = GenerationRegistry()
+            registry.auto_discover()
+            gen = registry.get(provider)
 
         result = gen.download_result(job_id, output_dir=output_dir)
 
@@ -4393,6 +4487,202 @@ def generate_download(
     except GenerationError as exc:
         click.echo(format_error(str(exc), code=exc.code or "GENERATION_ERROR", json_mode=json_mode))
         sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.command("generate-and-print")
+@click.argument("prompt")
+@click.option(
+    "--provider",
+    "-p",
+    default="meshy",
+    type=click.Choice(["meshy", "openscad", "gemini", "tripo3d", "stability"]),
+    help="Generation provider (default: meshy).",
+)
+@click.option("--style", "-s", default=None, help="Style hint.")
+@click.option("--printer-id", default=None, help="Printer model ID for slicer profile.")
+@click.option(
+    "--material",
+    "-m",
+    default=None,
+    type=click.Choice(["PLA", "PETG", "ABS", "TPU", "ASA", "Nylon", "PC"]),
+    help="Material type — auto-sets slicer temperatures.",
+)
+@click.option("--timeout", "-t", default=600, type=int, help="Max generation wait time in seconds (default 600).")
+@click.option(
+    "--auto-print/--no-auto-print", default=False, help="Automatically start printing after upload (default: preview only)."
+)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def generate_and_print_cmd(
+    ctx: click.Context,
+    prompt: str,
+    provider: str,
+    style: str | None,
+    printer_id: str | None,
+    material: str | None,
+    timeout: int,
+    auto_print: bool,
+    json_mode: bool,
+) -> None:
+    """Generate a 3D model, slice it, and upload to the printer.
+
+    One-command pipeline from text description to print-ready.
+
+    \b
+    Examples:
+        kiln generate-and-print "a phone stand" --provider gemini --material PLA
+        kiln generate-and-print "a gear" --provider openscad --auto-print
+    """
+    import time as _time
+
+    from kiln.generation import (
+        GenerationAuthError,
+        GenerationError,
+        GenerationStatus,
+        MeshyProvider,
+        OpenSCADProvider,
+        validate_mesh,
+    )
+    from kiln.generation.registry import GenerationRegistry
+    from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
+    from kiln.slicer_profiles import resolve_slicer_profile
+
+    try:
+        # --- Step 1: Generate ---
+        if provider == "openscad":
+            gen = OpenSCADProvider()
+        elif provider == "meshy":
+            gen = MeshyProvider()
+        else:
+            registry = GenerationRegistry()
+            registry.auto_discover()
+            gen = registry.get(provider)
+
+        if not json_mode:
+            click.echo(f"Generating model with {gen.display_name}...")
+
+        job = gen.generate(prompt, format="stl", style=style)
+
+        # Wait for async providers
+        if job.status not in (GenerationStatus.SUCCEEDED, GenerationStatus.FAILED):
+            start = _time.time()
+            while _time.time() - start < timeout:
+                _time.sleep(10)
+                job = gen.get_job_status(job.id)
+                if not json_mode:
+                    click.echo(f"  Status: {job.status.value}  Progress: {job.progress}%")
+                if job.status in (GenerationStatus.SUCCEEDED, GenerationStatus.FAILED):
+                    break
+            else:
+                click.echo(format_error("Generation timed out.", code="TIMEOUT", json_mode=json_mode))
+                sys.exit(1)
+
+        if job.status == GenerationStatus.FAILED:
+            click.echo(format_error(f"Generation failed: {job.error}", code="GENERATION_FAILED", json_mode=json_mode))
+            sys.exit(1)
+
+        # --- Step 2: Download ---
+        output_dir = os.path.join(tempfile.gettempdir(), "kiln_generated")
+        result = gen.download_result(job.id, output_dir=output_dir)
+        val = validate_mesh(result.local_path)
+        if not json_mode:
+            click.echo(f"Generated: {result.local_path} ({result.file_size_bytes:,} bytes, {val.triangle_count:,} triangles)")
+
+        # --- Step 3: Slice ---
+        effective_printer_id = _map_printer_hint_to_profile_id(printer_id) or _autodetect_printer_profile_id(ctx)
+        effective_profile = None
+        if effective_printer_id:
+            try:
+                overrides: dict[str, str] | None = None
+                if material:
+                    _mat_temps: dict[str, tuple[int, int, int, int]] = {
+                        "PLA": (200, 210, 60, 60),
+                        "PETG": (240, 245, 80, 80),
+                        "ABS": (250, 255, 100, 100),
+                        "TPU": (225, 230, 50, 50),
+                        "ASA": (250, 255, 100, 100),
+                        "Nylon": (260, 265, 70, 70),
+                        "PC": (280, 285, 110, 110),
+                    }
+                    temps = _mat_temps.get(material)
+                    if temps:
+                        nozzle, first_nozzle, bed, first_bed = temps
+                        overrides = {
+                            "temperature": str(nozzle),
+                            "first_layer_temperature": str(first_nozzle),
+                            "bed_temperature": str(bed),
+                            "first_layer_bed_temperature": str(first_bed),
+                        }
+                effective_profile = resolve_slicer_profile(effective_printer_id, overrides=overrides)
+            except Exception as exc:
+                logger.debug("Profile resolution failed: %s", exc)
+
+        if not json_mode:
+            click.echo("Slicing...")
+        slice_result = slice_file(result.local_path, profile=effective_profile)
+        if not json_mode:
+            click.echo(f"Sliced: {slice_result.output_path}")
+
+        # --- Step 4: Upload ---
+        adapter = _get_adapter_from_ctx(ctx)
+        if not json_mode:
+            click.echo("Uploading to printer...")
+        upload_result = adapter.upload_file(slice_result.output_path)
+        if not upload_result.success:
+            click.echo(format_error(upload_result.message or "Upload failed", code="UPLOAD_FAILED", json_mode=json_mode))
+            sys.exit(1)
+
+        # --- Step 5: Optionally start print ---
+        if auto_print:
+            remote = upload_result.remote_name or os.path.basename(slice_result.output_path)
+            adapter.start_print(remote)
+            if not json_mode:
+                click.echo(f"Printing started: {remote}")
+
+        if json_mode:
+            import json as _json
+
+            click.echo(
+                _json.dumps(
+                    {
+                        "status": "success",
+                        "data": {
+                            "generation": job.to_dict(),
+                            "validation": val.to_dict(),
+                            "slice": {"output_path": slice_result.output_path, "message": slice_result.message},
+                            "upload": upload_result.to_dict(),
+                            "printing": auto_print,
+                        },
+                    },
+                    indent=2,
+                )
+            )
+        elif not auto_print:
+            click.echo(
+                f"Ready to print. Start with: kiln print {upload_result.remote_name or os.path.basename(slice_result.output_path)}"
+            )
+
+    except GenerationAuthError as exc:
+        click.echo(format_error(str(exc), code="AUTH_ERROR", json_mode=json_mode))
+        sys.exit(1)
+    except GenerationError as exc:
+        click.echo(format_error(str(exc), code=exc.code or "GENERATION_ERROR", json_mode=json_mode))
+        sys.exit(1)
+    except (SlicerNotFoundError, SlicerError) as exc:
+        click.echo(format_error(str(exc), code="SLICER_ERROR", json_mode=json_mode))
+        sys.exit(1)
+    except PrinterError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+    except KeyboardInterrupt:
+        if not json_mode:
+            click.echo("\nInterrupted.")
+        sys.exit(130)
+    except click.ClickException:
+        raise
     except Exception as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
         sys.exit(1)

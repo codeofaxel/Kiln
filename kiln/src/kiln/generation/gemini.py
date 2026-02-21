@@ -41,7 +41,7 @@ from kiln.generation.base import (
 logger = logging.getLogger(__name__)
 
 _GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
-_DEFAULT_MODEL = "gemini-2.0-flash"
+_DEFAULT_MODEL = os.environ.get("KILN_GEMINI_MODEL", "").strip() or "gemini-2.5-flash"
 _REQUEST_TIMEOUT = 120
 _MACOS_APP_PATH = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD" if sys.platform == "darwin" else ""
 
@@ -298,8 +298,71 @@ class GeminiDeepThinkProvider(GenerationProvider):
 
         self._scad_code[job_id] = scad_code
 
-        # Stage 2: Compile OpenSCAD code to STL
+        # Stage 2: Compile OpenSCAD code to STL (with self-healing retry)
+        max_compile_retries = 2  # up to 2 retries = 3 total attempts
         compile_result = self._compile_scad(scad_code, out_path, job_id, prompt, format)
+
+        for attempt in range(1, max_compile_retries + 1):
+            if compile_result.status != GenerationStatus.FAILED:
+                break
+            if not compile_result.error or "compilation failed" not in compile_result.error.lower():
+                break  # Only retry on compilation errors, not timeouts or missing binaries
+
+            logger.info(
+                "Gemini Deep Think: OpenSCAD compile failed (attempt %d/%d), retrying with error feedback...",
+                attempt,
+                max_compile_retries + 1,
+            )
+
+            # Feed the error back to Gemini for a corrected version
+            retry_prompt = (
+                f"The following OpenSCAD code failed to compile:\n\n"
+                f"```openscad\n{scad_code}\n```\n\n"
+                f"Compiler error:\n{compile_result.error}\n\n"
+                f"Please fix the OpenSCAD code so it compiles successfully. "
+                f"Output only the corrected OpenSCAD code."
+            )
+
+            try:
+                scad_code = self._call_gemini(retry_prompt)
+            except (GenerationError, Exception) as exc:
+                logger.warning("Gemini retry call failed: %s", exc)
+                break
+
+            # Safety check on retried code
+            safe = True
+            for pattern in _DANGEROUS_PATTERNS:
+                if re.search(pattern, scad_code, re.IGNORECASE):
+                    safe = False
+                    break
+            if not safe:
+                logger.warning("Retried code contains dangerous patterns, aborting retry.")
+                break
+
+            scad_code = _extract_openscad_code(scad_code)
+            if not scad_code.strip():
+                logger.warning("Retried code was empty, aborting retry.")
+                break
+
+            # Safety check on extracted code
+            safe = True
+            for pattern in _DANGEROUS_PATTERNS:
+                if re.search(pattern, scad_code, re.IGNORECASE):
+                    safe = False
+                    break
+            if not safe:
+                logger.warning("Retried extracted code contains dangerous patterns, aborting retry.")
+                break
+
+            self._scad_code[job_id] = scad_code
+
+            # Clean up previous failed output
+            if os.path.isfile(out_path):
+                with contextlib.suppress(OSError):
+                    os.unlink(out_path)
+
+            compile_result = self._compile_scad(scad_code, out_path, job_id, prompt, format)
+
         return compile_result
 
     def get_job_status(self, job_id: str) -> GenerationJob:

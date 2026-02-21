@@ -184,6 +184,7 @@ def format_status(
     file_name = job.get("file_name")
     completion = job.get("completion")
     time_left = job.get("print_time_left_seconds")
+    time_elapsed = job.get("print_time_seconds")
 
     if RICH_AVAILABLE:
         table = Table(show_header=False, box=None, padding=(0, 2))
@@ -204,6 +205,11 @@ def format_status(
             table.add_row("Progress", progress_bar(completion))
         if time_left is not None:
             table.add_row("Time left", format_time(time_left))
+        if time_elapsed is not None:
+            table.add_row("Elapsed", format_time(time_elapsed))
+        if time_left is not None and time_elapsed is not None:
+            total = time_elapsed + time_left
+            table.add_row("Total est.", format_time(total))
 
         return _render(Panel(table, title="Printer Status", border_style="blue"))
 
@@ -219,6 +225,11 @@ def format_status(
         lines.append(f"Progress:  {progress_bar(completion)}")
     if time_left is not None:
         lines.append(f"Time left: {format_time(time_left)}")
+    if time_elapsed is not None:
+        lines.append(f"Elapsed:   {format_time(time_elapsed)}")
+    if time_left is not None and time_elapsed is not None:
+        total = time_elapsed + time_left
+        lines.append(f"Total est: {format_time(total)}")
     return "\n".join(lines)
 
 
@@ -254,6 +265,7 @@ def format_files(
         table.add_column("Name", style="bold")
         table.add_column("Size", justify="right")
         table.add_column("Date")
+        table.add_column("Est. Time", justify="right")
 
         for f in files:
             name = f.get("name", "")
@@ -266,11 +278,13 @@ def format_files(
                     date_str = str(raw_date)
             else:
                 date_str = ""
-            table.add_row(name, size, date_str)
+            est_time = f.get("estimated_time_seconds")
+            est_str = format_time(est_time) if est_time is not None else ""
+            table.add_row(name, size, date_str, est_str)
         return _render(table)
 
-    lines = [f"{'Name':<40} {'Size':>10} {'Date'}"]
-    lines.append("-" * 65)
+    lines = [f"{'Name':<40} {'Size':>10} {'Date':<16} {'Est. Time'}"]
+    lines.append("-" * 80)
     for f in files:
         name = f.get("name", "")
         size = format_bytes(f.get("size_bytes"))
@@ -282,7 +296,9 @@ def format_files(
                 date_str = str(raw_date)
         else:
             date_str = ""
-        lines.append(f"{name:<40} {size:>10} {date_str}")
+        est_time = f.get("estimated_time_seconds")
+        est_str = format_time(est_time) if est_time is not None else ""
+        lines.append(f"{name:<40} {size:>10} {date_str:<16} {est_str}")
     return "\n".join(lines)
 
 

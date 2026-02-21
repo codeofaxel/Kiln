@@ -32,6 +32,7 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 from dataclasses import dataclass, field
@@ -148,6 +149,17 @@ _MOVE_COMMANDS: set[str] = {"G0", "G1", "G2", "G3"}
 
 # Arc commands that require I/J or R parameters.
 _ARC_COMMANDS: set[str] = {"G2", "G3"}
+
+# Material temperature ranges: (hotend_min, hotend_max, bed_min, bed_max)
+_MATERIAL_TEMPS: dict[str, tuple[float, float, float, float]] = {
+    "PLA": (180.0, 220.0, 40.0, 70.0),
+    "PETG": (220.0, 260.0, 60.0, 90.0),
+    "ABS": (230.0, 270.0, 90.0, 115.0),
+    "TPU": (210.0, 240.0, 30.0, 60.0),
+    "ASA": (230.0, 270.0, 90.0, 115.0),
+    "Nylon": (240.0, 280.0, 60.0, 80.0),
+    "PC": (260.0, 310.0, 90.0, 120.0),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +478,87 @@ def validate_gcode_for_printer(
             result.commands.append(cleaned)
 
     result.valid = len(result.errors) == 0
+    return result
+
+
+def validate_gcode_for_material(
+    commands: str | list[str],
+    material: str,
+    dialect: GCodeDialect = GCodeDialect.GENERIC,
+) -> GCodeValidationResult:
+    """Validate G-code temperatures against a material's expected range.
+
+    Runs standard validation first, then adds warnings for any
+    temperature commands that fall outside the expected range for the
+    specified material.  A bed temperature of 0 with a material that
+    requires a heated bed generates a warning.
+
+    :param commands: One or more G-code commands.
+    :param material: Material name (e.g. ``"PLA"``, ``"ABS"``).
+    :param dialect: Firmware dialect for dialect-specific validation.
+    """
+    result = validate_gcode(commands, dialect=dialect)
+
+    mat_range = _MATERIAL_TEMPS.get(material)
+    if mat_range is None:
+        result.warnings.append(f"Unknown material {material!r} -- skipping temperature validation.")
+        return result
+
+    hotend_min, hotend_max, bed_min, bed_max = mat_range
+
+    # Re-parse to check temperatures against material ranges
+    if isinstance(commands, str):
+        lines = commands.splitlines()
+    else:
+        lines = list(commands)
+
+    for line in lines:
+        cleaned = line.split(";")[0].strip().upper()
+        if not cleaned:
+            continue
+
+        parts = cleaned.split()
+        if not parts:
+            continue
+        cmd = parts[0]
+
+        # Parse S parameter (temperature setpoint)
+        s_val: float | None = None
+        for part in parts[1:]:
+            if part.startswith("S"):
+                with contextlib.suppress(ValueError):
+                    s_val = float(part[1:])
+
+        if s_val is None:
+            continue
+
+        # Check hotend temperature commands
+        if cmd in _HOTEND_TEMP_COMMANDS:
+            if s_val > 0 and s_val < hotend_min:
+                result.warnings.append(
+                    f"{cmd} S{s_val:.0f} is below {material} minimum hotend temp ({hotend_min:.0f}\u00b0C)."
+                )
+            elif s_val > hotend_max:
+                result.warnings.append(
+                    f"{cmd} S{s_val:.0f} exceeds {material} maximum hotend temp ({hotend_max:.0f}\u00b0C)."
+                )
+
+        # Check bed temperature commands
+        if cmd in _BED_TEMP_COMMANDS:
+            if s_val == 0 and bed_min > 0:
+                result.warnings.append(
+                    f"{cmd} S0 sets bed to 0\u00b0C but {material} requires {bed_min:.0f}-{bed_max:.0f}\u00b0C. "
+                    f"Print will likely fail due to adhesion."
+                )
+            elif s_val > 0 and s_val < bed_min:
+                result.warnings.append(
+                    f"{cmd} S{s_val:.0f} is below {material} minimum bed temp ({bed_min:.0f}\u00b0C)."
+                )
+            elif s_val > bed_max:
+                result.warnings.append(
+                    f"{cmd} S{s_val:.0f} exceeds {material} maximum bed temp ({bed_max:.0f}\u00b0C)."
+                )
+
     return result
 
 
