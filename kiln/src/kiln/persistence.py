@@ -451,6 +451,7 @@ class KilnDB:
             logger.info("KilnDB using SQLite backend (%s)", self._db_path)
 
         self._write_lock = threading.Lock()
+        self._audit_hmac_key_cache: bytes | None = None
 
         self._ensure_schema()
         self._migrate_agent_memory()
@@ -2544,9 +2545,13 @@ class KilnDB:
         generates) a random 32-byte key persisted at
         ``~/.kiln/audit_hmac.key`` with ``0o600`` permissions.
         """
+        if self._audit_hmac_key_cache is not None:
+            return self._audit_hmac_key_cache
+
         env_key = os.environ.get("KILN_AUDIT_HMAC_KEY", "")
         if env_key:
-            return env_key.encode("utf-8")
+            self._audit_hmac_key_cache = env_key.encode("utf-8")
+            return self._audit_hmac_key_cache
 
         key_path = os.path.join(str(Path.home()), ".kiln", "audit_hmac.key")
         try:
@@ -2554,6 +2559,7 @@ class KilnDB:
                 with open(key_path, "rb") as fh:
                     key = fh.read()
                 if len(key) >= 32:
+                    self._audit_hmac_key_cache = key
                     return key
 
             # Generate a new random HMAC key.
@@ -2564,15 +2570,19 @@ class KilnDB:
                 fh.write(key)
             os.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
             logger.info("Generated new audit HMAC key at %s", key_path)
+            self._audit_hmac_key_cache = key
             return key
         except OSError as exc:
-            logger.warning(
+            key = os.urandom(32)
+            logger.error(
                 "Could not read/write HMAC key file %s (%s); "
-                "falling back to db-path-derived key",
+                "using an ephemeral in-memory key for this process only. "
+                "Set KILN_AUDIT_HMAC_KEY or fix file permissions for durable audit signatures.",
                 key_path,
                 exc,
             )
-            return hashlib.sha256(self._db_path.encode("utf-8")).digest()
+            self._audit_hmac_key_cache = key
+            return key
 
     def _compute_audit_hmac(self, row_data: dict[str, Any]) -> str:
         """Compute an HMAC-SHA256 signature for an audit log row.

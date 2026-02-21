@@ -37,35 +37,10 @@ Environment variables
     marketplace auto-print** — generated geometry is experimental.
 """
 
-# SECURITY NOTE — Mutating tools without explicit auth checks (2026-02-19):
-# These tools perform write operations but rely on transport-level auth
-# (MCP protocol auth) rather than key-based auth:
-#   - confirm_action: executes previously confirmed destructive actions
-#   - activate_license: writes license key to ~/.kiln/license
-#   - get_upgrade_url: creates Stripe checkout sessions
-#   - billing_check_setup: activates payment methods, saves billing config
-#   - download_model: downloads marketplace files to local filesystem
-#   - slice_model: runs slicer binary, writes G-code output files
-#   - set_material: records material changes for a printer
-#   - add_spool: adds filament spool to inventory
-#   - remove_spool: removes filament spool from inventory
-#   - trigger_bed_level: sends bed-leveling G-code to the printer
-#   - set_leveling_policy: modifies auto-leveling policy config
-#   - set_autonomy_level: changes agent autonomy tier, writes config file
-#   - cloud_sync_now: triggers an immediate cloud sync cycle
-#   - cloud_sync_configure: configures cloud sync endpoint with API key
-#   - save_print_checkpoint: persists checkpoint data for crash recovery
-#   - firmware_resume_print: sends G-code sequence to resume a failed print
-#   - start_printer_health_monitoring: starts background health monitoring thread
-#   - stop_printer_health_monitoring: stops background health monitoring thread
-#   - fleet_submit_job: submits a print job to the fleet orchestrator
-#   - cache_design: caches design files for version tracking
-#   - store_credential: encrypts and stores secrets (API keys, tokens)
-#   - acquire_printer_lock: acquires exclusive printer lock
-#   - release_printer_lock: releases exclusive printer lock
-#   - update_printer_firmware: starts firmware update on a printer
-#   - rollback_printer_firmware: rolls back printer firmware
-# When KILN_AUTH_ENABLED=1, consider adding _check_auth("write") to these.
+# SECURITY NOTE:
+# All mutating tools should call _check_auth(...) or _check_billing_auth(...).
+# _check_auth reads per-request MCP metadata first (when available), then
+# falls back to KILN_MCP_AUTH_TOKEN for compatibility with existing clients.
 
 from __future__ import annotations
 
@@ -81,7 +56,9 @@ import tempfile
 import threading
 import time
 import uuid as _uuid_mod
+from contextvars import ContextVar
 from pathlib import Path
+from types import MethodType
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -364,6 +341,44 @@ mcp = FastMCP(
         "Use `safety_settings` to check current auto-print status."
     ),
 )
+
+_current_mcp_request_context: ContextVar[Any | None] = ContextVar(
+    "kiln_current_mcp_request_context",
+    default=None,
+)
+
+
+def _install_mcp_request_context_capture() -> None:
+    """Capture current MCP request context so auth can read per-request metadata."""
+    tool_mgr = mcp._tool_manager
+    if getattr(tool_mgr, "_kiln_request_context_capture_installed", False):
+        return
+
+    original_call_tool = tool_mgr.call_tool
+
+    async def _call_tool_with_context(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context=None,
+        convert_result: bool = False,
+    ):
+        token = _current_mcp_request_context.set(context)
+        try:
+            return await original_call_tool(
+                name,
+                arguments,
+                context=context,
+                convert_result=convert_result,
+            )
+        finally:
+            _current_mcp_request_context.reset(token)
+
+    tool_mgr.call_tool = MethodType(_call_tool_with_context, tool_mgr)
+    setattr(tool_mgr, "_kiln_request_context_capture_installed", True)
+
+
+_install_mcp_request_context_capture()
 
 # ---------------------------------------------------------------------------
 # Printer adapter singleton
@@ -1110,6 +1125,77 @@ def _error_dict(
     }
 
 
+def _extract_bearer_or_raw_token(value: Any) -> str:
+    """Extract a token from either ``Bearer <token>`` or raw token input."""
+    if value is None:
+        return ""
+    raw = str(value).strip()
+    if not raw:
+        return ""
+    if raw.lower().startswith("bearer "):
+        return raw[7:].strip()
+    return raw
+
+
+def _token_from_mcp_context() -> str:
+    """Best-effort token extraction from the current MCP request context."""
+    ctx = _current_mcp_request_context.get()
+    if ctx is None:
+        return ""
+
+    request_context = getattr(ctx, "request_context", None)
+    if request_context is None:
+        return ""
+
+    # Prefer explicit request metadata tokens when present.
+    meta = getattr(request_context, "meta", None)
+    meta_data: dict[str, Any] = {}
+    if meta is not None:
+        if isinstance(meta, dict):
+            meta_data = meta
+        elif hasattr(meta, "model_dump"):
+            try:
+                meta_data = dict(meta.model_dump(exclude_none=True))
+            except Exception:
+                meta_data = {}
+        else:
+            meta_data = dict(getattr(meta, "__dict__", {}))
+
+    for key in ("authorization", "Authorization", "auth_token", "authToken", "api_key", "apiKey", "token"):
+        token = _extract_bearer_or_raw_token(meta_data.get(key))
+        if token:
+            return token
+
+    # Fall back to request headers (transport-dependent).
+    request = getattr(request_context, "request", None)
+    headers = getattr(request, "headers", None)
+    if headers is not None:
+        try:
+            header_token = _extract_bearer_or_raw_token(
+                headers.get("authorization") or headers.get("Authorization")
+            )
+            if header_token:
+                return header_token
+        except Exception:
+            pass
+
+    return ""
+
+
+def _resolve_auth_token() -> str:
+    """Resolve auth token from request context, then environment fallback."""
+    context_token = _token_from_mcp_context()
+    if context_token:
+        return context_token
+
+    # Compatibility fallback for deployments that inject auth via env.
+    for env_name in ("KILN_MCP_AUTH_TOKEN", "KILN_API_AUTH_TOKEN", "KILN_AUTH_TOKEN"):
+        token = _extract_bearer_or_raw_token(os.environ.get(env_name, ""))
+        if token:
+            return token
+    return ""
+
+
 def _check_auth(scope: str) -> dict[str, Any] | None:
     """Check authentication for a tool invocation.
 
@@ -1123,7 +1209,7 @@ def _check_auth(scope: str) -> dict[str, Any] | None:
     if not _auth.enabled:
         return None
 
-    token = os.environ.get("KILN_MCP_AUTH_TOKEN", "")
+    token = _resolve_auth_token()
     result = _auth.check_request(key=token, scope=scope)
     if result.get("authenticated"):
         return None
@@ -2536,6 +2622,9 @@ def confirm_action(token: str) -> dict:
     Args:
         token: The confirmation token returned by the original tool call.
     """
+    if err := _check_auth("write"):
+        return err
+
     pending = _pending_confirmations.pop(token, None)
     if pending is None:
         return _error_dict(
@@ -3540,6 +3629,9 @@ def billing_check_setup() -> dict:
     the Stripe SetupIntent for completion and configures the payment
     method for future charges.
     """
+    if err := _check_billing_auth("billing"):
+        return err
+
     try:
         mgr = _get_payment_mgr()
         provider = mgr.get_provider("stripe")
@@ -3675,6 +3767,8 @@ def activate_license(key: str) -> dict:
     Args:
         key: License key string (format: ``kiln_pro_...`` or ``kiln_biz_...``).
     """
+    if err := _check_auth("admin"):
+        return err
     if not key or not key.strip():
         return _error_dict("License key is required.", code="INVALID_INPUT")
     try:
@@ -3699,6 +3793,9 @@ def get_upgrade_url(tier: str = "pro", billing: str = "monthly", email: str = ""
         billing: ``"monthly"`` or ``"annual"``.
         email: Pre-fill the checkout email field (optional).
     """
+    if err := _check_auth("billing"):
+        return err
+
     tier_lower = tier.lower().strip()
     billing_lower = billing.lower().strip()
 
@@ -3988,6 +4085,9 @@ def set_autonomy_level(level: int) -> dict:
     Changing this updates the config file.  Requires human confirmation
     because it affects how much control the agent has.
     """
+    if err := _check_auth("admin"):
+        return err
+
     from kiln.autonomy import (
         AutonomyConfig,
         AutonomyLevel,
@@ -4289,6 +4389,8 @@ def download_model(
     After downloading, validate with ``validate_generated_mesh``, then
     upload to a printer with ``upload_file`` and print with ``start_print``.
     """
+    if err := _check_auth("files"):
+        return err
     if disk_err := _check_disk_space(dest_dir):
         return disk_err
     try:
@@ -4760,6 +4862,9 @@ def slice_model(
     can then be uploaded to a printer with ``upload_file`` and printed
     with ``start_print``.
     """
+    if err := _check_auth("slicer"):
+        return err
+
     try:
         from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
 
@@ -5065,6 +5170,8 @@ def set_material(
         spool_id: Optional ID of a tracked spool.
         tool_index: Extruder index for multi-tool printers (default 0).
     """
+    if err := _check_auth("write"):
+        return err
     try:
         mat = _material_tracker.set_material(
             printer_name=printer_name,
@@ -5155,6 +5262,8 @@ def add_spool(
         weight_grams: Total spool weight in grams (default 1000).
         cost_usd: Cost of the spool in USD.
     """
+    if err := _check_auth("write"):
+        return err
     try:
         spool = _material_tracker.add_spool(
             material_type=material,
@@ -5176,6 +5285,8 @@ def remove_spool(spool_id: str) -> dict:
     Args:
         spool_id: The spool's unique identifier.
     """
+    if err := _check_auth("write"):
+        return err
     try:
         removed = _material_tracker.remove_spool(spool_id)
         if removed:
@@ -5217,6 +5328,8 @@ def trigger_bed_level(printer_name: str | None = None) -> dict:
     Args:
         printer_name: Target printer.  Omit for the default printer.
     """
+    if err := _check_auth("calibrate"):
+        return err
     try:
         if printer_name:
             adapter = _registry.get(printer_name)
@@ -5253,6 +5366,8 @@ def set_leveling_policy(
         gcode_command: G-code command to send (G29 or BED_MESH_CALIBRATE).
         printer_name: Target printer.  Omit for the default printer.
     """
+    if err := _check_auth("calibrate"):
+        return err
     try:
         name = printer_name or "default"
         policy = LevelingPolicy(
@@ -5345,6 +5460,8 @@ def cloud_sync_status() -> dict:
 def cloud_sync_now() -> dict:
     """Trigger an immediate cloud sync cycle."""
     global _cloud_sync
+    if err := _check_auth("admin"):
+        return err
     if _cloud_sync is None:
         return _error_dict("Cloud sync not configured.", code="NOT_CONFIGURED")
     try:
@@ -5369,6 +5486,8 @@ def cloud_sync_configure(
         interval: Sync interval in seconds (default 60).
     """
     global _cloud_sync
+    if err := _check_auth("admin"):
+        return err
     try:
         config = SyncConfig(
             cloud_url=cloud_url,
@@ -6061,6 +6180,9 @@ def await_print_completion(
     timeout), final printer state, elapsed time, and completion
     percentage history.
     """
+    if err := _check_auth("print"):
+        return err
+
     start = time.time()
     progress_log: list[dict] = []
     last_pct: float | None = None
@@ -9645,6 +9767,9 @@ def save_print_checkpoint(
         bed_temp: Bed temperature at checkpoint time.
         filament_used_mm: Filament consumed so far in mm.
     """
+    if err := _check_auth("print"):
+        return err
+
     try:
         from kiln.recovery import get_recovery_manager
 
@@ -9682,6 +9807,9 @@ def plan_print_recovery(
         failure_type: Type of failure (power_loss, filament_runout, nozzle_clog,
             bed_adhesion, thermal_runaway, layer_shift, first_layer_failure).
     """
+    if err := _check_auth("print"):
+        return err
+
     try:
         from kiln.recovery import get_recovery_manager
 
@@ -9740,6 +9868,9 @@ def firmware_resume_print(
         prime_length_mm: Filament to extrude for nozzle priming (mm).
         z_clearance_mm: How far above the part to raise the nozzle (mm).
     """
+    if err := _check_auth("firmware"):
+        return err
+
     try:
         adapter = _get_adapter(printer_name)
 
@@ -9815,6 +9946,9 @@ def start_printer_health_monitoring(
         printer_name: Printer to monitor.
         interval_seconds: Check interval in seconds (default 30).
     """
+    if err := _check_auth("monitoring"):
+        return err
+
     try:
         from kiln.print_health_monitor import get_print_health_monitor
 
@@ -9833,6 +9967,9 @@ def stop_printer_health_monitoring(printer_name: str) -> dict:
     Args:
         printer_name: Printer to stop monitoring.
     """
+    if err := _check_auth("monitoring"):
+        return err
+
     try:
         from kiln.print_health_monitor import get_print_health_monitor
 
@@ -9898,6 +10035,9 @@ def route_print_job(
         quality: Quality preference — "draft", "standard", or "fine".
         priority: Job priority — "low", "normal", or "high".
     """
+    if err := _check_auth("print"):
+        return err
+
     try:
         from kiln.job_router import get_job_router
 
@@ -9933,6 +10073,9 @@ def fleet_submit_job(
         material: Required filament material.
         priority: Job priority (low, normal, high).
     """
+    if err := _check_auth("print"):
+        return err
+
     try:
         from kiln.fleet_orchestrator import get_fleet_orchestrator
 
@@ -10000,6 +10143,9 @@ def cache_design(
         label: Human-readable label for the cached design.
         material: Intended material for this design.
     """
+    if err := _check_auth("cache"):
+        return err
+
     try:
         from kiln.design_cache import get_design_cache
 
@@ -10076,6 +10222,9 @@ def store_credential(
         value: The plaintext secret to store.
         label: Human-readable description.
     """
+    if err := _check_auth("admin"):
+        return err
+
     try:
         from kiln.credential_store import CredentialType
         from kiln.credential_store import store_credential as _store
@@ -10165,6 +10314,9 @@ def acquire_printer_lock(
         holder: Identifier of the lock holder.
         timeout_seconds: Maximum time to wait for the lock.
     """
+    if err := _check_auth("write"):
+        return err
+
     try:
         from kiln.state_lock import get_state_lock_manager
 
@@ -10189,6 +10341,9 @@ def release_printer_lock(printer_name: str, *, holder: str = "agent") -> dict:
         printer_name: Printer to unlock.
         holder: Identifier of the lock holder (must match acquire).
     """
+    if err := _check_auth("write"):
+        return err
+
     try:
         from kiln.state_lock import get_state_lock_manager
 
@@ -10259,6 +10414,9 @@ def update_printer_firmware(
         printer_name: Printer to update.
         target_version: Specific version to update to (latest if None).
     """
+    if err := _check_auth("firmware"):
+        return err
+
     try:
         from kiln.firmware import get_firmware_manager
 
@@ -10282,6 +10440,9 @@ def rollback_printer_firmware(
         printer_name: Printer to rollback.
         target_version: Specific version to rollback to.
     """
+    if err := _check_auth("firmware"):
+        return err
+
     try:
         from kiln.firmware import get_firmware_manager
 

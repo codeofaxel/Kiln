@@ -972,4 +972,6 @@ Kiln is free, open-source software. If you find it useful, consider sending a ti
 
 ## License
 
+Kiln is a project of **Hadron Labs Inc.**
+
 [MIT License](LICENSE) — free for any use. See LICENSE for details.

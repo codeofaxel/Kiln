@@ -30,6 +30,8 @@ FastAPI and uvicorn are optional dependencies.  Install them with::
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import inspect
 import json as _json
 import logging
@@ -59,6 +61,17 @@ logger = logging.getLogger(__name__)
 def _rest_auth_token_from_env() -> str | None:
     """Resolve REST bearer token from environment variables."""
     token = (os.environ.get("KILN_API_AUTH_TOKEN", "") or os.environ.get("KILN_AUTH_TOKEN", "")).strip()
+    return token or None
+
+
+def _extract_bearer_token(auth_header: str | None) -> str | None:
+    """Return bearer token from an Authorization header."""
+    if not auth_header:
+        return None
+    header = auth_header.strip()
+    if not header.lower().startswith("bearer "):
+        return None
+    token = header[7:].strip()
     return token or None
 
 
@@ -295,6 +308,9 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
 
     if config is None:
         config = RestApiConfig()
+    from kiln.auth import AuthManager
+
+    auth_manager = AuthManager()
 
     app = FastAPI(
         title="Kiln REST API",
@@ -361,9 +377,11 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
             Uses the Bearer token (if present) so that authenticated
             clients get their own bucket.  Falls back to client IP.
             """
-            auth = request.headers.get("Authorization", "")
-            if auth.startswith("Bearer ") and len(auth) > 7:
-                return f"token:{auth[7:]}"
+            token = _extract_bearer_token(request.headers.get("Authorization"))
+            if token:
+                # Keep token values out of in-memory limiter keys.
+                digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:24]
+                return f"token:{digest}"
             if request.client:
                 return f"ip:{request.client.host}"
             return "ip:unknown"
@@ -373,18 +391,32 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
     # ----- Auth dependency ------------------------------------------------
 
     async def verify_auth(request: Request):
-        """Verify Bearer token if auth is configured."""
-        if not config.auth_token:
-            return
-        import hmac as _hmac
+        """Verify Bearer token against static token and/or scoped API keys."""
+        token = _extract_bearer_token(request.headers.get("Authorization"))
 
-        auth_header = request.headers.get("Authorization", "")
-        expected = f"Bearer {config.auth_token}"
-        if not _hmac.compare_digest(auth_header, expected):
+        # Legacy static REST token support (backward compatible).
+        if config.auth_token:
+            if token and hmac.compare_digest(token, config.auth_token):
+                return
+            # If no auth manager is enabled, static-token mismatch is a hard failure.
+            if not auth_manager.enabled:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid or missing auth token",
+                )
+
+        # Scoped API key path (KILN_AUTH_ENABLED=1).
+        if auth_manager.enabled:
+            result = auth_manager.check_request(key=token, scope="read")
+            if result.get("authenticated"):
+                return
             raise HTTPException(
                 status_code=401,
-                detail="Invalid or missing auth token",
+                detail=result.get("error", "Invalid or missing auth token"),
             )
+
+        # No auth configured.
+        return
 
     _auth_dep = Depends(verify_auth)
 
@@ -950,13 +982,17 @@ def run_rest_server(config: RestApiConfig | None = None) -> None:
         config = RestApiConfig()
 
     app = create_app(config)
+    from kiln.auth import AuthManager
 
     # Refuse to bind to non-localhost without authentication
     _LOCALHOST_ADDRESSES = {"127.0.0.1", "localhost", "::1"}
-    if config.host not in _LOCALHOST_ADDRESSES and not config.auth_token:
+    auth_manager = AuthManager()
+    has_auth = bool(config.auth_token) or auth_manager.enabled
+    if config.host not in _LOCALHOST_ADDRESSES and not has_auth:
         raise RuntimeError(
             f"REST API cannot bind to {config.host} without authentication. "
             "Set KILN_API_AUTH_TOKEN=<token> (or pass --auth-token), "
+            "or enable scoped auth with KILN_AUTH_ENABLED=1 and KILN_AUTH_KEY=<key>, "
             "or bind to localhost by setting KILN_REST_HOST=127.0.0.1"
         )
 

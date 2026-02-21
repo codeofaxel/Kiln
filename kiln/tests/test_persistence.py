@@ -18,6 +18,8 @@ import os
 import sqlite3
 import threading
 import time
+from unittest import mock
+import hashlib
 
 import pytest
 
@@ -651,3 +653,20 @@ class TestClose:
         assert len(db2.recent_events()) == 1
         assert len(db2.list_printers()) == 1
         db2.close()
+
+
+class TestAuditHmacKey:
+    """Tests for secure audit HMAC key fallback behavior."""
+
+    def test_unwritable_key_file_uses_ephemeral_cached_key(self, tmp_path):
+        db_path = str(tmp_path / "audit.db")
+        instance = KilnDB(db_path=db_path)
+        try:
+            with mock.patch("builtins.open", side_effect=OSError("permission denied")):
+                key1 = instance._get_hmac_key()
+                key2 = instance._get_hmac_key()
+            assert len(key1) == 32
+            assert key1 == key2
+            assert key1 != hashlib.sha256(db_path.encode("utf-8")).digest()
+        finally:
+            instance.close()

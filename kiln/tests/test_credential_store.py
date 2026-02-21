@@ -109,7 +109,7 @@ class TestCredentialStoreInit:
     def test_auto_generated_master_key(self, tmp_path):
         db_path = str(tmp_path / "credentials.db")
         # Clear both env vars and make sure no key file exists at the default path.
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {"KILN_ALLOW_FILE_MASTER_KEY": "1"}, clear=True):
             with mock.patch("kiln.credential_store._DEFAULT_MASTER_KEY_PATH", str(tmp_path / "master.key")):
                 with mock.patch("kiln.credential_store._DEFAULT_DB_PATH", db_path):
                     store = CredentialStore(db_path=db_path)
@@ -121,7 +121,7 @@ class TestCredentialStoreInit:
     def test_auto_generated_key_persisted_to_file(self, tmp_path):
         key_path = str(tmp_path / "master.key")
         db_path = str(tmp_path / "credentials.db")
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {"KILN_ALLOW_FILE_MASTER_KEY": "1"}, clear=True):
             with mock.patch("kiln.credential_store._DEFAULT_MASTER_KEY_PATH", key_path):
                 store = CredentialStore(db_path=db_path)
                 store.close()
@@ -129,6 +129,13 @@ class TestCredentialStoreInit:
         assert os.path.isfile(key_path)
         with open(key_path) as fh:
             assert len(fh.read().strip()) > 0
+
+    def test_missing_master_key_raises_without_file_opt_in(self, tmp_path):
+        db_path = str(tmp_path / "credentials.db")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch("kiln.credential_store._DEFAULT_MASTER_KEY_PATH", str(tmp_path / "master.key")):
+                with pytest.raises(CredentialStoreError, match="No master key configured"):
+                    CredentialStore(db_path=db_path)
 
     def test_db_directory_created(self, tmp_path):
         nested = tmp_path / "deep" / "nested" / "dir"
@@ -555,7 +562,7 @@ class TestFilePermissions:
     def test_auto_gen_key_calls_chmod(self, tmp_path):
         key_path = str(tmp_path / "master.key")
         db_path = str(tmp_path / "credentials.db")
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {"KILN_ALLOW_FILE_MASTER_KEY": "1"}, clear=True):
             with mock.patch("kiln.credential_store._DEFAULT_MASTER_KEY_PATH", key_path):
                 with mock.patch("kiln.credential_store.sys") as mock_sys:
                     mock_sys.platform = "linux"

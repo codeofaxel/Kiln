@@ -327,3 +327,4 @@ Kiln demonstrates that AI agents can safely operate physical manufacturing hardw
 ---
 
 *Kiln is open-source software released under the MIT License.*
+*Kiln is a project of Hadron Labs Inc.*

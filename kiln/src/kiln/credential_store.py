@@ -12,8 +12,11 @@ The master key is sourced from (in order):
 
 1. The ``master_key`` constructor argument.
 2. The ``KILN_MASTER_KEY`` environment variable.
-3. Auto-generated and persisted to ``~/.kiln/master.key`` (with a
-   warning logged on first run).
+3. The command in ``KILN_MASTER_KEY_COMMAND`` (stdout is the key).
+4. The file path in ``KILN_MASTER_KEY_FILE``.
+5. Existing ``~/.kiln/master.key`` (legacy compatibility).
+6. Auto-generation to ``~/.kiln/master.key`` only when
+   ``KILN_ALLOW_FILE_MASTER_KEY=1`` is set.
 
 Example::
 
@@ -35,7 +38,9 @@ import hashlib
 import logging
 import os
 import secrets
+import shlex
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -64,6 +69,9 @@ _DEFAULT_DB_DIR = os.path.join(str(Path.home()), ".kiln")
 _DEFAULT_DB_PATH = os.path.join(_DEFAULT_DB_DIR, "credentials.db")
 _DEFAULT_MASTER_KEY_PATH = os.path.join(_DEFAULT_DB_DIR, "master.key")
 _ENC_VERSION_PREFIX = "v2:"
+_MASTER_KEY_FILE_ENV = "KILN_MASTER_KEY_FILE"
+_MASTER_KEY_COMMAND_ENV = "KILN_MASTER_KEY_COMMAND"
+_ALLOW_FILE_MASTER_KEY_ENV = "KILN_ALLOW_FILE_MASTER_KEY"
 
 
 # ---------------------------------------------------------------------------
@@ -175,8 +183,47 @@ class CredentialStore:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _env_truthy(name: str, default: bool = False) -> bool:
+        raw = os.environ.get(name, "").strip().lower()
+        if raw == "":
+            return default
+        return raw in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _read_master_key_from_command() -> str | None:
+        """Resolve key from ``KILN_MASTER_KEY_COMMAND`` if configured."""
+        cmd = os.environ.get(_MASTER_KEY_COMMAND_ENV, "").strip()
+        if not cmd:
+            return None
+        try:
+            parts = shlex.split(cmd)
+            if not parts:
+                raise CredentialStoreError(f"{_MASTER_KEY_COMMAND_ENV} is set but empty after parsing")
+            output = subprocess.check_output(parts, text=True, stderr=subprocess.STDOUT)
+            key = output.strip()
+            if not key:
+                raise CredentialStoreError(f"{_MASTER_KEY_COMMAND_ENV} produced an empty key")
+            return key
+        except CredentialStoreError:
+            raise
+        except Exception as exc:
+            raise CredentialStoreError(f"Failed to resolve master key via {_MASTER_KEY_COMMAND_ENV}: {exc}") from exc
+
+    @staticmethod
+    def _read_master_key_file(path: str) -> str | None:
+        """Read a master key file and return a non-empty key, if present."""
+        if not path or not os.path.isfile(path):
+            return None
+        try:
+            with open(path, encoding="utf-8") as fh:
+                key = fh.read().strip()
+        except OSError as exc:
+            raise CredentialStoreError(f"Failed to read master key file {path}: {exc}") from exc
+        return key or None
+
+    @staticmethod
     def _resolve_master_key(explicit_key: str | None) -> str:
-        """Determine the master key from explicit value, env, or auto-gen.
+        """Determine the master key from explicit value, env, command, or file.
 
         :param explicit_key: Key passed directly to the constructor.
         :returns: The resolved master key string.
@@ -188,17 +235,43 @@ class CredentialStore:
         if env_key:
             return env_key
 
-        # Auto-generate and persist.
+        command_key = CredentialStore._read_master_key_from_command()
+        if command_key:
+            return command_key
+
+        configured_path = os.environ.get(_MASTER_KEY_FILE_ENV, "").strip()
+        if configured_path:
+            file_key = CredentialStore._read_master_key_file(configured_path)
+            if not file_key:
+                raise CredentialStoreError(
+                    f"{_MASTER_KEY_FILE_ENV}={configured_path!r} is set but the key file is missing or empty"
+                )
+            return file_key
+
+        # Legacy compatibility: reuse existing default key file if present.
         key_path = _DEFAULT_MASTER_KEY_PATH
-        if os.path.isfile(key_path):
-            with open(key_path) as fh:
-                stored = fh.read().strip()
-            if stored:
-                return stored
+        existing = CredentialStore._read_master_key_file(key_path)
+        if existing:
+            logger.warning(
+                "Using legacy file-based master key at %s. "
+                "For stronger secret handling, set KILN_MASTER_KEY, %s, or %s.",
+                key_path,
+                _MASTER_KEY_COMMAND_ENV,
+                _MASTER_KEY_FILE_ENV,
+            )
+            return existing
+
+        if not CredentialStore._env_truthy(_ALLOW_FILE_MASTER_KEY_ENV, default=False):
+            raise CredentialStoreError(
+                "No master key configured. Set one of: constructor master_key, "
+                "KILN_MASTER_KEY, KILN_MASTER_KEY_COMMAND, or KILN_MASTER_KEY_FILE. "
+                f"Auto-generating {key_path} is disabled by default; set "
+                f"{_ALLOW_FILE_MASTER_KEY_ENV}=1 to opt in."
+            )
 
         os.makedirs(os.path.dirname(key_path), exist_ok=True)
         generated = secrets.token_urlsafe(48)
-        with open(key_path, "w") as fh:
+        with open(key_path, "w", encoding="utf-8") as fh:
             fh.write(generated)
 
         # Restrict file permissions (skip on Windows).
@@ -207,10 +280,11 @@ class CredentialStore:
                 os.chmod(key_path, 0o600)
 
         logger.warning(
-            "No master key provided. Auto-generated and saved to %s. "
+            "No master key provided. Auto-generated and saved to %s (explicitly enabled via %s). "
             "Back up this file — losing it means losing access to all "
             "encrypted credentials.",
             key_path,
+            _ALLOW_FILE_MASTER_KEY_ENV,
         )
         return generated
 

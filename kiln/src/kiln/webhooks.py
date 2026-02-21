@@ -44,14 +44,26 @@ logger = logging.getLogger(__name__)
 # SSRF prevention: private/reserved IP networks that webhooks must not target
 # ---------------------------------------------------------------------------
 _BLOCKED_NETWORKS = [
+    ipaddress.ip_network("0.0.0.0/8"),
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
     ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("192.0.0.0/24"),
+    ipaddress.ip_network("192.0.2.0/24"),
+    ipaddress.ip_network("198.18.0.0/15"),
+    ipaddress.ip_network("198.51.100.0/24"),
+    ipaddress.ip_network("203.0.113.0/24"),
+    ipaddress.ip_network("224.0.0.0/4"),
+    ipaddress.ip_network("240.0.0.0/4"),
     ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("::/128"),
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("2001:db8::/32"),
+    ipaddress.ip_network("ff00::/8"),
 ]
 _REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
 _MAX_REDIRECT_HOPS_DEFAULT = 3
@@ -77,6 +89,11 @@ def _get_webhook_redirect_policy() -> tuple[bool, int]:
     return allow, max_hops
 
 
+def _allow_insecure_http_webhooks() -> bool:
+    """Whether non-TLS webhook URLs are allowed."""
+    return _env_truthy("KILN_WEBHOOK_ALLOW_HTTP", default=False)
+
+
 def _validate_webhook_url(url: str) -> tuple[bool, str]:
     """Validate a webhook URL to prevent SSRF attacks.
 
@@ -95,8 +112,15 @@ def _validate_webhook_url(url: str) -> tuple[bool, str]:
         return False, "Malformed URL"
 
     # -- Scheme check --
-    if parsed.scheme not in ("http", "https"):
-        return False, f"Unsupported URL scheme '{parsed.scheme}'; only http and https are allowed"
+    if parsed.scheme == "http":
+        if not _allow_insecure_http_webhooks():
+            return (
+                False,
+                "Insecure webhook URL scheme 'http' is disabled; use https "
+                "or set KILN_WEBHOOK_ALLOW_HTTP=1 to explicitly allow it",
+            )
+    elif parsed.scheme != "https":
+        return False, f"Unsupported URL scheme '{parsed.scheme}'; only https is allowed by default"
 
     # -- Hostname presence --
     hostname = parsed.hostname
@@ -123,6 +147,11 @@ def _validate_webhook_url(url: str) -> tuple[bool, str]:
             addr = ipaddress.ip_address(ip_str)
         except ValueError:
             continue
+        if not addr.is_global:
+            return False, (
+                f"Webhook URL resolves to private/reserved non-public address {ip_str}; "
+                "only publicly routable destinations are allowed"
+            )
         for network in _BLOCKED_NETWORKS:
             if addr in network:
                 return False, (

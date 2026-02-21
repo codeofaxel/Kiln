@@ -221,6 +221,25 @@ class TestCreateApp:
             app = create_app(config)
             yield TestClient(app)
 
+    @pytest.fixture
+    def scoped_auth_client(self, mock_mcp, monkeypatch):
+        """Create a TestClient with AuthManager-based scoped auth enabled."""
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:
+            pytest.skip("FastAPI not installed")
+
+        monkeypatch.setenv("KILN_AUTH_ENABLED", "1")
+        monkeypatch.setenv("KILN_AUTH_KEY", "scoped-auth-key")
+        monkeypatch.delenv("KILN_API_AUTH_TOKEN", raising=False)
+        monkeypatch.delenv("KILN_AUTH_TOKEN", raising=False)
+
+        with mock.patch("kiln.rest_api._get_mcp_instance", return_value=mock_mcp):
+            from kiln.rest_api import create_app
+
+            app = create_app(RestApiConfig(auth_token=None))
+            yield TestClient(app)
+
     # --- Health endpoint ---
 
     def test_health_returns_200(self, client):
@@ -306,6 +325,17 @@ class TestCreateApp:
             "/api/tools/printer_status",
             json={},
             headers={"Authorization": "Bearer test-secret-token"},
+        )
+        assert resp.status_code == 200
+
+    def test_tools_require_scoped_auth_when_enabled(self, scoped_auth_client):
+        resp = scoped_auth_client.get("/api/tools")
+        assert resp.status_code == 401
+
+    def test_tools_accept_scoped_auth_key(self, scoped_auth_client):
+        resp = scoped_auth_client.get(
+            "/api/tools",
+            headers={"Authorization": "Bearer scoped-auth-key"},
         )
         assert resp.status_code == 200
 
@@ -460,6 +490,27 @@ class TestRunRestServer:
             from kiln.rest_api import run_rest_server
 
             config = RestApiConfig(host="0.0.0.0", port=9999, auth_token="secret-token")
+            run_rest_server(config)
+            mock_run.assert_called_once_with(
+                mock_app, host="0.0.0.0", port=9999
+            )
+
+    @mock.patch("kiln.rest_api.create_app")
+    def test_run_rest_server_allows_non_localhost_with_scoped_auth(self, mock_create_app, monkeypatch):
+        try:
+            import uvicorn
+        except ImportError:
+            pytest.skip("uvicorn not installed")
+
+        monkeypatch.setenv("KILN_AUTH_ENABLED", "1")
+        monkeypatch.setenv("KILN_AUTH_KEY", "scoped-auth-key")
+        mock_app = mock.MagicMock()
+        mock_create_app.return_value = mock_app
+
+        with mock.patch.object(uvicorn, "run") as mock_run:
+            from kiln.rest_api import run_rest_server
+
+            config = RestApiConfig(host="0.0.0.0", port=9999, auth_token=None)
             run_rest_server(config)
             mock_run.assert_called_once_with(
                 mock_app, host="0.0.0.0", port=9999

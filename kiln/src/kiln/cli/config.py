@@ -129,7 +129,7 @@ def _validate_printer_url(url: str, *, printer_type: str = "octoprint") -> tuple
     try:
         import requests
 
-        requests.head(cleaned, timeout=5, verify=False, allow_redirects=True)
+        requests.head(cleaned, timeout=5, allow_redirects=True)
     except ImportError:
         pass  # requests not available in this context
     except Exception as exc:

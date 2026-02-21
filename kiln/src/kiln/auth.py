@@ -49,6 +49,75 @@ _KEY_PREFIX = "sk_kiln_"
 # Default grace period for key rotation (24 hours)
 _DEFAULT_GRACE_PERIOD = 86400  # seconds
 
+# Scope normalization so legacy feature scopes remain compatible with the
+# canonical role scopes: read/write/admin.
+_SCOPE_ALIAS_TO_CANONICAL: dict[str, str] = {
+    "read": "read",
+    "write": "write",
+    "admin": "admin",
+    # Read-only intelligence queries
+    "intel": "read",
+    # Feature scopes that imply mutating capability
+    "files": "write",
+    "print": "write",
+    "temperature": "write",
+    "billing": "write",
+    "generate": "write",
+    "firmware": "write",
+    "history": "write",
+    "monitoring": "write",
+    "safety": "write",
+    "gcode": "write",
+    "slicer": "write",
+    "pipeline": "write",
+    "cache": "write",
+    "config": "write",
+    "calibrate": "write",
+}
+
+
+def _normalize_scope(scope: str | None) -> str | None:
+    """Normalize a scope string to a canonical representation."""
+    if scope is None:
+        return None
+    cleaned = scope.strip().lower()
+    if not cleaned:
+        return None
+    return _SCOPE_ALIAS_TO_CANONICAL.get(cleaned, cleaned)
+
+
+def _normalize_scope_set(scopes: set[str]) -> set[str]:
+    """Return a cleaned, lowercase scope set with empty values removed."""
+    normalized: set[str] = set()
+    for scope in scopes:
+        cleaned = (scope or "").strip().lower()
+        if cleaned:
+            normalized.add(cleaned)
+    return normalized
+
+
+def _expand_effective_scopes(scopes: set[str]) -> set[str]:
+    """Expand scopes with aliases and hierarchical implications."""
+    effective = set(scopes)
+    canonical = {_normalize_scope(s) for s in scopes}
+    effective.update(s for s in canonical if s)
+
+    # Hierarchy: admin => write => read
+    if "admin" in effective:
+        effective.update({"write", "read"})
+    if "write" in effective:
+        effective.add("read")
+    return effective
+
+
+def _scope_satisfied(required_scope: str | None, granted_scopes: set[str]) -> bool:
+    """Whether *granted_scopes* satisfy *required_scope*."""
+    if required_scope is None:
+        return True
+    normalized_required = _normalize_scope(required_scope)
+    effective = _expand_effective_scopes(_normalize_scope_set(granted_scopes))
+    return required_scope in effective or (normalized_required in effective if normalized_required else False)
+
 
 # ---------------------------------------------------------------------------
 # Role-based access control (Enterprise)
@@ -187,7 +256,7 @@ class AuthManager:
             id=key_id,
             name=name,
             key_hash=key_hash,
-            scopes=set(scopes or ["read", "write"]),
+            scopes=_normalize_scope_set(set(scopes or ["read", "write"])),
         )
         self._keys[key_hash] = api_key
         logger.info("Created API key %r (id=%s)", name, key_id)
@@ -317,12 +386,15 @@ class AuthManager:
 
         # Check env key first
         if self._env_key_hash and hmac.compare_digest(key_hash, self._env_key_hash):
-            return ApiKey(
+            env_api_key = ApiKey(
                 id="env",
                 name="environment-key",
                 key_hash=self._env_key_hash,
                 scopes={"read", "write", "admin"},
             )
+            if not _scope_satisfied(required_scope, env_api_key.scopes):
+                raise AuthError(f"Key missing required scope: {required_scope!r}")
+            return env_api_key
 
         # Check registered keys
         api_key = self._keys.get(key_hash)
@@ -336,7 +408,7 @@ class AuthManager:
         if api_key.expires_at is not None and time.time() >= api_key.expires_at:
             raise AuthError("API key has expired (rotation grace period ended)")
 
-        if required_scope and required_scope not in api_key.scopes:
+        if not _scope_satisfied(required_scope, api_key.scopes):
             raise AuthError(f"Key missing required scope: {required_scope!r}")
 
         api_key.last_used_at = time.time()

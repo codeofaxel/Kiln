@@ -130,7 +130,6 @@ READ_ONLY_TOOLS: Set[str] = {
 
     # Billing read-only
     "billing_summary",
-    "billing_check_setup",
     "billing_alerts",
 
     # License read-only
@@ -164,7 +163,6 @@ READ_ONLY_TOOLS: Set[str] = {
 
     # Onboarding / help (no side effects)
     "get_started",
-    "confirm_action",
 
     # Discovery / scan (no mutation)
     "discover_printers",
@@ -211,63 +209,7 @@ READ_ONLY_TOOLS: Set[str] = {
 # added without being in either allowlist.
 # ---------------------------------------------------------------------------
 
-KNOWN_UNSCOPED_MUTATING_TOOLS: Set[str] = {
-    # Material / spool management
-    "set_material",
-    "add_spool",
-    "remove_spool",
-
-    # Bed leveling control
-    "trigger_bed_level",
-    "set_leveling_policy",
-
-    # Autonomy / config
-    "set_autonomy_level",
-
-    # Cloud sync
-    "cloud_sync_now",
-    "cloud_sync_configure",
-
-    # Marketplace download (writes to disk)
-    "download_model",
-
-    # Slicer (writes files)
-    "slice_model",
-
-    # Long-running blocking operations
-    "await_print_completion",
-
-    # Print recovery / checkpoint
-    "save_print_checkpoint",
-    "plan_print_recovery",
-    "firmware_resume_print",
-
-    # Health monitoring control
-    "start_printer_health_monitoring",
-    "stop_printer_health_monitoring",
-
-    # Fleet job routing
-    "route_print_job",
-    "fleet_submit_job",
-
-    # Cache writes
-    "cache_design",
-
-    # Credential store
-    "store_credential",
-
-    # Printer locking
-    "acquire_printer_lock",
-    "release_printer_lock",
-
-    # License management
-    "activate_license",
-    "get_upgrade_url",
-
-    # Firmware update (duplicate of scoped versions)
-    "update_printer_firmware",
-    "rollback_printer_firmware",
-}
+KNOWN_UNSCOPED_MUTATING_TOOLS: Set[str] = set()
 
 
 # ---------------------------------------------------------------------------

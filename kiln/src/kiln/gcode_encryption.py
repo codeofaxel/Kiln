@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 _ENCRYPTION_KEY_ENV = "KILN_ENCRYPTION_KEY"
 _SALT_ENV = "KILN_ENCRYPTION_SALT"
-_DEFAULT_SALT = b"kiln-gcode-encryption-v1"
 _HEADER = b"KILN_ENC_V1:"
 _SALT_FILE = os.path.join(str(Path.home()), ".kiln", "encryption_salt")
 
@@ -40,8 +39,8 @@ def _get_or_create_salt() -> bytes:
 
     On first run, generates 16 random bytes and writes them to disk with
     ``0o600`` permissions.  On subsequent runs, reads the persisted salt.
-    Falls back to :data:`_DEFAULT_SALT` only if the file cannot be created
-    (e.g. read-only filesystem).
+    Raises if the salt cannot be read/written and no explicit
+    ``KILN_ENCRYPTION_SALT`` is provided.
     """
     try:
         if os.path.isfile(_SALT_FILE):
@@ -60,12 +59,11 @@ def _get_or_create_salt() -> bytes:
         logger.info("Generated new PBKDF2 salt at %s", _SALT_FILE)
         return salt
     except OSError as exc:
-        logger.warning(
-            "Could not read/write salt file %s (%s); falling back to default salt",
-            _SALT_FILE,
-            exc,
-        )
-        return _DEFAULT_SALT
+        raise RuntimeError(
+            "Could not read/write encryption salt file "
+            f"{_SALT_FILE}: {exc}. Set KILN_ENCRYPTION_SALT explicitly "
+            "or fix filesystem permissions."
+        ) from exc
 
 
 class GcodeEncryptionError(Exception):
@@ -104,7 +102,11 @@ class GcodeEncryption:
             return
 
         env_salt = os.environ.get(_SALT_ENV, "").strip()
-        salt = env_salt.encode("utf-8") if env_salt else _get_or_create_salt()
+        try:
+            salt = env_salt.encode("utf-8") if env_salt else _get_or_create_salt()
+        except RuntimeError as exc:
+            logger.error("KILN_ENCRYPTION_KEY is set but encryption cannot initialize securely: %s", exc)
+            return
 
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),

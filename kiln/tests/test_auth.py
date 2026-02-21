@@ -231,6 +231,24 @@ class TestVerify:
         result = mgr.verify(raw_key, required_scope="read")
         assert "read" in result.scopes
 
+    def test_alias_scope_write_passes(self):
+        mgr = AuthManager(enabled=True)
+        _, raw_key = mgr.create_key("writer", scopes=["write"])
+        result = mgr.verify(raw_key, required_scope="print")
+        assert "write" in result.scopes
+
+    def test_alias_scope_read_passes(self):
+        mgr = AuthManager(enabled=True)
+        _, raw_key = mgr.create_key("reader", scopes=["read"])
+        result = mgr.verify(raw_key, required_scope="intel")
+        assert "read" in result.scopes
+
+    def test_alias_scope_write_missing_for_read_key(self):
+        mgr = AuthManager(enabled=True)
+        _, raw_key = mgr.create_key("reader", scopes=["read"])
+        with pytest.raises(AuthError, match="missing required scope"):
+            mgr.verify(raw_key, required_scope="print")
+
     # 15. Empty key raises AuthError
     def test_empty_key_raises(self):
         mgr = AuthManager(enabled=True)

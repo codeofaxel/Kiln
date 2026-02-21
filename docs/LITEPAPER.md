@@ -90,3 +90,4 @@ Full documentation, CLI reference, and the technical whitepaper are available in
 ---
 
 Kiln is open-source software released under the MIT License. Version 0.1.0, February 2026.
+Kiln is a project of Hadron Labs Inc.

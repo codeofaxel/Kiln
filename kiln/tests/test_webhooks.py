@@ -1055,7 +1055,19 @@ class TestValidateWebhookUrl:
         assert valid is True
         assert reason == ""
 
-    def test_valid_http_url(self, monkeypatch):
+    def test_rejects_http_url_by_default(self, monkeypatch):
+        monkeypatch.setattr(
+            "kiln.webhooks.socket.getaddrinfo",
+            lambda _host, port, proto=socket.IPPROTO_TCP: [
+                (socket.AF_INET, socket.SOCK_STREAM, proto, "", ("93.184.216.34", port))
+            ],
+        )
+        valid, reason = _validate_webhook_url("http://example.com/hook")
+        assert valid is False
+        assert "http" in reason.lower()
+
+    def test_allows_http_url_when_opted_in(self, monkeypatch):
+        monkeypatch.setenv("KILN_WEBHOOK_ALLOW_HTTP", "1")
         monkeypatch.setattr(
             "kiln.webhooks.socket.getaddrinfo",
             lambda _host, port, proto=socket.IPPROTO_TCP: [

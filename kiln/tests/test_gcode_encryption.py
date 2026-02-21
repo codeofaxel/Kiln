@@ -70,6 +70,12 @@ class TestGcodeEncryptionConfigured:
             s = enc.status()
             assert s["key_configured"] is True
 
+    def test_key_set_but_salt_unavailable_disables_encryption(self):
+        with mock.patch.dict(os.environ, {"KILN_ENCRYPTION_KEY": "test-key"}, clear=True):
+            with mock.patch("kiln.gcode_encryption._get_or_create_salt", side_effect=RuntimeError("salt unavailable")):
+                enc = GcodeEncryption()
+                assert enc.is_available is False
+
 
 class TestCryptographyCheck:
     def test_returns_bool(self):
