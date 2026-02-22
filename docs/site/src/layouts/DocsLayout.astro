@@ -1,15 +1,30 @@
 ---
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
+import SeoHead from '../components/SeoHead.astro';
 import '../styles/global.css';
 
 interface Props {
   title: string;
   description: string;
   current?: string;
+  type?: 'website' | 'article';
+  image?: string;
+  keywords?: string[];
+  noindex?: boolean;
+  schema?: Record<string, unknown> | Record<string, unknown>[];
 }
 
-const { title, description, current = '' } = Astro.props;
+const {
+  title,
+  description,
+  current = '',
+  type = 'website',
+  image,
+  keywords,
+  noindex = false,
+  schema,
+} = Astro.props;
 ---
 
 <!DOCTYPE html>
@@ -17,19 +32,15 @@ const { title, description, current = '' } = Astro.props;
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{title}</title>
-  <meta name="description" content={description}>
-
-  <meta property="og:title" content={title}>
-  <meta property="og:description" content={description}>
-  <meta property="og:image" content="https://kiln3d.com/assets/kiln-social-preview.png">
-  <meta property="og:type" content="article">
-  <meta property="og:url" content={Astro.url.href}>
-
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content={title}>
-  <meta name="twitter:description" content={description}>
-  <meta name="twitter:image" content="https://kiln3d.com/assets/kiln-social-preview.png">
+  <SeoHead
+    title={title}
+    description={description}
+    type={type}
+    image={image}
+    keywords={keywords}
+    noindex={noindex}
+    schema={schema}
+  />
 
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">

@@ -42,12 +42,32 @@ renderer.heading = function({ tokens, depth }: { tokens: any[]; depth: number })
 
 marked.setOptions({ renderer });
 const htmlContent = await marked.parse(rawMd);
+
+const whitepaperSchema = {
+  '@type': 'ScholarlyArticle',
+  headline: 'Kiln: A Protocol for Agent-Operated Physical Manufacturing',
+  description:
+    'Technical whitepaper covering Kiln architecture, safety systems, protocol design, and printer adapter model.',
+  url: 'https://kiln3d.com/whitepaper',
+  datePublished: '2026-02-01',
+  dateModified: '2026-02-01',
+  inLanguage: 'en-US',
+};
 ---
 
 <DocsLayout
-  title="Kiln Whitepaper — Protocol for Agent-Operated Manufacturing"
-  description="Technical whitepaper describing the Kiln protocol for safe AI agent control of 3D printers and physical manufacturing hardware."
+  title="Kiln Whitepaper — AI 3D Printing Protocol and Safety Architecture"
+  description="Technical whitepaper describing Kiln's protocol for safe AI agent control of 3D printers, manufacturing workflows, and hardware safety enforcement."
   current="whitepaper"
+  type="article"
+  keywords={[
+    'kiln whitepaper',
+    'ai 3d printing protocol',
+    'agentic manufacturing protocol',
+    '3d printer safety architecture',
+    'mcp manufacturing',
+  ]}
+  schema={whitepaperSchema}
 >
   <!-- Page Header -->
   <header class="wp-header">

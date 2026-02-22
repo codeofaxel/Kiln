@@ -17,6 +17,8 @@ const { current = '' } = Astro.props;
     </button>
     <div class="links">
       <a href="/#features" class:list={[{ active: current === 'features' }]}>Features</a>
+      <a href="/use-cases" class:list={[{ active: current === 'use-cases' }]}>Use Cases</a>
+      <a href="/integrations" class:list={[{ active: current === 'integrations' }]}>Integrations</a>
       <a href="/install" class:list={[{ active: current === 'install' }]}>Install</a>
       <a href="/docs" class:list={[{ active: current === 'docs' }]}>Docs</a>
       <a href="/whitepaper" class:list={[{ active: current === 'whitepaper' }]}>Whitepaper</a>
@@ -59,8 +61,8 @@ const { current = '' } = Astro.props;
   .logo .accent { color: var(--accent); }
   .links {
     display: flex;
-    gap: 24px;
-    font-size: 14px;
+    gap: 18px;
+    font-size: 13px;
   }
   .links a {
     color: var(--text-muted);

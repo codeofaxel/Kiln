@@ -1,11 +1,81 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+
+const posts = [
+  {
+    title: 'Kiln is Now One Install Away from Any AI Agent',
+    url: '/blog/one-install-away',
+    datePublished: '2026-02-20',
+    description:
+      'Kiln v0.2.1 ships to PyPI, ClawHub, and the MCP Registry with 273 tools for 3D printer control.',
+  },
+  {
+    title: 'Think → Print → Earn: 12 New Subsystems Ship Today',
+    url: '/blog/think-print-earn',
+    datePublished: '2026-02-19',
+    description:
+      'New generation, printability, marketplace, and revenue tooling expands Kiln from model creation to monetization.',
+  },
+  {
+    title: 'Craftcloud Integration Is Live',
+    url: '/blog/craftcloud-live',
+    datePublished: '2026-02-18',
+    description:
+      "Kiln now supports outsourced 3D printing through Craftcloud's network of providers.",
+  },
+  {
+    title: 'Our First Real Prints: Two Users, Two Printers, Zero Manual Steps',
+    url: '/blog/first-real-prints',
+    datePublished: '2026-02-18',
+    description:
+      'Real-world demo showing end-to-end AI-agent prints on Bambu Lab and Prusa hardware.',
+  },
+  {
+    title: 'Introducing Kiln: Let AI Agents Run Your 3D Printers',
+    url: '/blog/introducing-kiln',
+    datePublished: '2026-02-17',
+    description:
+      'Launch post covering Kiln architecture, supported printer ecosystems, and safety model.',
+  },
+];
+
+const blogSchema = [
+  {
+    '@type': 'Blog',
+    name: 'Kiln Blog',
+    url: 'https://kiln3d.com/blog',
+    blogPost: posts.map((post) => ({
+      '@type': 'BlogPosting',
+      headline: post.title,
+      url: `https://kiln3d.com${post.url}`,
+      datePublished: post.datePublished,
+      description: post.description,
+    })),
+  },
+  {
+    '@type': 'ItemList',
+    name: 'Kiln Blog Posts',
+    itemListElement: posts.map((post, index) => ({
+      '@type': 'ListItem',
+      position: index + 1,
+      name: post.title,
+      url: `https://kiln3d.com${post.url}`,
+    })),
+  },
+];
 ---
 
 <BaseLayout
-  title="Blog — Kiln"
-  description="Updates, tutorials, and announcements from the Kiln project."
+  title="Kiln Blog — AI 3D Printing, Automation, and Product Updates"
+  description="Updates, tutorials, integration launches, and technical deep dives from the Kiln 3D print automation project."
   current="blog"
+  keywords={[
+    'kiln blog',
+    '3d printing automation news',
+    'ai agent manufacturing updates',
+    'mcp server 3d printing',
+  ]}
+  schema={blogSchema}
 >
   <div class="blog-page">
     <div class="container">

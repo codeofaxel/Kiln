@@ -64,12 +64,33 @@ marked.setOptions({
 });
 
 const htmlContent = await marked.parse(markdown);
+
+const docsSchema = {
+  '@type': 'TechArticle',
+  headline: 'Kiln Documentation',
+  description:
+    'Complete documentation for Kiln CLI commands, MCP tools, printer adapters, safety systems, and configuration.',
+  url: 'https://kiln3d.com/docs',
+  about: [
+    { '@type': 'Thing', name: 'Kiln 3D print automation' },
+    { '@type': 'Thing', name: 'Model Context Protocol (MCP)' },
+    { '@type': 'Thing', name: '3D printer control software' },
+  ],
+};
 ---
 
 <DocsLayout
   title="Kiln Documentation — CLI, MCP Server, and API Reference"
   description="Complete documentation for Kiln: CLI commands, MCP tools, printer adapters, safety systems, and configuration reference."
   current="docs"
+  keywords={[
+    'kiln documentation',
+    'kiln mcp tools',
+    '3d printer cli',
+    '3d print automation docs',
+    'octoprint moonraker bambu prusa elegoo',
+  ]}
+  schema={docsSchema}
 >
   <!-- Mobile TOC toggle -->
   <button class="toc-toggle" aria-label="Table of Contents" id="toc-toggle">

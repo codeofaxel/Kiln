@@ -26,10 +26,57 @@ $ kiln compare-cost model.gcode --fulfillment-material pla_standard --json
 ---
 
 <BaseLayout
-  title="Kiln — Agentic 3D Printing Infrastructure"
-  description="Kiln lets AI agents safely control 3D printers. Open-source CLI and MCP server for OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link."
+  title="Kiln 3D Print Software — AI-Powered 3D Printer Automation"
+  description="Open-source AI 3D print automation. Control OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa printers from one CLI and MCP server."
+  keywords={['kiln', 'kiln 3d', 'kiln 3d print', '3d print software', '3d printer automation']}
 >
   <Hero />
+
+  <section class="bordered search-intent">
+    <div class="container">
+      <h2>What is Kiln 3D?</h2>
+      <p class="lead what-is-lead">
+        Kiln 3D is open-source software that lets AI agents run 3D print workflows end-to-end:
+        discover printers, slice models, start jobs, monitor progress, and recover from failures
+        with safety guardrails built in.
+      </p>
+    </div>
+  </section>
+
+  <section class="topic-hub bordered">
+    <div class="container">
+      <h2>Explore Kiln by topic</h2>
+      <p class="lead">Everything you need for setup, integrations, operations, and production workflows.</p>
+
+      <div class="hub-grid">
+        <a href="/install" class="hub-card">
+          <h3>Install and setup</h3>
+          <p>Quick install, first printer connection, and MCP server setup.</p>
+        </a>
+        <a href="/integrations" class="hub-card">
+          <h3>Printer and ecosystem integrations</h3>
+          <p>OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, marketplaces, and fulfillment.</p>
+        </a>
+        <a href="/use-cases" class="hub-card">
+          <h3>Use cases</h3>
+          <p>Print farm automation, AI prototyping, outsourced production, and lab operations.</p>
+        </a>
+        <a href="/docs" class="hub-card">
+          <h3>Documentation</h3>
+          <p>CLI, MCP tools, safety architecture, and full configuration reference.</p>
+        </a>
+        <a href="/blog" class="hub-card">
+          <h3>Releases and updates</h3>
+          <p>Feature launches, integration announcements, and real-world print stories.</p>
+        </a>
+        <a href="/faq" class="hub-card">
+          <h3>FAQ</h3>
+          <p>Answers on pricing, compatibility, deployment, safety, and operations.</p>
+        </a>
+      </div>
+    </div>
+  </section>
+
   <Terminal />
   <FeatureGrid />
   <Steps />
@@ -119,6 +166,60 @@ $ kiln compare-cost model.gcode --fulfillment-material pla_standard --json
 <style>
   .bordered {
     border-top: 1px solid var(--border);
+  }
+
+  /* What is Kiln section */
+  .search-intent {
+    text-align: center;
+    padding: 72px 0;
+  }
+
+  .search-intent h2 {
+    font-size: clamp(22px, 3vw, 32px);
+    margin-bottom: 16px;
+  }
+
+  .what-is-lead {
+    max-width: 640px;
+    margin: 0 auto !important;
+  }
+
+  .topic-hub {
+    padding-top: 56px;
+  }
+
+  .hub-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+  }
+
+  .hub-card {
+    display: block;
+    padding: 22px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-card);
+    text-decoration: none;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+
+  .hub-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    text-decoration: none;
+  }
+
+  .hub-card h3 {
+    color: var(--text);
+    font-size: 18px;
+    margin-bottom: 8px;
+  }
+
+  .hub-card p {
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.6;
   }
 
   /* Real Prints section */

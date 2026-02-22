@@ -1,0 +1,329 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+interface UseCase {
+  name: string;
+  title: string;
+  description: string;
+  outcomes: string[];
+  icon: string;
+  num: string;
+}
+
+const useCases: UseCase[] = [
+  {
+    name: 'print-farms',
+    title: 'Print farm automation',
+    description:
+      'Coordinate dozens of printers with queueing, routing, and failure recovery so operators spend less time babysitting machines and more time shipping parts.',
+    outcomes: [
+      'Priority scheduling across a mixed-firmware fleet',
+      'Automated retries and reroutes when a printer fails',
+      'Centralized telemetry for progress, temperatures, and health',
+    ],
+    icon: '🏭',
+    num: '01',
+  },
+  {
+    name: 'agent-prototyping',
+    title: 'AI agent rapid prototyping',
+    description:
+      'Let agents move from prompt to physical part by discovering models, slicing for the target printer, and launching monitored jobs with guardrails.',
+    outcomes: [
+      'Text-to-3D and sketch-to-3D workflows tied to printability checks',
+      'Reusable command pipelines for repeated prototype cycles',
+      'CLI + MCP support for custom app integrations',
+    ],
+    icon: '🤖',
+    num: '02',
+  },
+  {
+    name: 'outsourced-manufacturing',
+    title: 'Outsourced manufacturing fallback',
+    description:
+      'When local printers are overloaded, route jobs to external services without changing tools or workflows.',
+    outcomes: [
+      'Compare local cost versus fulfillment pricing in one flow',
+      'Place orders with provider APIs from the same Kiln interface',
+      'Keep auditability across local and remote production',
+    ],
+    icon: '☁️',
+    num: '03',
+  },
+  {
+    name: 'education-labs',
+    title: 'Education and research labs',
+    description:
+      'Run shared fabrication environments with safer default controls, role-aware operation, and repeatable setup for student or research teams.',
+    outcomes: [
+      'Constrain dangerous operations with tool tiers and safety limits',
+      'Standardize setup across semester resets and staff changes',
+      'Document print histories and job outcomes for reproducibility',
+    ],
+    icon: '🔬',
+    num: '04',
+  },
+  {
+    name: 'marketplace-creators',
+    title: 'Marketplace and maker businesses',
+    description:
+      'Go from model idea to printable asset to publishable product with integrated tooling for generation, validation, and fulfillment.',
+    outcomes: [
+      'Generate, validate, and orient designs before wasting material',
+      'Publish models and track downstream performance',
+      'Automate repetitive order and printing workflows',
+    ],
+    icon: '🛒',
+    num: '05',
+  },
+];
+
+const useCasesSchema = {
+  '@type': 'CollectionPage',
+  name: 'Kiln Use Cases',
+  about: {
+    '@type': 'Thing',
+    name: 'AI-powered 3D printing automation',
+  },
+  mainEntity: {
+    '@type': 'ItemList',
+    itemListElement: useCases.map((useCase, index) => ({
+      '@type': 'ListItem',
+      position: index + 1,
+      name: useCase.title,
+      description: useCase.description,
+    })),
+  },
+};
+---
+
+<BaseLayout
+  title="Kiln Use Cases — AI 3D Print Automation for Teams and Makers"
+  description="See how teams use Kiln for print farm automation, AI prototyping, outsourced 3D manufacturing, lab operations, and marketplace workflows."
+  current="use-cases"
+  keywords={[
+    'kiln use cases',
+    'ai 3d printing workflows',
+    'print farm software',
+    '3d printer automation platform',
+    'agentic manufacturing',
+  ]}
+  schema={useCasesSchema}
+>
+  <section class="usecases-hero">
+    <div class="container">
+      <h1>Use Kiln across the entire 3D printing workflow</h1>
+      <p class="lead">
+        Kiln is built for makers, labs, and production teams that want AI-driven 3D print operations
+        without sacrificing safety, observability, or control.
+      </p>
+    </div>
+  </section>
+
+  <section class="usecases-list bordered">
+    <div class="container">
+      {useCases.map((useCase) => (
+        <article class="usecase-row" id={useCase.name}>
+          <div class="usecase-left">
+            <div class="usecase-meta">
+              <span class="usecase-icon">{useCase.icon}</span>
+              <span class="usecase-num">{useCase.num}</span>
+            </div>
+            <h2>{useCase.title}</h2>
+          </div>
+          <div class="usecase-right">
+            <p class="usecase-desc">{useCase.description}</p>
+            <ul class="usecase-outcomes">
+              {useCase.outcomes.map((outcome) => (
+                <li>{outcome}</li>
+              ))}
+            </ul>
+          </div>
+        </article>
+      ))}
+    </div>
+  </section>
+
+  <section class="usecases-cta bordered">
+    <div class="container">
+      <h2>Build your own workflow on top of Kiln</h2>
+      <p class="lead">
+        Start with the install guide, then use docs and API references to tailor Kiln to your exact
+        printer stack and operating model.
+      </p>
+      <div class="cta-actions">
+        <a href="/install" class="btn">Install</a>
+        <a href="/docs" class="btn btn-ghost">Documentation</a>
+        <a href="/integrations" class="btn btn-ghost">Integrations</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .usecases-hero {
+    text-align: center;
+    padding: 96px 0 44px;
+  }
+
+  .usecases-hero h1 {
+    font-size: clamp(30px, 4.5vw, 46px);
+    line-height: 1.15;
+    margin-bottom: 14px;
+  }
+
+  .usecases-hero .lead {
+    max-width: 700px;
+    margin: 0 auto;
+  }
+
+  .usecases-list {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .bordered {
+    border-top: 1px solid var(--border);
+  }
+
+  /* Each use case row */
+  .usecase-row {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 48px;
+    padding: 48px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .usecase-row:last-child {
+    border-bottom: none;
+  }
+
+  /* Left column */
+  .usecase-left {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .usecase-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .usecase-icon {
+    font-size: 28px;
+    line-height: 1;
+  }
+
+  .usecase-num {
+    font-size: 13px;
+    font-weight: 700;
+    font-family: var(--mono);
+    color: var(--accent);
+    letter-spacing: 0.05em;
+  }
+
+  .usecase-left h2 {
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.3;
+    margin: 0;
+  }
+
+  /* Right column */
+  .usecase-right {
+    padding-top: 4px;
+  }
+
+  .usecase-desc {
+    color: var(--text-muted);
+    font-size: 15px;
+    line-height: 1.7;
+    margin-bottom: 20px;
+  }
+
+  .usecase-outcomes {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .usecase-outcomes li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.55;
+  }
+
+  .usecase-outcomes li::before {
+    content: '✓';
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  /* CTA */
+  .usecases-cta {
+    text-align: center;
+    padding: 64px 0 96px;
+  }
+
+  .usecases-cta h2 {
+    font-size: clamp(22px, 3vw, 32px);
+    margin-bottom: 12px;
+  }
+
+  .usecases-cta .lead {
+    margin: 0 auto 28px;
+    max-width: 600px;
+  }
+
+  .cta-actions {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  @media (max-width: 768px) {
+    .usecase-row {
+      grid-template-columns: 1fr;
+      gap: 20px;
+      padding: 36px 0;
+    }
+
+    .usecase-left {
+      flex-direction: row;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .usecase-left h2 {
+      font-size: 20px;
+    }
+
+    .usecase-right {
+      padding-top: 0;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .usecases-hero {
+      padding: 64px 0 26px;
+    }
+
+    .usecases-cta {
+      padding: 44px 0 64px;
+    }
+  }
+</style>

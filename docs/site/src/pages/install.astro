@@ -30,12 +30,54 @@ const mcpConfigCompact = JSON.stringify({
     }
   }
 });
+
+const installHowToSchema = {
+  '@type': 'HowTo',
+  name: 'How to install Kiln for AI-powered 3D printing',
+  description:
+    'Install Kiln, connect your 3D printer, and expose Kiln tools to an AI agent through MCP.',
+  totalTime: 'PT10M',
+  step: [
+    {
+      '@type': 'HowToStep',
+      name: 'Install Kiln',
+      text: 'Install Kiln via pip, pipx, or the one-line installer.',
+      url: 'https://kiln3d.com/install',
+    },
+    {
+      '@type': 'HowToStep',
+      name: 'Configure printer access',
+      text: 'Run kiln setup to discover printers and save connection settings.',
+      url: 'https://kiln3d.com/install',
+    },
+    {
+      '@type': 'HowToStep',
+      name: 'Verify connectivity',
+      text: 'Run kiln verify and kiln status --json to validate dependencies and printer state.',
+      url: 'https://kiln3d.com/install',
+    },
+    {
+      '@type': 'HowToStep',
+      name: 'Start MCP server',
+      text: 'Run kiln serve and connect an MCP-compatible AI agent.',
+      url: 'https://kiln3d.com/install',
+    },
+  ],
+};
 ---
 
 <BaseLayout
-  title="Install Kiln — 3D Printing Infrastructure for AI Agents"
-  description="Install Kiln in under a minute on macOS, Linux, or WSL 2. Connect your 3D printer and start printing with AI agents."
+  title="Install Kiln 3D Print Automation Software"
+  description="Install Kiln in under a minute on macOS, Linux, or WSL 2. Connect OctoPrint, Moonraker, Bambu, or Prusa printers for AI-driven 3D printing."
   current="install"
+  keywords={[
+    'install kiln',
+    'kiln setup',
+    'kiln mcp server',
+    '3d printer ai setup',
+    'octoprint ai automation',
+  ]}
+  schema={installHowToSchema}
 >
 
   <!-- Hero -->

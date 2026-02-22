@@ -42,12 +42,31 @@ renderer.heading = function({ tokens, depth }: { tokens: any[]; depth: number })
 
 marked.setOptions({ renderer });
 const htmlContent = await marked.parse(rawMd);
+
+const litepaperSchema = {
+  '@type': 'Article',
+  headline: 'Kiln Litepaper',
+  description:
+    'Non-technical overview of Kiln and how AI agents can safely operate 3D printer workflows.',
+  url: 'https://kiln3d.com/litepaper',
+  datePublished: '2026-02-01',
+  dateModified: '2026-02-01',
+  inLanguage: 'en-US',
+};
 ---
 
 <DocsLayout
-  title="Kiln Litepaper — Non-Technical Overview"
-  description="A non-technical overview of Kiln, the open-source infrastructure that lets AI agents safely control 3D printers."
+  title="Kiln Litepaper — AI-Powered 3D Printing Overview"
+  description="A non-technical overview of Kiln 3D: open-source infrastructure that lets AI agents safely automate 3D printer operations."
   current="litepaper"
+  type="article"
+  keywords={[
+    'kiln litepaper',
+    'kiln 3d overview',
+    'ai powered 3d printing',
+    '3d print automation platform',
+  ]}
+  schema={litepaperSchema}
 >
   <!-- Page Header -->
   <header class="lp-header">

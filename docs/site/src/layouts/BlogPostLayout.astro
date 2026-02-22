@@ -1,18 +1,41 @@
 ---
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
+import SeoHead from '../components/SeoHead.astro';
 import '../styles/global.css';
 
 interface Props {
   title: string;
   description: string;
   date: string;
+  updatedDate?: string;
   tags?: string[];
   image?: string;
+  noindex?: boolean;
+  schema?: Record<string, unknown> | Record<string, unknown>[];
 }
 
-const { title, description, date, tags = [], image } = Astro.props;
-const ogImage = image ? `https://kiln3d.com${image}` : 'https://kiln3d.com/assets/kiln-social-preview.png';
+const {
+  title,
+  description,
+  date,
+  updatedDate,
+  tags = [],
+  image,
+  noindex = false,
+  schema,
+} = Astro.props;
+
+const pageTitle = `${title} — Kiln Blog`;
+const articleDate = new Date(date);
+const publishedIso = Number.isNaN(articleDate.getTime())
+  ? undefined
+  : articleDate.toISOString();
+const updatedDateObj = updatedDate ? new Date(updatedDate) : undefined;
+const modifiedIso =
+  updatedDateObj && !Number.isNaN(updatedDateObj.getTime())
+    ? updatedDateObj.toISOString()
+    : publishedIso;
 ---
 
 <!DOCTYPE html>
@@ -20,19 +43,18 @@ const ogImage = image ? `https://kiln3d.com${image}` : 'https://kiln3d.com/asset
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{title} — Kiln Blog</title>
-  <meta name="description" content={description}>
-
-  <meta property="og:title" content={title}>
-  <meta property="og:description" content={description}>
-  <meta property="og:image" content={ogImage}>
-  <meta property="og:type" content="article">
-  <meta property="og:url" content={Astro.url.href}>
-
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content={title}>
-  <meta name="twitter:description" content={description}>
-  <meta name="twitter:image" content={ogImage}>
+  <SeoHead
+    title={pageTitle}
+    description={description}
+    type="article"
+    image={image}
+    keywords={['Kiln blog', '3D printing blog', ...tags]}
+    noindex={noindex}
+    articlePublishedTime={publishedIso}
+    articleModifiedTime={modifiedIso}
+    articleTags={tags}
+    schema={schema}
+  />
 
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">

@@ -126,9 +126,32 @@ const sections: Section[] = [
     ]
   },
 ];
+
+const stripHtml = (html: string): string =>
+  html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+const faqSchema = {
+  '@type': 'FAQPage',
+  mainEntity: sections.flatMap((section) =>
+    section.items.map((item) => ({
+      '@type': 'Question',
+      name: item.q,
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: stripHtml(item.a),
+      },
+    })),
+  ),
+};
 ---
 
-<BaseLayout title="FAQ — Kiln" description="Frequently asked questions about Kiln, the open-source AI-powered 3D printing infrastructure." current="faq">
+<BaseLayout
+  title="FAQ — Kiln 3D Printing Software"
+  description="Frequently asked questions about Kiln 3D: open-source AI-powered software for 3D printing automation, printer control, and safe agent workflows."
+  current="faq"
+  keywords={['kiln faq', 'kiln 3d faq', '3d print automation faq']}
+  schema={faqSchema}
+>
   <section class="faq-hero">
     <div class="container">
       <h1>Frequently Asked Questions</h1>

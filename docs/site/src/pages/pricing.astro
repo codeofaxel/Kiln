@@ -1,8 +1,96 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+
+const pricingSchema = {
+  '@type': 'OfferCatalog',
+  name: 'Kiln Pricing Plans',
+  itemListElement: [
+    {
+      '@type': 'Offer',
+      name: 'Free',
+      price: '0',
+      priceCurrency: 'USD',
+      availability: 'https://schema.org/InStock',
+      url: 'https://kiln3d.com/pricing',
+    },
+    {
+      '@type': 'Offer',
+      name: 'Pro',
+      price: '29',
+      priceCurrency: 'USD',
+      availability: 'https://schema.org/InStock',
+      url: 'https://kiln3d.com/pricing',
+    },
+    {
+      '@type': 'Offer',
+      name: 'Business',
+      price: '99',
+      priceCurrency: 'USD',
+      availability: 'https://schema.org/InStock',
+      url: 'https://kiln3d.com/pricing',
+    },
+    {
+      '@type': 'Offer',
+      name: 'Enterprise',
+      price: '499',
+      priceCurrency: 'USD',
+      availability: 'https://schema.org/InStock',
+      url: 'https://kiln3d.com/pricing',
+    },
+  ],
+};
+
+const pricingFaqSchema = {
+  '@type': 'FAQPage',
+  mainEntity: [
+    {
+      '@type': 'Question',
+      name: 'Is local printing really free?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Yes. Kiln is open source under MIT and local printing, slicing, and printer control are free forever.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'Can I self-host everything?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Yes. Kiln runs locally, and paid tiers add optional hosted features without removing local functionality.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'Do I need a paid plan for multiple printers?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'The free tier supports up to 2 printers. For 3 or more printers, use Pro or above.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: "What's included in Enterprise?",
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Enterprise includes a dedicated MCP server, SSO, role-based access control, audit trails, lockable safety profiles, and a 99.9% uptime SLA.',
+      },
+    },
+  ],
+};
 ---
 
-<BaseLayout title="Pricing — Kiln" description="Kiln pricing plans. Local printing is free forever. Pay only for fleet management or outsourced manufacturing." current="pricing">
+<BaseLayout
+  title="Kiln Pricing — 3D Print Automation Plans"
+  description="Kiln pricing for 3D print automation. Local printing is free forever. Paid tiers add fleet management, hosted MCP, and enterprise controls."
+  current="pricing"
+  keywords={[
+    'kiln pricing',
+    '3d print farm pricing',
+    'ai 3d printer software pricing',
+    'mcp server pricing',
+  ]}
+  schema={[pricingSchema, pricingFaqSchema]}
+>
   <section class="pricing-hero">
     <div class="container">
       <h1>Pricing</h1>

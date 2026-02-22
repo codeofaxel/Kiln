@@ -1,5 +1,6 @@
 User-agent: *
 Allow: /
+Host: kiln3d.com
 Sitemap: https://kiln3d.com/sitemap-index.xml
 
 # LLM / AI agent metadata

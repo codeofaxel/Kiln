@@ -1,0 +1,447 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+interface Integration {
+  name: string;
+  title: string;
+  description: string;
+  icon: string;
+  tag: string;
+}
+
+const printerIntegrations: Integration[] = [
+  {
+    name: 'octoprint',
+    title: 'OctoPrint',
+    description:
+      'Connect any OctoPrint-powered printer to Kiln so AI agents can run monitored prints, queue jobs, and enforce safety checks through one interface.',
+    icon: '🐙',
+    tag: 'REST API',
+  },
+  {
+    name: 'moonraker',
+    title: 'Moonraker / Klipper',
+    description:
+      'Use Kiln with Moonraker and Klipper printers for high-speed workflows, fleet routing, and JSON-first automation in CLI or MCP.',
+    icon: '🌙',
+    tag: 'REST API',
+  },
+  {
+    name: 'bambu',
+    title: 'Bambu Lab',
+    description:
+      'Bring Bambu Lab printers (X1C, P1S, P1P, A1, A1 Mini) into an AI-native workflow with controlled commands, telemetry, and queue orchestration.',
+    icon: '🟦',
+    tag: 'MQTT',
+  },
+  {
+    name: 'prusa',
+    title: 'Prusa Link',
+    description:
+      'Run Prusa printers through a consistent API so agents can monitor status, launch prints, and manage multi-printer jobs without custom glue code.',
+    icon: '🟧',
+    tag: 'REST API',
+  },
+  {
+    name: 'elegoo',
+    title: 'Elegoo',
+    description:
+      'Automate supported Elegoo printers with standardized command handling, safety profiles, and remote monitoring inside the Kiln control plane.',
+    icon: '⬛',
+    tag: 'REST API',
+  },
+];
+
+const ecosystemIntegrations: Integration[] = [
+  {
+    name: 'craftcloud',
+    title: 'Craftcloud',
+    description:
+      'Get quotes and place outsourced 3D print orders across 150+ providers when local printers are busy, offline, or unavailable.',
+    icon: '☁️',
+    tag: 'Fulfillment',
+  },
+  {
+    name: 'sculpteo',
+    title: 'Sculpteo',
+    description:
+      'Route production orders to Sculpteo directly from Kiln for external manufacturing workflows tied to the same automation pipeline.',
+    icon: '🏭',
+    tag: 'Fulfillment',
+  },
+  {
+    name: 'thingiverse',
+    title: 'Marketplace Search',
+    description:
+      'Search and retrieve model files from Thingiverse, MyMiniFactory, Thangs, Cults3D, GrabCAD, and Etsy before generating from scratch.',
+    icon: '🔍',
+    tag: 'Discovery',
+  },
+  {
+    name: 'mcp',
+    title: 'Model Context Protocol',
+    description:
+      'Expose Kiln as an MCP server so Claude, GPT, and other AI agents can use 3D printer tools safely with structured, typed responses.',
+    icon: '🤖',
+    tag: 'AI Protocol',
+  },
+];
+
+const integrationSchema = {
+  '@type': 'ItemList',
+  name: 'Kiln Integrations',
+  itemListElement: [...printerIntegrations, ...ecosystemIntegrations].map(
+    (integration, index) => ({
+      '@type': 'ListItem',
+      position: index + 1,
+      name: integration.title,
+      description: integration.description,
+    }),
+  ),
+};
+---
+
+<BaseLayout
+  title="Kiln Integrations — OctoPrint, Moonraker, Bambu, Prusa, Elegoo, MCP"
+  description="Kiln integrations for OctoPrint, Moonraker, Bambu Lab, Prusa Link, Elegoo, MCP clients, fulfillment, and model marketplaces."
+  current="integrations"
+  keywords={[
+    'kiln integrations',
+    'octoprint ai automation',
+    'moonraker ai control',
+    'bambu lab automation',
+    'prusa link automation',
+    '3d printing mcp server',
+  ]}
+  schema={integrationSchema}
+>
+  <section class="integrations-hero">
+    <div class="container">
+      <h1>Kiln integrations for the full 3D printing stack</h1>
+      <p class="lead">
+        Kiln connects AI agents to printers, slicers, fulfillment providers, and model marketplaces.
+        One control plane, consistent safety model, and shared automation workflow.
+      </p>
+      <div class="stat-row">
+        <div class="stat">
+          <span class="stat-num">5</span>
+          <span class="stat-label">Printer backends</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num">150+</span>
+          <span class="stat-label">Fulfillment providers</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num">6</span>
+          <span class="stat-label">Marketplaces</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num">273</span>
+          <span class="stat-label">MCP tools</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="integrations-section bordered">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-label">Printer backends</span>
+        <h2>Works with your existing printers</h2>
+        <p class="lead">Use Kiln as a universal interface for mixed-brand 3D printer fleets.</p>
+      </div>
+      <div class="printer-grid">
+        {printerIntegrations.map((integration, i) => (
+          <article class={`card integration-card${i === 4 ? ' card-wide' : ''}`} id={integration.name}>
+            <div class="card-inner">
+              <div class="card-top">
+                <span class="card-icon">{integration.icon}</span>
+                <span class="card-tag">{integration.tag}</span>
+              </div>
+              <h3>{integration.title}</h3>
+              <p>{integration.description}</p>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="integrations-section bordered">
+    <div class="container">
+      <div class="section-header">
+        <span class="section-label">Ecosystem</span>
+        <h2>Discovery, outsourcing, and AI interop</h2>
+        <p class="lead">Beyond printer control: find models, outsource jobs, and plug into AI agents.</p>
+      </div>
+      <div class="ecosystem-grid">
+        {ecosystemIntegrations.map((integration) => (
+          <article class="card integration-card" id={integration.name}>
+            <div class="card-inner">
+              <div class="card-top">
+                <span class="card-icon">{integration.icon}</span>
+                <span class="card-tag">{integration.tag}</span>
+              </div>
+              <h3>{integration.title}</h3>
+              <p>{integration.description}</p>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="integrations-cta bordered">
+    <div class="container">
+      <h2>Start integrating in minutes</h2>
+      <p class="lead">
+        Install Kiln, connect your printer backend, and expose tools to your AI agent through MCP or the CLI.
+      </p>
+      <div class="cta-actions">
+        <a href="/install" class="btn">Install Kiln</a>
+        <a href="/docs" class="btn btn-ghost">Read Docs</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .integrations-hero {
+    text-align: center;
+    padding: 96px 0 48px;
+  }
+
+  .integrations-hero h1 {
+    font-size: clamp(30px, 4.5vw, 48px);
+    line-height: 1.15;
+    margin-bottom: 16px;
+  }
+
+  .integrations-hero .lead {
+    max-width: 700px;
+    margin: 0 auto 48px;
+  }
+
+  /* Stat row */
+  .stat-row {
+    display: flex;
+    justify-content: center;
+    gap: 48px;
+    flex-wrap: wrap;
+  }
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .stat-num {
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+  }
+
+  .stat-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  /* Section */
+  .integrations-section {
+    padding: 64px 0;
+  }
+
+  .bordered {
+    border-top: 1px solid var(--border);
+  }
+
+  .section-header {
+    margin-bottom: 36px;
+  }
+
+  .section-label {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    background: var(--accent-glow);
+    border: 1px solid rgba(255, 107, 43, 0.25);
+    border-radius: 20px;
+    padding: 3px 12px;
+    margin-bottom: 12px;
+  }
+
+  .section-header h2 {
+    font-size: clamp(22px, 3vw, 32px);
+    margin-bottom: 10px;
+  }
+
+  .section-header .lead {
+    color: var(--text-muted);
+    max-width: 600px;
+  }
+
+  /* Printer grid: 2-col, 5th card spans full width */
+  .printer-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+
+  .card-wide {
+    grid-column: 1 / -1;
+  }
+
+  /* When wide card, lay out inner content horizontally */
+  .card-wide .card-inner {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 24px;
+    align-items: start;
+  }
+
+  .card-wide .card-top {
+    grid-row: 1;
+    grid-column: 1;
+    align-items: center;
+  }
+
+  .card-wide h3 {
+    grid-row: 1;
+    grid-column: 2;
+    align-self: center;
+    margin-bottom: 0;
+  }
+
+  .card-wide p {
+    grid-row: 2;
+    grid-column: 2;
+    margin-top: 8px;
+  }
+
+  /* Ecosystem grid: 2×2 */
+  .ecosystem-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+
+  /* Cards */
+  .integration-card {
+    padding: 0;
+    height: 100%;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+
+  .integration-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+
+  .card-inner {
+    padding: 24px;
+  }
+
+  .card-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .card-icon {
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .card-tag {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: var(--mono);
+  }
+
+  .integration-card h3 {
+    font-size: 18px;
+    margin-bottom: 10px;
+  }
+
+  .integration-card p {
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.65;
+    margin: 0;
+  }
+
+  /* CTA */
+  .integrations-cta {
+    text-align: center;
+    padding: 64px 0 96px;
+  }
+
+  .integrations-cta h2 {
+    font-size: clamp(22px, 3vw, 32px);
+    margin-bottom: 12px;
+  }
+
+  .integrations-cta .lead {
+    margin: 0 auto 28px;
+    max-width: 600px;
+  }
+
+  .cta-actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  @media (max-width: 640px) {
+    .integrations-hero {
+      padding: 64px 0 32px;
+    }
+
+    .stat-row {
+      gap: 28px;
+    }
+
+    .stat-num {
+      font-size: 28px;
+    }
+
+    .printer-grid,
+    .ecosystem-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .card-wide {
+      grid-column: 1;
+    }
+
+    .card-wide .card-inner {
+      display: block;
+    }
+
+    .integrations-section {
+      padding: 44px 0;
+    }
+
+    .integrations-cta {
+      padding: 44px 0 64px;
+    }
+  }
+</style>
