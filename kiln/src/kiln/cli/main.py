@@ -69,6 +69,238 @@ from kiln.cli.output import (
 
 logger = logging.getLogger(__name__)
 
+_MATERIAL_CHOICES: tuple[str, ...] = ("PLA", "PETG", "ABS", "TPU", "ASA", "Nylon", "PC")
+_MATERIAL_TEMPS: dict[str, tuple[int, int, int, int]] = {
+    "PLA": (200, 210, 60, 60),
+    "PETG": (240, 245, 80, 80),
+    "ABS": (250, 255, 100, 100),
+    "TPU": (225, 230, 50, 50),
+    "ASA": (250, 255, 100, 100),
+    "NYLON": (260, 265, 70, 70),
+    "PC": (280, 285, 110, 110),
+}
+_SUPPORT_MODE_CHOICES: tuple[str, ...] = ("off", "auto", "minimal", "aggressive")
+
+
+def _normalise_material_type(raw: str | None) -> str | None:
+    """Normalize material names to canonical keys used by temp defaults."""
+    if not raw:
+        return None
+    value = raw.strip().upper()
+    aliases = {
+        "PA": "NYLON",
+        "PA6": "NYLON",
+        "PA12": "NYLON",
+    }
+    value = aliases.get(value, value)
+    if value in _MATERIAL_TEMPS:
+        return value
+    return None
+
+
+def _material_profile_overrides(material: str) -> dict[str, str]:
+    """Build slicer profile overrides for a material."""
+    nozzle, first_nozzle, bed, first_bed = _MATERIAL_TEMPS[material]
+    return {
+        "temperature": str(nozzle),
+        "first_layer_temperature": str(first_nozzle),
+        "bed_temperature": str(bed),
+        "first_layer_bed_temperature": str(first_bed),
+    }
+
+
+def _material_extra_args(material: str) -> list[str]:
+    """Build CLI temperature args for slicers when no bundled profile is used."""
+    nozzle, first_nozzle, bed, first_bed = _MATERIAL_TEMPS[material]
+    return [
+        "--temperature",
+        str(nozzle),
+        "--first-layer-temperature",
+        str(first_nozzle),
+        "--bed-temperature",
+        str(bed),
+        "--first-layer-bed-temperature",
+        str(first_bed),
+    ]
+
+
+def _infer_default_material(ctx: click.Context) -> str:
+    """Infer material from tracked state/env, falling back to PLA."""
+    try:
+        from kiln.materials import MaterialTracker
+        from kiln.persistence import get_db
+
+        printer_name = (ctx.obj or {}).get("printer") or "default"
+        tracker = MaterialTracker(db=get_db())
+        loaded = tracker.get_material(printer_name, tool_index=0)
+        loaded_type = _normalise_material_type(getattr(loaded, "material_type", None))
+        if loaded_type:
+            return loaded_type
+    except Exception as exc:
+        logger.debug("Material tracker lookup failed: %s", exc)
+
+    for env_name in ("KILN_MATERIAL", "KILN_DEFAULT_MATERIAL", "KILN_FILAMENT"):
+        env_val = _normalise_material_type(os.environ.get(env_name))
+        if env_val:
+            return env_val
+
+    return "PLA"
+
+
+def _resolve_material_for_slice(ctx: click.Context, material: str | None) -> tuple[str, bool]:
+    """Resolve the effective material and whether it was explicitly provided."""
+    explicit = _normalise_material_type(material)
+    if explicit:
+        return explicit, True
+    return _infer_default_material(ctx), False
+
+
+def _support_profile_overrides(style: str) -> dict[str, str]:
+    """Support overrides optimized for minimal waste on common PLA prints."""
+    if style == "minimal":
+        return {
+            "support_material": "1",
+            "support_material_buildplate_only": "1",
+            "support_material_threshold": "55",
+        }
+    if style == "aggressive":
+        return {
+            "support_material": "1",
+            "support_material_buildplate_only": "0",
+        }
+    return {}
+
+
+def _support_extra_args(style: str) -> list[str]:
+    """CLI support args used when slicing without a bundled profile."""
+    if style == "minimal":
+        return ["--support-material", "--support-material-buildplate-only"]
+    if style == "aggressive":
+        return ["--support-material"]
+    return []
+
+
+def _auto_support_style(input_file: str) -> tuple[str | None, str | None]:
+    """Infer whether the model needs supports based on printability analysis."""
+    ext = os.path.splitext(input_file)[1].lower()
+    if ext not in {".stl", ".obj"}:
+        return None, None
+
+    try:
+        from kiln.printability import analyze_printability
+
+        report = analyze_printability(input_file)
+        reasons: list[str] = []
+        if report.overhangs.needs_supports and report.overhangs.overhang_percentage >= 1.0:
+            reasons.append(f"overhangs={report.overhangs.overhang_percentage:.1f}%")
+        if report.bridging.needs_supports_for_bridges:
+            reasons.append(f"bridges={report.bridging.max_bridge_length_mm:.1f}mm")
+        if reasons:
+            return "minimal", ", ".join(reasons)
+    except Exception as exc:
+        logger.debug("Auto-support analysis failed for %s: %s", input_file, exc)
+
+    return None, None
+
+
+def _resolve_support_style(support_mode: str, input_file: str) -> tuple[str | None, str | None]:
+    """Resolve support style from CLI mode and model analysis."""
+    mode = (support_mode or "off").strip().lower()
+    if mode == "off":
+        return None, None
+    if mode in {"minimal", "aggressive"}:
+        return mode, "explicit"
+    if mode == "auto":
+        return _auto_support_style(input_file)
+    return None, None
+
+
+def _resolve_slice_plan(
+    ctx: click.Context,
+    *,
+    input_file: str,
+    profile: str | None,
+    printer_id: str | None,
+    material: str | None,
+    support_mode: str,
+) -> dict[str, Any]:
+    """Compute profile path and slicer args for a slice operation."""
+    from kiln.slicer_profiles import resolve_slicer_profile
+
+    effective_printer_id = _map_printer_hint_to_profile_id(printer_id) or _autodetect_printer_profile_id(ctx)
+    effective_profile = profile
+    extra_args: list[str] = []
+
+    material_key, material_is_explicit = _resolve_material_for_slice(ctx, material)
+    support_style, support_reason = _resolve_support_style(support_mode, input_file)
+
+    use_material_defaults = material_is_explicit or profile is None
+
+    if effective_profile is None and effective_printer_id:
+        try:
+            overrides: dict[str, str] = {}
+            if use_material_defaults:
+                overrides.update(_material_profile_overrides(material_key))
+            if support_style:
+                overrides.update(_support_profile_overrides(support_style))
+            effective_profile = resolve_slicer_profile(
+                effective_printer_id,
+                overrides=overrides or None,
+            )
+        except Exception as exc:
+            logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
+
+    # Fallback to direct CLI overrides when no bundled profile is active.
+    if use_material_defaults and effective_profile is None:
+        extra_args.extend(_material_extra_args(material_key))
+    if support_style and effective_profile is None:
+        extra_args.extend(_support_extra_args(support_style))
+
+    return {
+        "material": material_key,
+        "material_explicit": material_is_explicit,
+        "printer_id": effective_printer_id,
+        "profile_path": effective_profile,
+        "extra_args": extra_args,
+        "support_style": support_style,
+        "support_reason": support_reason,
+    }
+
+
+def _notify_preview_if_available(preview_path: str) -> bool:
+    """Best-effort preview notification via optional env-configured hooks."""
+    cmd_template = os.environ.get("KILN_PREVIEW_NOTIFY_CMD", "").strip()
+    if cmd_template:
+        import subprocess
+
+        try:
+            cmd = cmd_template.replace("{path}", preview_path)
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=20)
+            if result.returncode == 0:
+                return True
+            logger.warning("Preview notify command failed (exit %d): %s", result.returncode, (result.stderr or "").strip())
+        except Exception as exc:
+            logger.warning("Preview notify command failed: %s", exc)
+
+    webhook_url = os.environ.get("KILN_PREVIEW_NOTIFY_URL", "").strip()
+    if webhook_url:
+        import urllib.request
+
+        payload = json.dumps({"preview_path": preview_path}).encode("utf-8")
+        request = urllib.request.Request(
+            webhook_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return 200 <= getattr(response, "status", 0) < 300
+        except Exception as exc:
+            logger.warning("Preview notify webhook failed: %s", exc)
+
+    return False
+
 
 # ---------------------------------------------------------------------------
 # Adapter factory
@@ -1418,8 +1650,15 @@ def remove(name: str) -> None:
     "--material",
     "-m",
     default=None,
-    type=click.Choice(["PLA", "PETG", "ABS", "TPU", "ASA", "Nylon", "PC"]),
-    help="Material type — auto-sets temperatures in slicer profile.",
+    type=click.Choice(_MATERIAL_CHOICES),
+    help="Material type (defaults to loaded material, then PLA).",
+)
+@click.option(
+    "--support-mode",
+    default="auto",
+    show_default=True,
+    type=click.Choice(_SUPPORT_MODE_CHOICES),
+    help="Support strategy: off, auto, minimal (buildplate-only), or aggressive.",
 )
 @click.option("--print-after", is_flag=True, help="Upload and start printing after slicing.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
@@ -1433,6 +1672,7 @@ def slice(
     printer_id: str | None,
     slicer: str | None,
     material: str | None,
+    support_mode: str,
     print_after: bool,
     json_mode: bool,
 ) -> None:
@@ -1445,43 +1685,24 @@ def slice(
     immediately.
     """
     from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
-    from kiln.slicer_profiles import resolve_slicer_profile
 
     try:
-        effective_printer_id = _map_printer_hint_to_profile_id(printer_id) or _autodetect_printer_profile_id(ctx)
-        effective_profile = profile
-        if effective_profile is None and effective_printer_id:
-            try:
-                overrides: dict[str, str] | None = None
-                if material:
-                    _mat_temps: dict[str, tuple[int, int, int, int]] = {
-                        "PLA": (200, 210, 60, 60),
-                        "PETG": (240, 245, 80, 80),
-                        "ABS": (250, 255, 100, 100),
-                        "TPU": (225, 230, 50, 50),
-                        "ASA": (250, 255, 100, 100),
-                        "Nylon": (260, 265, 70, 70),
-                        "PC": (280, 285, 110, 110),
-                    }
-                    temps = _mat_temps.get(material)
-                    if temps:
-                        nozzle, first_nozzle, bed, first_bed = temps
-                        overrides = {
-                            "temperature": str(nozzle),
-                            "first_layer_temperature": str(first_nozzle),
-                            "bed_temperature": str(bed),
-                            "first_layer_bed_temperature": str(first_bed),
-                        }
-                effective_profile = resolve_slicer_profile(effective_printer_id, overrides=overrides)
-            except Exception as exc:
-                logger.debug("Profile resolution failed for %s: %s", effective_printer_id, exc)
+        plan = _resolve_slice_plan(
+            ctx,
+            input_file=input_file,
+            profile=profile,
+            printer_id=printer_id,
+            material=material,
+            support_mode=support_mode,
+        )
 
         result = slice_file(
             input_file,
             output_dir=output_dir,
             output_name=output_name,
-            profile=effective_profile,
+            profile=plan["profile_path"],
             slicer_path=slicer,
+            extra_args=plan["extra_args"] or None,
         )
 
         if not print_after:
@@ -1489,16 +1710,26 @@ def slice(
                 import json as _json
 
                 payload = result.to_dict()
-                if effective_printer_id:
-                    payload["printer_id"] = effective_printer_id
-                if effective_profile:
-                    payload["profile_path"] = effective_profile
+                if plan["printer_id"]:
+                    payload["printer_id"] = plan["printer_id"]
+                if plan["profile_path"]:
+                    payload["profile_path"] = plan["profile_path"]
+                payload["material"] = plan["material"]
+                payload["support_mode"] = support_mode
+                if plan["support_style"]:
+                    payload["support_style"] = plan["support_style"]
+                if plan["support_reason"]:
+                    payload["support_reason"] = plan["support_reason"]
                 click.echo(_json.dumps({"status": "success", "data": payload}, indent=2))
             else:
                 click.echo(result.message)
                 click.echo(f"Output: {result.output_path}")
-                if effective_printer_id:
-                    click.echo(f"Profile: {effective_printer_id}")
+                click.echo(f"Material: {plan['material']}")
+                if plan["printer_id"]:
+                    click.echo(f"Profile: {plan['printer_id']}")
+                if plan["support_style"]:
+                    note = f" ({plan['support_reason']})" if plan["support_reason"] else ""
+                    click.echo(f"Supports: {plan['support_style']}{note}")
             return
 
         # --print-after: upload and start
@@ -4184,6 +4415,7 @@ def agent(model: str, tier: str | None, base_url: str) -> None:
     "--wait/--no-wait", "wait_for", default=False, help="Wait for generation to complete (default: return immediately)."
 )
 @click.option("--timeout", "-t", default=600, type=int, help="Max wait time in seconds (default 600).")
+@click.option("--preview/--no-preview", "preview_enabled", default=True, help="Render a 3-view preview after generation.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def generate(
     prompt: str,
@@ -4192,6 +4424,7 @@ def generate(
     output_dir: str | None,
     wait_for: bool,
     timeout: int,
+    preview_enabled: bool,
     json_mode: bool,
 ) -> None:
     """Generate a 3D model from a text description.
@@ -4236,6 +4469,20 @@ def generate(
                     job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
                 )
                 val = validate_mesh(result.local_path)
+                preview_data: dict[str, Any] | None = None
+                preview_notified = False
+                if preview_enabled:
+                    try:
+                        from kiln.preview import render_multi_view_preview
+
+                        preview_data = render_multi_view_preview(result.local_path).to_dict()
+                        preview_path = str(preview_data.get("path") or "")
+                        if preview_path:
+                            preview_notified = _notify_preview_if_available(preview_path)
+                    except Exception as exc:
+                        logger.debug("Preview render failed for %s: %s", result.local_path, exc)
+                        if not json_mode:
+                            click.echo(click.style(f"Preview unavailable: {exc}", fg="yellow"))
 
                 if json_mode:
                     import json
@@ -4248,6 +4495,8 @@ def generate(
                                     "job": job.to_dict(),
                                     "result": result.to_dict(),
                                     "validation": val.to_dict(),
+                                    "preview": preview_data,
+                                    "preview_notified": preview_notified,
                                 },
                             },
                             indent=2,
@@ -4257,6 +4506,10 @@ def generate(
                     click.echo(f"Generated: {result.local_path}")
                     click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
                     click.echo(f"  Triangles: {val.triangle_count:,}  Manifold: {val.is_manifold}")
+                    if preview_data:
+                        click.echo(f"  Preview: {preview_data['path']}")
+                    if preview_notified:
+                        click.echo("  Preview notification: sent")
                     if val.warnings:
                         for w in val.warnings:
                             click.echo(f"  Warning: {w}")
@@ -4302,6 +4555,20 @@ def generate(
                     job.id, output_dir=output_dir or os.path.join(tempfile.gettempdir(), "kiln_generated")
                 )
                 val = validate_mesh(result.local_path)
+                preview_data: dict[str, Any] | None = None
+                preview_notified = False
+                if preview_enabled:
+                    try:
+                        from kiln.preview import render_multi_view_preview
+
+                        preview_data = render_multi_view_preview(result.local_path).to_dict()
+                        preview_path = str(preview_data.get("path") or "")
+                        if preview_path:
+                            preview_notified = _notify_preview_if_available(preview_path)
+                    except Exception as exc:
+                        logger.debug("Preview render failed for %s: %s", result.local_path, exc)
+                        if not json_mode:
+                            click.echo(click.style(f"Preview unavailable: {exc}", fg="yellow"))
 
                 if json_mode:
                     import json
@@ -4314,6 +4581,8 @@ def generate(
                                     "job": job.to_dict(),
                                     "result": result.to_dict(),
                                     "validation": val.to_dict(),
+                                    "preview": preview_data,
+                                    "preview_notified": preview_notified,
                                     "elapsed_seconds": round(elapsed, 1),
                                 },
                             },
@@ -4324,6 +4593,10 @@ def generate(
                     click.echo(f"\nGenerated: {result.local_path}")
                     click.echo(f"  Format: {result.format}  Size: {result.file_size_bytes:,} bytes")
                     click.echo(f"  Triangles: {val.triangle_count:,}  Manifold: {val.is_manifold}")
+                    if preview_data:
+                        click.echo(f"  Preview: {preview_data['path']}")
+                    if preview_notified:
+                        click.echo("  Preview notification: sent")
                     click.echo(f"  Completed in {elapsed:.0f}s")
                 return
 
@@ -4507,13 +4780,21 @@ def generate_download(
     "--material",
     "-m",
     default=None,
-    type=click.Choice(["PLA", "PETG", "ABS", "TPU", "ASA", "Nylon", "PC"]),
-    help="Material type — auto-sets slicer temperatures.",
+    type=click.Choice(_MATERIAL_CHOICES),
+    help="Material type (defaults to loaded material, then PLA).",
+)
+@click.option(
+    "--support-mode",
+    default="auto",
+    show_default=True,
+    type=click.Choice(_SUPPORT_MODE_CHOICES),
+    help="Support strategy: off, auto, minimal (buildplate-only), or aggressive.",
 )
 @click.option("--timeout", "-t", default=600, type=int, help="Max generation wait time in seconds (default 600).")
 @click.option(
     "--auto-print/--no-auto-print", default=False, help="Automatically start printing after upload (default: preview only)."
 )
+@click.option("--preview/--no-preview", "preview_enabled", default=True, help="Render 3-view model preview after generation.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def generate_and_print_cmd(
@@ -4523,8 +4804,10 @@ def generate_and_print_cmd(
     style: str | None,
     printer_id: str | None,
     material: str | None,
+    support_mode: str,
     timeout: int,
     auto_print: bool,
+    preview_enabled: bool,
     json_mode: bool,
 ) -> None:
     """Generate a 3D model, slice it, and upload to the printer.
@@ -4548,7 +4831,6 @@ def generate_and_print_cmd(
     )
     from kiln.generation.registry import GenerationRegistry
     from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
-    from kiln.slicer_profiles import resolve_slicer_profile
 
     try:
         # --- Step 1: Generate ---
@@ -4591,40 +4873,48 @@ def generate_and_print_cmd(
         if not json_mode:
             click.echo(f"Generated: {result.local_path} ({result.file_size_bytes:,} bytes, {val.triangle_count:,} triangles)")
 
-        # --- Step 3: Slice ---
-        effective_printer_id = _map_printer_hint_to_profile_id(printer_id) or _autodetect_printer_profile_id(ctx)
-        effective_profile = None
-        if effective_printer_id:
+        preview_data: dict[str, Any] | None = None
+        preview_notified = False
+        if preview_enabled:
             try:
-                overrides: dict[str, str] | None = None
-                if material:
-                    _mat_temps: dict[str, tuple[int, int, int, int]] = {
-                        "PLA": (200, 210, 60, 60),
-                        "PETG": (240, 245, 80, 80),
-                        "ABS": (250, 255, 100, 100),
-                        "TPU": (225, 230, 50, 50),
-                        "ASA": (250, 255, 100, 100),
-                        "Nylon": (260, 265, 70, 70),
-                        "PC": (280, 285, 110, 110),
-                    }
-                    temps = _mat_temps.get(material)
-                    if temps:
-                        nozzle, first_nozzle, bed, first_bed = temps
-                        overrides = {
-                            "temperature": str(nozzle),
-                            "first_layer_temperature": str(first_nozzle),
-                            "bed_temperature": str(bed),
-                            "first_layer_bed_temperature": str(first_bed),
-                        }
-                effective_profile = resolve_slicer_profile(effective_printer_id, overrides=overrides)
+                from kiln.preview import render_multi_view_preview
+
+                preview_data = render_multi_view_preview(result.local_path).to_dict()
+                preview_path = str(preview_data.get("path") or "")
+                if preview_path:
+                    preview_notified = _notify_preview_if_available(preview_path)
+                if not json_mode:
+                    click.echo(f"Preview: {preview_data['path']}")
+                    if preview_notified:
+                        click.echo("Preview notification: sent")
             except Exception as exc:
-                logger.debug("Profile resolution failed: %s", exc)
+                logger.debug("Preview render failed for %s: %s", result.local_path, exc)
+                if not json_mode:
+                    click.echo(click.style(f"Preview unavailable: {exc}", fg="yellow"))
+
+        # --- Step 3: Slice ---
+        plan = _resolve_slice_plan(
+            ctx,
+            input_file=result.local_path,
+            profile=None,
+            printer_id=printer_id,
+            material=material,
+            support_mode=support_mode,
+        )
 
         if not json_mode:
             click.echo("Slicing...")
-        slice_result = slice_file(result.local_path, profile=effective_profile)
+        slice_result = slice_file(
+            result.local_path,
+            profile=plan["profile_path"],
+            extra_args=plan["extra_args"] or None,
+        )
         if not json_mode:
             click.echo(f"Sliced: {slice_result.output_path}")
+            click.echo(f"Material: {plan['material']}")
+            if plan["support_style"]:
+                note = f" ({plan['support_reason']})" if plan["support_reason"] else ""
+                click.echo(f"Supports: {plan['support_style']}{note}")
 
         # --- Step 4: Upload ---
         adapter = _get_adapter_from_ctx(ctx)
@@ -4652,7 +4942,13 @@ def generate_and_print_cmd(
                         "data": {
                             "generation": job.to_dict(),
                             "validation": val.to_dict(),
+                            "preview": preview_data,
+                            "preview_notified": preview_notified,
                             "slice": {"output_path": slice_result.output_path, "message": slice_result.message},
+                            "material": plan["material"],
+                            "support_mode": support_mode,
+                            "support_style": plan["support_style"],
+                            "support_reason": plan["support_reason"],
                             "upload": upload_result.to_dict(),
                             "printing": auto_print,
                         },

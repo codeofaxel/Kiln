@@ -324,7 +324,7 @@ kiln printers [--json]                     # List saved printers
 kiln use <name>                            # Switch active printer
 kiln remove <name>                         # Remove a saved printer
 kiln preflight [--material MAT] [--json]   # Pre-print safety checks
-kiln slice <file> [--print-after] [--json] # Slice STL/3MF to G-code
+kiln slice <file> [--print-after] [--json] # Slice STL/3MF to G-code (material-aware temps + smart supports)
 kiln snapshot [--save PATH] [--json]       # Capture webcam snapshot
 kiln wait [--timeout N] [--json]           # Wait for print to finish
 kiln history [--status S] [--json]         # View past prints
@@ -340,6 +340,7 @@ kiln stream [--port 8081] [--stop] [--json]   # Webcam MJPEG proxy
 kiln sync status|now|configure                # Cloud sync
 kiln plugins list|info                        # Plugin management
 kiln generate "a phone stand" --provider meshy --json   # Generate 3D model from text (meshy/tripo3d/stability/gemini/openscad)
+kiln generate-and-print "a phone stand" --provider gemini --material PLA   # One-command generate -> preview -> slice -> upload
 kiln generate-status <job_id> --json                    # Check generation status
 kiln generate-download <job_id> -o ./models --json      # Download generated model
 kiln firmware status --json                # Check for firmware updates
@@ -796,6 +797,7 @@ OpenSCAD is also available for local parametric generation (no API key needed â€
 | **OpenSCAD** | Local | No (synchronous) | STL |
 
 Generated models are automatically validated for printability (manifold check, triangle count, bounding box dimensions) before printing. The registry pattern means new providers can be added in under 100 lines.
+`kiln generate` and `kiln generate-and-print` now render a 3-view preview (isometric/dimetric/trimetric) by default; use `--no-preview` to disable.
 
 ## Slicer Integration
 
@@ -807,6 +809,12 @@ kiln slice model.stl
 
 # Slice and immediately print
 kiln slice model.stl --print-after
+
+# Smart supports (auto = minimal buildplate-only only when needed)
+kiln slice model.stl --support-mode auto
+
+# Override material defaults when needed
+kiln slice model.stl --material PETG
 
 # Supported formats: STL, 3MF, STEP, OBJ, AMF
 ```

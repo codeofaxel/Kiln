@@ -9,6 +9,7 @@ Covers:
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,7 +24,6 @@ from kiln.generation.base import (
     GenerationStatus,
     MeshValidationResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -148,6 +148,37 @@ class TestGenerate:
         assert "result" in data["data"]
         assert "validation" in data["data"]
         assert data["data"]["validation"]["valid"] is True
+
+    def test_generate_openscad_json_includes_preview(self, runner):
+        """Synchronous generation includes preview metadata by default."""
+        with patch("kiln.generation.OpenSCADProvider") as MockProvider, \
+             patch("kiln.generation.validate_mesh") as mock_validate, \
+             patch("kiln.preview.render_multi_view_preview") as mock_preview:
+            provider = MockProvider.return_value
+            provider.display_name = "OpenSCAD"
+            provider.generate.return_value = _make_job(
+                provider="openscad",
+                prompt="cube([10,10,10]);",
+                status=GenerationStatus.SUCCEEDED,
+                progress=100,
+            )
+            provider.download_result.return_value = _make_result(
+                provider="openscad",
+                prompt="cube([10,10,10]);",
+            )
+            mock_validate.return_value = _make_validation(valid=True)
+            mock_preview.return_value = SimpleNamespace(
+                to_dict=lambda: {"path": "/tmp/model_preview.svg", "format": "svg"}
+            )
+
+            result = runner.invoke(cli, [
+                "generate", "cube([10,10,10]);", "--provider", "openscad", "--json",
+            ])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["status"] == "success"
+        assert data["data"]["preview"]["path"] == "/tmp/model_preview.svg"
 
     def test_generate_auth_error(self, runner):
         """Auth error returns non-zero exit and error JSON."""
@@ -324,3 +355,64 @@ class TestGenerateDownload:
             ])
 
         assert result.exit_code != 0
+
+
+class TestGenerateAndPrint:
+    def test_generate_and_print_json_includes_preview_and_support_metadata(self, runner):
+        with patch("kiln.generation.OpenSCADProvider") as MockProvider, \
+             patch("kiln.generation.validate_mesh") as mock_validate, \
+             patch("kiln.preview.render_multi_view_preview") as mock_preview, \
+             patch("kiln.cli.main._resolve_slice_plan") as mock_plan, \
+             patch("kiln.slicer.slice_file") as mock_slice, \
+             patch("kiln.cli.main._get_adapter_from_ctx") as mock_get_adapter:
+            provider = MockProvider.return_value
+            provider.display_name = "OpenSCAD"
+            provider.generate.return_value = _make_job(
+                provider="openscad",
+                prompt="cube([10,10,10]);",
+                status=GenerationStatus.SUCCEEDED,
+                progress=100,
+            )
+            provider.download_result.return_value = _make_result(
+                provider="openscad",
+                prompt="cube([10,10,10]);",
+            )
+            mock_validate.return_value = _make_validation(valid=True)
+            mock_preview.return_value = SimpleNamespace(
+                to_dict=lambda: {"path": "/tmp/model_preview.svg", "format": "svg"}
+            )
+            mock_plan.return_value = {
+                "profile_path": "/tmp/prusa_mini.ini",
+                "extra_args": ["--bed-temperature", "60"],
+                "material": "PLA",
+                "support_style": "minimal",
+                "support_reason": "overhangs=12.0%",
+            }
+            mock_slice.return_value = SimpleNamespace(
+                output_path="/tmp/model.gcode",
+                message="Sliced",
+            )
+            adapter = MagicMock()
+            adapter.upload_file.return_value = SimpleNamespace(
+                success=True,
+                message="Uploaded",
+                remote_name=None,
+                file_name="model.gcode",
+                to_dict=lambda: {"success": True},
+            )
+            mock_get_adapter.return_value = adapter
+
+            result = runner.invoke(cli, [
+                "generate-and-print",
+                "cube([10,10,10]);",
+                "--provider",
+                "openscad",
+                "--json",
+            ])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["status"] == "success"
+        assert data["data"]["preview"]["path"] == "/tmp/model_preview.svg"
+        assert data["data"]["material"] == "PLA"
+        assert data["data"]["support_style"] == "minimal"

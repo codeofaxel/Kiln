@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,7 +24,6 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -353,6 +353,7 @@ class TestSlice:
             output_name=None,
             profile="/tmp/prusa_mini.ini",
             slicer_path=None,
+            extra_args=None,
         )
 
     def test_slice_uses_autodetected_prusa_profile(self, runner, tmp_path):
@@ -371,6 +372,67 @@ class TestSlice:
         assert result.exit_code == 0
         kwargs = mock_slice.call_args.kwargs
         assert kwargs["profile"] == "/tmp/prusa_mini.ini"
+
+    def test_slice_defaults_to_pla_temperatures_when_no_profile(self, runner, tmp_path):
+        stl = tmp_path / "temps.stl"
+        stl.write_text("solid\nendsolid\n")
+        mock_result = MagicMock()
+        mock_result.message = "Sliced"
+        mock_result.output_path = str(tmp_path / "temps.gcode")
+        mock_result.to_dict.return_value = {"output_path": mock_result.output_path}
+
+        with patch("kiln.cli.main._autodetect_printer_profile_id", return_value=None), \
+             patch("kiln.slicer.slice_file", return_value=mock_result) as mock_slice:
+            result = runner.invoke(cli, ["slice", str(stl), "--json"])
+
+        assert result.exit_code == 0
+        args = mock_slice.call_args.kwargs["extra_args"]
+        assert "--bed-temperature" in args
+        assert "60" in args
+
+    def test_slice_uses_loaded_material_defaults(self, runner, tmp_path):
+        stl = tmp_path / "petg.stl"
+        stl.write_text("solid\nendsolid\n")
+        mock_result = MagicMock()
+        mock_result.message = "Sliced"
+        mock_result.output_path = str(tmp_path / "petg.gcode")
+        mock_result.to_dict.return_value = {"output_path": mock_result.output_path}
+
+        tracker = MagicMock()
+        tracker.get_material.return_value = SimpleNamespace(material_type="PETG")
+
+        with patch("kiln.cli.main._autodetect_printer_profile_id", return_value=None), \
+             patch("kiln.materials.MaterialTracker", return_value=tracker), \
+             patch("kiln.persistence.get_db"), \
+             patch("kiln.slicer.slice_file", return_value=mock_result) as mock_slice:
+            result = runner.invoke(cli, ["slice", str(stl), "--json"])
+
+        assert result.exit_code == 0
+        args = mock_slice.call_args.kwargs["extra_args"]
+        assert "--bed-temperature" in args
+        assert "80" in args
+
+    def test_slice_auto_supports_enable_minimal_args(self, runner, tmp_path):
+        stl = tmp_path / "supports.stl"
+        stl.write_text("solid\nendsolid\n")
+        mock_result = MagicMock()
+        mock_result.message = "Sliced"
+        mock_result.output_path = str(tmp_path / "supports.gcode")
+        mock_result.to_dict.return_value = {"output_path": mock_result.output_path}
+
+        report = SimpleNamespace(
+            overhangs=SimpleNamespace(needs_supports=True, overhang_percentage=12.0),
+            bridging=SimpleNamespace(needs_supports_for_bridges=False, max_bridge_length_mm=0.0),
+        )
+        with patch("kiln.cli.main._autodetect_printer_profile_id", return_value=None), \
+             patch("kiln.printability.analyze_printability", return_value=report), \
+             patch("kiln.slicer.slice_file", return_value=mock_result) as mock_slice:
+            result = runner.invoke(cli, ["slice", str(stl), "--support-mode", "auto", "--json"])
+
+        assert result.exit_code == 0
+        args = mock_slice.call_args.kwargs["extra_args"]
+        assert "--support-material" in args
+        assert "--support-material-buildplate-only" in args
 
 
 # ---------------------------------------------------------------------------
