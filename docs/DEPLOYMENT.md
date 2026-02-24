@@ -105,12 +105,14 @@ Comprehensive reference for deploying Kiln as a hosted REST API service or local
 | `KILN_AGENT_ID` | No | `default` | Agent identifier for event attribution and memory |
 | `KILN_LLM_PRIVACY_MODE` | No | `1` (enabled) | Redact secrets from LLM context. Set `0` to disable |
 
-### Distributed Manufacturing Network *(Coming Soon)*
+### Partner Network Integrations *(Coming Soon)*
+
+Legacy `KILN_NETWORK_*` variable names are retained for backward compatibility.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `KILN_NETWORK_API_KEY` | No | `""` | Distributed network gateway API key |
-| `KILN_NETWORK_BASE_URL` | No | — | Override network API base URL |
+| `KILN_NETWORK_API_KEY` | No | `""` | API key for connected partner-network gateway integrations (legacy variable name) |
+| `KILN_NETWORK_BASE_URL` | No | — | Override partner-network integration API base URL (legacy variable name) |
 
 ### Safety & Confirmation
 

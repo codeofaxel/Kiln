@@ -8,15 +8,23 @@
 
 ### Overview
 
-Kiln is agentic infrastructure for physical fabrication. It provides a unified interface for AI agents to control 3D printers, outsource to manufacturing services, and route jobs across distributed printer networks — all through the Model Context Protocol (MCP) or a conventional CLI.
+Kiln is agentic infrastructure for physical fabrication. It provides a unified interface for AI agents to control 3D printers, outsource to manufacturing services, and route jobs through connected third-party provider/network integrations — all through the Model Context Protocol (MCP) or a conventional CLI.
+
+**Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align docs with existing intent. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available. Messaging clarification to reflect existing intent; no strategy change.
 
 **Three ways to print:**
 
 - **🖨️ Your printers.** Control OctoPrint, Moonraker, Bambu Lab, or Prusa Link machines on your LAN — or remotely via Bambu Cloud.
 - **🏭 Fulfillment centers.** Outsource to Craftcloud (150+ services — no API key required). No printer required — or use alongside local printers for overflow and specialty materials. More providers coming soon.
-- **🌐 Distributed network.** *(Coming soon.)* Route jobs to decentralized peer-to-peer printer networks, or register your own printer to earn revenue.
+- **🌐 Partner networks (via integration).** *(Coming soon.)* Route jobs to connected third-party manufacturing networks through integration adapters.
 
 All three modes use the same MCP tools and CLI commands.
+
+**Non-goals:**
+
+- Operating a first-party decentralized manufacturing marketplace/network
+- Replacing partner supply-side networks
+- Owning provider marketplaces instead of integrating with them
 
 **Key properties:**
 
@@ -404,16 +412,16 @@ Kiln exposes **273 MCP tools** in total. The most commonly used tools are docume
 | `billing_check_setup` | — | Polls pending Stripe SetupIntent; persists payment method on success |
 | `check_payment_status` | `payment_id` | Non-blocking check of Circle/Stripe payment finality |
 
-#### Distributed Manufacturing Network *(Coming Soon)*
+#### Partner Network Integrations *(Coming Soon)*
 
 | Tool | Input | Output |
 |---|---|---|
-| `network_register_printer` | `name`, `location`, `materials` | Registration confirmation |
-| `network_update_printer` | `printer_id`, `available` | Update confirmation |
-| `network_list_printers` | — | Your registered network printers |
-| `network_find_printers` | `material`, `location` | Available printers on the network |
-| `network_submit_job` | `file_url`, `material`, `printer_id` | Network job ID |
-| `network_job_status` | `job_id` | Job tracking details |
+| `network_register_printer` | `name`, `location`, `materials` | Partner integration registration confirmation (supported providers only) |
+| `network_update_printer` | `printer_id`, `available` | Partner integration availability update confirmation |
+| `network_list_printers` | — | Your printers registered with connected partner provider(s) |
+| `network_find_printers` | `material`, `location` | Available capacity from connected partner provider(s) |
+| `network_submit_job` | `file_url`, `material`, `printer_id` | Partner-network job ID (provider-managed) |
+| `network_job_status` | `job_id` | Provider job tracking details |
 
 #### Safety Audit
 
@@ -910,7 +918,7 @@ kiln/src/kiln/
         stripe_provider.py   # Stripe payment provider
         circle_provider.py   # Circle USDC payment provider
     gateway/
-        network.py       # Distributed manufacturing network client (coming soon)
+        network.py       # Partner-network integration client (coming soon)
     data/
         safety_profiles.json     # Per-printer safety limits (temps, feedrates, flow)
         slicer_profiles.json     # Per-printer slicer settings (INI key-values)

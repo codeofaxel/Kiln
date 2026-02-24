@@ -24,6 +24,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - `generate_and_print` and `download_and_upload` no longer auto-start prints (upload only, explicit start required)
 - Auto-print toggles for marketplace and generated models (env var opt-in, default OFF)
+- Docs: clarified product boundary to reflect existing intent (orchestration layer, partner integrations; no strategy change)
 - SKILL.md reorganized: quick start moved to top, fulfillment section added, JSON response examples
 - Enriched `kiln status --json` with `printer_name` and `printer_type` fields
 - Improved config validation errors with actionable quick-fix suggestions

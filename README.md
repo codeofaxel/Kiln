@@ -36,15 +36,25 @@
 
 Kiln lets AI agents design, queue, and execute physical manufacturing jobs on real 3D printers with zero human intervention. It exposes printer control through both a **CLI** and the **Model Context Protocol (MCP)**, making any MCP-compatible agent (OpenClaw, Claude, GPT, custom) a first-class operator of your print farm.
 
+### Positioning Clarification
+
+> **Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align docs with existing intent. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available. Messaging clarification to reflect existing intent; no strategy change.
+
 ### Three ways to print
 
 | Mode | What it is | You need |
 |------|-----------|----------|
 | **🖨️ Your printer** | Control OctoPrint, Moonraker, Bambu, or Prusa Link printers on your LAN — or remotely via Bambu Cloud | A 3D printer |
 | **🏭 Fulfillment centers** | Outsource to Craftcloud (150+ services — no API key required). Kiln handles quoting, ordering, and tracking. More providers coming soon | Nothing — no printer required |
-| **🌐 Distributed network** *(coming soon)* | Route jobs to decentralized peer-to-peer printer networks, or register your own printer to earn revenue | Nothing — or a printer to earn |
+| **🌐 Partner networks (via integration)** *(coming soon)* | Route jobs to connected third-party manufacturing networks through integration adapters. Kiln does not operate a first-party network marketplace | Nothing — integrations as available |
 
-All three modes use the same MCP tools and CLI commands. An agent can seamlessly fall back from a busy local printer to a fulfillment center — all in one workflow.
+All three modes use the same MCP tools and CLI commands. An agent can seamlessly fall back from a busy local printer to a fulfillment center or connected partner network — all in one workflow.
+
+### Non-goals
+
+- Operating a first-party decentralized manufacturing marketplace/network
+- Replacing partner supply-side networks
+- Owning provider marketplaces instead of integrating with them
 
 ### Why Kiln?
 
@@ -63,7 +73,7 @@ graph TD
 
     B --> C["🖨️ Your Printers"]
     B --> F["🏭 Fulfillment"]
-    B --> N["🌐 Distributed Network<br/><sub>(coming soon)</sub>"]
+    B --> N["🌐 Partner Networks<br/><sub>(via integrations, coming soon)</sub>"]
     B --> D["🛒 Marketplaces"]
 
     C --> E1["OctoPrint"]
@@ -74,7 +84,7 @@ graph TD
 
     F --> F1["Craftcloud"]
 
-    N --> N1["Remote Printers"]
+    N --> N1["Third-Party Network Providers"]
 
     D --> I["MyMiniFactory"]
     D --> J["Cults3D"]
@@ -346,12 +356,12 @@ kiln generate-download <job_id> -o ./models --json      # Download generated mod
 kiln firmware status --json                # Check for firmware updates
 kiln firmware update [--component klipper] # Apply firmware updates
 kiln firmware rollback <component>         # Roll back firmware
-kiln network register --name N --location L # Register printer on distributed network (coming soon)
-kiln network find --material PLA           # Find network printers by material (coming soon)
-kiln network submit URL --material PLA     # Submit job to distributed network (coming soon)
-kiln network status <job_id>               # Check network job status (coming soon)
-kiln network list                          # List your registered network printers (coming soon)
-kiln network update <id> --available       # Update printer availability (coming soon)
+kiln network register --name N --location L # Register printer with a connected partner network (integration preview)
+kiln network find --material PLA           # Find partner-network printers by material (integration preview)
+kiln network submit URL --material PLA     # Submit job to a connected partner network (integration preview)
+kiln network status <job_id>               # Check connected-network job status (integration preview)
+kiln network list                          # List printers registered through connected partner networks
+kiln network update <id> --available       # Update connected-network availability
 kiln setup                                 # Interactive printer setup wizard
 kiln serve                                 # Start MCP server
 kiln rest [--port 8420] [--tier full] [--auth-token TOKEN]  # Start REST API server
@@ -554,12 +564,12 @@ The Kiln MCP server (`kiln serve`) exposes **273 tools** to agents. Key tools ar
 | `get_printer_insights` | Query cross-printer learning: success rates, failure breakdown, material stats |
 | `suggest_printer_for_job` | Rank printers by historical success for a file/material combination |
 | `recommend_settings` | Recommend print settings (temps, speed, slicer profile) from historical successes |
-| `network_register_printer` | Register a local printer on a distributed manufacturing network *(coming soon)* |
-| `network_update_printer` | Update a printer's availability on the distributed network *(coming soon)* |
-| `network_list_printers` | List printers registered by this account on the distributed network *(coming soon)* |
-| `network_find_printers` | Search for available printers on the distributed network by material/location *(coming soon)* |
-| `network_submit_job` | Submit a print job to a distributed manufacturing network *(coming soon)* |
-| `network_job_status` | Check the status of a job on the distributed network *(coming soon)* |
+| `network_register_printer` | Register a local printer with a connected partner network *(integration path, coming soon)* |
+| `network_update_printer` | Update printer availability on a connected partner network *(integration path, coming soon)* |
+| `network_list_printers` | List printers registered via connected partner networks *(integration path, coming soon)* |
+| `network_find_printers` | Search connected partner networks by material/location *(integration path, coming soon)* |
+| `network_submit_job` | Submit a print job to a connected partner network *(integration path, coming soon)* |
+| `network_job_status` | Check the status of a job routed via a connected partner network *(integration path, coming soon)* |
 | `billing_status` | Get billing status, fee policy, and payment methods |
 | `billing_summary` | Aggregated billing summary |
 | `billing_history` | Recent billing charges and payment outcomes |
@@ -680,7 +690,7 @@ The server also exposes read-only resources that agents can use for context:
 | `rest_api.py` | REST API wrapper (FastAPI) exposing all MCP tools as HTTP endpoints |
 | `data/` | Bundled JSON databases (safety profiles, slicer profiles, printer intelligence) |
 | `payments/` | Payment processing (Stripe, Circle USDC, crypto rails) |
-| `gateway/` | Distributed manufacturing network gateway *(coming soon)* |
+| `gateway/` | Partner-network integration gateway *(coming soon)* |
 | `heater_watchdog.py` | Auto-cooldown watchdog for idle heaters |
 | `licensing.py` | License tier management (Free/Pro/Business/Enterprise, offline-first) |
 | `sso.py` | SSO authentication (OIDC/SAML) with IdP role mapping and email domain allowlists |
