@@ -34,8 +34,9 @@ from kiln.fulfillment.base import (
     QuoteRequest,
 )
 from kiln.fulfillment.registry import get_provider as get_fulfillment_provider
-from kiln.licensing import LicenseManager, LicenseTier, generate_license_key
+from kiln.licensing import LicenseManager, LicenseTier, generate_license_key_v2, parse_license_claims
 from kiln.payments.base import PaymentError
+from kiln.pilot_access import EntitlementEnforcer, PilotGrant, SupabasePilotStore, hash_license_key, key_hint
 
 if TYPE_CHECKING:
     from kiln.payments.manager import PaymentManager
@@ -61,6 +62,14 @@ class ProxyOrchestrator:
         self._db = db
         self._event_bus = event_bus
         self._ledger = BillingLedger(db=db)
+        self._pilot_store = SupabasePilotStore.from_env()
+        self._entitlement = EntitlementEnforcer(
+            store=self._pilot_store,
+            cache_ttl_seconds=int(os.environ.get("KILN_LICENSE_GRANT_CACHE_TTL_SECONDS", "120")),
+            cache_grace_seconds=int(os.environ.get("KILN_LICENSE_GRANT_CACHE_GRACE_SECONDS", "900")),
+            fail_open_on_store_error=(os.environ.get("KILN_LICENSE_FAIL_OPEN_ON_ENTITLEMENT_ERROR", "0") == "1"),
+            require_ledger_for_v2=(os.environ.get("KILN_LICENSE_REQUIRE_LEDGER_FOR_V2", "1") != "0"),
+        )
         self._payment_mgr: PaymentManager | None = None
         self._payment_lock = threading.Lock()
         # Server-side quote cache: quote_id → (total_price, currency, provider, user_email, expires_at)
@@ -98,7 +107,19 @@ class ProxyOrchestrator:
     # License validation
     # ------------------------------------------------------------------
 
-    def validate_license(self, key: str) -> dict[str, Any]:
+    def validate_license(
+        self,
+        key: str,
+        *,
+        event_type: str = "validation",
+        device_fingerprint: str = "",
+        ip_address_raw: str = "",
+        client_version: str = "",
+        metadata: dict[str, Any] | None = None,
+        enforce_activation_cap: bool = True,
+        auto_activate_if_needed: bool = True,
+        record_event: bool = False,
+    ) -> dict[str, Any]:
         """Validate a license key and return tier info.
 
         Args:
@@ -119,11 +140,39 @@ class ProxyOrchestrator:
             mgr = LicenseManager(license_key=key)
             tier = mgr.get_tier()
             info = mgr.get_info()
+            decision = None
+            if self._pilot_store is not None:
+                decision = self._entitlement.evaluate_license(
+                    license_key=key,
+                    event_type=event_type,
+                    device_fingerprint=device_fingerprint,
+                    ip_address_raw=ip_address_raw,
+                    client_version=client_version,
+                    metadata=metadata,
+                    enforce_activation_cap=enforce_activation_cap,
+                    auto_activate_if_needed=auto_activate_if_needed,
+                    record_event=record_event,
+                )
+                if not decision.valid:
+                    return {
+                        "tier": decision.tier or tier.value,
+                        "email": decision.email or info.email,
+                        "jti": decision.jti,
+                        "valid": False,
+                        "error": decision.reason or "Entitlement denied",
+                        "source": decision.source,
+                        "activation_count": decision.activation_count,
+                        "max_activations": decision.max_activations,
+                    }
             return {
                 "tier": tier.value,
                 "email": info.email,
                 "valid": info.is_valid,
                 "info": info.to_dict(),
+                "jti": decision.jti if decision is not None else "",
+                "source": decision.source if decision is not None else "local",
+                "activation_count": decision.activation_count if decision is not None else 0,
+                "max_activations": decision.max_activations if decision is not None else 0,
             }
         except Exception as exc:
             logger.warning("License validation failed: %s", exc)
@@ -463,12 +512,49 @@ class ProxyOrchestrator:
         Raises:
             ValueError: If signing key is not configured.
         """
-        key = generate_license_key(LicenseTier.FREE, email)
+        ttl_days = int(os.environ.get("KILN_FREE_LICENSE_TTL_DAYS", "365"))
+        max_activations = int(os.environ.get("KILN_FREE_LICENSE_MAX_ACTIVATIONS", "10"))
+        key = generate_license_key_v2(
+            tier=LicenseTier.FREE,
+            email=email,
+            ttl_seconds=max(1, ttl_days) * 24 * 3600,
+        )
+        claims = parse_license_claims(key) or {}
+        jti = str(claims.get("jti", "")).strip()
+        issued_at = float(claims.get("issued_at", time.time()))
+        expires_at = float(claims.get("expires_at", issued_at))
+
+        if self._pilot_store is not None and jti:
+            grant = PilotGrant(
+                jti=jti,
+                email=email,
+                tier=LicenseTier.FREE.value,
+                issued_at=issued_at,
+                expires_at=expires_at,
+                key_hash=hash_license_key(key),
+                key_hint=key_hint(key),
+                max_activations=max(1, max_activations),
+                notes="auto:free_register",
+                status="active",
+            )
+            ok, err = self._pilot_store.record_grant(grant)
+            if not ok and err:
+                logger.warning("Could not record free registration grant: %s", err)
+
         return {
             "license_key": key,
             "tier": "free",
             "email": email,
+            "jti": jti,
         }
+
+    def is_revoked(self, jti: str) -> bool:
+        """Return whether a token has been revoked."""
+        return self._entitlement.is_revoked(jti.strip())
+
+    def list_revocations(self, *, limit: int = 500, since_iso: str | None = None) -> list[dict[str, Any]]:
+        """List revoked JTIs for revocation cache sync."""
+        return self._entitlement.list_revocations(limit=limit, since_iso=since_iso)
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -13,6 +13,8 @@ from kiln.licensing import (
     LicenseManager,
     LicenseTier,
     generate_license_key,
+    generate_license_key_v2,
+    parse_license_claims,
 )
 
 
@@ -112,3 +114,28 @@ class TestGenerateLicenseKey:
                 cache_path=tmp_path / "cache.json",
             )
             assert mgr.get_tier() == LicenseTier.FREE
+
+
+class TestGenerateLicenseKeyV2:
+    def test_generates_v2_pro_key(self):
+        private_key = "00" * 32
+        key = generate_license_key_v2(
+            LicenseTier.PRO,
+            "user@example.com",
+            signing_private_key=private_key,
+        )
+        assert key.startswith("kiln_v2_")
+        parts = key.split("_", 3)
+        assert len(parts) == 4
+
+    def test_parse_claims_returns_jti(self):
+        private_key = "00" * 32
+        key = generate_license_key_v2(
+            LicenseTier.BUSINESS,
+            "biz@example.com",
+            signing_private_key=private_key,
+        )
+        claims = parse_license_claims(key) or {}
+        assert claims["tier"] == "business"
+        assert claims["email"] == "biz@example.com"
+        assert claims["jti"]

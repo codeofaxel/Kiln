@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 import tempfile
+import time
 from typing import Any
 
 import click
@@ -5661,6 +5662,164 @@ def license_info(json_mode: bool) -> None:
         if info.license_key_hint:
             click.echo(f"  Key:      ...{info.license_key_hint}")
         click.echo(f"  Source:   {info.source}")
+
+
+# ---------------------------------------------------------------------------
+# pilot access admin
+# ---------------------------------------------------------------------------
+
+
+@cli.group("pilot")
+def pilot_group() -> None:
+    """Pilot entitlement admin commands (grant/revoke)."""
+
+
+@pilot_group.command("grant")
+@click.option("--email", required=True, help="Pilot user email.")
+@click.option(
+    "--tier",
+    type=click.Choice(["pro", "business", "enterprise"], case_sensitive=False),
+    default="pro",
+    show_default=True,
+    help="Tier to grant for this pilot key.",
+)
+@click.option("--days", default=30, type=int, show_default=True, help="Expiration window in days.")
+@click.option(
+    "--max-activations",
+    default=3,
+    type=int,
+    show_default=True,
+    help="Maximum unique activations allowed before key is blocked.",
+)
+@click.option("--notes", default="", help="Optional internal note for this grant.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def pilot_grant(email: str, tier: str, days: int, max_activations: int, notes: str, json_mode: bool) -> None:
+    """Issue an expiring v2 pilot license key and optionally log it to Supabase."""
+    from kiln.licensing import LicenseTier, generate_license_key_v2, parse_license_claims
+    from kiln.pilot_access import PilotGrant, SupabasePilotStore, hash_license_key, key_hint, load_env_file
+
+    load_env_file()
+    if days <= 0 or max_activations <= 0:
+        click.echo(
+            format_error(
+                "--days and --max-activations must both be > 0",
+                code="INVALID_ARGS",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    tier_enum = {
+        "pro": LicenseTier.PRO,
+        "business": LicenseTier.BUSINESS,
+        "enterprise": LicenseTier.ENTERPRISE,
+    }[tier.lower()]
+
+    try:
+        license_key = generate_license_key_v2(
+            tier=tier_enum,
+            email=email.strip(),
+            ttl_seconds=days * 24 * 3600,
+            features=["multi_printer", "queue", "fleet_analytics", "business_fulfillment"],
+            notes=notes.strip() or None,
+        )
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Could not issue pilot key: {exc}. Set KILN_LICENSE_SIGNING_PRIVATE_KEY first.",
+                code="LICENSE_ISSUE_ERROR",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    claims = parse_license_claims(license_key) or {}
+    jti = str(claims.get("jti", ""))
+    issued_at = float(claims.get("issued_at", time.time()))
+    expires_at = float(claims.get("expires_at", issued_at))
+
+    logged = False
+    log_error = None
+    store = SupabasePilotStore.from_env()
+    if store is not None and jti:
+        grant = PilotGrant(
+            jti=jti,
+            email=email.strip(),
+            tier=tier_enum.value,
+            issued_at=issued_at,
+            expires_at=expires_at,
+            key_hash=hash_license_key(license_key),
+            key_hint=key_hint(license_key),
+            max_activations=max_activations,
+            notes=notes.strip(),
+        )
+        logged, log_error = store.record_grant(grant)
+
+    data = {
+        "email": email.strip(),
+        "tier": tier_enum.value,
+        "days": days,
+        "max_activations": max_activations,
+        "license_key": license_key,
+        "jti": jti,
+        "issued_at": issued_at,
+        "expires_at": expires_at,
+        "logged_to_supabase": logged,
+        "supabase_log_error": log_error,
+        "activation_command": f"kiln upgrade --key {license_key}",
+    }
+    if json_mode:
+        click.echo(format_response("success", data=data, json_mode=True))
+        return
+
+    click.echo("\n  Pilot key issued")
+    click.echo("  ───────────────")
+    click.echo(f"  Email: {data['email']}")
+    click.echo(f"  Tier:  {data['tier']}")
+    click.echo(f"  Max activations: {data['max_activations']}")
+    click.echo(f"  JTI:   {data['jti'] or '(none)'}")
+    click.echo(f"  Expires (unix): {int(expires_at)}")
+    click.echo("\n  License key:")
+    click.echo(f"  {license_key}")
+    click.echo("\n  Recipient activation:")
+    click.echo(f"  kiln upgrade --key {license_key}")
+    if store is None:
+        click.echo("\n  Note: Supabase env not configured; issuance not logged remotely.")
+    elif not logged and log_error:
+        click.echo(f"\n  Note: Supabase log failed: {log_error}")
+
+
+@pilot_group.command("revoke")
+@click.option("--jti", required=True, help="Pilot token ID to revoke.")
+@click.option("--reason", default="manual revoke", help="Revocation reason.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def pilot_revoke(jti: str, reason: str, json_mode: bool) -> None:
+    """Revoke a previously issued pilot key in the Supabase ledger."""
+    from kiln.pilot_access import SupabasePilotStore, load_env_file
+
+    load_env_file()
+    store = SupabasePilotStore.from_env()
+    if store is None:
+        click.echo(
+            format_error(
+                "Supabase env not configured. Set KILN_SUPABASE_URL and KILN_SUPABASE_SERVICE_KEY.",
+                code="CONFIG_MISSING",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    ok, err = store.revoke_grant(jti.strip(), reason=reason.strip() or "manual revoke")
+    if not ok:
+        click.echo(format_error(err or "Revoke failed.", code="REVOKE_ERROR", json_mode=json_mode))
+        sys.exit(1)
+    click.echo(
+        format_response(
+            "success",
+            data={"jti": jti.strip(), "revoked": True, "reason": reason.strip() or "manual revoke"},
+            json_mode=json_mode,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

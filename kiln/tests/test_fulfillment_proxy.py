@@ -208,6 +208,15 @@ class TestProxyProviderConstructor:
         p = _provider()
         assert p._session.headers.get("Accept") == "application/json"
 
+    def test_session_device_fingerprint_header(self, monkeypatch):
+        monkeypatch.setenv("KILN_DEVICE_FINGERPRINT", "device-test-123")
+        p = _provider()
+        assert p._session.headers.get("X-Kiln-Device-Fingerprint") == "device-test-123"
+
+    def test_session_client_version_header_exists(self):
+        p = _provider()
+        assert "X-Kiln-Client-Version" in p._session.headers
+
     def test_default_provider(self):
         p = _provider()
         assert p._provider == "craftcloud"

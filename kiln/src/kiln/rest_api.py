@@ -431,8 +431,26 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
         if not key:
             raise HTTPException(status_code=401, detail="Empty license key")
 
+        device_fingerprint = request.headers.get("X-Kiln-Device-Fingerprint", "").strip()
+        if not device_fingerprint:
+            ua = request.headers.get("User-Agent", "").strip()
+            client_ip = request.client.host if request.client else ""
+            device_fingerprint = f"{ua}|{client_ip}"
+        client_version = request.headers.get("X-Kiln-Client-Version", "").strip()
+        client_ip = request.client.host if request.client else ""
+
         orch = get_orchestrator()
-        result = orch.validate_license(key)
+        result = orch.validate_license(
+            key,
+            event_type="validation",
+            device_fingerprint=device_fingerprint,
+            ip_address_raw=client_ip,
+            client_version=client_version,
+            metadata={"path": request.url.path},
+            enforce_activation_cap=True,
+            auto_activate_if_needed=True,
+            record_event=False,
+        )
         if not result.get("valid", False):
             raise HTTPException(status_code=401, detail=result.get("error", "Invalid license key"))
         return result
@@ -678,19 +696,51 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
             session_metadata = session_obj.get("metadata", {})
             tier_str = session_metadata.get("tier", "pro")
 
-            from kiln.licensing import LicenseTier, generate_license_key
+            from kiln.licensing import LicenseTier, generate_license_key_v2, parse_license_claims
+            from kiln.pilot_access import PilotGrant, SupabasePilotStore, hash_license_key, key_hint
 
             tier_map = {"business": LicenseTier.BUSINESS, "enterprise": LicenseTier.ENTERPRISE}
             tier = tier_map.get(tier_str, LicenseTier.PRO)
+            ttl_days = int(session_metadata.get("license_days", os.environ.get("KILN_PAID_LICENSE_TTL_DAYS", "365")))
+            max_activations = int(
+                session_metadata.get("max_activations", os.environ.get("KILN_PAID_LICENSE_MAX_ACTIVATIONS", "5"))
+            )
 
             try:
-                license_key = generate_license_key(tier=tier, email=customer_email)
+                license_key = generate_license_key_v2(
+                    tier=tier,
+                    email=customer_email,
+                    ttl_seconds=max(1, ttl_days) * 24 * 3600,
+                )
             except ValueError as exc:
                 logger.error("License key generation failed: %s", exc)
                 return JSONResponse(
                     {"success": False, "error": f"License signing key not configured: {exc}"},
                     status_code=500,
                 )
+
+            claims = parse_license_claims(license_key) or {}
+            jti = str(claims.get("jti", "")).strip()
+            issued_at = float(claims.get("issued_at", _time.time()))
+            expires_at = float(claims.get("expires_at", issued_at))
+
+            store = SupabasePilotStore.from_env()
+            if store is not None and jti:
+                grant = PilotGrant(
+                    jti=jti,
+                    email=customer_email,
+                    tier=tier.value,
+                    issued_at=issued_at,
+                    expires_at=expires_at,
+                    key_hash=hash_license_key(license_key),
+                    key_hint=key_hint(license_key),
+                    max_activations=max(1, max_activations),
+                    notes=f"stripe_session:{session_obj.get('id', '')}",
+                    status="active",
+                )
+                ok, err = store.record_grant(grant)
+                if not ok and err:
+                    logger.warning("Could not record Stripe entitlement: %s", err)
 
             # Store only a hash of the key on the Stripe session (never the full key).
             import hashlib as _hashlib
@@ -700,7 +750,13 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
                 _stripe_mod.api_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
                 _stripe_mod.checkout.Session.modify(
                     session_obj["id"],
-                    metadata={**session_metadata, "license_key_hash": license_key_hash},
+                    metadata={
+                        **session_metadata,
+                        "license_key_hash": license_key_hash,
+                        "license_key": license_key,
+                        "license_jti": jti,
+                        "license_tier": tier.value,
+                    },
                 )
                 logger.info(
                     "License key generated for session %s (%s, %s)",
@@ -925,8 +981,32 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
         if not key:
             return JSONResponse({"valid": False, "error": "No license key provided"}, status_code=400)
 
+        device_fingerprint = (
+            str(body.get("device_fingerprint", "")).strip()
+            or request.headers.get("X-Kiln-Device-Fingerprint", "").strip()
+        )
+        if not device_fingerprint:
+            ua = request.headers.get("User-Agent", "").strip()
+            client_ip = request.client.host if request.client else ""
+            device_fingerprint = f"{ua}|{client_ip}"
+        client_version = (
+            str(body.get("client_version", "")).strip()
+            or request.headers.get("X-Kiln-Client-Version", "").strip()
+        )
+        client_ip = request.client.host if request.client else ""
+
         orch = get_orchestrator()
-        result = orch.validate_license(key)
+        result = orch.validate_license(
+            key,
+            event_type="validation",
+            device_fingerprint=device_fingerprint,
+            ip_address_raw=client_ip,
+            client_version=client_version,
+            metadata={"api": "license_validate"},
+            enforce_activation_cap=True,
+            auto_activate_if_needed=False,
+            record_event=True,
+        )
         # Add usage stats
         if result.get("valid") and result.get("email"):
             ledger = orch._ledger
@@ -940,6 +1020,122 @@ def create_app(config: RestApiConfig | None = None) -> FastAPI:
         if "info" in result:
             result.pop("info")  # LicenseInfo not JSON-serializable
         return JSONResponse(result)
+
+    @app.post("/api/license/activate")
+    async def license_activate(request: Request):
+        """Activate a license on a specific device and enforce activation caps."""
+        from kiln.fulfillment.proxy_server import get_orchestrator
+
+        body = await request.json()
+        key = str(body.get("license_key", "")).strip()
+        if not key:
+            return JSONResponse({"valid": False, "error": "No license key provided"}, status_code=400)
+
+        device_fingerprint = (
+            str(body.get("device_fingerprint", "")).strip()
+            or request.headers.get("X-Kiln-Device-Fingerprint", "").strip()
+        )
+        if not device_fingerprint:
+            ua = request.headers.get("User-Agent", "").strip()
+            client_ip = request.client.host if request.client else ""
+            device_fingerprint = f"{ua}|{client_ip}"
+        client_version = (
+            str(body.get("client_version", "")).strip()
+            or request.headers.get("X-Kiln-Client-Version", "").strip()
+        )
+        client_ip = request.client.host if request.client else ""
+
+        orch = get_orchestrator()
+        result = orch.validate_license(
+            key,
+            event_type="activation",
+            device_fingerprint=device_fingerprint,
+            ip_address_raw=client_ip,
+            client_version=client_version,
+            metadata={"api": "license_activate"},
+            enforce_activation_cap=True,
+            auto_activate_if_needed=True,
+            record_event=True,
+        )
+        status = 200
+        if not result.get("valid", False):
+            status = 429 if "Activation limit" in str(result.get("error", "")) else 401
+        if "info" in result:
+            result.pop("info")
+        return JSONResponse(result, status_code=status)
+
+    @app.post("/api/license/refresh")
+    async def license_refresh(request: Request):
+        """Refresh license validity without creating a new activation."""
+        from kiln.fulfillment.proxy_server import get_orchestrator
+        from kiln.licensing import parse_license_claims
+
+        body = await request.json()
+        key = str(body.get("license_key", "")).strip()
+        if not key:
+            return JSONResponse({"valid": False, "error": "No license key provided"}, status_code=400)
+
+        device_fingerprint = (
+            str(body.get("device_fingerprint", "")).strip()
+            or request.headers.get("X-Kiln-Device-Fingerprint", "").strip()
+        )
+        if not device_fingerprint:
+            ua = request.headers.get("User-Agent", "").strip()
+            client_ip = request.client.host if request.client else ""
+            device_fingerprint = f"{ua}|{client_ip}"
+        client_version = (
+            str(body.get("client_version", "")).strip()
+            or request.headers.get("X-Kiln-Client-Version", "").strip()
+        )
+        client_ip = request.client.host if request.client else ""
+
+        orch = get_orchestrator()
+        result = orch.validate_license(
+            key,
+            event_type="refresh",
+            device_fingerprint=device_fingerprint,
+            ip_address_raw=client_ip,
+            client_version=client_version,
+            metadata={"api": "license_refresh"},
+            enforce_activation_cap=False,
+            auto_activate_if_needed=False,
+            record_event=True,
+        )
+        claims = parse_license_claims(key) or {}
+        result["expires_at"] = claims.get("expires_at")
+        if "info" in result:
+            result.pop("info")
+        return JSONResponse(result, status_code=200 if result.get("valid", False) else 401)
+
+    @app.get("/api/license/revocations")
+    async def license_revocations(limit: int = 500, since: str | None = None):
+        """Return revoked token IDs for client-side revocation cache sync."""
+        from kiln.fulfillment.proxy_server import get_orchestrator
+
+        orch = get_orchestrator()
+        rows = orch.list_revocations(limit=limit, since_iso=since)
+        # Public feed: do not expose internal revoke reasons/notes.
+        sanitized = [
+            {
+                "jti": row.get("jti", ""),
+                "revoked_at": row.get("revoked_at"),
+            }
+            for row in rows
+            if isinstance(row, dict)
+        ]
+        return JSONResponse({"success": True, "revocations": sanitized, "count": len(sanitized)})
+
+    @app.get("/api/license/revocations/check")
+    async def license_revocation_check(jti: str):
+        """Check whether a single token id has been revoked."""
+        from kiln.fulfillment.proxy_server import get_orchestrator
+
+        token_id = (jti or "").strip()
+        if not token_id:
+            return JSONResponse({"success": False, "error": "jti is required"}, status_code=400)
+        orch = get_orchestrator()
+        revoked = orch.is_revoked(token_id)
+        return JSONResponse({"success": True, "jti": token_id, "revoked": revoked})
 
     @app.post("/api/license/register")
     async def license_register(request: Request):

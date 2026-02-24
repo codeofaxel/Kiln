@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +75,37 @@ def _read_license_key() -> str:
     return ""
 
 
+def _client_version() -> str:
+    """Best-effort package version for request metadata."""
+    try:
+        return metadata.version("kiln3d")
+    except Exception:
+        return ""
+
+
+def _device_fingerprint() -> str:
+    """Return a stable local device fingerprint (random UUID persisted on disk)."""
+    explicit = os.environ.get("KILN_DEVICE_FINGERPRINT", "").strip()
+    if explicit:
+        return explicit
+
+    path = Path.home() / ".kiln" / "device_fingerprint"
+    try:
+        if path.is_file():
+            value = path.read_text(encoding="utf-8").strip()
+            if value:
+                return value
+        path.parent.mkdir(parents=True, exist_ok=True)
+        value = f"kiln-device-{uuid.uuid4().hex}"
+        path.write_text(value, encoding="utf-8")
+        if os.name != "nt":
+            path.chmod(0o600)
+        return value
+    except Exception:
+        # Last-resort ephemeral fallback.
+        return f"kiln-device-{uuid.uuid4().hex}"
+
+
 class ProxyProvider(FulfillmentProvider):
     """Concrete :class:`FulfillmentProvider` backed by the Kiln Cloud proxy.
 
@@ -109,6 +142,8 @@ class ProxyProvider(FulfillmentProvider):
             {
                 "Accept": "application/json",
                 "Authorization": f"Bearer {self._license_key}",
+                "X-Kiln-Device-Fingerprint": _device_fingerprint(),
+                "X-Kiln-Client-Version": _client_version(),
             }
         )
 

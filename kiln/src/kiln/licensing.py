@@ -40,6 +40,7 @@ import hmac
 import json
 import logging
 import os
+import secrets
 import sys
 import time
 import warnings
@@ -47,6 +48,10 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +62,16 @@ logger = logging.getLogger(__name__)
 _KEY_PREFIX_PRO = "kiln_pro_"
 _KEY_PREFIX_BUSINESS = "kiln_biz_"
 _KEY_PREFIX_ENTERPRISE = "kiln_ent_"
+_KEY_PREFIX_V2 = "kiln_v2_"
+
+# Built-in public verify key for v2 licenses (Ed25519).
+# This key is safe to publish; only the matching private key can mint licenses.
+_V2_DEFAULT_KEY_ID = "k1"
+_V2_DEFAULT_VERIFY_KEYS: dict[str, str] = {
+    _V2_DEFAULT_KEY_ID: "tu4SayAZ4W2MJ4w8ZrMjhgkLn7LY3aB5yxilwsE_4aQ",
+}
+_V2_VERIFY_KEYS_ENV = "KILN_LICENSE_VERIFY_KEYS_JSON"
+_V2_PRIVATE_KEY_ENV = "KILN_LICENSE_SIGNING_PRIVATE_KEY"
 
 # Cache validity: how long a remote validation result is trusted (7 days).
 _CACHE_TTL_SECONDS: float = 7 * 24 * 3600
@@ -71,6 +86,65 @@ _DEFAULT_CACHE_PATH = Path.home() / ".kiln" / "license_cache.json"
 
 # Offline mode bypass: if set to "1", allow prefix-based keys even when signature fails.
 _OFFLINE_MODE_ENV_VAR = "KILN_LICENSE_OFFLINE"
+
+
+def _decode_b64_flexible(value: str) -> bytes:
+    """Decode standard or url-safe base64 with optional missing padding."""
+    padded = value + "=" * ((4 - len(value) % 4) % 4)
+    try:
+        return base64.b64decode(padded)
+    except Exception:
+        return base64.urlsafe_b64decode(padded)
+
+
+def _encode_b64_no_pad(raw: bytes) -> str:
+    """Encode bytes as standard base64 without trailing padding."""
+    return base64.b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _load_v2_verify_keys() -> dict[str, Ed25519PublicKey]:
+    """Load v2 Ed25519 verify keys keyed by key id (kid)."""
+    raw_map = dict(_V2_DEFAULT_VERIFY_KEYS)
+    env_json = os.environ.get(_V2_VERIFY_KEYS_ENV, "").strip()
+    if env_json:
+        try:
+            parsed = json.loads(env_json)
+            if isinstance(parsed, dict):
+                for kid, key in parsed.items():
+                    if isinstance(kid, str) and isinstance(key, str) and kid.strip() and key.strip():
+                        raw_map[kid.strip()] = key.strip()
+        except Exception as exc:
+            logger.warning("Invalid %s value: %s", _V2_VERIFY_KEYS_ENV, exc)
+
+    out: dict[str, Ed25519PublicKey] = {}
+    for kid, key_raw in raw_map.items():
+        try:
+            key_bytes = _decode_b64_flexible(key_raw)
+            out[kid] = Ed25519PublicKey.from_public_bytes(key_bytes)
+        except Exception as exc:
+            logger.warning("Failed to load v2 verify key %s: %s", kid, exc)
+    return out
+
+
+def _load_v2_private_key(key_value: str) -> Ed25519PrivateKey:
+    """Load an Ed25519 private key from PEM, base64, base64url, or hex."""
+    value = key_value.strip()
+    if not value:
+        raise ValueError("Empty signing private key")
+
+    if "BEGIN" in value:
+        key = serialization.load_pem_private_key(value.encode("utf-8"), password=None)
+        if not isinstance(key, Ed25519PrivateKey):
+            raise ValueError("PEM key is not an Ed25519 private key")
+        return key
+
+    try:
+        raw = bytes.fromhex(value)
+    except ValueError:
+        raw = _decode_b64_flexible(value)
+    if len(raw) != 32:
+        raise ValueError("Ed25519 private key must be 32 bytes")
+    return Ed25519PrivateKey.from_private_bytes(raw)
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +295,7 @@ class LicenseManager:
         if not key or not key.startswith("kiln_"):
             return None
 
-        parts = key.split("_")
+        parts = key.split("_", 3)
         if len(parts) < 4:
             # Not a signed key format
             return None
@@ -229,6 +303,9 @@ class LicenseManager:
         tier_part = parts[1]  # "pro" or "biz"
         payload_b64 = parts[2]
         signature_b64 = parts[3]
+
+        if tier_part == "v2":
+            return self._validate_key_signature_v2(payload_b64, signature_b64)
 
         # Get verification key — prefer KILN_LICENSE_SIGNING_SECRET, fall back
         # to legacy KILN_LICENSE_PUBLIC_KEY.
@@ -287,6 +364,55 @@ class LicenseManager:
             logger.debug("License key signature validation failed: %s", exc)
             return None
 
+    def _validate_key_signature_v2(self, payload_b64: str, signature_b64: str) -> dict[str, Any] | None:
+        """Validate v2 Ed25519-signed license payloads.
+
+        v2 format:
+            ``kiln_v2_{payload_b64}_{signature_b64}``
+
+        Payload fields:
+            - ``tier``: free/pro/business/enterprise
+            - ``email``: account email
+            - ``issued_at``: unix timestamp
+            - ``expires_at``: unix timestamp
+            - ``jti``: token id
+            - ``kid``: verify key id
+        """
+        verify_keys = _load_v2_verify_keys()
+        if not verify_keys:
+            logger.warning("No v2 verify keys available")
+            return None
+
+        try:
+            payload_bytes = _decode_b64_flexible(payload_b64)
+            payload = json.loads(payload_bytes.decode("utf-8"))
+            if not isinstance(payload, dict):
+                return None
+
+            kid = str(payload.get("kid") or _V2_DEFAULT_KEY_ID)
+            verifier = verify_keys.get(kid)
+            if verifier is None:
+                logger.warning("Unknown v2 key id: %s", kid)
+                return None
+
+            signature = _decode_b64_flexible(signature_b64)
+            verifier.verify(signature, payload_b64.encode("ascii"))
+
+            expires_at = payload.get("expires_at")
+            if expires_at is not None and time.time() >= float(expires_at):
+                logger.warning("License key has expired")
+                return None
+
+            tier = str(payload.get("tier", "")).lower()
+            if tier not in {"free", "pro", "business", "enterprise"}:
+                logger.warning("Invalid v2 license tier: %s", tier)
+                return None
+
+            return payload
+        except (InvalidSignature, ValueError, TypeError, json.JSONDecodeError) as exc:
+            logger.warning("v2 license validation failed: %s", exc)
+            return None
+
     def _infer_tier_from_key(self, key: str) -> tuple[LicenseTier, float | None, str]:
         """Infer the license tier from the key, validating signature if present.
 
@@ -318,7 +444,7 @@ class LicenseManager:
 
         if not offline_mode:
             # Online mode: signature is mandatory for non-free tiers.
-            if key.startswith((_KEY_PREFIX_PRO, _KEY_PREFIX_BUSINESS, _KEY_PREFIX_ENTERPRISE)):
+            if key.startswith((_KEY_PREFIX_PRO, _KEY_PREFIX_BUSINESS, _KEY_PREFIX_ENTERPRISE, _KEY_PREFIX_V2)):
                 logger.warning(
                     "License key signature validation failed. "
                     "Set KILN_LICENSE_OFFLINE=1 to allow cached offline validation, "
@@ -695,6 +821,69 @@ def generate_license_key(
     }
     prefix = _TIER_PREFIXES[tier]
     return f"kiln_{prefix}_{payload_b64}_{signature_b64}"
+
+
+def parse_license_claims(key: str) -> dict[str, Any] | None:
+    """Parse claims from a signed license key without validating signature.
+
+    Supports both legacy and v2 key formats. Intended for administrative
+    workflows (issuance logs, display metadata) where signature validation
+    happens separately via ``LicenseManager``.
+    """
+    if not key or not key.startswith("kiln_"):
+        return None
+    parts = key.split("_", 3)
+    if len(parts) < 4:
+        return None
+    payload_b64 = parts[2]
+    try:
+        payload = json.loads(_decode_b64_flexible(payload_b64).decode("utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def generate_license_key_v2(
+    tier: LicenseTier,
+    email: str,
+    *,
+    ttl_seconds: int = 30 * 24 * 3600,
+    key_id: str = _V2_DEFAULT_KEY_ID,
+    signing_private_key: str | None = None,
+    features: list[str] | None = None,
+    notes: str | None = None,
+) -> str:
+    """Generate a v2 Ed25519-signed license key.
+
+    v2 keys are validated with a public key baked into the client, so
+    users do not need access to signing secrets.
+    """
+    key_value = signing_private_key or os.environ.get(_V2_PRIVATE_KEY_ENV, "").strip()
+    if not key_value:
+        raise ValueError(
+            f"Signing key is required: pass signing_private_key or set {_V2_PRIVATE_KEY_ENV}"
+        )
+    private_key = _load_v2_private_key(key_value)
+
+    now = time.time()
+    payload: dict[str, Any] = {
+        "version": 2,
+        "kid": key_id,
+        "jti": secrets.token_hex(16),
+        "tier": tier.value,
+        "email": email,
+        "issued_at": now,
+        "expires_at": now + ttl_seconds,
+    }
+    if features:
+        payload["features"] = sorted({str(f).strip() for f in features if str(f).strip()})
+    if notes:
+        payload["notes"] = notes
+
+    payload_raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    payload_b64 = _encode_b64_no_pad(payload_raw)
+    signature_b64 = _encode_b64_no_pad(private_key.sign(payload_b64.encode("ascii")))
+    return f"{_KEY_PREFIX_V2}{payload_b64}_{signature_b64}"
 
 
 # ---------------------------------------------------------------------------

@@ -24,10 +24,23 @@ explicitly use features that connect to external services.
 | Fulfillment orders | Model file, shipping address, material choice | Craftcloud (manufacturing provider) |
 | Card payments | Payment amount, currency | Stripe |
 | USDC payments | Wallet address, payment amount | Circle |
+| Licensing / entitlement checks (optional cloud mode) | License token ID (JTI), email hash, tier, expiry, activation/security metadata | Supabase (Kiln project DB) |
 | Marketplace browsing | Search queries | MyMiniFactory, Cults3D, Thingiverse (deprecated) |
 
 Kiln does **not** share data with advertising networks, analytics services, or
 data brokers. Kiln does **not** have telemetry or usage tracking.
+
+### Licensing metadata boundaries
+
+When cloud entitlement management is enabled, Kiln stores only licensing and
+abuse-prevention metadata:
+
+- token ID (JTI), tier, expiry, revocation status
+- activation count metadata (hashed device fingerprint, coarse IP hash)
+- client version and timestamped security event type
+
+Kiln does **not** store print models, G-code, prompts, job payloads, file names,
+or design content in the entitlement store.
 
 ## Payment Data
 

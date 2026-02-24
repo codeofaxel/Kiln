@@ -419,6 +419,67 @@ class TestCreateApp:
         assert data["success"] is False
         assert "error" in data
 
+    # --- License endpoints ---
+
+    def test_license_activate_endpoint(self, client):
+        fake_orch = mock.MagicMock()
+        fake_orch.validate_license.return_value = {"valid": True, "tier": "pro", "email": "u@test.com", "jti": "j1"}
+
+        with mock.patch("kiln.fulfillment.proxy_server.get_orchestrator", return_value=fake_orch):
+            resp = client.post("/api/license/activate", json={"license_key": "kiln_v2_x_y"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["valid"] is True
+        assert body["tier"] == "pro"
+        fake_orch.validate_license.assert_called_once()
+        _, kwargs = fake_orch.validate_license.call_args
+        assert kwargs["event_type"] == "activation"
+        assert kwargs["enforce_activation_cap"] is True
+        assert kwargs["auto_activate_if_needed"] is True
+
+    def test_license_refresh_endpoint(self, client):
+        fake_orch = mock.MagicMock()
+        fake_orch.validate_license.return_value = {"valid": True, "tier": "pro", "email": "u@test.com", "jti": "j1"}
+
+        with mock.patch("kiln.fulfillment.proxy_server.get_orchestrator", return_value=fake_orch):
+            resp = client.post("/api/license/refresh", json={"license_key": "kiln_v2_x_y"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["valid"] is True
+        fake_orch.validate_license.assert_called_once()
+        _, kwargs = fake_orch.validate_license.call_args
+        assert kwargs["event_type"] == "refresh"
+        assert kwargs["auto_activate_if_needed"] is False
+
+    def test_license_revocations_endpoints(self, client):
+        fake_orch = mock.MagicMock()
+        fake_orch.list_revocations.return_value = [
+            {
+                "jti": "r1",
+                "revoked_at": "2026-02-24T00:00:00+00:00",
+                "revoked_reason": "internal-note",
+            }
+        ]
+        fake_orch.is_revoked.return_value = True
+
+        with mock.patch("kiln.fulfillment.proxy_server.get_orchestrator", return_value=fake_orch):
+            list_resp = client.get("/api/license/revocations")
+            check_resp = client.get("/api/license/revocations/check", params={"jti": "r1"})
+
+        assert list_resp.status_code == 200
+        list_body = list_resp.json()
+        assert list_body["success"] is True
+        assert list_body["count"] == 1
+        assert "revoked_reason" not in list_body["revocations"][0]
+        assert list_body["revocations"][0]["jti"] == "r1"
+
+        assert check_resp.status_code == 200
+        check_body = check_resp.json()
+        assert check_body["success"] is True
+        assert check_body["revoked"] is True
+
 
 # ---------------------------------------------------------------------------
 # 5. run_rest_server

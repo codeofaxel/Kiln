@@ -141,8 +141,14 @@ def mock_payment_mgr() -> MagicMock:
 
 
 @pytest.fixture()
-def orch(mock_db: MagicMock) -> ProxyOrchestrator:
+def orch(mock_db: MagicMock, monkeypatch: pytest.MonkeyPatch) -> ProxyOrchestrator:
     """Create a ProxyOrchestrator with a mocked DB."""
+    monkeypatch.setenv("KILN_SUPABASE_DISABLE_DOTENV", "1")
+    monkeypatch.delenv("KILN_SUPABASE_URL", raising=False)
+    monkeypatch.delenv("KILN_SUPABASE_SERVICE_KEY", raising=False)
+    monkeypatch.delenv("KILN_SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("KILN_STRIPE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("KILN_CIRCLE_API_KEY", raising=False)
     return ProxyOrchestrator(db=mock_db)
 
 
@@ -801,19 +807,23 @@ class TestHandleStatus:
 class TestRegisterUser:
     def test_generates_free_tier_key(self, orch: ProxyOrchestrator):
         with patch(
-            "kiln.fulfillment.proxy_server.generate_license_key",
-            return_value="kiln_free_abc123",
-        ) as mock_gen:
+            "kiln.fulfillment.proxy_server.generate_license_key_v2",
+            return_value="kiln_v2_abc123_sig",
+        ) as mock_gen, patch(
+            "kiln.fulfillment.proxy_server.parse_license_claims",
+            return_value={"jti": "jti-123", "issued_at": 100.0, "expires_at": 200.0},
+        ):
             result = orch.register_user("user@test.com")
 
-        mock_gen.assert_called_once_with(LicenseTier.FREE, "user@test.com")
-        assert result["license_key"] == "kiln_free_abc123"
+        mock_gen.assert_called_once()
+        assert result["license_key"] == "kiln_v2_abc123_sig"
         assert result["tier"] == "free"
         assert result["email"] == "user@test.com"
+        assert result["jti"] == "jti-123"
 
     def test_signing_key_error_propagates(self, orch: ProxyOrchestrator):
         with patch(
-            "kiln.fulfillment.proxy_server.generate_license_key",
+            "kiln.fulfillment.proxy_server.generate_license_key_v2",
             side_effect=ValueError("No signing key configured"),
         ):
             with pytest.raises(ValueError, match="signing key"):
