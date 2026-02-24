@@ -44,7 +44,10 @@ from kiln.server import (
     _tool_limiter,
     _validate_local_file,
     cancel_print as server_cancel_print,
+    clear_emergency_stop as server_clear_emergency_stop,
     delete_file as server_delete_file,
+    emergency_status as server_emergency_status,
+    emergency_trip_input as server_emergency_trip_input,
     pause_print as server_pause_print,
     preflight_check,
     printer_files,
@@ -61,6 +64,17 @@ from kiln.server import (
 def _disable_rate_limiter(monkeypatch):
     """Disable rate limiting in tests to prevent timing-dependent failures."""
     monkeypatch.setattr(_tool_limiter, "check", lambda *a, **kw: None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_emergency_state(monkeypatch):
+    """Keep server tests isolated from any local persisted E-stop state."""
+    monkeypatch.setenv("KILN_EMERGENCY_PERSIST", "0")
+    import kiln.emergency as _emergency_mod
+
+    _emergency_mod._coordinator = None
+    yield
+    _emergency_mod._coordinator = None
 
 
 
@@ -310,6 +324,13 @@ class TestStartPrint:
         result = server_start_print("missing.gcode")
         assert result["success"] is False
 
+    @patch("kiln.server._emergency_latch_error")
+    def test_blocked_when_emergency_latched(self, mock_latch_error):
+        mock_latch_error.return_value = _error_dict("latched", code="E_STOP_LATCHED", retryable=False)
+        result = server_start_print("benchy.gcode")
+        assert result["success"] is False
+        assert result["error"]["code"] == "E_STOP_LATCHED"
+
 
 # ---------------------------------------------------------------------------
 # cancel_print()
@@ -387,6 +408,45 @@ class TestResumePrint:
 
         result = server_resume_print()
         assert result["success"] is False
+
+    @patch("kiln.server._emergency_latch_error")
+    def test_blocked_when_emergency_latched(self, mock_latch_error):
+        mock_latch_error.return_value = _error_dict("latched", code="E_STOP_LATCHED", retryable=False)
+        result = server_resume_print()
+        assert result["success"] is False
+        assert result["error"]["code"] == "E_STOP_LATCHED"
+
+
+class TestEmergencyTools:
+    @patch("kiln.emergency.get_emergency_coordinator")
+    def test_emergency_status_single(self, mock_get_coord):
+        coord = MagicMock()
+        coord.get_latch_status.return_value = {"printer_id": "default", "latched": False}
+        mock_get_coord.return_value = coord
+
+        result = server_emergency_status("default")
+        assert result["success"] is True
+        assert result["emergency_status"]["printer_id"] == "default"
+
+    @patch("kiln.emergency.get_emergency_coordinator")
+    def test_emergency_clear_success(self, mock_get_coord):
+        coord = MagicMock()
+        coord.clear_stop_with_ack.return_value = {
+            "success": True,
+            "status": {"printer_id": "default", "latched": False},
+            "message": "cleared",
+        }
+        mock_get_coord.return_value = coord
+
+        result = server_clear_emergency_stop("default", "operator confirmed", acknowledged_by="adam")
+        assert result["success"] is True
+        assert result["cleared"] is True
+
+    @patch("kiln.server._ESTOP_INPUT_TOKEN", "abc123")
+    def test_emergency_trip_input_requires_token(self):
+        result = server_emergency_trip_input("default", token="wrong")
+        assert result["success"] is False
+        assert result["error"]["code"] == "AUTH_ERROR"
 
 
 # ---------------------------------------------------------------------------

@@ -229,6 +229,27 @@ class JobScheduler:
         except Exception:
             logger.debug("Failed to auto-record outcome for job %s (non-fatal)", job_id, exc_info=True)
 
+    def _emergency_block_reason(self, printer_name: str) -> str | None:
+        """Return dispatch block reason when a printer is emergency-latched."""
+        try:
+            from kiln.emergency import get_emergency_coordinator
+
+            status = get_emergency_coordinator().get_latch_status(printer_name)
+        except Exception as exc:
+            # Best effort: if safety status can't be read, do not block dispatch.
+            logger.debug("Emergency status lookup failed for %s: %s", printer_name, exc)
+            return None
+
+        if not bool(status.get("latched")):
+            return None
+        blockers = status.get("critical_interlocks_pending") or []
+        if blockers:
+            return (
+                "Emergency latch is active; critical interlocks pending: "
+                + ", ".join(str(x) for x in blockers)
+            )
+        return "Emergency latch is active; operator acknowledgement + clear required."
+
     def tick(self) -> dict[str, Any]:
         """Run one scheduling cycle.  Can be called manually for testing.
 
@@ -250,6 +271,23 @@ class JobScheduler:
         for job_id, printer_name in active_snapshot.items():
             checked += 1
             try:
+                estop_reason = self._emergency_block_reason(printer_name)
+                if estop_reason:
+                    error_msg = f"Job stopped due to safety latch on {printer_name}: {estop_reason}"
+                    with self._lock:
+                        self._active_jobs.pop(job_id, None)
+                        self._retry_counts.pop(job_id, None)
+                        self._retry_not_before.pop(job_id, None)
+                    self._queue.mark_failed(job_id, error_msg)
+                    self._event_bus.publish(
+                        EventType.JOB_FAILED,
+                        {"job_id": job_id, "error": error_msg},
+                        source="scheduler",
+                    )
+                    self._auto_record_outcome(job_id, printer_name, "failed", error_msg=error_msg)
+                    failed.append({"job_id": job_id, "error": error_msg})
+                    continue
+
                 adapter = self._registry.get(printer_name)
                 state = adapter.get_state()
                 job_progress = adapter.get_job()
@@ -346,6 +384,26 @@ class JobScheduler:
         for printer_name in available:
             next_job = self._queue.next_job(printer_name=printer_name)
             if next_job is None:
+                continue
+
+            estop_reason = self._emergency_block_reason(printer_name)
+            if estop_reason:
+                logger.warning(
+                    "Dispatch blocked for %s (job %s): %s",
+                    printer_name,
+                    next_job.id,
+                    estop_reason,
+                )
+                self._event_bus.publish(
+                    EventType.SAFETY_ESCALATED,
+                    {
+                        "printer_name": printer_name,
+                        "job_id": next_job.id,
+                        "reason": "emergency_latched",
+                        "message": estop_reason,
+                    },
+                    source="scheduler",
+                )
                 continue
 
             # Respect exponential backoff for retried jobs

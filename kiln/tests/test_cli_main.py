@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+import time
+from unittest.mock import MagicMock, call, patch
 
 import click
 import pytest
@@ -24,6 +26,17 @@ from kiln.printers.base import (
 @pytest.fixture
 def runner():
     return CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _reset_emergency_state(monkeypatch):
+    """Keep CLI tests isolated from any local persisted E-stop state."""
+    monkeypatch.setenv("KILN_EMERGENCY_PERSIST", "0")
+    import kiln.emergency as _emergency_mod
+
+    _emergency_mod._coordinator = None
+    yield
+    _emergency_mod._coordinator = None
 
 
 @pytest.fixture
@@ -149,6 +162,95 @@ class TestIngestWatch:
         assert payload["data"]["mode"] == "detect_only"
         assert str(file_path) in payload["data"]["detected"]
 
+    def test_detect_once_with_state_file_persists_progress(self, runner, tmp_path):
+        watch_dir = tmp_path / "incoming"
+        watch_dir.mkdir()
+        file_path = watch_dir / "part.gcode"
+        file_path.write_text("G28\nM104 S200\n", encoding="utf-8")
+        state_path = tmp_path / "watch_state.json"
+
+        first = runner.invoke(
+            cli,
+            [
+                "ingest",
+                "watch",
+                "--dir",
+                str(watch_dir),
+                "--once",
+                "--state-file",
+                str(state_path),
+                "--min-stable-seconds",
+                "0",
+                "--json",
+            ],
+        )
+        assert first.exit_code == 0, first.output
+        first_payload = json.loads(first.output)
+        assert str(file_path) in first_payload["data"]["detected"]
+        assert state_path.exists()
+
+        second = runner.invoke(
+            cli,
+            [
+                "ingest",
+                "watch",
+                "--dir",
+                str(watch_dir),
+                "--once",
+                "--state-file",
+                str(state_path),
+                "--min-stable-seconds",
+                "0",
+                "--json",
+            ],
+        )
+        assert second.exit_code == 0, second.output
+        second_payload = json.loads(second.output)
+        assert second_payload["data"]["detected"] == []
+
+    def test_detect_once_respects_stability_window(self, runner, tmp_path):
+        watch_dir = tmp_path / "incoming"
+        watch_dir.mkdir()
+        file_path = watch_dir / "fresh.gcode"
+        file_path.write_text("G28\nM104 S200\n", encoding="utf-8")
+
+        deferred = runner.invoke(
+            cli,
+            [
+                "ingest",
+                "watch",
+                "--dir",
+                str(watch_dir),
+                "--once",
+                "--min-stable-seconds",
+                "10",
+                "--json",
+            ],
+        )
+        assert deferred.exit_code == 0, deferred.output
+        deferred_payload = json.loads(deferred.output)
+        assert deferred_payload["data"]["detected"] == []
+
+        old_ts = time.time() - 20
+        os.utime(file_path, (old_ts, old_ts))
+
+        ready = runner.invoke(
+            cli,
+            [
+                "ingest",
+                "watch",
+                "--dir",
+                str(watch_dir),
+                "--once",
+                "--min-stable-seconds",
+                "10",
+                "--json",
+            ],
+        )
+        assert ready.exit_code == 0, ready.output
+        ready_payload = json.loads(ready.output)
+        assert str(file_path) in ready_payload["data"]["detected"]
+
     def test_auto_queue_once_dispatches_when_idle(self, runner, tmp_path):
         watch_dir = tmp_path / "incoming"
         watch_dir.mkdir()
@@ -201,6 +303,150 @@ class TestIngestWatch:
         adapter.start_print.assert_called_once_with("widget.gcode")
 
 
+class TestIngestService:
+    def test_service_install_and_status(self, runner, tmp_path):
+        watch_dir = tmp_path / "incoming"
+        watch_dir.mkdir()
+        config_path = tmp_path / "service.json"
+
+        install = runner.invoke(
+            cli,
+            [
+                "ingest",
+                "service",
+                "install",
+                "--dir",
+                str(watch_dir),
+                "--config-path",
+                str(config_path),
+                "--json",
+            ],
+        )
+        assert install.exit_code == 0, install.output
+        install_payload = json.loads(install.output)
+        assert install_payload["status"] == "success"
+        assert config_path.exists()
+
+        status = runner.invoke(
+            cli,
+            ["ingest", "service", "status", "--config-path", str(config_path), "--json"],
+        )
+        assert status.exit_code == 0, status.output
+        status_payload = json.loads(status.output)
+        assert status_payload["status"] == "success"
+        assert status_payload["data"]["installed"] is True
+        assert status_payload["data"]["running"] is False
+
+    def test_service_start_writes_pid(self, runner, tmp_path):
+        watch_dir = tmp_path / "incoming"
+        watch_dir.mkdir()
+        config_path = tmp_path / "service.json"
+
+        install = runner.invoke(
+            cli,
+            [
+                "ingest",
+                "service",
+                "install",
+                "--dir",
+                str(watch_dir),
+                "--config-path",
+                str(config_path),
+                "--json",
+            ],
+        )
+        assert install.exit_code == 0, install.output
+
+        proc = MagicMock()
+        proc.pid = 43210
+        proc.poll.return_value = None
+        with patch("kiln.cli.main.subprocess.Popen", return_value=proc):
+            start = runner.invoke(
+                cli,
+                ["ingest", "service", "start", "--config-path", str(config_path), "--json"],
+            )
+        assert start.exit_code == 0, start.output
+        start_payload = json.loads(start.output)
+        assert start_payload["data"]["running"] is True
+        assert start_payload["data"]["pid"] == 43210
+
+        cfg = json.loads(config_path.read_text(encoding="utf-8"))
+        pid_path = Path(cfg["pid_file"])
+        assert pid_path.exists()
+        assert pid_path.read_text(encoding="utf-8").strip() == "43210"
+
+    def test_service_stop_not_running(self, runner, tmp_path):
+        watch_dir = tmp_path / "incoming"
+        watch_dir.mkdir()
+        config_path = tmp_path / "service.json"
+        install = runner.invoke(
+            cli,
+            [
+                "ingest",
+                "service",
+                "install",
+                "--dir",
+                str(watch_dir),
+                "--config-path",
+                str(config_path),
+                "--json",
+            ],
+        )
+        assert install.exit_code == 0, install.output
+
+        stop = runner.invoke(
+            cli,
+            ["ingest", "service", "stop", "--config-path", str(config_path), "--json"],
+        )
+        assert stop.exit_code == 0, stop.output
+        stop_payload = json.loads(stop.output)
+        assert stop_payload["data"]["running"] is False
+        assert stop_payload["data"]["reason"] == "not_running"
+
+    def test_service_stop_running_process(self, runner, tmp_path):
+        watch_dir = tmp_path / "incoming"
+        watch_dir.mkdir()
+        config_path = tmp_path / "service.json"
+        install = runner.invoke(
+            cli,
+            [
+                "ingest",
+                "service",
+                "install",
+                "--dir",
+                str(watch_dir),
+                "--config-path",
+                str(config_path),
+                "--json",
+            ],
+        )
+        assert install.exit_code == 0, install.output
+
+        cfg = json.loads(config_path.read_text(encoding="utf-8"))
+        pid_path = Path(cfg["pid_file"])
+        pid_path.parent.mkdir(parents=True, exist_ok=True)
+        pid_path.write_text("5001\n", encoding="utf-8")
+
+        checks = {"count": 0}
+
+        def _fake_is_running(_: int) -> bool:
+            checks["count"] += 1
+            return checks["count"] == 1
+
+        with (
+            patch("kiln.cli.main.os.kill"),
+            patch("kiln.cli.main._is_pid_running", side_effect=_fake_is_running),
+        ):
+            stop = runner.invoke(
+                cli,
+                ["ingest", "service", "stop", "--config-path", str(config_path), "--json"],
+            )
+        assert stop.exit_code == 0, stop.output
+        stop_payload = json.loads(stop.output)
+        assert stop_payload["data"]["stopped"] is True
+        assert stop_payload["data"]["forced"] is False
+
+
 class TestFleetRoute:
     def test_fleet_route_json(self, runner):
         adapter = MagicMock()
@@ -223,13 +469,17 @@ class TestFleetRoute:
 class TestLocalFirst:
     def test_local_first_apply_updates_cloud_sync_setting(self, runner):
         fake_db = MagicMock()
+        fake_db.get_setting.return_value = '{"provider":"x"}'
         with patch("kiln.persistence.get_db", return_value=fake_db):
             result = runner.invoke(cli, ["local-first", "--apply", "--json"])
 
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["status"] == "success"
-        fake_db.set_setting.assert_called_once_with("cloud_sync_config", "")
+        assert fake_db.set_setting.call_args_list == [
+            call("cloud_sync_config_backup", '{"provider":"x"}'),
+            call("cloud_sync_config", ""),
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -433,6 +683,51 @@ class TestJobControl:
             result = runner.invoke(cli, ["resume", "--json"])
         assert result.exit_code == 0
         mock_adapter.resume_print.assert_called_once()
+
+    def test_resume_blocked_when_latched(self, runner, mock_adapter, config_file):
+        p1, p2, p3 = _patch_adapter(mock_adapter, config_file)
+        with p1, p2, p3, patch("kiln.cli.main._emergency_latch_status", return_value={"latched": True}):
+            result = runner.invoke(cli, ["resume", "--json"])
+        assert result.exit_code != 0
+        payload = json.loads(result.output)
+        assert payload["error"]["code"] == "E_STOP_LATCHED"
+
+
+class TestEmergencyCommands:
+    def test_emergency_status_json(self, runner):
+        fake_coord = MagicMock()
+        fake_coord.get_latch_status.return_value = {"printer_id": "default", "latched": False}
+        with patch("kiln.emergency.get_emergency_coordinator", return_value=fake_coord):
+            result = runner.invoke(cli, ["emergency-status", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["status"] == "success"
+        assert data["data"]["printer"] == "default"
+
+    def test_emergency_stop_json(self, runner):
+        fake_record = MagicMock()
+        fake_record.to_dict.return_value = {"printer_id": "default", "success": True}
+        fake_coord = MagicMock()
+        fake_coord.emergency_stop.return_value = fake_record
+        with patch("kiln.emergency.get_emergency_coordinator", return_value=fake_coord):
+            result = runner.invoke(cli, ["emergency-stop", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["status"] == "success"
+        assert data["data"]["emergency_stop"]["success"] is True
+
+    def test_emergency_clear_json(self, runner):
+        fake_coord = MagicMock()
+        fake_coord.clear_stop_with_ack.return_value = {
+            "success": True,
+            "status": {"printer_id": "default", "latched": False},
+        }
+        with patch("kiln.emergency.get_emergency_coordinator", return_value=fake_coord):
+            result = runner.invoke(cli, ["emergency-clear", "--ack-note", "operator checked", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["status"] == "success"
+        assert data["data"]["cleared"] is True
 
 
 # ---------------------------------------------------------------------------

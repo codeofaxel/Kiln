@@ -24,6 +24,54 @@ A command must pass *all* layers.  Failing any one is enough to block it.
 
 ---
 
+## Emergency Latch Model (E-stop)
+
+Kiln uses a persistent emergency latch per printer.  When tripped, the latch
+remains active across process restarts until an operator explicitly clears it.
+
+### What gets persisted
+
+- `latched` state
+- `reason` and `source`
+- `triggered_at`, `cleared_at`
+- `cleared_by`
+- `ack_note`
+
+### What is blocked while latched
+
+- `start_print`
+- `resume_print`
+- queue/scheduler dispatch for that printer
+- hazardous control paths (`send_gcode`, heating commands in `set_temperature`,
+  firmware resume)
+
+Blocked calls return `E_STOP_LATCHED` with next-step guidance.
+
+### Clear requirements
+
+Clearing a latch requires all of the following:
+
+1. all critical interlocks engaged
+2. explicit acknowledgement note
+3. explicit clear action (no implicit auto-resume)
+
+CLI:
+
+```bash
+kiln emergency-stop --printer default --reason user_request --source cli
+kiln emergency-status --printer default
+kiln emergency-clear --printer default --ack-note "Area inspected, safe to resume"
+```
+
+MCP tools:
+
+- `emergency_stop`
+- `emergency_status`
+- `clear_emergency_stop`
+- `emergency_trip_input` (for external button/PLC bridges)
+
+---
+
 ## Pre-flight Checks
 
 Before every print, Kiln runs a mandatory pre-flight sequence.  This cannot
@@ -63,7 +111,7 @@ These violations prevent the command from being sent at all:
   checked against hard limits (per-printer or generic defaults of 300/130/80 C).
 - **Negative temperatures** -- caught and blocked.
 - **Unconditionally blocked commands:**
-  - `M112` (emergency stop) -- must use the dedicated `cancel_print` tool.
+  - `M112` (emergency stop) -- must use the dedicated `emergency_stop` tool.
   - `M500/M501/M502` (EEPROM save/load/reset) -- agents must not modify
     firmware settings.
   - `M552/M553/M554` (network config) -- agents must not change network
@@ -170,7 +218,7 @@ The safety system actively prevents the following:
   network configuration (M552-M554), and firmware updates (M997) are all
   blocked at the G-code validation layer.
 - **Send emergency stop via G-code.**  M112 is blocked -- the dedicated
-  `cancel_print` tool handles orderly shutdown.
+  `emergency_stop` tool handles safety-stop behavior.
 - **Leave heaters on indefinitely.**  The watchdog auto-cools after the
   configured timeout.
 - **Forward unvalidated external data to the printer.**  Every adapter

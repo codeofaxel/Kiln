@@ -32,13 +32,28 @@ Usage::
 from __future__ import annotations
 
 import enum
+import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_PERSIST_SETTING_KEY = "emergency_latch_state_v1"
+_PERSIST_ENABLED_ENV = "KILN_EMERGENCY_PERSIST"
+_DEFAULT_DEBOUNCE_SECONDS = 2.0
+
+
+def _as_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +138,32 @@ class EmergencyRecord:
 
 
 @dataclass
+class EmergencyLatch:
+    """Persistent latch state for a printer emergency stop."""
+
+    printer_id: str
+    latched: bool = False
+    reason: str | None = None
+    source: str | None = None
+    triggered_at: float | None = None
+    cleared_at: float | None = None
+    cleared_by: str | None = None
+    ack_note: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "printer_id": self.printer_id,
+            "latched": self.latched,
+            "reason": self.reason,
+            "source": self.source,
+            "triggered_at": self.triggered_at,
+            "cleared_at": self.cleared_at,
+            "cleared_by": self.cleared_by,
+            "ack_note": self.ack_note,
+        }
+
+
+@dataclass
 class SafetyInterlock:
     """State of a single safety interlock on a printer.
 
@@ -159,12 +200,13 @@ class SafetyInterlock:
 class EmergencyCoordinator:
     """Central coordinator for emergency stops and safety interlocks.
 
-    All public methods are thread-safe.  The coordinator maintains three
+    All public methods are thread-safe.  The coordinator maintains four
     pieces of mutable state protected by a single lock:
 
     - **interlocks** -- ``{(printer_id, name): SafetyInterlock}``
     - **stop_history** -- ordered list of :class:`EmergencyRecord`
     - **stopped_printers** -- set of printer IDs currently in E-stop state
+    - **latches** -- per-printer persistent latch metadata
     """
 
     def __init__(self) -> None:
@@ -172,6 +214,114 @@ class EmergencyCoordinator:
         self._interlocks: dict[tuple[str, str], SafetyInterlock] = {}
         self._stop_history: list[EmergencyRecord] = []
         self._stopped_printers: set[str] = set()
+        self._latches: dict[str, EmergencyLatch] = {}
+        self._debounce_seconds = self._resolve_debounce_seconds()
+        self._persist_enabled = os.environ.get(_PERSIST_ENABLED_ENV, "1").strip().lower() not in ("0", "false", "no")
+        self._load_persisted_state()
+
+    def _resolve_debounce_seconds(self) -> float:
+        raw = os.environ.get("KILN_EMERGENCY_DEBOUNCE_SECONDS", "").strip()
+        if not raw:
+            return _DEFAULT_DEBOUNCE_SECONDS
+        try:
+            value = float(raw)
+        except ValueError:
+            logger.warning("Invalid KILN_EMERGENCY_DEBOUNCE_SECONDS=%r, using %.1fs", raw, _DEFAULT_DEBOUNCE_SECONDS)
+            return _DEFAULT_DEBOUNCE_SECONDS
+        return max(0.0, value)
+
+    def _load_persisted_state(self) -> None:
+        """Restore latched state from persistence (best effort)."""
+        if not self._persist_enabled:
+            return
+        try:
+            from kiln.persistence import get_db
+
+            raw = get_db().get_setting(_PERSIST_SETTING_KEY, "")
+            if not raw:
+                return
+            payload = json.loads(raw)
+        except Exception as exc:
+            logger.debug("Emergency state load skipped: %s", exc)
+            return
+
+        if not isinstance(payload, dict):
+            return
+
+        with self._lock:
+            stopped = payload.get("stopped_printers", [])
+            if isinstance(stopped, list):
+                self._stopped_printers = {str(x) for x in stopped if str(x).strip()}
+
+            raw_latches = payload.get("latches", {})
+            if isinstance(raw_latches, dict):
+                for printer_id, item in raw_latches.items():
+                    if not isinstance(item, dict):
+                        continue
+                    pid = str(printer_id).strip()
+                    if not pid:
+                        continue
+                    self._latches[pid] = EmergencyLatch(
+                        printer_id=pid,
+                        latched=bool(item.get("latched", False)),
+                        reason=str(item.get("reason")) if item.get("reason") is not None else None,
+                        source=str(item.get("source")) if item.get("source") is not None else None,
+                        triggered_at=_as_float(item.get("triggered_at")),
+                        cleared_at=_as_float(item.get("cleared_at")),
+                        cleared_by=str(item.get("cleared_by")) if item.get("cleared_by") is not None else None,
+                        ack_note=str(item.get("ack_note")) if item.get("ack_note") is not None else None,
+                    )
+            # Keep stopped set and latch states consistent.
+            for printer_id in list(self._stopped_printers):
+                latch = self._latches.get(printer_id)
+                if latch is None:
+                    self._latches[printer_id] = EmergencyLatch(printer_id=printer_id, latched=True)
+                else:
+                    latch.latched = True
+            for printer_id, latch in self._latches.items():
+                if latch.latched:
+                    self._stopped_printers.add(printer_id)
+
+    def _persist_state_locked(self) -> None:
+        """Persist stopped/latch state (requires self._lock)."""
+        if not self._persist_enabled:
+            return
+        payload = {
+            "version": 1,
+            "updated_at": time.time(),
+            "stopped_printers": sorted(self._stopped_printers),
+            "latches": {pid: latch.to_dict() for pid, latch in self._latches.items()},
+        }
+        try:
+            from kiln.persistence import get_db
+
+            get_db().set_setting(_PERSIST_SETTING_KEY, json.dumps(payload, sort_keys=True))
+        except Exception as exc:
+            logger.debug("Emergency state persist skipped: %s", exc)
+
+    def _ensure_latch_locked(self, printer_id: str) -> EmergencyLatch:
+        latch = self._latches.get(printer_id)
+        if latch is None:
+            latch = EmergencyLatch(printer_id=printer_id)
+            self._latches[printer_id] = latch
+        return latch
+
+    def _critical_interlock_blockers_locked(self, printer_id: str) -> list[str]:
+        blockers: list[str] = []
+        for (pid, _), interlock in self._interlocks.items():
+            if pid == printer_id and interlock.is_critical and not interlock.is_engaged:
+                blockers.append(interlock.name)
+        return sorted(blockers)
+
+    def _latch_status_locked(self, printer_id: str) -> dict[str, Any]:
+        latch = self._ensure_latch_locked(printer_id)
+        blockers = self._critical_interlock_blockers_locked(printer_id)
+        return {
+            **latch.to_dict(),
+            "latched": printer_id in self._stopped_printers or latch.latched,
+            "critical_interlocks_pending": blockers,
+            "all_critical_interlocks_engaged": len(blockers) == 0,
+        }
 
     # -- stop operations ---------------------------------------------------
 
@@ -180,6 +330,8 @@ class EmergencyCoordinator:
         printer_id: str,
         *,
         reason: EmergencyReason = EmergencyReason.USER_REQUEST,
+        source: str = "unknown",
+        note: str | None = None,
     ) -> EmergencyRecord:
         """Execute an immediate emergency stop on a single printer.
 
@@ -190,12 +342,55 @@ class EmergencyCoordinator:
 
         :param printer_id: Identifier of the printer to stop.
         :param reason: Why the stop was triggered.
+        :param source: Human/agent/system source label for audit context.
+        :param note: Optional short note for the latch record.
         :returns: :class:`EmergencyRecord` describing the outcome.
         """
+        printer_id = printer_id.strip()
+        if not printer_id:
+            raise ValueError("printer_id is required")
+
         now = time.time()
         gcode_sent: list[str] = []
         actions: list[str] = []
         error: str | None = None
+
+        with self._lock:
+            existing = self._latches.get(printer_id)
+            already_latched = printer_id in self._stopped_printers
+            last_trigger = existing.triggered_at if existing is not None else None
+
+        if already_latched and last_trigger is not None and (now - last_trigger) <= self._debounce_seconds:
+            # Debounce repeated stop requests from digital buttons or retries.
+            record = EmergencyRecord(
+                printer_id=printer_id,
+                success=True,
+                reason=reason,
+                timestamp=now,
+                actions_taken=["already_stopped"],
+                gcode_sent=[],
+                error=None,
+            )
+            with self._lock:
+                latch = self._ensure_latch_locked(printer_id)
+                latch.latched = True
+                latch.reason = reason.value
+                latch.source = source
+                if note:
+                    latch.ack_note = note
+                self._stop_history.append(record)
+                self._persist_state_locked()
+            logger.warning(
+                "EMERGENCY STOP (debounced): printer=%s reason=%s source=%s",
+                printer_id,
+                reason.value,
+                source,
+            )
+            if source and source != "unknown":
+                self._emit_event(printer_id, reason, ["already_stopped"], source=source)
+            else:
+                self._emit_event(printer_id, reason, ["already_stopped"])
+            return record
 
         # Attempt to send emergency G-code via the printer adapter.
         try:
@@ -224,16 +419,30 @@ class EmergencyCoordinator:
 
         with self._lock:
             self._stopped_printers.add(printer_id)
+            latch = self._ensure_latch_locked(printer_id)
+            latch.latched = True
+            latch.reason = reason.value
+            latch.source = source
+            latch.triggered_at = now
+            latch.cleared_at = None
+            latch.cleared_by = None
+            if note:
+                latch.ack_note = note
             self._stop_history.append(record)
+            self._persist_state_locked()
 
         logger.warning(
-            "EMERGENCY STOP: printer=%s reason=%s actions=%s",
+            "EMERGENCY STOP: printer=%s reason=%s source=%s actions=%s",
             printer_id,
             reason.value,
+            source,
             actions,
         )
 
-        self._emit_event(printer_id, reason, actions)
+        if source and source != "unknown":
+            self._emit_event(printer_id, reason, actions, source=source)
+        else:
+            self._emit_event(printer_id, reason, actions)
 
         return record
 
@@ -241,6 +450,8 @@ class EmergencyCoordinator:
         self,
         *,
         reason: EmergencyReason = EmergencyReason.USER_REQUEST,
+        source: str = "unknown",
+        note: str | None = None,
     ) -> list[EmergencyRecord]:
         """Execute an immediate emergency stop on ALL known printers.
 
@@ -250,6 +461,8 @@ class EmergencyCoordinator:
         list.
 
         :param reason: Why the stop was triggered.
+        :param source: Human/agent/system source label for audit context.
+        :param note: Optional short note for latch records.
         :returns: List of :class:`EmergencyRecord` for each printer.
         """
         printer_ids: set[str] = set()
@@ -269,7 +482,7 @@ class EmergencyCoordinator:
 
         results: list[EmergencyRecord] = []
         for printer_id in sorted(printer_ids):
-            results.append(self.emergency_stop(printer_id, reason=reason))
+            results.append(self.emergency_stop(printer_id, reason=reason, source=source, note=note))
         return results
 
     # -- interlock management ----------------------------------------------
@@ -282,6 +495,7 @@ class EmergencyCoordinator:
         key = (interlock.printer_id, interlock.name)
         with self._lock:
             self._interlocks[key] = interlock
+            self._persist_state_locked()
         logger.info(
             "Interlock registered: printer=%s name=%s critical=%s engaged=%s",
             interlock.printer_id,
@@ -296,6 +510,7 @@ class EmergencyCoordinator:
         name: str,
         *,
         is_engaged: bool,
+        source: str = "interlock",
     ) -> None:
         """Update the engaged state of a registered interlock.
 
@@ -306,6 +521,7 @@ class EmergencyCoordinator:
         :param printer_id: Printer the interlock belongs to.
         :param name: Interlock name as registered.
         :param is_engaged: New engaged state.
+        :param source: Source label for auto-triggered emergency stop.
         :raises KeyError: If the interlock is not registered.
         """
         key = (printer_id, name)
@@ -316,6 +532,7 @@ class EmergencyCoordinator:
             interlock.is_engaged = is_engaged
             interlock.last_checked = time.time()
             is_critical = interlock.is_critical
+            self._persist_state_locked()
 
         if is_critical and not is_engaged:
             logger.warning(
@@ -326,6 +543,8 @@ class EmergencyCoordinator:
             self.emergency_stop(
                 printer_id,
                 reason=EmergencyReason.INTERLOCK_BREACH,
+                source=source,
+                note=f"critical interlock disengaged: {name}",
             )
 
     def check_interlocks(self, printer_id: str) -> list[SafetyInterlock]:
@@ -347,7 +566,109 @@ class EmergencyCoordinator:
             cleared.
         """
         with self._lock:
-            return printer_id in self._stopped_printers
+            latch = self._latches.get(printer_id)
+            return printer_id in self._stopped_printers or bool(latch and latch.latched)
+
+    def get_latch_status(self, printer_id: str) -> dict[str, Any]:
+        """Return emergency latch + critical interlock status for a printer."""
+        with self._lock:
+            return self._latch_status_locked(printer_id)
+
+    def list_latch_statuses(
+        self,
+        *,
+        include_unlatched: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return latch status for known printers."""
+        with self._lock:
+            known: set[str] = set(self._stopped_printers)
+            known.update(self._latches.keys())
+            known.update(pid for (pid, _) in self._interlocks.keys())
+            rows = [self._latch_status_locked(pid) for pid in sorted(known)]
+        if include_unlatched:
+            return rows
+        return [row for row in rows if bool(row.get("latched"))]
+
+    def clear_stop_with_ack(
+        self,
+        printer_id: str,
+        *,
+        acknowledged_by: str | None = None,
+        ack_note: str | None = None,
+    ) -> dict[str, Any]:
+        """Acknowledge and clear an emergency stop for a printer.
+
+        The stop can only be cleared if ALL critical interlocks for the
+        printer are currently engaged.  Returns a structured result for
+        API/CLI usage.
+        """
+        printer_id = (printer_id or "").strip()
+        if not printer_id:
+            return {
+                "success": False,
+                "cleared": False,
+                "reason": "invalid_printer_id",
+                "status": None,
+                "message": "printer_id is required",
+            }
+
+        actor = (acknowledged_by or "").strip() or "operator"
+        note = (ack_note or "").strip() or None
+        now = time.time()
+
+        with self._lock:
+            status_before = self._latch_status_locked(printer_id)
+            if not bool(status_before.get("latched")):
+                return {
+                    "success": False,
+                    "cleared": False,
+                    "reason": "not_stopped",
+                    "status": status_before,
+                    "message": f"Printer '{printer_id}' is not latched.",
+                }
+
+            blockers = self._critical_interlock_blockers_locked(printer_id)
+            if blockers:
+                return {
+                    "success": False,
+                    "cleared": False,
+                    "reason": "critical_interlocks_pending",
+                    "status": status_before,
+                    "message": (
+                        f"Cannot clear E-stop for '{printer_id}' until critical interlocks are engaged: "
+                        + ", ".join(blockers)
+                    ),
+                }
+
+            self._stopped_printers.discard(printer_id)
+            latch = self._ensure_latch_locked(printer_id)
+            latch.latched = False
+            latch.cleared_at = now
+            latch.cleared_by = actor
+            if note:
+                latch.ack_note = note
+            self._persist_state_locked()
+            status_after = self._latch_status_locked(printer_id)
+
+        logger.info(
+            "E-stop cleared for printer '%s' by %s.",
+            printer_id,
+            actor,
+        )
+        self._emit_event(
+            printer_id,
+            EmergencyReason.USER_REQUEST,
+            ["clear_emergency_stop"],
+            source=f"clear:{actor}",
+            event_name="emergency_clear",
+        )
+        return {
+            "success": True,
+            "cleared": True,
+            "reason": "cleared",
+            "status": status_after,
+            "message": f"E-stop cleared for printer '{printer_id}'.",
+        }
 
     def clear_stop(self, printer_id: str) -> bool:
         """Acknowledge and clear an emergency stop for a printer.
@@ -361,24 +682,12 @@ class EmergencyCoordinator:
             ``False`` if a critical interlock is still disengaged or
             the printer was not in a stopped state.
         """
-        with self._lock:
-            if printer_id not in self._stopped_printers:
-                return False
-
-            # Check all critical interlocks are engaged.
-            for (pid, _), il in self._interlocks.items():
-                if pid == printer_id and il.is_critical and not il.is_engaged:
-                    logger.warning(
-                        "Cannot clear E-stop for '%s': critical interlock '%s' is disengaged.",
-                        printer_id,
-                        il.name,
-                    )
-                    return False
-
-            self._stopped_printers.discard(printer_id)
-
-        logger.info("E-stop cleared for printer '%s'.", printer_id)
-        return True
+        result = self.clear_stop_with_ack(
+            printer_id,
+            acknowledged_by="legacy_clear_stop",
+            ack_note="legacy clear_stop()",
+        )
+        return bool(result.get("cleared"))
 
     # -- history -----------------------------------------------------------
 
@@ -488,6 +797,9 @@ class EmergencyCoordinator:
         printer_id: str,
         reason: EmergencyReason,
         actions: list[str],
+        *,
+        source: str = "unknown",
+        event_name: str = "emergency_stop",
     ) -> None:
         """Best-effort event emission.  Never raises."""
         try:
@@ -499,7 +811,8 @@ class EmergencyCoordinator:
                     "printer_id": printer_id,
                     "reason": reason.value,
                     "actions": actions,
-                    "event": "emergency_stop",
+                    "event": event_name,
+                    "source": source,
                 },
                 source=f"emergency:{printer_id}",
             )
@@ -559,6 +872,8 @@ def emergency_stop(
     printer_id: str,
     *,
     reason: EmergencyReason = EmergencyReason.USER_REQUEST,
+    source: str = "unknown",
+    note: str | None = None,
 ) -> EmergencyRecord:
     """Convenience wrapper: stop a single printer via the global coordinator.
 
@@ -566,19 +881,49 @@ def emergency_stop(
     :param reason: Why the stop was triggered.
     :returns: :class:`EmergencyRecord`.
     """
+    if source == "unknown" and note is None:
+        return get_emergency_coordinator().emergency_stop(
+            printer_id,
+            reason=reason,
+        )
     return get_emergency_coordinator().emergency_stop(
         printer_id,
         reason=reason,
+        source=source,
+        note=note,
     )
 
 
 def emergency_stop_all(
     *,
     reason: EmergencyReason = EmergencyReason.USER_REQUEST,
+    source: str = "unknown",
+    note: str | None = None,
 ) -> list[EmergencyRecord]:
     """Convenience wrapper: stop ALL known printers via the global coordinator.
 
     :param reason: Why the stop was triggered.
     :returns: List of :class:`EmergencyRecord`.
     """
-    return get_emergency_coordinator().emergency_stop_all(reason=reason)
+    if source == "unknown" and note is None:
+        return get_emergency_coordinator().emergency_stop_all(reason=reason)
+    return get_emergency_coordinator().emergency_stop_all(reason=reason, source=source, note=note)
+
+
+def emergency_status(printer_id: str) -> dict[str, Any]:
+    """Return emergency latch status for a single printer."""
+    return get_emergency_coordinator().get_latch_status(printer_id)
+
+
+def clear_emergency_stop(
+    printer_id: str,
+    *,
+    acknowledged_by: str | None = None,
+    ack_note: str | None = None,
+) -> dict[str, Any]:
+    """Acknowledge and clear emergency stop state for a printer."""
+    return get_emergency_coordinator().clear_stop_with_ack(
+        printer_id,
+        acknowledged_by=acknowledged_by,
+        ack_note=ack_note,
+    )

@@ -38,6 +38,13 @@ from kiln.emergency import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
+@pytest.fixture(autouse=True)
+def _disable_emergency_persistence(monkeypatch):
+    """Keep tests isolated from any local persisted latch state."""
+    monkeypatch.setenv("KILN_EMERGENCY_PERSIST", "0")
+    monkeypatch.setenv("KILN_EMERGENCY_DEBOUNCE_SECONDS", "0")
+
 @dataclass
 class _FakeResult:
     """Minimal stand-in for PrintResult returned by adapter.emergency_stop()."""
@@ -370,6 +377,8 @@ class TestCriticalInterlockAutoStop:
         mock_estop.assert_called_once_with(
             "voron",
             reason=EmergencyReason.INTERLOCK_BREACH,
+            source="interlock",
+            note="critical interlock disengaged: enclosure",
         )
 
     def test_non_critical_disengage_does_not_trigger_estop(self):

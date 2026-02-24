@@ -15,6 +15,9 @@ import json
 import logging
 import os
 from pathlib import Path
+import shutil
+import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -306,6 +309,36 @@ def _notify_preview_if_available(preview_path: str) -> bool:
     return False
 
 
+def _resolve_emergency_printer_name(ctx: click.Context, printer_name: str | None = None) -> str:
+    """Resolve printer identifier used for emergency latch checks."""
+    if printer_name and printer_name.strip():
+        return printer_name.strip()
+    selected = (ctx.obj or {}).get("printer")
+    if isinstance(selected, str) and selected.strip():
+        return selected.strip()
+    return "default"
+
+
+def _emergency_latch_status(printer_name: str) -> dict[str, Any] | None:
+    """Best-effort emergency latch status lookup for CLI safety gates."""
+    try:
+        from kiln.emergency import get_emergency_coordinator
+
+        return get_emergency_coordinator().get_latch_status(printer_name)
+    except Exception as exc:
+        logger.debug("Emergency status lookup failed for %s: %s", printer_name, exc)
+        return None
+
+
+def _emergency_block_message(printer_name: str, status: dict[str, Any]) -> str:
+    blockers = status.get("critical_interlocks_pending") or []
+    message = f"Emergency latch is active for printer '{printer_name}'."
+    if blockers:
+        message += " Critical interlocks pending: " + ", ".join(str(x) for x in blockers) + "."
+    message += " Resolve hazards, acknowledge, then clear with `kiln emergency-clear`."
+    return message
+
+
 # ---------------------------------------------------------------------------
 # Adapter factory
 # ---------------------------------------------------------------------------
@@ -570,6 +603,210 @@ def _scan_ingest_directory(watch_dir: Path, seen: dict[str, float]) -> list[Path
         seen[key] = mtime
         discovered.append(entry)
     return discovered
+
+
+def _normalise_ingest_seen(raw_seen: Any) -> dict[str, float]:
+    """Normalize persisted seen-map payload into {path: mtime}."""
+    if not isinstance(raw_seen, dict):
+        return {}
+    seen: dict[str, float] = {}
+    for key, value in raw_seen.items():
+        if not isinstance(key, str):
+            continue
+        try:
+            seen[key] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return seen
+
+
+def _load_ingest_seen_state(state_path: Path) -> dict[str, float]:
+    """Load persisted ingest seen-state from disk."""
+    payload = _read_json_file(state_path, default={})
+    return _normalise_ingest_seen(payload.get("seen"))
+
+
+def _save_ingest_seen_state(state_path: Path, watch_dir: Path, seen: dict[str, float]) -> None:
+    """Persist ingest seen-state to disk."""
+    payload = {
+        "watch_dir": str(watch_dir),
+        "updated_at": time.time(),
+        "seen": seen,
+    }
+    _write_json_file(state_path, payload)
+
+
+def _filter_stable_ingest_files(
+    detected: list[Path],
+    *,
+    seen: dict[str, float],
+    min_stable_seconds: float,
+) -> list[Path]:
+    """Keep only files old enough to avoid ingesting partially-written files."""
+    if min_stable_seconds <= 0:
+        return detected
+
+    stable: list[Path] = []
+    now = time.time()
+    for path in detected:
+        try:
+            stat = path.stat()
+            age = now - stat.st_mtime
+        except OSError:
+            continue
+        if age >= min_stable_seconds:
+            stable.append(path)
+            continue
+        # Re-arm the file so the next scan can pick it up once stable.
+        try:
+            seen.pop(str(path.resolve()), None)
+        except OSError:
+            pass
+    return stable
+
+
+def _default_ingest_service_dir() -> Path:
+    """Return the base directory for ingest service metadata files."""
+    override = os.environ.get("KILN_INGEST_SERVICE_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return Path.home() / ".kiln" / "ingest_service"
+
+
+def _default_ingest_service_config_path() -> Path:
+    return _default_ingest_service_dir() / "service.json"
+
+
+def _default_ingest_pid_path() -> Path:
+    return _default_ingest_service_dir() / "service.pid"
+
+
+def _default_ingest_log_path() -> Path:
+    return _default_ingest_service_dir() / "service.log"
+
+
+def _default_ingest_state_path() -> Path:
+    return _default_ingest_service_dir() / "watch_state.json"
+
+
+def _read_json_file(path: Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Load JSON file content with safe defaults."""
+    if not path.exists():
+        return dict(default or {})
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return dict(default or {})
+
+
+def _write_json_file(path: Path, data: dict[str, Any]) -> None:
+    """Write JSON atomically to reduce state-file corruption risk."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _is_pid_running(pid: int) -> bool:
+    """Return True when a process exists for PID."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _read_pid_file(pid_path: Path) -> int | None:
+    """Read PID from file, returning None when missing/invalid."""
+    if not pid_path.exists():
+        return None
+    try:
+        value = pid_path.read_text(encoding="utf-8").strip()
+        if not value:
+            return None
+        return int(value)
+    except Exception:
+        return None
+
+
+def _resolve_kiln_command() -> list[str]:
+    """Resolve executable command prefix for launching Kiln subprocesses."""
+    kiln_bin = shutil.which("kiln")
+    if kiln_bin:
+        return [kiln_bin]
+    return [sys.executable, "-m", "kiln"]
+
+
+def _build_ingest_watch_command(config: dict[str, Any]) -> list[str]:
+    """Build command line for background ingest watch process."""
+    cmd = _resolve_kiln_command() + [
+        "ingest",
+        "watch",
+        "--dir",
+        str(config["watch_dir"]),
+        "--interval",
+        str(config.get("interval", 2.0)),
+        "--state-file",
+        str(config["state_file"]),
+        "--min-stable-seconds",
+        str(config.get("min_stable_seconds", 2.0)),
+    ]
+    if bool(config.get("auto_queue", False)):
+        cmd.append("--auto-queue")
+    printer = str(config.get("printer", "") or "").strip()
+    if printer:
+        cmd.extend(["--printer", printer])
+    material = str(config.get("material", "PLA") or "PLA").strip().upper()
+    if material:
+        cmd.extend(["--material", material])
+    return cmd
+
+
+def _tail_text(path: Path, max_lines: int = 30) -> str:
+    """Return tail lines from a text file for diagnostics."""
+    if not path.exists():
+        return ""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return ""
+    return "\n".join(lines[-max_lines:])
+
+
+def _resolve_service_config_path(config_path: str | None) -> Path:
+    """Resolve ingest service config file path."""
+    if config_path:
+        return Path(config_path).expanduser().resolve()
+    return _default_ingest_service_config_path()
+
+
+def _resolve_service_sidecar_paths(config_path: Path, config: dict[str, Any]) -> tuple[Path, Path, Path]:
+    """Resolve pid/log/state paths from config with safe defaults."""
+    config_dir = config_path.parent
+    pid_path = Path(str(config.get("pid_file") or (config_dir / "service.pid"))).expanduser().resolve()
+    log_path = Path(str(config.get("log_file") or (config_dir / "service.log"))).expanduser().resolve()
+    state_path = Path(str(config.get("state_file") or (config_dir / "watch_state.json"))).expanduser().resolve()
+    return pid_path, log_path, state_path
+
+
+def _coerce_bool(value: Any) -> bool:
+    """Interpret bool-like values from config payloads."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
 
 
 def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
@@ -1412,6 +1649,20 @@ def print_cmd(
             click.echo(format_error("No files matched.", code="NO_FILES", json_mode=json_mode))
             sys.exit(1)
 
+        # Hard gate direct print starts while emergency latch is active.
+        if not use_queue:
+            safety_printer = _resolve_emergency_printer_name(ctx)
+            estop_status = _emergency_latch_status(safety_printer)
+            if estop_status and bool(estop_status.get("latched")):
+                click.echo(
+                    format_error(
+                        _emergency_block_message(safety_printer, estop_status),
+                        code="E_STOP_LATCHED",
+                        json_mode=json_mode,
+                    )
+                )
+                sys.exit(1)
+
         # Batch mode: queue multiple files
         if len(expanded) > 1 and use_queue:
             import json as _json
@@ -1637,6 +1888,17 @@ def pause(ctx: click.Context, json_mode: bool) -> None:
 def resume(ctx: click.Context, json_mode: bool) -> None:
     """Resume a paused print job."""
     try:
+        safety_printer = _resolve_emergency_printer_name(ctx)
+        estop_status = _emergency_latch_status(safety_printer)
+        if estop_status and bool(estop_status.get("latched")):
+            click.echo(
+                format_error(
+                    _emergency_block_message(safety_printer, estop_status),
+                    code="E_STOP_LATCHED",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
         adapter = _get_adapter_from_ctx(ctx)
         result = adapter.resume_print()
         click.echo(format_action("resume", result.to_dict(), json_mode=json_mode))
@@ -1654,6 +1916,190 @@ def resume(ctx: click.Context, json_mode: bool) -> None:
         click.echo(
             format_error(
                 f"Failed to resume print: {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# emergency-stop / emergency-status / emergency-clear
+# ---------------------------------------------------------------------------
+
+
+@cli.command("emergency-stop")
+@click.option("--printer", "printer_name", default=None, help="Target printer name (default: active printer).")
+@click.option("--all", "all_printers", is_flag=True, help="Stop all known printers.")
+@click.option(
+    "--reason",
+    default="user_request",
+    help="Reason code (e.g. user_request, thermal_runaway, software_fault).",
+)
+@click.option("--source", default="cli", help="Source label for audit context.")
+@click.option("--note", default=None, help="Optional operator note.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def emergency_stop_cmd(
+    ctx: click.Context,
+    printer_name: str | None,
+    all_printers: bool,
+    reason: str,
+    source: str,
+    note: str | None,
+    json_mode: bool,
+) -> None:
+    """Trigger emergency stop for one printer or all printers."""
+    if all_printers and printer_name:
+        click.echo(
+            format_error(
+                "Use either --printer or --all, not both.",
+                code="INVALID_ARGS",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    try:
+        from kiln.emergency import EmergencyReason, get_emergency_coordinator
+
+        try:
+            reason_enum = EmergencyReason(str(reason or "user_request").strip().lower())
+        except ValueError:
+            valid = ", ".join(r.value for r in EmergencyReason)
+            click.echo(
+                format_error(
+                    f"Invalid reason {reason!r}. Valid reasons: {valid}.",
+                    code="INVALID_ARGS",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+
+        coord = get_emergency_coordinator()
+        if all_printers:
+            records = coord.emergency_stop_all(reason=reason_enum, source=source, note=note)
+            payload = {
+                "count": len(records),
+                "results": [r.to_dict() for r in records],
+            }
+            click.echo(format_response("success", data=payload, json_mode=json_mode))
+            return
+
+        target = _resolve_emergency_printer_name(ctx, printer_name)
+        record = coord.emergency_stop(target, reason=reason_enum, source=source, note=note)
+        click.echo(
+            format_response(
+                "success",
+                data={"printer": target, "emergency_stop": record.to_dict()},
+                json_mode=json_mode,
+            )
+        )
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to execute emergency stop: {exc}",
+                code="EMERGENCY_STOP_FAILED",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
+@cli.command("emergency-status")
+@click.option("--printer", "printer_name", default=None, help="Target printer name (default: active printer).")
+@click.option("--all", "all_printers", is_flag=True, help="Show status for all known printers.")
+@click.option("--include-unlatched", is_flag=True, help="Include printers that are not currently latched.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def emergency_status_cmd(
+    ctx: click.Context,
+    printer_name: str | None,
+    all_printers: bool,
+    include_unlatched: bool,
+    json_mode: bool,
+) -> None:
+    """Show emergency latch status for one printer or the fleet."""
+    if all_printers and printer_name:
+        click.echo(
+            format_error(
+                "Use either --printer or --all, not both.",
+                code="INVALID_ARGS",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+    try:
+        from kiln.emergency import get_emergency_coordinator
+
+        coord = get_emergency_coordinator()
+        if all_printers:
+            rows = coord.list_latch_statuses(include_unlatched=include_unlatched)
+            click.echo(
+                format_response(
+                    "success",
+                    data={"count": len(rows), "emergency_status": rows},
+                    json_mode=json_mode,
+                )
+            )
+            return
+
+        target = _resolve_emergency_printer_name(ctx, printer_name)
+        status = coord.get_latch_status(target)
+        click.echo(format_response("success", data={"printer": target, "emergency_status": status}, json_mode=json_mode))
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to read emergency status: {exc}",
+                code="EMERGENCY_STATUS_FAILED",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
+@cli.command("emergency-clear")
+@click.option("--printer", "printer_name", default=None, help="Target printer name (default: active printer).")
+@click.option("--ack-note", required=True, help="Acknowledgement note required to clear latch.")
+@click.option("--ack-by", default=None, help="Operator identifier for audit.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def emergency_clear_cmd(
+    ctx: click.Context,
+    printer_name: str | None,
+    ack_note: str,
+    ack_by: str | None,
+    json_mode: bool,
+) -> None:
+    """Acknowledge and clear an emergency latch."""
+    target = _resolve_emergency_printer_name(ctx, printer_name)
+    actor = (ack_by or "").strip() or os.environ.get("USER", "operator")
+    try:
+        from kiln.emergency import get_emergency_coordinator
+
+        coord = get_emergency_coordinator()
+        result = coord.clear_stop_with_ack(target, acknowledged_by=actor, ack_note=ack_note)
+        if not result.get("success"):
+            click.echo(
+                format_error(
+                    str(result.get("message") or "Failed to clear emergency latch."),
+                    code="E_STOP_CLEAR_BLOCKED",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+
+        click.echo(
+            format_response(
+                "success",
+                data={"printer": target, "cleared": True, "emergency_status": result.get("status")},
+                json_mode=json_mode,
+            )
+        )
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to clear emergency latch: {exc}",
+                code="EMERGENCY_CLEAR_FAILED",
                 json_mode=json_mode,
             )
         )
@@ -3210,6 +3656,19 @@ def ingest() -> None:
     type=click.Choice(_MATERIAL_CHOICES, case_sensitive=False),
     help="Target material used for auto-routing.",
 )
+@click.option(
+    "--state-file",
+    default=None,
+    type=click.Path(dir_okay=False, file_okay=True, path_type=str),
+    help="Optional JSON state file for restart-safe ingest tracking.",
+)
+@click.option(
+    "--min-stable-seconds",
+    default=0.0,
+    show_default=True,
+    type=float,
+    help="Require files to be stable for this many seconds before ingest.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON (requires --once).")
 def ingest_watch_cmd(
     watch_dir: str,
@@ -3218,6 +3677,8 @@ def ingest_watch_cmd(
     auto_queue: bool,
     printer: str | None,
     material: str,
+    state_file: str | None,
+    min_stable_seconds: float,
     json_mode: bool,
 ) -> None:
     """Watch a folder and detect new printable files for Kiln workflows."""
@@ -3243,7 +3704,12 @@ def ingest_watch_cmd(
         sys.exit(1)
 
     material_type = _normalise_material_type(material) or "PLA"
+    state_path: Path | None = None
+    if state_file:
+        state_path = Path(state_file).expanduser().resolve()
     seen: dict[str, float] = {}
+    if state_path:
+        seen = _load_ingest_seen_state(state_path)
     pending: dict[str, deque[Path]] = {}
     adapters: dict[str, Any] = {}
     adapter_errors: list[str] = []
@@ -3271,6 +3737,10 @@ def ingest_watch_cmd(
             return
         for printer_name, queue_items in pending.items():
             if not queue_items:
+                continue
+            estop_status = _emergency_latch_status(printer_name)
+            if estop_status and bool(estop_status.get("latched")):
+                errors.append(_emergency_block_message(printer_name, estop_status))
                 continue
             adapter = adapters[printer_name]
             try:
@@ -3358,19 +3828,32 @@ def ingest_watch_cmd(
     def _scan_cycle() -> list[Path]:
         try:
             detected = _scan_ingest_directory(watch_path, seen)
+            detected = _filter_stable_ingest_files(
+                detected,
+                seen=seen,
+                min_stable_seconds=max(0.0, float(min_stable_seconds)),
+            )
         except Exception as exc:
             errors.append(f"scan: {exc}")
             return []
         _enqueue_detected(detected)
         _dispatch_pending()
+        if state_path:
+            try:
+                _save_ingest_seen_state(state_path, watch_path, seen)
+            except Exception as exc:
+                errors.append(f"state: {exc}")
         return detected
 
     if not json_mode:
         mode = "auto-queue" if auto_queue else "detect-only"
         click.echo(f"Watching {watch_path} ({mode})")
         click.echo(f"File types: {', '.join(_INGEST_EXTENSIONS)}")
+        click.echo(f"Stability window: {max(0.0, float(min_stable_seconds)):.1f}s")
         if auto_queue and printer:
             click.echo(f"Fixed printer: {printer}")
+        if state_path:
+            click.echo(f"State file: {state_path}")
 
     detected_all: list[str] = []
 
@@ -3394,6 +3877,8 @@ def ingest_watch_cmd(
             "watch_dir": str(watch_path),
             "mode": "auto_queue" if auto_queue else "detect_only",
             "material": material_type,
+            "state_file": str(state_path) if state_path else None,
+            "min_stable_seconds": max(0.0, float(min_stable_seconds)),
             "detected": detected_all,
             "queued": queued,
             "dispatched": dispatched,
@@ -3401,6 +3886,517 @@ def ingest_watch_cmd(
             "pending": {name: [str(p) for p in items] for name, items in pending.items()},
         }
         click.echo(format_response("success", data=payload, json_mode=True))
+
+
+@ingest.group("service")
+def ingest_service_group() -> None:
+    """Manage ingest watcher as an explicit background service."""
+
+
+@ingest_service_group.command("install")
+@click.option(
+    "--dir",
+    "watch_dir",
+    required=True,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True),
+    help="Directory to watch for printable files.",
+)
+@click.option("--interval", default=2.0, show_default=True, help="Polling interval in seconds.")
+@click.option(
+    "--auto-queue",
+    is_flag=True,
+    help="Opt in to automatic queue/dispatch behavior (default is detect-only).",
+)
+@click.option(
+    "--printer",
+    default=None,
+    help="Optional fixed printer name. Omit to auto-route across configured printers.",
+)
+@click.option(
+    "--material",
+    "-m",
+    default="PLA",
+    show_default=True,
+    type=click.Choice(_MATERIAL_CHOICES, case_sensitive=False),
+    help="Target material used for auto-routing.",
+)
+@click.option(
+    "--min-stable-seconds",
+    default=2.0,
+    show_default=True,
+    type=float,
+    help="Require files to be stable for this many seconds before ingest.",
+)
+@click.option(
+    "--state-file",
+    default=None,
+    type=click.Path(dir_okay=False, file_okay=True, path_type=str),
+    help="Optional JSON state file for restart-safe ingest tracking.",
+)
+@click.option(
+    "--config-path",
+    default=None,
+    type=click.Path(dir_okay=False, file_okay=True, path_type=str),
+    help="Optional path for ingest service configuration.",
+)
+@click.option("--force", is_flag=True, help="Overwrite existing service config when not running.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def ingest_service_install_cmd(
+    watch_dir: str,
+    interval: float,
+    auto_queue: bool,
+    printer: str | None,
+    material: str,
+    min_stable_seconds: float,
+    state_file: str | None,
+    config_path: str | None,
+    force: bool,
+    json_mode: bool,
+) -> None:
+    """Install or update background ingest service configuration."""
+    if interval <= 0:
+        click.echo(format_error("Interval must be > 0.", code="INVALID_ARGS", json_mode=json_mode))
+        sys.exit(1)
+    if min_stable_seconds < 0:
+        click.echo(format_error("min-stable-seconds must be >= 0.", code="INVALID_ARGS", json_mode=json_mode))
+        sys.exit(1)
+
+    watch_path = Path(watch_dir).expanduser().resolve()
+    if not watch_path.is_dir():
+        click.echo(
+            format_error(
+                f"Watch directory is not valid: {watch_path}",
+                code="INVALID_ARGS",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    cfg_path = _resolve_service_config_path(config_path)
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing_cfg = _read_json_file(cfg_path, default={})
+    if cfg_path.exists() and existing_cfg:
+        existing_pid_path, _, _ = _resolve_service_sidecar_paths(cfg_path, existing_cfg)
+        existing_pid = _read_pid_file(existing_pid_path)
+        if existing_pid and _is_pid_running(existing_pid):
+            click.echo(
+                format_error(
+                    "Ingest service is running. Stop it before reinstalling config.",
+                    code="SERVICE_RUNNING",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+        if not force:
+            click.echo(
+                format_error(
+                    f"Service config already exists at {cfg_path}. Use --force to overwrite.",
+                    code="ALREADY_EXISTS",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+
+    cfg_dir = cfg_path.parent
+    state_path = Path(state_file).expanduser().resolve() if state_file else (cfg_dir / "watch_state.json").resolve()
+    pid_path = (cfg_dir / "service.pid").resolve()
+    log_path = (cfg_dir / "service.log").resolve()
+    material_type = _normalise_material_type(material) or "PLA"
+
+    payload: dict[str, Any] = {
+        "watch_dir": str(watch_path),
+        "interval": float(interval),
+        "auto_queue": bool(auto_queue),
+        "printer": (printer or "").strip(),
+        "material": material_type,
+        "min_stable_seconds": float(min_stable_seconds),
+        "state_file": str(state_path),
+        "pid_file": str(pid_path),
+        "log_file": str(log_path),
+        "installed_at": time.time(),
+    }
+    try:
+        _write_json_file(cfg_path, payload)
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to write service config: {exc}",
+                code="SERVICE_INSTALL_FAILED",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    if json_mode:
+        click.echo(
+            format_response(
+                "success",
+                data={
+                    "config_path": str(cfg_path),
+                    "mode": "auto_queue" if auto_queue else "detect_only",
+                    "watch_dir": str(watch_path),
+                    "state_file": str(state_path),
+                    "log_file": str(log_path),
+                    "pid_file": str(pid_path),
+                },
+                json_mode=True,
+            )
+        )
+        return
+
+    click.echo("Installed ingest service configuration.")
+    click.echo(f"  Config: {cfg_path}")
+    click.echo(f"  Watch:  {watch_path}")
+    click.echo(f"  Mode:   {'auto-queue' if auto_queue else 'detect-only'}")
+    click.echo(f"  State:  {state_path}")
+    click.echo(f"  Logs:   {log_path}")
+
+
+@ingest_service_group.command("start")
+@click.option(
+    "--config-path",
+    default=None,
+    type=click.Path(dir_okay=False, file_okay=True, path_type=str),
+    help="Optional path for ingest service configuration.",
+)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def ingest_service_start_cmd(config_path: str | None, json_mode: bool) -> None:
+    """Start ingest watcher service in the background."""
+    cfg_path = _resolve_service_config_path(config_path)
+    if not cfg_path.exists():
+        click.echo(
+            format_error(
+                f"Service config not found: {cfg_path}. Run `kiln ingest service install` first.",
+                code="SERVICE_NOT_INSTALLED",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    cfg = _read_json_file(cfg_path, default={})
+    watch_dir = str(cfg.get("watch_dir", "")).strip()
+    if not watch_dir:
+        click.echo(
+            format_error(
+                "Service config is missing watch_dir.",
+                code="SERVICE_CONFIG_INVALID",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    watch_path = Path(watch_dir).expanduser().resolve()
+    if not watch_path.is_dir():
+        click.echo(
+            format_error(
+                f"Configured watch directory does not exist: {watch_path}",
+                code="SERVICE_CONFIG_INVALID",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    try:
+        interval = float(cfg.get("interval", 2.0))
+    except (TypeError, ValueError):
+        interval = 2.0
+    if interval <= 0:
+        interval = 2.0
+
+    try:
+        min_stable_seconds = float(cfg.get("min_stable_seconds", 2.0))
+    except (TypeError, ValueError):
+        min_stable_seconds = 2.0
+    if min_stable_seconds < 0:
+        min_stable_seconds = 0.0
+
+    auto_queue = _coerce_bool(cfg.get("auto_queue", False))
+    printer = str(cfg.get("printer", "")).strip()
+    material = _normalise_material_type(str(cfg.get("material", "PLA"))) or "PLA"
+    pid_path, log_path, state_path = _resolve_service_sidecar_paths(cfg_path, cfg)
+
+    existing_pid = _read_pid_file(pid_path)
+    if existing_pid and _is_pid_running(existing_pid):
+        click.echo(
+            format_error(
+                f"Ingest service already running (pid={existing_pid}).",
+                code="SERVICE_RUNNING",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    if existing_pid and not _is_pid_running(existing_pid):
+        try:
+            pid_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    cfg.update(
+        {
+            "watch_dir": str(watch_path),
+            "interval": float(interval),
+            "auto_queue": bool(auto_queue),
+            "printer": printer,
+            "material": material,
+            "min_stable_seconds": float(min_stable_seconds),
+            "pid_file": str(pid_path),
+            "log_file": str(log_path),
+            "state_file": str(state_path),
+            "last_start_attempt_at": time.time(),
+        }
+    )
+    _write_json_file(cfg_path, cfg)
+
+    cmd = _build_ingest_watch_command(cfg)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with log_path.open("a", encoding="utf-8") as log_file:
+            stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            log_file.write(f"\n[{stamp}] starting ingest service\n")
+            log_file.flush()
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=log_file,
+                start_new_session=True,
+            )
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to launch ingest service: {exc}",
+                code="SERVICE_START_FAILED",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    pid_path.write_text(f"{proc.pid}\n", encoding="utf-8")
+    time.sleep(0.4)
+    if proc.poll() is not None:
+        pid_path.unlink(missing_ok=True)
+        tail = _tail_text(log_path, max_lines=30)
+        message = f"Ingest service exited immediately with code {proc.returncode}."
+        if tail:
+            message = f"{message}\nRecent logs:\n{tail}"
+        click.echo(format_error(message, code="SERVICE_START_FAILED", json_mode=json_mode))
+        sys.exit(1)
+
+    cfg["last_started_at"] = time.time()
+    cfg["last_started_pid"] = proc.pid
+    _write_json_file(cfg_path, cfg)
+
+    payload = {
+        "running": True,
+        "pid": proc.pid,
+        "config_path": str(cfg_path),
+        "log_file": str(log_path),
+        "state_file": str(state_path),
+        "mode": "auto_queue" if auto_queue else "detect_only",
+        "command": cmd,
+    }
+    if json_mode:
+        click.echo(format_response("success", data=payload, json_mode=True))
+        return
+
+    click.echo(f"Ingest service started (pid={proc.pid}).")
+    click.echo(f"  Config: {cfg_path}")
+    click.echo(f"  Logs:   {log_path}")
+    click.echo(f"  State:  {state_path}")
+
+
+@ingest_service_group.command("stop")
+@click.option(
+    "--config-path",
+    default=None,
+    type=click.Path(dir_okay=False, file_okay=True, path_type=str),
+    help="Optional path for ingest service configuration.",
+)
+@click.option(
+    "--timeout",
+    default=8.0,
+    show_default=True,
+    type=float,
+    help="Seconds to wait for graceful shutdown before force-kill.",
+)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def ingest_service_stop_cmd(config_path: str | None, timeout: float, json_mode: bool) -> None:
+    """Stop the background ingest watcher service."""
+    cfg_path = _resolve_service_config_path(config_path)
+    cfg = _read_json_file(cfg_path, default={}) if cfg_path.exists() else {}
+    pid_path, log_path, _ = _resolve_service_sidecar_paths(cfg_path, cfg)
+    pid = _read_pid_file(pid_path)
+
+    if not pid:
+        payload = {
+            "running": False,
+            "stopped": False,
+            "reason": "not_running",
+            "config_path": str(cfg_path),
+            "pid_file": str(pid_path),
+        }
+        if json_mode:
+            click.echo(format_response("success", data=payload, json_mode=True))
+        else:
+            click.echo("Ingest service is not running.")
+        return
+
+    if not _is_pid_running(pid):
+        pid_path.unlink(missing_ok=True)
+        payload = {
+            "running": False,
+            "stopped": False,
+            "reason": "stale_pid_removed",
+            "pid": pid,
+            "pid_file": str(pid_path),
+        }
+        if json_mode:
+            click.echo(format_response("success", data=payload, json_mode=True))
+        else:
+            click.echo(f"Removed stale ingest service pid file (pid={pid}).")
+        return
+
+    forced = False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pid_path.unlink(missing_ok=True)
+        if json_mode:
+            click.echo(
+                format_response(
+                    "success",
+                    data={"running": False, "stopped": True, "pid": pid, "forced": False},
+                    json_mode=True,
+                )
+            )
+        else:
+            click.echo("Ingest service stopped.")
+        return
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to signal ingest service pid {pid}: {exc}",
+                code="SERVICE_STOP_FAILED",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    deadline = time.time() + max(0.5, timeout)
+    while time.time() < deadline:
+        if not _is_pid_running(pid):
+            break
+        time.sleep(0.2)
+
+    if _is_pid_running(pid):
+        forced = True
+        kill_signal = getattr(signal, "SIGKILL", signal.SIGTERM)
+        try:
+            os.kill(pid, kill_signal)
+        except Exception as exc:
+            click.echo(
+                format_error(
+                    f"Failed to force-stop ingest service pid {pid}: {exc}",
+                    code="SERVICE_STOP_FAILED",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+        time.sleep(0.2)
+
+    if _is_pid_running(pid):
+        click.echo(
+            format_error(
+                f"Ingest service pid {pid} is still running after stop attempt.",
+                code="SERVICE_STOP_FAILED",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    pid_path.unlink(missing_ok=True)
+    payload = {
+        "running": False,
+        "stopped": True,
+        "pid": pid,
+        "forced": forced,
+        "log_file": str(log_path),
+    }
+    if json_mode:
+        click.echo(format_response("success", data=payload, json_mode=True))
+        return
+
+    click.echo(f"Ingest service stopped (pid={pid}).")
+    if forced:
+        click.echo("  Shutdown required force-kill after timeout.")
+
+
+@ingest_service_group.command("status")
+@click.option(
+    "--config-path",
+    default=None,
+    type=click.Path(dir_okay=False, file_okay=True, path_type=str),
+    help="Optional path for ingest service configuration.",
+)
+@click.option("--tail-lines", default=20, show_default=True, type=int, help="Number of recent log lines to include.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def ingest_service_status_cmd(config_path: str | None, tail_lines: int, json_mode: bool) -> None:
+    """Show ingest service install/runtime status."""
+    cfg_path = _resolve_service_config_path(config_path)
+    cfg_exists = cfg_path.exists()
+    cfg = _read_json_file(cfg_path, default={}) if cfg_exists else {}
+    pid_path, log_path, state_path = _resolve_service_sidecar_paths(cfg_path, cfg)
+
+    pid = _read_pid_file(pid_path)
+    running = bool(pid and _is_pid_running(pid))
+    stale_pid = bool(pid and not running)
+    mode = "auto_queue" if _coerce_bool(cfg.get("auto_queue", False)) else "detect_only"
+    seen_entries = len(_load_ingest_seen_state(state_path))
+    tail = _tail_text(log_path, max_lines=max(0, tail_lines)) if tail_lines > 0 else ""
+
+    payload = {
+        "installed": cfg_exists,
+        "running": running,
+        "stale_pid": stale_pid,
+        "pid": pid if running else None,
+        "config_path": str(cfg_path),
+        "watch_dir": str(cfg.get("watch_dir", "")).strip() or None,
+        "mode": mode,
+        "interval": cfg.get("interval", 2.0),
+        "min_stable_seconds": cfg.get("min_stable_seconds", 2.0),
+        "state_file": str(state_path),
+        "state_seen_entries": seen_entries,
+        "pid_file": str(pid_path),
+        "log_file": str(log_path),
+        "log_tail": tail,
+    }
+    if json_mode:
+        click.echo(format_response("success", data=payload, json_mode=True))
+        return
+
+    if not cfg_exists:
+        click.echo(f"Ingest service is not installed. Expected config: {cfg_path}")
+        return
+
+    status_label = "running" if running else "stopped"
+    if stale_pid:
+        status_label = "stopped (stale pid file)"
+    click.echo(f"Ingest service: {status_label}")
+    click.echo(f"  Config: {cfg_path}")
+    click.echo(f"  Watch:  {payload['watch_dir'] or '-'}")
+    click.echo(f"  Mode:   {'auto-queue' if mode == 'auto_queue' else 'detect-only'}")
+    click.echo(f"  State:  {state_path} ({seen_entries} tracked entries)")
+    click.echo(f"  Logs:   {log_path}")
+    if running and pid:
+        click.echo(f"  PID:    {pid}")
+    if tail:
+        click.echo("  Recent logs:")
+        for line in tail.splitlines():
+            click.echo(f"    {line}")
 
 
 # ---------------------------------------------------------------------------
@@ -5707,14 +6703,22 @@ def local_first_cmd(apply: bool, write_env: bool, json_mode: bool) -> None:
     export_lines = [f"export {k}={v}" for k, v in exports.items()]
     applied: list[str] = []
     errors: list[str] = []
+    warnings: list[str] = []
     env_file_path: str | None = None
 
     if apply:
         try:
             from kiln.persistence import get_db
 
-            get_db().set_setting("cloud_sync_config", "")
-            applied.append("cloud_sync_disabled")
+            db = get_db()
+            existing_cloud_sync = db.get_setting("cloud_sync_config", "") or ""
+            if existing_cloud_sync.strip():
+                db.set_setting("cloud_sync_config_backup", existing_cloud_sync)
+                applied.append("cloud_sync_backup_saved")
+                db.set_setting("cloud_sync_config", "")
+                applied.append("cloud_sync_disabled")
+            else:
+                applied.append("cloud_sync_already_disabled")
         except Exception as exc:
             errors.append(f"Failed to disable cloud sync config: {exc}")
 
@@ -5722,16 +6726,31 @@ def local_first_cmd(apply: bool, write_env: bool, json_mode: bool) -> None:
         try:
             env_path = Path.home() / ".kiln" / "local-first.env"
             env_path.parent.mkdir(parents=True, exist_ok=True)
-            env_path.write_text("\n".join(export_lines) + "\n", encoding="utf-8")
+            header = [
+                "# Kiln local-first profile",
+                "# Source this file to keep workflows local/privacy-first by default.",
+            ]
+            env_path.write_text("\n".join(header + export_lines) + "\n", encoding="utf-8")
             env_file_path = str(env_path)
         except Exception as exc:
             errors.append(f"Failed to write local-first env file: {exc}")
+
+    active_cloud_vars = [
+        name for name in ("KILN_OPENROUTER_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY") if os.environ.get(name)
+    ]
+    if active_cloud_vars:
+        warnings.append(
+            "Cloud model API keys detected in environment: "
+            + ", ".join(active_cloud_vars)
+            + ". Local-first still works, but remote model calls may occur if enabled."
+        )
 
     payload = {
         "profile": "local-first",
         "exports": exports,
         "export_lines": export_lines,
         "applied": applied,
+        "warnings": warnings,
         "env_file": env_file_path,
         "notes": [
             "This profile is privacy-first and local-first by default.",
@@ -5760,7 +6779,12 @@ def local_first_cmd(apply: bool, write_env: bool, json_mode: bool) -> None:
 
     click.echo("Local-first profile prepared.")
     if apply:
-        click.echo("  - Cloud sync config disabled in local settings.")
+        if "cloud_sync_disabled" in applied:
+            click.echo("  - Cloud sync config disabled in local settings.")
+        elif "cloud_sync_already_disabled" in applied:
+            click.echo("  - Cloud sync config was already disabled.")
+        if "cloud_sync_backup_saved" in applied:
+            click.echo("  - Previous cloud sync config was backed up to key: cloud_sync_config_backup")
     if env_file_path:
         click.echo(f"  - Wrote env file: {env_file_path}")
         click.echo(f"    source {env_file_path}")
@@ -5768,6 +6792,8 @@ def local_first_cmd(apply: bool, write_env: bool, json_mode: bool) -> None:
         click.echo("Recommended exports:")
         for line in export_lines:
             click.echo(f"  {line}")
+    for warning in warnings:
+        click.echo(f"Warning: {warning}")
 
 
 # ---------------------------------------------------------------------------

@@ -134,12 +134,38 @@ def queue_summary() -> dict:
         active = _srv._queue.active_count()
         total = _srv._queue.total_count
         registered_printers = _srv._registry.count
-        dispatch_blocked = pending > 0 and active == 0 and registered_printers == 0
-        dispatch_block_reason = (
-            "Jobs are queued but no printers are registered. Register at least one printer with register_printer()."
-            if dispatch_blocked
-            else None
+        emergency_latched_printers: list[str] = []
+        if registered_printers > 0:
+            try:
+                from kiln.emergency import get_emergency_coordinator
+
+                coord = get_emergency_coordinator()
+                for name in _srv._registry.list_names():
+                    status = coord.get_latch_status(name)
+                    if bool(status.get("latched")):
+                        emergency_latched_printers.append(name)
+            except Exception:
+                emergency_latched_printers = []
+
+        no_printer_block = pending > 0 and active == 0 and registered_printers == 0
+        all_latched_block = (
+            pending > 0
+            and active == 0
+            and registered_printers > 0
+            and len(emergency_latched_printers) >= registered_printers
         )
+        dispatch_blocked = no_printer_block or all_latched_block
+        if no_printer_block:
+            dispatch_block_reason = (
+                "Jobs are queued but no printers are registered. Register at least one printer with register_printer()."
+            )
+        elif all_latched_block:
+            dispatch_block_reason = (
+                "Jobs are queued but all registered printers are emergency-latched. "
+                "Acknowledge and clear latch state before dispatch."
+            )
+        else:
+            dispatch_block_reason = None
         return {
             "success": True,
             "counts": summary,
@@ -151,6 +177,7 @@ def queue_summary() -> dict:
             "registered_printers": registered_printers,
             "dispatch_blocked": dispatch_blocked,
             "dispatch_block_reason": dispatch_block_reason,
+            "emergency_latched_printers": emergency_latched_printers,
         }
     except Exception as exc:
         _logger.exception("Unexpected error in queue_summary")

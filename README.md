@@ -329,6 +329,9 @@ kiln print <files>... [--queue] [--json]   # Start printing (supports batch + qu
 kiln cancel [--json]                       # Cancel current print
 kiln pause [--json]                        # Pause current print
 kiln resume [--json]                       # Resume paused print
+kiln emergency-stop [--printer N|--all]    # Trip emergency stop latch (single printer or fleet)
+kiln emergency-status [--printer N|--all]  # Inspect emergency latch/interlock state
+kiln emergency-clear --ack-note "..."      # Acknowledge and clear emergency latch
 kiln temp [--tool N] [--bed N] [--json]    # Get/set temperatures
 kiln gcode <cmds>... [--json]              # Send raw G-code
 kiln printers [--json]                     # List saved printers
@@ -349,8 +352,10 @@ kiln material set|show|spools|add-spool       # Material tracking
 kiln level [--status] [--trigger] [--json]    # Bed leveling triggers
 kiln stream [--port 8081] [--stop] [--json]   # Webcam MJPEG proxy
 kiln sync status|now|configure                # Cloud sync
-kiln local-first [--apply] [--write-env]     # Local-first profile for edge/AGX deployments
-kiln ingest watch --dir ~/incoming [--auto-queue] [--once]  # Watch-folder handoff (detect-only by default)
+kiln local-first [--apply] [--write-env]     # Local-first profile for edge/AGX deployments (backs up cloud sync config before disabling)
+kiln ingest watch --dir ~/incoming [--auto-queue] [--once] [--state-file ~/.kiln/ingest_service/watch_state.json] [--min-stable-seconds N]
+kiln ingest service install --dir ~/incoming [--auto-queue]  # Install opt-in background watcher config (detect-only by default)
+kiln ingest service start|stop|status                           # Run and manage watcher as a background service
 kiln plugins list|info                        # Plugin management
 kiln generate "a phone stand" --provider meshy --json   # Generate 3D model from text (meshy/tripo3d/stability/gemini/openscad)
 kiln generate-and-print "a phone stand" --provider gemini --material PLA   # One-command generate -> preview -> slice -> upload
@@ -483,6 +488,10 @@ The Kiln MCP server (`kiln serve`) exposes **273 tools** to agents. Key tools ar
 | `cancel_print` | Cancel the active print job |
 | `pause_print` | Pause the active print |
 | `resume_print` | Resume a paused print |
+| `emergency_stop` | Trigger emergency stop latch for one or all printers |
+| `emergency_status` | Read emergency latch/interlock status |
+| `clear_emergency_stop` | Acknowledge and clear emergency latch |
+| `emergency_trip_input` | Secure external-input trigger (button/PLC bridge) |
 | `set_temperature` | Set hotend and/or bed temperature |
 | `preflight_check` | Run safety checks before printing |
 | `send_gcode` | Send raw G-code commands |

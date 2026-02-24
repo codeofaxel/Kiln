@@ -42,6 +42,18 @@
       "physical_effect": true,
       "irreversible": true
     },
+    "emergency_trip_input": {
+      "level": "emergency",
+      "physical_effect": true,
+      "irreversible": true
+    },
+    "emergency_status": {
+      "level": "safe"
+    },
+    "clear_emergency_stop": {
+      "level": "confirm",
+      "physical_effect": true
+    },
     "pause_print": {
       "level": "guarded",
       "physical_effect": true

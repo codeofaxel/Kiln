@@ -258,6 +258,7 @@ _CRAFTCLOUD_API_KEY: str = os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
 _FULFILLMENT_PROVIDER: str = os.environ.get("KILN_FULFILLMENT_PROVIDER", "")
 _MESHY_API_KEY: str = os.environ.get("KILN_MESHY_API_KEY", "")
 _GEMINI_API_KEY: str = os.environ.get("KILN_GEMINI_API_KEY", "")
+_ESTOP_INPUT_TOKEN: str = os.environ.get("KILN_ESTOP_INPUT_TOKEN", "")
 
 # Auto-print toggles: OFF by default for safety.  Generated models are
 # higher risk than marketplace downloads — two independent toggles let
@@ -286,6 +287,7 @@ def _reload_env_config() -> None:
     global _THINGIVERSE_TOKEN, _MMF_API_KEY  # noqa: PLW0603
     global _CULTS3D_USERNAME, _CULTS3D_API_KEY, _CRAFTCLOUD_API_KEY  # noqa: PLW0603
     global _FULFILLMENT_PROVIDER, _MESHY_API_KEY  # noqa: PLW0603
+    global _ESTOP_INPUT_TOKEN  # noqa: PLW0603
     global _AUTO_PRINT_MARKETPLACE, _AUTO_PRINT_GENERATED  # noqa: PLW0603
     global _HEATER_TIMEOUT_MIN  # noqa: PLW0603
 
@@ -304,6 +306,7 @@ def _reload_env_config() -> None:
     _FULFILLMENT_PROVIDER = os.environ.get("KILN_FULFILLMENT_PROVIDER", "")
     _MESHY_API_KEY = os.environ.get("KILN_MESHY_API_KEY", "")
     _GEMINI_API_KEY = os.environ.get("KILN_GEMINI_API_KEY", "")
+    _ESTOP_INPUT_TOKEN = os.environ.get("KILN_ESTOP_INPUT_TOKEN", "")
     _AUTO_PRINT_MARKETPLACE = os.environ.get("KILN_AUTO_PRINT_MARKETPLACE", "").lower() in ("1", "true", "yes")
     _AUTO_PRINT_GENERATED = os.environ.get("KILN_AUTO_PRINT_GENERATED", "").lower() in ("1", "true", "yes")
     _HEATER_TIMEOUT_MIN = parse_float_env("KILN_HEATER_TIMEOUT", 30.0)
@@ -500,6 +503,57 @@ def _get_temp_limits() -> tuple:
     return 300.0, 130.0
 
 
+def _resolve_effective_printer_name(printer_name: str | None = None) -> str:
+    """Resolve the printer identifier used for emergency latch checks."""
+    if printer_name:
+        return printer_name
+    try:
+        names = _registry.list_names()
+        if "default" in names:
+            return "default"
+        if names:
+            return sorted(names)[0]
+    except Exception:
+        pass
+    return "default"
+
+
+def _get_emergency_latch_status(printer_name: str) -> dict[str, Any] | None:
+    """Best-effort emergency latch status lookup for a printer."""
+    try:
+        from kiln.emergency import get_emergency_coordinator
+
+        return get_emergency_coordinator().get_latch_status(printer_name)
+    except Exception as exc:
+        logger.debug("Emergency latch lookup failed for %s: %s", printer_name, exc)
+        return None
+
+
+def _emergency_latch_error(tool_name: str, printer_name: str) -> dict | None:
+    """Return E_STOP_LATCHED error when a printer is emergency-latched."""
+    status = _get_emergency_latch_status(printer_name)
+    if not status or not bool(status.get("latched")):
+        return None
+
+    blockers = status.get("critical_interlocks_pending") or []
+    msg = f"Emergency latch is active for printer '{printer_name}'."
+    if blockers:
+        msg += " Critical interlocks pending: " + ", ".join(str(x) for x in blockers) + "."
+    msg += " Resolve hazards, acknowledge, then clear via clear_emergency_stop()."
+
+    _audit(
+        tool_name,
+        "blocked_emergency_latch",
+        details={
+            "printer_name": printer_name,
+            "critical_interlocks_pending": blockers,
+        },
+    )
+    data = _error_dict(msg, code="E_STOP_LATCHED", retryable=False)
+    data["emergency_status"] = status
+    return data
+
+
 # ---------------------------------------------------------------------------
 # MCP tool rate limiter
 # ---------------------------------------------------------------------------
@@ -599,6 +653,7 @@ _TOOL_RATE_LIMITS: dict[str, tuple[int, int]] = {
     "set_temperature": (2000, 10),
     "send_gcode": (500, 30),
     "emergency_stop": (5000, 3),
+    "emergency_trip_input": (1000, 20),
     "cancel_print": (5000, 3),
     "start_print": (5000, 3),
     "upload_file": (2000, 10),
@@ -1718,6 +1773,8 @@ def start_print(file_name: str) -> dict:
         return err
     if conf := _check_confirmation("start_print", {"file_name": file_name}):
         return conf
+    if block := _emergency_latch_error("start_print", _resolve_effective_printer_name()):
+        return block
     try:
         adapter = _get_adapter()
 
@@ -1817,7 +1874,12 @@ def cancel_print() -> dict:
 
 
 @mcp.tool()
-def emergency_stop(printer_name: str | None = None) -> dict:
+def emergency_stop(
+    printer_name: str | None = None,
+    reason: str = "user_request",
+    source: str = "mcp",
+    note: str | None = None,
+) -> dict:
     """Trigger an emergency stop on one or all printers.
 
     Sends M112 (emergency stop), turns off heaters, and disables steppers.
@@ -1832,6 +1894,9 @@ def emergency_stop(printer_name: str | None = None) -> dict:
 
     Args:
         printer_name: Specific printer to stop. If None, stops ALL printers.
+        reason: Reason code (e.g. ``user_request``, ``thermal_runaway``).
+        source: Trigger source label for audit context.
+        note: Optional operator note.
     """
     if err := _check_auth("print"):
         return err
@@ -1840,15 +1905,25 @@ def emergency_stop(printer_name: str | None = None) -> dict:
     if conf := _check_confirmation("emergency_stop", {}):
         return conf
     try:
-        from kiln.emergency import get_emergency_coordinator
+        from kiln.emergency import EmergencyReason, get_emergency_coordinator
+
+        try:
+            reason_enum = EmergencyReason(str(reason or "user_request").strip().lower())
+        except ValueError:
+            valid = ", ".join(r.value for r in EmergencyReason)
+            return _error_dict(
+                f"Invalid emergency reason {reason!r}. Valid reasons: {valid}.",
+                code="INVALID_ARGS",
+                retryable=False,
+            )
 
         coord = get_emergency_coordinator()
         if printer_name:
-            result = coord.emergency_stop(printer_name)
+            result = coord.emergency_stop(printer_name, reason=reason_enum, source=source, note=note)
             _audit("emergency_stop", f"executed for {printer_name}")
             return {"success": True, "emergency_stop": result.to_dict()}
         else:
-            results = coord.emergency_stop_all()
+            results = coord.emergency_stop_all(reason=reason_enum, source=source, note=note)
             _audit("emergency_stop", "executed for ALL printers")
             return {
                 "success": True,
@@ -1859,6 +1934,132 @@ def emergency_stop(printer_name: str | None = None) -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in emergency_stop")
         return _error_dict(f"Unexpected error in emergency_stop: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def emergency_status(printer_name: str | None = None, include_unlatched: bool = False) -> dict:
+    """Return emergency latch status for one printer or the fleet."""
+    if err := _check_auth("print"):
+        return err
+    try:
+        from kiln.emergency import get_emergency_coordinator
+
+        coord = get_emergency_coordinator()
+        if printer_name:
+            return {
+                "success": True,
+                "printer_name": printer_name,
+                "emergency_status": coord.get_latch_status(printer_name),
+            }
+        rows = coord.list_latch_statuses(include_unlatched=include_unlatched)
+        return {
+            "success": True,
+            "count": len(rows),
+            "emergency_status": rows,
+            "include_unlatched": include_unlatched,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in emergency_status")
+        return _error_dict(f"Unexpected error in emergency_status: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def clear_emergency_stop(
+    printer_name: str,
+    acknowledgement_note: str,
+    acknowledged_by: str = "operator",
+) -> dict:
+    """Acknowledge and clear a printer emergency latch."""
+    if err := _check_auth("print"):
+        return err
+    if conf := _check_confirmation(
+        "clear_emergency_stop",
+        {"printer_name": printer_name, "acknowledged_by": acknowledged_by},
+    ):
+        return conf
+    if not (acknowledgement_note or "").strip():
+        return _error_dict("acknowledgement_note is required.", code="INVALID_ARGS", retryable=False)
+    try:
+        from kiln.emergency import get_emergency_coordinator
+
+        coord = get_emergency_coordinator()
+        result = coord.clear_stop_with_ack(
+            printer_name,
+            acknowledged_by=acknowledged_by,
+            ack_note=acknowledgement_note,
+        )
+        if not result.get("success"):
+            reason = str(result.get("reason") or "")
+            code = "E_STOP_CLEAR_BLOCKED" if reason == "critical_interlocks_pending" else "INVALID_STATE"
+            payload = _error_dict(str(result.get("message") or "Failed to clear emergency latch."), code=code, retryable=False)
+            payload["emergency_status"] = result.get("status")
+            return payload
+        _audit(
+            "clear_emergency_stop",
+            "executed",
+            details={
+                "printer_name": printer_name,
+                "acknowledged_by": acknowledged_by,
+            },
+        )
+        return {
+            "success": True,
+            "printer_name": printer_name,
+            "cleared": True,
+            "emergency_status": result.get("status"),
+            "message": str(result.get("message") or "Emergency latch cleared."),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in clear_emergency_stop")
+        return _error_dict(f"Unexpected error in clear_emergency_stop: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def emergency_trip_input(
+    printer_name: str,
+    input_name: str = "external_button",
+    token: str | None = None,
+    note: str | None = None,
+) -> dict:
+    """Trip emergency stop from an external input bridge (e.g. ESP32/PLC)."""
+    if err := _check_auth("print"):
+        return err
+    if err := _check_rate_limit("emergency_trip_input"):
+        return err
+    if _ESTOP_INPUT_TOKEN and token != _ESTOP_INPUT_TOKEN:
+        return _error_dict(
+            "Invalid emergency input token.",
+            code="AUTH_ERROR",
+            retryable=False,
+        )
+    try:
+        from kiln.emergency import EmergencyReason, get_emergency_coordinator
+
+        source_label = f"input:{(input_name or 'external_button').strip() or 'external_button'}"
+        coord = get_emergency_coordinator()
+        record = coord.emergency_stop(
+            printer_name,
+            reason=EmergencyReason.USER_REQUEST,
+            source=source_label,
+            note=note,
+        )
+        _audit(
+            "emergency_trip_input",
+            "executed",
+            details={
+                "printer_name": printer_name,
+                "input_name": input_name,
+            },
+        )
+        return {
+            "success": True,
+            "printer_name": printer_name,
+            "emergency_stop": record.to_dict(),
+            "source": source_label,
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in emergency_trip_input")
+        return _error_dict(f"Unexpected error in emergency_trip_input: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -1894,6 +2095,8 @@ def resume_print() -> dict:
         return err
     if err := _check_rate_limit("resume_print"):
         return err
+    if block := _emergency_latch_error("resume_print", _resolve_effective_printer_name()):
+        return block
     try:
         adapter = _get_adapter()
         result = adapter.resume_print()
@@ -1935,6 +2138,12 @@ def set_temperature(
             "At least one of tool_temp or bed_temp must be provided.",
             code="INVALID_ARGS",
         )
+    if block := _emergency_latch_error("set_temperature", _resolve_effective_printer_name()):
+        tool_heating = tool_temp is not None and tool_temp > 0
+        bed_heating = bed_temp is not None and bed_temp > 0
+        # Allow heater-off/cooldown commands while latched.
+        if tool_heating or bed_heating:
+            return block
 
     # -- Temperature safety validation (per-printer when configured) ------
     _MAX_TOOL, _MAX_BED = _get_temp_limits()
@@ -2426,6 +2635,8 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
         return err
     if not dry_run and (conf := _check_confirmation("send_gcode", {"commands": commands})):
         return conf
+    if not dry_run and (block := _emergency_latch_error("send_gcode", _resolve_effective_printer_name())):
+        return block
     try:
         adapter = _get_adapter()
 
@@ -4678,6 +4889,9 @@ def download_and_upload(
         print_data = None
         auto_printed = False
         if _AUTO_PRINT_MARKETPLACE:
+            safety_printer = _resolve_effective_printer_name(printer_name)
+            if block := _emergency_latch_error("download_and_upload", safety_printer):
+                return block
             # Mandatory pre-flight safety gate before starting print.
             pf = preflight_check()
             if not pf.get("ready", False):
@@ -5014,6 +5228,9 @@ def slice_and_print(
         file_name = upload.file_name or os.path.basename(result.output_path)
 
         # Mandatory pre-flight safety gate before starting print.
+        safety_printer = _resolve_effective_printer_name(printer_name)
+        if block := _emergency_latch_error("slice_and_print", safety_printer):
+            return block
         pf = preflight_check()
         if not pf.get("ready", False):
             _audit(
@@ -7421,6 +7638,9 @@ def generate_and_print(
         print_data = None
         auto_printed = False
         if _AUTO_PRINT_GENERATED:
+            safety_printer = _resolve_effective_printer_name(printer_name)
+            if block := _emergency_latch_error("generate_and_print", safety_printer):
+                return block
             # Mandatory pre-flight safety gate before starting print.
             pf = preflight_check()
             if not pf.get("ready", False):
@@ -8502,6 +8722,8 @@ def start_monitored_print(
         return err
     if conf := _check_confirmation("start_monitored_print", {"file_name": file_name}):
         return conf
+    if block := _emergency_latch_error("start_monitored_print", _resolve_effective_printer_name(printer_name)):
+        return block
     try:
         adapter = _registry.get(printer_name) if printer_name else _get_adapter()
 
@@ -9697,7 +9919,7 @@ def main() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Ported Forge tools — material substitution, recovery, health monitoring,
+# Extended toolset — material substitution, recovery, health monitoring,
 # credential management, design caching, job routing, fleet orchestration,
 # file metadata, progress estimation, emergency stop, state locking,
 # snapshot analysis, quote caching, firmware management
@@ -9917,9 +10139,11 @@ def firmware_resume_print(
     """
     if err := _check_auth("firmware"):
         return err
+    if block := _emergency_latch_error("firmware_resume_print", _resolve_effective_printer_name(printer_name)):
+        return block
 
     try:
-        adapter = _get_adapter(printer_name)
+        adapter = _registry.get(printer_name) if printer_name else _get_adapter()
 
         # Verify this is an OctoPrint adapter (firmware resume is Marlin-specific)
         if adapter.name != "octoprint":

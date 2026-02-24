@@ -107,6 +107,17 @@ def scheduler(queue, registry, event_bus):
     return JobScheduler(queue, registry, event_bus, poll_interval=0.1, max_retries=0)
 
 
+@pytest.fixture(autouse=True)
+def _reset_emergency_state(monkeypatch):
+    """Keep scheduler tests isolated from any local persisted E-stop state."""
+    monkeypatch.setenv("KILN_EMERGENCY_PERSIST", "0")
+    import kiln.emergency as _emergency_mod
+
+    _emergency_mod._coordinator = None
+    yield
+    _emergency_mod._coordinator = None
+
+
 # ---------------------------------------------------------------------------
 # 1. Scheduler start / stop lifecycle
 # ---------------------------------------------------------------------------
@@ -920,6 +931,59 @@ class TestEdgeCases:
         assert result["completed"] == []
         # The RuntimeError is not a PrinterNotFoundError, so it is just logged
         assert result["failed"] == []
+
+
+class TestEmergencyLatchGating:
+    """Scheduler should not dispatch/start while emergency latch is active."""
+
+    def test_dispatch_blocked_when_latched(self, queue, registry, event_bus, scheduler):
+        adapter = make_mock_adapter(name="printer-1", state=PrinterStatus.IDLE)
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="blocked.gcode")
+
+        fake_coord = MagicMock()
+        fake_coord.get_latch_status.return_value = {
+            "printer_id": "printer-1",
+            "latched": True,
+            "critical_interlocks_pending": ["door_closed"],
+        }
+
+        with patch("kiln.emergency.get_emergency_coordinator", return_value=fake_coord):
+            result = scheduler.tick()
+
+        assert result["dispatched"] == []
+        assert queue.get_job(job_id).status == JobStatus.QUEUED
+        adapter.start_print.assert_not_called()
+
+        events = event_bus.recent_events(EventType.SAFETY_ESCALATED)
+        assert len(events) == 1
+        assert events[0].data["printer_name"] == "printer-1"
+        assert events[0].data["job_id"] == job_id
+
+    def test_active_job_marked_failed_when_latched(self, queue, registry, event_bus, scheduler):
+        adapter = make_mock_adapter(name="printer-1", state=PrinterStatus.IDLE)
+        registry.register("printer-1", adapter)
+        job_id = queue.submit(file_name="running.gcode")
+
+        fake_coord = MagicMock()
+        fake_coord.get_latch_status.return_value = {"printer_id": "printer-1", "latched": False}
+        with patch("kiln.emergency.get_emergency_coordinator", return_value=fake_coord):
+            first = scheduler.tick()
+        assert len(first["dispatched"]) == 1
+        assert queue.get_job(job_id).status == JobStatus.PRINTING
+
+        fake_coord.get_latch_status.return_value = {
+            "printer_id": "printer-1",
+            "latched": True,
+            "critical_interlocks_pending": [],
+        }
+        with patch("kiln.emergency.get_emergency_coordinator", return_value=fake_coord):
+            second = scheduler.tick()
+
+        assert len(second["failed"]) == 1
+        assert second["failed"][0]["job_id"] == job_id
+        assert queue.get_job(job_id).status == JobStatus.FAILED
+        assert job_id not in scheduler.active_jobs
 
 
 

@@ -40,6 +40,40 @@ What Kiln does when things go wrong — no human needed.
 
 ---
 
+## Emergency Stop Runbook
+
+When a critical event happens, use the latch flow instead of ad-hoc commands.
+
+1. Trip stop immediately.
+2. Inspect hardware and clear hazards.
+3. Verify critical interlocks are re-engaged.
+4. Acknowledge and clear latch.
+5. Resume operations intentionally.
+
+### Commands
+
+```bash
+# Trip one printer
+kiln emergency-stop --printer <name> --reason user_request --source operator
+
+# Trip all known printers
+kiln emergency-stop --all --reason software_fault --source supervisor
+
+# Inspect latch state
+kiln emergency-status --all
+
+# Clear after inspection (ack note required)
+kiln emergency-clear --printer <name> --ack-note "Inspected nozzle/heaters, safe to continue"
+```
+
+### Operational rules
+
+- Do not bypass with raw G-code while latched.
+- Do not auto-resume after a latch event.
+- Treat repeated latch triggers as an escalation event and investigate root cause.
+
+---
+
 ## Alert Configuration
 
 Kiln delivers alerts via webhooks. Wire them to your preferred notification channel.
