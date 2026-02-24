@@ -38,17 +38,17 @@ Kiln lets AI agents design, queue, and execute physical manufacturing jobs on re
 
 ### Positioning Clarification
 
-> **Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available.
+> **Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and external provider/network adapters as integrations are available.
 
 ### Three ways to print
 
 | Mode | What it is | You need |
 |------|-----------|----------|
 | **🖨️ Your printer** | Control OctoPrint, Moonraker, Bambu, or Prusa Link printers on your LAN — or remotely via Bambu Cloud | A 3D printer |
-| **🏭 Fulfillment centers** | Outsource to Craftcloud (150+ services — no API key required). Kiln handles quoting, ordering, and tracking. More providers coming soon | Nothing — no printer required |
-| **🌐 Partner networks (via integration)** *(coming soon)* | Route jobs to connected third-party manufacturing networks through integration adapters. Kiln does not operate a first-party network marketplace | Nothing — integrations as available |
+| **🏭 Fulfillment centers** | Outsource to Craftcloud (150+ services — no API key required). Kiln handles quoting, ordering, and tracking. More providers as integrations launch | Nothing — no printer required |
+| **🌐 External provider integrations** | Route jobs through connected third-party provider/network adapters. Kiln does not operate a first-party network marketplace | Integrations as available |
 
-All three modes use the same MCP tools and CLI commands. An agent can seamlessly fall back from a busy local printer to a fulfillment center or connected partner network — all in one workflow.
+All three modes use the same MCP tools and CLI commands. An agent can seamlessly fall back from a busy local printer to a fulfillment center or connected external provider integration — all in one workflow.
 
 ### Non-goals
 
@@ -74,7 +74,7 @@ graph TD
 
     B --> C["🖨️ Your Printers"]
     B --> F["🏭 Fulfillment"]
-    B --> N["🌐 Partner Networks<br/><sub>(via integrations, coming soon)</sub>"]
+    B --> N["🌐 External Integrations<br/><sub>(third-party providers/networks, as available)</sub>"]
     B --> D["🛒 Marketplaces"]
 
     C --> E1["OctoPrint"]
@@ -567,12 +567,12 @@ The Kiln MCP server (`kiln serve`) exposes **273 tools** to agents. Key tools ar
 | `get_printer_insights` | Query cross-printer learning: success rates, failure breakdown, material stats |
 | `suggest_printer_for_job` | Rank printers by historical success for a file/material combination |
 | `recommend_settings` | Recommend print settings (temps, speed, slicer profile) from historical successes |
-| `connect_provider_account` | Connect a local listing to a partner provider integration *(coming soon)* |
-| `sync_provider_capacity` | Sync provider availability/capacity for a connected listing *(coming soon)* |
-| `list_provider_capacity` | List capacity/listings from connected provider integrations *(coming soon)* |
-| `find_provider_capacity` | Search connected provider capacity by material/location *(coming soon)* |
-| `submit_provider_job` | Submit a print job through a connected provider integration *(coming soon)* |
-| `provider_job_status` | Check status of a provider-managed job *(coming soon)* |
+| `connect_provider_account` | Connect a local listing to a partner provider integration *(as integrations launch)* |
+| `sync_provider_capacity` | Sync provider availability/capacity for a connected listing *(as integrations launch)* |
+| `list_provider_capacity` | List capacity/listings from connected provider integrations *(as integrations launch)* |
+| `find_provider_capacity` | Search connected provider capacity by material/location *(as integrations launch)* |
+| `submit_provider_job` | Submit a print job through a connected provider integration *(as integrations launch)* |
+| `provider_job_status` | Check status of a provider-managed job *(as integrations launch)* |
 | `network_register_printer` | Deprecated alias for `connect_provider_account` *(deprecated v0.2.0; remove v0.4.0)* |
 | `network_update_printer` | Deprecated alias for `sync_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
 | `network_list_printers` | Deprecated alias for `list_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
@@ -707,7 +707,7 @@ The server also exposes read-only resources that agents can use for context:
 | `rest_api.py` | REST API wrapper (FastAPI) exposing all MCP tools as HTTP endpoints |
 | `data/` | Bundled JSON databases (safety profiles, slicer profiles, printer intelligence) |
 | `payments/` | Payment processing (Stripe, Circle USDC, crypto rails) |
-| `gateway/` | Partner-network integration gateway *(coming soon)* |
+| `gateway/` | External-provider integration gateway *(as integrations launch)* |
 | `heater_watchdog.py` | Auto-cooldown watchdog for idle heaters |
 | `licensing.py` | License tier management (Free/Pro/Business/Enterprise, offline-first) |
 | `sso.py` | SSO authentication (OIDC/SAML) with IdP role mapping and email domain allowlists |

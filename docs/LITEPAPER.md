@@ -12,7 +12,7 @@ Kiln is free, open-source infrastructure that lets AI agents control 3D printers
 
 ## Positioning Clarification
 
-**Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available.
+**Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and external provider/network adapters as integrations are available.
 
 ## The Problem
 
@@ -26,11 +26,11 @@ Kiln acts as a universal translator between AI agents and 3D printers. One inter
 
 1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Bambu Lab, Elegoo (Centauri Carbon, Saturn, Mars via SDCP; Neptune 4 and OrangeStorm Giga via Moonraker), or Prusa Link machines on your local network -- or remotely via Bambu Cloud. Your agent doesn't need to know which firmware a printer runs; Kiln handles the translation.
 
-2. **Fulfillment centers.** Send jobs to professional manufacturing services. Craftcloud aggregates quotes from over 150 print services worldwide across FDM, SLA, SLS, MJF, and metal (DMLS) — works out of the box with no API key required. No printer required -- but printer owners use this too for overflow, specialty materials, or production-quality parts. More providers coming soon.
+2. **Fulfillment centers.** Send jobs to professional manufacturing services. Craftcloud aggregates quotes from over 150 print services worldwide across FDM, SLA, SLS, MJF, and metal (DMLS) — works out of the box with no API key required. No printer required -- but printer owners use this too for overflow, specialty materials, or production-quality parts. More providers as integrations launch.
 
-3. **Partner networks (via integration).** *(Coming soon.)* Route jobs to connected third-party manufacturing networks through integration adapters. Kiln does not operate a first-party network marketplace.
+3. **External provider integrations.** Route jobs through connected third-party provider/network adapters. Kiln does not operate a first-party network marketplace.
 
-An agent can start a PLA prototype on your desk printer, send the SLA version to Craftcloud, and route overflow to a connected partner network -- all from the same conversation.
+An agent can start a PLA prototype on your desk printer, send the SLA version to Craftcloud, and route overflow through an external provider integration -- all from the same conversation.
 
 **Non-goals:**
 
@@ -54,12 +54,12 @@ An agent can start a PLA prototype on your desk printer, send the SLA version to
 ```
 You (or your agent) --> Kiln --> 🖨️ Your Printers  (local or remote via Bambu Cloud)
                                  🏭 Fulfillment     (Craftcloud)
-                                 🌐 Partner Networks (via integration, coming soon)
+                                 🌐 External Integrations (third-party providers/networks, as available)
 ```
 
 Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. For those who prefer a terminal, there's also a full command-line interface with over 80 commands and a REST API for custom integrations.
 
-All three printing modes use the same interface. An agent doesn't need to know whether a job is printing on your desk, at a factory in Germany, or through a connected partner network -- Kiln abstracts the routing. Communication with local printers stays on your network; fulfillment and partner-network jobs use HTTPS to the respective provider APIs.
+All three printing modes use the same interface. An agent doesn't need to know whether a job is printing on your desk, at a factory in Germany, or through a connected external provider integration -- Kiln abstracts the routing. Communication with local printers stays on your network; fulfillment and provider-integration jobs use HTTPS to the respective provider APIs.
 
 ## Safety
 

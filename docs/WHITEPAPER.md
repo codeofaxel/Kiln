@@ -6,11 +6,11 @@
 
 **Version 0.1.0 — February 2026**
 
-> **Positioning clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available.
+> **Positioning clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and external provider/network adapters as integrations are available.
 
 ## Abstract
 
-We present Kiln, a protocol and reference implementation that enables autonomous AI agents to control physical manufacturing hardware — specifically 3D printers — through a unified adapter interface. Kiln bridges the gap between digital intelligence and physical fabrication by exposing three co-equal manufacturing paths through a single interface: (1) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link adapters; (2) outsourced manufacturing through fulfillment providers such as Craftcloud; and (3) integration with third-party partner manufacturing networks (coming soon). All three modes are accessible through the Model Context Protocol (MCP) and a conventional CLI, allowing agents to seamlessly route jobs based on material availability, capacity, cost, or geographic proximity. Kiln acts as orchestration infrastructure and does not operate a first-party decentralized manufacturing marketplace/network. The system enforces safety invariants at the protocol level to prevent physical damage. We describe the adapter abstraction that normalizes disparate printer APIs, the fulfillment and partner-network integrations, the safety validation layer, and the scheduling architecture that enables multi-printer job dispatch.
+We present Kiln, a protocol and reference implementation that enables autonomous AI agents to control physical manufacturing hardware — specifically 3D printers — through a unified adapter interface. Kiln bridges the gap between digital intelligence and physical fabrication by exposing three co-equal manufacturing paths through a single interface: (1) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link adapters; (2) outsourced manufacturing through fulfillment providers such as Craftcloud; and (3) integration with third-party provider/network adapters as integrations launch. All three modes are accessible through the Model Context Protocol (MCP) and a conventional CLI, allowing agents to seamlessly route jobs based on material availability, capacity, cost, or geographic proximity. Kiln acts as orchestration infrastructure and does not operate a first-party decentralized manufacturing marketplace/network. The system enforces safety invariants at the protocol level to prevent physical damage. We describe the adapter abstraction that normalizes disparate printer APIs, the fulfillment and external-provider integrations, the safety validation layer, and the scheduling architecture that enables multi-printer job dispatch.
 
 ## 1. Introduction
 
@@ -48,18 +48,18 @@ Kiln solves both problems simultaneously:
                         /      |      \
               ---------/       |       \---------
              /                 |                 \
-   [Your Printers]     [Fulfillment]     [Partner Networks]
+   [Your Printers]     [Fulfillment]     [External Integrations]
     /   |   \  \  \       /       \           |
   OP  MR  BL  PL  EG  Craftcloud  Third-party providers
    |   |   |   |   |      |           |
   HTTP HTTP MQTT HTTP WS  HTTPS       HTTPS
    |   |   |   |   |      |          |           |
-  🖨️  🖨️  🖨️  🖨️  🖨️   150+ svcs  75+ mats   Partner networks
+  🖨️  🖨️  🖨️  🖨️  🖨️   150+ svcs  75+ mats   External integrations
 
   OP = OctoPrint, MR = Moonraker, BL = Bambu Lab, PL = Prusa Link, EG = Elegoo
 ```
 
-The three manufacturing paths are co-equal: an agent can print locally, outsource to a fulfillment center, or route to a connected partner network provider — all through the same MCP tools and CLI commands. The server is stateless with respect to printer communication — all state lives on the printers themselves. Kiln maintains local state only for job queuing, event history, and webhook registrations via SQLite.
+The three manufacturing paths are co-equal: an agent can print locally, outsource to a fulfillment center, or route through a connected external provider/network integration — all through the same MCP tools and CLI commands. The server is stateless with respect to printer communication — all state lives on the printers themselves. Kiln maintains local state only for job queuing, event history, and webhook registrations via SQLite.
 
 ### 2.2 The Adapter Contract
 
@@ -203,7 +203,7 @@ Kiln supports third-party extensions through a plugin system based on Python ent
 
 ## 7. Revenue Model
 
-Local printer control is free and unrestricted. Kiln charges a 5% orchestration software fee on orders placed through external manufacturing services (Craftcloud and connected partner network providers), with the first 3 outsourced orders per month free and a $0.25 minimum / $200 maximum per-order cap. The fee is surfaced transparently in every quote response before the user commits to an order. For provider-routed jobs, the provider remains merchant of record.
+Local printer control is free and unrestricted. Kiln charges a 5% orchestration software fee on orders placed through external manufacturing services (Craftcloud and connected external provider/network integrations), with the first 3 outsourced orders per month free and a $0.25 minimum / $200 maximum per-order cap. The fee is surfaced transparently in every quote response before the user commits to an order. For provider-routed jobs, the provider remains merchant of record.
 
 Kiln uses a four-tier licensing model: **Free** (all local printing, up to 2 printers, 10-job queue, billing visibility), **Pro** ($29/mo or $23/mo annual -- unlimited printers, fleet orchestration, analytics, unlimited queue, cloud sync), **Business** ($99/mo or $79/mo annual -- up to 50 printers, 5 team seats, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles, webhook integrations), and **Enterprise** (from $499/mo or $399/mo annual -- unlimited printers with 20 included at base price and $15/printer/mo thereafter, unlimited team seats, role-based access control, dedicated single-tenant MCP server, on-premises/cloud/hybrid deployment, SSO via SAML/OIDC, full audit trail with export, lockable safety profiles that prevent agent override, encrypted G-code at rest, 99.9% API uptime SLA, and dedicated support channel with onboarding). The free tier is designed to be excellent for solo operators, with the paywall boundary at multi-printer fleet orchestration rather than individual feature gating. License keys are validated offline-first via key prefix detection (`kiln_pro_`, `kiln_biz_`, `kiln_ent_`) with cached remote validation. The licensing system never blocks printer operations if the validation API is unreachable. Billing is tracked through a `BillingLedger` with `FeeCalculation` structs that record fee type, amount, and associated order metadata.
 
@@ -296,9 +296,9 @@ Agents record structured print outcomes after each job: success/failure/partial,
 
 All learning data is advisory — it informs agent decisions but never overrides safety limits. The system rejects outcome records with physically dangerous parameter values. Every insight response carries an explicit safety notice stating that data reflects past outcomes only and must not be used to bypass safety validation.
 
-## 11. Partner Network Integrations
+## 11. External Provider Integrations
 
-*(Coming soon.)* Kiln's architecture supports integration with third-party partner manufacturing networks, enabling job routing across independent printer operators through provider adapters. The gateway layer handles registration payloads, availability updates, job submission, and status polling against partner APIs. Agents can discover available capacity by material type or location, submit jobs for remote fabrication, and track order status — extending Kiln's reach beyond locally-connected hardware. Kiln remains orchestration infrastructure and does not operate a first-party decentralized manufacturing marketplace/network. Specific partner integrations will be announced as partnerships are finalized.
+Kiln's architecture supports integration with third-party provider/network adapters, enabling job routing across independent printer operators through provider APIs. The gateway layer handles registration payloads, availability updates, job submission, and status polling against partner APIs. Agents can discover available capacity by material type or location, submit jobs for remote fabrication, and track order status — extending Kiln's reach beyond locally-connected hardware. Kiln remains orchestration infrastructure and does not operate a first-party decentralized manufacturing marketplace/network. Specific integrations are exposed as they become available.
 
 ## 12. Consumer Manufacturing Workflow
 

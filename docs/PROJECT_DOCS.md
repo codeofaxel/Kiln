@@ -8,15 +8,15 @@
 
 ### Overview
 
-Kiln is agentic infrastructure for physical fabrication. It provides a unified interface for AI agents to control 3D printers, outsource to manufacturing services, and route jobs through connected third-party provider/network integrations — all through the Model Context Protocol (MCP) or a conventional CLI.
+Kiln is agentic infrastructure for physical fabrication. It provides a unified interface for AI agents to control 3D printers, outsource to manufacturing services, and route jobs through connected external provider/network integrations — all through the Model Context Protocol (MCP) or a conventional CLI.
 
-**Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available.
+**Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and external provider/network adapters as integrations are available.
 
 **Three ways to print:**
 
 - **🖨️ Your printers.** Control OctoPrint, Moonraker, Bambu Lab, or Prusa Link machines on your LAN — or remotely via Bambu Cloud.
-- **🏭 Fulfillment centers.** Outsource to Craftcloud (150+ services — no API key required). No printer required — or use alongside local printers for overflow and specialty materials. More providers coming soon.
-- **🌐 Partner networks (via integration).** *(Coming soon.)* Route jobs to connected third-party manufacturing networks through integration adapters.
+- **🏭 Fulfillment centers.** Outsource to Craftcloud (150+ services — no API key required). No printer required — or use alongside local printers for overflow and specialty materials. More providers as integrations launch.
+- **🌐 External provider integrations.** Route jobs through connected third-party provider/network adapters.
 
 All three modes use the same MCP tools and CLI commands.
 
