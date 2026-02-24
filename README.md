@@ -573,12 +573,12 @@ The Kiln MCP server (`kiln serve`) exposes **273 tools** to agents. Key tools ar
 | `find_provider_capacity` | Search connected provider capacity by material/location *(as integrations launch)* |
 | `submit_provider_job` | Submit a print job through a connected provider integration *(as integrations launch)* |
 | `provider_job_status` | Check status of a provider-managed job *(as integrations launch)* |
-| `network_register_printer` | Deprecated alias for `connect_provider_account` *(deprecated v0.2.0; remove v0.4.0)* |
-| `network_update_printer` | Deprecated alias for `sync_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
-| `network_list_printers` | Deprecated alias for `list_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
-| `network_find_printers` | Deprecated alias for `find_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
-| `network_submit_job` | Deprecated alias for `submit_provider_job` *(deprecated v0.2.0; remove v0.4.0)* |
-| `network_job_status` | Deprecated alias for `provider_job_status` *(deprecated v0.2.0; remove v0.4.0)* |
+| `network_register_printer` | Legacy compatibility alias for `connect_provider_account` *(deprecated v0.2.0; remove v0.4.0)* |
+| `network_update_printer` | Legacy compatibility alias for `sync_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
+| `network_list_printers` | Legacy compatibility alias for `list_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
+| `network_find_printers` | Legacy compatibility alias for `find_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
+| `network_submit_job` | Legacy compatibility alias for `submit_provider_job` *(deprecated v0.2.0; remove v0.4.0)* |
+| `network_job_status` | Legacy compatibility alias for `provider_job_status` *(deprecated v0.2.0; remove v0.4.0)* |
 | `billing_status` | Get billing status, fee policy, and payment methods |
 | `billing_summary` | Aggregated billing summary |
 | `billing_history` | Recent billing charges and payment outcomes |

@@ -105,8 +105,9 @@ Comprehensive reference for deploying Kiln as a hosted REST API service or local
 | `KILN_AGENT_ID` | No | `default` | Agent identifier for event attribution and memory |
 | `KILN_LLM_PRIVACY_MODE` | No | `1` (enabled) | Redact secrets from LLM context. Set `0` to disable |
 
-### Partner Network Integrations *(Coming Soon)*
+### External Provider Integrations *(As Integrations Launch)*
 
+Kiln does not operate a first-party marketplace/network. These settings are for third-party provider integrations.
 Legacy `KILN_NETWORK_*` variable names are retained for backward compatibility.
 
 | Variable | Required | Default | Description |

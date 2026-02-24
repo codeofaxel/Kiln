@@ -413,7 +413,9 @@ Kiln exposes **273 MCP tools** in total. The most commonly used tools are docume
 | `billing_check_setup` | — | Polls pending Stripe SetupIntent; persists payment method on success |
 | `check_payment_status` | `payment_id` | Non-blocking check of Circle/Stripe payment finality |
 
-#### Partner Provider Integrations *(Coming Soon)*
+#### External Provider Integrations *(As Integrations Launch)*
+
+Kiln does not operate a first-party marketplace/network. These tools integrate with third-party provider APIs.
 
 | Tool | Input | Output |
 |---|---|---|
@@ -423,12 +425,12 @@ Kiln exposes **273 MCP tools** in total. The most commonly used tools are docume
 | `find_provider_capacity` | `material`, `location` | Available provider capacity by material/location |
 | `submit_provider_job` | `file_url`, `material`, `printer_id` | Provider-managed remote job ID |
 | `provider_job_status` | `job_id` | Provider job tracking details |
-| `network_register_printer` | same as `connect_provider_account` | Deprecated alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
-| `network_update_printer` | same as `sync_provider_capacity` | Deprecated alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
-| `network_list_printers` | same as `list_provider_capacity` | Deprecated alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
-| `network_find_printers` | same as `find_provider_capacity` | Deprecated alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
-| `network_submit_job` | same as `submit_provider_job` | Deprecated alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
-| `network_job_status` | same as `provider_job_status` | Deprecated alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
+| `network_register_printer` | same as `connect_provider_account` | Legacy compatibility alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
+| `network_update_printer` | same as `sync_provider_capacity` | Legacy compatibility alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
+| `network_list_printers` | same as `list_provider_capacity` | Legacy compatibility alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
+| `network_find_printers` | same as `find_provider_capacity` | Legacy compatibility alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
+| `network_submit_job` | same as `submit_provider_job` | Legacy compatibility alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
+| `network_job_status` | same as `provider_job_status` | Legacy compatibility alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
 
 #### Safety Audit
 
