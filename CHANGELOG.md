@@ -25,6 +25,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - `generate_and_print` and `download_and_upload` no longer auto-start prints (upload only, explicit start required)
 - Auto-print toggles for marketplace and generated models (env var opt-in, default OFF)
 - Docs: clarified product boundary to reflect existing intent (orchestration layer, partner integrations; no strategy change)
+- Partner/provider naming is now canonical for remote integration surfaces (`partner` CLI group and provider-oriented MCP tools)
+- Legacy `network_*` MCP tools and `kiln network ...` CLI remain as compatibility aliases (deprecated in `v0.2.0`, removal target `v0.4.0`)
+- Fulfillment responses now include explicit provider ownership metadata (`provider_name`, `provider_order_id`, `provider_terms_url`, `support_owner=provider`, `merchant_of_record=provider`)
+- Billing language standardized to "orchestration software fee" in user-facing docs/CLI copy
 - SKILL.md reorganized: quick start moved to top, fulfillment section added, JSON response examples
 - Enriched `kiln status --json` with `printer_name` and `printer_type` fields
 - Improved config validation errors with actionable quick-fix suggestions

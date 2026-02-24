@@ -884,6 +884,33 @@ def _get_threedos_client() -> ThreeDOSClient:
     return _threedos_client
 
 
+_PROVIDER_TERMS_URLS: dict[str, str] = {
+    "craftcloud": "https://craftcloud3d.com/terms-and-conditions",
+    "sculpteo": "https://www.sculpteo.com/en/legal-notice/terms-of-use/",
+    "3dos": "https://www.3dos.io/terms",
+}
+
+
+def _provider_routing_metadata(
+    provider_name: str,
+    *,
+    provider_order_id: str = "",
+) -> dict[str, str]:
+    """Return normalized routing metadata for provider-managed orders.
+
+    Kiln is orchestration infrastructure. For provider-routed jobs, the
+    provider remains merchant of record and support owner.
+    """
+    normalized = (provider_name or "").strip().lower()
+    return {
+        "provider_name": provider_name,
+        "provider_order_id": provider_order_id,
+        "provider_terms_url": _PROVIDER_TERMS_URLS.get(normalized, ""),
+        "support_owner": "provider",
+        "merchant_of_record": "provider",
+    }
+
+
 def _get_payment_mgr() -> PaymentManager:
     """Return the lazily-initialised payment manager."""
     global _payment_mgr  # noqa: PLW0603
@@ -3315,7 +3342,7 @@ def recent_events(limit: int = 20, *, type: str | None = None) -> dict:
 
 @mcp.tool()
 def billing_summary() -> dict:
-    """Get a summary of Kiln platform fees for the current month.
+    """Get a summary of Kiln orchestration software fees for the current month.
 
     Shows total fees collected, number of outsourced orders, free tier
     usage, and the current fee policy.  Only orders placed through
@@ -3330,12 +3357,14 @@ def billing_summary() -> dict:
             "success": True,
             "month_revenue": revenue,
             "fee_policy": {
+                "orchestration_fee_percent": policy.network_fee_percent,
                 "network_fee_percent": policy.network_fee_percent,
                 "min_fee_usd": policy.min_fee_usd,
                 "max_fee_usd": policy.max_fee_usd,
                 "free_tier_jobs": policy.free_tier_jobs,
                 "currency": policy.currency,
             },
+            "outsourced_jobs_this_month": _billing.network_jobs_this_month(),
             "network_jobs_this_month": _billing.network_jobs_this_month(),
         }
     except Exception as exc:
@@ -3345,14 +3374,14 @@ def billing_summary() -> dict:
 
 @mcp.tool()
 def billing_setup_url(rail: str = "stripe") -> dict:
-    """Get a URL to link a payment method for Kiln platform fees.
+    """Get a URL to link a payment method for Kiln orchestration software fees.
 
     Args:
         rail: Payment rail — ``"stripe"`` for credit card, ``"crypto"``
             for USDC on Solana/Base.
 
     Returns the setup URL.  Open it in a browser to complete payment
-    method setup.  After setup, Kiln automatically charges the platform
+    method setup.  After setup, Kiln automatically charges the orchestration
     fee on each outsourced manufacturing order.
     """
     if err := _check_billing_auth("billing"):
@@ -5584,13 +5613,16 @@ def fulfillment_quote(
 
     Uploads the model, returns pricing from Craftcloud's network of 150+
     print services, including unit price, total, lead time, and shipping
-    options.  A Kiln platform fee is shown separately so the user sees
-    the full cost before committing.
+    options. A Kiln orchestration software fee is shown separately so
+    the user sees the full cost before committing.
 
     If a payment method is linked, a hold is placed on the fee amount
     at quote time (Stripe auth-and-capture).  The hold is captured
     when the order is placed via ``fulfillment_order``, or released
     if the user doesn't proceed.
+
+    Provider-routed jobs remain provider-managed: the response includes
+    provider ownership metadata and merchant-of-record context.
 
     Use the returned ``quote_id`` with ``fulfillment_order`` to place the
     order.
@@ -5612,6 +5644,8 @@ def fulfillment_quote(
         quote_data = quote.to_dict()
         quote_data["kiln_fee"] = fee_calc.to_dict()
         quote_data["total_with_fee"] = fee_calc.total_cost
+        quote_data.update(_provider_routing_metadata(provider.name))
+        quote_data["provider_quote_id"] = quote.quote_id
 
         # Try to authorize (hold) the fee at quote time.
         try:
@@ -5656,7 +5690,7 @@ def fulfillment_order(
 ) -> dict:
     """Place a manufacturing order based on a previous quote.
 
-    Charges the platform fee BEFORE placing the order to prevent
+    Charges the orchestration software fee BEFORE placing the order to prevent
     unpaid orders.  If order placement fails after payment, the
     charge is automatically refunded.
 
@@ -5803,6 +5837,12 @@ def fulfillment_order(
 
         # 4. Build response.
         order_data = result.to_dict()
+        order_data.update(
+            _provider_routing_metadata(
+                provider.name,
+                provider_order_id=result.order_id or "",
+            )
+        )
         if fee_calc:
             order_data["kiln_fee"] = fee_calc.to_dict()
             order_data["total_with_fee"] = fee_calc.total_cost
@@ -5887,9 +5927,16 @@ def fulfillment_order_status(order_id: str) -> dict:
     try:
         provider = _get_fulfillment()
         result = provider.get_order_status(order_id)
+        order_data = result.to_dict()
+        order_data.update(
+            _provider_routing_metadata(
+                provider.name,
+                provider_order_id=order_id,
+            )
+        )
         return {
             "success": True,
-            "order": result.to_dict(),
+            "order": order_data,
         }
     except (FulfillmentError, RuntimeError) as exc:
         return _error_dict(f"Failed to check order status: {exc}. Verify the order_id is correct.")

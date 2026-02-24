@@ -3550,7 +3550,7 @@ def billing() -> None:
 )
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def billing_setup(rail: str, json_mode: bool) -> None:
-    """Link a payment method for platform fees.
+    """Link a payment method for orchestration software fees.
 
     Generates a setup URL to add a credit card (Stripe) or configure
     crypto payments (USDC on Solana/Base).
@@ -5664,17 +5664,24 @@ def license_info(json_mode: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
-# network (3DOS distributed manufacturing)
+# partner/provider integration (3DOS-backed)
 # ---------------------------------------------------------------------------
 
+_NETWORK_ALIAS_DEPRECATED_IN = "v0.2.0"
+_NETWORK_ALIAS_REMOVAL_TARGET = "v0.4.0"
 
-@cli.group()
-def network() -> None:
-    """Distributed manufacturing via the 3DOS network.
 
-    Register local printers, find remote printers, and submit jobs
-    to the 3DOS distributed manufacturing network.
-    """
+def _network_alias_warning() -> None:
+    """Emit a warning when legacy `kiln network ...` commands are used."""
+    click.echo(
+        (
+            "Warning: `kiln network ...` is deprecated. "
+            "Use `kiln partner ...` instead. "
+            f"Deprecated in {_NETWORK_ALIAS_DEPRECATED_IN}; "
+            f"removal target {_NETWORK_ALIAS_REMOVAL_TARGET}."
+        ),
+        err=True,
+    )
 
 
 def _get_threedos_client():
@@ -5684,23 +5691,245 @@ def _get_threedos_client():
     try:
         return ThreeDOSClient()
     except ValueError as exc:
-        raise click.ClickException(f"3DOS not configured: {exc}. Set KILN_3DOS_API_KEY.") from exc
+        raise click.ClickException(
+            f"3DOS not configured: {exc}. Set KILN_3DOS_API_KEY."
+        ) from exc
+
+
+def _provider_connect(
+    *,
+    name: str,
+    location: str,
+    price: float | None,
+    json_mode: bool,
+) -> None:
+    client = _get_threedos_client()
+    listing = client.register_printer(name=name, location=location, price_per_gram=price)
+    if json_mode:
+        click.echo(format_response("success", data=listing.to_dict(), json_mode=True))
+    else:
+        click.echo(f"Connected provider listing '{listing.name}' (id: {listing.id})")
+
+
+def _provider_sync(
+    *,
+    printer_id: str,
+    available: bool,
+    json_mode: bool,
+) -> None:
+    client = _get_threedos_client()
+    client.update_printer_status(printer_id=printer_id, available=available)
+    if json_mode:
+        click.echo(
+            format_response(
+                "success",
+                data={"printer_id": printer_id, "available": available},
+                json_mode=True,
+            )
+        )
+    else:
+        status = "available" if available else "unavailable"
+        click.echo(f"Provider listing {printer_id} is now {status}")
+
+
+def _provider_list(*, json_mode: bool) -> None:
+    client = _get_threedos_client()
+    printers = client.list_my_printers()
+    if json_mode:
+        click.echo(
+            format_response(
+                "success",
+                data={"printers": [p.to_dict() for p in printers], "count": len(printers)},
+                json_mode=True,
+            )
+        )
+    else:
+        if not printers:
+            click.echo("No provider capacity listings connected yet.")
+        else:
+            for p in printers:
+                avail = "available" if p.available else "offline"
+                click.echo(f"  {p.name} ({p.id}) — {p.location} [{avail}]")
+
+
+def _provider_find(*, material: str, location: str | None, json_mode: bool) -> None:
+    client = _get_threedos_client()
+    printers = client.find_printers(material=material, location=location)
+    if json_mode:
+        click.echo(
+            format_response(
+                "success",
+                data={"printers": [p.to_dict() for p in printers], "count": len(printers)},
+                json_mode=True,
+            )
+        )
+    else:
+        if not printers:
+            click.echo(f"No provider capacity found for material '{material}'.")
+        else:
+            click.echo(f"Found {len(printers)} provider listing(s):")
+            for p in printers:
+                price_str = f"${p.price_per_gram}/g" if p.price_per_gram else "price TBD"
+                click.echo(f"  {p.name} ({p.id}) — {p.location} [{price_str}]")
+
+
+def _provider_submit(
+    *,
+    file_url: str,
+    material: str,
+    printer: str | None,
+    json_mode: bool,
+) -> None:
+    client = _get_threedos_client()
+    job = client.submit_network_job(file_url=file_url, material=material, printer_id=printer)
+    if json_mode:
+        click.echo(format_response("success", data=job.to_dict(), json_mode=True))
+    else:
+        cost = f" (est. ${job.estimated_cost:.2f})" if job.estimated_cost else ""
+        click.echo(f"Provider job submitted: {job.id} — status: {job.status}{cost}")
+
+
+def _provider_status(*, job_id: str, json_mode: bool) -> None:
+    client = _get_threedos_client()
+    job = client.get_network_job(job_id=job_id)
+    if json_mode:
+        click.echo(format_response("success", data=job.to_dict(), json_mode=True))
+    else:
+        cost = f" (est. ${job.estimated_cost:.2f})" if job.estimated_cost else ""
+        printer_info = f" on {job.printer_id}" if job.printer_id else ""
+        click.echo(f"Provider job {job.id}: {job.status}{printer_info}{cost}")
+
+
+@cli.group()
+def partner() -> None:
+    """Partner-provider integrations for remote manufacturing routing."""
+
+
+@partner.command("connect")
+@click.option("--name", "-n", required=True, help="Printer/listing name.")
+@click.option("--location", "-l", required=True, help="Geographic location.")
+@click.option("--price", type=float, default=None, help="Price per gram (USD).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def partner_connect(name: str, location: str, price: float | None, json_mode: bool) -> None:
+    """Connect a local printer listing to a provider account integration."""
+    try:
+        _provider_connect(name=name, location=location, price=price, json_mode=json_mode)
+    except click.ClickException:
+        raise
+    except ThreeDOSError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@partner.command("sync")
+@click.argument("printer_id")
+@click.option("--available/--unavailable", default=True, help="Set availability.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def partner_sync(printer_id: str, available: bool, json_mode: bool) -> None:
+    """Sync provider capacity status for a connected listing."""
+    try:
+        _provider_sync(printer_id=printer_id, available=available, json_mode=json_mode)
+    except click.ClickException:
+        raise
+    except ThreeDOSError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@partner.command("list")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def partner_list(json_mode: bool) -> None:
+    """List connected provider capacity listings."""
+    try:
+        _provider_list(json_mode=json_mode)
+    except click.ClickException:
+        raise
+    except ThreeDOSError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@partner.command("find")
+@click.option("--material", "-m", required=True, help="Material type (PLA, PETG, ABS).")
+@click.option("--location", "-l", default=None, help="Geographic filter.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def partner_find(material: str, location: str | None, json_mode: bool) -> None:
+    """Find available provider capacity by material/location."""
+    try:
+        _provider_find(material=material, location=location, json_mode=json_mode)
+    except click.ClickException:
+        raise
+    except ThreeDOSError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@partner.command("submit")
+@click.argument("file_url")
+@click.option("--material", "-m", required=True, help="Material type.")
+@click.option("--printer", "-p", default=None, help="Target printer ID (auto-assign if omitted).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def partner_submit(file_url: str, material: str, printer: str | None, json_mode: bool) -> None:
+    """Submit a remote job through the connected provider integration."""
+    try:
+        _provider_submit(file_url=file_url, material=material, printer=printer, json_mode=json_mode)
+    except click.ClickException:
+        raise
+    except ThreeDOSError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@partner.command("status")
+@click.argument("job_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def partner_status(job_id: str, json_mode: bool) -> None:
+    """Check status of a provider-managed remote job."""
+    try:
+        _provider_status(job_id=job_id, json_mode=json_mode)
+    except click.ClickException:
+        raise
+    except ThreeDOSError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@cli.group()
+def network() -> None:
+    """Deprecated alias for `partner` commands.
+
+    Deprecated in v0.2.0. Removal target: v0.4.0.
+    """
 
 
 @network.command("register")
-@click.option("--name", "-n", required=True, help="Printer name.")
+@click.option("--name", "-n", required=True, help="Printer/listing name.")
 @click.option("--location", "-l", required=True, help="Geographic location.")
 @click.option("--price", type=float, default=None, help="Price per gram (USD).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def network_register(name: str, location: str, price: float | None, json_mode: bool) -> None:
-    """Register a local printer on the 3DOS network."""
+    """Deprecated alias for `partner connect`."""
+    _network_alias_warning()
     try:
-        client = _get_threedos_client()
-        listing = client.register_printer(name=name, location=location, price_per_gram=price)
-        if json_mode:
-            click.echo(format_response("success", data=listing.to_dict(), json_mode=True))
-        else:
-            click.echo(f"Registered printer '{listing.name}' (id: {listing.id})")
+        _provider_connect(name=name, location=location, price=price, json_mode=json_mode)
     except click.ClickException:
         raise
     except ThreeDOSError as exc:
@@ -5716,17 +5945,10 @@ def network_register(name: str, location: str, price: float | None, json_mode: b
 @click.option("--available/--unavailable", default=True, help="Set availability.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def network_update(printer_id: str, available: bool, json_mode: bool) -> None:
-    """Update a printer's availability on the 3DOS network."""
+    """Deprecated alias for `partner sync`."""
+    _network_alias_warning()
     try:
-        client = _get_threedos_client()
-        client.update_printer_status(printer_id=printer_id, available=available)
-        if json_mode:
-            click.echo(
-                format_response("success", data={"printer_id": printer_id, "available": available}, json_mode=True)
-            )
-        else:
-            status = "available" if available else "unavailable"
-            click.echo(f"Printer {printer_id} is now {status}")
+        _provider_sync(printer_id=printer_id, available=available, json_mode=json_mode)
     except click.ClickException:
         raise
     except ThreeDOSError as exc:
@@ -5740,25 +5962,10 @@ def network_update(printer_id: str, available: bool, json_mode: bool) -> None:
 @network.command("list")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def network_list(json_mode: bool) -> None:
-    """List your printers registered on the 3DOS network."""
+    """Deprecated alias for `partner list`."""
+    _network_alias_warning()
     try:
-        client = _get_threedos_client()
-        printers = client.list_my_printers()
-        if json_mode:
-            click.echo(
-                format_response(
-                    "success",
-                    data={"printers": [p.to_dict() for p in printers], "count": len(printers)},
-                    json_mode=True,
-                )
-            )
-        else:
-            if not printers:
-                click.echo("No printers registered on the 3DOS network.")
-            else:
-                for p in printers:
-                    avail = "available" if p.available else "offline"
-                    click.echo(f"  {p.name} ({p.id}) — {p.location} [{avail}]")
+        _provider_list(json_mode=json_mode)
     except click.ClickException:
         raise
     except ThreeDOSError as exc:
@@ -5774,26 +5981,10 @@ def network_list(json_mode: bool) -> None:
 @click.option("--location", "-l", default=None, help="Geographic filter.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def network_find(material: str, location: str | None, json_mode: bool) -> None:
-    """Search for available printers on the 3DOS network."""
+    """Deprecated alias for `partner find`."""
+    _network_alias_warning()
     try:
-        client = _get_threedos_client()
-        printers = client.find_printers(material=material, location=location)
-        if json_mode:
-            click.echo(
-                format_response(
-                    "success",
-                    data={"printers": [p.to_dict() for p in printers], "count": len(printers)},
-                    json_mode=True,
-                )
-            )
-        else:
-            if not printers:
-                click.echo(f"No printers found for material '{material}'.")
-            else:
-                click.echo(f"Found {len(printers)} printer(s):")
-                for p in printers:
-                    price_str = f"${p.price_per_gram}/g" if p.price_per_gram else "price TBD"
-                    click.echo(f"  {p.name} ({p.id}) — {p.location} [{price_str}]")
+        _provider_find(material=material, location=location, json_mode=json_mode)
     except click.ClickException:
         raise
     except ThreeDOSError as exc:
@@ -5810,15 +6001,10 @@ def network_find(material: str, location: str | None, json_mode: bool) -> None:
 @click.option("--printer", "-p", default=None, help="Target printer ID (auto-assign if omitted).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def network_submit(file_url: str, material: str, printer: str | None, json_mode: bool) -> None:
-    """Submit a print job to the 3DOS network."""
+    """Deprecated alias for `partner submit`."""
+    _network_alias_warning()
     try:
-        client = _get_threedos_client()
-        job = client.submit_network_job(file_url=file_url, material=material, printer_id=printer)
-        if json_mode:
-            click.echo(format_response("success", data=job.to_dict(), json_mode=True))
-        else:
-            cost = f" (est. ${job.estimated_cost:.2f})" if job.estimated_cost else ""
-            click.echo(f"Job submitted: {job.id} — status: {job.status}{cost}")
+        _provider_submit(file_url=file_url, material=material, printer=printer, json_mode=json_mode)
     except click.ClickException:
         raise
     except ThreeDOSError as exc:
@@ -5833,16 +6019,10 @@ def network_submit(file_url: str, material: str, printer: str | None, json_mode:
 @click.argument("job_id")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def network_status(job_id: str, json_mode: bool) -> None:
-    """Check the status of a 3DOS network job."""
+    """Deprecated alias for `partner status`."""
+    _network_alias_warning()
     try:
-        client = _get_threedos_client()
-        job = client.get_network_job(job_id=job_id)
-        if json_mode:
-            click.echo(format_response("success", data=job.to_dict(), json_mode=True))
-        else:
-            cost = f" (est. ${job.estimated_cost:.2f})" if job.estimated_cost else ""
-            printer_info = f" on {job.printer_id}" if job.printer_id else ""
-            click.echo(f"Job {job.id}: {job.status}{printer_info}{cost}")
+        _provider_status(job_id=job_id, json_mode=json_mode)
     except click.ClickException:
         raise
     except ThreeDOSError as exc:

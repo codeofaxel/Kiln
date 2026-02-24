@@ -120,7 +120,7 @@ This threat model covers the following components of the Kiln system:
 | ID | Threat | Component | Description |
 |---|---|---|---|
 | R-1 | Print commands without attribution | MCP Server | Agent IDs in audit log entries are self-reported strings. An agent can claim any identity or provide no identity. There is no cryptographic binding between an authenticated API key and the agent ID recorded in the audit log. |
-| R-2 | Fee disputes on outsourced orders | Payment Manager | Platform fees (5% on fulfillment orders) are calculated locally and recorded in the `BillingLedger`. The fee calculation is deterministic and auditable, but there is no third-party attestation or signed receipt from the payment provider that the specific fee amount was authorized by the user. |
+| R-2 | Fee disputes on outsourced orders | Payment Manager | Orchestration software fees (5% on fulfillment orders) are calculated locally and recorded in the `BillingLedger`. The fee calculation is deterministic and auditable, but there is no third-party attestation or signed receipt from the payment provider that the specific fee amount was authorized by the user. |
 | R-3 | Deleted event history | Persistence | Events persisted to SQLite can be deleted by any process with filesystem access. While the safety audit log has HMAC signatures, the general event log does not. Event deletion leaves no trace. |
 | R-4 | Unsigned cloud sync payloads | Cloud Sync | Cloud sync payloads are HMAC-signed for integrity, but the signing key is locally held. The remote API cannot independently verify that the data originated from a legitimate Kiln instance versus a replay or fabrication using a compromised key. |
 

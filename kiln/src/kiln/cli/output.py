@@ -1040,19 +1040,21 @@ def format_billing_status(
 
         # Monthly spend
         total = revenue.get("total_fees", 0.0)
-        jobs = revenue.get("job_count", 0)
+        jobs = revenue.get("job_count", data.get("outsourced_jobs_this_month", data.get("network_jobs_this_month", 0)))
         waived = revenue.get("waived_count", 0)
         cap = limits.get("monthly_cap_usd", 2000.0)
         parts.append(f"[bold]Monthly spend:[/bold] ${total:.2f} / ${cap:.2f} cap  ({jobs} orders, {waived} waived)")
 
         # Fee policy
+        fee_percent = policy.get("orchestration_fee_percent", policy.get("network_fee_percent", 5))
         parts.append(
-            f"[bold]Fee:[/bold] {policy.get('network_fee_percent', 5)}% "
+            f"[bold]Orchestration fee:[/bold] {fee_percent}% "
             f"(min ${policy.get('min_fee_usd', 0.25):.2f}, "
             f"max ${policy.get('max_fee_usd', 50):.2f})"
         )
 
-        free_left = max(0, policy.get("free_tier_jobs", 3) - data.get("network_jobs_this_month", 0))
+        jobs_this_month = data.get("outsourced_jobs_this_month", data.get("network_jobs_this_month", 0))
+        free_left = max(0, policy.get("free_tier_jobs", 3) - jobs_this_month)
         parts.append(f"[bold]Free tier:[/bold] {free_left} free orders remaining this month")
 
         # Available rails
@@ -1072,7 +1074,8 @@ def format_billing_status(
     total = revenue.get("total_fees", 0.0)
     cap = limits.get("monthly_cap_usd", 2000.0)
     lines.append(f"Monthly spend: ${total:.2f} / ${cap:.2f}")
-    lines.append(f"Fee: {policy.get('network_fee_percent', 5)}%")
+    fee_percent = policy.get("orchestration_fee_percent", policy.get("network_fee_percent", 5))
+    lines.append(f"Orchestration fee: {fee_percent}%")
     return "\n".join(lines)
 
 
@@ -1163,7 +1166,7 @@ def format_billing_setup(
             content = (
                 f"Open the link below to add a credit card:\n\n"
                 f"  [bold blue]{url}[/bold blue]\n\n"
-                f"After setup, Kiln will charge the platform fee automatically\n"
+                f"After setup, Kiln will charge the orchestration software fee automatically\n"
                 f"on each outsourced manufacturing order."
             )
         else:

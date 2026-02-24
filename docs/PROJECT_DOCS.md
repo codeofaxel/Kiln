@@ -10,7 +10,7 @@
 
 Kiln is agentic infrastructure for physical fabrication. It provides a unified interface for AI agents to control 3D printers, outsource to manufacturing services, and route jobs through connected third-party provider/network integrations — all through the Model Context Protocol (MCP) or a conventional CLI.
 
-**Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align docs with existing intent. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available. Messaging clarification to reflect existing intent; no strategy change.
+**Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available.
 
 **Three ways to print:**
 
@@ -25,6 +25,7 @@ All three modes use the same MCP tools and CLI commands.
 - Operating a first-party decentralized manufacturing marketplace/network
 - Replacing partner supply-side networks
 - Owning provider marketplaces instead of integrating with them
+- Acting as merchant of record for provider-routed manufacturing orders
 
 **Key properties:**
 
@@ -412,16 +413,22 @@ Kiln exposes **273 MCP tools** in total. The most commonly used tools are docume
 | `billing_check_setup` | — | Polls pending Stripe SetupIntent; persists payment method on success |
 | `check_payment_status` | `payment_id` | Non-blocking check of Circle/Stripe payment finality |
 
-#### Partner Network Integrations *(Coming Soon)*
+#### Partner Provider Integrations *(Coming Soon)*
 
 | Tool | Input | Output |
 |---|---|---|
-| `network_register_printer` | `name`, `location`, `materials` | Partner integration registration confirmation (supported providers only) |
-| `network_update_printer` | `printer_id`, `available` | Partner integration availability update confirmation |
-| `network_list_printers` | — | Your printers registered with connected partner provider(s) |
-| `network_find_printers` | `material`, `location` | Available capacity from connected partner provider(s) |
-| `network_submit_job` | `file_url`, `material`, `printer_id` | Partner-network job ID (provider-managed) |
-| `network_job_status` | `job_id` | Provider job tracking details |
+| `connect_provider_account` | `name`, `location`, `capabilities`, `price_per_gram` | Connects local listing to provider integration account |
+| `sync_provider_capacity` | `printer_id?`, `available?` | Syncs provider-side availability/capacity snapshot |
+| `list_provider_capacity` | — | Connected provider listings/capacity |
+| `find_provider_capacity` | `material`, `location` | Available provider capacity by material/location |
+| `submit_provider_job` | `file_url`, `material`, `printer_id` | Provider-managed remote job ID |
+| `provider_job_status` | `job_id` | Provider job tracking details |
+| `network_register_printer` | same as `connect_provider_account` | Deprecated alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
+| `network_update_printer` | same as `sync_provider_capacity` | Deprecated alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
+| `network_list_printers` | same as `list_provider_capacity` | Deprecated alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
+| `network_find_printers` | same as `find_provider_capacity` | Deprecated alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
+| `network_submit_job` | same as `submit_provider_job` | Deprecated alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
+| `network_job_status` | same as `provider_job_status` | Deprecated alias (deprecated `v0.2.0`, removal target `v0.4.0`) |
 
 #### Safety Audit
 
@@ -437,9 +444,9 @@ Kiln exposes **273 MCP tools** in total. The most commonly used tools are docume
 | Tool | Input | Output |
 |---|---|---|
 | `fulfillment_materials` | `provider` | Available materials from external print services |
-| `fulfillment_quote` | `file_path`, `material_id`, `quantity`, `provider` | Manufacturing quote with shipping options |
-| `fulfillment_order` | `quote_id`, `shipping_option_id`, `payment_hold_id` | Order confirmation with billing |
-| `fulfillment_order_status` | `order_id` | Order tracking details |
+| `fulfillment_quote` | `file_path`, `material_id`, `quantity`, `provider` | Manufacturing quote + provider ownership metadata (`provider_name`, `provider_terms_url`, `support_owner=provider`, `merchant_of_record=provider`) |
+| `fulfillment_order` | `quote_id`, `shipping_option_id`, `payment_hold_id` | Order confirmation with billing + provider metadata (`provider_order_id`) |
+| `fulfillment_order_status` | `order_id` | Order tracking details + provider ownership metadata |
 | `fulfillment_cancel` | `order_id` | Cancellation confirmation |
 | `compare_print_options` | `file_path`, `material` | Local vs. fulfillment cost comparison |
 | `fulfillment_compare_providers` | `file_path`, `material_id`, `quantity` | Side-by-side quotes from all providers |
@@ -918,7 +925,7 @@ kiln/src/kiln/
         stripe_provider.py   # Stripe payment provider
         circle_provider.py   # Circle USDC payment provider
     gateway/
-        network.py       # Partner-network integration client (coming soon)
+        network.py       # Provider-integration gateway client (canonical partner_* tools + legacy network_* aliases)
     data/
         safety_profiles.json     # Per-printer safety limits (temps, feedrates, flow)
         slicer_profiles.json     # Per-printer slicer settings (INI key-values)

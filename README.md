@@ -38,7 +38,7 @@ Kiln lets AI agents design, queue, and execute physical manufacturing jobs on re
 
 ### Positioning Clarification
 
-> **Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align docs with existing intent. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available. Messaging clarification to reflect existing intent; no strategy change.
+> **Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available.
 
 ### Three ways to print
 
@@ -55,6 +55,7 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 - Operating a first-party decentralized manufacturing marketplace/network
 - Replacing partner supply-side networks
 - Owning provider marketplaces instead of integrating with them
+- Acting as merchant of record for provider-routed manufacturing orders
 
 ### Why Kiln?
 
@@ -356,12 +357,14 @@ kiln generate-download <job_id> -o ./models --json      # Download generated mod
 kiln firmware status --json                # Check for firmware updates
 kiln firmware update [--component klipper] # Apply firmware updates
 kiln firmware rollback <component>         # Roll back firmware
-kiln network register --name N --location L # Register printer with a connected partner network (integration preview)
-kiln network find --material PLA           # Find partner-network printers by material (integration preview)
-kiln network submit URL --material PLA     # Submit job to a connected partner network (integration preview)
-kiln network status <job_id>               # Check connected-network job status (integration preview)
-kiln network list                          # List printers registered through connected partner networks
-kiln network update <id> --available       # Update connected-network availability
+kiln partner connect --name N --location L # Connect provider account/listing (integration preview)
+kiln partner find --material PLA           # Find provider capacity by material/location
+kiln partner submit URL --material PLA     # Submit job through a connected provider integration
+kiln partner status <job_id>               # Check provider-managed job status
+kiln partner list                          # List connected provider capacity listings
+kiln partner sync <id> --available         # Sync provider capacity availability
+# Legacy alias (deprecated in v0.2.0, removal target v0.4.0):
+# kiln network register|find|submit|status|list|update
 kiln setup                                 # Interactive printer setup wizard
 kiln serve                                 # Start MCP server
 kiln rest [--port 8420] [--tier full] [--auth-token TOKEN]  # Start REST API server
@@ -564,12 +567,18 @@ The Kiln MCP server (`kiln serve`) exposes **273 tools** to agents. Key tools ar
 | `get_printer_insights` | Query cross-printer learning: success rates, failure breakdown, material stats |
 | `suggest_printer_for_job` | Rank printers by historical success for a file/material combination |
 | `recommend_settings` | Recommend print settings (temps, speed, slicer profile) from historical successes |
-| `network_register_printer` | Register a local printer with a connected partner network *(integration path, coming soon)* |
-| `network_update_printer` | Update printer availability on a connected partner network *(integration path, coming soon)* |
-| `network_list_printers` | List printers registered via connected partner networks *(integration path, coming soon)* |
-| `network_find_printers` | Search connected partner networks by material/location *(integration path, coming soon)* |
-| `network_submit_job` | Submit a print job to a connected partner network *(integration path, coming soon)* |
-| `network_job_status` | Check the status of a job routed via a connected partner network *(integration path, coming soon)* |
+| `connect_provider_account` | Connect a local listing to a partner provider integration *(coming soon)* |
+| `sync_provider_capacity` | Sync provider availability/capacity for a connected listing *(coming soon)* |
+| `list_provider_capacity` | List capacity/listings from connected provider integrations *(coming soon)* |
+| `find_provider_capacity` | Search connected provider capacity by material/location *(coming soon)* |
+| `submit_provider_job` | Submit a print job through a connected provider integration *(coming soon)* |
+| `provider_job_status` | Check status of a provider-managed job *(coming soon)* |
+| `network_register_printer` | Deprecated alias for `connect_provider_account` *(deprecated v0.2.0; remove v0.4.0)* |
+| `network_update_printer` | Deprecated alias for `sync_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
+| `network_list_printers` | Deprecated alias for `list_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
+| `network_find_printers` | Deprecated alias for `find_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
+| `network_submit_job` | Deprecated alias for `submit_provider_job` *(deprecated v0.2.0; remove v0.4.0)* |
+| `network_job_status` | Deprecated alias for `provider_job_status` *(deprecated v0.2.0; remove v0.4.0)* |
 | `billing_status` | Get billing status, fee policy, and payment methods |
 | `billing_summary` | Aggregated billing summary |
 | `billing_history` | Recent billing charges and payment outcomes |
@@ -628,6 +637,14 @@ The Kiln MCP server (`kiln serve`) exposes **273 tools** to agents. Key tools ar
 | `log_project_cost` | Log a cost entry (material, printer time, labor, etc.) against a project (Enterprise) |
 | `project_cost_summary` | Aggregate cost summary with budget tracking for a project (Enterprise) |
 | `client_cost_report` | Cross-project cost report for a client (Enterprise) |
+
+### Provider Tool Deprecation Timeline
+
+- Canonical provider integration tools: `connect_provider_account`, `sync_provider_capacity`, `list_provider_capacity`, `find_provider_capacity`, `submit_provider_job`, `provider_job_status`.
+- Legacy aliases (`network_*`) remain available for compatibility only.
+- `network_*` deprecated in `v0.2.0`.
+- Removal target for `network_*`: `v0.4.0`.
+- Clarification only: existing intent unchanged, no strategy change.
 
 ## Supported Printers
 
@@ -922,12 +939,14 @@ cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 
 All local printing is **free forever** — status checks, file management, slicing, fleet control, and printing to your own printers costs nothing.
 
-Kiln charges a **5% platform fee** on orders placed through external manufacturing services (`kiln order` / fulfillment MCP tools), with:
+Kiln charges a **5% orchestration software fee** on orders placed through external manufacturing services (`kiln order` / fulfillment MCP tools), with:
 
 - First 3 outsourced orders per month **free**
 - $0.25 minimum / $200 maximum per-order cap
 
 The fee is shown transparently in every quote before you commit.
+
+For provider-routed orders, the provider remains merchant of record and support owner. Kiln acts as orchestration infrastructure.
 
 ### Licensing Tiers
 
@@ -935,7 +954,7 @@ The fee is shown transparently in every quote before you commit.
 |------|-------|-------------|
 | **Free** | $0 | All local printing, slicing, marketplace, safety profiles. Job queue (10 jobs). Up to 2 printers. Billing visibility. |
 | **Pro** | $29/mo | Unlimited printers + fleet orchestration, fleet analytics, unlimited queue depth, cloud sync, priority scheduler. Annual: $23/mo ($276/yr). |
-| **Business** | $99/mo | Everything in Pro + up to 50 printers, 5 team seats, unlimited fulfillment orders (5% fee), shared hosted MCP server, priority support, custom safety profiles, webhook integrations. Annual: $79/mo ($948/yr). |
+| **Business** | $99/mo | Everything in Pro + up to 50 printers, 5 team seats, unlimited fulfillment orders (5% orchestration fee), shared hosted MCP server, priority support, custom safety profiles, webhook integrations. Annual: $79/mo ($948/yr). |
 | **Enterprise** | From $499/mo | Everything in Business + unlimited printers (20 included, $15/mo each after), unlimited seats, role-based access control, dedicated single-tenant MCP server, on-prem/cloud/hybrid deployment, SSO (SAML/OIDC), full audit trail with export, lockable safety profiles, encrypted G-code at rest, 99.9% uptime SLA, dedicated Slack channel. Annual: $399/mo ($4,788/yr). |
 
 Run `kiln upgrade` to activate a license key.

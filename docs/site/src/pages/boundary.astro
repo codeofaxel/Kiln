@@ -1,0 +1,234 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const boundarySchema = {
+  '@type': 'TechArticle',
+  headline: 'Kiln Product Boundary',
+  description:
+    'How Kiln fits with provider networks: orchestration infrastructure vs. first-party network operation.',
+  url: 'https://kiln3d.com/boundary',
+};
+---
+
+<BaseLayout
+  title="Kiln Product Boundary — Orchestration Layer, Not First-Party Network"
+  description="Clear scope boundaries for Kiln: orchestration infrastructure that integrates providers, not a first-party decentralized manufacturing network operator."
+  current="boundary"
+  keywords={['kiln boundary', 'orchestration layer', 'provider integration', 'merchant of record']}
+  schema={boundarySchema}
+>
+  <section class="hero">
+    <div class="container">
+      <h1>How Kiln Fits in the Stack</h1>
+      <p class="lead">
+        Kiln is orchestration and agent infrastructure. It integrates with third-party providers and
+        partner networks; it does not operate a first-party decentralized manufacturing marketplace/network.
+      </p>
+      <p class="note">
+        We clarified wording to remove ambiguity and align with existing intent; no strategy change.
+      </p>
+    </div>
+  </section>
+
+  <section class="section bordered">
+    <div class="container">
+      <h2>Direct Comparison</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Dimension</th>
+              <th>Kiln</th>
+              <th>Provider Networks</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Primary role</td>
+              <td>Agent orchestration/control plane</td>
+              <td>Supply-side marketplace/network operator</td>
+            </tr>
+            <tr>
+              <td>Supply onboarding</td>
+              <td>No direct operator onboarding marketplace</td>
+              <td>Core function</td>
+            </tr>
+            <tr>
+              <td>Merchant of record</td>
+              <td>Provider (for routed jobs)</td>
+              <td>Provider/network operator</td>
+            </tr>
+            <tr>
+              <td>Provider visibility</td>
+              <td>Provider name + terms + provider order IDs preserved</td>
+              <td>Native provider/network experience</td>
+            </tr>
+            <tr>
+              <td>Monetization</td>
+              <td>Orchestration software fee on routed jobs</td>
+              <td>Marketplace/network economics</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section bordered">
+    <div class="container grid">
+      <article class="card">
+        <h3>In Scope for Kiln</h3>
+        <ul>
+          <li>Agent-first orchestration and control</li>
+          <li>Local device operation + safety guardrails</li>
+          <li>Provider integrations for routing/fulfillment</li>
+          <li>Unified CLI, MCP, and API workflows</li>
+        </ul>
+      </article>
+      <article class="card">
+        <h3>Out of Scope for Kiln</h3>
+        <ul>
+          <li>Operating a first-party decentralized marketplace/network</li>
+          <li>Owning direct supplier payout rails</li>
+          <li>Replacing provider brands as merchant of record</li>
+          <li>Provider replacement strategy</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <section class="section bordered">
+    <div class="container">
+      <h2>API Naming Transition</h2>
+      <p>
+        Canonical provider tools are <code>connect_provider_account</code>, <code>sync_provider_capacity</code>,
+        <code>list_provider_capacity</code>, <code>find_provider_capacity</code>,
+        <code>submit_provider_job</code>, and <code>provider_job_status</code>.
+      </p>
+      <p>
+        Legacy <code>network_*</code> aliases remain for compatibility only.
+        Deprecated in <code>v0.2.0</code>, removal target <code>v0.4.0</code>.
+      </p>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .hero {
+    padding: 88px 0 40px;
+    text-align: center;
+  }
+
+  h1 {
+    font-size: clamp(32px, 4.4vw, 48px);
+    margin: 0 0 14px;
+    line-height: 1.12;
+  }
+
+  .lead {
+    max-width: 820px;
+    margin: 0 auto 16px;
+    color: var(--text-muted);
+  }
+
+  .note {
+    display: inline-block;
+    margin: 0;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--bg-elev) 85%, transparent);
+  }
+
+  .section {
+    padding: 56px 0;
+  }
+
+  .bordered {
+    border-top: 1px solid var(--border);
+  }
+
+  h2 {
+    font-size: 26px;
+    margin: 0 0 18px;
+  }
+
+  h3 {
+    font-size: 19px;
+    margin: 0 0 14px;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-elev);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 720px;
+  }
+
+  th,
+  td {
+    text-align: left;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  th {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--bg-code) 70%, transparent);
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  .card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    background: var(--bg-elev);
+  }
+
+  ul {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--text-muted);
+    line-height: 1.7;
+  }
+
+  p {
+    color: var(--text-muted);
+    line-height: 1.7;
+  }
+
+  code {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 0.92em;
+  }
+
+  @media (max-width: 860px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

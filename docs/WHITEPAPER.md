@@ -6,7 +6,7 @@
 
 **Version 0.1.0 — February 2026**
 
-> **Positioning clarification (February 24, 2026):** We clarified wording to remove ambiguity and align docs with existing intent. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available. Messaging clarification to reflect existing intent; no strategy change.
+> **Positioning clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available.
 
 ## Abstract
 
@@ -203,7 +203,7 @@ Kiln supports third-party extensions through a plugin system based on Python ent
 
 ## 7. Revenue Model
 
-Local printer control is free and unrestricted. Kiln charges a 5% platform fee on orders placed through external manufacturing services (Craftcloud and connected partner network providers), with the first 3 outsourced orders per month free and a $0.25 minimum / $200 maximum per-order cap. The fee is surfaced transparently in every quote response before the user commits to an order.
+Local printer control is free and unrestricted. Kiln charges a 5% orchestration software fee on orders placed through external manufacturing services (Craftcloud and connected partner network providers), with the first 3 outsourced orders per month free and a $0.25 minimum / $200 maximum per-order cap. The fee is surfaced transparently in every quote response before the user commits to an order. For provider-routed jobs, the provider remains merchant of record.
 
 Kiln uses a four-tier licensing model: **Free** (all local printing, up to 2 printers, 10-job queue, billing visibility), **Pro** ($29/mo or $23/mo annual -- unlimited printers, fleet orchestration, analytics, unlimited queue, cloud sync), **Business** ($99/mo or $79/mo annual -- up to 50 printers, 5 team seats, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles, webhook integrations), and **Enterprise** (from $499/mo or $399/mo annual -- unlimited printers with 20 included at base price and $15/printer/mo thereafter, unlimited team seats, role-based access control, dedicated single-tenant MCP server, on-premises/cloud/hybrid deployment, SSO via SAML/OIDC, full audit trail with export, lockable safety profiles that prevent agent override, encrypted G-code at rest, 99.9% API uptime SLA, and dedicated support channel with onboarding). The free tier is designed to be excellent for solo operators, with the paywall boundary at multi-printer fleet orchestration rather than individual feature gating. License keys are validated offline-first via key prefix detection (`kiln_pro_`, `kiln_biz_`, `kiln_ent_`) with cached remote validation. The licensing system never blocks printer operations if the validation API is unreachable. Billing is tracked through a `BillingLedger` with `FeeCalculation` structs that record fee type, amount, and associated order metadata.
 

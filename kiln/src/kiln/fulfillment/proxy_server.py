@@ -3,7 +3,7 @@
 Handles proxy fulfillment requests from the REST API:
 - License validation
 - Per-user usage limits
-- 5% platform fee calculation and collection
+- 5% orchestration software fee calculation and collection
 - Order forwarding to fulfillment providers
 - Auto-refund on order failure
 - Server-side quote caching (prevents client-side price manipulation)
@@ -72,6 +72,27 @@ class ProxyOrchestrator:
         # race conditions where concurrent requests bypass the limit.
         self._user_order_locks: dict[str, threading.Lock] = {}
         self._user_locks_lock = threading.Lock()
+
+    @staticmethod
+    def _provider_routing_metadata(
+        provider_name: str,
+        *,
+        provider_order_id: str = "",
+    ) -> dict[str, str]:
+        """Return provider ownership metadata for routed jobs."""
+        normalized = (provider_name or "").strip().lower()
+        terms_urls = {
+            "craftcloud": "https://craftcloud3d.com/terms-and-conditions",
+            "sculpteo": "https://www.sculpteo.com/en/legal-notice/terms-of-use/",
+            "3dos": "https://www.3dos.io/terms",
+        }
+        return {
+            "provider_name": provider_name,
+            "provider_order_id": provider_order_id,
+            "provider_terms_url": terms_urls.get(normalized, ""),
+            "support_owner": "provider",
+            "merchant_of_record": "provider",
+        }
 
     # ------------------------------------------------------------------
     # License validation
@@ -144,7 +165,7 @@ class ProxyOrchestrator:
         *,
         user_email: str,
     ) -> dict[str, Any]:
-        """Request a quote and calculate the Kiln fee.
+        """Request a quote and calculate the Kiln orchestration software fee.
 
         Stores the quote server-side so ``handle_order`` can look up the
         authoritative price instead of trusting client-supplied values.
@@ -156,9 +177,9 @@ class ProxyOrchestrator:
             user_email: User's email address for tracking.
 
         Returns:
-            Dict with ``quote``, ``kiln_fee``, ``total_with_fee``, and
-            ``quote_token`` fields.  The ``quote_token`` must be passed
-            back at order time.
+            Dict with ``quote``, ``kiln_fee``, ``total_with_fee``,
+            provider ownership metadata, and ``quote_token`` fields. The
+            ``quote_token`` must be passed back at order time.
 
         Raises:
             FulfillmentError: If quote cannot be generated.
@@ -166,7 +187,7 @@ class ProxyOrchestrator:
         provider = get_fulfillment_provider(provider_name)
         quote = provider.get_quote(request)
 
-        # Calculate Kiln fee
+        # Calculate Kiln orchestration software fee
         fee_calc = self._ledger.calculate_fee(
             quote.total_price,
             currency=quote.currency,
@@ -190,6 +211,8 @@ class ProxyOrchestrator:
             "quote": quote.to_dict(),
             "kiln_fee": fee_calc.to_dict(),
             "total_with_fee": fee_calc.total_cost,
+            "provider_quote_id": quote.quote_id if hasattr(quote, "quote_id") else "",
+            **self._provider_routing_metadata(provider_name),
             "quote_token": quote_token,
         }
 
@@ -215,7 +238,7 @@ class ProxyOrchestrator:
         Workflow:
             1. Look up cached quote by ``quote_token``.
             2. Check free tier limits if user is on free tier.
-            3. Calculate and charge the platform fee.
+            3. Calculate and charge the orchestration software fee.
             4. Forward order to the fulfillment provider.
             5. Auto-refund if order fails after payment.
 
@@ -227,7 +250,7 @@ class ProxyOrchestrator:
             quote_token: Server-issued token from :meth:`handle_quote`.
 
         Returns:
-            Dict with ``order`` and ``kiln_fee`` fields.
+            Dict with ``order``, ``kiln_fee``, and provider ownership metadata.
 
         Raises:
             FulfillmentError: If quote not found, expired, free tier limit
@@ -359,6 +382,10 @@ class ProxyOrchestrator:
         return {
             "order": result.to_dict(),
             "kiln_fee": fee_calc.to_dict(),
+            **self._provider_routing_metadata(
+                provider_name,
+                provider_order_id=getattr(result, "order_id", "") or "",
+            ),
         }
 
     # ------------------------------------------------------------------
@@ -384,7 +411,13 @@ class ProxyOrchestrator:
         """
         provider = get_fulfillment_provider(provider_name)
         result = provider.get_order_status(order_id)
-        return result.to_dict()
+        return {
+            **result.to_dict(),
+            **self._provider_routing_metadata(
+                provider_name,
+                provider_order_id=order_id,
+            ),
+        }
 
     # ------------------------------------------------------------------
     # Order cancellation

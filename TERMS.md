@@ -1,6 +1,6 @@
 # Kiln Terms of Use
 
-*Last updated: 2026-02-12 · Version 1.2*
+*Last updated: 2026-02-24 · Version 1.3*
 
 ## What Kiln Is
 
@@ -40,12 +40,12 @@ operate under their own terms of service, content policies, and legal
 obligations. Kiln facilitates the connection but is not a party to those
 transactions.
 
-## Platform Fees
+## Orchestration Software Fees
 
 When you place orders through Kiln's fulfillment service (external manufacturing
-providers), Kiln charges a platform fee:
+providers), Kiln charges an orchestration software fee:
 
-- **Network fee**: 5% of the manufacturing provider's quoted price.
+- **Orchestration software fee**: 5% of the manufacturing provider's quoted price.
 - **Minimum fee**: $0.25 per order.
 - **Maximum fee**: $200.00 per order.
 - **Free tier**: Your first 3 fulfillment orders each calendar month are
@@ -62,7 +62,7 @@ operation.
 ## Applicable Taxes
 
 Depending on your jurisdiction, applicable taxes (sales tax, VAT, GST, or JCT)
-may be added to the platform fee:
+may be added to the orchestration software fee:
 
 - **United States**: Sales tax applies in states where Kiln has nexus or where
   marketplace facilitator laws require collection (CA, TX, NY, WA, FL, IL, MA).
@@ -76,7 +76,7 @@ may be added to the platform fee:
 - **Australia**: 10% GST. B2B reverse charge available for GST-registered buyers.
 - **Japan**: 10% JCT (consumption tax). B2B reverse charge available.
 
-Tax is calculated on the **platform fee only**, not on the manufacturing cost.
+Tax is calculated on the **orchestration software fee only**, not on the manufacturing cost.
 The manufacturing provider is responsible for any taxes on their charges.
 
 You can preview the tax for any order using the ``tax_estimate`` tool before
@@ -99,12 +99,12 @@ Kiln displays the full fee + tax breakdown before charging. No hidden fees.
 ## Refund Policy
 
 - If a fulfillment order fails during manufacturing or is cancelled by the
-  provider, Kiln will refund the platform fee automatically.
+  provider, Kiln will refund the orchestration software fee automatically.
 - If you cancel an order before it enters production, any authorized payment
   hold will be released.
 - If your order is delivered with defects, contact the manufacturing provider
   directly for a reprint or refund of the manufacturing cost. Kiln will refund
-  the platform fee upon confirmation that the provider has issued a refund.
+  the orchestration software fee upon confirmation that the provider has issued a refund.
 - Refund requests must be made within 30 days of the original charge.
 - Refunds are processed through the original payment method and may take
   3–10 business days to appear on your statement.

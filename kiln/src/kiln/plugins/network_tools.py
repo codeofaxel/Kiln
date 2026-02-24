@@ -1,12 +1,19 @@
-"""3DOS network integration tools plugin.
+"""Partner-provider integration tools plugin.
 
-Provides MCP tools for registering printers, finding available printers,
-submitting jobs, and tracking job status on the 3DOS distributed
-manufacturing network.
+Canonical tools are provider-oriented and integration-scoped:
 
-Migrated from server.py to reduce monolith size.  The original tool
-definitions in server.py remain authoritative until removed; this plugin
-is the extraction target.
+- ``connect_provider_account``
+- ``sync_provider_capacity``
+- ``list_provider_capacity``
+- ``find_provider_capacity``
+- ``submit_provider_job``
+- ``provider_job_status``
+
+Legacy ``network_*`` tool names remain available as compatibility aliases.
+They return explicit deprecation metadata:
+
+- Deprecated in: ``v0.2.0``
+- Removal target: ``v0.4.0``
 """
 
 from __future__ import annotations
@@ -18,9 +25,17 @@ _logger = logging.getLogger(__name__)
 
 
 class _NetworkToolsPlugin:
-    """3DOS network integration tools.
+    """Partner-provider integration tools (3DOS-backed).
 
     Tools:
+        - connect_provider_account
+        - sync_provider_capacity
+        - list_provider_capacity
+        - find_provider_capacity
+        - submit_provider_job
+        - provider_job_status
+
+    Legacy aliases:
         - network_register_printer
         - network_update_printer
         - network_list_printers
@@ -29,25 +44,49 @@ class _NetworkToolsPlugin:
         - network_job_status
     """
 
+    _DEPRECATION_VERSION = "v0.2.0"
+    _REMOVAL_TARGET = "v0.4.0"
+
     @property
     def name(self) -> str:
-        return "network_tools"
+        return "provider_integration_tools"
 
     @property
     def description(self) -> str:
-        return "3DOS network integration tools"
+        return "Partner-provider integration tools (with legacy network_* aliases)"
 
     def register(self, mcp: Any) -> None:
-        """Register 3DOS network tools with the MCP server."""
+        """Register provider integration tools with the MCP server."""
+
+        def _deprecated_alias(
+            result: dict,
+            *,
+            old_name: str,
+            new_name: str,
+        ) -> dict:
+            """Attach deprecation metadata for legacy network_* aliases."""
+            out = dict(result)
+            out["deprecated"] = {
+                "tool": old_name,
+                "replacement": new_name,
+                "deprecated_in": self._DEPRECATION_VERSION,
+                "removal_target": self._REMOVAL_TARGET,
+                "message": (
+                    f"{old_name} is deprecated; use {new_name}. "
+                    f"Deprecated in {self._DEPRECATION_VERSION}, "
+                    f"removal target {self._REMOVAL_TARGET}."
+                ),
+            }
+            return out
 
         @mcp.tool()
-        def network_register_printer(
+        def connect_provider_account(
             name: str,
             location: str,
             capabilities: dict[str, Any] | None = None,
             price_per_gram: float | None = None,
         ) -> dict:
-            """Register a local printer on the 3DOS distributed manufacturing network.
+            """Connect a local printer to a provider account (integration path).
 
             Args:
                 name: Human-readable printer name (e.g. "Prusa MK4 #2").
@@ -56,8 +95,8 @@ class _NetworkToolsPlugin:
                     supported materials, etc.).
                 price_per_gram: Price per gram of filament in USD (optional).
 
-            Makes this printer available for remote print jobs from the 3DOS
-            network.  Requires ``KILN_3DOS_API_KEY`` to be set.
+            Registers this printer with the configured partner provider
+            integration (currently 3DOS).
             """
             from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
@@ -72,48 +111,61 @@ class _NetworkToolsPlugin:
                 )
                 return {
                     "success": True,
+                    "provider_name": "3dos",
                     "printer": listing.to_dict(),
+                    "integration_scope": "provider",
                 }
             except (ThreeDOSError, ValueError) as exc:
                 return _error_dict(str(exc))
             except Exception as exc:
-                _logger.exception("Unexpected error in network_register_printer")
+                _logger.exception("Unexpected error in connect_provider_account")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool()
-        def network_update_printer(
-            printer_id: str,
-            available: bool,
+        def sync_provider_capacity(
+            printer_id: str | None = None,
+            available: bool | None = None,
         ) -> dict:
-            """Update a printer's availability on the 3DOS network.
+            """Sync local printer capacity/availability to the provider integration.
 
             Args:
-                printer_id: ID of the registered printer.
-                available: Whether the printer is available for new jobs.
+                printer_id: Optional ID of a registered provider printer.
+                available: Optional availability update for ``printer_id``.
+
+            If ``printer_id`` and ``available`` are provided, updates that
+            listing first, then returns the current provider-side capacity view.
             """
             from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
 
             try:
                 client = _get_threedos_client()
-                client.update_printer_status(printer_id=printer_id, available=available)
+                updated = False
+                if printer_id is not None and available is not None:
+                    client.update_printer_status(printer_id=printer_id, available=available)
+                    updated = True
+                printers = client.list_my_printers()
                 return {
                     "success": True,
+                    "provider_name": "3dos",
                     "printer_id": printer_id,
                     "available": available,
+                    "updated": updated,
+                    "printers": [p.to_dict() for p in printers],
+                    "count": len(printers),
                 }
             except (ThreeDOSError, ValueError) as exc:
                 return _error_dict(str(exc))
             except Exception as exc:
-                _logger.exception("Unexpected error in network_update_printer")
+                _logger.exception("Unexpected error in sync_provider_capacity")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool()
-        def network_list_printers() -> dict:
-            """List printers registered by this account on the 3DOS network.
+        def list_provider_capacity() -> dict:
+            """List printers registered with connected provider integrations.
 
-            Returns all printers that this Kiln instance has registered,
-            including their current availability status and pricing.
+            Returns all provider-side listings associated with this
+            integration account.
             """
             from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
@@ -123,29 +175,28 @@ class _NetworkToolsPlugin:
                 printers = client.list_my_printers()
                 return {
                     "success": True,
+                    "provider_name": "3dos",
                     "printers": [p.to_dict() for p in printers],
                     "count": len(printers),
                 }
             except (ThreeDOSError, ValueError) as exc:
                 return _error_dict(str(exc))
             except Exception as exc:
-                _logger.exception("Unexpected error in network_list_printers")
+                _logger.exception("Unexpected error in list_provider_capacity")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool()
-        def network_find_printers(
+        def find_provider_capacity(
             material: str,
             location: str | None = None,
         ) -> dict:
-            """Search for available printers on the 3DOS network.
+            """Find available provider capacity by material/location.
 
             Args:
                 material: Material type to filter by (e.g. "PLA", "PETG", "ABS").
                 location: Optional geographic filter (e.g. "Austin, TX").
 
-            Returns printers that can handle the requested material.  Use the
-            printer ``id`` from the results with ``network_submit_job`` to
-            target a specific printer.
+            Returns provider-side capacity listings that match the request.
             """
             from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
@@ -155,31 +206,32 @@ class _NetworkToolsPlugin:
                 printers = client.find_printers(material=material, location=location)
                 return {
                     "success": True,
+                    "provider_name": "3dos",
                     "printers": [p.to_dict() for p in printers],
                     "count": len(printers),
                 }
             except (ThreeDOSError, ValueError) as exc:
                 return _error_dict(str(exc))
             except Exception as exc:
-                _logger.exception("Unexpected error in network_find_printers")
+                _logger.exception("Unexpected error in find_provider_capacity")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool()
-        def network_submit_job(
+        def submit_provider_job(
             file_url: str,
             material: str,
             printer_id: str | None = None,
         ) -> dict:
-            """Submit a print job to the 3DOS distributed manufacturing network.
+            """Submit a print job through a connected provider integration.
 
             Args:
                 file_url: Public URL of the model file to print.
                 material: Material to print with (e.g. "PLA", "PETG").
-                printer_id: Optional target printer ID.  If omitted, 3DOS
+                printer_id: Optional target printer ID.  If omitted, provider
                     auto-assigns the best available printer.
 
-            Returns the network job with ID, status, and estimated cost.
-            Use ``network_job_status`` to track progress.
+            Returns a provider-managed job reference. Use
+            ``provider_job_status`` to track progress.
             """
             from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
@@ -193,20 +245,21 @@ class _NetworkToolsPlugin:
                 )
                 return {
                     "success": True,
+                    "provider_name": "3dos",
                     "job": job.to_dict(),
                 }
             except (ThreeDOSError, ValueError) as exc:
                 return _error_dict(str(exc))
             except Exception as exc:
-                _logger.exception("Unexpected error in network_submit_job")
+                _logger.exception("Unexpected error in submit_provider_job")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool()
-        def network_job_status(job_id: str) -> dict:
-            """Check the status of a job on the 3DOS network.
+        def provider_job_status(job_id: str) -> dict:
+            """Check status of a provider-managed remote job.
 
             Args:
-                job_id: Job ID from ``network_submit_job``.
+                job_id: Job ID from ``submit_provider_job``.
             """
             from kiln.gateway.threedos import ThreeDOSError
             from kiln.server import _error_dict, _get_threedos_client
@@ -216,15 +269,88 @@ class _NetworkToolsPlugin:
                 job = client.get_network_job(job_id=job_id)
                 return {
                     "success": True,
+                    "provider_name": "3dos",
                     "job": job.to_dict(),
                 }
             except (ThreeDOSError, ValueError) as exc:
                 return _error_dict(str(exc))
             except Exception as exc:
-                _logger.exception("Unexpected error in network_job_status")
+                _logger.exception("Unexpected error in provider_job_status")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        _logger.debug("Registered 3DOS network tools")
+        # -------------------------------------------------------------------
+        # Legacy network_* aliases (deprecated; compatibility window only)
+        # -------------------------------------------------------------------
+
+        @mcp.tool()
+        def network_register_printer(
+            name: str,
+            location: str,
+            capabilities: dict[str, Any] | None = None,
+            price_per_gram: float | None = None,
+        ) -> dict:
+            return _deprecated_alias(
+                connect_provider_account(
+                    name=name,
+                    location=location,
+                    capabilities=capabilities,
+                    price_per_gram=price_per_gram,
+                ),
+                old_name="network_register_printer",
+                new_name="connect_provider_account",
+            )
+
+        @mcp.tool()
+        def network_update_printer(printer_id: str, available: bool) -> dict:
+            return _deprecated_alias(
+                sync_provider_capacity(printer_id=printer_id, available=available),
+                old_name="network_update_printer",
+                new_name="sync_provider_capacity",
+            )
+
+        @mcp.tool()
+        def network_list_printers() -> dict:
+            return _deprecated_alias(
+                list_provider_capacity(),
+                old_name="network_list_printers",
+                new_name="list_provider_capacity",
+            )
+
+        @mcp.tool()
+        def network_find_printers(material: str, location: str | None = None) -> dict:
+            return _deprecated_alias(
+                find_provider_capacity(material=material, location=location),
+                old_name="network_find_printers",
+                new_name="find_provider_capacity",
+            )
+
+        @mcp.tool()
+        def network_submit_job(
+            file_url: str,
+            material: str,
+            printer_id: str | None = None,
+        ) -> dict:
+            return _deprecated_alias(
+                submit_provider_job(
+                    file_url=file_url,
+                    material=material,
+                    printer_id=printer_id,
+                ),
+                old_name="network_submit_job",
+                new_name="submit_provider_job",
+            )
+
+        @mcp.tool()
+        def network_job_status(job_id: str) -> dict:
+            return _deprecated_alias(
+                provider_job_status(job_id=job_id),
+                old_name="network_job_status",
+                new_name="provider_job_status",
+            )
+
+        _logger.debug(
+            "Registered provider integration tools with legacy network_* aliases"
+        )
 
 
 plugin = _NetworkToolsPlugin()

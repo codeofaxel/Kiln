@@ -12,7 +12,7 @@ Kiln is free, open-source infrastructure that lets AI agents control 3D printers
 
 ## Positioning Clarification
 
-**Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align docs with existing intent. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available. Messaging clarification to reflect existing intent; no strategy change.
+**Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and partner networks where integrations are available.
 
 ## The Problem
 
@@ -37,6 +37,7 @@ An agent can start a PLA prototype on your desk printer, send the SLA version to
 - Operating a first-party decentralized manufacturing marketplace/network
 - Replacing partner supply-side networks
 - Owning provider marketplaces instead of integrating with them
+- Acting as merchant of record for provider-routed manufacturing orders
 
 **Beyond printing:**
 
@@ -79,7 +80,7 @@ Revenue comes from optional services:
 - **Business ($99/month)** -- Up to 50 printers, 5 team seats, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles. Annual: $79/mo.
 - **Enterprise (from $499/month)** -- Unlimited printers (20 included, $15/mo each additional) and unlimited team seats, dedicated single-tenant MCP server, on-premises deployment via Kubernetes and Helm (air-gapped support included), single sign-on via OIDC and SAML (works with Okta, Google Workspace, Azure AD, Auth0), role-based access control (admin/engineer/operator), full audit trail with JSON/CSV export, lockable safety profiles that prevent agent modifications, encrypted G-code at rest, per-printer overage billing via Stripe, 99.9% uptime SLA with rolling health monitoring, and dedicated support channel with onboarding. Annual: $399/mo.
 
-Outsourced manufacturing orders carry a 5% platform fee (first 3 per month are free, with a $0.25 minimum and $200 maximum per order).
+Outsourced manufacturing orders carry a 5% orchestration software fee (first 3 per month are free, with a $0.25 minimum and $200 maximum per order). For provider-routed orders, the provider remains merchant of record.
 
 Crypto donations are also accepted at kiln3d.sol (Solana) and kiln3d.eth (Ethereum).
 

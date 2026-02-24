@@ -89,8 +89,8 @@ class _FulfillmentToolsPlugin:
 
             Uploads the model, returns pricing from Craftcloud's network of 150+
             print services, including unit price, total, lead time, and shipping
-            options.  A Kiln platform fee is shown separately so the user sees
-            the full cost before committing.
+            options. A Kiln orchestration software fee is shown separately so
+            the user sees the full cost before committing.
 
             If a payment method is linked, a hold is placed on the fee amount
             at quote time (Stripe auth-and-capture).  The hold is captured
@@ -121,6 +121,8 @@ class _FulfillmentToolsPlugin:
                 quote_data = quote.to_dict()
                 quote_data["kiln_fee"] = fee_calc.to_dict()
                 quote_data["total_with_fee"] = fee_calc.total_cost
+                quote_data.update(_srv._provider_routing_metadata(provider.name))
+                quote_data["provider_quote_id"] = quote.quote_id
 
                 # Try to authorize (hold) the fee at quote time.
                 try:
@@ -169,7 +171,7 @@ class _FulfillmentToolsPlugin:
         ) -> dict:
             """Place a manufacturing order based on a previous quote.
 
-            Charges the platform fee BEFORE placing the order to prevent
+            Charges the orchestration software fee BEFORE placing the order to prevent
             unpaid orders.  If order placement fails after payment, the
             charge is automatically refunded.
 
@@ -327,6 +329,12 @@ class _FulfillmentToolsPlugin:
 
                 # 4. Build response.
                 order_data = result.to_dict()
+                order_data.update(
+                    _srv._provider_routing_metadata(
+                        provider.name,
+                        provider_order_id=result.order_id or "",
+                    )
+                )
                 if fee_calc:
                     order_data["kiln_fee"] = fee_calc.to_dict()
                     order_data["total_with_fee"] = fee_calc.total_cost
@@ -412,9 +420,16 @@ class _FulfillmentToolsPlugin:
             try:
                 provider = _srv._get_fulfillment()
                 result = provider.get_order_status(order_id)
+                order_data = result.to_dict()
+                order_data.update(
+                    _srv._provider_routing_metadata(
+                        provider.name,
+                        provider_order_id=order_id,
+                    )
+                )
                 return {
                     "success": True,
-                    "order": result.to_dict(),
+                    "order": order_data,
                 }
             except (FulfillmentError, RuntimeError) as exc:
                 return _srv._error_dict(
