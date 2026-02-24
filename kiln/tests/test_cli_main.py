@@ -128,6 +128,111 @@ class TestHelp:
 
 
 # ---------------------------------------------------------------------------
+# ingest / local-first / fleet route
+# ---------------------------------------------------------------------------
+
+
+class TestIngestWatch:
+    def test_detect_only_once_json(self, runner, tmp_path):
+        watch_dir = tmp_path / "incoming"
+        watch_dir.mkdir()
+        file_path = watch_dir / "part.gcode"
+        file_path.write_text("G28\nM104 S200\n", encoding="utf-8")
+
+        result = runner.invoke(
+            cli,
+            ["ingest", "watch", "--dir", str(watch_dir), "--once", "--json"],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["status"] == "success"
+        assert payload["data"]["mode"] == "detect_only"
+        assert str(file_path) in payload["data"]["detected"]
+
+    def test_auto_queue_once_dispatches_when_idle(self, runner, tmp_path):
+        watch_dir = tmp_path / "incoming"
+        watch_dir.mkdir()
+        file_path = watch_dir / "widget.gcode"
+        file_path.write_text("G28\nM109 S205\n", encoding="utf-8")
+
+        adapter = MagicMock()
+        adapter.get_state.return_value = PrinterState(
+            state=PrinterStatus.IDLE,
+            connected=True,
+        )
+        adapter.upload_file.return_value = UploadResult(
+            success=True,
+            message="Uploaded widget.gcode",
+            file_name="widget.gcode",
+        )
+        adapter.start_print.return_value = PrintResult(
+            success=True,
+            message="Print started",
+        )
+
+        with (
+            patch("kiln.cli.main._load_fleet_adapters", return_value=({"lab-printer": adapter}, [])),
+            patch("kiln.cli.main._collect_routing_candidates", return_value=[{"printer_id": "lab-printer"}]),
+            patch(
+                "kiln.cli.main._route_printer_for_job",
+                return_value=("lab-printer", {"recommended_printer": {"score": 92.0}}, None),
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "ingest",
+                    "watch",
+                    "--dir",
+                    str(watch_dir),
+                    "--once",
+                    "--auto-queue",
+                    "--json",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["status"] == "success"
+        assert payload["data"]["mode"] == "auto_queue"
+        assert payload["data"]["queued"][0]["printer"] == "lab-printer"
+        assert payload["data"]["dispatched"][0]["printer"] == "lab-printer"
+        adapter.upload_file.assert_called_once_with(str(file_path))
+        adapter.start_print.assert_called_once_with("widget.gcode")
+
+
+class TestFleetRoute:
+    def test_fleet_route_json(self, runner):
+        adapter = MagicMock()
+        with (
+            patch("kiln.cli.main._load_fleet_adapters", return_value=({"p1": adapter}, [])),
+            patch("kiln.cli.main._collect_routing_candidates", return_value=[{"printer_id": "p1"}]),
+            patch(
+                "kiln.cli.main._route_printer_for_job",
+                return_value=("p1", {"recommended_printer": {"score": 88.5}}, None),
+            ),
+        ):
+            result = runner.invoke(cli, ["fleet", "route", "--json"])
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["status"] == "success"
+        assert payload["data"]["recommended_printer"] == "p1"
+
+
+class TestLocalFirst:
+    def test_local_first_apply_updates_cloud_sync_setting(self, runner):
+        fake_db = MagicMock()
+        with patch("kiln.persistence.get_db", return_value=fake_db):
+            result = runner.invoke(cli, ["local-first", "--apply", "--json"])
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["status"] == "success"
+        fake_db.set_setting.assert_called_once_with("cloud_sync_config", "")
+
+
+# ---------------------------------------------------------------------------
 # status
 # ---------------------------------------------------------------------------
 

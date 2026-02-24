@@ -349,6 +349,8 @@ kiln material set|show|spools|add-spool       # Material tracking
 kiln level [--status] [--trigger] [--json]    # Bed leveling triggers
 kiln stream [--port 8081] [--stop] [--json]   # Webcam MJPEG proxy
 kiln sync status|now|configure                # Cloud sync
+kiln local-first [--apply] [--write-env]     # Local-first profile for edge/AGX deployments
+kiln ingest watch --dir ~/incoming [--auto-queue] [--once]  # Watch-folder handoff (detect-only by default)
 kiln plugins list|info                        # Plugin management
 kiln generate "a phone stand" --provider meshy --json   # Generate 3D model from text (meshy/tripo3d/stability/gemini/openscad)
 kiln generate-and-print "a phone stand" --provider gemini --material PLA   # One-command generate -> preview -> slice -> upload
@@ -357,6 +359,7 @@ kiln generate-download <job_id> -o ./models --json      # Download generated mod
 kiln firmware status --json                # Check for firmware updates
 kiln firmware update [--component klipper] # Apply firmware updates
 kiln firmware rollback <component>         # Roll back firmware
+kiln fleet route --material PLA [--file model.gcode] --json   # Mixed-fleet printer recommendation
 kiln partner connect --name N --location L # Connect provider account/listing (integration preview)
 kiln partner find --material PLA           # Find provider capacity by material/location
 kiln partner submit URL --material PLA     # Submit job through a connected provider integration

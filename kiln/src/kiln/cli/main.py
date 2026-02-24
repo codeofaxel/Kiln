@@ -10,9 +10,11 @@ behaviour).
 
 from __future__ import annotations
 
+from collections import deque
 import json
 import logging
 import os
+from pathlib import Path
 import sys
 import tempfile
 import time
@@ -81,6 +83,7 @@ _MATERIAL_TEMPS: dict[str, tuple[int, int, int, int]] = {
     "PC": (280, 285, 110, 110),
 }
 _SUPPORT_MODE_CHOICES: tuple[str, ...] = ("off", "auto", "minimal", "aggressive")
+_INGEST_EXTENSIONS: tuple[str, ...] = (".gcode", ".gco", ".g", ".3mf")
 
 
 def _normalise_material_type(raw: str | None) -> str | None:
@@ -366,6 +369,207 @@ def _get_adapter_from_ctx(ctx: click.Context):
         raise click.ClickException(f"Invalid printer config for {pname!r}: {err}{hint}")
 
     return _make_adapter(cfg)
+
+
+def _adapter_supports_extension(adapter: Any, extension: str) -> bool:
+    """Return True if the adapter advertises support for the file extension."""
+    ext = extension.lower().strip()
+    if not ext:
+        return True
+    try:
+        capabilities = getattr(adapter, "capabilities", None)
+        supported = getattr(capabilities, "supported_extensions", None)
+        if not supported:
+            return True
+        return ext in {str(v).lower() for v in supported}
+    except Exception:
+        return True
+
+
+def _list_configured_printer_names() -> list[str]:
+    """Return configured printer names in stable order."""
+    names: list[str] = []
+    for entry in _list_printers():
+        name = str(entry.get("name", "")).strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def _load_fleet_adapters(printer_filter: str | None = None) -> tuple[dict[str, Any], list[str]]:
+    """Load adapters for configured printers, optionally narrowed to one printer."""
+    errors: list[str] = []
+    adapters: dict[str, Any] = {}
+
+    if printer_filter:
+        targets = [printer_filter.strip()]
+    else:
+        targets = _list_configured_printer_names()
+
+    if not targets:
+        return {}, ["No configured printers found. Run 'kiln setup' or 'kiln auth' first."]
+
+    for name in targets:
+        try:
+            cfg = load_printer_config(name)
+            ok, err = validate_printer_config(cfg)
+            if not ok:
+                errors.append(f"{name}: invalid config ({err})")
+                continue
+            adapters[name] = _make_adapter(cfg)
+        except Exception as exc:
+            errors.append(f"{name}: {exc}")
+    return adapters, errors
+
+
+def _collect_routing_candidates(
+    *,
+    adapters: dict[str, Any],
+    material: str,
+    pending_counts: dict[str, int] | None = None,
+    file_extension: str | None = None,
+) -> list[dict[str, Any]]:
+    """Build JobRouter candidate dictionaries from configured adapters."""
+    from kiln.persistence import get_db
+
+    pending = pending_counts or {}
+    file_ext = (file_extension or "").lower().strip()
+    candidates: list[dict[str, Any]] = []
+
+    try:
+        from kiln.materials import MaterialTracker
+
+        tracker = MaterialTracker(db=get_db())
+    except Exception:
+        tracker = None
+
+    db = None
+    try:
+        db = get_db()
+    except Exception:
+        db = None
+
+    for name, adapter in adapters.items():
+        if file_ext and not _adapter_supports_extension(adapter, file_ext):
+            continue
+
+        status = "unknown"
+        try:
+            state = adapter.get_state()
+            raw_state = getattr(state, "state", None)
+            status = str(getattr(raw_state, "value", raw_state or "unknown")).lower()
+        except Exception:
+            status = "offline"
+
+        supported_materials: list[str] = []
+        if tracker is not None:
+            try:
+                loaded = tracker.get_material(name, tool_index=0)
+                loaded_material = _normalise_material_type(getattr(loaded, "material_type", None))
+                if loaded_material:
+                    supported_materials = [loaded_material]
+            except Exception:
+                supported_materials = []
+
+        success_rate: float | None = None
+        if db is not None:
+            try:
+                insights = db.get_printer_learning_insights(name)
+                raw_rate = insights.get("success_rate")
+                if raw_rate is not None:
+                    success_rate = float(raw_rate)
+            except Exception:
+                success_rate = None
+
+        queue_depth = max(0, int(pending.get(name, 0)))
+        estimated_wait_s = float(queue_depth * 1800)
+        if status in {"printing", "busy", "paused", "cancelling"}:
+            estimated_wait_s = max(estimated_wait_s, 1800.0)
+
+        candidates.append(
+            {
+                "printer_id": name,
+                "printer_model": name,
+                "status": status,
+                "queue_depth": queue_depth,
+                "supported_materials": supported_materials,
+                "success_rate": success_rate,
+                "estimated_wait_s": estimated_wait_s,
+                "print_speed_factor": 1.0,
+            }
+        )
+
+    # Keep at least one candidate path for normal .gcode flows.
+    if not candidates and file_ext in {".gcode", ".gco", ".g"}:
+        for name in adapters:
+            candidates.append(
+                {
+                    "printer_id": name,
+                    "printer_model": name,
+                    "status": "unknown",
+                    "queue_depth": max(0, int(pending.get(name, 0))),
+                    "supported_materials": [],
+                    "success_rate": None,
+                    "estimated_wait_s": float(max(0, int(pending.get(name, 0))) * 1800),
+                    "print_speed_factor": 1.0,
+                }
+            )
+
+    return candidates
+
+
+def _route_printer_for_job(
+    *,
+    material: str,
+    candidates: list[dict[str, Any]],
+) -> tuple[str | None, dict[str, Any] | None, str | None]:
+    """Return (printer_name, routing_data, error_message)."""
+    if not candidates:
+        return None, None, "No eligible printers available for this file/material."
+
+    from kiln.job_router import RoutingCriteria, get_job_router
+
+    try:
+        router = get_job_router()
+        result = router.route_job(
+            RoutingCriteria(material=material),
+            available_printers=candidates,
+        )
+        chosen = result.recommended_printer.printer_id
+        return chosen, result.to_dict(), None
+    except Exception as exc:
+        # Deterministic fallback: prefer lowest queue depth, then idle.
+        ranked = sorted(
+            candidates,
+            key=lambda c: (
+                int(c.get("queue_depth", 0)),
+                0 if str(c.get("status", "unknown")) == "idle" else 1,
+                str(c.get("printer_id", "")),
+            ),
+        )
+        if not ranked:
+            return None, None, f"Routing failed: {exc}"
+        return str(ranked[0]["printer_id"]), None, None
+
+
+def _scan_ingest_directory(watch_dir: Path, seen: dict[str, float]) -> list[Path]:
+    """Return newly created/updated printable files since the last scan."""
+    discovered: list[Path] = []
+    for entry in sorted(watch_dir.iterdir(), key=lambda p: p.name.lower()):
+        if not entry.is_file():
+            continue
+        if entry.suffix.lower() not in _INGEST_EXTENSIONS:
+            continue
+        try:
+            mtime = entry.stat().st_mtime
+        except OSError:
+            continue
+        key = str(entry.resolve())
+        if seen.get(key) == mtime:
+            continue
+        seen[key] = mtime
+        discovered.append(entry)
+    return discovered
 
 
 def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
@@ -2628,6 +2832,85 @@ def fleet_status_cmd(json_mode: bool) -> None:
         sys.exit(1)
 
 
+@fleet.command("route")
+@click.option(
+    "--material",
+    "-m",
+    default="PLA",
+    show_default=True,
+    type=click.Choice(_MATERIAL_CHOICES, case_sensitive=False),
+    help="Target material for routing.",
+)
+@click.option(
+    "--file",
+    "file_path",
+    default=None,
+    type=click.Path(exists=True),
+    help="Optional file path used for extension-aware routing.",
+)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def fleet_route_cmd(material: str, file_path: str | None, json_mode: bool) -> None:
+    """Recommend the best printer for a job across configured fleet printers."""
+    material_type = _normalise_material_type(material) or "PLA"
+    file_ext = Path(file_path).suffix.lower() if file_path else ".gcode"
+
+    adapters, adapter_errors = _load_fleet_adapters()
+    candidates = _collect_routing_candidates(
+        adapters=adapters,
+        material=material_type,
+        pending_counts={},
+        file_extension=file_ext,
+    )
+    chosen, routing_data, route_error = _route_printer_for_job(
+        material=material_type,
+        candidates=candidates,
+    )
+
+    payload = {
+        "material": material_type,
+        "file_extension": file_ext,
+        "recommended_printer": chosen,
+        "candidate_count": len(candidates),
+        "routing": routing_data,
+        "adapter_errors": adapter_errors,
+    }
+
+    if route_error:
+        if json_mode:
+            click.echo(
+                format_response(
+                    "error",
+                    data=payload,
+                    error={"code": "ROUTING_ERROR", "message": route_error},
+                    json_mode=True,
+                )
+            )
+        else:
+            click.echo(format_error(route_error, code="ROUTING_ERROR", json_mode=False))
+            if adapter_errors:
+                click.echo("Adapter issues:")
+                for item in adapter_errors:
+                    click.echo(f"  - {item}")
+        sys.exit(1)
+
+    if json_mode:
+        click.echo(format_response("success", data=payload, json_mode=True))
+        return
+
+    click.echo(f"Recommended printer: {chosen}")
+    click.echo(f"Material: {material_type}")
+    click.echo(f"File extension: {file_ext}")
+    if routing_data:
+        rec = routing_data.get("recommended_printer", {})
+        score = rec.get("score")
+        if score is not None:
+            click.echo(f"Score: {score}")
+    if adapter_errors:
+        click.echo("Adapter issues:")
+        for item in adapter_errors:
+            click.echo(f"  - {item}")
+
+
 @fleet.command("register")
 @click.argument("name")
 @click.argument("printer_type", type=click.Choice(["octoprint", "moonraker", "bambu", "elegoo", "prusaconnect"]))
@@ -2887,6 +3170,237 @@ def queue_cancel_cmd(job_id: str, json_mode: bool) -> None:
             )
         )
         sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# ingest (watch-folder handoff)
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def ingest() -> None:
+    """Watch a folder for printable files and optionally auto-submit them."""
+
+
+@ingest.command("watch")
+@click.option(
+    "--dir",
+    "watch_dir",
+    required=True,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True),
+    help="Directory to watch for printable files.",
+)
+@click.option("--interval", default=2.0, show_default=True, help="Polling interval in seconds.")
+@click.option("--once", is_flag=True, help="Run one scan cycle and exit.")
+@click.option(
+    "--auto-queue",
+    is_flag=True,
+    help="Opt in to automatic queue/dispatch behavior (default is detect-only).",
+)
+@click.option(
+    "--printer",
+    default=None,
+    help="Optional fixed printer name. Omit to auto-route across configured printers.",
+)
+@click.option(
+    "--material",
+    "-m",
+    default="PLA",
+    show_default=True,
+    type=click.Choice(_MATERIAL_CHOICES, case_sensitive=False),
+    help="Target material used for auto-routing.",
+)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON (requires --once).")
+def ingest_watch_cmd(
+    watch_dir: str,
+    interval: float,
+    once: bool,
+    auto_queue: bool,
+    printer: str | None,
+    material: str,
+    json_mode: bool,
+) -> None:
+    """Watch a folder and detect new printable files for Kiln workflows."""
+    if json_mode and not once:
+        click.echo(
+            format_error(
+                "--json is supported only with --once for ingest watch.",
+                code="INVALID_ARGS",
+                json_mode=True,
+            )
+        )
+        sys.exit(1)
+
+    watch_path = Path(watch_dir).expanduser().resolve()
+    if not watch_path.is_dir():
+        click.echo(
+            format_error(
+                f"Watch directory is not valid: {watch_path}",
+                code="INVALID_ARGS",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+    material_type = _normalise_material_type(material) or "PLA"
+    seen: dict[str, float] = {}
+    pending: dict[str, deque[Path]] = {}
+    adapters: dict[str, Any] = {}
+    adapter_errors: list[str] = []
+    queued: list[dict[str, Any]] = []
+    dispatched: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    if auto_queue:
+        adapters, adapter_errors = _load_fleet_adapters(printer_filter=printer)
+        errors.extend(adapter_errors)
+        if not adapters:
+            click.echo(
+                format_error(
+                    "No valid printers available for auto-queue mode. "
+                    "Use detect-only mode or fix printer config.",
+                    code="NO_PRINTERS",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+        pending = {name: deque() for name in adapters}
+
+    def _dispatch_pending() -> None:
+        if not auto_queue:
+            return
+        for printer_name, queue_items in pending.items():
+            if not queue_items:
+                continue
+            adapter = adapters[printer_name]
+            try:
+                state = adapter.get_state()
+                status = str(getattr(getattr(state, "state", None), "value", "unknown")).lower()
+            except Exception as exc:
+                errors.append(f"{printer_name}: state check failed ({exc})")
+                continue
+
+            if status != "idle":
+                continue
+
+            local_path = queue_items[0]
+            if not local_path.exists():
+                queue_items.popleft()
+                errors.append(f"{printer_name}: file disappeared before dispatch ({local_path})")
+                continue
+
+            try:
+                upload_result = adapter.upload_file(str(local_path))
+                if not upload_result.success:
+                    queue_items.popleft()
+                    errors.append(
+                        f"{printer_name}: upload failed for {local_path.name} ({upload_result.message or 'unknown'})"
+                    )
+                    continue
+
+                remote_name = upload_result.file_name or local_path.name
+                start_result = adapter.start_print(remote_name)
+                if not start_result.success:
+                    queue_items.popleft()
+                    errors.append(
+                        f"{printer_name}: start failed for {remote_name} ({start_result.message or 'unknown'})"
+                    )
+                    continue
+
+                queue_items.popleft()
+                dispatched.append(
+                    {
+                        "printer": printer_name,
+                        "file": str(local_path),
+                        "remote_file": remote_name,
+                    }
+                )
+                if not json_mode:
+                    click.echo(f"Dispatched: {local_path.name} -> {printer_name}")
+            except Exception as exc:
+                queue_items.popleft()
+                errors.append(f"{printer_name}: dispatch failed for {local_path.name} ({exc})")
+
+    def _enqueue_detected(paths: list[Path]) -> None:
+        for path in paths:
+            if not auto_queue:
+                if not json_mode:
+                    click.echo(f"Detected: {path.name}")
+                continue
+
+            file_ext = path.suffix.lower()
+            pending_counts = {name: len(items) for name, items in pending.items()}
+            candidates = _collect_routing_candidates(
+                adapters=adapters,
+                material=material_type,
+                pending_counts=pending_counts,
+                file_extension=file_ext,
+            )
+            chosen, routing_data, route_error = _route_printer_for_job(
+                material=material_type,
+                candidates=candidates,
+            )
+            if route_error or not chosen:
+                errors.append(f"{path.name}: {route_error or 'no routing candidate'}")
+                continue
+
+            pending[chosen].append(path)
+            row = {
+                "file": str(path),
+                "printer": chosen,
+            }
+            if routing_data:
+                row["score"] = routing_data.get("recommended_printer", {}).get("score")
+            queued.append(row)
+            if not json_mode:
+                click.echo(f"Queued: {path.name} -> {chosen}")
+
+    def _scan_cycle() -> list[Path]:
+        try:
+            detected = _scan_ingest_directory(watch_path, seen)
+        except Exception as exc:
+            errors.append(f"scan: {exc}")
+            return []
+        _enqueue_detected(detected)
+        _dispatch_pending()
+        return detected
+
+    if not json_mode:
+        mode = "auto-queue" if auto_queue else "detect-only"
+        click.echo(f"Watching {watch_path} ({mode})")
+        click.echo(f"File types: {', '.join(_INGEST_EXTENSIONS)}")
+        if auto_queue and printer:
+            click.echo(f"Fixed printer: {printer}")
+
+    detected_all: list[str] = []
+
+    try:
+        if once:
+            detected = _scan_cycle()
+            detected_all.extend(str(p) for p in detected)
+        else:
+            while True:
+                detected = _scan_cycle()
+                detected_all.extend(str(p) for p in detected)
+                time.sleep(max(0.2, float(interval)))
+    except KeyboardInterrupt:
+        if json_mode:
+            pass
+        else:
+            click.echo("\nStopped ingest watcher.")
+
+    if json_mode:
+        payload = {
+            "watch_dir": str(watch_path),
+            "mode": "auto_queue" if auto_queue else "detect_only",
+            "material": material_type,
+            "detected": detected_all,
+            "queued": queued,
+            "dispatched": dispatched,
+            "errors": errors,
+            "pending": {name: [str(p) for p in items] for name, items in pending.items()},
+        }
+        click.echo(format_response("success", data=payload, json_mode=True))
 
 
 # ---------------------------------------------------------------------------
@@ -5162,6 +5676,98 @@ def firmware_rollback_cmd(ctx: click.Context, component: str, json_mode: bool) -
     except Exception as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
         sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# local-first
+# ---------------------------------------------------------------------------
+
+
+@cli.command("local-first")
+@click.option(
+    "--apply",
+    is_flag=True,
+    help="Apply local-first defaults to local Kiln settings (disables cloud sync config).",
+)
+@click.option(
+    "--write-env",
+    is_flag=True,
+    help="Write ~/.kiln/local-first.env with recommended local-first environment variables.",
+)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def local_first_cmd(apply: bool, write_env: bool, json_mode: bool) -> None:
+    """Generate and optionally apply local-first defaults for edge deployments."""
+    exports = {
+        "KILN_LLM_PRIVACY_MODE": "1",
+        "KILN_CONFIRM_MODE": "true",
+        "KILN_CONFIRM_UPLOAD": "true",
+        "KILN_AUTO_PRINT_MARKETPLACE": "false",
+        "KILN_AUTO_PRINT_GENERATED": "false",
+    }
+    export_lines = [f"export {k}={v}" for k, v in exports.items()]
+    applied: list[str] = []
+    errors: list[str] = []
+    env_file_path: str | None = None
+
+    if apply:
+        try:
+            from kiln.persistence import get_db
+
+            get_db().set_setting("cloud_sync_config", "")
+            applied.append("cloud_sync_disabled")
+        except Exception as exc:
+            errors.append(f"Failed to disable cloud sync config: {exc}")
+
+    if write_env:
+        try:
+            env_path = Path.home() / ".kiln" / "local-first.env"
+            env_path.parent.mkdir(parents=True, exist_ok=True)
+            env_path.write_text("\n".join(export_lines) + "\n", encoding="utf-8")
+            env_file_path = str(env_path)
+        except Exception as exc:
+            errors.append(f"Failed to write local-first env file: {exc}")
+
+    payload = {
+        "profile": "local-first",
+        "exports": exports,
+        "export_lines": export_lines,
+        "applied": applied,
+        "env_file": env_file_path,
+        "notes": [
+            "This profile is privacy-first and local-first by default.",
+            "No print content or model payloads are sent to Supabase licensing tables.",
+            "If you use cloud LLMs, set KILN_OPENROUTER_KEY explicitly.",
+        ],
+    }
+
+    if errors:
+        if json_mode:
+            click.echo(
+                format_response(
+                    "error",
+                    data=payload,
+                    error={"code": "LOCAL_FIRST_ERROR", "message": "; ".join(errors)},
+                    json_mode=True,
+                )
+            )
+        else:
+            click.echo(format_error("; ".join(errors), code="LOCAL_FIRST_ERROR", json_mode=False))
+        sys.exit(1)
+
+    if json_mode:
+        click.echo(format_response("success", data=payload, json_mode=True))
+        return
+
+    click.echo("Local-first profile prepared.")
+    if apply:
+        click.echo("  - Cloud sync config disabled in local settings.")
+    if env_file_path:
+        click.echo(f"  - Wrote env file: {env_file_path}")
+        click.echo(f"    source {env_file_path}")
+    else:
+        click.echo("Recommended exports:")
+        for line in export_lines:
+            click.echo(f"  {line}")
 
 
 # ---------------------------------------------------------------------------
