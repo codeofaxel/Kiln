@@ -43,9 +43,6 @@ scripts/
 # Internal working docs (backed up via iCloud)
 .dev
 
-# Internal R&D (not public-facing)
-.forge
-
 # Internal task tracking
 task.md
 
