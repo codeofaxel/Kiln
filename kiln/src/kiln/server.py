@@ -11419,5 +11419,97 @@ def sso_status() -> dict:
         return _error_dict(f"Failed to get SSO status: {exc}", code="SSO_ERROR")
 
 
+# ---------------------------------------------------------------------------
+# Print trend analysis & ambient safety
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def printer_trend_analysis(
+    printer_name: str,
+    *,
+    lookback_days: int | None = None,
+) -> dict:
+    """Analyze local print history trends for a printer.
+
+    Uses only data already stored in the local database — nothing
+    leaves the machine.  Returns health score, failure rate trends,
+    duration trends, recurring failure modes, and material reliability.
+
+    Args:
+        printer_name: Printer to analyze.
+        lookback_days: How far back to look (default 30 days).
+    """
+    try:
+        from kiln.persistence import get_db
+        from kiln.print_trend_analysis import analyze_printer_trends
+
+        db = get_db()
+        report = analyze_printer_trends(
+            printer_name,
+            db=db,
+            lookback_days=lookback_days,
+        )
+        return {"success": True, "trend_report": report.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in printer_trend_analysis")
+        return _error_dict(f"Failed to analyze printer trends: {exc}", code="TREND_ANALYSIS_ERROR")
+
+
+@mcp.tool()
+def check_ambient_conditions(
+    *,
+    material: str | None = None,
+) -> dict:
+    """Check if the printer's chamber temperature is safe for a material.
+
+    Reads the current chamber temperature from the connected printer
+    and checks it against material-specific thermal limits.  Warns
+    about conditions like:
+    - Chamber too hot for PLA (softening risk)
+    - Chamber too cold for ABS/ASA (warping risk)
+    - Thermal runaway (exceeds printer safety profile max)
+    - Cool-down advisory after a high-temp print
+
+    All checks are local — no data leaves the machine.
+
+    Args:
+        material: Filament material type (e.g. "PLA", "ABS", "PETG").
+                  If not provided, only checks against printer max.
+    """
+    try:
+        adapter = _get_adapter()
+        state = adapter.get_state()
+        chamber_temp = state.chamber_temp_actual
+
+        # Get max chamber temp from safety profile if available
+        max_chamber = None
+        try:
+            from kiln.safety_profiles import get_profile
+
+            printer_model = os.environ.get("KILN_PRINTER_MODEL", "default")
+            profile = get_profile(printer_model)
+            max_chamber = profile.max_chamber_temp
+        except Exception:
+            pass  # No profile available — skip that check
+
+        from kiln.ambient_safety import check_ambient_safety
+
+        result = check_ambient_safety(
+            chamber_temp_c=chamber_temp,
+            material=material,
+            max_chamber_temp_c=max_chamber,
+        )
+        return {"success": True, "ambient_safety": result.to_dict()}
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(
+            f"Failed to check ambient conditions: {exc}. "
+            "Check that the printer is online and supports chamber temperature reporting."
+        )
+    except Exception as exc:
+        logger.exception("Error in check_ambient_conditions")
+        return _error_dict(f"Failed to check ambient conditions: {exc}", code="AMBIENT_CHECK_ERROR")
+
+
 if __name__ == "__main__":
     main()
