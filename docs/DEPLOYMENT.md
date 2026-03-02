@@ -78,8 +78,8 @@ Comprehensive reference for deploying Kiln as a hosted REST API service or local
 | `KILN_CRAFTCLOUD_MATERIAL_CATALOG_URL` | No | `https://customer-api.craftcloud3d.com/material-catalog` | Craftcloud material catalog endpoint (used to retrieve `materialConfigId`s) |
 | `KILN_CRAFTCLOUD_USE_WEBSOCKET` | No | `""` | Set to `1` to use WebSocket price polling (recommended by Craftcloud; requires `websockets` + `msgpack`) |
 | `KILN_CRAFTCLOUD_PAYMENT_MODE` | No | `craftcloud` | `craftcloud` (Craftcloud handles payment) or `partner` (platform handles payment separately) |
-| `KILN_SCULPTEO_API_KEY` | No | `""` | Sculpteo API key *(pending partner credentials)* |
-| `KILN_SCULPTEO_BASE_URL` | No | Sculpteo default | Override Sculpteo API base URL *(pending partner credentials)* |
+| `KILN_SCULPTEO_API_KEY` | No | `""` | Sculpteo API key *(inactive — pending partner credentials)* |
+| `KILN_SCULPTEO_BASE_URL` | No | Sculpteo default | Override Sculpteo API base URL *(inactive — pending partner credentials)* |
 
 ### Payment Providers
 

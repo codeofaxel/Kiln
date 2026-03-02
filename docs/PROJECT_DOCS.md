@@ -943,7 +943,7 @@ kiln/src/kiln/
         base.py          # Fulfillment adapter interface
         registry.py      # Provider registry and factory
         craftcloud.py    # Craftcloud v5 API client (upload → price → cart → order)
-        sculpteo.py      # Sculpteo partner API client (pending partner credentials)
+        sculpteo.py      # Sculpteo partner API client (inactive — pending partner credentials)
     marketplaces/
         base.py          # Marketplace adapter interface
         myminifactory.py # MyMiniFactory API client (primary)
