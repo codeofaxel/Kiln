@@ -60,7 +60,7 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 ### Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link. Manage a mixed fleet from one place.
-- **AI-native** — 273 MCP tools built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — 300 MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
 - **Search → Slice → Print** — Browse MyMiniFactory, Cults3D, Thangs, GrabCAD, Etsy (and legacy Thingiverse), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
 - **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
@@ -458,7 +458,7 @@ pip install kiln3d[rest]
 
 When binding REST to non-localhost addresses (for hosted deployments), set `KILN_API_AUTH_TOKEN` or pass `--auth-token`.
 
-Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 273 tools are available via MCP (`kiln serve`).
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 300 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -477,7 +477,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **273 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **300 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
 
 | Tool | Description |
 |------|-------------|
@@ -649,6 +649,32 @@ The Kiln MCP server (`kiln serve`) exposes **273 tools** to agents. Key tools ar
 | `log_project_cost` | Log a cost entry (material, printer time, labor, etc.) against a project (Enterprise) |
 | `project_cost_summary` | Aggregate cost summary with budget tracking for a project (Enterprise) |
 | `client_cost_report` | Cross-project cost report for a client (Enterprise) |
+| `get_design_brief` | Complete design brief for a functional requirement (materials, patterns, constraints) |
+| `get_material_design_profile` | Full engineering properties for a 3D printing material |
+| `list_design_materials` | List all available materials with summary properties |
+| `recommend_design_material` | Recommend the best material for a design task |
+| `estimate_structural_load` | Estimate safe structural load for a cantilevered section |
+| `check_material_environment` | Check whether a material is compatible with an environment |
+| `get_printer_design_capabilities` | Get the design capability profile for a printer |
+| `list_printer_design_profiles` | List all known printer design capability profiles |
+| `get_design_pattern_info` | Get detailed design rules for a functional pattern (snap-fit, living hinge, etc.) |
+| `list_design_patterns_catalog` | List all available design patterns with descriptions |
+| `find_design_patterns` | Find design patterns that apply to a specific use case |
+| `match_design_requirements` | Identify which functional requirements apply to a design task |
+| `validate_design_for_requirements` | Validate a 3D model against functional design requirements |
+| `troubleshoot_print_issue` | Diagnose a 3D printing problem by material and symptom |
+| `check_printer_material_compatibility` | Check if a specific printer can handle a material |
+| `get_post_processing_guide` | Post-processing techniques for finishing a 3D printed part |
+| `check_multi_material_pairing` | Check if two materials can be co-printed in dual extrusion |
+| `get_print_diagnostic` | Comprehensive print diagnostic combining multiple knowledge sources |
+| `get_construction_design_brief` | Design brief for construction-scale 3D printing |
+| `get_construction_material_profile` | Engineering properties for a construction printing material |
+| `list_construction_materials_catalog` | List all available construction printing materials |
+| `get_construction_pattern_info` | Design rules for a construction printing pattern |
+| `list_construction_patterns_catalog` | List all available construction printing patterns |
+| `get_construction_building_requirement` | Detailed building program requirements |
+| `list_construction_building_requirements` | List all available building program requirement profiles |
+| `match_construction_building_requirements` | Match a building description to known program requirements |
 
 ### Provider Tool Deprecation Timeline
 

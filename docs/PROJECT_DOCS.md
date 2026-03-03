@@ -278,7 +278,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **273 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **300 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
 
 #### Printer Control
 
@@ -555,6 +555,44 @@ Kiln provides structured monitoring data (webcam snapshots, temperatures, print 
 | `list_trusted_printers` | — | Trusted printers with fingerprints and verification status |
 | `trust_printer` | `printer_name`, `fingerprint` | Trust confirmation |
 | `untrust_printer` | `printer_name` | Removal confirmation |
+
+#### Design Intelligence
+
+Constraint-aware design reasoning — agents query material properties, design patterns, and functional constraints before generating geometry.
+
+| Tool | Input | Output |
+|---|---|---|
+| `get_design_brief` | `requirements`, `material` | Complete design brief (materials, patterns, constraints, orientation) |
+| `get_material_design_profile` | `material` | Full engineering properties for a printing material |
+| `list_design_materials` | — | All available materials with summary properties |
+| `recommend_design_material` | `requirements`, constraints | Best material recommendation with reasoning |
+| `estimate_structural_load` | `material`, dimensions | Safe structural load estimate for cantilevered sections |
+| `check_material_environment` | `material`, `environment` | Material-environment compatibility check |
+| `get_printer_design_capabilities` | `printer_id` | Design capability profile for a printer |
+| `list_printer_design_profiles` | — | All known printer design capability profiles |
+| `get_design_pattern_info` | `pattern` | Detailed design rules for a functional pattern |
+| `list_design_patterns_catalog` | — | All available design patterns with descriptions |
+| `find_design_patterns` | `use_case` | Design patterns that apply to a use case |
+| `match_design_requirements` | `description` | Functional requirements that apply to a design task |
+| `validate_design_for_requirements` | `design`, requirements | Validation against functional design requirements |
+| `troubleshoot_print_issue` | `material`, `symptom` | Print problem diagnosis by material and symptom |
+| `check_printer_material_compatibility` | `printer_id`, `material` | Printer-material compatibility check |
+| `get_post_processing_guide` | `material` | Post-processing techniques for finishing a printed part |
+| `check_multi_material_pairing` | `material_a`, `material_b` | Dual extrusion co-print compatibility check |
+| `get_print_diagnostic` | `material`, `printer`, `symptom` | Comprehensive diagnostic combining multiple knowledge sources |
+
+#### Construction-Scale Design Intelligence
+
+| Tool | Input | Output |
+|---|---|---|
+| `get_construction_design_brief` | `requirements` | Design brief for construction-scale 3D printing |
+| `get_construction_material_profile` | `material` | Engineering properties for a construction material |
+| `list_construction_materials_catalog` | — | All available construction printing materials |
+| `get_construction_pattern_info` | `pattern` | Design rules for a construction printing pattern |
+| `list_construction_patterns_catalog` | — | All available construction printing patterns |
+| `get_construction_building_requirement` | `requirement` | Detailed building program requirements |
+| `list_construction_building_requirements` | — | All building program requirement profiles |
+| `match_construction_building_requirements` | `description` | Match a building description to known program requirements |
 
 #### Enterprise Features (Enterprise Tier)
 
@@ -901,6 +939,8 @@ kiln/src/kiln/
     safety_profiles.py   # Bundled safety database (30 printer models)
     slicer_profiles.py   # Bundled slicer profiles (auto .ini generation)
     printer_intelligence.py  # Printer knowledge base (quirks, materials, fixes)
+    design_intelligence.py   # Design knowledge queries (materials, patterns, constraints)
+    design_validator.py      # Design validation + feedback bridge
     pipelines.py         # Pre-validated print pipelines (quick_print, calibrate, benchmark)
     cost_estimator.py    # Print cost estimation
     materials.py         # Multi-material tracking
@@ -932,6 +972,11 @@ kiln/src/kiln/
         safety_profiles.json     # Per-printer safety limits (temps, feedrates, flow)
         slicer_profiles.json     # Per-printer slicer settings (INI key-values)
         printer_intelligence.json  # Firmware quirks, materials, failure modes
+        design_knowledge/          # Design intelligence data files
+            material_troubleshooting.json   # 20 materials × 5-7 failure modes each
+            printer_material_compatibility.json  # 29 printers × 20 materials
+            multi_material_pairing.json     # Soluble support pairs, co-print matrix
+            post_processing.json            # Finishing techniques per material
     printers/
         base.py          # Abstract PrinterAdapter + dataclasses
         octoprint.py     # OctoPrint REST adapter
