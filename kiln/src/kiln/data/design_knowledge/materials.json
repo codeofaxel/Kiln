@@ -1,0 +1,1497 @@
+{
+  "_meta": {
+    "version": "1.1.0",
+    "domain": "fdm",
+    "description": "Mechanical, thermal, and chemical properties for FDM materials with design limits. Agent-consumable — structured for constraint reasoning, not human reference.",
+    "_data_quality": {
+      "last_audit_date": "2026-03-02",
+      "primary_sources": [
+        "Bambu Lab filament datasheets (2024-2025)",
+        "Prusament technical data sheets (2024)",
+        "eSun product specifications (2024-2025)",
+        "Polymaker technical data sheets (2024-2025)",
+        "MatWeb polymer database",
+        "CES EduPack material property ranges"
+      ],
+      "update_cadence": "annual for established materials (PLA, PETG, ABS), semi-annual for newer composites (CF-Nylon, PA6-GF, PET-CF)",
+      "methodology": "Conservative/worst-case values used for composites where manufacturer specs vary. Mechanical values represent typical FDM-printed properties (not injection-molded datasheets). Design limits empirically validated where possible."
+    }
+  },
+  "pla": {
+    "display_name": "PLA (Polylactic Acid)",
+    "category": "thermoplastic",
+    "mechanical": {
+      "tensile_strength_mpa": 50,
+      "flexural_strength_mpa": 80,
+      "compressive_strength_mpa": 66,
+      "elongation_at_break_pct": 6,
+      "youngs_modulus_gpa": 3.5,
+      "impact_resistance": "low",
+      "layer_adhesion": "good",
+      "creep_resistance": "poor",
+      "fatigue_resistance": "poor"
+    },
+    "thermal": {
+      "glass_transition_c": 60,
+      "heat_deflection_c": 55,
+      "max_service_temp_c": 50,
+      "print_temp_range_c": [190, 220],
+      "bed_temp_range_c": [50, 65],
+      "warping_tendency": "low"
+    },
+    "chemical": {
+      "uv_resistance": "poor",
+      "moisture_absorption": "low",
+      "chemical_resistance": "poor",
+      "food_safe": "conditional",
+      "biodegradable": true,
+      "outgassing": "minimal"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 0.8,
+      "recommended_wall_thickness_mm": 1.2,
+      "max_unsupported_overhang_deg": 60,
+      "max_bridge_length_mm": 15,
+      "min_hole_diameter_mm": 2.0,
+      "min_embossed_text_height_mm": 0.6,
+      "min_engraved_text_depth_mm": 0.4,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.1,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 30,
+      "min_pin_diameter_mm": 3.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "poor",
+      "outdoor_use": "poor",
+      "food_contact": "conditional",
+      "high_temp_environment": "poor",
+      "impact_resistance": "poor",
+      "repeated_flexing": "poor",
+      "cosmetic_finish": "excellent",
+      "dimensional_accuracy": "excellent",
+      "prototyping": "excellent",
+      "snap_fits": "poor",
+      "gears_and_bearings": "poor",
+      "water_tight": "moderate"
+    },
+    "agent_guidance": [
+      "DEFAULT RECOMMENDATION for beginners and when no specific requirements override it. Easiest to print, best surface finish, lowest cost.",
+      "Z-axis (layer direction) is ALWAYS the weakest axis. Orient parts so primary loads are perpendicular to layer lines.",
+      "PLA creeps under sustained load — NOT suitable for shelf brackets, clamps, spring clips, or anything under constant mechanical stress.",
+      "Glass transition at 60C means PLA deforms in hot cars, near windows in direct sunlight, dishwashers, or near heat sources.",
+      "Snap fits will break after 2-3 cycles. For anything that clips/unclips repeatedly, use PETG or Nylon.",
+      "Good for: prototypes, display models, toys, cosplay, decorative objects, architectural models, teaching aids.",
+      "Bad for: outdoor use, mechanical parts, anything near heat, anything under sustained load, anything that flexes."
+    ]
+  },
+  "petg": {
+    "display_name": "PETG (Polyethylene Terephthalate Glycol)",
+    "category": "thermoplastic",
+    "mechanical": {
+      "tensile_strength_mpa": 50,
+      "flexural_strength_mpa": 77,
+      "compressive_strength_mpa": 55,
+      "elongation_at_break_pct": 23,
+      "youngs_modulus_gpa": 2.1,
+      "impact_resistance": "good",
+      "layer_adhesion": "excellent",
+      "creep_resistance": "moderate",
+      "fatigue_resistance": "moderate"
+    },
+    "thermal": {
+      "glass_transition_c": 80,
+      "heat_deflection_c": 70,
+      "max_service_temp_c": 65,
+      "print_temp_range_c": [220, 250],
+      "bed_temp_range_c": [70, 85],
+      "warping_tendency": "low"
+    },
+    "chemical": {
+      "uv_resistance": "moderate",
+      "moisture_absorption": "low",
+      "chemical_resistance": "good",
+      "food_safe": "yes",
+      "biodegradable": false,
+      "outgassing": "minimal"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.0,
+      "recommended_wall_thickness_mm": 1.5,
+      "max_unsupported_overhang_deg": 55,
+      "max_bridge_length_mm": 12,
+      "min_hole_diameter_mm": 2.0,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.15,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 40,
+      "min_pin_diameter_mm": 3.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "moderate",
+      "outdoor_use": "moderate",
+      "food_contact": "good",
+      "high_temp_environment": "moderate",
+      "impact_resistance": "good",
+      "repeated_flexing": "moderate",
+      "cosmetic_finish": "good",
+      "dimensional_accuracy": "good",
+      "prototyping": "good",
+      "snap_fits": "good",
+      "gears_and_bearings": "moderate",
+      "water_tight": "good"
+    },
+    "agent_guidance": [
+      "THE WORKHORSE. When PLA isn't strong enough and you don't need an enclosure, PETG is the answer.",
+      "Excellent layer adhesion makes it the best choice for watertight prints and functional parts under moderate stress.",
+      "Higher elongation (23% vs PLA's 6%) means snap fits survive repeated use. Good for enclosures, clips, and latches.",
+      "Stringing is worse than PLA — increase retraction, reduce travel speed, or accept minor post-processing.",
+      "Slightly worse overhang performance than PLA. Design with 50-55 degree max overhangs or add supports.",
+      "Food safe (PETG is the same polymer family as water bottles). Good for kitchen tools, containers, cookie cutters.",
+      "Good for: functional parts, snap-fit enclosures, food-contact items, water-tight containers, outdoor-tolerant parts.",
+      "Bad for: high-temp environments (> 65C), parts requiring high dimensional precision, cosmetic parts where stringing matters."
+    ]
+  },
+  "abs": {
+    "display_name": "ABS (Acrylonitrile Butadiene Styrene)",
+    "category": "thermoplastic",
+    "mechanical": {
+      "tensile_strength_mpa": 40,
+      "flexural_strength_mpa": 75,
+      "compressive_strength_mpa": 65,
+      "elongation_at_break_pct": 25,
+      "youngs_modulus_gpa": 2.3,
+      "impact_resistance": "excellent",
+      "layer_adhesion": "moderate",
+      "creep_resistance": "moderate",
+      "fatigue_resistance": "good"
+    },
+    "thermal": {
+      "glass_transition_c": 105,
+      "heat_deflection_c": 95,
+      "max_service_temp_c": 85,
+      "print_temp_range_c": [230, 255],
+      "bed_temp_range_c": [90, 110],
+      "warping_tendency": "high"
+    },
+    "chemical": {
+      "uv_resistance": "poor",
+      "moisture_absorption": "moderate",
+      "chemical_resistance": "moderate",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "moderate"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.0,
+      "recommended_wall_thickness_mm": 1.5,
+      "max_unsupported_overhang_deg": 50,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.5,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.15,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 45,
+      "min_pin_diameter_mm": 3.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "good",
+      "outdoor_use": "poor",
+      "food_contact": "no",
+      "high_temp_environment": "good",
+      "impact_resistance": "excellent",
+      "repeated_flexing": "good",
+      "cosmetic_finish": "moderate",
+      "dimensional_accuracy": "moderate",
+      "prototyping": "moderate",
+      "snap_fits": "good",
+      "gears_and_bearings": "moderate",
+      "water_tight": "moderate"
+    },
+    "agent_guidance": [
+      "REQUIRES ENCLOSURE. Do not recommend unless printer has an enclosed build chamber. Warping is severe without one.",
+      "Best impact resistance of common materials — LEGO is made from ABS. Good for parts that get dropped or hit.",
+      "Acetone smoothing is possible for cosmetic finish — dip or vapor smooth for a glossy, injection-molded look.",
+      "Emits fumes during printing — recommend ventilation. Not suitable for poorly ventilated spaces.",
+      "Higher heat resistance than PLA/PETG — survives in cars, near electronics, in warm environments.",
+      "UV degrades ABS. For outdoor use, prefer ASA instead (same properties, UV stable).",
+      "Good for: impact-resistant parts, automotive, enclosures, heat-tolerant fixtures, mechanical parts.",
+      "Bad for: outdoor (UV), food contact, printers without enclosure, poorly ventilated rooms."
+    ]
+  },
+  "tpu": {
+    "display_name": "TPU (Thermoplastic Polyurethane)",
+    "category": "thermoplastic_elastomer",
+    "mechanical": {
+      "tensile_strength_mpa": 30,
+      "flexural_strength_mpa": 20,
+      "compressive_strength_mpa": 15,
+      "elongation_at_break_pct": 580,
+      "youngs_modulus_gpa": 0.03,
+      "impact_resistance": "excellent",
+      "layer_adhesion": "excellent",
+      "creep_resistance": "poor",
+      "fatigue_resistance": "excellent"
+    },
+    "thermal": {
+      "glass_transition_c": -40,
+      "heat_deflection_c": 60,
+      "max_service_temp_c": 80,
+      "print_temp_range_c": [215, 235],
+      "bed_temp_range_c": [40, 60],
+      "warping_tendency": "none"
+    },
+    "chemical": {
+      "uv_resistance": "moderate",
+      "moisture_absorption": "moderate",
+      "chemical_resistance": "good",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "low"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.2,
+      "recommended_wall_thickness_mm": 2.0,
+      "max_unsupported_overhang_deg": 45,
+      "max_bridge_length_mm": 8,
+      "min_hole_diameter_mm": 3.0,
+      "min_embossed_text_height_mm": 1.0,
+      "min_engraved_text_depth_mm": 0.8,
+      "snap_fit_tolerance_mm": 0.5,
+      "press_fit_interference_mm": 0.3,
+      "thread_min_pitch_mm": 2.0,
+      "living_hinge_viable": true,
+      "max_cantilever_length_mm": 60,
+      "min_pin_diameter_mm": 4.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "poor",
+      "outdoor_use": "moderate",
+      "food_contact": "no",
+      "high_temp_environment": "moderate",
+      "impact_resistance": "excellent",
+      "repeated_flexing": "excellent",
+      "cosmetic_finish": "moderate",
+      "dimensional_accuracy": "poor",
+      "prototyping": "moderate",
+      "snap_fits": "excellent",
+      "gears_and_bearings": "poor",
+      "water_tight": "excellent"
+    },
+    "agent_guidance": [
+      "THE FLEXIBLE MATERIAL. Use for anything that needs to bend, flex, compress, or absorb impact.",
+      "Requires direct drive extruder for reliable printing. Bowden tube setups (like some Enders) will struggle or fail.",
+      "Print SLOW (15-25 mm/s). Flexible filament buckles in the extruder at higher speeds.",
+      "Dimensional accuracy is poor — TPU squishes. Add 0.5mm tolerance on mating surfaces. Forget tight tolerances.",
+      "Living hinges are viable in TPU — one of the few FDM materials where a printed hinge lasts thousands of cycles.",
+      "Excellent for vibration damping — motor mounts, anti-vibration feet, shock absorbers.",
+      "Good for: phone cases, gaskets, seals, flexible joints, vibration dampeners, shoe insoles, protective covers, grip surfaces.",
+      "Bad for: structural parts, precise fitments, gears, anything requiring rigidity."
+    ]
+  },
+  "asa": {
+    "display_name": "ASA (Acrylonitrile Styrene Acrylate)",
+    "category": "thermoplastic",
+    "mechanical": {
+      "tensile_strength_mpa": 45,
+      "flexural_strength_mpa": 72,
+      "compressive_strength_mpa": 60,
+      "elongation_at_break_pct": 30,
+      "youngs_modulus_gpa": 2.1,
+      "impact_resistance": "good",
+      "layer_adhesion": "moderate",
+      "creep_resistance": "moderate",
+      "fatigue_resistance": "good"
+    },
+    "thermal": {
+      "glass_transition_c": 100,
+      "heat_deflection_c": 90,
+      "max_service_temp_c": 85,
+      "print_temp_range_c": [235, 260],
+      "bed_temp_range_c": [90, 110],
+      "warping_tendency": "moderate"
+    },
+    "chemical": {
+      "uv_resistance": "excellent",
+      "moisture_absorption": "low",
+      "chemical_resistance": "good",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "moderate"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.0,
+      "recommended_wall_thickness_mm": 1.5,
+      "max_unsupported_overhang_deg": 50,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.5,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.15,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 45,
+      "min_pin_diameter_mm": 3.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "good",
+      "outdoor_use": "excellent",
+      "food_contact": "no",
+      "high_temp_environment": "good",
+      "impact_resistance": "good",
+      "repeated_flexing": "moderate",
+      "cosmetic_finish": "good",
+      "dimensional_accuracy": "moderate",
+      "prototyping": "moderate",
+      "snap_fits": "good",
+      "gears_and_bearings": "moderate",
+      "water_tight": "moderate"
+    },
+    "agent_guidance": [
+      "THE OUTDOOR MATERIAL. ABS but UV-stable. First choice for anything exposed to sunlight.",
+      "REQUIRES ENCLOSURE. Same warping tendency as ABS — enclosed build chamber is mandatory.",
+      "UV resistance is the key differentiator — parts hold color and strength for years in direct sunlight.",
+      "Same fume concerns as ABS — print with ventilation.",
+      "Slightly better layer adhesion than ABS, slightly less impact resistance. Net win for most outdoor applications.",
+      "Good for: garden fixtures, outdoor signs, planters, car accessories, weatherproof enclosures, exterior mounting hardware.",
+      "Bad for: indoor-only parts (use PETG instead — easier to print), food contact, printers without enclosure."
+    ]
+  },
+  "nylon": {
+    "display_name": "Nylon (PA6/PA12)",
+    "category": "thermoplastic",
+    "mechanical": {
+      "tensile_strength_mpa": 70,
+      "flexural_strength_mpa": 95,
+      "compressive_strength_mpa": 80,
+      "elongation_at_break_pct": 40,
+      "youngs_modulus_gpa": 2.7,
+      "impact_resistance": "excellent",
+      "layer_adhesion": "good",
+      "creep_resistance": "good",
+      "fatigue_resistance": "excellent"
+    },
+    "thermal": {
+      "glass_transition_c": 70,
+      "heat_deflection_c": 80,
+      "max_service_temp_c": 80,
+      "print_temp_range_c": [240, 270],
+      "bed_temp_range_c": [70, 90],
+      "warping_tendency": "high"
+    },
+    "chemical": {
+      "uv_resistance": "moderate",
+      "moisture_absorption": "high",
+      "chemical_resistance": "excellent",
+      "food_safe": "conditional",
+      "biodegradable": false,
+      "outgassing": "low"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.0,
+      "recommended_wall_thickness_mm": 1.5,
+      "max_unsupported_overhang_deg": 50,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.0,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.4,
+      "press_fit_interference_mm": 0.2,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": true,
+      "max_cantilever_length_mm": 50,
+      "min_pin_diameter_mm": 2.5
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "excellent",
+      "outdoor_use": "moderate",
+      "food_contact": "conditional",
+      "high_temp_environment": "good",
+      "impact_resistance": "excellent",
+      "repeated_flexing": "excellent",
+      "cosmetic_finish": "moderate",
+      "dimensional_accuracy": "moderate",
+      "prototyping": "moderate",
+      "snap_fits": "excellent",
+      "gears_and_bearings": "excellent",
+      "water_tight": "poor"
+    },
+    "agent_guidance": [
+      "THE ENGINEERING MATERIAL. Highest overall mechanical performance of common FDM materials.",
+      "REQUIRES ENCLOSURE AND DRY FILAMENT. Nylon absorbs moisture aggressively — must be dried before printing and ideally printed from a dry box.",
+      "Excellent fatigue resistance — gears, hinges, snap fits, anything with repeated mechanical cycles.",
+      "Living hinges are viable in Nylon — flex life in the tens of thousands of cycles.",
+      "Self-lubricating surface — excellent for gears, bearings, sliding surfaces, and bushings.",
+      "Dimensional accuracy suffers from moisture absorption — parts swell. Design with 0.3-0.5mm extra clearance on critical dimensions.",
+      "Chemical resistant to oils, greases, fuels, and many solvents. Good for automotive and industrial environments.",
+      "Good for: gears, bearings, hinges, clips, jigs, fixtures, functional mechanical parts, tools, industrial prototypes.",
+      "Bad for: watertight parts (moisture absorption), cosmetic-critical parts, beginners, printers without enclosure or dry storage."
+    ]
+  },
+  "polycarbonate": {
+    "display_name": "Polycarbonate (PC)",
+    "category": "thermoplastic",
+    "mechanical": {
+      "tensile_strength_mpa": 65,
+      "flexural_strength_mpa": 93,
+      "compressive_strength_mpa": 86,
+      "elongation_at_break_pct": 110,
+      "youngs_modulus_gpa": 2.4,
+      "impact_resistance": "outstanding",
+      "layer_adhesion": "moderate",
+      "creep_resistance": "good",
+      "fatigue_resistance": "excellent"
+    },
+    "thermal": {
+      "glass_transition_c": 147,
+      "heat_deflection_c": 130,
+      "max_service_temp_c": 120,
+      "print_temp_range_c": [270, 310],
+      "bed_temp_range_c": [100, 120],
+      "warping_tendency": "very_high"
+    },
+    "chemical": {
+      "uv_resistance": "moderate",
+      "moisture_absorption": "moderate",
+      "chemical_resistance": "moderate",
+      "food_safe": "conditional",
+      "biodegradable": false,
+      "outgassing": "moderate"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.2,
+      "recommended_wall_thickness_mm": 2.0,
+      "max_unsupported_overhang_deg": 45,
+      "max_bridge_length_mm": 8,
+      "min_hole_diameter_mm": 3.0,
+      "min_embossed_text_height_mm": 1.0,
+      "min_engraved_text_depth_mm": 0.6,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.15,
+      "thread_min_pitch_mm": 2.0,
+      "living_hinge_viable": true,
+      "max_cantilever_length_mm": 55,
+      "min_pin_diameter_mm": 3.5
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "excellent",
+      "outdoor_use": "moderate",
+      "food_contact": "conditional",
+      "high_temp_environment": "excellent",
+      "impact_resistance": "outstanding",
+      "repeated_flexing": "excellent",
+      "cosmetic_finish": "moderate",
+      "dimensional_accuracy": "moderate",
+      "prototyping": "poor",
+      "snap_fits": "excellent",
+      "gears_and_bearings": "good",
+      "water_tight": "moderate"
+    },
+    "agent_guidance": [
+      "THE TOUGHEST MATERIAL. Bulletproof glass is made from polycarbonate. Highest impact resistance of any FDM material.",
+      "REQUIRES HIGH-TEMP PRINTER (270-310C hotend, 100-120C bed) AND ENCLOSURE. Most consumer printers cannot print PC.",
+      "Highest heat deflection temp of common materials — survives 120C+ continuous service. Use near engines, electronics, heat sources.",
+      "110% elongation at break — nearly unbreakable in impact. Parts deform rather than shatter.",
+      "Warping is extreme — even with enclosure, large flat parts are challenging. Design with rounded corners, fillets, avoid large flat surfaces.",
+      "Absorbs moisture — dry before printing, print from dry box.",
+      "Good for: safety equipment, high-temp fixtures, impact-resistant housings, industrial tooling, automotive under-hood parts.",
+      "Bad for: beginners, printers without high-temp hotend + enclosure, cosmetic parts, cost-sensitive projects ($45+/kg)."
+    ]
+  },
+  "cf_pla": {
+    "display_name": "Carbon Fiber PLA",
+    "category": "composite",
+    "mechanical": {
+      "tensile_strength_mpa": 55,
+      "flexural_strength_mpa": 95,
+      "compressive_strength_mpa": 75,
+      "elongation_at_break_pct": 3,
+      "youngs_modulus_gpa": 6.0,
+      "impact_resistance": "low",
+      "layer_adhesion": "moderate",
+      "creep_resistance": "moderate",
+      "fatigue_resistance": "moderate"
+    },
+    "thermal": {
+      "glass_transition_c": 60,
+      "heat_deflection_c": 58,
+      "max_service_temp_c": 52,
+      "print_temp_range_c": [200, 230],
+      "bed_temp_range_c": [55, 70],
+      "warping_tendency": "low"
+    },
+    "chemical": {
+      "uv_resistance": "poor",
+      "moisture_absorption": "low",
+      "chemical_resistance": "poor",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "minimal"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.0,
+      "recommended_wall_thickness_mm": 1.6,
+      "max_unsupported_overhang_deg": 55,
+      "max_bridge_length_mm": 12,
+      "min_hole_diameter_mm": 2.5,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.2,
+      "press_fit_interference_mm": 0.08,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 40,
+      "min_pin_diameter_mm": 3.5
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "moderate",
+      "outdoor_use": "poor",
+      "food_contact": "no",
+      "high_temp_environment": "poor",
+      "impact_resistance": "poor",
+      "repeated_flexing": "poor",
+      "cosmetic_finish": "good",
+      "dimensional_accuracy": "excellent",
+      "prototyping": "good",
+      "snap_fits": "poor",
+      "gears_and_bearings": "moderate",
+      "water_tight": "moderate"
+    },
+    "agent_guidance": [
+      "STIFFEST PLA VARIANT. ~15% chopped carbon fiber increases rigidity by ~70% over standard PLA. Use when parts must resist deflection.",
+      "REQUIRES HARDENED STEEL NOZZLE. Carbon fiber is extremely abrasive — a brass nozzle will wear out in hours. Hardened steel or ruby nozzle mandatory.",
+      "Very low elongation (~3%) means parts are BRITTLE. Stiffer but snaps under impact. Never use for parts that take sudden loads or drops.",
+      "Excellent dimensional stability — very low warping and shrinkage. Great for jigs, fixtures, camera mounts, drone frames where rigidity matters.",
+      "Matte surface finish with visible fiber texture. Cannot be smoothed like standard PLA. Looks industrial/technical, not glossy.",
+      "Layer adhesion is weaker than standard PLA due to fiber disruption. Increase wall count and use higher print temps (210-220C) for better bonding.",
+      "Good for: drone frames, camera mounts, jigs and fixtures, stiff brackets, lightweight structural parts. Bad for: snap fits, living hinges, impact parts, food contact."
+    ],
+    "_validation": {
+      "source": "eSun ePLA-CF, Polymaker PolyLite PLA-CF datasheets",
+      "verified_date": "2026-03-02",
+      "confidence": "high",
+      "_review_needed": []
+    },
+    "_notes": "Well-characterized material. CF content varies 10-20% across brands; used 15% baseline. Mechanical values conservative — some brands claim higher tensile."
+  },
+  "cf_petg": {
+    "display_name": "Carbon Fiber PETG",
+    "category": "composite",
+    "mechanical": {
+      "tensile_strength_mpa": 55,
+      "flexural_strength_mpa": 90,
+      "compressive_strength_mpa": 70,
+      "elongation_at_break_pct": 4,
+      "youngs_modulus_gpa": 4.5,
+      "impact_resistance": "moderate",
+      "layer_adhesion": "moderate",
+      "creep_resistance": "moderate",
+      "fatigue_resistance": "moderate"
+    },
+    "thermal": {
+      "glass_transition_c": 82,
+      "heat_deflection_c": 78,
+      "max_service_temp_c": 75,
+      "print_temp_range_c": [230, 260],
+      "bed_temp_range_c": [75, 90],
+      "warping_tendency": "low"
+    },
+    "chemical": {
+      "uv_resistance": "moderate",
+      "moisture_absorption": "low",
+      "chemical_resistance": "moderate",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "low"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.0,
+      "recommended_wall_thickness_mm": 1.6,
+      "max_unsupported_overhang_deg": 50,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.5,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.1,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 35,
+      "min_pin_diameter_mm": 3.5
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "good",
+      "outdoor_use": "moderate",
+      "food_contact": "no",
+      "high_temp_environment": "moderate",
+      "impact_resistance": "moderate",
+      "repeated_flexing": "poor",
+      "cosmetic_finish": "moderate",
+      "dimensional_accuracy": "good",
+      "prototyping": "good",
+      "snap_fits": "poor",
+      "gears_and_bearings": "moderate",
+      "water_tight": "moderate"
+    },
+    "agent_guidance": [
+      "STEP UP FROM CF-PLA. Better heat resistance and toughness than CF-PLA while retaining stiffness. Good middle-ground engineering composite.",
+      "REQUIRES HARDENED STEEL NOZZLE. Carbon fiber shreds brass nozzles within hours. Non-negotiable.",
+      "Better impact resistance than CF-PLA — PETG base gives some ductility. Still more brittle than plain PETG.",
+      "Handles ~75C continuous service — suitable for under-hood automotive brackets, electronics enclosures near heat sources.",
+      "Low warping tendency makes it easier to print large parts than ABS-based composites. Enclosed chamber helpful but not strictly required.",
+      "Moisture absorption is low but still present — store sealed with desiccant for best results.",
+      "Good for: functional brackets, electronics housings, automotive parts, tooling. Bad for: snap fits, flexible parts, food contact, cosmetic/glossy finish."
+    ],
+    "_validation": {
+      "source": "Prusament PETG-CF, Bambu Lab PETG-CF datasheets",
+      "verified_date": "2026-03-02",
+      "confidence": "high",
+      "_review_needed": []
+    },
+    "_notes": "Standard ~15% CF loading. Values based on Prusament specs cross-referenced with Bambu Lab. Less variation across brands than CF-PLA."
+  },
+  "cf_nylon": {
+    "display_name": "Carbon Fiber Nylon (PA-CF)",
+    "category": "composite",
+    "mechanical": {
+      "tensile_strength_mpa": 90,
+      "flexural_strength_mpa": 130,
+      "compressive_strength_mpa": 100,
+      "elongation_at_break_pct": 5,
+      "youngs_modulus_gpa": 8.0,
+      "impact_resistance": "good",
+      "layer_adhesion": "good",
+      "creep_resistance": "good",
+      "fatigue_resistance": "good"
+    },
+    "thermal": {
+      "glass_transition_c": 75,
+      "heat_deflection_c": 150,
+      "max_service_temp_c": 130,
+      "print_temp_range_c": [260, 290],
+      "bed_temp_range_c": [80, 100],
+      "warping_tendency": "moderate"
+    },
+    "chemical": {
+      "uv_resistance": "moderate",
+      "moisture_absorption": "moderate",
+      "chemical_resistance": "good",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "moderate"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.2,
+      "recommended_wall_thickness_mm": 1.8,
+      "max_unsupported_overhang_deg": 45,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.5,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.1,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 50,
+      "min_pin_diameter_mm": 3.5
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "excellent",
+      "outdoor_use": "good",
+      "food_contact": "no",
+      "high_temp_environment": "excellent",
+      "impact_resistance": "good",
+      "repeated_flexing": "moderate",
+      "cosmetic_finish": "moderate",
+      "dimensional_accuracy": "good",
+      "prototyping": "moderate",
+      "snap_fits": "moderate",
+      "gears_and_bearings": "excellent",
+      "water_tight": "moderate"
+    },
+    "agent_guidance": [
+      "TOP-TIER ENGINEERING COMPOSITE. Closest FDM gets to injection-molded nylon. Extremely stiff and strong with good fatigue life.",
+      "REQUIRES: enclosed printer, hardened nozzle, dry box feeding, 260C+ hotend. Bambu X1C with AMS is ideal. Most budget printers cannot handle this.",
+      "MOISTURE IS THE ENEMY. PA-CF absorbs water aggressively. Print from a sealed dry box. Wet filament produces popping, stringing, and catastrophic layer adhesion failure.",
+      "Young's modulus ~8 GPa — stiffer than aluminum in some orientations. Use for jigs, fixtures, end-use tooling that replaces CNC parts.",
+      "Heat deflection at 150C makes this suitable for under-hood automotive, near-motor applications, and industrial environments.",
+      "Cost is high ($40-60/kg) and print difficulty is high. Only use when PLA/PETG/CF-PLA genuinely cannot meet the requirements.",
+      "Good for: end-use industrial parts, automotive components, high-temp fixtures, gears, tooling. Bad for: beginners, budget printers, cosmetic models, food contact."
+    ],
+    "_validation": {
+      "source": "Bambu Lab PA-CF, Polymaker PolyMide PA6-CF datasheets",
+      "verified_date": "2026-03-02",
+      "confidence": "high",
+      "_review_needed": []
+    },
+    "_notes": "Values based primarily on Bambu Lab PA-CF (their most popular engineering filament). Bambu and Polymaker specs align closely. Moisture sensitivity makes real-world performance variable."
+  },
+  "pet_cf": {
+    "display_name": "PET-CF (PET Carbon Fiber)",
+    "category": "composite",
+    "mechanical": {
+      "tensile_strength_mpa": 60,
+      "flexural_strength_mpa": 95,
+      "compressive_strength_mpa": 75,
+      "elongation_at_break_pct": 4,
+      "youngs_modulus_gpa": 5.0,
+      "impact_resistance": "moderate",
+      "layer_adhesion": "moderate",
+      "creep_resistance": "moderate",
+      "fatigue_resistance": "moderate"
+    },
+    "thermal": {
+      "glass_transition_c": 80,
+      "heat_deflection_c": 75,
+      "max_service_temp_c": 70,
+      "print_temp_range_c": [250, 280],
+      "bed_temp_range_c": [70, 90],
+      "warping_tendency": "low"
+    },
+    "chemical": {
+      "uv_resistance": "moderate",
+      "moisture_absorption": "low",
+      "chemical_resistance": "moderate",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "low"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.0,
+      "recommended_wall_thickness_mm": 1.6,
+      "max_unsupported_overhang_deg": 50,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.5,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.1,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 38,
+      "min_pin_diameter_mm": 3.5
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "good",
+      "outdoor_use": "moderate",
+      "food_contact": "no",
+      "high_temp_environment": "moderate",
+      "impact_resistance": "moderate",
+      "repeated_flexing": "poor",
+      "cosmetic_finish": "moderate",
+      "dimensional_accuracy": "good",
+      "prototyping": "good",
+      "snap_fits": "poor",
+      "gears_and_bearings": "moderate",
+      "water_tight": "good"
+    },
+    "agent_guidance": [
+      "BUDGET CF ALTERNATIVE. PET-CF is cheaper than PETG-CF or PA-CF while offering solid stiffness. Good value engineering composite.",
+      "REQUIRES HARDENED STEEL NOZZLE. Like all carbon fiber filaments, brass nozzles will be destroyed.",
+      "Lower moisture sensitivity than PA-CF — easier to store and handle. Still benefits from dry storage but is more forgiving.",
+      "PET base gives decent chemical resistance and low warping. Easier to print than nylon-based composites.",
+      "Stiffness (~5 GPa) sits between CF-PLA and CF-PETG — a solid mid-range option when budget matters.",
+      "Print temps are higher than PETG (250-280C) — verify your hotend can handle this range.",
+      "Good for: cost-conscious stiff parts, electronics housings, brackets, replacement parts. Bad for: snap fits, flexible parts, food contact, high-temp (>70C) applications."
+    ],
+    "_validation": {
+      "source": "Bambu Lab PET-CF, eSun PET-CF datasheets",
+      "verified_date": "2026-03-02",
+      "confidence": "medium",
+      "_review_needed": ["compressive_strength_mpa", "heat_deflection_c"]
+    },
+    "_notes": "PET-CF is newer to market with fewer datasheets. Tensile and Young's modulus well-documented; compressive strength and HDT extrapolated from PET base polymer data. Values may shift as more manufacturers publish specs."
+  },
+  "silk_pla": {
+    "display_name": "Silk PLA",
+    "category": "thermoplastic",
+    "mechanical": {
+      "tensile_strength_mpa": 40,
+      "flexural_strength_mpa": 60,
+      "compressive_strength_mpa": 50,
+      "elongation_at_break_pct": 5,
+      "youngs_modulus_gpa": 2.8,
+      "impact_resistance": "low",
+      "layer_adhesion": "moderate",
+      "creep_resistance": "poor",
+      "fatigue_resistance": "poor"
+    },
+    "thermal": {
+      "glass_transition_c": 58,
+      "heat_deflection_c": 52,
+      "max_service_temp_c": 48,
+      "print_temp_range_c": [190, 230],
+      "bed_temp_range_c": [50, 65],
+      "warping_tendency": "low"
+    },
+    "chemical": {
+      "uv_resistance": "poor",
+      "moisture_absorption": "low",
+      "chemical_resistance": "poor",
+      "food_safe": "no",
+      "biodegradable": true,
+      "outgassing": "minimal"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 0.8,
+      "recommended_wall_thickness_mm": 1.2,
+      "max_unsupported_overhang_deg": 55,
+      "max_bridge_length_mm": 12,
+      "min_hole_diameter_mm": 2.0,
+      "min_embossed_text_height_mm": 0.6,
+      "min_engraved_text_depth_mm": 0.4,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.1,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 25,
+      "min_pin_diameter_mm": 3.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "poor",
+      "outdoor_use": "poor",
+      "food_contact": "no",
+      "high_temp_environment": "poor",
+      "impact_resistance": "poor",
+      "repeated_flexing": "poor",
+      "cosmetic_finish": "outstanding",
+      "dimensional_accuracy": "good",
+      "prototyping": "good",
+      "snap_fits": "poor",
+      "gears_and_bearings": "poor",
+      "water_tight": "moderate"
+    },
+    "agent_guidance": [
+      "COSMETIC KING. Beautiful metallic/pearlescent sheen. The best-looking FDM filament. Use when visual appearance is the #1 priority.",
+      "WEAKER THAN STANDARD PLA (~20% lower tensile). The additives that create the sheen reduce mechanical strength. Never use for structural parts.",
+      "Print settings similar to standard PLA (190-230C). Slightly slower speeds (40-50mm/s) give the best surface quality.",
+      "The silk effect is most visible on curved surfaces and large flat areas. Small detailed parts don't showcase the finish well.",
+      "Layer lines are less visible than standard PLA due to the reflective surface — one of the few filaments where layer lines become a feature.",
+      "Not food safe — the silk additives are not certified for food contact. Use standard PLA for food-contact applications.",
+      "Good for: display models, vases, decorative objects, gifts, cosplay props, artistic prints. Bad for: anything structural, outdoor use, functional parts, food contact."
+    ],
+    "_validation": {
+      "source": "eSun Silk PLA, Polymaker PolyTerra Silk datasheets",
+      "verified_date": "2026-03-02",
+      "confidence": "medium",
+      "_review_needed": ["tensile_strength_mpa", "elongation_at_break_pct"]
+    },
+    "_notes": "Silk additives vary significantly across brands. Mechanical properties 15-25% below standard PLA depending on brand. Used conservative estimates. Thermal properties match standard PLA closely."
+  },
+  "wood_pla": {
+    "display_name": "Wood Fill PLA",
+    "category": "composite",
+    "mechanical": {
+      "tensile_strength_mpa": 35,
+      "flexural_strength_mpa": 50,
+      "compressive_strength_mpa": 42,
+      "elongation_at_break_pct": 3,
+      "youngs_modulus_gpa": 2.5,
+      "impact_resistance": "low",
+      "layer_adhesion": "poor",
+      "creep_resistance": "poor",
+      "fatigue_resistance": "poor"
+    },
+    "thermal": {
+      "glass_transition_c": 55,
+      "heat_deflection_c": 50,
+      "max_service_temp_c": 45,
+      "print_temp_range_c": [185, 215],
+      "bed_temp_range_c": [50, 65],
+      "warping_tendency": "low"
+    },
+    "chemical": {
+      "uv_resistance": "poor",
+      "moisture_absorption": "moderate",
+      "chemical_resistance": "poor",
+      "food_safe": "no",
+      "biodegradable": true,
+      "outgassing": "low"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.2,
+      "recommended_wall_thickness_mm": 1.6,
+      "max_unsupported_overhang_deg": 50,
+      "max_bridge_length_mm": 8,
+      "min_hole_diameter_mm": 3.0,
+      "min_embossed_text_height_mm": 1.0,
+      "min_engraved_text_depth_mm": 0.6,
+      "snap_fit_tolerance_mm": 0.2,
+      "press_fit_interference_mm": 0.08,
+      "thread_min_pitch_mm": 2.0,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 20,
+      "min_pin_diameter_mm": 4.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "poor",
+      "outdoor_use": "poor",
+      "food_contact": "no",
+      "high_temp_environment": "poor",
+      "impact_resistance": "poor",
+      "repeated_flexing": "poor",
+      "cosmetic_finish": "good",
+      "dimensional_accuracy": "moderate",
+      "prototyping": "moderate",
+      "snap_fits": "poor",
+      "gears_and_bearings": "poor",
+      "water_tight": "poor"
+    },
+    "agent_guidance": [
+      "LOOKS AND FEELS LIKE WOOD. ~20% wood fiber fill. Can be sanded, stained, and finished like real wood. Unique aesthetic.",
+      "USE 0.6mm+ NOZZLE. Wood fibers clog 0.4mm nozzles frequently. A 0.6mm or 0.8mm nozzle is strongly recommended. Avoid nozzles below 0.5mm entirely.",
+      "WEAKEST MATERIAL IN THIS DATABASE. ~30% weaker than standard PLA. Purely decorative — never use for structural or load-bearing parts.",
+      "Vary print temperature between layers (185-215C) to create natural wood grain color variation. Higher temps produce darker 'rings'.",
+      "Absorbs moisture more than standard PLA due to wood fiber content. Store sealed. Wet wood PLA produces excessive stringing and rough surfaces.",
+      "Sandable and stainable — post-processing with wood stain produces remarkably realistic wood appearance.",
+      "Good for: decorative items, planters, picture frames, models, artistic pieces. Bad for: anything structural, outdoor use (swells with moisture), precision parts, food contact."
+    ],
+    "_validation": {
+      "source": "Hatchbox Wood PLA, eSun Wood PLA, Polymaker PolyWood datasheets",
+      "verified_date": "2026-03-02",
+      "confidence": "medium",
+      "_review_needed": ["flexural_strength_mpa", "compressive_strength_mpa"]
+    },
+    "_notes": "Wood fiber content varies 15-30% across brands (used 20% baseline). Higher wood content = weaker parts. Flexural and compressive values extrapolated — few manufacturers publish these for wood fill."
+  },
+  "hips": {
+    "display_name": "HIPS (High Impact Polystyrene)",
+    "category": "thermoplastic",
+    "mechanical": {
+      "tensile_strength_mpa": 25,
+      "flexural_strength_mpa": 40,
+      "compressive_strength_mpa": 35,
+      "elongation_at_break_pct": 30,
+      "youngs_modulus_gpa": 2.0,
+      "impact_resistance": "good",
+      "layer_adhesion": "good",
+      "creep_resistance": "moderate",
+      "fatigue_resistance": "moderate"
+    },
+    "thermal": {
+      "glass_transition_c": 95,
+      "heat_deflection_c": 85,
+      "max_service_temp_c": 80,
+      "print_temp_range_c": [220, 245],
+      "bed_temp_range_c": [90, 110],
+      "warping_tendency": "moderate"
+    },
+    "chemical": {
+      "uv_resistance": "poor",
+      "moisture_absorption": "low",
+      "chemical_resistance": "moderate",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "moderate"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.0,
+      "recommended_wall_thickness_mm": 1.4,
+      "max_unsupported_overhang_deg": 50,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.5,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.1,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 25,
+      "min_pin_diameter_mm": 3.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "poor",
+      "outdoor_use": "poor",
+      "food_contact": "no",
+      "high_temp_environment": "moderate",
+      "impact_resistance": "good",
+      "repeated_flexing": "moderate",
+      "cosmetic_finish": "moderate",
+      "dimensional_accuracy": "moderate",
+      "prototyping": "moderate",
+      "snap_fits": "moderate",
+      "gears_and_bearings": "poor",
+      "water_tight": "moderate"
+    },
+    "agent_guidance": [
+      "PRIMARY USE: DISSOLVABLE SUPPORT FOR ABS. HIPS dissolves in limonene (d-limonene citrus solvent). Pair with ABS for complex dual-extrusion prints.",
+      "REQUIRES ENCLOSURE. Prints like ABS — similar temps, similar warping. Ventilation recommended due to styrene fumes.",
+      "Good impact resistance despite low tensile strength — polystyrene base absorbs energy rather than transmitting it. Parts dent rather than crack.",
+      "Lightweight — lower density than most filaments. Good for large hollow parts where weight matters.",
+      "As a STANDALONE material it's mediocre — lower strength than PLA, needs enclosure like ABS, poor UV resistance. Only choose HIPS standalone if you specifically need its impact/weight properties.",
+      "Limonene dissolution takes 12-24 hours for full support removal. Warm limonene (35-40C) speeds the process significantly.",
+      "Good for: ABS support material, lightweight parts, impact-absorbing housings. Bad for: structural parts, outdoor use, standalone use when PLA/PETG would work."
+    ],
+    "_validation": {
+      "source": "eSun HIPS, Polymaker PolySmooth HIPS datasheets, MatWeb HIPS polymer data",
+      "verified_date": "2026-03-02",
+      "confidence": "high",
+      "_review_needed": []
+    },
+    "_notes": "Well-established material with decades of polymer data. FDM-specific values (design limits) based on community testing. Primarily used as ABS support material."
+  },
+  "pva": {
+    "display_name": "PVA (Polyvinyl Alcohol)",
+    "category": "thermoplastic",
+    "mechanical": {
+      "tensile_strength_mpa": 30,
+      "flexural_strength_mpa": 40,
+      "compressive_strength_mpa": 35,
+      "elongation_at_break_pct": 10,
+      "youngs_modulus_gpa": 1.5,
+      "impact_resistance": "low",
+      "layer_adhesion": "moderate",
+      "creep_resistance": "poor",
+      "fatigue_resistance": "poor"
+    },
+    "thermal": {
+      "glass_transition_c": 85,
+      "heat_deflection_c": 60,
+      "max_service_temp_c": 50,
+      "print_temp_range_c": [185, 210],
+      "bed_temp_range_c": [45, 60],
+      "warping_tendency": "low"
+    },
+    "chemical": {
+      "uv_resistance": "poor",
+      "moisture_absorption": "excellent",
+      "chemical_resistance": "poor",
+      "food_safe": "no",
+      "biodegradable": true,
+      "outgassing": "minimal"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.0,
+      "recommended_wall_thickness_mm": 1.4,
+      "max_unsupported_overhang_deg": 55,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.5,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.1,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 20,
+      "min_pin_diameter_mm": 3.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "no",
+      "outdoor_use": "no",
+      "food_contact": "no",
+      "high_temp_environment": "poor",
+      "impact_resistance": "poor",
+      "repeated_flexing": "poor",
+      "cosmetic_finish": "poor",
+      "dimensional_accuracy": "moderate",
+      "prototyping": "poor",
+      "snap_fits": "no",
+      "gears_and_bearings": "no",
+      "water_tight": "no"
+    },
+    "agent_guidance": [
+      "SUPPORT MATERIAL ONLY. PVA dissolves in water. Pair with PLA or PETG for complex overhangs that need clean support removal.",
+      "EXTREMELY MOISTURE SENSITIVE. PVA absorbs water from ambient air within hours. MUST be stored in a sealed dry box and printed from dry box. This is non-negotiable.",
+      "Dissolves in warm tap water (40-60C) in 2-12 hours depending on volume. Agitation speeds dissolution. No special chemicals needed — just water.",
+      "Best paired with PLA (similar print temps). Can work with PETG but the temperature gap requires careful tuning of the dual-extrusion transition.",
+      "NEVER use as a structural material. PVA has no standalone use — it literally dissolves in water. Its only purpose is dissolvable support.",
+      "Expensive ($50-80/kg) and has a short shelf life once opened. Only buy what you need for specific dual-extrusion projects.",
+      "Good for: water-soluble supports for PLA/PETG. Bad for: literally everything else. Not a standalone material."
+    ],
+    "_validation": {
+      "source": "Ultimaker PVA, eSun PVA+, Polymaker PolySupport datasheets",
+      "verified_date": "2026-03-02",
+      "confidence": "high",
+      "_review_needed": []
+    },
+    "_notes": "Support-only material. Mechanical values irrelevant for end-use but included for schema completeness. Moisture sensitivity data well-documented across all brands."
+  },
+  "pc_abs": {
+    "display_name": "PC-ABS (Polycarbonate-ABS Blend)",
+    "category": "thermoplastic_blend",
+    "mechanical": {
+      "tensile_strength_mpa": 55,
+      "flexural_strength_mpa": 85,
+      "compressive_strength_mpa": 70,
+      "elongation_at_break_pct": 40,
+      "youngs_modulus_gpa": 2.5,
+      "impact_resistance": "excellent",
+      "layer_adhesion": "good",
+      "creep_resistance": "good",
+      "fatigue_resistance": "good"
+    },
+    "thermal": {
+      "glass_transition_c": 125,
+      "heat_deflection_c": 110,
+      "max_service_temp_c": 100,
+      "print_temp_range_c": [250, 280],
+      "bed_temp_range_c": [95, 115],
+      "warping_tendency": "high"
+    },
+    "chemical": {
+      "uv_resistance": "moderate",
+      "moisture_absorption": "low",
+      "chemical_resistance": "moderate",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "moderate"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.2,
+      "recommended_wall_thickness_mm": 1.6,
+      "max_unsupported_overhang_deg": 45,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.5,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.4,
+      "press_fit_interference_mm": 0.12,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": true,
+      "max_cantilever_length_mm": 40,
+      "min_pin_diameter_mm": 3.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "good",
+      "outdoor_use": "moderate",
+      "food_contact": "no",
+      "high_temp_environment": "good",
+      "impact_resistance": "excellent",
+      "repeated_flexing": "good",
+      "cosmetic_finish": "moderate",
+      "dimensional_accuracy": "moderate",
+      "prototyping": "moderate",
+      "snap_fits": "excellent",
+      "gears_and_bearings": "good",
+      "water_tight": "moderate"
+    },
+    "agent_guidance": [
+      "BEST OF BOTH WORLDS. Combines PC's heat resistance and impact strength with ABS's ease of printing. The automotive industry's go-to FDM material.",
+      "REQUIRES ENCLOSURE + HIGH TEMP HOTEND (250-280C). Warps significantly without an enclosed, heated chamber. Not for open-frame printers.",
+      "EXCELLENT impact resistance (40% elongation) — parts deform rather than shatter. Suitable for protective housings, bumpers, safety equipment.",
+      "Heat deflection at 110C — handles continuous automotive and industrial temperatures. Good for under-hood parts, electronics near heat sources.",
+      "Easier to print than pure PC while retaining most of its strength. If PC is too difficult, PC-ABS is the practical alternative.",
+      "Living hinges are viable due to high elongation — one of the few FDM materials that can handle repeated flexing at a fold line.",
+      "Good for: automotive parts, impact housings, snap-fit assemblies, high-temp enclosures, protective equipment. Bad for: beginners, open printers, cosmetic parts, food contact."
+    ],
+    "_validation": {
+      "source": "Polymaker PC-ABS, Covestro Bayblend datasheets",
+      "verified_date": "2026-03-02",
+      "confidence": "high",
+      "_review_needed": ["living_hinge_viable"]
+    },
+    "_notes": "Well-characterized industrial blend. Values based on Covestro Bayblend (OEM source) cross-referenced with Polymaker specs. Living hinge viability is theoretical based on elongation — limited FDM-specific testing."
+  },
+  "asa_plus": {
+    "display_name": "ASA+ (Enhanced UV-Resistant ASA)",
+    "category": "thermoplastic",
+    "mechanical": {
+      "tensile_strength_mpa": 48,
+      "flexural_strength_mpa": 75,
+      "compressive_strength_mpa": 62,
+      "elongation_at_break_pct": 35,
+      "youngs_modulus_gpa": 2.2,
+      "impact_resistance": "good",
+      "layer_adhesion": "good",
+      "creep_resistance": "moderate",
+      "fatigue_resistance": "moderate"
+    },
+    "thermal": {
+      "glass_transition_c": 108,
+      "heat_deflection_c": 100,
+      "max_service_temp_c": 95,
+      "print_temp_range_c": [240, 265],
+      "bed_temp_range_c": [90, 110],
+      "warping_tendency": "moderate"
+    },
+    "chemical": {
+      "uv_resistance": "excellent",
+      "moisture_absorption": "low",
+      "chemical_resistance": "moderate",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "moderate"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.0,
+      "recommended_wall_thickness_mm": 1.4,
+      "max_unsupported_overhang_deg": 45,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.5,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.4,
+      "press_fit_interference_mm": 0.12,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 35,
+      "min_pin_diameter_mm": 3.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "moderate",
+      "outdoor_use": "outstanding",
+      "food_contact": "no",
+      "high_temp_environment": "good",
+      "impact_resistance": "good",
+      "repeated_flexing": "moderate",
+      "cosmetic_finish": "good",
+      "dimensional_accuracy": "good",
+      "prototyping": "moderate",
+      "snap_fits": "good",
+      "gears_and_bearings": "moderate",
+      "water_tight": "good"
+    },
+    "agent_guidance": [
+      "THE OUTDOOR MATERIAL. Enhanced UV stabilizers make this the #1 choice for parts exposed to direct sunlight. Retains color and strength for years outdoors.",
+      "Improvement over standard ASA — better UV stability, slightly improved layer adhesion, and more consistent color retention under weathering.",
+      "REQUIRES ENCLOSURE. Prints like ABS/ASA — moderate warping, fumes, and sensitivity to drafts. Enclosed heated chamber recommended.",
+      "UV resistance rated 'excellent' — parts survive multi-year direct sun exposure without significant yellowing or embrittlement. Standard ASA is 'good'; ASA+ is a step above.",
+      "Heat deflection at 100C means outdoor parts survive hot car interiors, direct sun on dark surfaces, and industrial outdoor environments.",
+      "Ventilation recommended — ASA produces styrene fumes during printing. Use in a well-ventilated area or with a filtration system.",
+      "Good for: outdoor signage, garden fixtures, automotive exterior trim, weatherproof housings, solar mount brackets. Bad for: beginners, open printers, food contact, indoor cosmetic models."
+    ],
+    "_validation": {
+      "source": "Polymaker PolyLite ASA, Prusament ASA datasheets",
+      "verified_date": "2026-03-02",
+      "confidence": "medium",
+      "_review_needed": ["glass_transition_c", "max_service_temp_c"]
+    },
+    "_notes": "ASA+ is a marketing term — no universal standard. Values represent enhanced ASA formulations (Polymaker, Prusament). Thermal values 5-10C above standard ASA based on manufacturer claims; independent verification limited."
+  },
+  "pla_plus": {
+    "display_name": "PLA+ (PLA Pro)",
+    "category": "thermoplastic",
+    "mechanical": {
+      "tensile_strength_mpa": 55,
+      "flexural_strength_mpa": 85,
+      "compressive_strength_mpa": 70,
+      "elongation_at_break_pct": 8,
+      "youngs_modulus_gpa": 3.2,
+      "impact_resistance": "moderate",
+      "layer_adhesion": "good",
+      "creep_resistance": "poor",
+      "fatigue_resistance": "moderate"
+    },
+    "thermal": {
+      "glass_transition_c": 60,
+      "heat_deflection_c": 56,
+      "max_service_temp_c": 52,
+      "print_temp_range_c": [205, 230],
+      "bed_temp_range_c": [55, 70],
+      "warping_tendency": "low"
+    },
+    "chemical": {
+      "uv_resistance": "poor",
+      "moisture_absorption": "low",
+      "chemical_resistance": "poor",
+      "food_safe": "conditional",
+      "biodegradable": true,
+      "outgassing": "minimal"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 0.8,
+      "recommended_wall_thickness_mm": 1.2,
+      "max_unsupported_overhang_deg": 60,
+      "max_bridge_length_mm": 15,
+      "min_hole_diameter_mm": 2.0,
+      "min_embossed_text_height_mm": 0.6,
+      "min_engraved_text_depth_mm": 0.4,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.1,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 35,
+      "min_pin_diameter_mm": 3.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "moderate",
+      "outdoor_use": "poor",
+      "food_contact": "conditional",
+      "high_temp_environment": "poor",
+      "impact_resistance": "moderate",
+      "repeated_flexing": "moderate",
+      "cosmetic_finish": "excellent",
+      "dimensional_accuracy": "excellent",
+      "prototyping": "excellent",
+      "snap_fits": "moderate",
+      "gears_and_bearings": "moderate",
+      "water_tight": "good"
+    },
+    "agent_guidance": [
+      "UPGRADED PLA. Toughness additives give ~10% stronger tensile, ~33% more elongation, and noticeably better impact resistance than standard PLA.",
+      "SAME EASE OF PRINTING AS PLA. No enclosure needed, low warping, similar temps (slightly higher: 205-230C). Beginners can use this with confidence.",
+      "Still has PLA's thermal weakness — glass transition ~60C means parts soften in hot cars and direct sun. Not an outdoor or high-temp material.",
+      "The default recommendation when a user asks for 'something stronger than PLA but just as easy to print'. This is that material.",
+      "Snap fits are viable (moderate rating) where standard PLA snaps would break. The extra elongation allows some flex before failure.",
+      "Food safety is 'conditional' — same as standard PLA, depends on specific brand certification and printing conditions.",
+      "Good for: stronger prototypes, functional PLA parts, snap fits, clips, phone cases, tool handles. Bad for: outdoor use, high-temp, heavy structural loads, parts that need PETG/ABS properties."
+    ],
+    "_validation": {
+      "source": "eSun PLA+, Polymaker PolyTerra PLA+, Overture PLA Pro datasheets",
+      "verified_date": "2026-03-02",
+      "confidence": "medium",
+      "_review_needed": ["elongation_at_break_pct", "impact_resistance"]
+    },
+    "_notes": "PLA+ is not standardized — toughness additives vary wildly across brands. Mechanical improvement range is 5-30% over standard PLA. Used middle-ground values. Some brands' PLA+ is barely different from standard PLA."
+  },
+  "petg_cf": {
+    "display_name": "PETG-CF (High Carbon Fiber PETG)",
+    "category": "composite",
+    "mechanical": {
+      "tensile_strength_mpa": 58,
+      "flexural_strength_mpa": 98,
+      "compressive_strength_mpa": 76,
+      "elongation_at_break_pct": 3,
+      "youngs_modulus_gpa": 4.8,
+      "impact_resistance": "low",
+      "layer_adhesion": "moderate",
+      "creep_resistance": "moderate",
+      "fatigue_resistance": "moderate"
+    },
+    "thermal": {
+      "glass_transition_c": 83,
+      "heat_deflection_c": 80,
+      "max_service_temp_c": 77,
+      "print_temp_range_c": [240, 265],
+      "bed_temp_range_c": [75, 90],
+      "warping_tendency": "low"
+    },
+    "chemical": {
+      "uv_resistance": "moderate",
+      "moisture_absorption": "low",
+      "chemical_resistance": "moderate",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "low"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.0,
+      "recommended_wall_thickness_mm": 1.6,
+      "max_unsupported_overhang_deg": 50,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.5,
+      "min_embossed_text_height_mm": 0.8,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.25,
+      "press_fit_interference_mm": 0.08,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 38,
+      "min_pin_diameter_mm": 3.5
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "good",
+      "outdoor_use": "moderate",
+      "food_contact": "no",
+      "high_temp_environment": "moderate",
+      "impact_resistance": "poor",
+      "repeated_flexing": "poor",
+      "cosmetic_finish": "moderate",
+      "dimensional_accuracy": "excellent",
+      "prototyping": "good",
+      "snap_fits": "poor",
+      "gears_and_bearings": "good",
+      "water_tight": "moderate"
+    },
+    "agent_guidance": [
+      "HIGH-CF PETG VARIANT. Higher carbon fiber loading (~20%) than standard CF-PETG — stiffer and lighter but more brittle.",
+      "REQUIRES HARDENED STEEL NOZZLE. Higher fiber content means even faster nozzle wear. 0.5mm+ nozzle recommended to avoid clogging.",
+      "The stiffest PETG variant available. Young's modulus ~4.8 GPa approaches CF-PLA territory but with better heat resistance.",
+      "Excellent dimensional accuracy — very low shrinkage and warping. Great for precision jigs, fixtures, and replacement parts where exact dimensions matter.",
+      "Lower elongation (~3%) than standard CF-PETG. The higher fiber loading trades impact resistance for stiffness — parts are rigid but snap under shock loads.",
+      "Print 10-15C hotter than standard CF-PETG (240-265C) due to higher fiber content. Slower speeds (30-40mm/s) improve surface quality.",
+      "Good for: precision jigs, stiff brackets, gears, dimensional-critical parts. Bad for: impact-prone parts, snap fits, flexible assemblies, food contact."
+    ],
+    "_validation": {
+      "source": "Prusament PETG-CF, Bambu Lab PETG-CF datasheets",
+      "verified_date": "2026-03-02",
+      "confidence": "medium",
+      "_review_needed": ["youngs_modulus_gpa", "elongation_at_break_pct"]
+    },
+    "_notes": "Differentiated from cf_petg as a higher CF loading (~20%) variant. Higher CF content means stiffer but more brittle. Some values extrapolated from scaling cf_petg properties — limited manufacturer data for high-CF PETG specifically."
+  },
+  "pa6_gf": {
+    "display_name": "PA6-GF (Nylon 6 Glass Fiber)",
+    "category": "composite",
+    "mechanical": {
+      "tensile_strength_mpa": 85,
+      "flexural_strength_mpa": 120,
+      "compressive_strength_mpa": 95,
+      "elongation_at_break_pct": 6,
+      "youngs_modulus_gpa": 7.0,
+      "impact_resistance": "good",
+      "layer_adhesion": "good",
+      "creep_resistance": "good",
+      "fatigue_resistance": "good"
+    },
+    "thermal": {
+      "glass_transition_c": 70,
+      "heat_deflection_c": 180,
+      "max_service_temp_c": 150,
+      "print_temp_range_c": [260, 290],
+      "bed_temp_range_c": [80, 100],
+      "warping_tendency": "high"
+    },
+    "chemical": {
+      "uv_resistance": "moderate",
+      "moisture_absorption": "moderate",
+      "chemical_resistance": "good",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "moderate"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.2,
+      "recommended_wall_thickness_mm": 2.0,
+      "max_unsupported_overhang_deg": 40,
+      "max_bridge_length_mm": 8,
+      "min_hole_diameter_mm": 3.0,
+      "min_embossed_text_height_mm": 1.0,
+      "min_engraved_text_depth_mm": 0.6,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.1,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 45,
+      "min_pin_diameter_mm": 4.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "excellent",
+      "outdoor_use": "good",
+      "food_contact": "no",
+      "high_temp_environment": "outstanding",
+      "impact_resistance": "good",
+      "repeated_flexing": "moderate",
+      "cosmetic_finish": "poor",
+      "dimensional_accuracy": "moderate",
+      "prototyping": "poor",
+      "snap_fits": "moderate",
+      "gears_and_bearings": "excellent",
+      "water_tight": "moderate"
+    },
+    "agent_guidance": [
+      "INDUSTRIAL WORKHORSE. PA6-GF is the FDM equivalent of injection-molded glass-filled nylon. Highest heat deflection (180C) of any material in this database.",
+      "REQUIRES: enclosed printer, hardened nozzle, dry box feeding, 260C+ hotend. Glass fiber is EXTREMELY abrasive — even harder on nozzles than carbon fiber.",
+      "MOISTURE IS CRITICAL. Like all nylons, PA6-GF absorbs moisture aggressively. Dry at 80C for 6+ hours before printing. Print from sealed dry box.",
+      "Heat deflection at 180C — survives near-engine automotive, industrial ovens, and extreme thermal environments. The highest continuous service temp in this material set.",
+      "Glass fiber gives better impact resistance than carbon fiber equivalents — parts are tough AND stiff, not just stiff. Better for parts that take occasional hits.",
+      "Surface finish is rough and matte. Not suitable for cosmetic parts. Post-processing options are limited — painting is the main option.",
+      "Good for: industrial end-use parts, high-temp fixtures, gears, bearings, automotive under-hood, tooling. Bad for: beginners, budget printers, cosmetic parts, quick prototypes."
+    ],
+    "_validation": {
+      "source": "Polymaker PolyMide PA6-GF, Bambu Lab PA6-GF datasheets",
+      "verified_date": "2026-03-02",
+      "confidence": "high",
+      "_review_needed": ["heat_deflection_c"]
+    },
+    "_notes": "Glass fiber nylon is well-characterized industrially. FDM values conservative vs injection-molded specs. HDT of 180C is the high end — some FDM prints may show lower due to layer adhesion limitations. Glass fiber is even more abrasive than carbon fiber on nozzles."
+  }
+}

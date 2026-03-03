@@ -1,0 +1,259 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "domain": "fdm",
+    "description": "Material survival matrix for environment and exposure checks. Ratings are qualitative and intended for fast agent triage before geometry generation."
+  },
+  "pla": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 80,
+      "notes": "Direct sun causes embrittlement and color fade quickly; not suitable for long outdoor service."
+    },
+    "temperature_range": {
+      "min_service_c": -10,
+      "max_service_c": 50,
+      "notes": "Above 50-55C, creep and deformation accelerate rapidly."
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": false,
+      "absorption_pct": 0.4,
+      "swelling_risk": "low",
+      "notes": "Short wet exposure is usually fine, but long immersion and heat can hydrolyze PLA over time."
+    },
+    "chemicals": {
+      "household_cleaners": "moderate",
+      "oils_greases": "poor",
+      "fuels": "poor",
+      "solvents": "poor",
+      "acids": "poor",
+      "notes": "PLA is broadly vulnerable to solvents and fuel exposure."
+    },
+    "vibration_fatigue": {
+      "rating": "poor",
+      "cycle_life_estimate": "~10k low-amplitude cycles before crack risk rises",
+      "notes": "Brittle failure mode limits repeated cyclic duty."
+    },
+    "abrasion_resistance": {
+      "rating": "poor",
+      "notes": "Surface wears quickly under sliding contact."
+    }
+  },
+  "petg": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 500,
+      "notes": "Can survive periodic outdoor use, but long direct UV exposure eventually embrittles the surface."
+    },
+    "temperature_range": {
+      "min_service_c": -20,
+      "max_service_c": 65,
+      "notes": "A common upper bound for functional parts; avoid prolonged loads above this range."
+    },
+    "moisture": {
+      "rating": "good",
+      "immersion_safe": true,
+      "absorption_pct": 0.2,
+      "swelling_risk": "low",
+      "notes": "Low absorption makes PETG a practical choice for wet functional parts."
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "good",
+      "fuels": "moderate",
+      "solvents": "conditional",
+      "acids": "moderate",
+      "notes": "Resists many household chemicals; avoid aggressive solvent soak."
+    },
+    "vibration_fatigue": {
+      "rating": "moderate",
+      "cycle_life_estimate": "~500k moderate-load cycles",
+      "notes": "Reasonable resilience, but lower fatigue life than nylon."
+    },
+    "abrasion_resistance": {
+      "rating": "moderate",
+      "notes": "Adequate for intermittent sliding; not ideal for bearing surfaces."
+    }
+  },
+  "abs": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 200,
+      "notes": "UV exposure causes chalking and brittleness; use ASA for long-term sun."
+    },
+    "temperature_range": {
+      "min_service_c": -20,
+      "max_service_c": 85,
+      "notes": "Suitable for warmer environments than PETG/PLA when printed well."
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 0.4,
+      "swelling_risk": "moderate",
+      "notes": "Handles occasional water contact; not ideal for long immersion precision parts."
+    },
+    "chemicals": {
+      "household_cleaners": "moderate",
+      "oils_greases": "good",
+      "fuels": "moderate",
+      "solvents": "poor",
+      "acids": "conditional",
+      "notes": "Avoid ketones/aromatic solvents; stress cracking can occur."
+    },
+    "vibration_fatigue": {
+      "rating": "good",
+      "cycle_life_estimate": "~1M moderate-load cycles",
+      "notes": "Tough matrix provides useful fatigue performance in impact-prone parts."
+    },
+    "abrasion_resistance": {
+      "rating": "good",
+      "notes": "Better wear behavior than PLA/PETG in many dry sliding applications."
+    }
+  },
+  "tpu": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 600,
+      "notes": "Flexible parts tolerate outdoor use better than PLA, but prolonged UV still hardens material."
+    },
+    "temperature_range": {
+      "min_service_c": -30,
+      "max_service_c": 80,
+      "notes": "Flexibility remains usable over wide temperatures, though stiffness changes with temperature."
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 1.0,
+      "swelling_risk": "moderate",
+      "notes": "Can be used in wet service, but dimensions can drift in long immersion."
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "good",
+      "fuels": "conditional",
+      "solvents": "poor",
+      "acids": "poor",
+      "notes": "Many TPU blends are solvent-sensitive; verify for specific filament chemistry."
+    },
+    "vibration_fatigue": {
+      "rating": "outstanding",
+      "cycle_life_estimate": ">5M flex cycles in low-strain duty",
+      "notes": "Excellent for damping and repeated deformation components."
+    },
+    "abrasion_resistance": {
+      "rating": "excellent",
+      "notes": "High wear resilience makes TPU suitable for bumpers and friction interfaces."
+    }
+  },
+  "asa": {
+    "uv_resistance": {
+      "rating": "excellent",
+      "hours_to_noticeable_degradation": 2500,
+      "notes": "Designed for outdoor exposure; maintains color and toughness significantly longer than ABS."
+    },
+    "temperature_range": {
+      "min_service_c": -30,
+      "max_service_c": 85,
+      "notes": "Good weathering plus temperature stability for exterior fixtures."
+    },
+    "moisture": {
+      "rating": "good",
+      "immersion_safe": true,
+      "absorption_pct": 0.3,
+      "swelling_risk": "low",
+      "notes": "Low moisture uptake supports stable dimensions in humid outdoor conditions."
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "good",
+      "fuels": "good",
+      "solvents": "moderate",
+      "acids": "conditional",
+      "notes": "Performs well in general outdoor/garage chemical contact, but avoid strong solvents."
+    },
+    "vibration_fatigue": {
+      "rating": "good",
+      "cycle_life_estimate": "~1.5M moderate-load cycles",
+      "notes": "Reliable for outdoor mounts and enclosures with moderate vibration."
+    },
+    "abrasion_resistance": {
+      "rating": "good",
+      "notes": "Stable surface wear for utility hardware and external housings."
+    }
+  },
+  "nylon": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 700,
+      "notes": "Unfilled nylon outdoors benefits from UV-stable pigments or coatings for long life."
+    },
+    "temperature_range": {
+      "min_service_c": -40,
+      "max_service_c": 80,
+      "notes": "Maintains toughness across broad temperatures; moisture state affects stiffness."
+    },
+    "moisture": {
+      "rating": "poor",
+      "immersion_safe": false,
+      "absorption_pct": 2.5,
+      "swelling_risk": "high",
+      "notes": "High absorption can cause dimensional growth and property drift in humid or wet service."
+    },
+    "chemicals": {
+      "household_cleaners": "good",
+      "oils_greases": "excellent",
+      "fuels": "excellent",
+      "solvents": "good",
+      "acids": "conditional",
+      "notes": "Excellent for lubricated/mechanical environments, but strong acids can attack polyamide."
+    },
+    "vibration_fatigue": {
+      "rating": "excellent",
+      "cycle_life_estimate": "~3M moderate-load cycles",
+      "notes": "One of the best FDM materials for repeated cyclic loading."
+    },
+    "abrasion_resistance": {
+      "rating": "excellent",
+      "notes": "Low-friction and high wear resistance make nylon strong for gears and bushings."
+    }
+  },
+  "polycarbonate": {
+    "uv_resistance": {
+      "rating": "moderate",
+      "hours_to_noticeable_degradation": 800,
+      "notes": "UV exposure causes yellowing and some property loss; UV-stabilized PC performs better."
+    },
+    "temperature_range": {
+      "min_service_c": -40,
+      "max_service_c": 120,
+      "notes": "Highest practical service temperature among common desktop FDM materials."
+    },
+    "moisture": {
+      "rating": "moderate",
+      "immersion_safe": true,
+      "absorption_pct": 0.7,
+      "swelling_risk": "moderate",
+      "notes": "Moderate uptake; dry-state assumptions are needed for precision and long-term stiffness."
+    },
+    "chemicals": {
+      "household_cleaners": "conditional",
+      "oils_greases": "good",
+      "fuels": "good",
+      "solvents": "poor",
+      "acids": "poor",
+      "notes": "Susceptible to environmental stress cracking with solvents and some cleaners."
+    },
+    "vibration_fatigue": {
+      "rating": "excellent",
+      "cycle_life_estimate": "~2M moderate-load cycles",
+      "notes": "Combines high toughness with good fatigue behavior in structural duty."
+    },
+    "abrasion_resistance": {
+      "rating": "excellent",
+      "notes": "Robust wear resistance when printed with high interlayer fusion quality."
+    }
+  }
+}

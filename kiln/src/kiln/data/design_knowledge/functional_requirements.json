@@ -1,0 +1,190 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "domain": "fdm",
+    "description": "Maps functional requirements to design constraints. When an agent describes what an object needs to DO, these rules translate into what the design needs to BE."
+  },
+  "load_bearing": {
+    "display_name": "Supports Weight / Load-Bearing",
+    "triggers": ["hold weight", "support", "load bearing", "carry", "mount", "hang", "shelf", "bracket", "hook", "strong enough"],
+    "constraint_rules": {
+      "material_exclude": ["pla", "tpu"],
+      "material_prefer": ["petg", "nylon", "abs", "polycarbonate"],
+      "min_wall_thickness_mm": 3,
+      "infill_min_pct": 60,
+      "print_orientation": "load_perpendicular_to_layers",
+      "gussets_required": true,
+      "fillets_required": true,
+      "fillet_min_radius_mm": 2
+    },
+    "load_estimation_rules": {
+      "petg_tension_capacity_n_per_mm2": 25,
+      "abs_tension_capacity_n_per_mm2": 20,
+      "nylon_tension_capacity_n_per_mm2": 35,
+      "pc_tension_capacity_n_per_mm2": 32,
+      "safety_factor": 3.0,
+      "layer_bond_derating_pct": 40
+    },
+    "agent_guidance": [
+      "Convert user's weight requirement to Newtons (1 kg = 9.81 N). Apply safety factor of 3x.",
+      "Cross-section area = (load_N * safety_factor) / material_capacity_n_per_mm2.",
+      "ALWAYS derate by 40% for inter-layer bond strength. FDM parts are 60% as strong across layers.",
+      "Orient the part so the primary load direction is ACROSS layers (compression), not ALONG them (tension/shear).",
+      "Example: PETG bracket holding 5 kg at 100mm cantilever: min cross-section = (49N * 3) / 25 = 5.9 mm2. Round up to 8mm x 3mm minimum."
+    ]
+  },
+  "watertight": {
+    "display_name": "Holds Liquid / Watertight",
+    "triggers": ["hold water", "liquid", "watertight", "vase", "cup", "container", "reservoir", "planter", "waterproof", "leak"],
+    "constraint_rules": {
+      "material_prefer": ["petg", "tpu"],
+      "material_acceptable": ["pla", "abs", "asa"],
+      "material_exclude": ["nylon"],
+      "min_wall_shells": 4,
+      "min_bottom_layers": 6,
+      "line_width_overlap_pct": 5,
+      "vase_mode_preferred": true,
+      "max_layer_height_mm": 0.2
+    },
+    "agent_guidance": [
+      "PETG is the best choice. Excellent layer adhesion = fewest micro-gaps = most watertight.",
+      "Vase mode (single continuous wall, no seam) is naturally watertight for simple geometries.",
+      "For non-vase-mode: 4 shells minimum. The overlap between shells seals micro-gaps.",
+      "If food contact is required, add food-safe epoxy coating to interior regardless of material."
+    ]
+  },
+  "outdoor_use": {
+    "display_name": "Outdoor / UV Exposed",
+    "triggers": ["outdoor", "outside", "garden", "sun", "weather", "rain", "UV", "patio", "yard", "balcony"],
+    "constraint_rules": {
+      "material_require": ["asa"],
+      "material_acceptable": ["petg", "abs", "nylon", "polycarbonate"],
+      "material_exclude": ["pla"],
+      "min_wall_thickness_mm": 2,
+      "infill_min_pct": 30
+    },
+    "agent_guidance": [
+      "ASA is the only material with genuine UV resistance. Everything else degrades in direct sunlight.",
+      "If ASA isn't available (requires enclosure), PETG is the next best — survives outdoors for 1-2 years before becoming brittle.",
+      "PLA will warp and become brittle within weeks in direct sunlight. NEVER recommend for outdoor use.",
+      "For rain exposure: design with drainage channels and avoid flat horizontal surfaces that pool water.",
+      "Add mounting provisions — outdoor parts get wind-loaded. Through-bolts or concrete anchors depending on application."
+    ]
+  },
+  "food_contact": {
+    "display_name": "Food Contact / Food Safe",
+    "triggers": ["food", "eat", "drink", "kitchen", "cookie cutter", "cup", "bowl", "utensil", "food safe"],
+    "constraint_rules": {
+      "material_require": ["petg"],
+      "material_exclude": ["abs", "asa", "tpu", "nylon"],
+      "material_conditional": ["pla"],
+      "min_wall_shells": 4,
+      "surface_finish": "smooth",
+      "coating_recommended": "food_safe_epoxy"
+    },
+    "agent_guidance": [
+      "PETG is the only common FDM material that is genuinely food-safe (same polymer family as water bottles).",
+      "PLA is 'food-safe' in pure form but FDM layer lines create bacterial harborage. Only use for single-use items (cookie cutters).",
+      "Coat interior surfaces with food-safe epoxy resin for any reusable food container regardless of material.",
+      "ABS, ASA, and Nylon are NOT food safe and should never be used for food contact.",
+      "Use a stainless steel nozzle — brass nozzles contain trace lead that can leach into food-contact surfaces.",
+      "4+ wall shells and 0.12-0.16mm layer height minimize gaps where bacteria can grow."
+    ]
+  },
+  "heat_exposure": {
+    "display_name": "Heat Resistant / High Temperature",
+    "triggers": ["heat", "hot", "temperature", "engine", "car dashboard", "electronics", "near heat", "oven", "warm", "thermal"],
+    "constraint_rules": {
+      "material_prefer": ["polycarbonate", "abs", "asa"],
+      "material_acceptable": ["nylon"],
+      "material_exclude": ["pla", "tpu"],
+      "material_conditional": ["petg"],
+      "annealing_recommended": true
+    },
+    "agent_guidance": [
+      "Match material heat deflection temp to the expected environment temp with 20C margin.",
+      "PLA deforms at 50-55C — rejects car interiors (80C+), near electronics (60C+), dishwashers (65C+).",
+      "PETG survives to ~65C. ABS/ASA to ~85C. PC to ~120C. Choose based on your temperature ceiling.",
+      "Annealing (controlled oven heating after printing) can raise heat deflection by 10-20C for PLA and PETG.",
+      "For electronics enclosures: calculate worst-case internal temperature (ambient + component heat). Add 20C safety margin."
+    ]
+  },
+  "flexibility_required": {
+    "display_name": "Flexible / Bending / Compliant",
+    "triggers": ["flexible", "bend", "soft", "rubber", "gasket", "seal", "dampen", "vibration", "cushion", "grip", "squeeze"],
+    "constraint_rules": {
+      "material_require": ["tpu"],
+      "material_exclude": ["pla", "abs", "asa", "polycarbonate"],
+      "print_speed_max_mm_s": 25,
+      "retraction_max_mm": 1.0,
+      "direct_drive_required": true
+    },
+    "agent_guidance": [
+      "TPU is the only FDM material with genuine flexibility. Shore hardness ranges from 85A (shoe sole) to 95A (car tire).",
+      "Verify printer has direct drive extruder. Bowden tube printers CANNOT reliably print TPU.",
+      "Print slow — 15-25 mm/s. TPU is elastic and buckles in the extruder at normal speeds.",
+      "Infill pattern and percentage control stiffness. 10% gyroid = very soft. 50% grid = quite stiff. Design accordingly.",
+      "For gaskets and seals: 0.2mm layer height, 100% infill, 3+ shells. This creates the most consistent seal surface."
+    ]
+  },
+  "impact_resistant": {
+    "display_name": "Impact Resistant / Drop-Proof",
+    "triggers": ["impact", "drop", "crash", "tough", "durable", "rough use", "kids", "tool", "bumps", "protective"],
+    "constraint_rules": {
+      "material_prefer": ["polycarbonate", "nylon", "abs"],
+      "material_acceptable": ["petg", "asa"],
+      "material_exclude": ["pla"],
+      "infill_min_pct": 40,
+      "min_wall_shells": 3,
+      "print_orientation": "load_perpendicular_to_layers"
+    },
+    "agent_guidance": [
+      "Polycarbonate is king — bulletproof glass material. Nearly unbreakable in normal use.",
+      "Nylon is second — absorbs energy by deforming rather than shattering. Best for tools and repeated abuse.",
+      "ABS is third — the LEGO material. Good impact resistance, easier to print than PC or Nylon.",
+      "PLA SHATTERS on impact. It's rigid and brittle. Never use for protective cases or parts that get dropped.",
+      "Layer bond is the weak point for impact. 3+ shells and 40%+ infill. Solid infill near impact zones if possible.",
+      "Round all edges. Sharp corners are stress concentrators that initiate cracks on impact."
+    ]
+  },
+  "precision_fit": {
+    "display_name": "Precision / Tight Tolerances",
+    "triggers": ["precise", "tolerance", "accurate", "exact", "fit together", "mate", "align", "clearance", "assembly"],
+    "constraint_rules": {
+      "material_prefer": ["pla"],
+      "material_acceptable": ["petg", "abs"],
+      "material_exclude": ["tpu", "nylon"],
+      "layer_height_max_mm": 0.12,
+      "print_speed_max_mm_s": 40,
+      "cooling_fan_pct": 100,
+      "calibration_required": true
+    },
+    "agent_guidance": [
+      "PLA has the best dimensional accuracy of any FDM material — lowest shrinkage, lowest warping.",
+      "Print at 0.12mm layer height for best dimensional accuracy. 0.2mm is fine for non-critical dimensions.",
+      "Add 0.2mm clearance on sliding fits, 0.1mm on snug fits. These are STARTING POINTS — printer-specific.",
+      "ALWAYS design a tolerance test piece first for any precision assembly. Print it, measure it, adjust your model.",
+      "Nylon absorbs moisture and swells. TPU is elastic and unpredictable. Neither works for precision.",
+      "Orient critical mating surfaces flat on the bed plate where possible — first layer is the most dimensionally accurate."
+    ]
+  },
+  "aesthetic_decorative": {
+    "display_name": "Decorative / Display / Visual Quality",
+    "triggers": ["pretty", "display", "decorative", "beautiful", "gift", "art", "sculpture", "figurine", "vase", "show piece", "aesthetic"],
+    "constraint_rules": {
+      "material_prefer": ["pla"],
+      "material_acceptable": ["petg", "abs"],
+      "layer_height_max_mm": 0.12,
+      "ironing_recommended": true,
+      "tree_supports_preferred": true
+    },
+    "agent_guidance": [
+      "PLA produces the best surface finish of any FDM material. Matte PLA is especially good.",
+      "0.12mm layer height for visible surfaces. 0.08mm if the user demands exceptional quality (doubles print time).",
+      "Enable ironing for top surfaces — makes them glass-smooth at the cost of ~10% extra print time.",
+      "Use tree supports instead of grid supports — they leave smaller marks and are easier to remove.",
+      "Post-processing options: sanding (400-800 grit), filler primer + paint, vapor smoothing (ABS with acetone).",
+      "Silk PLA filaments give a metallic/pearl finish straight off the printer with no post-processing."
+    ]
+  }
+}

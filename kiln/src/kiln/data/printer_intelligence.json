@@ -43,7 +43,43 @@
       "flow_rate_test": "Print single-wall cube, measure wall thickness. Adjust flow multiplier = expected/measured.",
       "retraction_test": "Print retraction tower varying 0.5-6mm. Find shortest distance without stringing."
     },
-    "failure_modes": []
+    "failure_modes": [
+      {
+        "symptom": "Under-extrusion or gaps in walls",
+        "cause": "Clogged nozzle, worn PTFE liner, or heat creep from inadequate cooling",
+        "fix": "Cold pull to clear nozzle. Replace PTFE tube if discolored. Ensure hotend fan runs at 100% during prints"
+      },
+      {
+        "symptom": "First layer does not stick to bed",
+        "cause": "Bed not level, Z-offset too high, or bed surface contaminated with oils",
+        "fix": "Re-level bed with paper method. Lower Z-offset in 0.02mm increments. Clean bed with IPA (90%+)"
+      },
+      {
+        "symptom": "Stringing between travel moves",
+        "cause": "Retraction distance/speed too low, nozzle temp too high, or filament absorbed moisture",
+        "fix": "Increase retraction (bowden: 4-6mm, direct drive: 0.5-2mm). Lower hotend temp by 5C. Dry filament at 50C for 4h"
+      },
+      {
+        "symptom": "Print corners lifting off bed (warping)",
+        "cause": "Bed temperature too low, ambient drafts, or insufficient first layer adhesion",
+        "fix": "Increase bed temp by 5-10C. Eliminate drafts or use an enclosure. Apply glue stick or hairspray to bed surface"
+      },
+      {
+        "symptom": "Layers misaligned in X or Y direction (layer shifting)",
+        "cause": "Loose belts, stepper driver overheating, or print speed too high for the motion system",
+        "fix": "Tighten belts until they twang. Add heatsinks to stepper drivers. Reduce print speed by 20-30%"
+      },
+      {
+        "symptom": "Filament oozing and blobs on surface (over-extrusion)",
+        "cause": "Flow rate/extrusion multiplier too high or filament diameter larger than expected",
+        "fix": "Calibrate flow rate with single-wall cube test. Measure filament diameter with calipers at 3+ points and update slicer"
+      },
+      {
+        "symptom": "Consistent horizontal lines/banding on print surface (Z-banding)",
+        "cause": "Lead screw wobble, Z-axis binding, or inconsistent layer heights from mechanical play",
+        "fix": "Check lead screw for bends — spin by hand and look for wobble. Lubricate Z rods. Ensure Z coupler is not over-tightened"
+      }
+    ]
   },
   "ender3": {
     "display_name": "Creality Ender 3 / Ender 3 Pro / Ender 3 V2",
@@ -520,7 +556,48 @@
     "calibration": {
       "first_steps": "Run built-in calibration. No LiDAR auto-detection, so manual first layer check is important."
     },
-    "failure_modes": []
+    "failure_modes": [
+      {
+        "symptom": "AMS filament tangle or feed jam",
+        "cause": "Spool tangled on itself or AMS feeder gear grinding on filament",
+        "fix": "Unload filament, check spool for tangles. Clean AMS feeder gears. Ensure spool rotates freely in the AMS slot"
+      },
+      {
+        "symptom": "Nozzle clog after switching materials (especially PETG to PLA)",
+        "cause": "Residual higher-temp material not fully purged before loading lower-temp filament",
+        "fix": "Purge at the higher material's temperature before switching. Run 2-3 manual purge cycles. Cold pull if clog persists"
+      },
+      {
+        "symptom": "First layer inconsistency or adhesion failure",
+        "cause": "No LiDAR auto-inspection (unlike X1C) — Z-offset drift or bed contamination goes undetected",
+        "fix": "Manually verify first layer quality on every print. Re-run bed leveling calibration. Clean PEI sheet with IPA between prints"
+      },
+      {
+        "symptom": "Toolhead wobble or inconsistent extrusion over time",
+        "cause": "Carbon rod wear on the toolhead linear motion system causing play",
+        "fix": "Inspect carbon rods for scoring or flat spots. Replace rods if wear is visible. Check toolhead bearing clamps for looseness"
+      },
+      {
+        "symptom": "Print pauses unexpectedly with filament error",
+        "cause": "Filament sensor false trigger from translucent or thin filament, or sensor contamination",
+        "fix": "Clean filament sensor with compressed air. If using translucent filament, disable filament runout detection for that print"
+      },
+      {
+        "symptom": "Gradual under-extrusion developing over 200+ print hours",
+        "cause": "PTFE tube wear at the hotend junction from repeated loading/unloading cycles",
+        "fix": "Replace the PTFE tube between the extruder and hotend. Trim new tube flush with a clean perpendicular cut"
+      },
+      {
+        "symptom": "Parts not sticking to textured PEI plate",
+        "cause": "Textured PEI surface contaminated with finger oils or filament residue buildup",
+        "fix": "Wash PEI sheet with dish soap and warm water. Follow with IPA wipe. For stubborn residue, light scuff with fine scotch-brite pad"
+      },
+      {
+        "symptom": "Excessive stringing with PETG",
+        "cause": "High flow rate combined with PETG's naturally stringy behavior and insufficient retraction",
+        "fix": "Lower hotend temp to 230-235C. Increase retraction to 0.8-1.0mm. Enable wipe on retract in slicer. Reduce flow rate by 2-3%"
+      }
+    ]
   },
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
@@ -670,7 +747,43 @@
     "calibration": {
       "first_steps": "Run auto-level from screen. Input shaping usually pre-configured \u2014 verify with test print."
     },
-    "failure_modes": []
+    "failure_modes": [
+      {
+        "symptom": "First layer not sticking despite auto bed leveling",
+        "cause": "PEI sheet contaminated with oils or Z-offset needs fine tuning after ABL",
+        "fix": "Clean PEI with IPA (90%+) before every print. Fine-tune Z-offset in 0.02mm increments during first layer. Re-run ABL if sheet was removed"
+      },
+      {
+        "symptom": "Ringing or ghosting artifacts on print surfaces",
+        "cause": "Input shaping pre-configured from factory but may not match your specific unit's resonance frequencies",
+        "fix": "Re-run input shaping calibration via Klipper console. Print resonance test model and adjust shaper frequency/type"
+      },
+      {
+        "symptom": "Stringing at high print speeds (100mm/s+)",
+        "cause": "Pressure advance not tuned for current filament, or retraction settings insufficient at speed",
+        "fix": "Run Klipper pressure advance tuning tower. Start with PA 0.04 for direct drive. Increase retraction speed to 40-50mm/s"
+      },
+      {
+        "symptom": "PLA jamming in hotend during slow or low-temp prints",
+        "cause": "Heat creep in all-metal hotend — PLA softens in the heat break zone at low flow rates",
+        "fix": "Increase minimum print temp to 210C for PLA. Ensure hotend cooling fan is running at 100%. Avoid long idle periods at temp"
+      },
+      {
+        "symptom": "PETG ripping chunks off PEI bed surface when removing print",
+        "cause": "PETG bonds too aggressively to bare PEI, especially smooth PEI at higher bed temps",
+        "fix": "Apply thin layer of glue stick as a release agent before PETG prints. Lower bed temp to 70C. Remove prints only after bed cools fully"
+      },
+      {
+        "symptom": "Print stops with filament runout error despite filament present",
+        "cause": "Filament runout sensor false positive from sensor contamination or filament path friction",
+        "fix": "Clean filament sensor with compressed air. Check filament path for kinks or excess friction. Disable sensor in Klipper config as last resort"
+      },
+      {
+        "symptom": "USB connection drops mid-print when printing over network",
+        "cause": "USB power management or electromagnetic interference disrupting the serial connection",
+        "fix": "Use a short, shielded USB cable. Disable USB power management in host OS. Route USB cable away from stepper motor wires. Prefer SD card for long prints"
+      }
+    ]
   },
   "elegoo_centauri_carbon": {
     "display_name": "Elegoo Centauri Carbon / Carbon 2",
@@ -763,7 +876,48 @@
     "calibration": {
       "first_steps": "Run mesh bed leveling. Verify all four Z-axes are level. Input shaping calibration recommended."
     },
-    "failure_modes": []
+    "failure_modes": [
+      {
+        "symptom": "Four Z-axes become misaligned — first layer uneven across bed",
+        "cause": "Quad lead screws drift out of sync from mechanical settling, vibration, or missed steps on one motor",
+        "fix": "Run quad-Z alignment procedure (G34 or Klipper Z_TILT_ADJUST). Verify all four corners are within 0.05mm. Add Z_TILT_ADJUST to start G-code"
+      },
+      {
+        "symptom": "Large prints warp severely, especially corners lifting",
+        "cause": "No enclosure on a massive build volume — ambient temperature gradient across 800mm causes differential shrinkage",
+        "fix": "Build a temporary enclosure from foam board or moving blankets. Use brim width of 10-15mm. Print with lower bed temp gradient materials (PLA, PETG) for large parts"
+      },
+      {
+        "symptom": "First layer uneven — thin in some areas, thick in others across 800mm bed",
+        "cause": "Mesh bed leveling not capturing enough probe points, or bed physically warped beyond mesh compensation range",
+        "fix": "Increase mesh probe density to at least 10x10 points. Re-run mesh leveling with bed at print temperature. Check bed flatness with straight edge"
+      },
+      {
+        "symptom": "Print fails partway through a multi-day print with no recovery",
+        "cause": "Power loss, firmware crash, or network interruption on a print that took 24-72 hours",
+        "fix": "Enable power loss recovery in Klipper config. Use a UPS for the printer and host. Save Z-position checkpoints for manual recovery"
+      },
+      {
+        "symptom": "Filament runs out mid-print on large models",
+        "cause": "Large prints consume multiple full spools — single spool insufficient for 800mm-scale parts",
+        "fix": "Calculate filament usage before printing. Stage multiple spools. Enable filament runout sensor and test that pause/resume works before committing to long prints"
+      },
+      {
+        "symptom": "Temperature varies across bed — edges 5-10C cooler than center",
+        "cause": "800mm heated bed loses heat at edges faster than the heater can compensate, especially without insulation",
+        "fix": "Add cork or silicone insulation under the bed. Increase bed temp by 5-10C to compensate. Avoid placing critical first-layer features at bed edges"
+      },
+      {
+        "symptom": "Moonraker web interface disconnects during multi-day prints",
+        "cause": "Network timeout, Moonraker process memory leak, or WiFi instability over extended periods",
+        "fix": "Use wired Ethernet instead of WiFi. Add Moonraker watchdog/auto-restart in systemd. Increase Moonraker connection timeout. Monitor host memory usage"
+      },
+      {
+        "symptom": "Layer shifting appears gradually on very long prints (12+ hours)",
+        "cause": "Belt stretch from sustained tension over many hours, or stepper motor thermal drift",
+        "fix": "Use Gates GT2 belts rated for sustained tension. Check belt tension every 100 print hours. Add stepper driver cooling if motors exceed 50C. Reduce acceleration for long prints"
+      }
+    ]
   },
   "qidi_x_plus3": {
     "display_name": "QIDI X-Plus 3 / X-Max 3",
@@ -812,7 +966,43 @@
     "calibration": {
       "first_steps": "Run QIDI's built-in calibration suite. Input shaping and pressure advance auto-tune available."
     },
-    "failure_modes": []
+    "failure_modes": [
+      {
+        "symptom": "Firmware update fails or breaks features",
+        "cause": "QIDI's custom Klipper fork lags behind mainline Klipper — updates may introduce incompatibilities or revert fixes",
+        "fix": "Back up printer.cfg before updating. Check QIDI forums for known issues with new firmware. Roll back via SD card if update causes problems"
+      },
+      {
+        "symptom": "PLA prints warp or deform inside the enclosure",
+        "cause": "Chamber heater raises ambient temperature too high for PLA (PLA glass transition ~60C)",
+        "fix": "Turn off chamber heater for PLA. Open the enclosure door during PLA prints. Reserve enclosed printing for ABS, ASA, PC, PA"
+      },
+      {
+        "symptom": "Nozzle wears out quickly when printing carbon fiber or glass fiber filaments",
+        "cause": "Abrasive CF/GF particles destroy brass nozzles within hours at 280-350C printing temps",
+        "fix": "Use hardened steel or tungsten carbide nozzle for all CF/GF materials. Expect nozzle replacement every 500-1000 hours even with hardened nozzles"
+      },
+      {
+        "symptom": "Bubbling, popping, or rough surface finish with nylon or polycarbonate",
+        "cause": "Hygroscopic engineering materials (PA, PA-CF, PC) absorb moisture rapidly — even hours of ambient exposure",
+        "fix": "Store filament in sealed dry box with desiccant. Dry PA/PA-CF at 80C for 8-12h, PC at 80C for 8h before printing. Use inline filament dryer for long prints"
+      },
+      {
+        "symptom": "Print quality degrades after firmware update — ringing or artifacts appear",
+        "cause": "Input shaping profile reset or invalidated by firmware update changing motion parameters",
+        "fix": "Re-run input shaping calibration after every firmware update. Save your tuned shaper values externally so you can re-enter them manually if needed"
+      },
+      {
+        "symptom": "Touchscreen freezes or becomes unresponsive during long prints",
+        "cause": "UI bug in certain QIDI firmware versions causes display process to hang under sustained load",
+        "fix": "Print continues even if screen freezes — monitor via network (Fluidd/Mainsail) instead. Update to latest firmware if available. Power cycle screen only (not printer) if possible"
+      },
+      {
+        "symptom": "Engineering materials (ABS, PA) lose bed adhesion at high chamber temperatures",
+        "cause": "PEI adhesion characteristics change at elevated chamber temps — thermal expansion and surface energy shift",
+        "fix": "Use Magigoo or specialized adhesive for engineering materials. Increase first layer width to 150%. Lower chamber temp by 5C if adhesion is marginal"
+      }
+    ]
   },
   "klipper_generic": {
     "display_name": "Generic Klipper Printer (Moonraker)",

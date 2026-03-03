@@ -1,0 +1,303 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "domain": "construction",
+    "description": "Material properties for construction-scale 3D printing. Covers concrete mixes, geopolymers, and earth-based materials used in structural printing. Agent-consumable for architectural design reasoning."
+  },
+  "standard_concrete_mix": {
+    "display_name": "Standard Print Concrete (OPC-based)",
+    "category": "cementitious",
+    "mechanical": {
+      "compressive_strength_28d_mpa": 35,
+      "tensile_strength_mpa": 3.5,
+      "flexural_strength_mpa": 5.0,
+      "youngs_modulus_gpa": 25,
+      "interlayer_bond_strength_mpa": 1.5,
+      "interlayer_bond_derating_pct": 60,
+      "density_kg_m3": 2300,
+      "shrinkage_pct": 0.06,
+      "creep_coefficient": 2.5
+    },
+    "thermal": {
+      "thermal_conductivity_w_mk": 1.7,
+      "specific_heat_j_kgk": 880,
+      "thermal_mass_rating": "excellent",
+      "r_value_per_inch": 0.08,
+      "fire_resistance_hours": 4,
+      "max_print_ambient_temp_c": 40,
+      "min_print_ambient_temp_c": 5,
+      "ideal_print_temp_range_c": [10, 30]
+    },
+    "process": {
+      "open_time_minutes": [15, 60],
+      "max_interlayer_interval_minutes": 30,
+      "min_interlayer_interval_minutes": 2,
+      "pumpability_hours": 2,
+      "layer_height_range_mm": [10, 40],
+      "layer_width_range_mm": [30, 100],
+      "print_speed_range_mm_s": [50, 300],
+      "slump_flow_mm": [180, 220],
+      "cure_time_days": 28
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 100,
+      "recommended_wall_thickness_mm": 200,
+      "max_unsupported_overhang_deg": 10,
+      "max_unsupported_span_m": 0.6,
+      "max_wall_height_without_cure_m": 3.0,
+      "min_layer_bond_interval_min": 2,
+      "max_layer_bond_interval_min": 30,
+      "max_print_height_per_session_m": 3.0,
+      "reinforcement_required_above_m": 2.5,
+      "foundation_required": true
+    },
+    "cost": {
+      "material_cost_per_m3_usd": 150,
+      "typical_wall_cost_per_sqft_usd": 45,
+      "waste_factor_pct": 5
+    },
+    "compliance": {
+      "applicable_codes": ["ACI 318", "ICC-ES AC509", "IBC 2021", "IRC 2021"],
+      "testing_standards": ["ASTM C39", "ASTM C78", "ASTM C496"],
+      "inspection_requirements": ["interlayer_bond_test", "compressive_test_28d", "dimensional_survey"],
+      "certification_path": "ICC-ES evaluation report per AC509"
+    },
+    "agent_guidance": [
+      "Standard OPC concrete is the workhorse for structural printing. Proven in hundreds of buildings worldwide.",
+      "Interlayer bond is the critical weak point — 60% of bulk strength. Design for this, not bulk compressive strength.",
+      "Open time is CRITICAL. If the next layer isn't placed within 30 minutes, the bond fails. Plan toolpaths accordingly.",
+      "Layer height and width directly affect structural capacity. Thicker layers = fewer bonds = stronger wall. But slower prints.",
+      "Reinforcement (rebar, fiber, post-tension) is required for any structural element over 2.5m tall or spanning openings.",
+      "Foundation is always required. Structural printers print walls, not foundations. Traditional foundation precedes printing.",
+      "Weather sensitivity: rain stops printing. Wind > 20 mph affects layer placement accuracy. Temperature < 5C prevents curing.",
+      "28-day cure is standard. Structure can't take design load until cure completes. Plan occupancy timelines accordingly.",
+      "Cost advantage over traditional comes from speed and labor reduction, NOT material cost. Material cost is comparable or higher."
+    ]
+  },
+  "icon_carbonx": {
+    "display_name": "ICON CarbonX",
+    "category": "proprietary_cementitious",
+    "mechanical": {
+      "compressive_strength_28d_mpa": 40,
+      "tensile_strength_mpa": 4.0,
+      "flexural_strength_mpa": 6.0,
+      "youngs_modulus_gpa": 28,
+      "interlayer_bond_strength_mpa": 2.0,
+      "interlayer_bond_derating_pct": 55,
+      "density_kg_m3": 2200,
+      "shrinkage_pct": 0.04,
+      "creep_coefficient": 2.0
+    },
+    "thermal": {
+      "thermal_conductivity_w_mk": 1.5,
+      "specific_heat_j_kgk": 900,
+      "thermal_mass_rating": "excellent",
+      "r_value_per_inch": 0.09,
+      "fire_resistance_hours": 4,
+      "max_print_ambient_temp_c": 43,
+      "min_print_ambient_temp_c": 4,
+      "ideal_print_temp_range_c": [10, 35]
+    },
+    "process": {
+      "open_time_minutes": [20, 90],
+      "max_interlayer_interval_minutes": 45,
+      "min_interlayer_interval_minutes": 1,
+      "pumpability_hours": 3,
+      "layer_height_range_mm": [10, 50],
+      "layer_width_range_mm": [30, 120],
+      "print_speed_range_mm_s": [100, 500],
+      "slump_flow_mm": [190, 230],
+      "cure_time_days": 28
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 80,
+      "recommended_wall_thickness_mm": 150,
+      "max_unsupported_overhang_deg": 15,
+      "max_unsupported_span_m": 0.8,
+      "max_wall_height_without_cure_m": 3.5,
+      "min_layer_bond_interval_min": 1,
+      "max_layer_bond_interval_min": 45,
+      "max_print_height_per_session_m": 3.5,
+      "reinforcement_required_above_m": 3.0,
+      "foundation_required": true
+    },
+    "cost": {
+      "material_cost_per_m3_usd": 250,
+      "typical_wall_cost_per_sqft_usd": 55,
+      "waste_factor_pct": 3
+    },
+    "compliance": {
+      "applicable_codes": ["ACI 318", "ICC-ES AC509", "IBC 2021", "IRC 2021"],
+      "testing_standards": ["ASTM C39", "ASTM C78", "ASTM C496"],
+      "inspection_requirements": ["interlayer_bond_test", "compressive_test_28d", "dimensional_survey", "lca_documentation"],
+      "certification_path": "ICON proprietary certification + ICC-ES"
+    },
+    "sustainability": {
+      "embodied_carbon_reduction_vs_cmu_pct": 31,
+      "total_environmental_impact_reduction_pct": 55,
+      "lifecycle_cost_reduction_pct": [2, 6],
+      "source": "MIT CSHub assessment"
+    },
+    "agent_guidance": [
+      "ICON's proprietary mix — optimized for their Titan printer system. Higher performance than standard concrete.",
+      "Better interlayer bond (2.0 MPa vs 1.5 MPa standard) means more forgiving print timing and taller walls per session.",
+      "Wider print speed range (100-500 mm/s) enables faster prints than standard concrete mixes.",
+      "31% lower embodied carbon vs CMU baseline per MIT CSHub — use this in sustainability-focused designs.",
+      "Higher material cost ($250/m3 vs $150/m3) but less waste (3% vs 5%) and faster printing offsets it.",
+      "Only available through ICON's Titan ecosystem. Cannot be sourced independently.",
+      "Longer open time (up to 90 min) gives more flexibility for complex toolpaths and multi-wall geometries."
+    ]
+  },
+  "geopolymer_concrete": {
+    "display_name": "Geopolymer Concrete (Fly Ash / Slag Based)",
+    "category": "geopolymer",
+    "mechanical": {
+      "compressive_strength_28d_mpa": 45,
+      "tensile_strength_mpa": 4.5,
+      "flexural_strength_mpa": 6.5,
+      "youngs_modulus_gpa": 22,
+      "interlayer_bond_strength_mpa": 1.8,
+      "interlayer_bond_derating_pct": 55,
+      "density_kg_m3": 2100,
+      "shrinkage_pct": 0.03,
+      "creep_coefficient": 1.8
+    },
+    "thermal": {
+      "thermal_conductivity_w_mk": 1.2,
+      "specific_heat_j_kgk": 950,
+      "thermal_mass_rating": "excellent",
+      "r_value_per_inch": 0.11,
+      "fire_resistance_hours": 6,
+      "max_print_ambient_temp_c": 45,
+      "min_print_ambient_temp_c": 10,
+      "ideal_print_temp_range_c": [15, 35]
+    },
+    "process": {
+      "open_time_minutes": [10, 45],
+      "max_interlayer_interval_minutes": 25,
+      "min_interlayer_interval_minutes": 2,
+      "pumpability_hours": 1.5,
+      "layer_height_range_mm": [10, 35],
+      "layer_width_range_mm": [30, 80],
+      "print_speed_range_mm_s": [50, 200],
+      "slump_flow_mm": [170, 210],
+      "cure_time_days": 7
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 120,
+      "recommended_wall_thickness_mm": 200,
+      "max_unsupported_overhang_deg": 8,
+      "max_unsupported_span_m": 0.5,
+      "max_wall_height_without_cure_m": 2.5,
+      "min_layer_bond_interval_min": 2,
+      "max_layer_bond_interval_min": 25,
+      "max_print_height_per_session_m": 2.5,
+      "reinforcement_required_above_m": 2.0,
+      "foundation_required": true
+    },
+    "cost": {
+      "material_cost_per_m3_usd": 120,
+      "typical_wall_cost_per_sqft_usd": 38,
+      "waste_factor_pct": 5
+    },
+    "compliance": {
+      "applicable_codes": ["ACI 318", "ASTM C1157"],
+      "testing_standards": ["ASTM C39", "ASTM C78"],
+      "inspection_requirements": ["interlayer_bond_test", "compressive_test_7d", "compressive_test_28d"],
+      "certification_path": "Performance-based per ACI 318 — no prescriptive path yet for geopolymers in AC509"
+    },
+    "sustainability": {
+      "embodied_carbon_reduction_vs_opc_pct": 80,
+      "uses_industrial_waste": true,
+      "waste_materials_used": ["fly_ash", "blast_furnace_slag", "mine_tailings"],
+      "source": "Various published LCA studies"
+    },
+    "agent_guidance": [
+      "LOWEST CARBON FOOTPRINT — 80% less CO2 than standard Portland cement concrete. Leading sustainability option.",
+      "Uses industrial waste products (fly ash, slag) as the binder instead of Portland cement. Circular economy material.",
+      "Faster cure (7 days vs 28 days) — structures reach design strength 4x sooner. Major schedule advantage.",
+      "Higher fire resistance (6 hours vs 4 hours) — valuable for defense and commercial applications.",
+      "Shorter open time and pumpability — more demanding on print planning and equipment reliability.",
+      "No prescriptive code path yet for structural printing. Requires performance-based engineering per ACI 318.",
+      "Lower material cost ($120/m3) than standard concrete ($150/m3) when waste feedstock is locally available.",
+      "Higher minimum print temperature (10C) — not suitable for cold-weather printing without heated enclosures."
+    ]
+  },
+  "earth_based_mix": {
+    "display_name": "Earth-Based / Adobe Print Mix",
+    "category": "earth_based",
+    "mechanical": {
+      "compressive_strength_28d_mpa": 5,
+      "tensile_strength_mpa": 0.5,
+      "flexural_strength_mpa": 1.0,
+      "youngs_modulus_gpa": 3,
+      "interlayer_bond_strength_mpa": 0.3,
+      "interlayer_bond_derating_pct": 70,
+      "density_kg_m3": 1800,
+      "shrinkage_pct": 2.0,
+      "creep_coefficient": 5.0
+    },
+    "thermal": {
+      "thermal_conductivity_w_mk": 0.7,
+      "specific_heat_j_kgk": 1000,
+      "thermal_mass_rating": "outstanding",
+      "r_value_per_inch": 0.2,
+      "fire_resistance_hours": 2,
+      "max_print_ambient_temp_c": 40,
+      "min_print_ambient_temp_c": 10,
+      "ideal_print_temp_range_c": [15, 30]
+    },
+    "process": {
+      "open_time_minutes": [30, 120],
+      "max_interlayer_interval_minutes": 60,
+      "min_interlayer_interval_minutes": 5,
+      "pumpability_hours": 4,
+      "layer_height_range_mm": [15, 50],
+      "layer_width_range_mm": [40, 120],
+      "print_speed_range_mm_s": [30, 150],
+      "cure_time_days": 14
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 200,
+      "recommended_wall_thickness_mm": 300,
+      "max_unsupported_overhang_deg": 5,
+      "max_unsupported_span_m": 0.3,
+      "max_wall_height_without_cure_m": 1.5,
+      "min_layer_bond_interval_min": 5,
+      "max_layer_bond_interval_min": 60,
+      "max_print_height_per_session_m": 1.5,
+      "reinforcement_required_above_m": 1.0,
+      "foundation_required": true,
+      "max_stories": 1,
+      "roof_type_restriction": "lightweight_only"
+    },
+    "cost": {
+      "material_cost_per_m3_usd": 30,
+      "typical_wall_cost_per_sqft_usd": 15,
+      "waste_factor_pct": 8
+    },
+    "compliance": {
+      "applicable_codes": ["NZS 4297", "NZS 4298", "NMAC 14.7.4"],
+      "testing_standards": ["ASTM E2392"],
+      "inspection_requirements": ["moisture_content", "compression_test", "dimensional_survey"],
+      "certification_path": "Varies by jurisdiction — earth building codes exist in NM, NZ, AU"
+    },
+    "sustainability": {
+      "embodied_carbon_reduction_vs_opc_pct": 95,
+      "locally_sourced": true,
+      "recyclable": true,
+      "source": "Published earth building LCA studies"
+    },
+    "agent_guidance": [
+      "CHEAPEST AND MOST SUSTAINABLE option — $30/m3, 95% less carbon than Portland cement. Uses local soil.",
+      "VERY LOW STRUCTURAL CAPACITY. Single-story only. Lightweight roof only (no concrete roof slabs).",
+      "Outstanding thermal mass — passive cooling in hot climates. R-value is modest but thermal mass handles diurnal swings.",
+      "Best for: developing world housing, disaster relief shelters, sustainability-focused single-story structures.",
+      "Not suitable for: multi-story, high-wind zones, seismic zones without significant engineering, cold climates.",
+      "Largest shrinkage of any print material (2%) — design for shrinkage control (expansion joints every 3-4 meters).",
+      "Longest open time (up to 2 hours) — most forgiving for toolpath complexity and equipment issues.",
+      "Requires moisture protection — earth walls need roof overhangs, lime plaster, or waterproof coating to survive rain.",
+      "Perfect for the humanitarian use case: local materials, minimal equipment, single-story dwellings, extremely low cost."
+    ]
+  }
+}

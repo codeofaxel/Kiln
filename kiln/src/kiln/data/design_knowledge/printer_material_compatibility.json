@@ -1,0 +1,3941 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "domain": "fdm",
+    "description": "Printer-to-material compatibility matrix. Maps which materials each printer can handle out-of-box, with upgrades, or not at all."
+  },
+  "anker_m5": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "artillery_sw_x3": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "bambu_a1": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "bambu_a1_mini": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "bambu_p1p": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "bambu_p1s": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enclosed chamber prevents warping. Good all-around engineering material."
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
+    },
+    "asa_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Dissolves in limonene for support removal. Prints like ABS \u2014 enclosed chamber recommended."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Nylon: extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PC-ABS: hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "bambu_x1c": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Hardened nozzle handles CF abrasion. Stiffer than plain PETG with good layer adhesion."
+    },
+    "cf_petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Hardened nozzle handles CF abrasion. Stiffer than plain PETG with good layer adhesion."
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enclosed chamber prevents warping. Good all-around engineering material."
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
+    },
+    "asa_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Dissolves in limonene for support removal. Prints like ABS \u2014 enclosed chamber recommended."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Nylon: extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Hardened nozzle included. Prints like PLA with much higher stiffness."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PC-ABS: hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Hardened nozzle handles CF abrasion. High-stiffness engineering material with good layer adhesion."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PA6-GF: nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "cr10": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Print at lower end of temp range (230-235C) to stay within PTFE limits. Reduce fan speed vs PLA."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles, print temps exceed PTFE limits."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles, print temps exceed PTFE limits."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ABS: PTFE degrades at ABS temps (240C+), open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ASA: PTFE degrades at ASA temps (240-260C), open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ASA+: PTFE hotend not rated for ASA+ temps, enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "direct_drive"
+      ],
+      "notes": "TPU buckles in bowden tubes \u2014 direct drive extruder required for reliable feeding."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "HIPS: PTFE hotend not rated for HIPS temps (230-250C), warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "direct_drive",
+        "dry_box"
+      ],
+      "notes": "PVA: bowden tube causes jams with soft PVA. Extremely hygroscopic \u2014 must be stored and fed from dry box."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: PTFE cannot handle nylon temps (250-270C), severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, PTFE cannot handle CF-nylon temps (260-280C), warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: PC prints at 260-300C \u2014 far above PTFE limits, extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: blend prints at 250-270C \u2014 exceeds PTFE limits, warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles, print temps (250-270C) exceed PTFE limits."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, print temps (260-290C) exceed PTFE limits, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "default": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "elegoo_centauri_carbon": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enclosed chamber prevents warping. Good all-around engineering material."
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
+    },
+    "asa_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Dissolves in limonene for support removal. Prints like ABS \u2014 enclosed chamber recommended."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Nylon: extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PC-ABS: hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "elegoo_neptune3": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Print at lower end of temp range (230-235C) to stay within PTFE limits. Reduce fan speed vs PLA."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles, print temps exceed PTFE limits."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles, print temps exceed PTFE limits."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ABS: PTFE degrades at ABS temps (240C+), open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ASA: PTFE degrades at ASA temps (240-260C), open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ASA+: PTFE hotend not rated for ASA+ temps, enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "HIPS: PTFE hotend not rated for HIPS temps (230-250C), warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: PTFE cannot handle nylon temps (250-270C), severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, PTFE cannot handle CF-nylon temps (260-280C), warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: PC prints at 260-300C \u2014 far above PTFE limits, extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: blend prints at 250-270C \u2014 exceeds PTFE limits, warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles, print temps (250-270C) exceed PTFE limits."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, print temps (260-290C) exceed PTFE limits, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "elegoo_neptune4": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "elegoo_orangestorm_giga": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "ender3": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Print at lower end of temp range (230-235C) to stay within PTFE limits. Reduce fan speed vs PLA."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles, print temps exceed PTFE limits."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles, print temps exceed PTFE limits."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ABS: PTFE degrades at ABS temps (240C+), open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ASA: PTFE degrades at ASA temps (240-260C), open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ASA+: PTFE hotend not rated for ASA+ temps, enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "direct_drive"
+      ],
+      "notes": "TPU buckles in bowden tubes \u2014 direct drive extruder required for reliable feeding."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "HIPS: PTFE hotend not rated for HIPS temps (230-250C), warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "direct_drive",
+        "dry_box"
+      ],
+      "notes": "PVA: bowden tube causes jams with soft PVA. Extremely hygroscopic \u2014 must be stored and fed from dry box."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: PTFE cannot handle nylon temps (250-270C), severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, PTFE cannot handle CF-nylon temps (260-280C), warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: PC prints at 260-300C \u2014 far above PTFE limits, extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: blend prints at 250-270C \u2014 exceeds PTFE limits, warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles, print temps (250-270C) exceed PTFE limits."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, print temps (260-290C) exceed PTFE limits, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "ender3_s1": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "ender5": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Print at lower end of temp range (230-235C) to stay within PTFE limits. Reduce fan speed vs PLA."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles, print temps exceed PTFE limits."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles, print temps exceed PTFE limits."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ABS: PTFE degrades at ABS temps (240C+), open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ASA: PTFE degrades at ASA temps (240-260C), open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ASA+: PTFE hotend not rated for ASA+ temps, enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "direct_drive"
+      ],
+      "notes": "TPU buckles in bowden tubes \u2014 direct drive extruder required for reliable feeding."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "HIPS: PTFE hotend not rated for HIPS temps (230-250C), warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "direct_drive",
+        "dry_box"
+      ],
+      "notes": "PVA: bowden tube causes jams with soft PVA. Extremely hygroscopic \u2014 must be stored and fed from dry box."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: PTFE cannot handle nylon temps (250-270C), severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, PTFE cannot handle CF-nylon temps (260-280C), warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: PC prints at 260-300C \u2014 far above PTFE limits, extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: blend prints at 250-270C \u2014 exceeds PTFE limits, warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles, print temps (250-270C) exceed PTFE limits."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, print temps (260-290C) exceed PTFE limits, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "flashforge_adventurer5m": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Print at lower end of temp range (230-235C) to stay within PTFE limits. Reduce fan speed vs PLA."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles, print temps exceed PTFE limits."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles, print temps exceed PTFE limits."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend"
+      ],
+      "notes": "ABS: PTFE degrades at ABS temps (240C+)."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend"
+      ],
+      "notes": "ASA: PTFE degrades at ASA temps (240-260C)."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend"
+      ],
+      "notes": "ASA+: PTFE hotend not rated for ASA+ temps."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend"
+      ],
+      "notes": "HIPS: PTFE hotend not rated for HIPS temps (230-250C)."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box"
+      ],
+      "notes": "Nylon: PTFE cannot handle nylon temps (250-270C), extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, PTFE cannot handle CF-nylon temps (260-280C), nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: PC prints at 260-300C \u2014 far above PTFE limits, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: blend prints at 250-270C \u2014 exceeds PTFE limits, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles, print temps (250-270C) exceed PTFE limits."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, print temps (260-290C) exceed PTFE limits, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "k1": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enclosed chamber prevents warping. Good all-around engineering material."
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
+    },
+    "asa_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Dissolves in limonene for support removal. Prints like ABS \u2014 enclosed chamber recommended."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Nylon: extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PC-ABS: hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "klipper_generic": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "prusa_mini": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Print at lower end of temp range (230-235C) to stay within PTFE limits. Reduce fan speed vs PLA."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles, print temps exceed PTFE limits."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles, print temps exceed PTFE limits."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ABS: PTFE degrades at ABS temps (240C+), open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ASA: PTFE degrades at ASA temps (240-260C), open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "ASA+: PTFE hotend not rated for ASA+ temps, enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "direct_drive"
+      ],
+      "notes": "TPU buckles in bowden tubes \u2014 direct drive extruder required for reliable feeding."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure"
+      ],
+      "notes": "HIPS: PTFE hotend not rated for HIPS temps (230-250C), warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "direct_drive",
+        "dry_box"
+      ],
+      "notes": "PVA: bowden tube causes jams with soft PVA. Extremely hygroscopic \u2014 must be stored and fed from dry box."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: PTFE cannot handle nylon temps (250-270C), severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, PTFE cannot handle CF-nylon temps (260-280C), warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: PC prints at 260-300C \u2014 far above PTFE limits, extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: blend prints at 250-270C \u2014 exceeds PTFE limits, warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles, print temps (250-270C) exceed PTFE limits."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "all_metal_hotend",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, print temps (260-290C) exceed PTFE limits, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "prusa_mk3s": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "prusa_mk4": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "prusa_xl": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enclosed chamber prevents warping. Good all-around engineering material."
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
+    },
+    "asa_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Dissolves in limonene for support removal. Prints like ABS \u2014 enclosed chamber recommended."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Nylon: extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PC-ABS: hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "qidi_x_plus3": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enclosed chamber prevents warping. Good all-around engineering material."
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
+    },
+    "asa_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Dissolves in limonene for support removal. Prints like ABS \u2014 enclosed chamber recommended."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Nylon: extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PC-ABS: hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "ratrig_vcore3": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "sovol_sv06": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "sovol_sv07": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ABS: open frame causes warping and layer splitting."
+    },
+    "asa": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA: open frame causes warping similar to ABS."
+    },
+    "asa_plus": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "ASA+: enclosure needed to prevent warping."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure"
+      ],
+      "notes": "HIPS: warps without enclosure like ABS."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Nylon: severe warping without enclosure, extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: extreme warping without heated enclosure, very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PC-ABS: warps without enclosure, hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "enclosure",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base warps severely without enclosure, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "voron_0": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enclosed chamber prevents warping. Good all-around engineering material."
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
+    },
+    "asa_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Dissolves in limonene for support removal. Prints like ABS \u2014 enclosed chamber recommended."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Nylon: extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PC-ABS: hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  },
+  "voron_2": {
+    "pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware."
+    },
+    "pla_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like standard PLA with improved toughness."
+    },
+    "silk_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Slightly higher temp for best sheen."
+    },
+    "wood_pla": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints like PLA. Wood particles are mildly abrasive over time \u2014 nozzle wears faster than plain PLA."
+    },
+    "petg": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Prints well on stock hardware. Reduce fan speed vs PLA for better layer adhesion."
+    },
+    "petg_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "cf_petg": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "CF-PETG: carbon fiber rapidly wears brass nozzles."
+    },
+    "abs": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enclosed chamber prevents warping. Good all-around engineering material."
+    },
+    "asa": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
+    },
+    "asa_plus": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
+    },
+    "tpu": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
+    },
+    "hips": {
+      "status": "compatible",
+      "upgrades_needed": [],
+      "notes": "Dissolves in limonene for support removal. Prints like ABS \u2014 enclosed chamber recommended."
+    },
+    "pva": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PVA is extremely hygroscopic \u2014 absorbs moisture within hours. Dry box storage and feeding mandatory."
+    },
+    "nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Nylon: extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_nylon": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "CF-Nylon: carbon fiber destroys brass nozzles within hours, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    },
+    "cf_pla": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "Carbon fiber rapidly wears brass nozzles. Hardened steel or ruby nozzle required."
+    },
+    "polycarbonate": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "Polycarbonate: very hygroscopic \u2014 dry box required."
+    },
+    "pc_abs": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "dry_box"
+      ],
+      "notes": "PC-ABS: hygroscopic blend \u2014 dry box recommended."
+    },
+    "pet_cf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle"
+      ],
+      "notes": "PET-CF: carbon fiber rapidly wears brass nozzles."
+    },
+    "pa6_gf": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "hardened_nozzle",
+        "dry_box"
+      ],
+      "notes": "PA6-GF: glass fiber is extremely abrasive \u2014 hardened nozzle required, nylon base is extremely hygroscopic \u2014 dry box mandatory."
+    }
+  }
+}

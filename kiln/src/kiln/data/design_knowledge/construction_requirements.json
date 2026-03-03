@@ -1,0 +1,233 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "domain": "construction",
+    "description": "Functional requirements for construction-scale 3D printing. Maps building program requirements to structural and manufacturing constraints."
+  },
+  "single_family_residential": {
+    "display_name": "Single-Family Residence",
+    "triggers": ["house", "home", "single family", "residence", "dwelling", "1 story", "single story", "2 bedroom", "3 bedroom"],
+    "program_requirements": {
+      "min_sqft": 600,
+      "typical_sqft_range": [1000, 2500],
+      "min_bedrooms": 1,
+      "min_bathrooms": 1,
+      "required_spaces": ["living_room", "kitchen", "bedroom", "bathroom", "entry"],
+      "optional_spaces": ["garage", "laundry", "storage", "porch", "patio"],
+      "min_ceiling_height_m": 2.44,
+      "min_hallway_width_m": 0.91,
+      "min_door_width_m": 0.81,
+      "accessibility_optional": true
+    },
+    "structural_constraints": {
+      "wall_type": "double_bead_with_core",
+      "min_wall_thickness_mm": 200,
+      "max_stories": 1,
+      "foundation": "slab_on_grade",
+      "roof_type": "truss",
+      "insulation_required": true,
+      "target_r_value": 19,
+      "lateral_system": "shear_walls"
+    },
+    "code_requirements": {
+      "primary_code": "IRC 2021",
+      "fire_separation": "none_for_single_family",
+      "egress_windows": "one_per_bedroom",
+      "smoke_detectors": "every_bedroom_plus_hallway",
+      "energy_code": "IECC 2021"
+    },
+    "print_planning": {
+      "estimated_wall_print_time_hours": [12, 36],
+      "estimated_total_construction_weeks": [4, 8],
+      "crew_size": [2, 4],
+      "printer_setup_days": 1,
+      "foundation_lead_time_weeks": 2
+    },
+    "agent_guidance": [
+      "Single-story residential is the sweet spot for structural printing today. Proven by ICON (100+ homes), COBOD, and others.",
+      "IRC 2021 governs residential construction in most US jurisdictions. Know it or partner with someone who does.",
+      "Typical flow: pour foundation (2 weeks) → print walls (1-3 days) → install roof (1 week) → MEP + finishes (3-5 weeks).",
+      "Wall printing is FAST (1-3 days for a typical home). The bottleneck is everything ELSE — foundation, roof, MEP, finishes.",
+      "Design for the printer's reach: gantry printers (ICON Titan, COBOD) have a fixed footprint. Plan the building within it.",
+      "Open floor plans reduce interior walls = less print time = lower cost. But some interior bearing walls may be needed for roof support.",
+      "Minimize wall penetrations (windows, doors). Each opening requires a header and interrupts the continuous print path.",
+      "ICON's Wolf Ranch homes: 1,574-2,000 sqft, single story, $430K-$600K. That's the current market benchmark."
+    ]
+  },
+  "affordable_housing": {
+    "display_name": "Affordable / Social Housing",
+    "triggers": ["affordable", "social housing", "low cost", "low income", "community housing", "homeless", "shelter"],
+    "program_requirements": {
+      "min_sqft": 400,
+      "typical_sqft_range": [400, 800],
+      "min_bedrooms": 1,
+      "min_bathrooms": 1,
+      "required_spaces": ["living_kitchen_combined", "bedroom", "bathroom"],
+      "accessibility_required": true,
+      "ada_compliance": true,
+      "cost_target_per_sqft_usd": 100
+    },
+    "structural_constraints": {
+      "wall_type": "double_bead",
+      "min_wall_thickness_mm": 150,
+      "max_stories": 1,
+      "foundation": "slab_on_grade",
+      "roof_type": "flat_or_simple_shed",
+      "insulation_required": true,
+      "target_r_value": 13,
+      "simplify_geometry": true
+    },
+    "print_planning": {
+      "estimated_wall_print_time_hours": [6, 12],
+      "estimated_total_construction_weeks": [2, 4],
+      "crew_size": [2, 3],
+      "units_per_printer_per_month": [4, 8]
+    },
+    "agent_guidance": [
+      "Cost is the PRIMARY driver. Every design decision filters through 'does this reduce $/sqft?'",
+      "Minimize geometry complexity — straight walls, minimal curves, few openings, simple roof shape.",
+      "Combined living/kitchen saves one interior wall and 20+ sqft of circulation space.",
+      "Flat or shed roof is cheapest — eliminates truss engineering and simplifies the roof-to-wall connection.",
+      "ADA accessibility is often required for publicly funded housing — 36-inch doors, 5-foot turning radius in bathroom.",
+      "ICON's Community First! Village: permanent housing for formerly homeless individuals. Best-known affordable printed housing project.",
+      "Target $100/sqft total construction cost. This is aggressive — material + foundation + MEP + finishes must all be optimized.",
+      "Cluster designs (multiple units sharing walls) reduce total wall length and foundation cost per unit.",
+      "Earth-based materials at $30/m3 could hit affordable targets in developing world contexts where labor costs are lower."
+    ]
+  },
+  "military_defense": {
+    "display_name": "Military / Defense Structure",
+    "triggers": ["military", "defense", "barracks", "bunker", "forward operating", "camp", "army", "marine", "milcon"],
+    "program_requirements": {
+      "min_sqft": 400,
+      "typical_sqft_range": [570, 5700],
+      "deployment_speed_critical": true,
+      "austere_conditions": true,
+      "force_protection_level": "configurable",
+      "modular_repeatable": true
+    },
+    "structural_constraints": {
+      "wall_type": "triple_bead",
+      "min_wall_thickness_mm": 250,
+      "blast_resistance_optional": true,
+      "max_stories": 2,
+      "foundation": "expeditionary_slab",
+      "insulation_required": true,
+      "hardened_against": ["small_arms", "fragmentation"],
+      "rapid_deployability": true
+    },
+    "compliance_requirements": {
+      "primary_standards": ["UFC 4-010-01", "UFC 3-340-02"],
+      "antiterrorism_standoff": true,
+      "progressive_collapse_resistance": true,
+      "audit_trail_required": true,
+      "material_traceability_required": true,
+      "quality_documentation": "military_grade"
+    },
+    "print_planning": {
+      "max_setup_time_hours": 24,
+      "estimated_wall_print_time_hours": [8, 24],
+      "estimated_total_construction_weeks": [1, 3],
+      "crew_size": [3, 6],
+      "transportable_printer_required": true,
+      "operates_in_austere_conditions": true
+    },
+    "agent_guidance": [
+      "SPEED IS PARAMOUNT. Military values time-to-operational over cost optimization. Design for fastest possible completion.",
+      "Repeatable, modular designs that can be deployed across multiple sites with minimal redesign.",
+      "Thicker walls (250mm+) for force protection. Concrete inherently resists small arms and fragmentation.",
+      "ICON completed 3x 570 sqft barracks at Fort Bliss under ACES program. That's the current benchmark.",
+      "Full audit trail required: every layer, every material batch, every quality check documented and traceable.",
+      "Design for expeditionary foundation — may not have time for full traditional foundation in forward deployments.",
+      "UFC standards govern military construction. Antiterrorism standoff distances and progressive collapse resistance are mandatory.",
+      "ICON received $4.7M Army SBIR Phase 2 contract (Jan 2026) — military procurement is actively funding this space.",
+      "Kiln's audit trail, safety profiles, and event logging are EXACTLY what military QA/QC requires."
+    ]
+  },
+  "disaster_relief_shelter": {
+    "display_name": "Disaster Relief / Emergency Shelter",
+    "triggers": ["disaster", "relief", "emergency", "hurricane", "earthquake", "refugee", "temporary", "rapid deploy"],
+    "program_requirements": {
+      "min_sqft": 200,
+      "typical_sqft_range": [200, 500],
+      "deployment_time_critical": true,
+      "local_materials_preferred": true,
+      "minimal_skilled_labor": true,
+      "culturally_appropriate": true,
+      "can_be_permanent": true
+    },
+    "structural_constraints": {
+      "wall_type": "single_or_double_bead",
+      "min_wall_thickness_mm": 100,
+      "max_stories": 1,
+      "foundation": "minimal_or_grade_beam",
+      "roof_type": "lightweight_metal_or_fabric",
+      "seismic_resilience": "zone_dependent",
+      "wind_resistance_mph": 100
+    },
+    "material_preference_order": [
+      "earth_based_mix",
+      "standard_concrete_mix",
+      "geopolymer_concrete"
+    ],
+    "print_planning": {
+      "estimated_wall_print_time_hours": [4, 8],
+      "estimated_total_construction_days": [3, 7],
+      "crew_size": [2, 3],
+      "units_per_printer_per_week": [3, 7],
+      "power_source": "generator_compatible"
+    },
+    "agent_guidance": [
+      "DEPLOYMENT SPEED IS EVERYTHING. People need shelter NOW, not in 4 weeks.",
+      "Earth-based materials are ideal when available — $30/m3, local sourcing, minimal supply chain dependency.",
+      "Design for the simplest possible geometry — rectangular or circular plan, minimal openings, lightweight roof.",
+      "Circular/dome plans resist wind loads better than rectangular. Consider for hurricane-prone regions.",
+      "Must withstand aftershocks (earthquake) or subsequent storms (hurricane). Design for the NEXT disaster, not just the current one.",
+      "Culturally appropriate design matters. A shelter that people won't use is worthless. Research local building traditions.",
+      "Design for permanent upgrade path — initial shelter becomes the core of a permanent home with added rooms/finishes over time.",
+      "Minimal foundation: grade beam or rubble trench. Can't wait weeks for traditional foundation in emergency context.",
+      "Power: design for generator operation. Grid power may not exist. Solar-powered pump systems are emerging."
+    ]
+  },
+  "commercial_single_story": {
+    "display_name": "Commercial / Retail Single Story",
+    "triggers": ["commercial", "retail", "store", "shop", "office", "restaurant", "clinic"],
+    "program_requirements": {
+      "min_sqft": 1000,
+      "typical_sqft_range": [1500, 10000],
+      "open_span_required": true,
+      "storefront_glazing": true,
+      "ada_compliance": true,
+      "fire_rating_required": true,
+      "occupancy_type": "business_or_mercantile"
+    },
+    "structural_constraints": {
+      "wall_type": "double_bead_with_core",
+      "min_wall_thickness_mm": 200,
+      "max_stories": 1,
+      "foundation": "slab_on_grade_thickened_edge",
+      "roof_type": "steel_frame_or_bar_joist",
+      "clear_span_m": [6, 15],
+      "insulation_required": true,
+      "target_r_value": 25,
+      "fire_resistance_walls_hours": 2,
+      "fire_resistance_structure_hours": 1
+    },
+    "code_requirements": {
+      "primary_code": "IBC 2021",
+      "occupancy_group": "B_or_M",
+      "fire_separation": "per_occupancy",
+      "ada_required": true,
+      "energy_code": "ASHRAE 90.1"
+    },
+    "agent_guidance": [
+      "Commercial buildings need larger clear spans than residential. Steel roof structure on printed walls is typical.",
+      "IBC 2021 governs (not IRC). More stringent fire, structural, and accessibility requirements.",
+      "Storefront glazing: large openings require engineered steel headers. Plan wall layout around glazing requirements.",
+      "ADA is mandatory: accessible entrance, restrooms, circulation paths, parking.",
+      "Fire-rated walls: printed concrete inherently achieves 2-4 hour fire rating. Document and certify per code.",
+      "ASHRAE 90.1 for energy code — more demanding than residential IECC. Continuous insulation typically required.",
+      "Open floor plans benefit from printed exterior walls + steel interior columns. Don't try to span 15m with printed walls alone."
+    ]
+  }
+}
