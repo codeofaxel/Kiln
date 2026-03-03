@@ -10,17 +10,18 @@ behaviour).
 
 from __future__ import annotations
 
-from collections import deque
+import contextlib
 import json
 import logging
 import os
-from pathlib import Path
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+from collections import deque
+from pathlib import Path
 from typing import Any
 
 import click
@@ -658,10 +659,8 @@ def _filter_stable_ingest_files(
             stable.append(path)
             continue
         # Re-arm the file so the next scan can pick it up once stable.
-        try:
+        with contextlib.suppress(OSError):
             seen.pop(str(path.resolve()), None)
-        except OSError:
-            pass
     return stable
 
 
@@ -4128,10 +4127,8 @@ def ingest_service_start_cmd(config_path: str | None, json_mode: bool) -> None:
         sys.exit(1)
 
     if existing_pid and not _is_pid_running(existing_pid):
-        try:
+        with contextlib.suppress(Exception):
             pid_path.unlink(missing_ok=True)
-        except Exception:
-            pass
 
     cfg.update(
         {

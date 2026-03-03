@@ -583,7 +583,7 @@ class EmergencyCoordinator:
         with self._lock:
             known: set[str] = set(self._stopped_printers)
             known.update(self._latches.keys())
-            known.update(pid for (pid, _) in self._interlocks.keys())
+            known.update(pid for (pid, _) in self._interlocks)
             rows = [self._latch_status_locked(pid) for pid in sorted(known)]
         if include_unlatched:
             return rows
