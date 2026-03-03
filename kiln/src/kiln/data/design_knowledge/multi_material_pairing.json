@@ -1,0 +1,300 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "domain": "fdm",
+    "description": "Dual-extrusion and multi-material compatibility rules. Which materials can be printed together, support dissolution methods, and interface adhesion."
+  },
+  "support_pairs": [
+    {
+      "model_material": "pla",
+      "support_material": "pva",
+      "dissolution_method": "Submerge in warm water (40-50C) for 2-12 hours. Agitation or ultrasonic bath speeds dissolution.",
+      "interface_adhesion": "excellent",
+      "notes": "PVA is the gold standard water-soluble support for PLA. Keep PVA filament bone-dry in a sealed container with desiccant — even brief humidity exposure causes jams and poor dissolution."
+    },
+    {
+      "model_material": "pla_plus",
+      "support_material": "pva",
+      "dissolution_method": "Submerge in warm water (40-50C) for 2-12 hours. Agitation or ultrasonic bath speeds dissolution.",
+      "interface_adhesion": "excellent",
+      "notes": "Identical behavior to PLA + PVA. PLA Plus prints at the same temps as PLA, so PVA is not thermally stressed."
+    },
+    {
+      "model_material": "silk_pla",
+      "support_material": "pva",
+      "dissolution_method": "Submerge in warm water (40-50C) for 2-12 hours.",
+      "interface_adhesion": "excellent",
+      "notes": "Works well, but PVA contact areas may leave a slightly matte mark on the silk finish. Orient support contact away from visible surfaces."
+    },
+    {
+      "model_material": "abs",
+      "support_material": "hips",
+      "dissolution_method": "Submerge in d-Limonene at room temperature for 12-24 hours. Use in a well-ventilated area.",
+      "interface_adhesion": "excellent",
+      "notes": "HIPS is the standard dissolvable support for ABS. Both print at similar temps and share styrene chemistry, so they bond and release cleanly. Limonene is reusable until saturated."
+    },
+    {
+      "model_material": "petg",
+      "support_material": "pva",
+      "dissolution_method": "Submerge in warm water (40-50C) for 4-16 hours. Takes longer than PLA+PVA due to denser interface.",
+      "interface_adhesion": "good",
+      "notes": "PVA degrades at PETG print temps (230-250C). Use 2-3 dense interface layers to insulate PVA from the PETG nozzle heat. Reduce PETG temp to low end of range (230C) when co-printing. Workable but not ideal."
+    },
+    {
+      "model_material": "nylon",
+      "support_material": "pva",
+      "dissolution_method": "Submerge in warm water (40-50C) for 6-24 hours.",
+      "interface_adhesion": "poor",
+      "notes": "Temperature mismatch is too large — nylon prints at 240-270C while PVA degrades above 210C. PVA chars and jams at nylon temps. Only feasible with very low nylon temps and thick interface layers. Not recommended for production use."
+    },
+    {
+      "model_material": "asa",
+      "support_material": "hips",
+      "dissolution_method": "Submerge in d-Limonene at room temperature for 12-24 hours. Use in a well-ventilated area. Limonene is reusable until saturated.",
+      "interface_adhesion": "good",
+      "notes": "ASA and HIPS are both styrene-based, so they bond and release similarly to ABS+HIPS. Slightly less clean separation than ABS+HIPS due to ASA's acrylic component, but still a reliable pairing for dissolvable supports."
+    },
+    {
+      "model_material": "pla",
+      "support_material": "hips",
+      "dissolution_method": "Submerge in d-Limonene at room temperature for 12-24 hours.",
+      "interface_adhesion": "poor",
+      "notes": "PLA and HIPS have incompatible print temp ranges and bed adhesion requirements. PLA prefers 50-65C bed, HIPS needs 90-110C. The interface bond is weak and inconsistent. PVA is a far better soluble support choice for PLA."
+    },
+    {
+      "model_material": "polycarbonate",
+      "support_material": "hips",
+      "dissolution_method": "Not viable — HIPS degrades before dissolution is useful.",
+      "interface_adhesion": "none",
+      "notes": "PC prints at 260-310C which is far above HIPS's softening point. HIPS deforms, chars, and fuses to the PC during printing. Not a viable support pairing. Use breakaway supports or dedicated high-temp support materials instead."
+    },
+    {
+      "model_material": "tpu",
+      "support_material": "pva",
+      "dissolution_method": "Submerge in warm water (40-50C) for 4-12 hours.",
+      "interface_adhesion": "moderate",
+      "notes": "PVA works as soluble support for TPU but the interface can bond too aggressively — PVA tends to embed into the soft TPU surface. Use 2-3 interface layers with reduced density. Dissolution may leave a rough texture on the TPU contact surface that needs trimming."
+    }
+  ],
+  "co_print_compatibility": {
+    "pla": {
+      "pla_plus": {
+        "compatible": true,
+        "interface_adhesion": "excellent",
+        "notes": "Same polymer family. PLA Plus is just PLA with impact modifiers — they bond seamlessly at identical print temps."
+      },
+      "silk_pla": {
+        "compatible": true,
+        "interface_adhesion": "excellent",
+        "notes": "Same PLA base. Silk additives don't affect inter-material adhesion."
+      },
+      "wood_pla": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "Wood filler slightly reduces interface strength vs pure PLA, but still bonds well."
+      },
+      "cf_pla": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "Carbon fibers reduce interface bonding area slightly. Use 2-3 interface layers for best results."
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Different polymer families with incompatible shrinkage rates. Poor chemical bonding at the interface. Parts delaminate under stress."
+      },
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Very different print temps (60C+ gap) and shrinkage rates. ABS warps and pulls away from PLA during cooling. Do not combine."
+      },
+      "tpu": {
+        "compatible": true,
+        "interface_adhesion": "moderate",
+        "notes": "Works for soft-touch grips on rigid PLA parts. Adhesion is mechanical rather than chemical — use interlocking geometry at the interface for reliability."
+      },
+      "pva": {
+        "compatible": true,
+        "interface_adhesion": "excellent",
+        "notes": "PVA is designed as soluble support for PLA. Bonds well during printing, dissolves cleanly in water."
+      }
+    },
+    "abs": {
+      "asa": {
+        "compatible": true,
+        "interface_adhesion": "excellent",
+        "notes": "Same styrene-acrylonitrile family. Virtually interchangeable — similar print temps, shrinkage, and chemistry. ASA adds UV resistance to outdoor-facing surfaces."
+      },
+      "hips": {
+        "compatible": true,
+        "interface_adhesion": "excellent",
+        "notes": "Standard support pairing. HIPS bonds well during printing and dissolves in d-Limonene. Both are styrene-based."
+      },
+      "pc_abs": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "PC-ABS contains ABS, so they share partial chemistry. PC-ABS prints hotter — use ABS at the high end of its temp range."
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Very different print temps and shrinkage rates. ABS warps and pulls away from PLA during cooling."
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Different polymer families. Poor chemical bonding despite overlapping print temps. Interface delaminates under thermal cycling or stress."
+      },
+      "tpu": {
+        "compatible": true,
+        "interface_adhesion": "moderate",
+        "notes": "Works for overmolded soft-touch grips on rigid ABS structures. Needs careful temp management — print ABS first, then TPU at lower temps to avoid softening the ABS. Use interlocking geometry at the interface."
+      }
+    },
+    "asa": {
+      "asa_plus": {
+        "compatible": true,
+        "interface_adhesion": "excellent",
+        "notes": "Same base polymer. ASA Plus adds impact modifiers — they bond seamlessly."
+      },
+      "abs": {
+        "compatible": true,
+        "interface_adhesion": "excellent",
+        "notes": "Same styrene family. Interchangeable in multi-material prints."
+      },
+      "hips": {
+        "compatible": true,
+        "interface_adhesion": "excellent",
+        "notes": "HIPS works as dissolvable support for ASA just as it does for ABS."
+      }
+    },
+    "petg": {
+      "petg_cf": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "Same PETG base. CF variant has slightly reduced interface bonding due to fiber content but works well with interface layers."
+      },
+      "cf_petg": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "Same PETG base with carbon fiber. Use 2-3 interface layers for best adhesion."
+      },
+      "pet_cf": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "PET-CF is closely related to PETG-CF. Similar enough chemistry for decent interface bonding."
+      },
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Different polymer families. Despite similar print temps, they don't bond chemically and delaminate under stress."
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Temperature mismatch and no chemical bonding. TPU is too flexible to form a reliable interface with rigid PETG."
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Different polymer families with incompatible shrinkage. Nylon's high moisture absorption also destabilizes the interface over time."
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Different polymer families. Poor chemical bonding at the interface."
+      }
+    },
+    "polycarbonate": {
+      "abs": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "PC-ABS blends exist commercially, proving these polymers are compatible. PC prints hotter — keep ABS at its high end (250C+) and PC at its low end."
+      },
+      "pc_abs": {
+        "compatible": true,
+        "interface_adhesion": "excellent",
+        "notes": "PC-ABS is literally a blend of these two materials. They bond exceptionally well."
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "none",
+        "notes": "PC prints at 260-310C which is well above PLA's melting point (~180C). PLA will completely melt and degrade while PC is printing. Absolutely incompatible."
+      }
+    },
+    "nylon": {
+      "cf_nylon": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "Same nylon base. CF filler reduces interface area slightly but bonding is reliable."
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Different polymer families with incompatible shrinkage and moisture behavior."
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "none",
+        "notes": "Completely incompatible. Nylon prints at 240-270C which softens PLA. Wildly different shrinkage rates (nylon ~1.5% vs PLA ~0.3%), opposite bed adhesion needs, and zero chemical affinity. Do not attempt."
+      }
+    },
+    "tpu": {
+      "pla": {
+        "compatible": true,
+        "interface_adhesion": "moderate",
+        "notes": "Works for soft-touch grips on rigid PLA parts. Design interlocking geometry at the interface rather than relying on adhesion alone."
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Temperature mismatch and no chemical affinity. TPU oozes badly at PETG print temps."
+      }
+    },
+    "cf_pla": {
+      "pla": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "Same PLA base polymer. CF filler slightly reduces bonding area but still reliable."
+      }
+    },
+    "cf_petg": {
+      "petg": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "Same PETG base. Good compatibility with minor interface adhesion reduction from fibers."
+      }
+    },
+    "cf_nylon": {
+      "nylon": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "Same nylon base. CF reduces interface bonding area but chemistry is compatible."
+      }
+    },
+    "pc_abs": {
+      "abs": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "PC-ABS contains ABS component — good chemical affinity."
+      },
+      "polycarbonate": {
+        "compatible": true,
+        "interface_adhesion": "excellent",
+        "notes": "PC-ABS is a blend of these two. Natural compatibility."
+      }
+    }
+  },
+  "general_rules": [
+    "Materials with similar print temps (within 20C) generally co-print well — the closer the temps, the less oozing and degradation from the idle nozzle.",
+    "Same polymer family materials bond best at interfaces: PLA variants with PLA variants, styrene family (ABS/ASA/HIPS) together, PETG variants together, nylon variants together.",
+    "Amorphous + crystalline polymer combinations usually have poor interface adhesion due to fundamentally different solidification behavior and shrinkage patterns.",
+    "Soluble support materials (PVA, HIPS) must be stored in sealed containers with desiccant until use — even moderate humidity exposure causes jams, poor print quality, and incomplete dissolution.",
+    "Interface/transition layers (2-3 dense layers of shared perimeter) significantly improve adhesion between dissimilar materials by increasing contact area and mechanical interlocking.",
+    "Purge tower volume should increase proportionally with the temperature differential between materials — a 10C gap needs minimal purge, but 40C+ gaps need 3-4x the default purge volume to prevent contamination.",
+    "Materials with very different shrinkage rates (e.g., ABS at 0.8% vs PLA at 0.3%) will delaminate at interfaces during cooling, especially on large parts.",
+    "Flexible + rigid material combinations work best when the flexible material is the outer layer or grip surface — rigid inner structure with flexible overmold is mechanically superior to the reverse.",
+    "Carbon fiber and glass fiber filled materials have reduced interface adhesion compared to their unfilled base polymer due to fibers disrupting the polymer chain entanglement at the boundary.",
+    "Dual extrusion with materials more than 40C apart in print temperature often causes the lower-temp material to degrade, char, or ooze excessively while the higher-temp material is printing."
+  ]
+}

@@ -1,0 +1,867 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "domain": "fdm",
+    "description": "Post-processing techniques per material. Surface finishing, strengthening, and aesthetic treatments with specific procedures."
+  },
+  "pla": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "easy",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "600-grit sandpaper", "water for wet sanding"],
+        "procedure": "Start at 220 grit to remove visible layer lines. Progress to 400 grit, then 600 grit for a smooth finish. Wet sand at 400+ to reduce dust and get a finer surface.",
+        "result": "Smooth matte finish, ready for primer and paint.",
+        "safety_notes": "Wear a dust mask. PLA dust is not toxic but irritates lungs."
+      },
+      {
+        "name": "Filler Primer + Spray Paint",
+        "difficulty": "easy",
+        "tools_needed": ["filler primer (Rust-Oleum, Tamiya)", "spray paint", "fine sandpaper (400-600 grit)", "clear coat (optional)"],
+        "procedure": "Sand to 400 grit. Apply 2-3 thin coats of filler primer, letting each dry 15 minutes. Wet sand primer with 600 grit. Apply 2-3 thin coats of color. Optional clear coat for durability.",
+        "result": "Professional painted finish with no visible layer lines.",
+        "safety_notes": "Spray in well-ventilated area or outdoors. Wear a respirator when spraying."
+      },
+      {
+        "name": "Epoxy Coating (XTC-3D)",
+        "difficulty": "moderate",
+        "tools_needed": ["XTC-3D epoxy (or generic brush-on epoxy)", "mixing cups", "disposable brush", "nitrile gloves"],
+        "procedure": "Mix epoxy per instructions (2:1 ratio for XTC-3D). Brush a thin coat over the entire surface, working quickly before it gels (10-15 min pot life). Rotate part to prevent drips. Cures in 2-4 hours.",
+        "result": "Glossy, smooth finish that fills layer lines without sanding. Adds water resistance and modest strength.",
+        "safety_notes": "Work in ventilated area. Wear nitrile gloves — uncured epoxy is a skin sensitizer."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Filler primer (Rust-Oleum 2-in-1, Tamiya Surface Primer)",
+      "paint_types": ["spray_paint", "acrylic", "enamel"],
+      "notes": "PLA takes paint well after light sanding and primer. Acrylic craft paints work for detail work. Clear coat recommended for handled parts."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Place part on a flat surface (glass or ceramic tile) in an oven. Heat to 80-110C and hold for 30-60 minutes. Cool slowly in the oven — do not remove while hot.",
+        "strength_gain_pct": 40,
+        "tradeoffs": "Significant dimensional distortion (2-5% shrinkage, warping on asymmetric parts). Print oversized to compensate. Best for simple, symmetric geometries."
+      }
+    ]
+  },
+  "pla_plus": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "easy",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "600-grit sandpaper", "water for wet sanding"],
+        "procedure": "Start at 220 grit to remove layer lines. Progress to 400, then 600. Wet sand at higher grits for smoother results. PLA Plus sands slightly easier than standard PLA due to softer impact modifiers.",
+        "result": "Smooth matte finish, ready for primer and paint.",
+        "safety_notes": "Wear a dust mask."
+      },
+      {
+        "name": "Filler Primer + Spray Paint",
+        "difficulty": "easy",
+        "tools_needed": ["filler primer", "spray paint", "fine sandpaper (400-600 grit)", "clear coat (optional)"],
+        "procedure": "Sand to 400 grit. Apply 2-3 thin coats of filler primer. Wet sand primer with 600 grit. Apply 2-3 thin coats of color. Optional clear coat.",
+        "result": "Professional painted finish, indistinguishable from standard PLA results.",
+        "safety_notes": "Spray in well-ventilated area."
+      },
+      {
+        "name": "Epoxy Coating (XTC-3D)",
+        "difficulty": "moderate",
+        "tools_needed": ["XTC-3D epoxy", "mixing cups", "disposable brush", "nitrile gloves"],
+        "procedure": "Mix and brush-apply thin coat. Rotate to prevent drips. Cures in 2-4 hours.",
+        "result": "Glossy smooth finish that fills layer lines.",
+        "safety_notes": "Ventilated area. Nitrile gloves required."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Filler primer (Rust-Oleum 2-in-1, Tamiya Surface Primer)",
+      "paint_types": ["spray_paint", "acrylic", "enamel"],
+      "notes": "Identical paintability to standard PLA. Impact modifiers don't affect paint adhesion."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Place part in oven at 80-110C for 30-60 minutes. Cool slowly in oven. PLA Plus responds slightly better than standard PLA — impact modifiers reduce brittleness post-anneal.",
+        "strength_gain_pct": 45,
+        "tradeoffs": "Dimensional distortion still occurs (2-5% shrinkage). Slightly less warping than standard PLA due to modified crystallization behavior."
+      }
+    ]
+  },
+  "silk_pla": {
+    "techniques": [
+      {
+        "name": "Clear Coat Protection",
+        "difficulty": "easy",
+        "tools_needed": ["clear spray lacquer or polyurethane", "lint-free cloth"],
+        "procedure": "Clean part with lint-free cloth. Apply 1-2 thin coats of clear spray lacquer. The silk finish is the aesthetic — clear coat preserves it without altering appearance. Use gloss clear coat to enhance the sheen or matte clear coat to tame it.",
+        "result": "Protected silk finish with enhanced durability against fingerprints and minor scratches.",
+        "safety_notes": "Spray in ventilated area."
+      },
+      {
+        "name": "Light Dusting (Minimal Sanding)",
+        "difficulty": "easy",
+        "tools_needed": ["800-grit or finer sandpaper"],
+        "procedure": "Only sand support contact points or visible imperfections with 800+ grit. Never broadly sand silk PLA — the silk finish is created by the filament additives reflecting light off layer lines. Sanding destroys this effect permanently.",
+        "result": "Cleaned-up support marks without damaging the silk appearance.",
+        "safety_notes": "Wear a dust mask."
+      }
+    ],
+    "paintability": {
+      "primer_needed": false,
+      "recommended_primer": "Not recommended — painting defeats the purpose of silk PLA",
+      "paint_types": [],
+      "notes": "Silk PLA's entire value is its lustrous, metallic-like finish straight off the printer. Painting over it is counterproductive. If you need a painted finish, use standard PLA instead."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": false,
+        "procedure": "Not recommended. Annealing causes the silk additives to migrate and discolor, ruining the finish.",
+        "strength_gain_pct": 0,
+        "tradeoffs": "Destroys the silk finish appearance. Use standard PLA or PLA Plus if strength is needed."
+      }
+    ]
+  },
+  "wood_pla": {
+    "techniques": [
+      {
+        "name": "Sanding + Wood Stain",
+        "difficulty": "moderate",
+        "tools_needed": ["120-grit sandpaper", "220-grit sandpaper", "wood stain (oil-based or water-based)", "clean rags", "polyurethane sealant"],
+        "procedure": "Sand with 120 grit to open the wood fiber surface, then 220 grit to smooth. Apply wood stain with a rag, working it into the grain pattern created by layer lines. Wipe excess after 5-10 minutes. The wood particles absorb stain at different rates, creating realistic wood grain. Apply 2-3 coats of polyurethane sealant after stain dries.",
+        "result": "Remarkably realistic wood appearance. Layer lines become wood grain. Darker stains (walnut, ebony) produce the most convincing results.",
+        "safety_notes": "Oil-based stains require ventilation. Wear nitrile gloves."
+      },
+      {
+        "name": "Sanding Only",
+        "difficulty": "easy",
+        "tools_needed": ["120-grit sandpaper", "220-grit sandpaper", "320-grit sandpaper"],
+        "procedure": "Sand progressively from 120 to 320 grit. Wood PLA sands very naturally — the wood fibers give it a realistic sanded-wood feel and appearance even without stain.",
+        "result": "Natural light wood finish with visible grain texture.",
+        "safety_notes": "Wear a dust mask. Wood fiber dust is mildly irritating."
+      },
+      {
+        "name": "Sealant Coating",
+        "difficulty": "easy",
+        "tools_needed": ["polyurethane spray or brush-on", "fine sandpaper (320 grit)"],
+        "procedure": "Sand to 320 grit. Apply 2-3 thin coats of polyurethane (spray or brush). Lightly sand between coats with 320 grit. Wood PLA absorbs moisture and can swell — sealant is essential for any part exposed to humidity.",
+        "result": "Sealed, durable surface with enhanced wood appearance.",
+        "safety_notes": "Ventilated area for polyurethane application."
+      }
+    ],
+    "paintability": {
+      "primer_needed": false,
+      "recommended_primer": "Not needed — wood stain is the primary finishing method",
+      "paint_types": ["wood_stain", "polyurethane", "lacquer"],
+      "notes": "Wood stain is the signature finish for wood PLA. Standard paint can be used with primer but defeats the wood aesthetic. If painting, filler primer works but the wood texture bleeds through slightly."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": false,
+        "procedure": "Not recommended. Wood filler particles scorch at annealing temperatures, causing discoloration and a burnt smell.",
+        "strength_gain_pct": 0,
+        "tradeoffs": "Burns the wood particles. Wood PLA is an aesthetic material, not a structural one."
+      }
+    ]
+  },
+  "abs": {
+    "techniques": [
+      {
+        "name": "Acetone Vapor Smoothing",
+        "difficulty": "moderate",
+        "tools_needed": ["acetone", "glass jar or sealed container", "paper towels", "wire rack or stand", "aluminum foil"],
+        "procedure": "Line the bottom and sides of a sealed glass container with acetone-soaked paper towels. Place the part on a wire rack above the towels (not touching liquid). Seal the container. Check every 15-30 minutes — the acetone vapor dissolves the surface, filling layer lines. Remove when desired smoothness is reached (typically 30-90 minutes). Let cure in open air for 24 hours.",
+        "result": "Glossy, injection-molded appearance with completely invisible layer lines. The signature ABS finishing technique.",
+        "safety_notes": "CRITICAL: Acetone is extremely flammable and toxic to inhale. Work in a well-ventilated area away from heat sources. Wear nitrile gloves and safety glasses. Never heat acetone directly."
+      },
+      {
+        "name": "Sanding",
+        "difficulty": "easy",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "600-grit sandpaper", "water for wet sanding"],
+        "procedure": "Sand from 220 to 600 grit. ABS sands easily and predictably. Wet sanding at 400+ produces excellent results.",
+        "result": "Smooth matte finish, ready for painting or vapor smoothing.",
+        "safety_notes": "Wear a dust mask. ABS dust contains styrene — avoid prolonged inhalation."
+      },
+      {
+        "name": "ABS Slurry Welding",
+        "difficulty": "moderate",
+        "tools_needed": ["acetone", "ABS scraps or failed prints", "small glass jar", "brush or syringe"],
+        "procedure": "Dissolve ABS scraps in acetone to make a thick paste (slurry). Apply to gaps, seams, or joints with a brush. The slurry chemically welds to the printed ABS as the acetone evaporates. Fill, let dry 1 hour, sand smooth.",
+        "result": "Chemically bonded joints as strong as the parent material. Invisible seams after sanding.",
+        "safety_notes": "Ventilated area. Nitrile gloves. Acetone dissolves many plastics — protect work surfaces."
+      },
+      {
+        "name": "Painting",
+        "difficulty": "easy",
+        "tools_needed": ["filler primer", "spray paint or acrylic", "fine sandpaper"],
+        "procedure": "Sand to 400 grit. Apply filler primer. Wet sand primer. Apply paint. ABS accepts paint extremely well, especially after vapor smoothing.",
+        "result": "Professional painted finish. Best results when combined with vapor smoothing first.",
+        "safety_notes": "Standard spray painting precautions."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Filler primer or plastic-specific primer (Tamiya, Krylon Fusion)",
+      "paint_types": ["spray_paint", "acrylic", "enamel", "automotive_paint"],
+      "notes": "ABS is one of the most paintable FDM materials. Acetone vapor smoothing before painting eliminates layer lines completely. Automotive paints bond exceptionally well."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 100-110C for 30-60 minutes. Cool slowly. ABS anneals more predictably than PLA with less distortion due to its amorphous structure.",
+        "strength_gain_pct": 20,
+        "tradeoffs": "Modest dimensional changes (1-2%). Less distortion than PLA annealing but still measurable on precision parts."
+      }
+    ]
+  },
+  "asa": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "easy",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "600-grit sandpaper"],
+        "procedure": "Sand from 220 to 600 grit. ASA sands similarly to ABS. Wet sanding at higher grits for best finish.",
+        "result": "Smooth matte finish ready for paint or coating.",
+        "safety_notes": "Wear a dust mask. ASA dust contains styrene."
+      },
+      {
+        "name": "Acetone Vapor Smoothing (Limited)",
+        "difficulty": "moderate",
+        "tools_needed": ["acetone", "sealed glass container", "paper towels", "wire rack"],
+        "procedure": "Same technique as ABS, but ASA is less responsive to acetone. Exposure times are 2-3x longer (60-180 minutes). Results are less dramatic — surface softens but may not achieve the full glossy finish ABS gets.",
+        "result": "Partially smoothed surface. Layer lines reduced but not eliminated. Better than sanding alone for organic shapes.",
+        "safety_notes": "Same acetone safety precautions as ABS. Extended exposure time increases fume risk — ensure strong ventilation."
+      },
+      {
+        "name": "Painting",
+        "difficulty": "easy",
+        "tools_needed": ["filler primer", "UV-resistant spray paint", "fine sandpaper"],
+        "procedure": "Sand to 400 grit. Apply primer. Paint with UV-resistant paint to match ASA's outdoor durability. Standard paints work too but may yellow in sun before the ASA itself does.",
+        "result": "Painted finish. ASA's built-in UV resistance means less need for protective coatings than ABS.",
+        "safety_notes": "Standard painting precautions."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Plastic-specific primer (Krylon Fusion, Tamiya Surface Primer)",
+      "paint_types": ["spray_paint", "acrylic", "enamel", "uv_resistant_paint"],
+      "notes": "Paints well with primer. ASA is inherently UV-stable so outdoor parts need less paint protection than ABS. Use UV-resistant topcoat for color longevity."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 100-110C for 30-60 minutes. Similar to ABS annealing process.",
+        "strength_gain_pct": 15,
+        "tradeoffs": "Minimal dimensional changes. Less effective than ABS annealing but still measurable improvement in layer adhesion."
+      }
+    ]
+  },
+  "asa_plus": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "easy",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "600-grit sandpaper"],
+        "procedure": "Sand from 220 to 600 grit. Identical to standard ASA sanding behavior.",
+        "result": "Smooth matte finish.",
+        "safety_notes": "Wear a dust mask."
+      },
+      {
+        "name": "Acetone Vapor Smoothing (Limited)",
+        "difficulty": "moderate",
+        "tools_needed": ["acetone", "sealed glass container", "paper towels", "wire rack"],
+        "procedure": "Same technique and limitations as standard ASA. Less responsive than ABS — longer exposure times needed.",
+        "result": "Partially smoothed surface with reduced layer lines.",
+        "safety_notes": "Acetone is flammable and toxic. Strong ventilation required."
+      },
+      {
+        "name": "Painting",
+        "difficulty": "easy",
+        "tools_needed": ["filler primer", "spray paint", "fine sandpaper"],
+        "procedure": "Sand, prime, paint. Same process as standard ASA.",
+        "result": "Professional painted finish with UV-resistant base material.",
+        "safety_notes": "Standard painting precautions."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Plastic-specific primer",
+      "paint_types": ["spray_paint", "acrylic", "enamel", "uv_resistant_paint"],
+      "notes": "Same paintability as standard ASA. Impact modifiers don't affect paint adhesion."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 100-110C for 30-60 minutes. Same as standard ASA.",
+        "strength_gain_pct": 15,
+        "tradeoffs": "Minimal dimensional changes. Same behavior as standard ASA."
+      }
+    ]
+  },
+  "petg": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "moderate",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "600-grit sandpaper", "water for wet sanding"],
+        "procedure": "Sand from 220 to 600 grit. PETG is harder and more abrasion-resistant than PLA — expect more effort. Wet sanding is strongly recommended as PETG tends to gum up dry sandpaper. Work slowly and let the abrasive do the work.",
+        "result": "Smooth finish, though PETG's natural slight translucency may show subsurface scuffs.",
+        "safety_notes": "Wear a dust mask. Wet sanding reduces dust significantly."
+      },
+      {
+        "name": "Painting",
+        "difficulty": "easy",
+        "tools_needed": ["plastic-specific primer (Krylon Fusion)", "spray paint or acrylic", "fine sandpaper"],
+        "procedure": "Sand to 400 grit. Apply plastic-specific primer — PETG's chemical resistance means standard primers may not adhere. Krylon Fusion bonds directly to PETG. Apply 2-3 thin coats of paint.",
+        "result": "Good painted finish. Adhesion is reliable with the right primer.",
+        "safety_notes": "Standard painting precautions."
+      },
+      {
+        "name": "Epoxy Coating",
+        "difficulty": "moderate",
+        "tools_needed": ["brush-on epoxy or XTC-3D", "mixing cups", "disposable brush", "nitrile gloves"],
+        "procedure": "Light sand to 220 grit for mechanical adhesion. Mix and brush-apply thin epoxy coat. No chemical smoothing exists for PETG — epoxy is the primary smoothing method.",
+        "result": "Glossy, smooth finish that fills layer lines. Adds chemical and moisture resistance.",
+        "safety_notes": "Ventilated area. Nitrile gloves required."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Krylon Fusion (bonds to plastics without sanding) or Tamiya Surface Primer",
+      "paint_types": ["spray_paint", "acrylic", "enamel"],
+      "notes": "PETG's chemical resistance makes primer essential — paint alone will chip off. No chemical smoothing is available for PETG, so sand thoroughly before painting for best results."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 80-90C for 30-60 minutes. PETG has a narrow annealing window — too hot and it deforms severely due to its semi-crystalline nature.",
+        "strength_gain_pct": 15,
+        "tradeoffs": "Narrow temperature window. Risk of significant warping if temperature overshoots. Less predictable than PLA or ABS annealing."
+      }
+    ]
+  },
+  "cf_pla": {
+    "techniques": [
+      {
+        "name": "Sanding (with protection)",
+        "difficulty": "moderate",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "water for wet sanding", "nitrile gloves", "N95 respirator"],
+        "procedure": "Wet sand only — dry sanding releases carbon fiber dust. Start at 220 grit, work to 400. The carbon fibers make the surface more abrasion-resistant than plain PLA. Wet sanding keeps fibers contained.",
+        "result": "Smooth matte finish with a subtle carbon fiber texture visible under the surface.",
+        "safety_notes": "MANDATORY: Wet sand only. Carbon fiber dust is a respiratory and skin irritant. Wear N95 respirator and nitrile gloves. Clean up wet — never sweep or blow dry CF dust."
+      },
+      {
+        "name": "Epoxy Sealing",
+        "difficulty": "moderate",
+        "tools_needed": ["brush-on epoxy", "mixing cups", "disposable brush", "nitrile gloves"],
+        "procedure": "Light wet sand to 220 grit. Apply thin epoxy coat. Sealing CF prints prevents loose fibers from shedding over time and adds a professional finish.",
+        "result": "Sealed, glossy surface. No loose fiber shedding. Enhanced moisture protection.",
+        "safety_notes": "Ventilated area. Nitrile gloves."
+      },
+      {
+        "name": "Painting",
+        "difficulty": "easy",
+        "tools_needed": ["filler primer", "spray paint", "fine sandpaper"],
+        "procedure": "Wet sand to 400 grit. Apply filler primer (fills fiber texture). Paint as normal.",
+        "result": "Painted finish that hides the carbon fiber texture. Use if uniform color is more important than CF aesthetic.",
+        "safety_notes": "Wet sand preparation to contain fiber dust."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Filler primer to smooth over fiber texture",
+      "paint_types": ["spray_paint", "acrylic", "enamel"],
+      "notes": "Paints well with filler primer. Carbon fiber texture may telegraph through thin paint — use 2-3 primer coats. Many users leave CF PLA unpainted for the industrial aesthetic."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Same as PLA: 80-110C for 30-60 minutes. CF filler reduces distortion compared to plain PLA since fibers resist shrinkage.",
+        "strength_gain_pct": 30,
+        "tradeoffs": "Less distortion than pure PLA due to fiber reinforcement constraining shrinkage. Still measurable dimensional changes on precision parts."
+      }
+    ]
+  },
+  "cf_petg": {
+    "techniques": [
+      {
+        "name": "Wet Sanding",
+        "difficulty": "moderate",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "water", "nitrile gloves", "N95 respirator"],
+        "procedure": "Wet sand only. Start at 220, work to 400. PETG base is already harder to sand than PLA — CF filler makes it more abrasive-resistant. Use firm, even pressure.",
+        "result": "Smooth finish with muted carbon fiber texture.",
+        "safety_notes": "MANDATORY: Wet sand only. Carbon fiber dust is a respiratory and skin irritant. N95 respirator and nitrile gloves required."
+      },
+      {
+        "name": "Epoxy Sealing",
+        "difficulty": "moderate",
+        "tools_needed": ["brush-on epoxy", "mixing cups", "disposable brush", "nitrile gloves"],
+        "procedure": "Wet sand to 220 grit. Apply thin epoxy coat. Seals exposed fibers and adds moisture barrier.",
+        "result": "Sealed glossy surface. Prevents fiber shedding and moisture ingress.",
+        "safety_notes": "Ventilated area. Nitrile gloves."
+      },
+      {
+        "name": "Painting",
+        "difficulty": "moderate",
+        "tools_needed": ["plastic-specific primer", "spray paint", "fine sandpaper"],
+        "procedure": "Wet sand to 400 grit. Apply plastic-specific primer (PETG base needs it for adhesion). Paint as normal.",
+        "result": "Painted finish hiding fiber texture.",
+        "safety_notes": "Wet sand preparation. Standard painting ventilation."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Krylon Fusion or plastic-specific primer — PETG base resists standard primers",
+      "paint_types": ["spray_paint", "acrylic", "enamel"],
+      "notes": "Requires plastic-specific primer due to PETG's chemical resistance. Filler primer helps smooth fiber texture."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 80-90C for 30-60 minutes. Same narrow window as plain PETG. CF filler provides some dimensional stability.",
+        "strength_gain_pct": 12,
+        "tradeoffs": "Narrow temperature window. CF filler reduces warping compared to plain PETG but risk of deformation remains."
+      }
+    ]
+  },
+  "petg_cf": {
+    "techniques": [
+      {
+        "name": "Wet Sanding",
+        "difficulty": "moderate",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "water", "nitrile gloves", "N95 respirator"],
+        "procedure": "Wet sand only. Same process as CF PETG — these are equivalent materials from different vendors.",
+        "result": "Smooth finish with subtle fiber texture.",
+        "safety_notes": "MANDATORY: Wet sand only. N95 respirator and nitrile gloves required for carbon fiber dust."
+      },
+      {
+        "name": "Epoxy Sealing",
+        "difficulty": "moderate",
+        "tools_needed": ["brush-on epoxy", "mixing cups", "disposable brush", "nitrile gloves"],
+        "procedure": "Wet sand to 220 grit. Apply thin epoxy coat to seal fibers and add moisture resistance.",
+        "result": "Sealed glossy surface with professional finish.",
+        "safety_notes": "Ventilated area. Nitrile gloves."
+      },
+      {
+        "name": "Painting",
+        "difficulty": "moderate",
+        "tools_needed": ["plastic-specific primer", "spray paint"],
+        "procedure": "Wet sand to 400 grit. Plastic-specific primer required. Paint normally.",
+        "result": "Uniform painted finish.",
+        "safety_notes": "Wet sand to contain fiber dust."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Krylon Fusion or plastic-specific primer",
+      "paint_types": ["spray_paint", "acrylic", "enamel"],
+      "notes": "Same as CF PETG — PETG base requires plastic-specific primer for paint adhesion."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 80-90C for 30-60 minutes. Same as CF PETG.",
+        "strength_gain_pct": 12,
+        "tradeoffs": "Narrow temperature window. Same characteristics as CF PETG."
+      }
+    ]
+  },
+  "pet_cf": {
+    "techniques": [
+      {
+        "name": "Wet Sanding",
+        "difficulty": "moderate",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "water", "nitrile gloves", "N95 respirator"],
+        "procedure": "Wet sand only. PET-CF is similar to PETG-CF in post-processing behavior. Start at 220, work to 400.",
+        "result": "Smooth matte finish.",
+        "safety_notes": "MANDATORY: Wet sand only. Carbon fiber dust is harmful. N95 respirator and nitrile gloves required."
+      },
+      {
+        "name": "Epoxy Sealing",
+        "difficulty": "moderate",
+        "tools_needed": ["brush-on epoxy", "mixing cups", "disposable brush", "nitrile gloves"],
+        "procedure": "Wet sand to 220 grit. Apply thin epoxy coat. Essential for sealing exposed carbon fibers and protecting against moisture.",
+        "result": "Sealed, durable surface with fiber shedding prevention.",
+        "safety_notes": "Ventilated area. Nitrile gloves."
+      },
+      {
+        "name": "Painting",
+        "difficulty": "moderate",
+        "tools_needed": ["plastic-specific primer", "spray paint"],
+        "procedure": "Wet sand to 400 grit. Apply plastic-specific primer. Paint normally.",
+        "result": "Uniform painted finish hiding fiber texture.",
+        "safety_notes": "Wet sand to contain fiber dust."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Plastic-specific primer (Krylon Fusion)",
+      "paint_types": ["spray_paint", "acrylic", "enamel"],
+      "notes": "PET base shares PETG's chemical resistance — plastic-specific primer required for adhesion."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 80-90C for 30-60 minutes. PET crystallizes more aggressively than PETG — watch for opacity changes.",
+        "strength_gain_pct": 15,
+        "tradeoffs": "Part may become opaque (crystallization whitening). Dimensional changes possible. CF filler provides some stability."
+      }
+    ]
+  },
+  "tpu": {
+    "techniques": [
+      {
+        "name": "Flexible Paint (PlastiDip / Flex Seal)",
+        "difficulty": "moderate",
+        "tools_needed": ["PlastiDip spray or Flex Seal", "masking tape (if multi-color)"],
+        "procedure": "Clean surface with isopropyl alcohol. Apply 3-4 thin coats of PlastiDip or Flex Seal, letting each coat dry 15-30 minutes. Standard rigid paints will crack and flake on flexible TPU — only flexible coatings work.",
+        "result": "Colored, rubberized finish that flexes with the material.",
+        "safety_notes": "Spray in well-ventilated area. PlastiDip fumes are moderately toxic."
+      },
+      {
+        "name": "Dyeing",
+        "difficulty": "moderate",
+        "tools_needed": ["Rit DyeMore (synthetic fabric dye)", "pot of water", "stove or hot plate", "tongs"],
+        "procedure": "Heat water to 90-95C (not boiling). Add Rit DyeMore per package instructions. Submerge TPU part for 10-30 minutes, checking color periodically. Rinse in cool water. TPU absorbs dye well, especially lighter-colored filaments.",
+        "result": "Through-dyed color that won't crack or peel when flexed.",
+        "safety_notes": "Use dedicated dye pot (not food prep). Ventilated area. Wear gloves — dye stains skin."
+      }
+    ],
+    "paintability": {
+      "primer_needed": false,
+      "recommended_primer": "Not applicable — standard primers crack on TPU",
+      "paint_types": ["plastidip", "flex_seal", "fabric_paint"],
+      "notes": "ONLY use flexible paints/coatings. Standard spray paint, acrylic, and enamel will crack and flake as the TPU flexes. PlastiDip is the go-to. Dyeing is often a better option than painting."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": false,
+        "procedure": "Not applicable. TPU is a thermoplastic elastomer — annealing does not meaningfully improve its properties and risks deformation.",
+        "strength_gain_pct": 0,
+        "tradeoffs": "TPU's value is flexibility, not rigidity. Annealing would work against its design purpose."
+      }
+    ]
+  },
+  "nylon": {
+    "techniques": [
+      {
+        "name": "Dyeing with Rit DyeMore",
+        "difficulty": "moderate",
+        "tools_needed": ["Rit DyeMore (synthetic fabric dye)", "large pot", "stove or hot plate", "tongs", "thermometer"],
+        "procedure": "Heat water to 90-100C. Add Rit DyeMore synthetic dye. Submerge nylon part for 10-60 minutes depending on desired intensity. Nylon absorbs dye eagerly and deeply — this is the signature nylon finishing technique. Start with white/natural filament for best results. Rinse in cool water when done.",
+        "result": "Deep, permanent, through-dyed color. Nylon absorbs dye better than any other FDM material. Vibrant colors that won't chip, crack, or wear off.",
+        "safety_notes": "Dedicated dye pot — not for food. Ventilated area. Wear gloves."
+      },
+      {
+        "name": "Sanding",
+        "difficulty": "advanced",
+        "tools_needed": ["120-grit sandpaper", "220-grit sandpaper", "400-grit sandpaper"],
+        "procedure": "Nylon is tough and slightly slippery, making it difficult to sand. Use aggressive 120 grit to start. The material tends to fuzz rather than powder. Wet sanding helps. Expect 2-3x the effort compared to PLA.",
+        "result": "Improved surface smoothness but nylon never sands as cleanly as PLA or ABS.",
+        "safety_notes": "Wear a dust mask. Nylon dust is a mild irritant."
+      },
+      {
+        "name": "Epoxy Coating",
+        "difficulty": "moderate",
+        "tools_needed": ["brush-on epoxy", "mixing cups", "disposable brush", "nitrile gloves"],
+        "procedure": "Light sand to 220 grit. Apply thin epoxy coat. Epoxy seals nylon against moisture absorption — critical for structural parts that need dimensional stability.",
+        "result": "Sealed, glossy surface. Dramatically reduces moisture absorption.",
+        "safety_notes": "Ventilated area. Nitrile gloves."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Nylon-specific adhesion promoter or plastic-specific primer (Krylon Fusion)",
+      "paint_types": ["spray_paint", "acrylic"],
+      "notes": "Nylon's low surface energy makes paint adhesion challenging. Dyeing is usually a better option for coloring nylon parts. If painting, use adhesion promoter and expect less durability than paint on PLA/ABS."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 70-80C for 2-4 hours. Nylon benefits from extended low-temp annealing that allows crystallization without melting. Some sources recommend even longer (8+ hours) at 70C.",
+        "strength_gain_pct": 20,
+        "tradeoffs": "Slow process. Modest dimensional changes. Moisture must be fully removed before annealing (dry at 70C for 4+ hours first) or steam bubbles form internally."
+      }
+    ]
+  },
+  "cf_nylon": {
+    "techniques": [
+      {
+        "name": "Wet Sanding (with protection)",
+        "difficulty": "advanced",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "water", "nitrile gloves", "N95 respirator", "safety glasses"],
+        "procedure": "Wet sand only — NEVER dry sand CF nylon. Carbon fiber dust is a serious respiratory and skin hazard. Start at 220 grit, work to 400. The material is very hard and abrasion-resistant. Expect significant effort.",
+        "result": "Smooth matte finish with industrial appearance.",
+        "safety_notes": "CRITICAL: Carbon fiber dust causes lung damage and severe skin irritation. N95 respirator, nitrile gloves, and safety glasses are mandatory. Wet sand only. Clean up with damp cloth — never blow or sweep dry."
+      },
+      {
+        "name": "Epoxy Sealing",
+        "difficulty": "moderate",
+        "tools_needed": ["brush-on epoxy", "mixing cups", "disposable brush", "nitrile gloves"],
+        "procedure": "Wet sand to 220 grit. Apply thin epoxy coat. Seals exposed fibers (prevents shedding), blocks moisture absorption (nylon's weakness), and adds a professional finish.",
+        "result": "Sealed surface with no fiber shedding. Enhanced moisture resistance and dimensional stability.",
+        "safety_notes": "Ventilated area. Nitrile gloves."
+      },
+      {
+        "name": "Painting",
+        "difficulty": "moderate",
+        "tools_needed": ["nylon adhesion promoter", "filler primer", "spray paint"],
+        "procedure": "Wet sand to 400 grit. Apply nylon adhesion promoter. Apply filler primer to smooth fiber texture. Paint normally.",
+        "result": "Painted finish. Adhesion promoter is critical — nylon's low surface energy plus CF texture make paint adhesion challenging.",
+        "safety_notes": "Wet sand to contain fiber dust. Standard painting ventilation."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Nylon adhesion promoter + filler primer (two-step)",
+      "paint_types": ["spray_paint", "acrylic", "enamel"],
+      "notes": "Requires adhesion promoter due to nylon base. Filler primer needed to smooth carbon fiber texture. Two-step primer process. Many users leave CF nylon unpainted for its industrial look."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 70-80C for 2-4 hours. Same as plain nylon. CF filler constrains distortion during annealing. Dry thoroughly first (70C for 4+ hours).",
+        "strength_gain_pct": 15,
+        "tradeoffs": "CF filler limits the crystallization gains compared to plain nylon. Still beneficial for layer adhesion improvement."
+      }
+    ]
+  },
+  "pa6_gf": {
+    "techniques": [
+      {
+        "name": "Wet Sanding (with protection)",
+        "difficulty": "advanced",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "water", "nitrile gloves", "N95 respirator", "safety glasses"],
+        "procedure": "Wet sand only — NEVER dry sand glass fiber materials. Glass fiber dust is extremely dangerous — the tiny glass shards embed in skin and lungs. Start at 220 grit, work to 400. Very abrasion-resistant material.",
+        "result": "Smooth finish with subtle glass fiber texture.",
+        "safety_notes": "CRITICAL: Glass fiber dust is more dangerous than carbon fiber dust — microscopic glass shards cause permanent lung damage and severe skin irritation. N95 respirator, nitrile gloves, safety glasses, and long sleeves mandatory. Wet sand only. Shower after extended sanding sessions."
+      },
+      {
+        "name": "Epoxy Sealing",
+        "difficulty": "moderate",
+        "tools_needed": ["brush-on epoxy", "mixing cups", "disposable brush", "nitrile gloves"],
+        "procedure": "Wet sand to 220 grit. Apply thin epoxy coat. Seals glass fibers (prevents shedding) and blocks moisture absorption. Essential for any part that will be handled regularly.",
+        "result": "Sealed, smooth surface safe for handling. No fiber shedding.",
+        "safety_notes": "Ventilated area. Nitrile gloves."
+      },
+      {
+        "name": "Painting",
+        "difficulty": "moderate",
+        "tools_needed": ["nylon adhesion promoter", "filler primer", "spray paint"],
+        "procedure": "Wet sand to 400 grit. Apply nylon adhesion promoter (PA6 is a nylon). Apply filler primer. Paint normally.",
+        "result": "Painted finish hiding glass fiber texture.",
+        "safety_notes": "Wet sand to contain glass fiber dust."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Nylon adhesion promoter + filler primer",
+      "paint_types": ["spray_paint", "acrylic", "enamel"],
+      "notes": "PA6 base is nylon — requires adhesion promoter. Glass fiber texture needs filler primer. Same two-step process as CF nylon."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 70-80C for 2-4 hours. Same nylon annealing process. Glass fibers constrain warping better than unreinforced nylon. Dry part thoroughly first.",
+        "strength_gain_pct": 18,
+        "tradeoffs": "Glass fibers provide good dimensional stability during annealing. Less warping than plain nylon. Must dry thoroughly before heating."
+      }
+    ]
+  },
+  "polycarbonate": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "moderate",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "600-grit sandpaper", "800-grit sandpaper", "water for wet sanding"],
+        "procedure": "Sand from 220 to 800 grit. PC is hard and abrasion-resistant but sands predictably. Wet sanding at 600+ produces a near-clear finish on natural/transparent PC. Progressive grits are important — don't skip.",
+        "result": "Very smooth finish. Transparent PC can be polished to near-optical clarity with enough grits.",
+        "safety_notes": "Wear a dust mask. PC dust is a mild irritant."
+      },
+      {
+        "name": "Solvent Welding (Dichloromethane)",
+        "difficulty": "advanced",
+        "tools_needed": ["dichloromethane (methylene chloride)", "syringe or fine-tip applicator", "clamps", "full-face respirator", "chemical-resistant gloves"],
+        "procedure": "Apply a thin bead of dichloromethane to the joint surfaces. Press parts together and clamp for 5-10 minutes. The solvent partially dissolves the PC surfaces, creating a chemical weld as it evaporates. The bond is as strong as the parent material.",
+        "result": "Invisible, full-strength chemical weld between PC parts.",
+        "safety_notes": "ADVANCED USERS ONLY: Dichloromethane is acutely toxic — causes chemical burns, is a suspected carcinogen, and can be fatal in poorly ventilated spaces. Full-face respirator with organic vapor cartridge, chemical-resistant gloves, and outdoor or fume-hood ventilation are mandatory."
+      },
+      {
+        "name": "Painting",
+        "difficulty": "easy",
+        "tools_needed": ["plastic-specific primer", "spray paint", "fine sandpaper"],
+        "procedure": "Sand to 400 grit. Apply plastic-specific primer. Paint normally. PC accepts paint well.",
+        "result": "Professional painted finish.",
+        "safety_notes": "Standard painting precautions."
+      },
+      {
+        "name": "Epoxy Coating",
+        "difficulty": "moderate",
+        "tools_needed": ["brush-on epoxy", "mixing cups", "disposable brush", "nitrile gloves"],
+        "procedure": "Sand to 220 grit. Apply thin epoxy coat for UV protection and surface smoothing. PC yellows in sunlight — epoxy with UV inhibitors extends outdoor life.",
+        "result": "Glossy, UV-protected finish.",
+        "safety_notes": "Ventilated area. Nitrile gloves."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Plastic-specific primer (Krylon Fusion, Tamiya)",
+      "paint_types": ["spray_paint", "acrylic", "enamel", "automotive_paint"],
+      "notes": "PC paints well with proper primer. Clear PC parts can be lightly tinted with transparent dyes or left clear with a polished finish."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 120-130C for 1-2 hours. PC has a high glass transition temp (147C) so it anneals at higher temperatures than most materials. Cool very slowly (2-3 hours in oven).",
+        "strength_gain_pct": 25,
+        "tradeoffs": "Requires oven capable of reaching 130C accurately. Slow cooling is critical — rapid cooling induces internal stresses. Transparent PC may become slightly opaque."
+      }
+    ]
+  },
+  "pc_abs": {
+    "techniques": [
+      {
+        "name": "Sanding",
+        "difficulty": "easy",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper", "600-grit sandpaper"],
+        "procedure": "Sand from 220 to 600 grit. PC-ABS sands similarly to ABS — the ABS component makes it easier to work than pure PC.",
+        "result": "Smooth matte finish ready for painting.",
+        "safety_notes": "Wear a dust mask."
+      },
+      {
+        "name": "Acetone Smoothing (Limited)",
+        "difficulty": "moderate",
+        "tools_needed": ["acetone", "sealed glass container", "paper towels", "wire rack"],
+        "procedure": "Same setup as ABS acetone vapor smoothing, but PC-ABS is significantly less responsive. The PC component resists acetone dissolution. Exposure times of 2-4 hours may be needed. Results are inconsistent — some PC-ABS blends respond better than others depending on the ABS ratio.",
+        "result": "Partially smoothed surface. Less dramatic than pure ABS vapor smoothing.",
+        "safety_notes": "Acetone safety — flammable, toxic fumes. Strong ventilation required."
+      },
+      {
+        "name": "Painting",
+        "difficulty": "easy",
+        "tools_needed": ["filler primer", "spray paint", "fine sandpaper"],
+        "procedure": "Sand to 400 grit. Apply filler primer. Paint normally. PC-ABS accepts paint well — better than pure PC due to the ABS component.",
+        "result": "Professional painted finish.",
+        "safety_notes": "Standard painting precautions."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Filler primer or plastic-specific primer",
+      "paint_types": ["spray_paint", "acrylic", "enamel"],
+      "notes": "Good paintability — the ABS component improves paint adhesion compared to pure PC. Standard filler primer works well."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 110-120C for 1-2 hours. Between ABS (100C) and PC (130C) annealing temps. Cool slowly.",
+        "strength_gain_pct": 20,
+        "tradeoffs": "Moderate dimensional changes. Better stability than pure ABS annealing due to PC component."
+      }
+    ]
+  },
+  "hips": {
+    "techniques": [
+      {
+        "name": "Limonene Smoothing",
+        "difficulty": "moderate",
+        "tools_needed": ["d-Limonene", "sealed glass container", "wire rack"],
+        "procedure": "Similar to acetone vapor smoothing but with d-Limonene. Place part above limonene in a sealed container. Limonene dissolves HIPS selectively — this is unique to HIPS among FDM materials. Exposure times of 1-4 hours. Check periodically.",
+        "result": "Smoothed surface with reduced layer lines. Less dramatic than ABS+acetone but effective.",
+        "safety_notes": "d-Limonene is much safer than acetone — it's a citrus extract. Still use ventilation as it can cause skin irritation with prolonged contact. Wear nitrile gloves."
+      },
+      {
+        "name": "Acetone Vapor Smoothing",
+        "difficulty": "moderate",
+        "tools_needed": ["acetone", "sealed glass container", "paper towels", "wire rack"],
+        "procedure": "Same technique as ABS. HIPS is a styrene-based material and responds to acetone, but less effectively than ABS. Longer exposure times needed (60-120 minutes).",
+        "result": "Partially smoothed surface. Less glossy than ABS results.",
+        "safety_notes": "Acetone is flammable and toxic. Well-ventilated area, nitrile gloves, no heat sources."
+      },
+      {
+        "name": "Sanding",
+        "difficulty": "easy",
+        "tools_needed": ["220-grit sandpaper", "400-grit sandpaper"],
+        "procedure": "Sand from 220 to 400 grit. HIPS is soft and easy to sand — similar to ABS but slightly softer.",
+        "result": "Smooth matte finish.",
+        "safety_notes": "Wear a dust mask."
+      },
+      {
+        "name": "Painting",
+        "difficulty": "easy",
+        "tools_needed": ["filler primer", "spray paint"],
+        "procedure": "Sand to 400 grit. Prime and paint. HIPS accepts paint well.",
+        "result": "Good painted finish.",
+        "safety_notes": "Standard painting precautions."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Filler primer",
+      "paint_types": ["spray_paint", "acrylic", "enamel"],
+      "notes": "Good paintability similar to ABS. Styrene-based surface bonds well with standard primers."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 90-100C for 30-60 minutes.",
+        "strength_gain_pct": 10,
+        "tradeoffs": "Modest improvement. HIPS is rarely used as a structural material — it's primarily a support material for ABS."
+      }
+    ]
+  },
+  "pva": {
+    "techniques": [
+      {
+        "name": "Water Dissolution",
+        "difficulty": "easy",
+        "tools_needed": ["warm water (40-50C)", "container large enough for the part", "optional: ultrasonic cleaner"],
+        "procedure": "Submerge the printed part (model + PVA supports) in warm water at 40-50C. PVA dissolves in 2-12 hours depending on support volume and water temperature. Agitate water periodically or use an ultrasonic cleaner to speed dissolution. Change water halfway through for faster results. Rinse model in clean water when supports are fully dissolved.",
+        "result": "Clean model with support-free surfaces. No mechanical removal marks.",
+        "safety_notes": "PVA solution is non-toxic and biodegradable. Dispose down the drain. Ensure water temperature doesn't exceed 60C or it may soften PLA model material."
+      },
+      {
+        "name": "Partial Dissolution (Break-Away Assist)",
+        "difficulty": "easy",
+        "tools_needed": ["warm water", "pliers or flush cutters"],
+        "procedure": "For large support volumes, break away the bulk of PVA mechanically first, then dissolve the remaining interface layer in warm water for 1-2 hours. Saves time over full dissolution.",
+        "result": "Clean surfaces with minimal dissolution time.",
+        "safety_notes": "Wear safety glasses when snapping off supports — PVA can shatter into small pieces."
+      }
+    ],
+    "paintability": {
+      "primer_needed": false,
+      "recommended_primer": "Not applicable",
+      "paint_types": [],
+      "notes": "PVA is a soluble support material, not a final-use material. It is dissolved and discarded after printing. Painting is not applicable."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": false,
+        "procedure": "Not applicable. PVA is a water-soluble support material that is removed during post-processing, not a final-use material.",
+        "strength_gain_pct": 0,
+        "tradeoffs": "PVA is never part of the finished product. Strengthening is irrelevant."
+      }
+    ]
+  }
+}

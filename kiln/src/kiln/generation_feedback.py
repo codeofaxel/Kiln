@@ -433,6 +433,128 @@ def add_iteration(
     return loop
 
 
+def enhance_prompt_with_design_intelligence(
+    prompt: str,
+    *,
+    material: str | None = None,
+    max_length: int = _MAX_PROMPT_LENGTH,
+) -> ImprovedPrompt:
+    """Enhance a generation prompt with design intelligence constraints.
+
+    Analyzes the prompt for functional requirements and appends relevant
+    manufacturing constraints, material guidance, and design rules to
+    produce a smarter generation request.
+
+    This is called **before** generation (proactive), unlike
+    :func:`analyze_for_feedback` which is called **after** (reactive).
+
+    :param prompt: The original generation prompt.
+    :param material: Optional material to constrain to.
+    :param max_length: Maximum allowed prompt length.
+    :returns: An :class:`ImprovedPrompt` with design constraints applied.
+    """
+    try:
+        from kiln.design_intelligence import get_design_constraints
+
+        brief = get_design_constraints(prompt, material=material)
+    except Exception:
+        logger.debug("Design intelligence unavailable, returning original prompt", exc_info=True)
+        return ImprovedPrompt(
+            original_prompt=prompt,
+            improved_prompt=prompt,
+            feedback_applied=[],
+            constraints_added=[],
+            iteration=0,
+            expected_improvements=[],
+        )
+
+    # Extract the most impactful constraints from the brief
+    constraints: list[str] = []
+
+    # Material design limits
+    rules = brief.combined_rules
+    if rules.get("min_wall_thickness_mm"):
+        constraints.append(f"minimum wall thickness {rules['min_wall_thickness_mm']}mm")
+    if rules.get("infill_min_pct"):
+        constraints.append("solid, thick structural elements")
+    if rules.get("gussets_required"):
+        constraints.append("triangular gussets at load-bearing joints")
+    if rules.get("fillets_required"):
+        constraints.append("rounded fillets at all corners and joints")
+
+    # Material suitability
+    mat = brief.recommended_material
+    if mat and mat.material:
+        constraints.append(f"designed for {mat.material.display_name} material")
+
+    # Pattern-specific constraints
+    for pattern in brief.applicable_patterns[:2]:  # limit to top 2
+        if pattern.print_orientation:
+            constraints.append(pattern.print_orientation_reason)
+
+    # Printability basics
+    constraints.append("flat bottom for bed adhesion")
+    constraints.append("no overhangs greater than 50 degrees")
+    constraints.append("single solid body, no floating parts")
+
+    if not constraints:
+        return ImprovedPrompt(
+            original_prompt=prompt,
+            improved_prompt=prompt,
+            feedback_applied=[],
+            constraints_added=[],
+            iteration=0,
+            expected_improvements=[],
+        )
+
+    # Build the enhanced prompt
+    requirements = ". ".join(constraints[:8])  # cap at 8 constraints
+    suffix = f" Requirements: {requirements}."
+
+    max_original = max_length - len(suffix)
+    if max_original < 20:
+        suffix = f" Requirements: {'. '.join(constraints[:4])}."
+        max_original = max_length - len(suffix)
+
+    trimmed = prompt[:max_original].rstrip()
+    improved = trimmed + suffix
+
+    if len(improved) > max_length:
+        improved = improved[: max_length - 3] + "..."
+
+    return ImprovedPrompt(
+        original_prompt=prompt,
+        improved_prompt=improved,
+        feedback_applied=[],
+        constraints_added=constraints,
+        iteration=0,
+        expected_improvements=[
+            f"Design-aware generation with {len(constraints)} constraints applied",
+        ],
+    )
+
+
+def design_validation_to_feedback(
+    report: Any,
+    original_prompt: str,
+) -> list[PrintFeedback]:
+    """Convert a :class:`~kiln.design_validator.DesignValidationReport` into feedback.
+
+    Bridge function that converts design validation failures into
+    :class:`PrintFeedback` items for the existing iterative improvement
+    loop.  This closes the loop: generate -> validate -> feedback ->
+    regenerate.
+
+    :param report: A ``DesignValidationReport`` from
+        :func:`~kiln.design_validator.validate_design`.
+    :param original_prompt: The original generation prompt.
+    :returns: List of :class:`PrintFeedback` items.
+    """
+    from kiln.design_validator import validation_to_feedback
+
+    return validation_to_feedback(report, original_prompt)
+
+
 def get_feedback_loop(model_id: str) -> FeedbackLoop | None:
     """Retrieve a feedback loop by model ID.
 

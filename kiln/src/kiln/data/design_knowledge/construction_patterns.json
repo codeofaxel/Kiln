@@ -1,0 +1,199 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "domain": "construction",
+    "description": "Architectural and structural design patterns for construction-scale 3D printing. Agent-consumable patterns for designing printed buildings and structures."
+  },
+  "load_bearing_wall": {
+    "display_name": "Load-Bearing Printed Wall",
+    "description": "A structural wall that carries roof/floor loads directly to the foundation. The primary structural element in most printed buildings.",
+    "use_cases": ["residential_exterior", "residential_interior_bearing", "commercial_single_story", "defense_structures"],
+    "design_rules": {
+      "min_wall_thickness_mm": 150,
+      "recommended_wall_thickness_mm": 200,
+      "max_height_to_thickness_ratio": 18,
+      "max_unsupported_length_m": 6,
+      "buttress_spacing_m": 4,
+      "horizontal_reinforcement_spacing_mm": 400,
+      "vertical_reinforcement_spacing_mm": 600,
+      "corner_overlap_layers": 3,
+      "opening_header_reinforcement": true,
+      "bond_beam_at_top": true,
+      "foundation_connection": "dowels_or_j_bolts"
+    },
+    "wall_profiles": {
+      "single_bead": {"width_mm": 100, "structural": false, "use": "non_bearing_partitions"},
+      "double_bead": {"width_mm": 200, "structural": true, "use": "single_story_bearing"},
+      "double_bead_with_core": {"width_mm": 300, "structural": true, "use": "insulated_bearing_wall", "core_fill": "insulation_or_grout"},
+      "triple_bead": {"width_mm": 300, "structural": true, "use": "multi_story_or_high_load"}
+    },
+    "agent_guidance": [
+      "Double-bead (200mm) is the standard for single-story residential. Two parallel beads with air gap or core fill.",
+      "Every wall needs a bond beam at the top — continuous reinforced concrete beam that ties wall to roof structure.",
+      "Openings (doors, windows) need lintels/headers. Print up to the opening, place steel header, continue printing above.",
+      "Height-to-thickness ratio of 18:1 max. A 200mm wall can go 3.6m tall. Thicker walls go taller.",
+      "Corner connections: overlap alternating layers (like brick bonding) to create structural interlocking.",
+      "Vertical rebar in cells every 600mm for walls over 2.5m. Grouted after printing."
+    ]
+  },
+  "curved_wall": {
+    "display_name": "Curved / Organic Wall",
+    "description": "A non-rectilinear wall following a curved path. One of the major advantages of 3D printing over traditional construction — curves cost the same as straight walls.",
+    "use_cases": ["architectural_feature", "wind_resistant_structures", "acoustic_optimization", "aesthetic_design", "shell_structures"],
+    "design_rules": {
+      "min_radius_m": 0.5,
+      "recommended_min_radius_m": 1.0,
+      "max_curvature_change_per_layer_deg": 5,
+      "speed_reduction_in_curves_pct": 20,
+      "consistent_layer_width_critical": true,
+      "layer_overlap_at_curves_mm": 5,
+      "structural_analysis_required": true
+    },
+    "agent_guidance": [
+      "THIS IS WHERE PRINTED CONSTRUCTION SHINES. Curves cost zero extra vs straight walls. In traditional construction, curves cost 3-5x more.",
+      "Use curves to your advantage — curved walls are inherently stronger than flat walls against lateral loads (wind, seismic).",
+      "Minimum practical radius is 0.5m for most printers. Below that, the nozzle can't maintain consistent bead width.",
+      "Slow down 20% in tight curves to maintain layer quality. The outside of the curve gets stretched, inside gets compressed.",
+      "Double-curved surfaces (domes, shells) require specialized toolpath planning — most slicers don't handle this natively.",
+      "Acoustic benefits: curved interior walls eliminate parallel surfaces that cause flutter echo. Design for sound quality.",
+      "Freeform organic shapes are the architectural signature of printed construction. Lean into it for visual differentiation."
+    ]
+  },
+  "window_opening": {
+    "display_name": "Window / Door Opening",
+    "description": "An opening in a printed wall for windows or doors. Requires special handling because the printing process can't bridge gaps natively.",
+    "use_cases": ["residential_windows", "residential_doors", "commercial_storefronts", "ventilation_openings"],
+    "design_rules": {
+      "max_opening_width_m": 2.4,
+      "header_depth_mm": 200,
+      "header_material": "reinforced_concrete_or_steel",
+      "bearing_length_each_side_mm": 200,
+      "sill_reinforcement": true,
+      "rough_opening_clearance_mm": 15,
+      "print_sequence": "walls_to_sill_height_then_place_frame_then_header_then_continue"
+    },
+    "agent_guidance": [
+      "Print walls up to sill height, leave opening, continue walls on each side up to header height.",
+      "Place steel or precast header across the opening before continuing to print above.",
+      "Standard rough opening: window size + 15mm each side for shimming and sealing.",
+      "Max opening width without special engineering: 2.4m. Wider spans need engineered beams.",
+      "Arched openings are naturally supported during printing — the arch shape holds the fresh concrete.",
+      "Consider printing a temporary support shelf at the opening bottom that gets removed after cure."
+    ]
+  },
+  "insulated_wall_system": {
+    "display_name": "Insulated Printed Wall",
+    "description": "A wall system combining printed concrete with insulation to meet thermal performance requirements. Multiple strategies exist.",
+    "use_cases": ["energy_efficient_residential", "code_compliant_commercial", "cold_climate_buildings", "passive_house"],
+    "design_rules": {
+      "target_r_value_residential": 19,
+      "target_r_value_commercial": 25,
+      "insulation_strategies": [
+        {"type": "core_fill_foam", "r_per_inch": 6.5, "description": "Spray foam between inner and outer printed shells"},
+        {"type": "core_fill_mineral_wool", "r_per_inch": 3.7, "description": "Mineral wool batts in cavity"},
+        {"type": "exterior_rigid_foam", "r_per_inch": 5.0, "description": "Rigid foam board on exterior face with cladding"},
+        {"type": "interior_rigid_foam", "r_per_inch": 5.0, "description": "Rigid foam board on interior face with drywall"}
+      ],
+      "thermal_bridge_prevention": true,
+      "vapor_barrier_required": true,
+      "air_barrier_required": true
+    },
+    "agent_guidance": [
+      "Bare printed concrete walls have R-0.08 per inch. A 200mm wall is about R-0.6. That fails every energy code.",
+      "INSULATION IS MANDATORY for habitable buildings. The wall alone does NOT meet thermal requirements.",
+      "Best approach for most climates: double-bead wall with spray foam core fill. Gets R-19+ in a 300mm total wall.",
+      "Cold climates (zones 6-8): add exterior rigid foam over the printed wall. R-25+ with continuous insulation.",
+      "Concrete's thermal mass is an advantage in hot-arid climates — absorbs heat by day, releases at night.",
+      "Prevent thermal bridges: insulation must be continuous. Don't leave uninsulated concrete connections between inside and outside.",
+      "Vapor barrier goes on the warm side of the insulation. In heating climates: interior. In cooling climates: exterior."
+    ]
+  },
+  "foundation_connection": {
+    "display_name": "Foundation / Slab Connection",
+    "description": "The connection between the printed walls and the foundation. Printers print walls, not foundations — the foundation is always built traditionally first.",
+    "use_cases": ["all_printed_buildings"],
+    "design_rules": {
+      "foundation_type": ["slab_on_grade", "stem_wall", "pier_and_beam"],
+      "anchor_bolt_spacing_mm": 600,
+      "anchor_bolt_embedment_mm": 200,
+      "first_layer_alignment_tolerance_mm": 5,
+      "moisture_barrier_below_first_layer": true,
+      "leveling_pad_required": true,
+      "rebar_dowels_into_wall_cells": true
+    },
+    "agent_guidance": [
+      "Foundation is ALWAYS traditional construction. Printed structures sit on top of a conventional foundation.",
+      "Level the foundation to within 5mm across the full building footprint. Printers can't compensate for an unlevel base.",
+      "Set anchor bolts or J-bolts in the foundation at 600mm spacing to tie the first printed layer down.",
+      "Rebar dowels extend up from foundation into the wall cells — grouted after printing for full structural connection.",
+      "Moisture barrier between foundation and first printed layer prevents rising damp.",
+      "Slab-on-grade is most common for residential. Stem wall for raised floor. Pier-and-beam for difficult sites."
+    ]
+  },
+  "roof_connection": {
+    "display_name": "Roof / Top-of-Wall Connection",
+    "description": "How the roof structure connects to the top of printed walls. A critical structural detail that transfers wind and gravity loads.",
+    "use_cases": ["all_printed_buildings"],
+    "design_rules": {
+      "bond_beam_depth_mm": 200,
+      "bond_beam_width_mm": "match_wall",
+      "bond_beam_reinforcement": "2_no_4_bars_continuous",
+      "anchor_bolt_spacing_for_plate_mm": 600,
+      "hurricane_strap_required_above_wind_mph": 90,
+      "roof_types_compatible": ["truss", "rafter", "flat_concrete", "steel_frame"]
+    },
+    "agent_guidance": [
+      "Bond beam at top of wall is MANDATORY. Poured in place after wall printing completes. Ties everything together.",
+      "Embed anchor bolts in bond beam for wood top plate — standard wood framing roof sits on top.",
+      "For hurricane/high-wind zones: hurricane straps from truss to bond beam, not just gravity connection.",
+      "Flat concrete roofs can be poured on formwork supported by the printed walls — but check wall capacity for wet concrete load.",
+      "Steel truss roofs bolt directly to embed plates cast into the bond beam.",
+      "The roof-to-wall connection is the most critical structural detail. Failures here cause catastrophic collapse in storms."
+    ]
+  },
+  "utility_chase": {
+    "display_name": "Utility / MEP Chase",
+    "description": "Channels and voids within or alongside printed walls for routing electrical, plumbing, and HVAC systems.",
+    "use_cases": ["all_habitable_buildings"],
+    "design_rules": {
+      "electrical_chase_min_width_mm": 50,
+      "plumbing_chase_min_width_mm": 100,
+      "hvac_chase_min_width_mm": 150,
+      "chase_wall_min_remaining_thickness_mm": 75,
+      "conduit_embedment_during_print": true,
+      "post_print_routing_preferred_for_plumbing": true,
+      "access_panel_locations": "code_required"
+    },
+    "agent_guidance": [
+      "Plan utility routing BEFORE printing. Chases must be designed into the wall geometry, not cut after.",
+      "Electrical: embed conduit during printing. Small enough to route within the wall beads or between double-bead cavity.",
+      "Plumbing: route in the wall cavity or on the interior face. Do NOT embed water pipes in printed concrete — repairs require wall demolition.",
+      "HVAC: plan duct routes through the wall cavity for small ducts, or build dedicated mechanical chases for larger systems.",
+      "Always maintain 75mm minimum concrete thickness after chase. Thinner walls lose structural capacity.",
+      "Access panels at code-required locations for inspection and repair. Design these into the wall during printing."
+    ]
+  },
+  "multi_story_connection": {
+    "display_name": "Multi-Story / Floor Connection",
+    "description": "Structural connection between floor levels in multi-story printed buildings. The printed walls support floor slabs which then support the next level of walls.",
+    "use_cases": ["multi_story_residential", "commercial_multi_story", "defense_multi_story"],
+    "design_rules": {
+      "floor_slab_type": ["precast_hollow_core", "cast_in_place", "steel_deck_composite"],
+      "bearing_wall_min_thickness_mm": 200,
+      "floor_bearing_length_mm": 100,
+      "rebar_continuity_through_floor": true,
+      "max_stories_concrete_bearing": 3,
+      "max_stories_with_steel_frame": 5,
+      "lateral_system_required_above_stories": 2
+    },
+    "agent_guidance": [
+      "Print first-story walls. Place floor system. Print second-story walls on top of floor. Repeat.",
+      "Precast hollow-core planks are fastest — crane-placed on printed walls, grouted, ready for next level same day.",
+      "Rebar must continue vertically through the floor slab into the upper wall. This creates a continuous load path.",
+      "3 stories max for pure concrete bearing walls. Above that, need a hybrid steel frame + printed infill strategy.",
+      "Lateral resistance (wind/seismic) requires shear walls, bracing, or moment frames. Pure printed walls are not enough above 2 stories.",
+      "Each floor acts as a diaphragm — must be rigidly connected to all walls to distribute lateral forces evenly.",
+      "Tolerance stack-up matters: 5mm per floor adds up. Re-survey and shim between levels as needed."
+    ]
+  }
+}

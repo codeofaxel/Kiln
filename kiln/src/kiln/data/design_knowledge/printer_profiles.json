@@ -1,0 +1,169 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "domain": "fdm",
+    "description": "Desktop printer capability profiles for material feasibility and design-for-manufacturing decisions."
+  },
+  "bambu_a1_mini": {
+    "display_name": "Bambu Lab A1 Mini",
+    "manufacturer": "Bambu Lab",
+    "build_volume_mm": {"x": 180, "y": 180, "z": 180},
+    "max_hotend_temp_c": 300,
+    "max_bed_temp_c": 80,
+    "has_enclosure": false,
+    "has_direct_drive": true,
+    "supported_materials": ["pla", "petg", "tpu"],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 300,
+    "default_layer_heights_mm": [0.08, 0.12, 0.16, 0.2, 0.28],
+    "agent_notes": [
+      "Great for small high-speed functional prototypes in PLA/PETG.",
+      "No enclosure means avoid ABS/ASA/Nylon/PC for critical functional parts.",
+      "Small Z height favors split-part strategies for taller objects."
+    ]
+  },
+  "bambu_x1c": {
+    "display_name": "Bambu Lab X1 Carbon",
+    "manufacturer": "Bambu Lab",
+    "build_volume_mm": {"x": 256, "y": 256, "z": 256},
+    "max_hotend_temp_c": 300,
+    "max_bed_temp_c": 120,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": ["pla", "petg", "abs", "tpu", "asa", "nylon", "polycarbonate"],
+    "typical_tolerance_mm": 0.1,
+    "max_print_speed_mm_s": 500,
+    "default_layer_heights_mm": [0.08, 0.12, 0.16, 0.2, 0.28],
+    "agent_notes": [
+      "High-speed enclosed platform suitable for most engineering filaments.",
+      "Use hardened nozzle and dry box workflows for nylon/carbon blends.",
+      "Can handle polycarbonate-class jobs when chamber and adhesion are tuned."
+    ]
+  },
+  "bambu_p1s": {
+    "display_name": "Bambu Lab P1S",
+    "manufacturer": "Bambu Lab",
+    "build_volume_mm": {"x": 256, "y": 256, "z": 256},
+    "max_hotend_temp_c": 300,
+    "max_bed_temp_c": 100,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": ["pla", "petg", "abs", "tpu", "asa", "nylon", "polycarbonate"],
+    "typical_tolerance_mm": 0.12,
+    "max_print_speed_mm_s": 500,
+    "default_layer_heights_mm": [0.08, 0.12, 0.16, 0.2, 0.28],
+    "agent_notes": [
+      "Strong enclosed workhorse for mixed prototype and production runs.",
+      "Nylon and PC are feasible but require strict filament drying and bed adhesion control.",
+      "Default to PETG for functional parts when extreme temperature is not required."
+    ]
+  },
+  "bambu_a1": {
+    "display_name": "Bambu Lab A1",
+    "manufacturer": "Bambu Lab",
+    "build_volume_mm": {"x": 256, "y": 256, "z": 256},
+    "max_hotend_temp_c": 300,
+    "max_bed_temp_c": 100,
+    "has_enclosure": false,
+    "has_direct_drive": true,
+    "supported_materials": ["pla", "petg", "tpu"],
+    "typical_tolerance_mm": 0.12,
+    "max_print_speed_mm_s": 500,
+    "default_layer_heights_mm": [0.08, 0.12, 0.16, 0.2, 0.28],
+    "agent_notes": [
+      "Excellent consumer platform for fast PLA/PETG design iteration.",
+      "Open-frame geometry limits reliability for warp-prone engineering materials.",
+      "Direct drive allows dependable TPU compared with Bowden systems."
+    ]
+  },
+  "prusa_mk4": {
+    "display_name": "Prusa MK4",
+    "manufacturer": "Prusa Research",
+    "build_volume_mm": {"x": 250, "y": 210, "z": 220},
+    "max_hotend_temp_c": 290,
+    "max_bed_temp_c": 120,
+    "has_enclosure": false,
+    "has_direct_drive": true,
+    "supported_materials": ["pla", "petg", "abs", "tpu", "asa", "nylon"],
+    "typical_tolerance_mm": 0.1,
+    "max_print_speed_mm_s": 250,
+    "default_layer_heights_mm": [0.08, 0.12, 0.16, 0.2, 0.28],
+    "agent_notes": [
+      "Very consistent dimensional output for precision-fit parts.",
+      "Engineering materials improve significantly when paired with an external enclosure.",
+      "Use conservative acceleration for tight tolerance assemblies."
+    ]
+  },
+  "prusa_mini_plus": {
+    "display_name": "Prusa MINI+",
+    "manufacturer": "Prusa Research",
+    "build_volume_mm": {"x": 180, "y": 180, "z": 180},
+    "max_hotend_temp_c": 280,
+    "max_bed_temp_c": 100,
+    "has_enclosure": false,
+    "has_direct_drive": false,
+    "supported_materials": ["pla", "petg"],
+    "typical_tolerance_mm": 0.15,
+    "max_print_speed_mm_s": 180,
+    "default_layer_heights_mm": [0.08, 0.12, 0.16, 0.2, 0.28],
+    "agent_notes": [
+      "Reliable compact platform for PLA/PETG prototypes and small fixtures.",
+      "Bowden extrusion is not ideal for soft TPU or very fast retract-heavy paths.",
+      "Limited build volume encourages modular design splits."
+    ]
+  },
+  "ender_3_v2": {
+    "display_name": "Ender 3 V2",
+    "manufacturer": "Creality",
+    "build_volume_mm": {"x": 220, "y": 220, "z": 250},
+    "max_hotend_temp_c": 260,
+    "max_bed_temp_c": 100,
+    "has_enclosure": false,
+    "has_direct_drive": false,
+    "supported_materials": ["pla", "petg", "tpu"],
+    "typical_tolerance_mm": 0.2,
+    "max_print_speed_mm_s": 120,
+    "default_layer_heights_mm": [0.08, 0.12, 0.16, 0.2, 0.28],
+    "agent_notes": [
+      "Assume slower print speeds and wider tolerance bands than modern CoreXY systems.",
+      "Direct-drive upgrades materially improve TPU reliability.",
+      "For ABS/ASA-class materials, enclosure retrofits are strongly recommended."
+    ]
+  },
+  "ender_3_s1": {
+    "display_name": "Ender 3 S1",
+    "manufacturer": "Creality",
+    "build_volume_mm": {"x": 220, "y": 220, "z": 270},
+    "max_hotend_temp_c": 260,
+    "max_bed_temp_c": 100,
+    "has_enclosure": false,
+    "has_direct_drive": true,
+    "supported_materials": ["pla", "petg", "abs", "tpu", "asa"],
+    "typical_tolerance_mm": 0.18,
+    "max_print_speed_mm_s": 150,
+    "default_layer_heights_mm": [0.08, 0.12, 0.16, 0.2, 0.28],
+    "agent_notes": [
+      "Direct drive enables functional TPU workflows better than older Ender Bowden setups.",
+      "Open frame still constrains warp-prone ABS/ASA jobs, especially large flat parts.",
+      "Use conservative speed and pressure-advance tuning for dimensional consistency."
+    ]
+  },
+  "voron_2_4": {
+    "display_name": "Voron 2.4",
+    "manufacturer": "Voron Design",
+    "build_volume_mm": {"x": 300, "y": 300, "z": 300},
+    "max_hotend_temp_c": 300,
+    "max_bed_temp_c": 120,
+    "has_enclosure": true,
+    "has_direct_drive": true,
+    "supported_materials": ["pla", "petg", "abs", "tpu", "asa", "nylon", "polycarbonate"],
+    "typical_tolerance_mm": 0.1,
+    "max_print_speed_mm_s": 350,
+    "default_layer_heights_mm": [0.08, 0.12, 0.16, 0.2, 0.28],
+    "agent_notes": [
+      "High-performance enclosed platform intended for engineering thermoplastics.",
+      "Commonly tuned for ABS/ASA/Nylon throughput with good chamber temperature stability.",
+      "Large volume enables one-piece functional builds that smaller beds force into assemblies."
+    ]
+  }
+}

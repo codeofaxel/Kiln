@@ -1,0 +1,327 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "domain": "fdm",
+    "description": "Per-material structural lookup tables for quick safe-load estimates on cantilevered FDM parts. Capacities are already derated with a 3x safety factor."
+  },
+  "pla": {
+    "tensile_capacity_n_per_mm2": 16,
+    "cross_section_vs_load": [
+      {
+        "cantilever_length_mm": 25,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 57.6},
+          {"cross_section_mm2": 24, "max_load_n": 115.2},
+          {"cross_section_mm2": 36, "max_load_n": 172.8},
+          {"cross_section_mm2": 48, "max_load_n": 230.4},
+          {"cross_section_mm2": 60, "max_load_n": 288.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 50,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 38.4},
+          {"cross_section_mm2": 24, "max_load_n": 76.8},
+          {"cross_section_mm2": 36, "max_load_n": 115.2},
+          {"cross_section_mm2": 48, "max_load_n": 153.6},
+          {"cross_section_mm2": 60, "max_load_n": 192.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 100,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 24.0},
+          {"cross_section_mm2": 24, "max_load_n": 48.0},
+          {"cross_section_mm2": 36, "max_load_n": 72.0},
+          {"cross_section_mm2": 48, "max_load_n": 96.0},
+          {"cross_section_mm2": 60, "max_load_n": 120.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 150,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 18.0},
+          {"cross_section_mm2": 24, "max_load_n": 36.0},
+          {"cross_section_mm2": 36, "max_load_n": 54.0},
+          {"cross_section_mm2": 48, "max_load_n": 72.0},
+          {"cross_section_mm2": 60, "max_load_n": 90.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 200,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 13.2},
+          {"cross_section_mm2": 24, "max_load_n": 26.4},
+          {"cross_section_mm2": 36, "max_load_n": 39.6},
+          {"cross_section_mm2": 48, "max_load_n": 52.8},
+          {"cross_section_mm2": 60, "max_load_n": 66.0}
+        ]
+      }
+    ],
+    "layer_orientation_derating": {
+      "across_layers": 1.0,
+      "along_layers": 0.6
+    },
+    "notes": [
+      "Use this table for quick cantilever sanity checks before CAD generation.",
+      "PLA remains sensitive to long-term creep under static loads even when short-term calculations pass.",
+      "If the design sees impact or cyclic loading, pick PETG, Nylon, or PC instead of PLA."
+    ]
+  },
+  "petg": {
+    "tensile_capacity_n_per_mm2": 25,
+    "cross_section_vs_load": [
+      {
+        "cantilever_length_mm": 25,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 80.64},
+          {"cross_section_mm2": 24, "max_load_n": 161.28},
+          {"cross_section_mm2": 36, "max_load_n": 241.92},
+          {"cross_section_mm2": 48, "max_load_n": 322.56},
+          {"cross_section_mm2": 60, "max_load_n": 403.2}
+        ]
+      },
+      {
+        "cantilever_length_mm": 50,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 53.76},
+          {"cross_section_mm2": 24, "max_load_n": 107.52},
+          {"cross_section_mm2": 36, "max_load_n": 161.28},
+          {"cross_section_mm2": 48, "max_load_n": 215.04},
+          {"cross_section_mm2": 60, "max_load_n": 268.8}
+        ]
+      },
+      {
+        "cantilever_length_mm": 100,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 33.6},
+          {"cross_section_mm2": 24, "max_load_n": 67.2},
+          {"cross_section_mm2": 36, "max_load_n": 100.8},
+          {"cross_section_mm2": 48, "max_load_n": 134.4},
+          {"cross_section_mm2": 60, "max_load_n": 168.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 150,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 25.2},
+          {"cross_section_mm2": 24, "max_load_n": 50.4},
+          {"cross_section_mm2": 36, "max_load_n": 75.6},
+          {"cross_section_mm2": 48, "max_load_n": 100.8},
+          {"cross_section_mm2": 60, "max_load_n": 126.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 200,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 18.48},
+          {"cross_section_mm2": 24, "max_load_n": 36.96},
+          {"cross_section_mm2": 36, "max_load_n": 55.44},
+          {"cross_section_mm2": 48, "max_load_n": 73.92},
+          {"cross_section_mm2": 60, "max_load_n": 92.4}
+        ]
+      }
+    ],
+    "layer_orientation_derating": {
+      "across_layers": 1.0,
+      "along_layers": 0.6
+    },
+    "notes": [
+      "PETG is the default load-bearing baseline when no enclosure is available.",
+      "For shelf brackets, always pair this estimate with gussets and fillets at the root.",
+      "If sustained load exceeds 5 kg at 100 mm cantilever, increase section area and use 60%+ infill."
+    ]
+  },
+  "abs": {
+    "tensile_capacity_n_per_mm2": 20,
+    "cross_section_vs_load": [
+      {
+        "cantilever_length_mm": 25,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 72.0},
+          {"cross_section_mm2": 24, "max_load_n": 144.0},
+          {"cross_section_mm2": 36, "max_load_n": 216.0},
+          {"cross_section_mm2": 48, "max_load_n": 288.0},
+          {"cross_section_mm2": 60, "max_load_n": 360.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 50,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 48.0},
+          {"cross_section_mm2": 24, "max_load_n": 96.0},
+          {"cross_section_mm2": 36, "max_load_n": 144.0},
+          {"cross_section_mm2": 48, "max_load_n": 192.0},
+          {"cross_section_mm2": 60, "max_load_n": 240.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 100,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 30.0},
+          {"cross_section_mm2": 24, "max_load_n": 60.0},
+          {"cross_section_mm2": 36, "max_load_n": 90.0},
+          {"cross_section_mm2": 48, "max_load_n": 120.0},
+          {"cross_section_mm2": 60, "max_load_n": 150.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 150,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 22.5},
+          {"cross_section_mm2": 24, "max_load_n": 45.0},
+          {"cross_section_mm2": 36, "max_load_n": 67.5},
+          {"cross_section_mm2": 48, "max_load_n": 90.0},
+          {"cross_section_mm2": 60, "max_load_n": 112.5}
+        ]
+      },
+      {
+        "cantilever_length_mm": 200,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 16.5},
+          {"cross_section_mm2": 24, "max_load_n": 33.0},
+          {"cross_section_mm2": 36, "max_load_n": 49.5},
+          {"cross_section_mm2": 48, "max_load_n": 66.0},
+          {"cross_section_mm2": 60, "max_load_n": 82.5}
+        ]
+      }
+    ],
+    "layer_orientation_derating": {
+      "across_layers": 1.0,
+      "along_layers": 0.6
+    },
+    "notes": [
+      "ABS handles impact better than PLA/PETG but needs enclosure-controlled printing for reliable strength.",
+      "Use these loads only when printed with low warp, high layer bonding process settings.",
+      "For outdoor UV exposure, prefer ASA with similar geometry assumptions."
+    ]
+  },
+  "nylon": {
+    "tensile_capacity_n_per_mm2": 35,
+    "cross_section_vs_load": [
+      {
+        "cantilever_length_mm": 25,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 100.8},
+          {"cross_section_mm2": 24, "max_load_n": 201.6},
+          {"cross_section_mm2": 36, "max_load_n": 302.4},
+          {"cross_section_mm2": 48, "max_load_n": 403.2},
+          {"cross_section_mm2": 60, "max_load_n": 504.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 50,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 67.2},
+          {"cross_section_mm2": 24, "max_load_n": 134.4},
+          {"cross_section_mm2": 36, "max_load_n": 201.6},
+          {"cross_section_mm2": 48, "max_load_n": 268.8},
+          {"cross_section_mm2": 60, "max_load_n": 336.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 100,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 42.0},
+          {"cross_section_mm2": 24, "max_load_n": 84.0},
+          {"cross_section_mm2": 36, "max_load_n": 126.0},
+          {"cross_section_mm2": 48, "max_load_n": 168.0},
+          {"cross_section_mm2": 60, "max_load_n": 210.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 150,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 31.5},
+          {"cross_section_mm2": 24, "max_load_n": 63.0},
+          {"cross_section_mm2": 36, "max_load_n": 94.5},
+          {"cross_section_mm2": 48, "max_load_n": 126.0},
+          {"cross_section_mm2": 60, "max_load_n": 157.5}
+        ]
+      },
+      {
+        "cantilever_length_mm": 200,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 23.1},
+          {"cross_section_mm2": 24, "max_load_n": 46.2},
+          {"cross_section_mm2": 36, "max_load_n": 69.3},
+          {"cross_section_mm2": 48, "max_load_n": 92.4},
+          {"cross_section_mm2": 60, "max_load_n": 115.5}
+        ]
+      }
+    ],
+    "layer_orientation_derating": {
+      "across_layers": 1.0,
+      "along_layers": 0.6
+    },
+    "notes": [
+      "Nylon gives the best fatigue and load performance in typical desktop FDM materials.",
+      "Moisture content strongly affects print quality and strength, so dry filament assumptions are required.",
+      "For high-cycle cantilever use, nylon is usually superior to PETG at the same geometry."
+    ]
+  },
+  "polycarbonate": {
+    "tensile_capacity_n_per_mm2": 32,
+    "cross_section_vs_load": [
+      {
+        "cantilever_length_mm": 25,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 92.16},
+          {"cross_section_mm2": 24, "max_load_n": 184.32},
+          {"cross_section_mm2": 36, "max_load_n": 276.48},
+          {"cross_section_mm2": 48, "max_load_n": 368.64},
+          {"cross_section_mm2": 60, "max_load_n": 460.8}
+        ]
+      },
+      {
+        "cantilever_length_mm": 50,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 61.44},
+          {"cross_section_mm2": 24, "max_load_n": 122.88},
+          {"cross_section_mm2": 36, "max_load_n": 184.32},
+          {"cross_section_mm2": 48, "max_load_n": 245.76},
+          {"cross_section_mm2": 60, "max_load_n": 307.2}
+        ]
+      },
+      {
+        "cantilever_length_mm": 100,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 38.4},
+          {"cross_section_mm2": 24, "max_load_n": 76.8},
+          {"cross_section_mm2": 36, "max_load_n": 115.2},
+          {"cross_section_mm2": 48, "max_load_n": 153.6},
+          {"cross_section_mm2": 60, "max_load_n": 192.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 150,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 28.8},
+          {"cross_section_mm2": 24, "max_load_n": 57.6},
+          {"cross_section_mm2": 36, "max_load_n": 86.4},
+          {"cross_section_mm2": 48, "max_load_n": 115.2},
+          {"cross_section_mm2": 60, "max_load_n": 144.0}
+        ]
+      },
+      {
+        "cantilever_length_mm": 200,
+        "entries": [
+          {"cross_section_mm2": 12, "max_load_n": 21.12},
+          {"cross_section_mm2": 24, "max_load_n": 42.24},
+          {"cross_section_mm2": 36, "max_load_n": 63.36},
+          {"cross_section_mm2": 48, "max_load_n": 84.48},
+          {"cross_section_mm2": 60, "max_load_n": 105.6}
+        ]
+      }
+    ],
+    "layer_orientation_derating": {
+      "across_layers": 1.0,
+      "along_layers": 0.6
+    },
+    "notes": [
+      "Polycarbonate combines high impact resistance with high service temperature for demanding brackets.",
+      "Use only when the printer can sustain high chamber and bed temperatures with low warp.",
+      "For large cantilevers, combine this table with ribbing/gusset design patterns rather than relying on section size alone."
+    ]
+  }
+}
