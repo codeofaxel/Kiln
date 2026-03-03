@@ -196,6 +196,10 @@ READ_ONLY_TOOLS: Set[str] = {
 
     # Database / infrastructure status (read-only)
     "database_status",
+
+    # Ambient / trend analysis (read-only)
+    "check_ambient_conditions",
+    "printer_trend_analysis",
 }
 
 
