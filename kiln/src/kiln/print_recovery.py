@@ -59,6 +59,34 @@ _SPAGHETTI_EXTRUSION_RATIO_MIN = 0.2
 _WARPING_TEMP_GRADIENT_MAX = 5.0  # degrees across bed
 _MONITORING_CHECKS_REQUIRED = 3
 
+# Material-dependent overlap depth for layer resumption.
+# More layers = stronger bonding at the recovery seam.
+# Flexible/weak-bonding materials need more overlap for structural integrity.
+_MATERIAL_OVERLAP_LAYERS: dict[str, int] = {
+    "pla": 2,
+    "petg": 3,
+    "abs": 3,
+    "asa": 3,
+    "tpu": 4,
+    "tpu_95a": 4,
+    "tpu_85a": 5,
+    "nylon": 4,
+    "pa6": 4,
+    "pa12": 4,
+    "pc": 3,
+    "pom": 3,
+    "hips": 2,
+    "pva": 2,
+    "cf_nylon": 4,
+    "gf_nylon": 4,
+    "cf_petg": 3,
+    "cf_abs": 3,
+    "peek": 5,
+    "pei": 5,
+    "pps": 5,
+}
+_DEFAULT_OVERLAP_LAYERS = 3
+
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -134,6 +162,8 @@ class FailureReport:
     severity: str = "high"
     probable_cause: str = ""
     contributing_factors: list[str] = field(default_factory=list)
+    telemetry_snapshot: dict[str, Any] = field(default_factory=dict)
+    material_type: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary."""
@@ -150,6 +180,8 @@ class FailureReport:
             "severity": self.severity,
             "probable_cause": self.probable_cause,
             "contributing_factors": self.contributing_factors,
+            "telemetry_snapshot": self.telemetry_snapshot,
+            "material_type": self.material_type,
         }
 
 
@@ -285,6 +317,14 @@ class PrintRecovery:
         for detector in detectors:
             report = detector(printer_name, telemetry, history, info)
             if report is not None:
+                # Capture telemetry snapshot and material for G-code generation.
+                report.telemetry_snapshot = {
+                    "hotend_temp": telemetry.get("hotend_target"),
+                    "bed_temp": telemetry.get("bed_target"),
+                    "hotend_actual": telemetry.get("hotend_temp"),
+                    "bed_actual": telemetry.get("bed_temp"),
+                }
+                report.material_type = info.get("material") or telemetry.get("material")
                 with self._lock:
                     self._failure_history.append(report)
                     if len(self._failure_history) > self._max_history:
@@ -1036,10 +1076,24 @@ class PrintRecovery:
     # -- private: recovery planners ----------------------------------------
 
     def _plan_resume(self, failure: FailureReport) -> RecoveryPlan:
-        """Plan resume from a specific layer."""
-        resume_layer = (failure.failed_layer or 1) - 3  # Back up 3 layers for overlap.
+        """Plan resume from a specific layer.
+
+        Overlap depth is material-dependent: flexible and high-performance
+        materials (TPU, nylon, PEEK) need more overlap layers for
+        structural integrity at the recovery seam, while rigid standard
+        materials (PLA, HIPS) bond sufficiently with fewer layers.
+        Layer shift failures always add one extra overlap layer because
+        positional accuracy is already compromised.
+        """
+        # Determine overlap from material type.
+        material = (failure.material_type or "").lower().strip().replace(" ", "_")
+        base_overlap = _MATERIAL_OVERLAP_LAYERS.get(material, _DEFAULT_OVERLAP_LAYERS)
+
+        # Layer shift gets +1 extra overlap for positional safety.
+        layer_overlap = base_overlap + 1 if failure.failure_type == FailureType.LAYER_SHIFT else base_overlap
+
+        resume_layer = (failure.failed_layer or 1) - layer_overlap
         resume_layer = max(1, resume_layer)
-        layer_overlap = 3 if failure.failure_type == FailureType.LAYER_SHIFT else 2
 
         z_per_layer = 0.2  # default assumption
         if failure.failure_z_mm and failure.failed_layer and failure.failed_layer > 0:
@@ -1063,13 +1117,17 @@ class PrintRecovery:
             ),
             parameter_adjustments={
                 "resume_z_mm": round(resume_layer * z_per_layer, 2),
+                "material_type": material or "unknown",
+                "overlap_layers": layer_overlap,
             },
             estimated_time_minutes=estimated_time,
             risks=[
                 "Layer bonding may be weak at the resume point",
                 "Z-offset calibration drift during recovery",
+                f"Material '{material or 'unknown'}' uses {layer_overlap}-layer overlap for bonding",
             ],
-            reason=f"Resume printing from layer {resume_layer} with {layer_overlap}-layer overlap for bonding",
+            reason=f"Resume printing from layer {resume_layer} with {layer_overlap}-layer "
+            f"overlap for bonding (material: {material or 'unknown'})",
         )
 
     def _plan_restart(self, failure: FailureReport) -> RecoveryPlan:
@@ -1345,9 +1403,18 @@ class PrintRecovery:
     ) -> list[str]:
         """Generate G-code commands for the recovery.
 
+        Temperatures are resolved from the failure's telemetry snapshot
+        (the target temps at the time of failure).  If telemetry is
+        unavailable, conservative defaults are used (200C hotend, 60C bed).
+
         Returns a list of G-code command strings ready to send to the
         printer.
         """
+        # Resolve actual temperatures from telemetry captured at failure time.
+        snap = failure.telemetry_snapshot or {}
+        hotend_temp = int(snap.get("hotend_temp") or 200)
+        bed_temp = int(snap.get("bed_temp") or 60)
+
         commands: list[str] = []
 
         if plan.strategy == RecoveryStrategy.SAFE_ABORT:
@@ -1364,15 +1431,22 @@ class PrintRecovery:
         elif plan.strategy == RecoveryStrategy.RESUME_FROM_LAYER:
             resume_z = plan.parameter_adjustments.get("resume_z_mm", 0)
             safe_z = resume_z + 5  # 5mm above resume layer
+            overlap = plan.parameter_adjustments.get("overlap_layers", plan.layer_overlap)
+            material = plan.parameter_adjustments.get("material_type", "unknown")
 
             commands = [
+                f"; Recovery: resume from layer {plan.resume_layer} "
+                f"with {overlap}-layer overlap (material: {material})",
                 "G28",  # Home all axes
-                "M104 S{hotend_temp}",  # Heat hotend (placeholder)
-                "M140 S{bed_temp}",  # Heat bed (placeholder)
-                "M109 S{hotend_temp}",  # Wait for hotend
-                "M190 S{bed_temp}",  # Wait for bed
+                f"M104 S{hotend_temp}",  # Heat hotend to job temp
+                f"M140 S{bed_temp}",  # Heat bed to job temp
+                f"M109 S{hotend_temp}",  # Wait for hotend to stabilize
+                f"M190 S{bed_temp}",  # Wait for bed to stabilize
                 f"G1 Z{safe_z:.1f} F1000",  # Move to safe Z above resume
                 "G1 E5 F300",  # Prime nozzle
+                "G1 E-2 F2400",  # Small retract to prevent ooze during travel
+                f"; Begin overlap bonding zone: layers {plan.resume_layer} to "
+                f"{plan.resume_layer + overlap}",
                 f"; Resume from layer {plan.resume_layer}, Z={resume_z:.2f}mm",
             ]
 

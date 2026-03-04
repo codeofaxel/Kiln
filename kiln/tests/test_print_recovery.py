@@ -537,7 +537,41 @@ class TestRecoveryPlanning:
             x_position=0.0, x_expected=5.0, y_position=0.0, y_expected=0.0
         )
         _, plan = _detect_and_plan(engine, telemetry)
-        assert plan.layer_overlap == 3  # layer shift uses 3-layer overlap
+        # Default material (unknown) = 3-layer base + 1 for layer shift = 4
+        assert plan.layer_overlap == 4
+
+    def test_resume_overlap_varies_by_material(self, engine: PrintRecovery):
+        """Material-dependent overlap: PLA=2, TPU=4, PEEK=5."""
+        for material, expected_overlap in [("pla", 2), ("tpu", 4), ("peek", 5)]:
+            failure = FailureReport(
+                failure_id="test",
+                failure_type=FailureType.POWER_LOSS,  # Maps to RESUME_FROM_LAYER
+                detected_at="2026-01-01T00:00:00Z",
+                printer_name="test-printer",
+                failed_layer=50,
+                total_layers=100,
+                failure_z_mm=10.0,
+                material_type=material,
+            )
+            plan = engine.plan_recovery(failure)
+            assert plan.layer_overlap == expected_overlap, (
+                f"{material}: expected {expected_overlap}, got {plan.layer_overlap}"
+            )
+
+    def test_layer_shift_adds_extra_overlap(self, engine: PrintRecovery):
+        """Layer shift always adds +1 overlap on top of material default."""
+        failure = FailureReport(
+            failure_id="test",
+            failure_type=FailureType.LAYER_SHIFT,
+            detected_at="2026-01-01T00:00:00Z",
+            printer_name="test-printer",
+            failed_layer=50,
+            total_layers=100,
+            failure_z_mm=10.0,
+            material_type="pla",
+        )
+        plan = engine.plan_recovery(failure)
+        assert plan.layer_overlap == 3  # PLA base=2 + 1 for layer shift
 
     def test_resume_plan_has_resume_layer(self, engine: PrintRecovery):
         telemetry = _make_telemetry(
@@ -706,6 +740,58 @@ class TestRecoveryGcodeGeneration:
         session = engine.start_recovery(plan, failure)
         steps = engine.get_recovery_steps(session.session_id)
         assert len(steps) > 0
+
+    def test_resume_gcode_uses_actual_temps(self, engine: PrintRecovery):
+        """G-code should contain real temps from telemetry, not placeholders."""
+        telemetry = _make_telemetry(
+            x_position=0.0, x_expected=5.0, y_position=0.0, y_expected=0.0,
+            hotend_temp=195, hotend_target=210, bed_temp=58, bed_target=60,
+        )
+        failure, plan = _detect_and_plan(engine, telemetry)
+        session = engine.start_recovery(plan, failure)
+        steps = engine.get_recovery_steps(session.session_id)
+        # Should contain actual target temps (210 hotend, 60 bed), no placeholders.
+        assert any("M104 S210" in s for s in steps), f"Expected M104 S210 in {steps}"
+        assert any("M140 S60" in s for s in steps), f"Expected M140 S60 in {steps}"
+        # No placeholder braces remaining.
+        assert not any("{" in s for s in steps), f"Placeholder found in {steps}"
+
+    def test_resume_gcode_defaults_when_no_telemetry(self, engine: PrintRecovery):
+        """When telemetry has no target temps, use safe defaults (200/60)."""
+        failure = FailureReport(
+            failure_id="test",
+            failure_type=FailureType.POWER_LOSS,
+            detected_at="2026-01-01T00:00:00Z",
+            printer_name="test-printer",
+            failed_layer=50,
+            total_layers=100,
+            failure_z_mm=10.0,
+        )
+        plan = engine.plan_recovery(failure)
+        session = engine.start_recovery(plan, failure)
+        steps = engine.get_recovery_steps(session.session_id)
+        assert any("M104 S200" in s for s in steps)
+        assert any("M140 S60" in s for s in steps)
+
+    def test_resume_gcode_includes_material_comment(self, engine: PrintRecovery):
+        """G-code should document the material and overlap depth."""
+        failure = FailureReport(
+            failure_id="test",
+            failure_type=FailureType.POWER_LOSS,  # Maps to RESUME_FROM_LAYER
+            detected_at="2026-01-01T00:00:00Z",
+            printer_name="test-printer",
+            failed_layer=50,
+            total_layers=100,
+            failure_z_mm=10.0,
+            material_type="tpu",
+        )
+        plan = engine.plan_recovery(failure)
+        session = engine.start_recovery(plan, failure)
+        steps = engine.get_recovery_steps(session.session_id)
+        material_comment = [s for s in steps if "tpu" in s.lower()]
+        assert len(material_comment) > 0, f"No TPU comment in {steps}"
+        overlap_comment = [s for s in steps if "4-layer" in s]
+        assert len(overlap_comment) > 0, f"No 4-layer overlap comment in {steps}"
 
     def test_no_recovery_gcode(self, engine: PrintRecovery):
         # Stringing maps to NO_RECOVERY -- need to plan directly.
