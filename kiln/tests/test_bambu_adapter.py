@@ -1177,7 +1177,7 @@ class TestBambuAdapterSnapshot:
     def test_get_stream_url(self) -> None:
         adapter = _adapter()
         url = adapter.get_stream_url()
-        assert url == f"rtsps://{HOST}:322/streaming/live/1"
+        assert url == f"rtsps://bblp:{ACCESS_CODE}@{HOST}:322/streaming/live/1"
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
     @mock.patch("kiln.printers.bambu.subprocess.run")
@@ -1364,3 +1364,490 @@ class TestImplicitFTPTLS:
         mock_ftp_class.connect.assert_called_once()
         mock_ftp_class.login.assert_called_once()
         mock_ftp_class.prot_p.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Speed profile control
+# ---------------------------------------------------------------------------
+
+
+class TestBambuAdapterSpeedProfile:
+    """Tests for speed profile get/set."""
+
+    def test_get_speed_profile_standard(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"spd_lvl": 2, "spd_mag": 100}
+        result = adapter_with_mqtt.get_speed_profile()
+        assert result["level"] == 2
+        assert result["name"] == "standard"
+        assert result["speed_magnitude"] == 100
+
+    def test_get_speed_profile_ludicrous(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"spd_lvl": 4, "spd_mag": 166}
+        result = adapter_with_mqtt.get_speed_profile()
+        assert result["level"] == 4
+        assert result["name"] == "ludicrous"
+
+    def test_get_speed_profile_missing(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {}
+        result = adapter_with_mqtt.get_speed_profile()
+        assert result["level"] is None
+        assert result["name"] == "unknown"
+
+    def test_get_speed_profile_mqtt_failure(self) -> None:
+        adapter = _adapter()
+        result = adapter.get_speed_profile()
+        assert result["name"] == "unknown"
+
+    def test_set_speed_profile_silent(self, adapter_with_mqtt: BambuAdapter) -> None:
+        ok = adapter_with_mqtt.set_speed_profile("silent")
+        assert ok is True
+        adapter_with_mqtt._mqtt_client.publish.assert_called_once()
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["command"] == "print_speed"
+        assert payload["print"]["param"] == "1"
+
+    def test_set_speed_profile_sport(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt.set_speed_profile("sport")
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["param"] == "3"
+
+    def test_set_speed_profile_case_insensitive(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt.set_speed_profile("LUDICROUS")
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["param"] == "4"
+
+    def test_set_speed_profile_invalid(self, adapter_with_mqtt: BambuAdapter) -> None:
+        with pytest.raises(PrinterError, match="Unknown speed profile"):
+            adapter_with_mqtt.set_speed_profile("turbo")
+
+    @pytest.mark.parametrize("profile,expected_param", [
+        ("silent", "1"),
+        ("standard", "2"),
+        ("sport", "3"),
+        ("ludicrous", "4"),
+    ])
+    def test_set_all_profiles(
+        self, adapter_with_mqtt: BambuAdapter, profile: str, expected_param: str,
+    ) -> None:
+        adapter_with_mqtt.set_speed_profile(profile)
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["param"] == expected_param
+
+
+# ---------------------------------------------------------------------------
+# LED / light control
+# ---------------------------------------------------------------------------
+
+
+class TestBambuAdapterLightControl:
+    """Tests for set_light."""
+
+    def test_chamber_light_on(self, adapter_with_mqtt: BambuAdapter) -> None:
+        ok = adapter_with_mqtt.set_light("chamber_light", "on")
+        assert ok is True
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["system"]["command"] == "ledctrl"
+        assert payload["system"]["led_node"] == "chamber_light"
+        assert payload["system"]["led_mode"] == "on"
+
+    def test_work_light_off(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt.set_light("work_light", "off")
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["system"]["led_node"] == "work_light"
+        assert payload["system"]["led_mode"] == "off"
+
+    def test_flashing_mode(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt.set_light("chamber_light", "flashing")
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["system"]["led_mode"] == "flashing"
+
+    def test_invalid_node(self, adapter_with_mqtt: BambuAdapter) -> None:
+        with pytest.raises(PrinterError, match="Unknown LED node"):
+            adapter_with_mqtt.set_light("disco_ball", "on")
+
+    def test_invalid_mode(self, adapter_with_mqtt: BambuAdapter) -> None:
+        with pytest.raises(PrinterError, match="Unknown LED mode"):
+            adapter_with_mqtt.set_light("chamber_light", "strobe")
+
+    def test_case_insensitive(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt.set_light("CHAMBER_LIGHT", "ON")
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["system"]["led_node"] == "chamber_light"
+        assert payload["system"]["led_mode"] == "on"
+
+
+# ---------------------------------------------------------------------------
+# Rich monitoring (extended state + layer tracking)
+# ---------------------------------------------------------------------------
+
+
+class TestBambuAdapterRichMonitoring:
+    """Tests for extended PrinterState and JobProgress fields."""
+
+    def test_state_includes_fan_speeds(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "running",
+            "cooling_fan_speed": 255,
+            "big_fan1_speed": 128,
+            "big_fan2_speed": 0,
+            "heatbreak_fan_speed": 200,
+        }
+        state = adapter_with_mqtt.get_state()
+        assert state.cooling_fan_speed == 255
+        assert state.aux_fan_speed == 128
+        assert state.chamber_fan_speed == 0
+        assert state.heatbreak_fan_speed == 200
+
+    def test_state_includes_speed_profile(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "running",
+            "spd_lvl": 3,
+            "spd_mag": 124,
+        }
+        state = adapter_with_mqtt.get_state()
+        assert state.speed_profile == "sport"
+        assert state.speed_magnitude == 124
+
+    def test_state_includes_wifi_signal(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "idle",
+            "wifi_signal": "-45dBm",
+        }
+        state = adapter_with_mqtt.get_state()
+        assert state.wifi_signal == "-45dBm"
+
+    def test_state_includes_nozzle_info(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "idle",
+            "nozzle_diameter": "0.4",
+            "nozzle_type": "stainless_steel",
+        }
+        state = adapter_with_mqtt.get_state()
+        assert state.nozzle_diameter == "0.4"
+        assert state.nozzle_type == "stainless_steel"
+
+    def test_state_includes_print_error(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "failed",
+            "print_error": 318734337,
+        }
+        state = adapter_with_mqtt.get_state()
+        assert state.state == PrinterStatus.ERROR
+        assert state.print_error == 318734337
+
+    def test_state_to_dict_omits_none_extended(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "idle"}
+        state = adapter_with_mqtt.get_state()
+        d = state.to_dict()
+        assert "cooling_fan_speed" not in d
+        assert "wifi_signal" not in d
+        assert "print_error" not in d
+        assert "speed_profile" not in d
+
+    def test_state_to_dict_includes_present_extended(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "running",
+            "spd_lvl": 2,
+            "spd_mag": 100,
+            "cooling_fan_speed": 255,
+        }
+        state = adapter_with_mqtt.get_state()
+        d = state.to_dict()
+        assert d["speed_profile"] == "standard"
+        assert d["speed_magnitude"] == 100
+        assert d["cooling_fan_speed"] == 255
+
+    def test_job_includes_layer_info(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "running",
+            "gcode_file": "test.gcode",
+            "mc_percent": 50,
+            "mc_remaining_time": 30,
+            "layer_num": 50,
+            "total_layer_num": 200,
+        }
+        job = adapter_with_mqtt.get_job()
+        assert job.current_layer == 50
+        assert job.total_layers == 200
+
+    def test_job_layer_info_missing(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "running",
+            "gcode_file": "test.gcode",
+            "mc_percent": 10,
+        }
+        job = adapter_with_mqtt.get_job()
+        assert job.current_layer is None
+        assert job.total_layers is None
+
+    def test_job_to_dict_omits_none_layers(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "running",
+            "gcode_file": "test.gcode",
+            "mc_percent": 10,
+        }
+        job = adapter_with_mqtt.get_job()
+        d = job.to_dict()
+        assert "current_layer" not in d
+        assert "total_layers" not in d
+
+    def test_job_to_dict_includes_layers_when_present(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "running",
+            "layer_num": 10,
+            "total_layer_num": 100,
+        }
+        job = adapter_with_mqtt.get_job()
+        d = job.to_dict()
+        assert d["current_layer"] == 10
+        assert d["total_layers"] == 100
+
+
+# ---------------------------------------------------------------------------
+# RTSP camera auth
+# ---------------------------------------------------------------------------
+
+
+class TestBambuAdapterRTSPAuth:
+    """Tests for RTSP camera URL authentication."""
+
+    def test_stream_url_includes_credentials(self) -> None:
+        adapter = _adapter()
+        url = adapter.get_stream_url()
+        assert f"bblp:{ACCESS_CODE}@" in url
+        assert url.startswith("rtsps://")
+        assert url.endswith("/streaming/live/1")
+
+    @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
+    @mock.patch("kiln.printers.bambu.subprocess.run")
+    def test_snapshot_uses_authenticated_url(self, mock_run, mock_ffmpeg) -> None:
+        adapter = _adapter()
+        fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 200
+        mock_run.return_value = mock.MagicMock(returncode=0, stdout=fake_jpeg)
+        adapter.get_snapshot()
+        call_args = mock_run.call_args[0][0]
+        # Find the -i argument
+        i_index = call_args.index("-i")
+        rtsp_url = call_args[i_index + 1]
+        assert f"bblp:{ACCESS_CODE}@" in rtsp_url
+
+
+# ---------------------------------------------------------------------------
+# AMS Intelligence tests
+# ---------------------------------------------------------------------------
+
+
+class TestBambuAdapterAMSStatus:
+    """Tests for the get_ams_status method: tray queries, edge cases."""
+
+    def _adapter_with_ams(self, ams_data: list[dict[str, Any]]) -> BambuAdapter:
+        """Create an adapter with pre-populated AMS data in the MQTT cache."""
+        adapter = _adapter()
+        adapter._mqtt_connected.set()
+        adapter._connected = True
+        adapter._mqtt_client = mock.MagicMock()
+        publish_result = mock.MagicMock()
+        publish_result.wait_for_publish = mock.MagicMock()
+        adapter._mqtt_client.publish.return_value = publish_result
+        adapter._last_status = {
+            "gcode_state": "IDLE",
+            "ams": ams_data,
+            "ams_exist_bits": "1",
+            "tray_exist_bits": "f",
+            "tray_now": "0",
+        }
+        adapter._last_state_time = time.monotonic()
+        return adapter
+
+    def test_ams_status_single_unit_four_trays(self) -> None:
+        adapter = self._adapter_with_ams([
+            {
+                "id": 0,
+                "humidity": 3,
+                "tray": [
+                    {"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF", "remain": 85, "tag_uid": "abc123", "nozzle_temp_min": 190, "nozzle_temp_max": 230, "bed_temp": 60},
+                    {"id": 1, "tray_type": "PETG", "tray_color": "00FF00FF", "remain": 42, "tag_uid": "def456", "nozzle_temp_min": 220, "nozzle_temp_max": 260, "bed_temp": 80},
+                    {"id": 2, "tray_type": "PLA", "tray_color": "0000FFFF", "remain": 100, "tag_uid": "", "nozzle_temp_min": 190, "nozzle_temp_max": 230, "bed_temp": 60},
+                    {"id": 3, "tray_type": "", "tray_color": "", "remain": None, "tag_uid": ""},
+                ],
+            }
+        ])
+        result = adapter.get_ams_status()
+        assert result["ams_exist_bits"] == "1"
+        assert result["tray_exist_bits"] == "f"
+        assert result["tray_now"] == "0"
+        assert len(result["units"]) == 1
+        unit = result["units"][0]
+        assert unit["unit_id"] == 0
+        assert unit["humidity"] == 3
+        assert len(unit["trays"]) == 4
+        # Verify first tray
+        t0 = unit["trays"][0]
+        assert t0["slot"] == 0
+        assert t0["tray_type"] == "PLA"
+        assert t0["tray_color"] == "FF0000FF"
+        assert t0["remain"] == 85
+        assert t0["tag_uid"] == "abc123"
+        assert t0["nozzle_temp_min"] == 190
+        assert t0["nozzle_temp_max"] == 230
+        assert t0["bed_temp"] == 60
+        # Empty slot
+        t3 = unit["trays"][3]
+        assert t3["tray_type"] == ""
+        assert t3["remain"] is None
+
+    def test_ams_status_no_ams_attached(self) -> None:
+        adapter = _adapter()
+        adapter._mqtt_connected.set()
+        adapter._connected = True
+        adapter._mqtt_client = mock.MagicMock()
+        publish_result = mock.MagicMock()
+        publish_result.wait_for_publish = mock.MagicMock()
+        adapter._mqtt_client.publish.return_value = publish_result
+        adapter._last_status = {"gcode_state": "IDLE"}
+        adapter._last_state_time = time.monotonic()
+        result = adapter.get_ams_status()
+        assert result["units"] == []
+        assert result["ams_exist_bits"] == "0"
+
+    def test_ams_status_ams_data_not_list(self) -> None:
+        adapter = self._adapter_with_ams([])
+        adapter._last_status["ams"] = "invalid"
+        result = adapter.get_ams_status()
+        assert result["units"] == []
+
+    def test_ams_status_multiple_units(self) -> None:
+        adapter = self._adapter_with_ams([
+            {"id": 0, "humidity": 2, "tray": [{"id": 0, "tray_type": "PLA", "tray_color": "FFFFFFFF", "remain": 50, "tag_uid": ""}]},
+            {"id": 1, "humidity": 5, "tray": [{"id": 0, "tray_type": "ABS", "tray_color": "000000FF", "remain": 30, "tag_uid": "xyz"}]},
+        ])
+        result = adapter.get_ams_status()
+        assert len(result["units"]) == 2
+        assert result["units"][0]["unit_id"] == 0
+        assert result["units"][1]["unit_id"] == 1
+        assert result["units"][1]["humidity"] == 5
+
+    def test_ams_status_tray_now_255_means_external(self) -> None:
+        adapter = self._adapter_with_ams([
+            {"id": 0, "humidity": 3, "tray": [{"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF", "remain": 85, "tag_uid": ""}]},
+        ])
+        adapter._last_status["tray_now"] = "255"
+        result = adapter.get_ams_status()
+        assert result["tray_now"] == "255"
+
+    def test_ams_status_remain_as_string(self) -> None:
+        """Some firmware versions report remain as a string."""
+        adapter = self._adapter_with_ams([
+            {"id": 0, "humidity": "3", "tray": [{"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF", "remain": "72", "tag_uid": ""}]},
+        ])
+        result = adapter.get_ams_status()
+        assert result["units"][0]["humidity"] == 3
+        assert result["units"][0]["trays"][0]["remain"] == 72
+
+    def test_ams_status_malformed_tray_entry_skipped(self) -> None:
+        adapter = self._adapter_with_ams([
+            {"id": 0, "humidity": 3, "tray": ["not_a_dict", {"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF", "remain": 50, "tag_uid": ""}]},
+        ])
+        result = adapter.get_ams_status()
+        assert len(result["units"][0]["trays"]) == 1
+
+    def test_ams_status_malformed_unit_skipped(self) -> None:
+        adapter = self._adapter_with_ams(["not_a_dict"])
+        result = adapter.get_ams_status()
+        assert result["units"] == []
+
+    def test_ams_status_missing_tray_key(self) -> None:
+        adapter = self._adapter_with_ams([{"id": 0, "humidity": 3}])
+        result = adapter.get_ams_status()
+        assert len(result["units"]) == 1
+        assert result["units"][0]["trays"] == []
+
+
+class TestBambuAdapterStartPrintConfigurable:
+    """Tests for configurable start_print parameters (AMS, calibration, etc.)."""
+
+    def test_start_print_with_ams_enabled(self, adapter_with_mqtt: BambuAdapter) -> None:
+        result = adapter_with_mqtt.start_print("model.3mf", use_ams=True, ams_mapping=[0, 1, 2, 3])
+        assert result.success is True
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["use_ams"] is True
+        assert payload["print"]["ams_mapping"] == [0, 1, 2, 3]
+
+    def test_start_print_defaults_ams_off(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt.start_print("model.3mf")
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["use_ams"] is False
+        assert payload["print"]["ams_mapping"] == [0]
+
+    def test_start_print_timelapse_enabled(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt.start_print("model.3mf", timelapse=True)
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["timelapse"] is True
+
+    def test_start_print_skip_calibrations(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt.start_print(
+            "model.3mf", bed_leveling=False, flow_cali=False, vibration_cali=False,
+        )
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["bed_leveling"] is False
+        assert payload["print"]["flow_cali"] is False
+        assert payload["print"]["vibration_cali"] is False
+
+    def test_start_print_layer_inspect(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt.start_print("model.3mf", layer_inspect=True)
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["layer_inspect"] is True
+
+    def test_start_print_custom_bed_type(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt.start_print("model.3mf", bed_type="textured_plate")
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["bed_type"] == "textured_plate"
+
+    def test_start_print_plate_number(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt.start_print("model.3mf", plate_number=3)
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["param"] == "Metadata/plate_3.gcode"
+
+    def test_start_print_ams_mapping_negative_one(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """ams_mapping with -1 means unused slot."""
+        adapter_with_mqtt.start_print("model.3mf", use_ams=True, ams_mapping=[0, -1, -1, -1])
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["ams_mapping"] == [0, -1, -1, -1]
+
+    def test_start_print_invalid_ams_mapping_type(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """Non-list ams_mapping falls back to default."""
+        adapter_with_mqtt.start_print("model.3mf", ams_mapping="invalid")
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["ams_mapping"] == [0]
+
+    def test_start_print_gcode_ignores_ams_params(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """G-code files use gcode_file command, not project_file — kwargs are ignored."""
+        adapter_with_mqtt.start_print("test.gcode", use_ams=True, timelapse=True)
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["command"] == "gcode_file"
+        assert "use_ams" not in payload["print"]
+
+    def test_start_print_all_params_combined(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt.start_print(
+            "multi.3mf",
+            use_ams=True,
+            ams_mapping=[2, 0, 1, 3],
+            timelapse=True,
+            bed_leveling=False,
+            flow_cali=False,
+            vibration_cali=False,
+            layer_inspect=True,
+            bed_type="engineering_plate",
+            plate_number=2,
+        )
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        p = payload["print"]
+        assert p["use_ams"] is True
+        assert p["ams_mapping"] == [2, 0, 1, 3]
+        assert p["timelapse"] is True
+        assert p["bed_leveling"] is False
+        assert p["flow_cali"] is False
+        assert p["vibration_cali"] is False
+        assert p["layer_inspect"] is True
+        assert p["bed_type"] == "engineering_plate"
+        assert p["param"] == "Metadata/plate_2.gcode"

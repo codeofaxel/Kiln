@@ -78,15 +78,36 @@ class PrinterState:
     bed_temp_target: float | None = None
     chamber_temp_actual: float | None = None
     chamber_temp_target: float | None = None
+    # Extended monitoring fields (populated by adapters that support them).
+    cooling_fan_speed: int | None = None
+    aux_fan_speed: int | None = None
+    chamber_fan_speed: int | None = None
+    heatbreak_fan_speed: int | None = None
+    wifi_signal: str | None = None
+    nozzle_diameter: str | None = None
+    nozzle_type: str | None = None
+    speed_profile: str | None = None
+    speed_magnitude: int | None = None
+    print_error: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dictionary.
 
         The :attr:`state` enum is converted to its string value so the
-        result can be passed directly to ``json.dumps``.
+        result can be passed directly to ``json.dumps``.  Extended
+        monitoring fields that are ``None`` are omitted for compactness.
         """
         data = asdict(self)
         data["state"] = self.state.value
+        # Omit None extended fields.
+        _EXTENDED = (
+            "cooling_fan_speed", "aux_fan_speed", "chamber_fan_speed",
+            "heatbreak_fan_speed", "wifi_signal", "nozzle_diameter",
+            "nozzle_type", "speed_profile", "speed_magnitude", "print_error",
+        )
+        for key in _EXTENDED:
+            if data.get(key) is None:
+                data.pop(key, None)
         return data
 
 
@@ -98,10 +119,20 @@ class JobProgress:
     completion: float | None = None  # 0.0 -- 100.0
     print_time_seconds: int | None = None
     print_time_left_seconds: int | None = None
+    # Extended layer tracking (populated by adapters that support it).
+    current_layer: int | None = None
+    total_layers: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable dictionary."""
-        return asdict(self)
+        """Return a JSON-serialisable dictionary.
+
+        Extended fields that are ``None`` are omitted for compactness.
+        """
+        data = asdict(self)
+        for key in ("current_layer", "total_layers"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
 
 
 @dataclass
@@ -344,11 +375,14 @@ class PrinterAdapter(ABC):
     # -- print control --------------------------------------------------
 
     @abstractmethod
-    def start_print(self, file_name: str) -> PrintResult:
+    def start_print(self, file_name: str, **kwargs: Any) -> PrintResult:
         """Begin printing a file that already exists on the printer.
 
         Args:
             file_name: Name (or path) of the file as known by the printer.
+            **kwargs: Adapter-specific print parameters (e.g. Bambu AMS
+                settings).  Adapters that don't support extra parameters
+                silently ignore them.
 
         Raises:
             PrinterError: If the printer cannot start the job.
@@ -596,9 +630,9 @@ class PrinterAdapter(ABC):
         """Async wrapper for :meth:`get_state` via :func:`asyncio.to_thread`."""
         return await asyncio.to_thread(self.get_state)
 
-    async def async_start_print(self, file_name: str) -> PrintResult:
+    async def async_start_print(self, file_name: str, **kwargs: Any) -> PrintResult:
         """Async wrapper for :meth:`start_print` via :func:`asyncio.to_thread`."""
-        return await asyncio.to_thread(self.start_print, file_name)
+        return await asyncio.to_thread(self.start_print, file_name, **kwargs)
 
     async def async_cancel_print(self) -> PrintResult:
         """Async wrapper for :meth:`cancel_print` via :func:`asyncio.to_thread`."""
