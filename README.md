@@ -137,6 +137,8 @@ Kiln only needs IP reachability on your local LAN. Ethernet-only printers are fu
 
 **Optional:** Install [PrusaSlicer](https://www.prusa3d.com/prusaslicer/) or OrcaSlicer to slice STL files directly from Kiln (`brew install --cask prusaslicer` on macOS).
 
+**Optional:** Install [OpenSCAD](https://openscad.org/) for AI model generation via Gemini Deep Think (`brew install openscad` on macOS). Gemini Deep Think can generate 3D-printable models from text descriptions — OpenSCAD compiles the generated geometry to STL. Set `KILN_GEMINI_API_KEY` to enable.
+
 ## Quick Start
 
 ### Kiln CLI

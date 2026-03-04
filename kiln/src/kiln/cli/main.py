@@ -6974,7 +6974,25 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
             }
         )
 
-    # 6. SQLite writable
+    # 6. OpenSCAD available (optional — needed for Gemini Deep Think generation)
+    openscad_path = shutil.which("openscad")
+    if not openscad_path and sys.platform == "darwin":
+        _mac_scad = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD"
+        if os.path.isfile(_mac_scad) and os.access(_mac_scad, os.X_OK):
+            openscad_path = _mac_scad
+    if openscad_path:
+        checks.append({"name": "openscad", "ok": True, "detail": openscad_path})
+    else:
+        checks.append(
+            {
+                "name": "openscad",
+                "ok": True,
+                "warn": True,
+                "detail": "not found (optional — needed for AI model generation via Gemini Deep Think)",
+            }
+        )
+
+    # 7. SQLite writable
     db_dir = os.path.join(os.path.expanduser("~"), ".kiln")
     db_path = os.path.join(db_dir, "kiln.db")
     try:
@@ -6989,7 +7007,7 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
     except Exception as exc:
         checks.append({"name": "database", "ok": False, "detail": str(exc)})
 
-    # 7. WSL 2 detection
+    # 8. WSL 2 detection
     wsl = False
     if sys.platform == "linux":
         try:
