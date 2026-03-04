@@ -316,32 +316,133 @@ def _reload_env_config() -> None:
 # MCP server instance
 # ---------------------------------------------------------------------------
 
+
+def _build_instructions() -> str:
+    """Build context-aware MCP instructions based on the user's config.
+
+    Reads registered printers, marketplace API keys, slicer availability,
+    generation providers, and plugin state to produce a concise capability
+    summary.  Called once in ``main()`` after env config is loaded.
+
+    When nothing is configured (fresh install), the instructions guide the
+    agent through a conversational first-time setup so normie users never
+    need to touch env vars or config files.
+    """
+    printer_names = _registry.list_names()
+    sources = _marketplace_registry.connected
+    has_printer = len(printer_names) > 0
+    has_marketplace = len(sources) > 0
+    is_fresh = not has_printer and not has_marketplace
+
+    parts: list[str] = [
+        "Kiln — AI agent infrastructure for 3D printing. "
+        "You control physical printers, search model marketplaces, "
+        "slice files, and manage print jobs through these tools.",
+    ]
+
+    # --- Fresh install: first-time setup guidance ---
+    if is_fresh:
+        parts.append(
+            "FIRST-TIME SETUP: No printer or marketplace is configured yet. "
+            "Welcome the user and walk them through setup conversationally:\n"
+            "1. Ask what 3D printer they have (brand/model) and how it connects "
+            "(OctoPrint, Klipper/Moonraker, Bambu Lab, or USB serial).\n"
+            "2. Run `discover_printers` to auto-detect printers on their network.\n"
+            "3. Once you have the host URL and API key, use `register_printer` "
+            "to connect it — no config files needed.\n"
+            "4. Confirm the connection with `printer_status`.\n"
+            "5. Optionally ask if they want to search for 3D models online "
+            "(needs a free Thingiverse token — guide them to get one if interested).\n"
+            "Keep it casual and brief. Most users just need steps 1-4."
+        )
+    else:
+        # --- Printer status ---
+        if has_printer:
+            ptype = _PRINTER_TYPE or "octoprint"
+            if len(printer_names) == 1:
+                parts.append(
+                    f"PRINTER: 1 {ptype} printer registered (\"{printer_names[0]}\"). "
+                    "Use `printer_status` to check it."
+                )
+            else:
+                parts.append(
+                    f"FLEET: {len(printer_names)} printers registered. "
+                    "Use `fleet_status` for overview, `printer_status` for details."
+                )
+
+        # --- Model marketplaces ---
+        if has_marketplace:
+            parts.append(
+                f"MODELS: {', '.join(sources)} connected. "
+                "Use `search_all_models` to find printable designs, "
+                "`download_and_upload` to send directly to printer."
+            )
+
+    # --- 3D model generation ---
+    gen_providers: list[str] = []
+    if _MESHY_API_KEY:
+        gen_providers.append("Meshy")
+    if _GEMINI_API_KEY:
+        gen_providers.append("Gemini")
+    if gen_providers:
+        parts.append(
+            f"GENERATION: {', '.join(gen_providers)} available. "
+            "Use `generate_model` to create 3D models from text descriptions."
+        )
+
+    # --- Slicer ---
+    try:
+        from kiln.slicer import find_slicer
+
+        slicer_info = find_slicer()
+        parts.append(
+            f"SLICER: {slicer_info.name} found. "
+            "Use `slice_model` to convert STL/3MF to G-code."
+        )
+    except Exception:
+        pass  # No slicer — omit rather than add noise
+
+    # --- Fulfillment ---
+    if _CRAFTCLOUD_API_KEY:
+        parts.append(
+            "FULFILLMENT: Craftcloud connected. "
+            "Use `fulfillment_quote` to outsource prints."
+        )
+
+    # --- Safety summary ---
+    safety_notes: list[str] = []
+    if _AUTO_PRINT_MARKETPLACE:
+        safety_notes.append("auto-print ON for marketplace downloads")
+    if _AUTO_PRINT_GENERATED:
+        safety_notes.append("auto-print ON for generated models")
+    if not safety_notes:
+        safety_notes.append("auto-print OFF (safe default)")
+    parts.append(
+        "SAFETY: Always run `preflight_check` before printing. "
+        + "; ".join(safety_notes)
+        + ". Use `safety_settings` to review."
+    )
+
+    # --- Natural language guidance ---
+    parts.append(
+        "The user may ask in plain language (e.g. \"what's my printer doing?\", "
+        "\"find me a phone stand\", \"print that benchy\"). Map their intent "
+        "to the appropriate tool. When uncertain, ask — don't guess on "
+        "physical operations."
+    )
+
+    return "\n\n".join(parts)
+
+
+# Static fallback for when the module is imported but main() hasn't run.
+# main() replaces this with _build_instructions() after config is loaded.
 mcp = FastMCP(
     "kiln",
     instructions=(
-        "Agent infrastructure for physical fabrication via 3D printing. "
-        "Provides tools to monitor printer status, manage files, control "
-        "print jobs, adjust temperatures, send raw G-code, run "
-        "pre-flight safety checks, and discover 3D models on Thingiverse.\n\n"
-        "Start with `printer_status` to see what the printer is doing. "
-        "Use `preflight_check` before printing. Use `fleet_status` to "
-        "manage multiple printers. Use `validate_gcode` before `send_gcode` "
-        "for raw commands. Submit jobs via `submit_job` for queued execution. "
-        "Use `search_all_models` to search across Thingiverse, MyMiniFactory, "
-        "and Cults3D simultaneously, or `search_models` for Thingiverse only. "
-        "Use `download_model` to fetch files and `download_and_upload` to go "
-        "straight from marketplace to printer. "
-        "Use `fulfillment_materials` and `fulfillment_quote` to outsource "
-        "prints to external services like Craftcloud when local printers "
-        "lack the material or capacity.\n\n"
-        "SAFETY: 3D printers are delicate hardware. Prefer downloading "
-        "proven community models over generating new ones. AI-generated "
-        "models are experimental and may damage hardware. By default, "
-        "downloaded and generated models are uploaded but NOT auto-printed "
-        "— you must call `start_print` separately. Users can opt in to "
-        "auto-print via KILN_AUTO_PRINT_MARKETPLACE (for community models) "
-        "or KILN_AUTO_PRINT_GENERATED (for AI models, higher risk). "
-        "Use `safety_settings` to check current auto-print status."
+        "Kiln — AI agent infrastructure for 3D printing. "
+        "Use `printer_status` to check the printer, `preflight_check` "
+        "before printing, `search_all_models` to find designs, and "
+        "`download_and_upload` to send models to the printer."
     ),
 )
 
@@ -9840,6 +9941,11 @@ def main() -> None:
     # plugin module registers its own tools via the ToolPlugin protocol.
     # See kiln/plugins/marketplace_tools.py for the migration pattern.
     register_all_plugins(mcp, plugin_package="kiln.plugins")
+
+    # Rebuild MCP instructions now that config, printers, marketplaces,
+    # and plugins are all loaded.  This replaces the static fallback with
+    # a context-aware summary of the user's actual capabilities.
+    mcp.instructions = _build_instructions()
 
     # Initialise cloud sync from saved config
     global _cloud_sync
