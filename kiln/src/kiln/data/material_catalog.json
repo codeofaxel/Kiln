@@ -1,0 +1,787 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "description": "Material catalog — brands, variants, sources, compatibility",
+    "last_updated": "2026-03-03"
+  },
+  "hatchbox_pla": {
+    "vendor": "Hatchbox",
+    "material_type": "PLA",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [22, 28],
+    "variants": ["black", "white", "gray", "red", "blue", "green", "orange", "yellow", "purple", "pink", "wood", "silk_gold", "silk_silver"],
+    "sources": {
+      "amazon": "Hatchbox+PLA+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.hatchbox3d.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Most popular PLA on Amazon. Consistent diameter tolerance +/-0.03mm."
+  },
+  "hatchbox_pla_plus": {
+    "vendor": "Hatchbox",
+    "material_type": "PLA+",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [24, 30],
+    "variants": ["black", "white", "gray", "red", "blue", "green"],
+    "sources": {
+      "amazon": "Hatchbox+PLA+Plus+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.hatchbox3d.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Enhanced toughness over standard PLA. Slightly higher temp tolerance."
+  },
+  "esun_pla_plus": {
+    "vendor": "eSun",
+    "material_type": "PLA+",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [18, 24],
+    "variants": ["black", "white", "gray", "red", "blue", "green", "orange", "yellow", "purple", "pink", "light_blue", "fire_engine_red"],
+    "sources": {
+      "amazon": "eSun+PLA+Plus+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.esun3d.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Widely regarded as the best PLA+ value. Good layer adhesion and minimal warping."
+  },
+  "esun_pla_pro": {
+    "vendor": "eSun",
+    "material_type": "PLA Pro",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [22, 28],
+    "variants": ["black", "white", "gray", "red", "blue"],
+    "sources": {
+      "amazon": "eSun+PLA+Pro+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.esun3d.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Higher impact resistance than PLA+. Good for functional parts."
+  },
+  "overture_pla": {
+    "vendor": "Overture",
+    "material_type": "PLA",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [16, 22],
+    "variants": ["black", "white", "gray", "red", "blue", "green", "orange", "yellow", "purple", "pink"],
+    "sources": {
+      "amazon": "Overture+PLA+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.overture3d.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Budget-friendly PLA with good consistency. Ships with build surface sample."
+  },
+  "overture_pla_pro": {
+    "vendor": "Overture",
+    "material_type": "PLA Pro",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [18, 24],
+    "variants": ["black", "white", "gray", "red", "blue"],
+    "sources": {
+      "amazon": "Overture+PLA+Professional+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.overture3d.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Improved toughness over standard Overture PLA. Good dimensional accuracy."
+  },
+  "prusament_pla": {
+    "vendor": "Prusament",
+    "material_type": "PLA",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [28, 35],
+    "variants": ["galaxy_black", "prusa_orange", "azure_blue", "lipstick_red", "vanilla_white", "jungle_green", "mystic_brown"],
+    "sources": {
+      "amazon": "Prusament+PLA+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.prusa3d.com/category/prusament/"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Premium PLA with +/-0.02mm tolerance. Every spool QC-tested with online report."
+  },
+  "polymaker_polyterra_pla": {
+    "vendor": "Polymaker",
+    "material_type": "PolyTerra PLA",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [18, 24],
+    "variants": ["charcoal_black", "cotton_white", "fossil_grey", "lava_red", "sapphire_blue", "forrest_green", "sunrise_orange", "savannah_yellow", "sakura_pink", "lavender_purple", "army_dark_green", "peach"],
+    "sources": {
+      "amazon": "Polymaker+PolyTerra+PLA+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.polymaker.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Matte finish PLA on cardboard spools. Eco-friendly packaging. Excellent for display models."
+  },
+  "polymaker_polylite_pla": {
+    "vendor": "Polymaker",
+    "material_type": "PolyLite PLA",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [20, 26],
+    "variants": ["black", "white", "grey", "red", "blue", "green", "orange", "yellow", "purple", "pink"],
+    "sources": {
+      "amazon": "Polymaker+PolyLite+PLA+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.polymaker.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Standard glossy PLA from Polymaker. Very consistent extrusion and low odor."
+  },
+  "bambu_pla_basic": {
+    "vendor": "Bambu Lab",
+    "material_type": "PLA Basic",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [14, 20],
+    "variants": ["black", "white", "gray", "red", "blue", "green", "orange", "yellow", "purple", "pink", "jade_white", "bambu_green"],
+    "sources": {
+      "amazon": "Bambu+Lab+PLA+Basic+1.75mm+{color}+1kg",
+      "manufacturer": "https://store.bambulab.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Optimized for Bambu printers with RFID spool recognition. Excellent value."
+  },
+  "bambu_pla_matte": {
+    "vendor": "Bambu Lab",
+    "material_type": "PLA Matte",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [16, 22],
+    "variants": ["black", "white", "gray", "red", "blue", "green", "charcoal", "mandarin_orange", "lilac_purple"],
+    "sources": {
+      "amazon": "Bambu+Lab+PLA+Matte+1.75mm+{color}+1kg",
+      "manufacturer": "https://store.bambulab.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Matte finish PLA with RFID. Hides layer lines well for aesthetic prints."
+  },
+  "sunlu_pla": {
+    "vendor": "Sunlu",
+    "material_type": "PLA",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [14, 20],
+    "variants": ["black", "white", "gray", "red", "blue", "green", "orange", "yellow", "purple", "pink"],
+    "sources": {
+      "amazon": "Sunlu+PLA+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.sunlu.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Budget PLA option. Decent quality for the price with wide color selection."
+  },
+  "sunlu_pla_plus": {
+    "vendor": "Sunlu",
+    "material_type": "PLA+",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [16, 22],
+    "variants": ["black", "white", "gray", "red", "blue", "green"],
+    "sources": {
+      "amazon": "Sunlu+PLA+Plus+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.sunlu.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Improved toughness over Sunlu standard PLA. Good for functional prototypes."
+  },
+  "amazon_basics_pla": {
+    "vendor": "Amazon Basics",
+    "material_type": "PLA",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [16, 22],
+    "variants": ["black", "white", "gray", "red", "blue", "green", "orange", "yellow", "purple"],
+    "sources": {
+      "amazon": "Amazon+Basics+PLA+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.amazon.com/stores/AmazonBasics"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Rebranded filament with Amazon Prime shipping. Acceptable quality for beginners."
+  },
+  "overture_pla_silk": {
+    "vendor": "Overture",
+    "material_type": "PLA Silk",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [18, 24],
+    "variants": ["gold", "silver", "copper", "rose_gold", "rainbow"],
+    "sources": {
+      "amazon": "Overture+PLA+Silk+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.overture3d.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Shiny metallic finish PLA. Popular for decorative prints and gifts."
+  },
+  "hatchbox_petg": {
+    "vendor": "Hatchbox",
+    "material_type": "PETG",
+    "material_family": "petg",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [22, 28],
+    "variants": ["black", "white", "transparent", "blue", "red", "green", "orange"],
+    "sources": {
+      "amazon": "Hatchbox+PETG+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.hatchbox3d.com"
+    },
+    "compatible_with": ["generic_petg"],
+    "notes": "Reliable PETG with good clarity in transparent variant. Minimal stringing."
+  },
+  "esun_petg": {
+    "vendor": "eSun",
+    "material_type": "PETG",
+    "material_family": "petg",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [18, 24],
+    "variants": ["black", "white", "transparent", "blue", "red", "green", "orange", "yellow"],
+    "sources": {
+      "amazon": "eSun+PETG+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.esun3d.com"
+    },
+    "compatible_with": ["generic_petg"],
+    "notes": "Good PETG value. Excellent layer adhesion. Best printed slowly at first."
+  },
+  "overture_petg": {
+    "vendor": "Overture",
+    "material_type": "PETG",
+    "material_family": "petg",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [16, 22],
+    "variants": ["black", "white", "transparent", "blue", "red", "green"],
+    "sources": {
+      "amazon": "Overture+PETG+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.overture3d.com"
+    },
+    "compatible_with": ["generic_petg"],
+    "notes": "Budget PETG with decent print quality. Ships with build surface sample."
+  },
+  "prusament_petg": {
+    "vendor": "Prusament",
+    "material_type": "PETG",
+    "material_family": "petg",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [28, 35],
+    "variants": ["jet_black", "prusa_orange", "signal_white", "carmine_red", "ultramarine_blue"],
+    "sources": {
+      "amazon": "Prusament+PETG+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.prusa3d.com/category/prusament/"
+    },
+    "compatible_with": ["generic_petg"],
+    "notes": "Premium PETG with tight tolerances. Minimal stringing and great interlayer bonding."
+  },
+  "polymaker_polylite_petg": {
+    "vendor": "Polymaker",
+    "material_type": "PolyLite PETG",
+    "material_family": "petg",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [20, 26],
+    "variants": ["black", "white", "transparent", "blue", "red", "green"],
+    "sources": {
+      "amazon": "Polymaker+PolyLite+PETG+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.polymaker.com"
+    },
+    "compatible_with": ["generic_petg"],
+    "notes": "Easy-to-print PETG with good surface finish. Low odor during printing."
+  },
+  "bambu_petg_basic": {
+    "vendor": "Bambu Lab",
+    "material_type": "PETG Basic",
+    "material_family": "petg",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [16, 22],
+    "variants": ["black", "white", "transparent", "blue", "red", "green"],
+    "sources": {
+      "amazon": "Bambu+Lab+PETG+Basic+1.75mm+{color}+1kg",
+      "manufacturer": "https://store.bambulab.com"
+    },
+    "compatible_with": ["generic_petg"],
+    "notes": "RFID-tagged PETG optimized for Bambu printers. Good all-around performance."
+  },
+  "hatchbox_abs": {
+    "vendor": "Hatchbox",
+    "material_type": "ABS",
+    "material_family": "abs",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [22, 28],
+    "variants": ["black", "white", "gray", "red", "blue", "green", "orange", "yellow"],
+    "sources": {
+      "amazon": "Hatchbox+ABS+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.hatchbox3d.com"
+    },
+    "compatible_with": ["generic_abs"],
+    "notes": "Standard ABS. Requires enclosure for best results. Moderate warping tendency."
+  },
+  "esun_abs_plus": {
+    "vendor": "eSun",
+    "material_type": "ABS+",
+    "material_family": "abs",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [18, 24],
+    "variants": ["black", "white", "gray", "red", "blue", "green", "orange", "yellow"],
+    "sources": {
+      "amazon": "eSun+ABS+Plus+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.esun3d.com"
+    },
+    "compatible_with": ["generic_abs"],
+    "notes": "Reduced warping compared to standard ABS. Good impact resistance."
+  },
+  "prusament_asa": {
+    "vendor": "Prusament",
+    "material_type": "ASA",
+    "material_family": "asa",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [0.85],
+    "price_range_usd": [30, 38],
+    "variants": ["galaxy_black", "prusa_orange", "signal_white"],
+    "sources": {
+      "amazon": "Prusament+ASA+1.75mm+{color}",
+      "manufacturer": "https://www.prusa3d.com/category/prusament/"
+    },
+    "compatible_with": ["generic_asa"],
+    "notes": "UV-resistant alternative to ABS. Excellent for outdoor parts. Requires enclosure."
+  },
+  "polymaker_polylite_asa": {
+    "vendor": "Polymaker",
+    "material_type": "PolyLite ASA",
+    "material_family": "asa",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [22, 30],
+    "variants": ["black", "white", "gray", "blue"],
+    "sources": {
+      "amazon": "Polymaker+PolyLite+ASA+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.polymaker.com"
+    },
+    "compatible_with": ["generic_asa"],
+    "notes": "Weather-resistant ASA with low warping. Good UV stability for outdoor use."
+  },
+  "esun_easa": {
+    "vendor": "eSun",
+    "material_type": "eASA",
+    "material_family": "asa",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [20, 28],
+    "variants": ["black", "white", "gray", "red", "blue"],
+    "sources": {
+      "amazon": "eSun+eASA+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.esun3d.com"
+    },
+    "compatible_with": ["generic_asa"],
+    "notes": "Budget ASA with decent UV resistance. Easier to print than standard ASA."
+  },
+  "esun_tpu_95a": {
+    "vendor": "eSun",
+    "material_type": "TPU 95A",
+    "material_family": "tpu",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [22, 28],
+    "variants": ["black", "white", "transparent", "blue", "red"],
+    "sources": {
+      "amazon": "eSun+TPU+95A+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.esun3d.com"
+    },
+    "compatible_with": ["generic_tpu"],
+    "notes": "Popular flexible filament at 95A hardness. Best with direct drive extruders."
+  },
+  "overture_tpu_95a": {
+    "vendor": "Overture",
+    "material_type": "TPU 95A",
+    "material_family": "tpu",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [18, 24],
+    "variants": ["black", "white", "transparent", "blue", "red"],
+    "sources": {
+      "amazon": "Overture+TPU+95A+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.overture3d.com"
+    },
+    "compatible_with": ["generic_tpu"],
+    "notes": "Budget TPU option. Good flexibility at 95A shore hardness."
+  },
+  "ninjaflex_85a": {
+    "vendor": "NinjaTek",
+    "material_type": "NinjaFlex 85A",
+    "material_family": "tpu",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [0.5],
+    "price_range_usd": [36, 48],
+    "variants": ["midnight", "snow", "sapphire", "lava", "grass", "water", "flamingo"],
+    "sources": {
+      "amazon": "NinjaTek+NinjaFlex+85A+1.75mm+{color}",
+      "manufacturer": "https://ninjatek.com"
+    },
+    "compatible_with": ["generic_tpu"],
+    "notes": "Ultra-flexible 85A shore hardness. Requires very slow printing and direct drive."
+  },
+  "bambu_tpu_95a": {
+    "vendor": "Bambu Lab",
+    "material_type": "TPU 95A",
+    "material_family": "tpu",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [20, 26],
+    "variants": ["black", "white", "transparent", "blue", "red"],
+    "sources": {
+      "amazon": "Bambu+Lab+TPU+95A+1.75mm+{color}+1kg",
+      "manufacturer": "https://store.bambulab.com"
+    },
+    "compatible_with": ["generic_tpu"],
+    "notes": "RFID-tagged TPU tuned for Bambu direct drive. Prints faster than most TPU."
+  },
+  "prusament_pc_blend": {
+    "vendor": "Prusament",
+    "material_type": "PC Blend",
+    "material_family": "pc",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [35, 45],
+    "variants": ["natural", "carbon_black"],
+    "sources": {
+      "amazon": "Prusament+PC+Blend+1.75mm+{color}+1kg",
+      "manufacturer": "https://www.prusa3d.com/category/prusament/"
+    },
+    "compatible_with": ["generic_pc"],
+    "notes": "Polycarbonate blend with lower printing temps than pure PC. Requires enclosure."
+  },
+  "polymaker_polymax_pc": {
+    "vendor": "Polymaker",
+    "material_type": "PolyMax PC",
+    "material_family": "pc",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [0.75],
+    "price_range_usd": [35, 45],
+    "variants": ["black", "white"],
+    "sources": {
+      "amazon": "Polymaker+PolyMax+PC+1.75mm+{color}",
+      "manufacturer": "https://www.polymaker.com"
+    },
+    "compatible_with": ["generic_pc"],
+    "notes": "Nano-reinforced polycarbonate. High impact strength. Requires enclosure and all-metal hotend."
+  },
+  "esun_epa_cf": {
+    "vendor": "eSun",
+    "material_type": "ePA-CF",
+    "material_family": "nylon",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [38, 50],
+    "variants": ["black"],
+    "sources": {
+      "amazon": "eSun+ePA-CF+Nylon+Carbon+Fiber+1.75mm+1kg",
+      "manufacturer": "https://www.esun3d.com"
+    },
+    "compatible_with": ["generic_nylon"],
+    "notes": "Carbon fiber reinforced nylon. Very stiff and strong. Requires hardened nozzle."
+  },
+  "bambu_pa6_cf": {
+    "vendor": "Bambu Lab",
+    "material_type": "PA6-CF",
+    "material_family": "nylon",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [42, 55],
+    "variants": ["black"],
+    "sources": {
+      "amazon": "Bambu+Lab+PA6-CF+1.75mm+1kg",
+      "manufacturer": "https://store.bambulab.com"
+    },
+    "compatible_with": ["generic_nylon"],
+    "notes": "High-performance carbon fiber nylon. Requires hardened nozzle and enclosure."
+  },
+  "bambu_ppa_cf": {
+    "vendor": "Bambu Lab",
+    "material_type": "PPA-CF",
+    "material_family": "nylon",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [50, 65],
+    "variants": ["black"],
+    "sources": {
+      "amazon": "Bambu+Lab+PPA-CF+1.75mm+1kg",
+      "manufacturer": "https://store.bambulab.com"
+    },
+    "compatible_with": ["generic_nylon"],
+    "notes": "Polyphthalamide carbon fiber. Extreme heat resistance up to 170C. Hardened nozzle required."
+  },
+  "polymaker_polymide_copa": {
+    "vendor": "Polymaker",
+    "material_type": "PolyMide CoPA",
+    "material_family": "nylon",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [0.75],
+    "price_range_usd": [40, 52],
+    "variants": ["black", "natural"],
+    "sources": {
+      "amazon": "Polymaker+PolyMide+CoPA+Nylon+1.75mm",
+      "manufacturer": "https://www.polymaker.com"
+    },
+    "compatible_with": ["generic_nylon"],
+    "notes": "Copolymer nylon with excellent toughness and low moisture absorption for a nylon."
+  },
+  "prusament_pvdf": {
+    "vendor": "Prusament",
+    "material_type": "PVDF",
+    "material_family": "pvdf",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [0.5],
+    "price_range_usd": [45, 60],
+    "variants": ["natural"],
+    "sources": {
+      "amazon": "Prusament+PVDF+1.75mm",
+      "manufacturer": "https://www.prusa3d.com/category/prusament/"
+    },
+    "compatible_with": [],
+    "notes": "Chemical-resistant fluoropolymer. Excellent for lab equipment and chemical handling."
+  },
+  "polymaker_polywood": {
+    "vendor": "Polymaker",
+    "material_type": "PolyWood",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [0.6],
+    "price_range_usd": [22, 30],
+    "variants": ["brown", "wood"],
+    "sources": {
+      "amazon": "Polymaker+PolyWood+1.75mm+{color}",
+      "manufacturer": "https://www.polymaker.com"
+    },
+    "compatible_with": ["generic_pla"],
+    "notes": "Wood-like PLA with sandable matte finish. Creates realistic wood appearance."
+  },
+  "elegoo_standard_resin": {
+    "vendor": "Elegoo",
+    "material_type": "Standard Resin",
+    "material_family": "resin",
+    "diameter_mm": null,
+    "weight_options_kg": [0.5, 1.0],
+    "price_range_usd": [16, 28],
+    "variants": ["gray", "white", "black", "clear", "beige", "blue", "green"],
+    "sources": {
+      "amazon": "Elegoo+Standard+Resin+{color}",
+      "manufacturer": "https://www.elegoo.com"
+    },
+    "compatible_with": ["generic_resin"],
+    "notes": "Best-selling standard resin. Good detail and easy to work with. Low odor formula."
+  },
+  "elegoo_abs_like_resin": {
+    "vendor": "Elegoo",
+    "material_type": "ABS-Like Resin",
+    "material_family": "resin",
+    "diameter_mm": null,
+    "weight_options_kg": [0.5, 1.0],
+    "price_range_usd": [22, 36],
+    "variants": ["gray", "white", "black", "clear", "beige"],
+    "sources": {
+      "amazon": "Elegoo+ABS-Like+Resin+{color}",
+      "manufacturer": "https://www.elegoo.com"
+    },
+    "compatible_with": ["generic_resin"],
+    "notes": "Tougher than standard resin with ABS-like properties. Good for functional parts."
+  },
+  "anycubic_standard_resin": {
+    "vendor": "Anycubic",
+    "material_type": "Standard Resin",
+    "material_family": "resin",
+    "diameter_mm": null,
+    "weight_options_kg": [0.5, 1.0],
+    "price_range_usd": [16, 28],
+    "variants": ["gray", "white", "black", "clear", "green", "maroon"],
+    "sources": {
+      "amazon": "Anycubic+Standard+Resin+{color}",
+      "manufacturer": "https://www.anycubic.com"
+    },
+    "compatible_with": ["generic_resin"],
+    "notes": "Affordable resin with fast cure times. Good for beginners to resin printing."
+  },
+  "siraya_tech_fast": {
+    "vendor": "Siraya Tech",
+    "material_type": "Fast",
+    "material_family": "resin",
+    "diameter_mm": null,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [30, 42],
+    "variants": ["gray", "white", "navy_gray", "smoky_black"],
+    "sources": {
+      "amazon": "Siraya+Tech+Fast+Resin+{color}",
+      "manufacturer": "https://siraya.tech"
+    },
+    "compatible_with": ["generic_resin"],
+    "notes": "Fast-curing ABS-like resin. Excellent detail with good toughness."
+  },
+  "siraya_tech_tenacious": {
+    "vendor": "Siraya Tech",
+    "material_type": "Tenacious",
+    "material_family": "resin",
+    "diameter_mm": null,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [50, 65],
+    "variants": ["clear"],
+    "sources": {
+      "amazon": "Siraya+Tech+Tenacious+Resin",
+      "manufacturer": "https://siraya.tech"
+    },
+    "compatible_with": ["generic_resin"],
+    "notes": "Flexible additive resin. Mix with other resins to increase impact resistance."
+  },
+  "phrozen_aqua_4k": {
+    "vendor": "Phrozen",
+    "material_type": "Aqua 4K",
+    "material_family": "resin",
+    "diameter_mm": null,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [35, 48],
+    "variants": ["gray", "beige", "navy_gray", "clear_green"],
+    "sources": {
+      "amazon": "Phrozen+Aqua+4K+Resin+{color}",
+      "manufacturer": "https://phrozen3d.com"
+    },
+    "compatible_with": ["generic_resin"],
+    "notes": "Optimized for 4K mono screens. Excellent detail for miniatures and jewelry."
+  },
+  "generic_pla": {
+    "vendor": null,
+    "material_type": "PLA",
+    "material_family": "pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [],
+    "price_range_usd": [15, 35],
+    "variants": [],
+    "sources": {
+      "amazon": "PLA+filament+1.75mm+1kg",
+      "manufacturer": ""
+    },
+    "compatible_with": ["hatchbox_pla", "hatchbox_pla_plus", "esun_pla_plus", "esun_pla_pro", "overture_pla", "overture_pla_pro", "prusament_pla", "polymaker_polyterra_pla", "polymaker_polylite_pla", "bambu_pla_basic", "bambu_pla_matte", "sunlu_pla", "sunlu_pla_plus", "amazon_basics_pla", "overture_pla_silk", "polymaker_polywood"],
+    "notes": "Generic PLA profile. 190-220C hotend, 50-65C bed. Most forgiving FDM material."
+  },
+  "generic_petg": {
+    "vendor": null,
+    "material_type": "PETG",
+    "material_family": "petg",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [],
+    "price_range_usd": [16, 35],
+    "variants": [],
+    "sources": {
+      "amazon": "PETG+filament+1.75mm+1kg",
+      "manufacturer": ""
+    },
+    "compatible_with": ["hatchbox_petg", "esun_petg", "overture_petg", "prusament_petg", "polymaker_polylite_petg", "bambu_petg_basic"],
+    "notes": "Generic PETG profile. 230-250C hotend, 70-85C bed. Good balance of strength and ease."
+  },
+  "generic_abs": {
+    "vendor": null,
+    "material_type": "ABS",
+    "material_family": "abs",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [],
+    "price_range_usd": [18, 30],
+    "variants": [],
+    "sources": {
+      "amazon": "ABS+filament+1.75mm+1kg",
+      "manufacturer": ""
+    },
+    "compatible_with": ["hatchbox_abs", "esun_abs_plus"],
+    "notes": "Generic ABS profile. 230-250C hotend, 100-110C bed. Requires enclosure to prevent warping."
+  },
+  "generic_asa": {
+    "vendor": null,
+    "material_type": "ASA",
+    "material_family": "asa",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [],
+    "price_range_usd": [20, 40],
+    "variants": [],
+    "sources": {
+      "amazon": "ASA+filament+1.75mm+1kg",
+      "manufacturer": ""
+    },
+    "compatible_with": ["prusament_asa", "polymaker_polylite_asa", "esun_easa"],
+    "notes": "Generic ASA profile. 240-260C hotend, 90-110C bed. UV-resistant alternative to ABS."
+  },
+  "generic_tpu": {
+    "vendor": null,
+    "material_type": "TPU",
+    "material_family": "tpu",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [],
+    "price_range_usd": [18, 50],
+    "variants": [],
+    "sources": {
+      "amazon": "TPU+filament+1.75mm+1kg",
+      "manufacturer": ""
+    },
+    "compatible_with": ["esun_tpu_95a", "overture_tpu_95a", "ninjaflex_85a", "bambu_tpu_95a"],
+    "notes": "Generic TPU profile. 220-240C hotend, 40-60C bed. Print slow with direct drive extruder."
+  },
+  "generic_nylon": {
+    "vendor": null,
+    "material_type": "Nylon",
+    "material_family": "nylon",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [],
+    "price_range_usd": [30, 65],
+    "variants": [],
+    "sources": {
+      "amazon": "Nylon+filament+1.75mm+1kg",
+      "manufacturer": ""
+    },
+    "compatible_with": ["esun_epa_cf", "bambu_pa6_cf", "bambu_ppa_cf", "polymaker_polymide_copa"],
+    "notes": "Generic nylon profile. 250-280C hotend, 70-100C bed. Requires dry storage and enclosure."
+  },
+  "generic_pc": {
+    "vendor": null,
+    "material_type": "PC",
+    "material_family": "pc",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [],
+    "price_range_usd": [30, 50],
+    "variants": [],
+    "sources": {
+      "amazon": "Polycarbonate+filament+1.75mm+1kg",
+      "manufacturer": ""
+    },
+    "compatible_with": ["prusament_pc_blend", "polymaker_polymax_pc"],
+    "notes": "Generic polycarbonate profile. 260-300C hotend, 100-120C bed. Extremely strong but demanding to print."
+  },
+  "generic_resin": {
+    "vendor": null,
+    "material_type": "Resin",
+    "material_family": "resin",
+    "diameter_mm": null,
+    "weight_options_kg": [],
+    "price_range_usd": [15, 65],
+    "variants": [],
+    "sources": {
+      "amazon": "3D+printer+resin+405nm",
+      "manufacturer": ""
+    },
+    "compatible_with": ["elegoo_standard_resin", "elegoo_abs_like_resin", "anycubic_standard_resin", "siraya_tech_fast", "siraya_tech_tenacious", "phrozen_aqua_4k"],
+    "notes": "Generic 405nm UV resin profile. Use in well-ventilated area with nitrile gloves."
+  }
+}

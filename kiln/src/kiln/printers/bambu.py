@@ -148,6 +148,19 @@ _PRINT_ACTIVE_STATES: frozenset[str] = frozenset(
     }
 )
 
+# Bambu speed profile levels (MQTT print_speed command values).
+_SPEED_PROFILES: dict[str, int] = {
+    "silent": 1,
+    "standard": 2,
+    "sport": 3,
+    "ludicrous": 4,
+}
+_SPEED_PROFILE_NAMES: dict[int, str] = {v: k for k, v in _SPEED_PROFILES.items()}
+
+# Bambu LED node names.
+_VALID_LED_NODES: frozenset[str] = frozenset({"chamber_light", "work_light"})
+_VALID_LED_MODES: frozenset[str] = frozenset({"on", "off", "flashing"})
+
 
 def _normalize_fingerprint(value: str) -> str:
     """Normalize a SHA-256 fingerprint string to lowercase hex."""
@@ -776,6 +789,26 @@ class BambuAdapter(PrinterAdapter):
 
         mapped = _STATE_MAP.get(gcode_state, PrinterStatus.UNKNOWN)
 
+        # Speed profile.
+        spd_lvl = status.get("spd_lvl")
+        spd_lvl_int: int | None = None
+        if spd_lvl is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                spd_lvl_int = int(spd_lvl)
+        speed_name = _SPEED_PROFILE_NAMES.get(spd_lvl_int) if spd_lvl_int else None
+        spd_mag = status.get("spd_mag")
+        spd_mag_int: int | None = None
+        if spd_mag is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                spd_mag_int = int(spd_mag)
+
+        # Print error code (populated when gcode_state == "failed").
+        print_error = status.get("print_error")
+        print_error_int: int | None = None
+        if print_error is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                print_error_int = int(print_error)
+
         return PrinterState(
             connected=True,
             state=mapped,
@@ -784,6 +817,16 @@ class BambuAdapter(PrinterAdapter):
             bed_temp_actual=status.get("bed_temper"),
             bed_temp_target=status.get("bed_target_temper"),
             chamber_temp_actual=status.get("chamber_temper"),
+            cooling_fan_speed=status.get("cooling_fan_speed"),
+            aux_fan_speed=status.get("big_fan1_speed"),
+            chamber_fan_speed=status.get("big_fan2_speed"),
+            heatbreak_fan_speed=status.get("heatbreak_fan_speed"),
+            wifi_signal=status.get("wifi_signal"),
+            nozzle_diameter=status.get("nozzle_diameter"),
+            nozzle_type=status.get("nozzle_type"),
+            speed_profile=speed_name,
+            speed_magnitude=spd_mag_int,
+            print_error=print_error_int,
         )
 
     def get_state(self) -> PrinterState:
@@ -854,11 +897,25 @@ class BambuAdapter(PrinterAdapter):
                 total_est = print_time_left_seconds / fraction_left
                 print_time_seconds = max(0, int(total_est - print_time_left_seconds))
 
+        # Layer tracking.
+        current_layer: int | None = None
+        total_layers: int | None = None
+        layer_num = status.get("layer_num")
+        total_layer_num = status.get("total_layer_num")
+        if layer_num is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                current_layer = int(layer_num)
+        if total_layer_num is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                total_layers = int(total_layer_num)
+
         return JobProgress(
             file_name=file_name if file_name else None,
             completion=completion,
             print_time_seconds=print_time_seconds,
             print_time_left_seconds=print_time_left_seconds,
+            current_layer=current_layer,
+            total_layers=total_layers,
         )
 
     def list_files(self) -> list[PrinterFile]:
@@ -1060,7 +1117,7 @@ class BambuAdapter(PrinterAdapter):
             time.sleep(poll_interval)
         return "timeout"
 
-    def start_print(self, file_name: str) -> PrintResult:
+    def start_print(self, file_name: str, **kwargs: Any) -> PrintResult:
         """Begin printing a file on the Bambu printer.
 
         The file must already exist on the printer's SD card (uploaded
@@ -1072,6 +1129,22 @@ class BambuAdapter(PrinterAdapter):
 
         Args:
             file_name: Name or path of the file on the printer.
+            **kwargs: Optional overrides for 3MF print parameters:
+
+                * ``use_ams`` (bool): Enable AMS filament feeding.
+                  Default ``False``.
+                * ``ams_mapping`` (list[int]): Slot mapping per extruder.
+                  Default ``[0]``.  Use ``[-1]`` for unused slots.
+                * ``timelapse`` (bool): Record timelapse.  Default ``False``.
+                * ``bed_leveling`` (bool): Run bed leveling.  Default ``True``.
+                * ``flow_cali`` (bool): Run flow calibration.  Default ``True``.
+                * ``vibration_cali`` (bool): Run vibration calibration.
+                  Default ``True``.
+                * ``layer_inspect`` (bool): Enable first-layer inspection.
+                  Default ``False``.
+                * ``bed_type`` (str): Bed surface type.  Default ``"auto"``.
+                * ``plate_number`` (int): Plate index in multi-plate 3MF.
+                  Default ``1``.
         """
         # Normalise: strip leading path components if user passes full path.
         basename = os.path.basename(file_name)
@@ -1081,22 +1154,26 @@ class BambuAdapter(PrinterAdapter):
             already_active = str(self._last_status.get("gcode_state", "")).lower() in _PRINT_ACTIVE_STATES
 
         if basename.lower().endswith(".3mf"):
+            plate_num = kwargs.get("plate_number", 1)
+            ams_mapping = kwargs.get("ams_mapping", [0])
+            if not isinstance(ams_mapping, list):
+                ams_mapping = [0]
             self._publish_command(
                 {
                     "print": {
                         "sequence_id": self._next_seq(),
                         "command": "project_file",
-                        "param": "Metadata/plate_1.gcode",
+                        "param": f"Metadata/plate_{plate_num}.gcode",
                         "subtask_name": basename,
                         "url": f"file:///sdcard/{basename}",
-                        "bed_type": "auto",
-                        "timelapse": False,
-                        "bed_leveling": True,
-                        "flow_cali": True,
-                        "vibration_cali": True,
-                        "layer_inspect": False,
-                        "use_ams": False,
-                        "ams_mapping": [0],
+                        "bed_type": str(kwargs.get("bed_type", "auto")),
+                        "timelapse": bool(kwargs.get("timelapse", False)),
+                        "bed_leveling": bool(kwargs.get("bed_leveling", True)),
+                        "flow_cali": bool(kwargs.get("flow_cali", True)),
+                        "vibration_cali": bool(kwargs.get("vibration_cali", True)),
+                        "layer_inspect": bool(kwargs.get("layer_inspect", False)),
+                        "use_ams": bool(kwargs.get("use_ams", False)),
+                        "ams_mapping": ams_mapping,
                         "profile_id": "0",
                         "project_id": "0",
                         "subtask_id": "0",
@@ -1192,6 +1269,210 @@ class BambuAdapter(PrinterAdapter):
         self._validate_temp(target, 130.0, "Bed")
         self.send_gcode([f"M140 S{int(target)}"])
         return True
+
+    # ------------------------------------------------------------------
+    # Bambu-specific: speed profiles
+    # ------------------------------------------------------------------
+
+    def get_speed_profile(self) -> dict[str, Any]:
+        """Return the current speed profile level and name.
+
+        Reads ``spd_lvl`` and ``spd_mag`` from the MQTT status cache.
+
+        Returns:
+            Dict with ``level`` (1-4), ``name`` (silent/standard/sport/ludicrous),
+            and ``speed_magnitude`` (actual multiplier percentage).
+        """
+        try:
+            status = self._get_cached_status()
+        except PrinterError:
+            return {"level": None, "name": "unknown", "speed_magnitude": None}
+
+        spd_lvl = status.get("spd_lvl")
+        spd_mag = status.get("spd_mag")
+        level: int | None = None
+        if spd_lvl is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                level = int(spd_lvl)
+        name = _SPEED_PROFILE_NAMES.get(level, "unknown") if level else "unknown"
+        return {"level": level, "name": name, "speed_magnitude": spd_mag}
+
+    def set_speed_profile(self, profile: str) -> bool:
+        """Set the printer speed profile.
+
+        Args:
+            profile: One of ``"silent"``, ``"standard"``, ``"sport"``,
+                or ``"ludicrous"`` (case-insensitive).
+
+        Returns:
+            ``True`` if the command was accepted.
+
+        Raises:
+            PrinterError: If *profile* is not a valid speed profile name.
+        """
+        key = profile.strip().lower()
+        if key not in _SPEED_PROFILES:
+            raise PrinterError(
+                f"Unknown speed profile {profile!r}. "
+                f"Valid profiles: {', '.join(sorted(_SPEED_PROFILES))}"
+            )
+        self._publish_command(
+            {
+                "print": {
+                    "sequence_id": self._next_seq(),
+                    "command": "print_speed",
+                    "param": str(_SPEED_PROFILES[key]),
+                }
+            }
+        )
+        return True
+
+    # ------------------------------------------------------------------
+    # Bambu-specific: LED control
+    # ------------------------------------------------------------------
+
+    def set_light(self, node: str, mode: str) -> bool:
+        """Control the printer's LED lights.
+
+        Args:
+            node: Light to control — ``"chamber_light"`` or ``"work_light"``.
+            mode: ``"on"``, ``"off"``, or ``"flashing"``.
+
+        Returns:
+            ``True`` if the command was accepted.
+
+        Raises:
+            PrinterError: If *node* or *mode* is invalid.
+        """
+        node_lower = node.strip().lower()
+        mode_lower = mode.strip().lower()
+        if node_lower not in _VALID_LED_NODES:
+            raise PrinterError(
+                f"Unknown LED node {node!r}. Valid nodes: {', '.join(sorted(_VALID_LED_NODES))}"
+            )
+        if mode_lower not in _VALID_LED_MODES:
+            raise PrinterError(
+                f"Unknown LED mode {mode!r}. Valid modes: {', '.join(sorted(_VALID_LED_MODES))}"
+            )
+        self._publish_command(
+            {
+                "system": {
+                    "sequence_id": self._next_seq(),
+                    "command": "ledctrl",
+                    "led_node": node_lower,
+                    "led_mode": mode_lower,
+                }
+            }
+        )
+        return True
+
+    # ------------------------------------------------------------------
+    # AMS (Automatic Material System)
+    # ------------------------------------------------------------------
+
+    def get_ams_status(self) -> dict[str, Any]:
+        """Query AMS status: what's loaded in each tray.
+
+        Returns a dict with structure::
+
+            {
+                "ams_exist_bits": "1",
+                "tray_exist_bits": "f",
+                "tray_now": "0",
+                "units": [
+                    {
+                        "unit_id": 0,
+                        "humidity": 3,
+                        "trays": [
+                            {
+                                "slot": 0,
+                                "tray_type": "PLA",
+                                "tray_color": "FF0000FF",
+                                "remain": 85,
+                                "tag_uid": "...",
+                                "nozzle_temp_min": 190,
+                                "nozzle_temp_max": 230,
+                                "bed_temp": 60,
+                            },
+                            ...
+                        ]
+                    }
+                ]
+            }
+
+        Returns an empty ``units`` list if no AMS data is available
+        (e.g. printer not connected or no AMS attached).
+
+        Raises:
+            PrinterError: If the MQTT connection is not available.
+        """
+        status = self._get_cached_status()
+        ams_data = status.get("ams")
+        result: dict[str, Any] = {
+            "ams_exist_bits": status.get("ams_exist_bits", "0"),
+            "tray_exist_bits": status.get("tray_exist_bits", "0"),
+            "tray_now": status.get("tray_now", "255"),
+            "units": [],
+        }
+
+        if not isinstance(ams_data, list):
+            return result
+
+        for unit in ams_data:
+            if not isinstance(unit, dict):
+                continue
+            unit_id = unit.get("id", 0)
+            humidity = unit.get("humidity")
+            humidity_int: int | None = None
+            if humidity is not None:
+                with contextlib.suppress(TypeError, ValueError):
+                    humidity_int = int(humidity)
+
+            trays: list[dict[str, Any]] = []
+            raw_trays = unit.get("tray")
+            if isinstance(raw_trays, list):
+                for tray in raw_trays:
+                    if not isinstance(tray, dict):
+                        continue
+                    slot_id = tray.get("id", 0)
+                    remain = tray.get("remain")
+                    remain_int: int | None = None
+                    if remain is not None:
+                        with contextlib.suppress(TypeError, ValueError):
+                            remain_int = int(remain)
+                    nozzle_min: int | None = None
+                    nozzle_max: int | None = None
+                    bed_t: int | None = None
+                    raw_min = tray.get("nozzle_temp_min")
+                    raw_max = tray.get("nozzle_temp_max")
+                    raw_bed = tray.get("bed_temp")
+                    if raw_min is not None:
+                        with contextlib.suppress(TypeError, ValueError):
+                            nozzle_min = int(raw_min)
+                    if raw_max is not None:
+                        with contextlib.suppress(TypeError, ValueError):
+                            nozzle_max = int(raw_max)
+                    if raw_bed is not None:
+                        with contextlib.suppress(TypeError, ValueError):
+                            bed_t = int(raw_bed)
+                    trays.append({
+                        "slot": slot_id,
+                        "tray_type": tray.get("tray_type", ""),
+                        "tray_color": tray.get("tray_color", ""),
+                        "remain": remain_int,
+                        "tag_uid": tray.get("tag_uid", ""),
+                        "nozzle_temp_min": nozzle_min,
+                        "nozzle_temp_max": nozzle_max,
+                        "bed_temp": bed_t,
+                    })
+
+            result["units"].append({
+                "unit_id": unit_id,
+                "humidity": humidity_int,
+                "trays": trays,
+            })
+
+        return result
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- G-code
@@ -1332,10 +1613,11 @@ class BambuAdapter(PrinterAdapter):
         """Return the RTSP stream URL for the Bambu printer's camera.
 
         Bambu printers expose a TLS-encrypted RTSP stream at
-        ``rtsps://<host>:322/streaming/live/1``.  Requires the LAN
-        Access Code for RTSP authentication.
+        ``rtsps://<host>:322/streaming/live/1``.  The URL includes
+        RTSP credentials (username ``bblp`` + LAN access code) so
+        that clients can authenticate directly.
         """
-        return f"rtsps://{self._host}:322/streaming/live/1"
+        return f"rtsps://bblp:{self._access_code}@{self._host}:322/streaming/live/1"
 
     # ------------------------------------------------------------------
     # Cleanup

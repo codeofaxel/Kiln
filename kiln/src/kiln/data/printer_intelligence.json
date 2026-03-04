@@ -606,40 +606,105 @@
     "hotend_type": "all_metal",
     "has_enclosure": false,
     "has_abl": true,
+    "build_volume_mm": [256, 256, 256],
+    "max_speed_mm_s": 500,
+    "max_acceleration_mm_s2": 10000,
+    "max_nozzle_temp": 300,
+    "max_bed_temp": 100,
+    "nozzle_options": ["0.2mm SS", "0.4mm SS (default)", "0.4mm hardened steel", "0.6mm hardened steel", "0.8mm hardened steel"],
+    "ams_type": "ams_lite",
+    "ams_slots": 4,
+    "camera": "1080p ~1fps",
+    "wifi": "2.4GHz only",
     "materials": {
       "PLA": {
         "hotend": 220,
         "bed": 55,
         "fan": 100,
-        "notes": "Great PLA printer out of the box."
+        "notes": "Great PLA printer out of the box. Default material."
+      },
+      "PLA+": {
+        "hotend": 220,
+        "bed": 60,
+        "fan": 100,
+        "notes": "Same as PLA. Slightly higher bed temp for improved adhesion."
+      },
+      "PLA Silk": {
+        "hotend": 215,
+        "bed": 55,
+        "fan": 80,
+        "notes": "Lower fan speed for better layer shine. Reduce print speed 10-20%."
+      },
+      "PLA-CF": {
+        "hotend": 230,
+        "bed": 55,
+        "fan": 100,
+        "notes": "Requires hardened steel nozzle. Standard SS nozzle will wear quickly."
       },
       "PETG": {
         "hotend": 240,
         "bed": 80,
         "fan": 40,
-        "notes": "Open frame \u2014 draft-free room recommended for PETG."
+        "notes": "Open frame \u2014 draft-free room recommended. Dry filament before use to reduce stringing."
       },
       "TPU": {
         "hotend": 225,
         "bed": 50,
         "fan": 50,
-        "notes": "Direct drive handles TPU. Reduce speed to 50mm/s."
+        "notes": "Direct drive handles TPU well. Reduce speed to 30-50mm/s. Feed manually, NOT through AMS Lite."
       }
     },
     "quirks": [
-      "Open frame \u2014 no ABS printing without aftermarket enclosure.",
-      "AMS Lite compatible (4-slot) \u2014 different from X1C full AMS.",
-      "Bed-slinger design \u2014 heavier parts may shift at very high accelerations.",
-      "Slightly lower max speeds than X1C/P1S due to bed-slinger kinematics."
+      "Open frame \u2014 cannot reliably print ABS, ASA, PA, or PC without aftermarket enclosure.",
+      "AMS Lite (4-slot, single unit only) \u2014 no daisy-chaining like full AMS. Not for TPU or abrasive filaments.",
+      "Bed-slinger design \u2014 heavier parts may shift at very high accelerations. Add brims for tall/small prints.",
+      "2.4GHz WiFi only \u2014 may have connectivity issues with special characters in WiFi password.",
+      "No LiDAR or AI spaghetti detection \u2014 those are X1 Carbon exclusive features.",
+      "Max bed temp 100C (vs 120C on X1C) \u2014 limits some engineering material adhesion.",
+      "PEI build plate needs regular washing with hot water and dish soap (IPA alone is insufficient).",
+      "Only one local MQTT client reliably supported at a time \u2014 close Bambu Studio before connecting Kiln.",
+      "Auto-calibration runs before every print (z-offset, bed leveling, vibration comp, pressure advance, flow cal). Do not skip."
     ],
     "calibration": {
-      "first_steps": "Run built-in calibration from touchscreen. Simple and effective."
+      "first_steps": "Fully automatic. Built-in strain-gauge z-offset, mesh bed leveling, input shaping, pressure advance, and flow calibration run before every print. No manual tuning needed.",
+      "bed_cleaning": "Wash PEI plate with hot water and dish soap (not just IPA). Never touch print surface with bare fingers.",
+      "nozzle_maintenance": "Clean nozzle tip before calibration for accurate z-offset. Replace nozzle if flow is inconsistent."
     },
     "failure_modes": [
       {
         "symptom": "Parts detaching at high speed",
-        "cause": "Bed-slinger Y acceleration too high for heavy parts",
-        "fix": "Reduce Y acceleration in slicer for prints taller than 100mm or with heavy infill."
+        "cause": "Bed-slinger Y acceleration too high for heavy parts, or contaminated PEI plate",
+        "fix": "Reduce Y acceleration in slicer. Add brims. Wash bed with hot water + dish soap. Increase bed temp 5C."
+      },
+      {
+        "symptom": "AMS Lite extrusion failures / filament not loading",
+        "cause": "Worn PTFE tubes, clogged filament path, or tangled spool",
+        "fix": "Replace PTFE tubes (consumable under heavy use). Check spool for tangles. Clean filament path through hub."
+      },
+      {
+        "symptom": "PTFE tube loosening in AMS Lite hub",
+        "cause": "Wear from repeated load/unload cycles on the 4-in-1 adapter",
+        "fix": "Reseat tubes firmly into the hub adapter. Replace adapter if tubes won't stay seated."
+      },
+      {
+        "symptom": "WiFi disconnecting or connection refused",
+        "cause": "2.4GHz only, special characters in WiFi password, or interference",
+        "fix": "Use simple alphanumeric WiFi password. Set up dedicated 2.4GHz network. Move printer closer to router."
+      },
+      {
+        "symptom": "Poor first layer adhesion",
+        "cause": "Dirty nozzle during calibration, contaminated PEI plate, or incorrect z-offset",
+        "fix": "Clean nozzle before starting. Wash bed (hot water + soap). Keep auto-calibration enabled. Try 0.5mm line width."
+      },
+      {
+        "symptom": "Stringing with PETG",
+        "cause": "Moisture in filament, retraction settings too low, or fan too high",
+        "fix": "Dry PETG before printing (6h at 65C). Reduce fan to 30-40%. Increase retraction distance slightly."
+      },
+      {
+        "symptom": "Camera snapshot returns empty / times out",
+        "cause": "RTSP authentication required by newer firmware, or camera disabled on printer",
+        "fix": "Ensure camera is enabled in printer settings. Verify LAN access code is correct. Check ffmpeg is installed."
       }
     ]
   },

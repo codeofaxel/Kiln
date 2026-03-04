@@ -1858,7 +1858,18 @@ def delete_file(file_path: str) -> dict:
 
 
 @mcp.tool()
-def start_print(file_name: str) -> dict:
+def start_print(
+    file_name: str,
+    use_ams: bool = False,
+    ams_mapping: list[int] | None = None,
+    timelapse: bool = False,
+    bed_leveling: bool = True,
+    flow_cali: bool = True,
+    vibration_cali: bool = True,
+    layer_inspect: bool = False,
+    bed_type: str = "auto",
+    plate_number: int = 1,
+) -> dict:
     """Start printing a file that already exists on the printer.
 
     Automatically runs pre-flight safety checks before starting.  If any
@@ -1867,6 +1878,22 @@ def start_print(file_name: str) -> dict:
 
     Args:
         file_name: Name or path of the file as shown by ``printer_files()``.
+        use_ams: Enable AMS filament feeding (Bambu only).  Default ``False``
+            (uses external spool).  Set ``True`` if filament is loaded in AMS.
+        ams_mapping: Slot mapping per extruder (Bambu only).  Default
+            ``[0]``.  Use ``[-1]`` for unused slots.  Check ``ams_status()``
+            to see which slots have filament.
+        timelapse: Record a timelapse video (Bambu only).  Default ``False``.
+        bed_leveling: Run automatic bed leveling before print (Bambu only).
+            Default ``True``.  Set ``False`` to skip for reprints (~2 min saved).
+        flow_cali: Run flow calibration (Bambu only).  Default ``True``.
+        vibration_cali: Run vibration/resonance calibration (Bambu only).
+            Default ``True``.
+        layer_inspect: Enable first-layer inspection pause (Bambu only).
+            Default ``False``.
+        bed_type: Bed surface type (Bambu only).  Default ``"auto"``.
+        plate_number: Plate index in multi-plate 3MF files (Bambu only).
+            Default ``1``.
     """
     if err := _check_auth("print"):
         return err
@@ -1932,9 +1959,29 @@ def start_print(file_name: str) -> dict:
                 result["preflight"] = pf
                 return result
 
-        result = adapter.start_print(file_name)
+        # Build kwargs for Bambu-specific print parameters.
+        print_kwargs: dict[str, Any] = {}
+        if use_ams:
+            print_kwargs["use_ams"] = True
+        if ams_mapping is not None:
+            print_kwargs["ams_mapping"] = ams_mapping
+        if timelapse:
+            print_kwargs["timelapse"] = True
+        if not bed_leveling:
+            print_kwargs["bed_leveling"] = False
+        if not flow_cali:
+            print_kwargs["flow_cali"] = False
+        if not vibration_cali:
+            print_kwargs["vibration_cali"] = False
+        if layer_inspect:
+            print_kwargs["layer_inspect"] = True
+        if bed_type != "auto":
+            print_kwargs["bed_type"] = bed_type
+        if plate_number != 1:
+            print_kwargs["plate_number"] = plate_number
+        result = adapter.start_print(file_name, **print_kwargs)
         _heater_watchdog.notify_print_started()
-        _audit("start_print", "executed", details={"file": file_name})
+        _audit("start_print", "executed", details={"file": file_name, **print_kwargs})
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(
@@ -2357,6 +2404,128 @@ def set_temperature(
     except Exception as exc:
         logger.exception("Unexpected error in set_temperature")
         return _error_dict(f"Unexpected error in set_temperature: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Bambu-specific tools (AMS, speed profiles, LED control)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def ams_status() -> dict:
+    """Query the AMS (Automatic Material System) status (Bambu Lab printers only).
+
+    Returns what's loaded in each AMS tray: filament type, color, remaining
+    percentage, RFID tag, temperature ranges, and humidity.
+
+    The ``tray_now`` field shows which tray is currently active (``"255"``
+    means none / external spool).  The ``ams_exist_bits`` and
+    ``tray_exist_bits`` fields are bitmasks showing which AMS units and
+    trays are physically present.
+
+    Use this to check filament levels before printing, verify the correct
+    material is loaded, or select the right ``ams_mapping`` for
+    ``start_print()``.
+    """
+    if err := _check_auth("read"):
+        return err
+    if err := _check_rate_limit("ams_status"):
+        return err
+    try:
+        adapter = _get_adapter()
+        if not hasattr(adapter, "get_ams_status"):
+            return _error_dict(
+                "AMS status is only available on Bambu Lab printers with AMS.",
+                code="UNSUPPORTED",
+            )
+        result = adapter.get_ams_status()
+        _audit("ams_status", "queried")
+        return {"status": "success", **result}
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to query AMS status: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in ams_status")
+        return _error_dict(f"Unexpected error in ams_status: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def set_speed_profile(profile: str) -> dict:
+    """Set the printer speed profile (Bambu Lab printers only).
+
+    Args:
+        profile: Speed profile name — one of ``"silent"`` (50% speed,
+            quiet), ``"standard"`` (100%, default), ``"sport"`` (124%,
+            faster), or ``"ludicrous"`` (166%, maximum speed).
+
+    Sport and Ludicrous modes automatically increase nozzle temperature
+    to prevent under-extrusion at higher flow rates.
+
+    Use ``printer_status()`` to see the current speed profile in the
+    response's ``printer.speed_profile`` field.
+    """
+    if err := _check_auth("printer_control"):
+        return err
+    if err := _check_rate_limit("set_speed_profile"):
+        return err
+    try:
+        adapter = _get_adapter()
+        if not hasattr(adapter, "set_speed_profile"):
+            return _error_dict(
+                "Speed profile control is only available on Bambu Lab printers.",
+                code="UNSUPPORTED",
+            )
+        ok = adapter.set_speed_profile(profile)
+        _audit("set_speed_profile", "executed", details={"profile": profile})
+        return {
+            "success": True,
+            "profile": profile.strip().lower(),
+            "accepted": ok,
+        }
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to set speed profile: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in set_speed_profile")
+        return _error_dict(f"Unexpected error in set_speed_profile: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
+    """Control the printer's LED lights (Bambu Lab printers only).
+
+    Args:
+        node: Which light to control — ``"chamber_light"`` (main
+            illumination) or ``"work_light"`` (nozzle area).
+            Defaults to ``"chamber_light"``.
+        mode: Light mode — ``"on"``, ``"off"``, or ``"flashing"``.
+            Defaults to ``"on"``.
+
+    Use this to improve camera visibility, signal print completion
+    (flashing), or turn lights off for overnight prints.
+    """
+    if err := _check_auth("printer_control"):
+        return err
+    if err := _check_rate_limit("set_printer_light"):
+        return err
+    try:
+        adapter = _get_adapter()
+        if not hasattr(adapter, "set_light"):
+            return _error_dict(
+                "Light control is only available on Bambu Lab printers.",
+                code="UNSUPPORTED",
+            )
+        ok = adapter.set_light(node, mode)
+        _audit("set_printer_light", "executed", details={"node": node, "mode": mode})
+        return {
+            "success": True,
+            "node": node.strip().lower(),
+            "mode": mode.strip().lower(),
+            "accepted": ok,
+        }
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to set printer light: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in set_printer_light")
+        return _error_dict(f"Unexpected error in set_printer_light: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
