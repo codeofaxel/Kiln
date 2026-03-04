@@ -672,19 +672,21 @@ class TestThreadSafety:
         def _stop(printer_id: str) -> None:
             try:
                 barrier.wait(timeout=5)
-                with mock.patch.object(coord, "_send_emergency_gcode", return_value=([], [])):
-                    coord.emergency_stop(printer_id)
+                coord.emergency_stop(printer_id)
             except Exception as exc:
                 errors.append(str(exc))
 
-        threads = [
-            threading.Thread(target=_stop, args=(f"printer-{i}",))
-            for i in range(num_threads)
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
+        # Patch once before spawning threads — mock.patch.object is not
+        # thread-safe when applied concurrently from multiple threads.
+        with mock.patch.object(coord, "_send_emergency_gcode", return_value=([], [])):
+            threads = [
+                threading.Thread(target=_stop, args=(f"printer-{i}",))
+                for i in range(num_threads)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
 
         assert errors == []
         history = coord.get_stop_history(limit=100)
