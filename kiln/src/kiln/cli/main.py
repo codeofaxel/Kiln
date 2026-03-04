@@ -6843,10 +6843,228 @@ def doctor_prusa(ctx: click.Context, json_mode: bool) -> None:
         sys.exit(1)
 
 
+# ---------------------------------------------------------------------------
+# Deep network diagnostics for kiln doctor --deep
+# ---------------------------------------------------------------------------
+
+# Known router brands that commonly enable device isolation by default.
+_ROUTER_ISOLATION_GUIDES: dict[str, str] = {
+    "spectrum": (
+        "Spectrum: Open the My Spectrum app > Services > Advanced Settings > "
+        "turn off 'Security Shield'. Or visit http://192.168.1.1 > "
+        "Advanced > Security > disable device isolation."
+    ),
+    "xfinity": (
+        "Xfinity: Open the Xfinity app > More > WiFi > Advanced Security > "
+        "turn it OFF.  This blocks device-to-device LAN traffic."
+    ),
+    "eero": (
+        "Eero: Open the eero app > Settings > Network Settings > Advanced > "
+        "disable 'Thread' and check that 'Local Network Access' is enabled."
+    ),
+    "google_wifi": (
+        "Google Wifi / Nest Wifi: Open the Google Home app > Wi-Fi > "
+        "Settings > Advanced Networking > ensure device isolation / "
+        "AP isolation is OFF."
+    ),
+    "att": (
+        "AT&T Gateway: Visit http://192.168.1.254 > Home Network > "
+        "Subnets & DHCP > disable 'Public Subnet Only' and 'IP Passthrough'."
+    ),
+    "verizon": (
+        "Verizon Fios: Visit http://192.168.1.1 > Advanced > Network "
+        "Settings > ensure 'Client Isolation' is OFF."
+    ),
+    "tp_link": (
+        "TP-Link: Visit the router admin page > Advanced > Wireless > "
+        "Wireless Settings > uncheck 'Enable AP Isolation'."
+    ),
+    "netgear": (
+        "Netgear: Visit http://routerlogin.net > Advanced > Wireless > "
+        "uncheck 'Enable Wireless Isolation'."
+    ),
+}
+
+
+def _deep_network_diagnostics(host: str, printer_cfg: dict) -> list[dict]:
+    """Run thorough network diagnostics when the printer is unreachable.
+
+    Tests ICMP reachability, TCP port connectivity, and provides
+    actionable guidance based on failure patterns.
+
+    :param host: Printer IP address or hostname.
+    :param printer_cfg: Full printer config dict.
+    :returns: List of check dicts for the doctor output.
+    """
+    import socket
+    import subprocess
+
+    checks: list[dict] = []
+    printer_type = str(printer_cfg.get("type", "")).strip().lower()
+
+    # --- 1. ICMP Ping ---
+    ping_ok = False
+    try:
+        result = subprocess.run(
+            ["ping", "-c", "2", "-W", "2", host],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        ping_ok = result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+    if ping_ok:
+        checks.append({"name": "ping", "ok": True, "detail": f"{host} responds to ping"})
+    else:
+        checks.append(
+            {
+                "name": "ping",
+                "ok": False,
+                "detail": (
+                    f"{host} does not respond to ping. "
+                    "Check: is the printer powered on and connected to WiFi? "
+                    "Verify the IP address in printer Settings > Network."
+                ),
+            }
+        )
+        # No point continuing if we can't even ping.
+        return checks
+
+    # --- 2. TCP port scan ---
+    # Ports depend on printer type.
+    port_map: dict[str, list[tuple[int, str]]] = {
+        "bambu": [
+            (8883, "MQTTS (control/status)"),
+            (990, "FTPS (file upload)"),
+        ],
+        "octoprint": [
+            (80, "HTTP"),
+            (443, "HTTPS"),
+        ],
+        "moonraker": [
+            (7125, "Moonraker API"),
+            (80, "HTTP"),
+        ],
+        "prusaconnect": [
+            (80, "HTTP"),
+            (443, "HTTPS"),
+        ],
+        "elegoo": [
+            (3000, "SDCP"),
+        ],
+    }
+    ports_to_check = port_map.get(printer_type, [(80, "HTTP"), (443, "HTTPS")])
+
+    any_port_open = False
+    all_no_route = True
+    for port, label in ports_to_check:
+        try:
+            sock = socket.create_connection((host, port), timeout=5)
+            sock.close()
+            checks.append({"name": f"port_{port}", "ok": True, "detail": f"Port {port} ({label}): open"})
+            any_port_open = True
+            all_no_route = False
+        except TimeoutError:
+            checks.append(
+                {"name": f"port_{port}", "ok": False, "detail": f"Port {port} ({label}): timeout (filtered)"}
+            )
+            all_no_route = False
+        except ConnectionRefusedError:
+            checks.append(
+                {
+                    "name": f"port_{port}",
+                    "ok": False,
+                    "detail": f"Port {port} ({label}): refused (service not running)",
+                }
+            )
+            all_no_route = False
+        except OSError as exc:
+            err_str = str(exc)
+            checks.append({"name": f"port_{port}", "ok": False, "detail": f"Port {port} ({label}): {err_str}"})
+
+    # --- 3. Diagnosis based on failure pattern ---
+    if any_port_open:
+        # Some ports work — likely an auth or service issue, not network.
+        return checks
+
+    if ping_ok and not any_port_open:
+        # Classic pattern: ping works, all TCP blocked.
+        if all_no_route:
+            diagnosis = (
+                "Ping works but all TCP ports return 'No route to host'. "
+                "This almost always means your router's firewall or device "
+                "isolation is blocking device-to-device traffic."
+            )
+        else:
+            diagnosis = (
+                "Ping works but no service ports are reachable. "
+                "This may be a router firewall, device isolation, or "
+                "the printer's LAN services are not running."
+            )
+
+        checks.append({"name": "diagnosis", "ok": False, "detail": diagnosis})
+
+        # Printer-specific advice
+        if printer_type == "bambu":
+            checks.append(
+                {
+                    "name": "bambu_lan_check",
+                    "ok": False,
+                    "detail": (
+                        "Bambu printers require LAN Only Mode enabled on the "
+                        "touchscreen (Settings > Network). After enabling, "
+                        "wait 30-60 seconds for MQTT to start. If it still "
+                        "fails, power cycle the printer with LAN mode OFF, "
+                        "let it fully boot, then enable LAN Only Mode."
+                    ),
+                }
+            )
+
+        # Router-specific guides
+        checks.append(
+            {
+                "name": "router_guide",
+                "ok": False,
+                "detail": (
+                    "Common routers that block device-to-device traffic by default:"
+                ),
+            }
+        )
+        for brand, guide in _ROUTER_ISOLATION_GUIDES.items():
+            checks.append(
+                {
+                    "name": f"router_{brand}",
+                    "ok": True,
+                    "warn": True,
+                    "detail": guide,
+                }
+            )
+
+        # General tips
+        checks.append(
+            {
+                "name": "general_tips",
+                "ok": True,
+                "warn": True,
+                "detail": (
+                    "General fixes: (1) Disable AP/client isolation in router settings. "
+                    "(2) Ensure printer and computer are on the same subnet/VLAN. "
+                    "(3) Try connecting the printer via Ethernet if available. "
+                    "(4) Temporarily disable router firewall to test."
+                ),
+            }
+        )
+
+    return checks
+
+
 @cli.command()
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.option("--deep", is_flag=True, help="Run deep network diagnostics when printer is unreachable.")
 @click.pass_context
-def verify(ctx: click.Context, json_mode: bool) -> None:
+def verify(ctx: click.Context, json_mode: bool, deep: bool) -> None:
     """Run pre-flight system checks to verify Kiln is ready to use."""
     import json as _json
     import platform
@@ -6971,6 +7189,20 @@ def verify(ctx: click.Context, json_mode: bool) -> None:
                 "name": "printer_reachable",
                 "ok": False,
                 "detail": "skipped (no printer configured)",
+            }
+        )
+
+    # 5b. Deep network diagnostics (only when --deep)
+    if deep and printer_cfg:
+        host = printer_cfg.get("host", "")
+        if host:
+            checks.extend(_deep_network_diagnostics(host, printer_cfg))
+    elif deep and not printer_cfg:
+        checks.append(
+            {
+                "name": "deep_diag",
+                "ok": False,
+                "detail": "skipped (no printer configured — run kiln auth first)",
             }
         )
 
