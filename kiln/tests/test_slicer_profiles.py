@@ -72,7 +72,7 @@ class TestGetSlicerProfile:
     def test_bambu_x1c_profile(self) -> None:
         profile = get_slicer_profile("bambu_x1c")
         assert profile.id == "bambu_x1c"
-        assert profile.slicer == "orcaslicer"
+        assert profile.slicer == "prusaslicer"
         assert profile.display_name == "Bambu Lab X1 Carbon"
 
     def test_nonexistent_falls_back_to_default(self) -> None:

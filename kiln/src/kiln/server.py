@@ -2813,6 +2813,26 @@ def preflight_check(
             if not file_ok:
                 errors.extend(file_result.get("errors", []))
 
+            # -- Missing temperature check (warning, not blocking) ---------
+            if file_ok and Path(file_path).suffix.lower() in _GCODE_EXTENSIONS:
+                try:
+                    from kiln.gcode import check_missing_temperatures
+
+                    with open(file_path, errors="replace") as _fh:
+                        gcode_content = _fh.read()
+                    temp_warnings = check_missing_temperatures(gcode_content)
+                    if temp_warnings:
+                        checks.append(
+                            {
+                                "name": "temperature_commands",
+                                "passed": True,  # Warning only -- does not block
+                                "message": "; ".join(temp_warnings),
+                                "advisory": True,
+                            }
+                        )
+                except Exception as exc:
+                    logger.debug("Missing temperature check failed: %s", exc)
+
         # -- Remote file check (optional) ----------------------------------
         if remote_file is not None:
             try:
@@ -5331,6 +5351,19 @@ def _map_printer_hint_to_profile_id(raw: str | None) -> str | None:
         return "ender3"
     if hint in {"klipper", "moonraker"}:
         return "klipper_generic"
+
+    # Bambu Lab printers
+    if "a1" in hint and "mini" in hint:
+        return "bambu_a1_mini"
+    if hint in {"bambu_a1", "a1", "a1_combo"} or ("bambu" in hint and "a1" in hint):
+        return "bambu_a1"
+    if "x1c" in hint or "x1_carbon" in hint_compact or ("bambu" in hint and "x1" in hint):
+        return "bambu_x1c"
+    if "p1s" in hint or ("bambu" in hint and "p1" in hint and "s" in hint):
+        return "bambu_p1s"
+    if "p1p" in hint or ("bambu" in hint and "p1" in hint):
+        return "bambu_p1p"
+
     return None
 
 
@@ -5494,8 +5527,22 @@ def slice_and_print(
         else:
             adapter = _get_adapter()
 
-        upload = adapter.upload_file(result.output_path)
-        file_name = upload.file_name or os.path.basename(result.output_path)
+        # Bambu printers need PrusaSlicer output wrapped in a 3MF with
+        # the proprietary BambuStudio start/end gcode.  The adapter
+        # exposes wrap_gcode_as_3mf() for this.
+        upload_path = result.output_path
+        if hasattr(adapter, "wrap_gcode_as_3mf") and result.output_path.endswith(".gcode"):
+            try:
+                upload_path = adapter.wrap_gcode_as_3mf(result.output_path)
+                logger.info("Wrapped gcode as Bambu 3MF: %s", upload_path)
+            except Exception:
+                logger.warning(
+                    "Bambu 3MF wrapping failed, uploading raw gcode",
+                    exc_info=True,
+                )
+
+        upload = adapter.upload_file(upload_path)
+        file_name = upload.file_name or os.path.basename(upload_path)
 
         # Mandatory pre-flight safety gate before starting print.
         safety_printer = _resolve_effective_printer_name(printer_name)

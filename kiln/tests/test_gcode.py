@@ -17,13 +17,13 @@ import pytest
 
 from kiln.gcode import (
     GCodeValidationResult,
-    validate_gcode,
-    scan_gcode_file,
-    _strip_comment,
-    _parse_command_word,
     _extract_param,
+    _parse_command_word,
+    _strip_comment,
+    check_missing_temperatures,
+    scan_gcode_file,
+    validate_gcode,
 )
-
 
 # ===================================================================
 # Helpers
@@ -626,3 +626,124 @@ class TestScanGcodeFile:
         result = scan_gcode_file(str(gcode))
         assert result.valid is False
         assert any("M112" in e for e in result.errors)
+
+
+# ===================================================================
+# Missing temperature detection
+# ===================================================================
+
+
+class TestCheckMissingTemperatures:
+    """Tests for check_missing_temperatures() and scan_gcode_file integration.
+
+    Covers:
+    - Both hotend and bed temps present → no warnings
+    - Missing hotend temp with extrusion → warning
+    - Missing bed temp with extrusion → warning
+    - Missing both temps with extrusion → two warnings
+    - No extrusion commands → no warnings (movement-only script)
+    - M104 S0 (zero temp) does not count as setting temp
+    - Comments with temperature commands don't count
+    - Integration with scan_gcode_file
+    """
+
+    def test_both_temps_present_no_warnings(self) -> None:
+        gcode = "G28\nM104 S200\nM140 S60\nG1 X10 E1 F600"
+        warnings = check_missing_temperatures(gcode)
+        assert warnings == []
+
+    def test_m109_and_m190_also_accepted(self) -> None:
+        gcode = "G28\nM109 S210\nM190 S65\nG1 X10 E1 F600"
+        warnings = check_missing_temperatures(gcode)
+        assert warnings == []
+
+    def test_missing_hotend_warns(self) -> None:
+        gcode = "G28\nM140 S60\nG1 X10 E1 F600"
+        warnings = check_missing_temperatures(gcode)
+        assert len(warnings) == 1
+        assert "hotend" in warnings[0].lower()
+        assert "M104" in warnings[0] or "M109" in warnings[0]
+
+    def test_missing_bed_warns(self) -> None:
+        gcode = "G28\nM104 S200\nG1 X10 E1 F600"
+        warnings = check_missing_temperatures(gcode)
+        assert len(warnings) == 1
+        assert "bed" in warnings[0].lower()
+        assert "M140" in warnings[0] or "M190" in warnings[0]
+
+    def test_missing_both_warns_twice(self) -> None:
+        gcode = "G28\nG1 X10 E1 F600\nG1 X20 E2 F600"
+        warnings = check_missing_temperatures(gcode)
+        assert len(warnings) == 2
+        messages = " ".join(warnings).lower()
+        assert "hotend" in messages
+        assert "bed" in messages
+
+    def test_no_extrusion_no_warnings(self) -> None:
+        """Movement-only gcode (no E parameter) should not trigger warnings."""
+        gcode = "G28\nG1 X10 Y10 Z5 F600\nG1 X20 Y20 F1200"
+        warnings = check_missing_temperatures(gcode)
+        assert warnings == []
+
+    def test_zero_temp_does_not_count(self) -> None:
+        """M104 S0 turns off the hotend -- not a real temp setting."""
+        gcode = "G28\nM104 S0\nM140 S0\nG1 X10 E1 F600"
+        warnings = check_missing_temperatures(gcode)
+        assert len(warnings) == 2
+
+    def test_comment_temps_not_counted(self) -> None:
+        """Temperature commands inside comments should be ignored."""
+        gcode = "; M104 S200\n; M140 S60\nG28\nG1 X10 E1 F600"
+        warnings = check_missing_temperatures(gcode)
+        assert len(warnings) == 2
+
+    def test_mixed_case_commands(self) -> None:
+        gcode = "g28\nm104 s200\nm140 s60\ng1 x10 e1 f600"
+        warnings = check_missing_temperatures(gcode)
+        assert warnings == []
+
+    def test_list_input(self) -> None:
+        lines = ["G28", "M109 S215", "M190 S70", "G1 X10 E1 F600"]
+        warnings = check_missing_temperatures(lines)
+        assert warnings == []
+
+    def test_empty_input(self) -> None:
+        warnings = check_missing_temperatures("")
+        assert warnings == []
+
+    def test_negative_extrusion_not_counted(self) -> None:
+        """Retraction (E < 0) should not count as extrusion."""
+        gcode = "G28\nG1 E-2 F1800\nG1 X10 F600"
+        warnings = check_missing_temperatures(gcode)
+        assert warnings == []
+
+
+class TestScanGcodeFileMissingTemps:
+    """Integration: scan_gcode_file should include missing temp warnings."""
+
+    def test_scan_warns_missing_temps(self, tmp_path) -> None:
+        gcode = tmp_path / "no_temps.gcode"
+        gcode.write_text("G28\nG1 X10 E1 F600\nG1 X20 E2 F600\n")
+        result = scan_gcode_file(str(gcode))
+        assert result.valid is True  # Warning only, not blocking
+        assert len(result.warnings) >= 2
+        warning_text = " ".join(result.warnings).lower()
+        assert "hotend" in warning_text
+        assert "bed" in warning_text
+
+    def test_scan_no_warning_when_temps_present(self, tmp_path) -> None:
+        gcode = tmp_path / "with_temps.gcode"
+        gcode.write_text("G28\nM104 S200\nM140 S60\nG1 X10 E1 F600\n")
+        result = scan_gcode_file(str(gcode))
+        assert result.valid is True
+        # Should have no missing-temp warnings
+        temp_warns = [w for w in result.warnings if "hotend" in w.lower() or "bed temperature" in w.lower()]
+        assert temp_warns == []
+
+    def test_scan_no_warning_for_movement_only(self, tmp_path) -> None:
+        gcode = tmp_path / "moves_only.gcode"
+        gcode.write_text("G28\nG1 X10 Y10 Z5 F600\n")
+        result = scan_gcode_file(str(gcode))
+        assert result.valid is True
+        temp_warns = [w for w in result.warnings if "hotend" in w.lower() or "bed temperature" in w.lower()]
+        assert temp_warns == []

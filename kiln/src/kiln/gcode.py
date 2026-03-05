@@ -720,6 +720,255 @@ def _validate_single_with_profile(
 
 
 # ---------------------------------------------------------------------------
+# Missing temperature detection
+# ---------------------------------------------------------------------------
+
+# All temperature commands that set hotend or bed temp.
+_ALL_HOTEND_TEMP_COMMANDS: set[str] = _HOTEND_TEMP_COMMANDS  # M104, M109
+_ALL_BED_TEMP_COMMANDS: set[str] = _BED_TEMP_COMMANDS  # M140, M190
+
+
+def _check_missing_temperatures(result: GCodeValidationResult) -> None:
+    """Check validated commands for missing temperature commands.
+
+    Appends warnings to *result* if no hotend or bed temperature commands
+    were found among the validated commands.  This catches gcode files
+    that rely on the printer's current temperature state instead of
+    explicitly setting temps -- a common source of failed prints.
+
+    Only meaningful for files with actual movement/extrusion commands.
+    """
+    has_hotend = False
+    has_bed = False
+    has_extrusion = False
+
+    for cmd_line in result.commands:
+        cmd_word = _parse_command_word(cmd_line)
+        if cmd_word is None:
+            continue
+
+        if cmd_word in _ALL_HOTEND_TEMP_COMMANDS:
+            temp = _extract_param(cmd_line, "S")
+            if temp is not None and temp > 0:
+                has_hotend = True
+        elif cmd_word in _ALL_BED_TEMP_COMMANDS:
+            temp = _extract_param(cmd_line, "S")
+            if temp is not None and temp > 0:
+                has_bed = True
+        elif cmd_word == "G1":
+            # Check for extrusion moves (E parameter present)
+            e_val = _extract_param(cmd_line, "E")
+            if e_val is not None and e_val > 0:
+                has_extrusion = True
+
+    # Only warn if the file actually has extrusion commands -- pure
+    # movement/homing scripts shouldn't need temperature commands.
+    if not has_extrusion:
+        return
+
+    if not has_hotend:
+        result.warnings.append(
+            "No hotend temperature command found (M104/M109). "
+            "The printer will use whatever temperature is currently set, "
+            "which may cause cold extrusion or print failure."
+        )
+    if not has_bed:
+        result.warnings.append(
+            "No bed temperature command found (M140/M190). "
+            "The printer will use whatever bed temperature is currently set, "
+            "which may cause adhesion failure."
+        )
+
+
+def check_missing_temperatures(
+    commands: str | list[str],
+) -> list[str]:
+    """Check G-code for missing temperature commands.
+
+    Scans the commands for hotend (M104/M109) and bed (M140/M190)
+    temperature setpoints.  Returns a list of warning strings for any
+    missing categories.  Returns an empty list if both are present or
+    if the gcode has no extrusion commands.
+
+    This is a lightweight check suitable for preflight validation --
+    it does NOT perform full G-code safety validation.
+
+    Args:
+        commands: G-code as a string (newline-separated) or list of lines.
+
+    Returns:
+        List of warning strings.  Empty if no issues found.
+    """
+    # Build a minimal GCodeValidationResult with parsed command words
+    if isinstance(commands, str):
+        lines = commands.splitlines()
+    else:
+        lines = []
+        for item in commands:
+            lines.extend(item.splitlines())
+
+    # Clean lines (strip comments, blank lines)
+    cleaned: list[str] = []
+    for raw in lines:
+        line = _strip_comment(raw)
+        if line:
+            line = _strip_line_number(line)
+            if _parse_command_word(line) is not None:
+                cleaned.append(line)
+
+    result = GCodeValidationResult(commands=cleaned)
+    _check_missing_temperatures(result)
+    return result.warnings
+
+
+# ---------------------------------------------------------------------------
+# Bambu-specific G-code validation
+# ---------------------------------------------------------------------------
+
+# Reasonable temperature ranges for Bambu printers by material category.
+_BAMBU_NOZZLE_TEMP_RANGE: tuple[float, float] = (150.0, 300.0)
+_BAMBU_BED_TEMP_RANGE: tuple[float, float] = (35.0, 120.0)
+
+
+@dataclass
+class BambuGcodeValidation:
+    """Result of Bambu-specific G-code preflight validation.
+
+    :param valid: ``True`` if the gcode is safe to send to a Bambu printer.
+    :param errors: Blocking issues that will cause print failure.
+    :param warnings: Non-blocking concerns.
+    :param has_nozzle_temp: Whether any M104/M109 command was found.
+    :param has_bed_temp: Whether any M140/M190 command was found.
+    :param nozzle_temp: The highest nozzle temperature setpoint found.
+    :param bed_temp: The highest bed temperature setpoint found.
+    """
+
+    valid: bool = True
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    has_nozzle_temp: bool = False
+    has_bed_temp: bool = False
+    nozzle_temp: float | None = None
+    bed_temp: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-safe dictionary."""
+        return {
+            "valid": self.valid,
+            "errors": self.errors,
+            "warnings": self.warnings,
+            "has_nozzle_temp": self.has_nozzle_temp,
+            "has_bed_temp": self.has_bed_temp,
+            "nozzle_temp": self.nozzle_temp,
+            "bed_temp": self.bed_temp,
+        }
+
+
+def validate_bambu_gcode(
+    gcode: str,
+) -> BambuGcodeValidation:
+    """Validate G-code for Bambu-specific requirements before upload.
+
+    Checks that the gcode contains required temperature commands and that
+    temperature values are within reasonable ranges.  This catches the
+    common failure where gcode has been stripped of temperature commands
+    (M104/M109/M140/M190), causing the printer to enter PREPARE state,
+    move around (homing, bed leveling), but never heat the nozzle.
+
+    Args:
+        gcode: The full G-code content as a string.
+
+    Returns:
+        A :class:`BambuGcodeValidation` with errors/warnings.
+    """
+    result = BambuGcodeValidation()
+    has_extrusion = False
+    max_nozzle: float = 0.0
+    max_bed: float = 0.0
+
+    for raw_line in gcode.splitlines():
+        line = raw_line.split(";")[0].strip()
+        if not line:
+            continue
+
+        cmd_word = _parse_command_word(line)
+        if cmd_word is None:
+            continue
+
+        # Check for temperature commands.
+        if cmd_word in _HOTEND_TEMP_COMMANDS:
+            temp = _extract_param(line, "S")
+            if temp is not None and temp > 0:
+                result.has_nozzle_temp = True
+                if temp > max_nozzle:
+                    max_nozzle = temp
+
+        elif cmd_word in _BED_TEMP_COMMANDS:
+            temp = _extract_param(line, "S")
+            if temp is not None and temp > 0:
+                result.has_bed_temp = True
+                if temp > max_bed:
+                    max_bed = temp
+
+        elif cmd_word == "G1":
+            e_val = _extract_param(line, "E")
+            if e_val is not None and e_val > 0:
+                has_extrusion = True
+
+    # Only validate if gcode has extrusion commands (not pure movement scripts).
+    if not has_extrusion:
+        return result
+
+    # Missing temperature commands → blocking errors.
+    if not result.has_nozzle_temp:
+        result.errors.append(
+            "No nozzle temperature command found (M104/M109). "
+            "The printer will enter PREPARE state but never heat the nozzle, "
+            "causing the print to hang indefinitely. Add M104/M109 with a "
+            "temperature appropriate for your filament."
+        )
+
+    if not result.has_bed_temp:
+        result.errors.append(
+            "No bed temperature command found (M140/M190). "
+            "The printer may fail to achieve proper adhesion. "
+            "Add M140/M190 with a temperature appropriate for your filament."
+        )
+
+    # Temperature range validation.
+    if max_nozzle > 0:
+        result.nozzle_temp = max_nozzle
+        lo, hi = _BAMBU_NOZZLE_TEMP_RANGE
+        if max_nozzle < lo:
+            result.warnings.append(
+                f"Nozzle temperature {max_nozzle:.0f}°C is below "
+                f"minimum recommended ({lo:.0f}°C) — risk of cold extrusion."
+            )
+        elif max_nozzle > hi:
+            result.errors.append(
+                f"Nozzle temperature {max_nozzle:.0f}°C exceeds "
+                f"Bambu maximum ({hi:.0f}°C)."
+            )
+
+    if max_bed > 0:
+        result.bed_temp = max_bed
+        lo, hi = _BAMBU_BED_TEMP_RANGE
+        if max_bed < lo:
+            result.warnings.append(
+                f"Bed temperature {max_bed:.0f}°C is below "
+                f"minimum recommended ({lo:.0f}°C)."
+            )
+        elif max_bed > hi:
+            result.errors.append(
+                f"Bed temperature {max_bed:.0f}°C exceeds "
+                f"Bambu maximum ({hi:.0f}°C)."
+            )
+
+    result.valid = len(result.errors) == 0
+    return result
+
+
+# ---------------------------------------------------------------------------
 # File-level scanning
 # ---------------------------------------------------------------------------
 
@@ -913,4 +1162,9 @@ def scan_gcode_file(
                 break
 
     result.valid = len(result.errors) == 0
+
+    # -- Missing temperature check (warning, not blocking) -----------------
+    if result.valid and result.commands:
+        _check_missing_temperatures(result)
+
     return result
