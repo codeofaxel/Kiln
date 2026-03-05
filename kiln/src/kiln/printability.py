@@ -857,7 +857,7 @@ def recommend_adhesion(
 def diagnose_from_signals(
     signals: dict[str, Any],
     *,
-    printer_id: str = "default",
+    printer_id: str | None = None,
     material: str | None = None,
 ) -> PrintFailureDiagnosis:
     """Produce a failure diagnosis from collected physical signals.

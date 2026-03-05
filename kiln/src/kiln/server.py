@@ -5526,6 +5526,29 @@ def slice_and_print(
             printer_id=printer_id,
         )
 
+        # --- Auto-material from AMS if not specified ---
+        if material is None:
+            try:
+                if printer_name:
+                    _adapter = _registry.get(printer_name)
+                else:
+                    _adapter = _get_adapter()
+                if hasattr(_adapter, "get_ams_status"):
+                    ams = _adapter.get_ams_status()
+                    tray_now = ams.get("tray_now", "255")
+                    if tray_now != "255":
+                        slot_idx = int(tray_now)
+                        for unit in ams.get("units", []):
+                            for tray in unit.get("trays", []):
+                                if tray.get("slot") == slot_idx and tray.get("tray_type"):
+                                    material = tray["tray_type"]
+                                    logger.debug("Auto-detected material from AMS: %s", material)
+                                    break
+                            if material:
+                                break
+            except Exception:
+                logger.debug("AMS material auto-detection failed", exc_info=True)
+
         # --- Auto-adhesion: analyse model and inject brim/raft if needed ---
         adhesion_rec = None
         adhesion_overrides: dict[str, str] = {}
@@ -5558,7 +5581,7 @@ def slice_and_print(
                         report.bed_adhesion,
                         material=material or "PLA",
                         has_enclosure=has_enclosure,
-                        is_bedslinger=is_bs,
+                        is_bedslinger_printer=is_bs,
                         model_height_mm=report.model_height_mm,
                     )
                     if rec.brim_width_mm > 0 or rec.use_raft:

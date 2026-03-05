@@ -272,7 +272,7 @@ class _PrintabilityToolsPlugin:
                     report.bed_adhesion,
                     material=material,
                     has_enclosure=has_enclosure,
-                    is_bedslinger=is_bs,
+                    is_bedslinger_printer=is_bs,
                     model_height_mm=report.model_height_mm,
                 )
                 return {
@@ -334,12 +334,12 @@ class _PrintabilityToolsPlugin:
                         adapter = _srv._get_adapter()
                     state = adapter.get_state()
                     state_data = state.to_dict()
-                    signals["tool_temp_actual"] = state.tool_temp
-                    signals["tool_temp_target"] = state.tool_target
-                    signals["bed_temp_actual"] = state.bed_temp
-                    signals["bed_temp_target"] = state.bed_target
-                    if hasattr(state, "error") and state.error:
-                        signals["print_error"] = state.error
+                    signals["tool_temp_actual"] = state.tool_temp_actual
+                    signals["tool_temp_target"] = state.tool_temp_target
+                    signals["bed_temp_actual"] = state.bed_temp_actual
+                    signals["bed_temp_target"] = state.bed_temp_target
+                    if state.print_error:
+                        signals["print_error"] = state.print_error
                 except Exception as exc:
                     _logger.debug("Could not get printer state: %s", exc)
 

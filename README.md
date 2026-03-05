@@ -60,7 +60,7 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 ### Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link. Manage a mixed fleet from one place.
-- **AI-native** — 300 MCP tools built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — 333 MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
 - **Search → Slice → Print** — Browse MyMiniFactory, Cults3D, Thangs, GrabCAD, Etsy (and legacy Thingiverse), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
 - **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
@@ -479,7 +479,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **300 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **333 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
 
 | Tool | Description |
 |------|-------------|
@@ -520,7 +520,16 @@ The Kiln MCP server (`kiln serve`) exposes **300 tools** to agents. Key tools ar
 | `list_model_categories` | List marketplace categories |
 | `slice_model` | Slice an STL/3MF file to G-code |
 | `find_slicer_tool` | Detect installed slicer (PrusaSlicer/OrcaSlicer) |
-| `slice_and_print` | Slice a model then upload and print in one step |
+| `slice_and_print` | Slice a model then upload and print in one step (auto-detects AMS material, auto-injects brim/raft) |
+| `slice_and_estimate` | Dry-run slice: time, filament, printability, and adhesion estimates without printing |
+| `analyze_printability` | Deep printability analysis: overhangs, thin walls, bridging, adhesion, support volume (score 0-100) |
+| `auto_orient_model` | Find optimal print orientation by scoring rotations for adhesion/supports/overhangs |
+| `estimate_supports` | Estimate support volume and whether supports are needed |
+| `recommend_adhesion_settings` | Recommend brim/raft settings based on geometry + material + printer type |
+| `diagnose_print_failure_live` | Real-time failure diagnosis from printer state + model geometry + printer intelligence |
+| `retry_print_with_fix` | Diagnose a failure, apply slicer overrides, re-slice, and reprint in one step |
+| `get_active_material` | Get the currently loaded AMS filament (type, color, remaining) |
+| `check_print_health` | Single-shot health check: temp drift, errors, progress assessment |
 | `printer_snapshot` | Capture a webcam snapshot from the printer |
 | `fulfillment_materials` | List materials from external print services (Craftcloud) |
 | `fulfillment_quote` | Get a manufacturing quote for a 3D model |
