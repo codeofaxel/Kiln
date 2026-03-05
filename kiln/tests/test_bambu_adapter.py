@@ -707,7 +707,7 @@ class TestBambuAdapterStartPrint:
         call_args = adapter_with_mqtt._mqtt_client.publish.call_args
         payload = json.loads(call_args[0][1])
         assert payload["print"]["command"] == "project_file"
-        assert payload["print"]["subtask_name"] == "model.3mf"
+        assert payload["print"]["subtask_name"] == "model"
 
     def test_start_gcode_file(self, adapter_with_mqtt: BambuAdapter) -> None:
         result = adapter_with_mqtt.start_print("test.gcode")
@@ -726,7 +726,7 @@ class TestBambuAdapterStartPrint:
 
         call_args = adapter_with_mqtt._mqtt_client.publish.call_args
         payload = json.loads(call_args[0][1])
-        assert payload["print"]["subtask_name"] == "model.3mf"
+        assert payload["print"]["subtask_name"] == "model"
 
     def test_start_print_gcode_with_full_path(self, adapter_with_mqtt: BambuAdapter) -> None:
         result = adapter_with_mqtt.start_print("/sdcard/test.gcode")
@@ -1181,7 +1181,8 @@ class TestBambuAdapterSnapshot:
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
     @mock.patch("kiln.printers.bambu.subprocess.run")
-    def test_get_snapshot_with_ffmpeg(self, mock_run, mock_ffmpeg) -> None:
+    @mock.patch.object(BambuAdapter, "_capture_jpeg_frame", return_value=None)
+    def test_get_snapshot_rtsps_fallback(self, mock_jpeg, mock_run, mock_ffmpeg) -> None:
         adapter = _adapter()
         fake_jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 200
         mock_run.return_value = mock.MagicMock(
@@ -1197,17 +1198,19 @@ class TestBambuAdapterSnapshot:
         assert "pipe:1" in call_args[0][0]
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value=None)
-    def test_get_snapshot_no_ffmpeg(self, mock_ffmpeg) -> None:
+    @mock.patch.object(BambuAdapter, "_capture_jpeg_frame", return_value=None)
+    def test_get_snapshot_no_camera(self, mock_jpeg, mock_ffmpeg) -> None:
         adapter = _adapter()
-        with pytest.raises(PrinterError, match="ffmpeg is not installed"):
+        with pytest.raises(PrinterError, match="Neither is available"):
             adapter.get_snapshot()
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
     @mock.patch("kiln.printers.bambu.subprocess.run")
-    def test_get_snapshot_ffmpeg_timeout(self, mock_run, mock_ffmpeg) -> None:
+    @mock.patch.object(BambuAdapter, "_capture_jpeg_frame", return_value=None)
+    def test_get_snapshot_ffmpeg_timeout(self, mock_jpeg, mock_run, mock_ffmpeg) -> None:
         adapter = _adapter()
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=10)
-        with pytest.raises(PrinterError, match="RTSP stream timed out"):
+        with pytest.raises(PrinterError, match="RTSPS stream timed out"):
             adapter.get_snapshot()
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")

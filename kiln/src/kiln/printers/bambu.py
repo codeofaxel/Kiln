@@ -195,6 +195,10 @@ class _ImplicitFTP_TLS(ftplib.FTP_TLS):
     upon connection (implicit mode), and data channels must reuse the
     control-channel TLS session to satisfy the printer's session-reuse
     requirement.
+
+    Also handles Python 3.14+ changes to TLS handling in ``ftplib`` and
+    the ``conn.unwrap()`` timeout that Bambu printers frequently cause
+    (the upload succeeds before unwrap completes).
     """
 
     def connect(
@@ -230,19 +234,102 @@ class _ImplicitFTP_TLS(ftplib.FTP_TLS):
         return self.welcome
 
     def ntransfercmd(self, cmd: str, rest: Any = None) -> Any:
-        """Override to reuse TLS session on data channels.
+        """Override to handle passive mode data connections with TLS wrapping.
 
-        Bambu printers reject data connections whose TLS session does not
-        match the control channel's session.
+        Manually implements passive mode to avoid Python 3.14 issues where
+        ``ftplib.FTP.ntransfercmd`` may try to wrap an already-wrapped socket.
+        Reuses the control-channel TLS session, which Bambu printers require.
         """
-        conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
-        if self._prot_p:  # type: ignore[attr-defined]
-            conn = self.context.wrap_socket(
-                conn,
-                server_hostname=self.host,
-                session=self.sock.session,  # type: ignore[union-attr]
+        import re as _re
+
+        size = None
+        if self.passiveserver:
+            host, port = self.makepasv()
+            conn = socket.create_connection(
+                (host, port), self.timeout, self.source_address
             )
+            try:
+                if self._prot_p:  # type: ignore[attr-defined]
+                    conn = self.context.wrap_socket(
+                        conn,
+                        server_hostname=self.host,
+                        session=self.sock.session,  # type: ignore[union-attr]
+                    )
+            except Exception:
+                conn.close()
+                raise
+            if rest is not None:
+                self.sendcmd(f"REST {rest}")
+            resp = self.sendcmd(cmd)
+            if resp[0] == "2":
+                resp = self.getresp()
+            if resp[0] != "1":
+                raise ftplib.error_reply(resp)
+        else:
+            raise ftplib.error_reply("Active mode not supported for Bambu FTPS")
+        if resp[:3] == "150":
+            m = _re.search(r"\((\d+) bytes\)", resp)
+            if m:
+                size = int(m.group(1))
         return conn, size
+
+    def storbinary(
+        self,
+        cmd: str,
+        fp: Any,
+        blocksize: int = 8192,
+        callback: Any = None,
+        rest: Any = None,
+    ) -> str:
+        """Override to handle ``conn.unwrap()`` timeout on Bambu printers.
+
+        Bambu printers frequently cause ``TimeoutError`` on ``conn.unwrap()``
+        after the upload data has already been fully sent.  The upload itself
+        succeeds; only the TLS shutdown handshake times out.
+        """
+        self.voidcmd("TYPE I")
+        conn, _ = self.ntransfercmd(cmd, rest)
+        try:
+            while True:
+                buf = fp.read(blocksize)
+                if not buf:
+                    break
+                conn.sendall(buf)
+                if callback:
+                    callback(buf)
+        finally:
+            try:
+                if hasattr(conn, "unwrap"):
+                    conn.unwrap()
+            except (TimeoutError, OSError, AttributeError):
+                pass
+            conn.close()
+        return self.voidresp()
+
+    def retrbinary(
+        self,
+        cmd: str,
+        callback: Any,
+        blocksize: int = 8192,
+        rest: Any = None,
+    ) -> str:
+        """Override to handle ``conn.unwrap()`` timeout on Bambu printers."""
+        self.voidcmd("TYPE I")
+        conn, _ = self.ntransfercmd(cmd, rest)
+        try:
+            while True:
+                data = conn.recv(blocksize)
+                if not data:
+                    break
+                callback(data)
+        finally:
+            try:
+                if hasattr(conn, "unwrap"):
+                    conn.unwrap()
+            except (TimeoutError, OSError, AttributeError):
+                pass
+            conn.close()
+        return self.voidresp()
 
 
 # ---------------------------------------------------------------------------
@@ -1044,10 +1131,31 @@ class BambuAdapter(PrinterAdapter):
     # PrinterAdapter -- file management
     # ------------------------------------------------------------------
 
+    def _detect_storage_path(self, ftp: ftplib.FTP_TLS) -> str:
+        """Detect the correct FTPS storage path for this printer.
+
+        A1 series printers store files at ``/model/`` while X1/P1 series
+        use ``/sdcard/``.  Tries ``/model/`` first (A1), falls back to
+        ``/sdcard/`` if CWD fails.
+
+        Returns:
+            The storage path (e.g. ``"/model"`` or ``"/sdcard"``).
+        """
+        for path in ("/model", "/sdcard"):
+            try:
+                ftp.cwd(path)
+                logger.debug("Detected Bambu storage path: %s", path)
+                return path
+            except ftplib.error_perm:
+                continue
+        # Default fallback.
+        return "/sdcard"
+
     def upload_file(self, file_path: str) -> UploadResult:
         """Upload a file to the printer via FTPS.
 
-        Uploads to ``/sdcard/`` on the printer.
+        Automatically detects the correct storage path (``/model/`` for A1
+        series, ``/sdcard/`` for X1/P1 series).
 
         Args:
             file_path: Absolute or relative path to the local file.
@@ -1068,12 +1176,13 @@ class BambuAdapter(PrinterAdapter):
             raise
 
         try:
+            storage_path = self._detect_storage_path(ftp)
             with open(abs_path, "rb") as fh:
-                ftp.storbinary(f"STOR /sdcard/{filename}", fh)
+                ftp.storbinary(f"STOR {storage_path}/{filename}", fh)
             return UploadResult(
                 success=True,
                 file_name=filename,
-                message=f"Uploaded {filename} to Bambu printer via FTPS.",
+                message=f"Uploaded {filename} to {storage_path}/ on Bambu printer via FTPS.",
             )
         except PermissionError as exc:
             raise PrinterError(
@@ -1090,6 +1199,61 @@ class BambuAdapter(PrinterAdapter):
                 ftp.quit()
             except Exception as exc:
                 logger.debug("Failed to quit FTP session after upload: %s", exc)
+
+    # ------------------------------------------------------------------
+    # 3MF wrapping for PrusaSlicer output
+    # ------------------------------------------------------------------
+
+    def wrap_gcode_as_3mf(
+        self,
+        gcode_path: str,
+        *,
+        hotend_temp: int = 220,
+        bed_temp: int = 65,
+        filament_type: str = "PLA",
+        source_3mf_path: str | None = None,
+    ) -> str:
+        """Wrap PrusaSlicer gcode in a Bambu-compatible 3MF.
+
+        The Bambu A1 requires BambuStudio's proprietary start/end gcode
+        (including ``M620 M`` motor enable, AMS load, extrusion calibration)
+        for the extruder to function.  This method wraps raw PrusaSlicer
+        output with those sequences and packages everything as a 3MF.
+
+        :param gcode_path: Path to PrusaSlicer ``.gcode`` output (must be
+            sliced with ``--use-relative-e-distances`` and empty start/end).
+        :param hotend_temp: Hotend temperature in °C (default 220 for PLA).
+        :param bed_temp: Bed temperature in °C (default 65 for PLA).
+        :param filament_type: Filament type string (PLA, PETG, ABS, etc.).
+        :param source_3mf_path: Optional source 3MF for thumbnails/geometry.
+        :returns: Path to the output 3MF file.
+        :raises FileNotFoundError: If the gcode file doesn't exist.
+        :raises ValueError: If the gcode has no layer changes.
+        """
+        from kiln.printers.bambu_3mf import BambuPrintSettings, build_bambu_3mf
+
+        abs_path = os.path.abspath(gcode_path)
+        if not os.path.isfile(abs_path):
+            raise FileNotFoundError(f"Gcode file not found: {abs_path}")
+
+        gcode_body = Path(abs_path).read_text(encoding="utf-8")
+        stem = Path(abs_path).stem
+        output_path = os.path.join(os.path.dirname(abs_path), f"{stem}.3mf")
+
+        settings = BambuPrintSettings(
+            hotend_temp=hotend_temp,
+            bed_temp=bed_temp,
+            filament_type=filament_type,
+            model_name=stem,
+        )
+
+        result = build_bambu_3mf(
+            gcode_body,
+            output_path,
+            settings=settings,
+            source_3mf_path=source_3mf_path,
+        )
+        return result.output_path
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- print control
@@ -1117,6 +1281,28 @@ class BambuAdapter(PrinterAdapter):
             time.sleep(poll_interval)
         return "timeout"
 
+    @staticmethod
+    def _compute_file_md5(file_path: str) -> str:
+        """Compute the MD5 hex digest of a local file."""
+        md5 = hashlib.md5()
+        with open(file_path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(8192), b""):
+                md5.update(chunk)
+        return md5.hexdigest()
+
+    def _build_print_url(self, basename: str) -> str:
+        """Build the correct ``file:///`` URL for the MQTT print command.
+
+        Bambu firmware reads files from the filesystem, not FTP.  The URL
+        must always use ``file:///sdcard/model/`` (which maps to the FTPS
+        ``/model/`` path on A1 series, or ``/sdcard/`` on X1/P1 which also
+        works with this path).
+
+        Using ``ftp:///`` URLs causes HMS error 0500-C010-010800
+        ("MicroSD Card read/write exception") on A1 printers.
+        """
+        return f"file:///sdcard/model/{basename}"
+
     def start_print(self, file_name: str, **kwargs: Any) -> PrintResult:
         """Begin printing a file on the Bambu printer.
 
@@ -1137,14 +1323,16 @@ class BambuAdapter(PrinterAdapter):
                   Default ``[0]``.  Use ``[-1]`` for unused slots.
                 * ``timelapse`` (bool): Record timelapse.  Default ``False``.
                 * ``bed_leveling`` (bool): Run bed leveling.  Default ``True``.
-                * ``flow_cali`` (bool): Run flow calibration.  Default ``True``.
+                * ``flow_cali`` (bool): Run flow calibration.  Default ``False``.
                 * ``vibration_cali`` (bool): Run vibration calibration.
-                  Default ``True``.
+                  Default ``False``.
                 * ``layer_inspect`` (bool): Enable first-layer inspection.
                   Default ``False``.
                 * ``bed_type`` (str): Bed surface type.  Default ``"auto"``.
                 * ``plate_number`` (int): Plate index in multi-plate 3MF.
                   Default ``1``.
+                * ``local_file_path`` (str): Local path to the 3MF file for
+                  MD5 calculation.  If not provided, MD5 is omitted.
         """
         # Normalise: strip leading path components if user passes full path.
         basename = os.path.basename(file_name)
@@ -1158,19 +1346,30 @@ class BambuAdapter(PrinterAdapter):
             ams_mapping = kwargs.get("ams_mapping", [0])
             if not isinstance(ams_mapping, list):
                 ams_mapping = [0]
+
+            # Compute MD5 of the local 3MF file if path is provided.
+            local_path = kwargs.get("local_file_path")
+            file_md5 = ""
+            if local_path and os.path.isfile(local_path):
+                file_md5 = self._compute_file_md5(local_path)
+
+            subtask_name = os.path.splitext(basename)[0]
+
             self._publish_command(
                 {
                     "print": {
                         "sequence_id": self._next_seq(),
                         "command": "project_file",
                         "param": f"Metadata/plate_{plate_num}.gcode",
-                        "subtask_name": basename,
-                        "url": f"file:///sdcard/{basename}",
+                        "subtask_name": subtask_name,
+                        "file": "",
+                        "url": self._build_print_url(basename),
+                        "md5": file_md5,
                         "bed_type": str(kwargs.get("bed_type", "auto")),
                         "timelapse": bool(kwargs.get("timelapse", False)),
                         "bed_leveling": bool(kwargs.get("bed_leveling", True)),
-                        "flow_cali": bool(kwargs.get("flow_cali", True)),
-                        "vibration_cali": bool(kwargs.get("vibration_cali", True)),
+                        "flow_cali": bool(kwargs.get("flow_cali", False)),
+                        "vibration_cali": bool(kwargs.get("vibration_cali", False)),
                         "layer_inspect": bool(kwargs.get("layer_inspect", False)),
                         "use_ams": bool(kwargs.get("use_ams", False)),
                         "ams_mapping": ams_mapping,
@@ -1550,21 +1749,101 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def get_snapshot(self) -> bytes | None:
-        """Capture a webcam snapshot via the RTSP stream.
+        """Capture a webcam snapshot from the printer's camera.
 
-        Uses ``ffmpeg`` to grab a single JPEG frame from the printer's
-        RTSP stream (``rtsps://<host>:322/streaming/live/1``).
+        Bambu printers use two different camera protocols:
+
+        * **A1 / A1 Mini / P1P / P1S**: TLS + JPEG streaming on port 6000.
+          A custom 80-byte auth packet is sent, then JPEG frames are read
+          from the socket.  No ffmpeg required.
+
+        * **X1C / X1 / P2S**: RTSPS on port 322 via ffmpeg.
+
+        This method tries port 6000 first (works for A1/P1 series), and
+        falls back to RTSPS if port 6000 is not available.
 
         Raises:
-            PrinterError: With a diagnostic message if ffmpeg is missing,
-                the RTSP stream times out, or ffmpeg fails.
+            PrinterError: If both camera protocols fail.
         """
+        # Try the TLS+JPEG protocol first (A1/P1 series, port 6000).
+        try:
+            frame = self._capture_jpeg_frame()
+            if frame:
+                return frame
+        except Exception:
+            logger.debug("Port 6000 JPEG capture failed, trying RTSPS fallback", exc_info=True)
+
+        # Fallback to RTSPS (X1 series, port 322) via ffmpeg.
+        return self._capture_rtsps_frame()
+
+    def _capture_jpeg_frame(self, *, timeout: float = 15.0) -> bytes | None:
+        """Capture a JPEG frame via the TLS+JPEG protocol on port 6000.
+
+        The A1/P1 series printers stream sequential JPEG frames over a
+        TLS socket.  Authentication uses an 80-byte binary packet with
+        the username and LAN access code.
+
+        :param timeout: Maximum time in seconds to wait for a complete frame.
+        :returns: JPEG bytes, or ``None`` if capture fails.
+        """
+        import struct
+        import time
+
+        _CAMERA_PORT = 6000
+        _JPEG_SOI = b"\xff\xd8\xff"  # JPEG Start of Image
+        _JPEG_EOI = b"\xff\xd9"      # JPEG End of Image
+
+        # Build 80-byte auth packet.
+        auth_data = struct.pack("<II", 0x40, 0x3000)
+        auth_data += struct.pack("<II", 0, 0)
+        auth_data += _MQTT_USERNAME.encode("ascii").ljust(32, b"\x00")
+        auth_data += self._access_code.encode("ascii").ljust(32, b"\x00")
+
+        ctx = self._build_tls_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        sock = socket.create_connection((self._host, _CAMERA_PORT), timeout=timeout)
+        try:
+            ssock = ctx.wrap_socket(sock, server_hostname=self._host)
+        except ssl.SSLError as exc:
+            sock.close()
+            logger.debug("Camera TLS handshake failed: %s", exc)
+            return None
+
+        try:
+            ssock.sendall(auth_data)
+
+            buf = b""
+            start_time = time.monotonic()
+            while time.monotonic() - start_time < timeout:
+                chunk = ssock.recv(8192)
+                if not chunk:
+                    break
+                buf += chunk
+
+                start_idx = buf.find(_JPEG_SOI)
+                if start_idx == -1:
+                    continue
+
+                end_idx = buf.find(_JPEG_EOI, start_idx + 3)
+                if end_idx != -1:
+                    return buf[start_idx : end_idx + 2]
+        except (TimeoutError, OSError) as exc:
+            logger.debug("Camera JPEG read failed: %s", exc)
+        finally:
+            ssock.close()
+
+        return None
+
+    def _capture_rtsps_frame(self) -> bytes | None:
+        """Capture a frame via RTSPS on port 322 using ffmpeg (X1 series)."""
         ffmpeg = _find_ffmpeg()
         if not ffmpeg:
             raise PrinterError(
-                "Camera snapshot requires ffmpeg but ffmpeg is not installed. "
-                "Install it (e.g. 'brew install ffmpeg' or 'apt install ffmpeg') "
-                "to enable Bambu camera snapshots."
+                "Camera snapshot requires either a port-6000 JPEG stream "
+                "(A1/P1 series) or ffmpeg for RTSPS (X1 series). "
+                "Neither is available. Install ffmpeg if using an X1 printer."
             )
 
         stream_url = self.get_stream_url()
@@ -1574,18 +1853,12 @@ class BambuAdapter(PrinterAdapter):
         try:
             result = subprocess.run(
                 [
-                    ffmpeg,
-                    "-y",
-                    "-rtsp_transport",
-                    "tcp",
-                    "-i",
-                    stream_url,
-                    "-frames:v",
-                    "1",
-                    "-f",
-                    "image2",
-                    "-vcodec",
-                    "mjpeg",
+                    ffmpeg, "-y",
+                    "-rtsp_transport", "tcp",
+                    "-i", stream_url,
+                    "-frames:v", "1",
+                    "-f", "image2",
+                    "-vcodec", "mjpeg",
                     "pipe:1",
                 ],
                 capture_output=True,
@@ -1594,28 +1867,24 @@ class BambuAdapter(PrinterAdapter):
             if result.returncode == 0 and result.stdout and len(result.stdout) > 100:
                 return result.stdout
             raise PrinterError(
-                f"Camera snapshot failed: ffmpeg exited with code "
-                f"{result.returncode}. Check that the printer camera is "
-                f"enabled and the printer is reachable on the LAN."
+                f"Camera RTSPS snapshot failed (ffmpeg exit {result.returncode}). "
+                f"Check that the printer camera is enabled."
             )
         except PrinterError:
             raise
         except subprocess.TimeoutExpired as exc:
             raise PrinterError(
-                "Camera RTSP stream timed out after 10s. Check that the "
-                "printer camera is enabled and the printer is reachable "
-                "on the LAN."
+                "Camera RTSPS stream timed out after 10s. Check camera and network."
             ) from exc
         except Exception as exc:
-            raise PrinterError(f"Camera snapshot failed: {exc}. Check camera and network connectivity.") from exc
+            raise PrinterError(f"Camera snapshot failed: {exc}") from exc
 
     def get_stream_url(self) -> str | None:
-        """Return the RTSP stream URL for the Bambu printer's camera.
+        """Return the RTSPS stream URL for X1 series printers.
 
-        Bambu printers expose a TLS-encrypted RTSP stream at
-        ``rtsps://<host>:322/streaming/live/1``.  The URL includes
-        RTSP credentials (username ``bblp`` + LAN access code) so
-        that clients can authenticate directly.
+        X1C/X1 printers expose an RTSP stream at port 322.  A1/P1
+        printers use port 6000 with a proprietary JPEG protocol instead
+        (handled by :meth:`_capture_jpeg_frame`).
         """
         return f"rtsps://bblp:{self._access_code}@{self._host}:322/streaming/live/1"
 
