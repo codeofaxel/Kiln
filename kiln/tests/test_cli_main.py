@@ -566,8 +566,11 @@ class TestPrint:
         assert result.exit_code == 0, result.output
         # upload_file should have been called with the local path
         mock_adapter.upload_file.assert_called_once_with(str(gcode_file))
-        # start_print should use the printer filename, not the local path
-        mock_adapter.start_print.assert_called_once_with("model.gcode")
+        # start_print should use the printer filename, not the local path.
+        # local_file_path is passed for 3MF auto-detection.
+        mock_adapter.start_print.assert_called_once()
+        call_args = mock_adapter.start_print.call_args
+        assert call_args[0][0] == "model.gcode"
 
     def test_print_auto_upload_failure(self, runner, mock_adapter, config_file, tmp_path):
         gcode_file = tmp_path / "bad.gcode"
