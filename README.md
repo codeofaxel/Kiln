@@ -112,6 +112,8 @@ graph TD
     style J fill:#2d2d44,stroke:#533483,color:#fff
 ```
 
+Kiln connects AI agents to **OctoPrint**, **Moonraker** (Klipper), **Bambu Lab**, **Prusa Link**, and **Elegoo** printers. Agents can also outsource jobs through **Craftcloud** fulfillment, and search models on **MyMiniFactory**, **Cults3D**, **Thangs**, **GrabCAD**, and **Etsy**.
+
 ## Packages
 
 This monorepo contains two packages:
