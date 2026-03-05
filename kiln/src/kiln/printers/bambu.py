@@ -417,6 +417,11 @@ class BambuAdapter(PrinterAdapter):
         self._backoff = _BackoffState()
         self._pin_lock = threading.Lock()
 
+        # Cached FTPS storage path — set by upload_file() to avoid
+        # re-probing during start_print().  Values: "/model" (A1) or
+        # "/sdcard" (X1/P1).
+        self._last_storage_path: str | None = None
+
     @staticmethod
     def _host_key(host: str) -> str:
         """Return canonical key for pin-store lookups."""
@@ -1177,6 +1182,7 @@ class BambuAdapter(PrinterAdapter):
 
         try:
             storage_path = self._detect_storage_path(ftp)
+            self._last_storage_path = storage_path
             with open(abs_path, "rb") as fh:
                 ftp.storbinary(f"STOR {storage_path}/{filename}", fh)
             return UploadResult(
@@ -1290,6 +1296,91 @@ class BambuAdapter(PrinterAdapter):
                 md5.update(chunk)
         return md5.hexdigest()
 
+    def _check_ams_color_mismatch(
+        self,
+        file_path: str,
+        plate_number: int,
+        ams_mapping: list[int],
+    ) -> list[str]:
+        """Check if 3MF expected filament colors match what's in the AMS.
+
+        Compares the 3MF plate's ``filament_colors`` against what's
+        actually loaded in the AMS trays (via MQTT status).  Non-blocking
+        — logs warnings and returns them as strings, never raises.
+
+        Args:
+            file_path: Local path to the 3MF file.
+            plate_number: Which plate is being printed.
+            ams_mapping: The AMS slot mapping being used.
+
+        Returns:
+            List of human-readable warning strings (empty if no mismatches).
+        """
+        warnings: list[str] = []
+        try:
+            expected_colors = self._detect_3mf_filaments(file_path, plate_number)
+            if not expected_colors:
+                return warnings
+
+            ams_info = self.get_ams_status()
+            loaded_trays: dict[int, str] = {}
+            for unit in ams_info.get("units", []):
+                for tray in unit.get("trays", []):
+                    tray_idx = tray.get("slot")
+                    tray_color = tray.get("tray_color", "")
+                    if tray_idx is not None and tray_color:
+                        # tray_color is hex like "FF0000FF" (RRGGBBAA).
+                        loaded_trays[int(tray_idx)] = tray_color[:6].upper()
+
+            for i, slot in enumerate(ams_mapping):
+                if i >= len(expected_colors):
+                    break
+                expected_hex = expected_colors[i].lstrip("#").upper()[:6]
+                loaded_hex = loaded_trays.get(slot, "")
+                if loaded_hex and expected_hex and expected_hex != loaded_hex:
+                    msg = (
+                        f"AMS color mismatch: plate {plate_number} filament {i} "
+                        f"expects #{expected_hex} but AMS slot {slot} has "
+                        f"#{loaded_hex} loaded."
+                    )
+                    logger.warning("%s", msg)
+                    warnings.append(msg)
+        except Exception:
+            logger.debug("AMS color mismatch check failed", exc_info=True)
+        return warnings
+
+    @staticmethod
+    def _detect_3mf_filaments(
+        file_path: str,
+        plate_number: int = 1,
+    ) -> list[str] | None:
+        """Extract filament color list from a 3MF's plate metadata.
+
+        Reads ``Metadata/plate_N.json`` inside the 3MF archive and returns
+        the ``filament_colors`` list (e.g. ``["#FFFFFF", "#808080"]``).
+        Returns ``None`` if the metadata cannot be read.
+
+        Args:
+            file_path: Local path to the 3MF file.
+            plate_number: Which plate's metadata to inspect.
+        """
+        import json
+        import zipfile
+
+        try:
+            with zipfile.ZipFile(file_path, "r") as zf:
+                meta_name = f"Metadata/plate_{plate_number}.json"
+                if meta_name not in zf.namelist():
+                    return None
+                with zf.open(meta_name) as mf:
+                    meta = json.loads(mf.read())
+                colors = meta.get("filament_colors")
+                if isinstance(colors, list) and len(colors) >= 1:
+                    return colors
+        except Exception:
+            logger.debug("Could not read 3MF filament metadata from %s", file_path, exc_info=True)
+        return None
+
     def _build_print_url(self, basename: str) -> str:
         """Build the correct ``file:///`` URL for the MQTT print command.
 
@@ -1341,17 +1432,44 @@ class BambuAdapter(PrinterAdapter):
         with self._state_lock:
             already_active = str(self._last_status.get("gcode_state", "")).lower() in _PRINT_ACTIVE_STATES
 
+        # Collect warnings (e.g. AMS color mismatches) to surface in result.
+        color_warnings: list[str] = []
+
         if basename.lower().endswith(".3mf"):
             plate_num = kwargs.get("plate_number", 1)
-            ams_mapping = kwargs.get("ams_mapping", [0])
-            if not isinstance(ams_mapping, list):
-                ams_mapping = [0]
+            ams_mapping = kwargs.get("ams_mapping")
+            use_ams = kwargs.get("use_ams", False)
 
             # Compute MD5 of the local 3MF file if path is provided.
             local_path = kwargs.get("local_file_path")
             file_md5 = ""
             if local_path and os.path.isfile(local_path):
                 file_md5 = self._compute_file_md5(local_path)
+
+            # Auto-detect filament count from 3MF plate metadata when
+            # the caller didn't specify ams_mapping explicitly.
+            if ams_mapping is None and local_path and os.path.isfile(local_path):
+                detected = self._detect_3mf_filaments(local_path, plate_num)
+                if detected is not None and len(detected) > 1:
+                    ams_mapping = list(range(len(detected)))
+                    use_ams = True
+                    logger.info(
+                        "Auto-detected %d filaments in plate %d — "
+                        "setting use_ams=True, ams_mapping=%s",
+                        len(detected),
+                        plate_num,
+                        ams_mapping,
+                    )
+
+            # Fall back to single-filament defaults.
+            if ams_mapping is None:
+                ams_mapping = [0]
+            if not isinstance(ams_mapping, list):
+                ams_mapping = [0]
+
+            # Check for AMS color mismatches and surface warnings.
+            if use_ams and local_path and os.path.isfile(local_path):
+                color_warnings = self._check_ams_color_mismatch(local_path, plate_num, ams_mapping)
 
             subtask_name = os.path.splitext(basename)[0]
 
@@ -1371,7 +1489,7 @@ class BambuAdapter(PrinterAdapter):
                         "flow_cali": bool(kwargs.get("flow_cali", False)),
                         "vibration_cali": bool(kwargs.get("vibration_cali", False)),
                         "layer_inspect": bool(kwargs.get("layer_inspect", False)),
-                        "use_ams": bool(kwargs.get("use_ams", False)),
+                        "use_ams": bool(use_ams),
                         "ams_mapping": ams_mapping,
                         "profile_id": "0",
                         "project_id": "0",
@@ -1382,12 +1500,23 @@ class BambuAdapter(PrinterAdapter):
             )
         else:
             # Raw G-code file.
+            # A1 series stores files at FTPS /model/ → filesystem
+            # /sdcard/model/, while X1/P1 uses FTPS /sdcard/ → filesystem
+            # /sdcard/.  Use the cached storage path from upload_file()
+            # when available; otherwise default to /sdcard/model/ (A1,
+            # the more common model) so the common upload→print flow
+            # works correctly on all series.
             if file_name.startswith("/"):
                 path = os.path.normpath(file_name)
                 if not (path.startswith("/sdcard/") or path.startswith("/cache/")):
                     raise PrinterError(f"File path must be under /sdcard/ or /cache/, got: {file_name!r}")
             else:
-                path = f"/sdcard/{basename}"
+                if self._last_storage_path == "/sdcard":
+                    # X1/P1 series — files live directly under /sdcard/.
+                    path = f"/sdcard/{basename}"
+                else:
+                    # A1 series (or unknown) — files under /sdcard/model/.
+                    path = f"/sdcard/model/{basename}"
             self._publish_command(
                 {
                     "print": {
@@ -1397,6 +1526,11 @@ class BambuAdapter(PrinterAdapter):
                     }
                 }
             )
+
+        # Build optional warning suffix from AMS color checks.
+        warn_suffix = ""
+        if color_warnings:
+            warn_suffix = " WARNING: " + "; ".join(color_warnings)
 
         # Wait for MQTT confirmation unless already active.
         if not already_active:
@@ -1413,7 +1547,7 @@ class BambuAdapter(PrinterAdapter):
             if result_state == "running":
                 return PrintResult(
                     success=True,
-                    message=f"Started printing {basename}. Printer confirmed running.",
+                    message=f"Started printing {basename}. Printer confirmed running.{warn_suffix}",
                 )
             # prepare / slicing / init — accepted but not yet running
             return PrintResult(
@@ -1421,13 +1555,13 @@ class BambuAdapter(PrinterAdapter):
                 message=(
                     f"Print command accepted for {basename}. Printer is "
                     f"preparing (state: {result_state}). Use printer_status() "
-                    f"to monitor — print has not yet confirmed running."
+                    f"to monitor — print has not yet confirmed running.{warn_suffix}"
                 ),
             )
 
         return PrintResult(
             success=True,
-            message=f"Started printing {basename}.",
+            message=f"Started printing {basename}.{warn_suffix}",
         )
 
     def cancel_print(self) -> PrintResult:

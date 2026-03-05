@@ -1600,6 +1600,14 @@ def preflight(ctx: click.Context, file_path: str | None, material: str | None, j
 @click.option("--queue", "use_queue", is_flag=True, help="Submit files to the job queue for sequential printing.")
 @click.option("--skip-preflight", is_flag=True, help="Skip automatic pre-print safety checks.")
 @click.option("--dry-run", is_flag=True, help="Preview what would happen without actually printing.")
+@click.option("--plate", "plate_number", type=click.IntRange(min=1), default=1, help="Plate number for multi-plate 3MF files (Bambu). Default 1.")
+@click.option("--use-ams", is_flag=True, help="Enable AMS filament feeding (Bambu).")
+@click.option(
+    "--ams-mapping",
+    type=str,
+    default=None,
+    help="AMS slot mapping per extruder, comma-separated (e.g. '0,1'). Implies --use-ams.",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def print_cmd(
@@ -1609,6 +1617,9 @@ def print_cmd(
     use_queue: bool,
     skip_preflight: bool,
     dry_run: bool,
+    plate_number: int,
+    use_ams: bool,
+    ams_mapping: str | None,
     json_mode: bool,
 ) -> None:
     """Start a print or check print status.
@@ -1794,7 +1805,41 @@ def print_cmd(
                     sys.exit(1)
                 file_name = upload_result.file_name or os.path.basename(f)
 
-            result = adapter.start_print(file_name)
+            # Build kwargs for Bambu-specific print parameters.
+            # Only pass these to adapters that accept **kwargs (Bambu,
+            # OctoPrint, Moonraker).  Avoids TypeError on adapters
+            # with a strict start_print(file_name) signature.
+            print_kwargs: dict[str, Any] = {}
+            from kiln.printers.bambu import BambuAdapter
+
+            is_bambu = isinstance(adapter, BambuAdapter)
+            if is_bambu:
+                if plate_number != 1:
+                    print_kwargs["plate_number"] = plate_number
+                # Parse --ams-mapping (e.g. "0,1") into list[int].
+                if ams_mapping is not None:
+                    try:
+                        parsed_ams_mapping = [int(x.strip()) for x in ams_mapping.split(",") if x.strip()]
+                    except ValueError:
+                        click.echo(
+                            format_error(
+                                f"Invalid --ams-mapping value: {ams_mapping!r}. "
+                                "Expected comma-separated integers (e.g. '0,1').",
+                                code="INVALID_AMS_MAPPING",
+                                json_mode=json_mode,
+                            )
+                        )
+                        sys.exit(1)
+                    print_kwargs["ams_mapping"] = parsed_ams_mapping
+                    print_kwargs["use_ams"] = True
+                elif use_ams:
+                    print_kwargs["use_ams"] = True
+                # Pass local file path so the adapter can inspect 3MF
+                # metadata for auto-detection of filament count.
+                if os.path.isfile(f):
+                    print_kwargs["local_file_path"] = os.path.abspath(f)
+
+            result = adapter.start_print(file_name, **print_kwargs)
             click.echo(format_action("start", result.to_dict(), json_mode=json_mode))
 
             # For batch without queue: only start the first file

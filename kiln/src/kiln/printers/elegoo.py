@@ -758,7 +758,7 @@ class ElegooAdapter(PrinterAdapter):
     # PrinterAdapter -- print control
     # ------------------------------------------------------------------
 
-    def start_print(self, file_name: str) -> PrintResult:
+    def start_print(self, file_name: str, **_kwargs: Any) -> PrintResult:
         """Begin printing a file on the Elegoo printer.
 
         The file must already exist on the printer's storage.

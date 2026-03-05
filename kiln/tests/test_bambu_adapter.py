@@ -717,7 +717,7 @@ class TestBambuAdapterStartPrint:
         call_args = adapter_with_mqtt._mqtt_client.publish.call_args
         payload = json.loads(call_args[0][1])
         assert payload["print"]["command"] == "gcode_file"
-        assert "/sdcard/test.gcode" in payload["print"]["param"]
+        assert "/sdcard/model/test.gcode" in payload["print"]["param"]
 
     def test_start_print_strips_path(self, adapter_with_mqtt: BambuAdapter) -> None:
         result = adapter_with_mqtt.start_print("/sdcard/subdir/model.3mf")
@@ -1854,3 +1854,280 @@ class TestBambuAdapterStartPrintConfigurable:
         assert p["layer_inspect"] is True
         assert p["bed_type"] == "engineering_plate"
         assert p["param"] == "Metadata/plate_2.gcode"
+
+
+# ---------------------------------------------------------------------------
+# 3MF filament detection tests
+# ---------------------------------------------------------------------------
+
+
+class TestDetect3mfFilaments:
+    """Tests for _detect_3mf_filaments static method."""
+
+    def test_single_plate_two_colors(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": ["#FFFFFF", "#808080"]}),
+            )
+        result = BambuAdapter._detect_3mf_filaments(str(threemf), 1)
+        assert result == ["#FFFFFF", "#808080"]
+
+    def test_plate_2_metadata(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": ["#FF0000"]}),
+            )
+            zf.writestr(
+                "Metadata/plate_2.json",
+                json.dumps({"filament_colors": ["#00FF00", "#0000FF"]}),
+            )
+        result = BambuAdapter._detect_3mf_filaments(str(threemf), 2)
+        assert result == ["#00FF00", "#0000FF"]
+
+    def test_missing_metadata_returns_none(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr("3D/model.model", "<model/>")
+        result = BambuAdapter._detect_3mf_filaments(str(threemf), 1)
+        assert result is None
+
+    def test_empty_colors_returns_none(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": []}),
+            )
+        result = BambuAdapter._detect_3mf_filaments(str(threemf), 1)
+        assert result is None
+
+    def test_invalid_zip_returns_none(self, tmp_path: Any) -> None:
+        bad_file = tmp_path / "notazip.3mf"
+        bad_file.write_text("not a zip")
+        result = BambuAdapter._detect_3mf_filaments(str(bad_file), 1)
+        assert result is None
+
+    def test_nonexistent_file_returns_none(self) -> None:
+        result = BambuAdapter._detect_3mf_filaments("/nonexistent/path.3mf", 1)
+        assert result is None
+
+    def test_missing_filament_colors_key(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"other_key": "value"}),
+            )
+        result = BambuAdapter._detect_3mf_filaments(str(threemf), 1)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# AMS color mismatch check tests
+# ---------------------------------------------------------------------------
+
+
+class TestCheckAmsColorMismatch:
+    """Tests for _check_ams_color_mismatch method."""
+
+    def test_matching_colors_no_warnings(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": ["#FFFFFF", "#000000"]}),
+            )
+        # Mock AMS status with matching colors.
+        adapter_with_mqtt.get_ams_status = mock.MagicMock(return_value={
+            "units": [{
+                "trays": [
+                    {"slot": 0, "tray_color": "FFFFFFFF"},
+                    {"slot": 1, "tray_color": "000000FF"},
+                ],
+            }],
+        })
+        warnings = adapter_with_mqtt._check_ams_color_mismatch(str(threemf), 1, [0, 1])
+        assert warnings == []
+
+    def test_mismatched_color_returns_warning(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": ["#FFFFFF", "#808080"]}),
+            )
+        # AMS slot 1 has black instead of gray.
+        adapter_with_mqtt.get_ams_status = mock.MagicMock(return_value={
+            "units": [{
+                "trays": [
+                    {"slot": 0, "tray_color": "FFFFFFFF"},
+                    {"slot": 1, "tray_color": "000000FF"},
+                ],
+            }],
+        })
+        warnings = adapter_with_mqtt._check_ams_color_mismatch(str(threemf), 1, [0, 1])
+        assert len(warnings) == 1
+        assert "mismatch" in warnings[0].lower()
+        assert "808080" in warnings[0]
+        assert "000000" in warnings[0]
+
+    def test_no_3mf_metadata_returns_empty(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr("3D/model.model", "<model/>")
+        warnings = adapter_with_mqtt._check_ams_color_mismatch(str(threemf), 1, [0])
+        assert warnings == []
+
+    def test_ams_error_returns_empty(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": ["#FFFFFF"]}),
+            )
+        # Simulate AMS status failure.
+        adapter_with_mqtt.get_ams_status = mock.MagicMock(side_effect=Exception("AMS offline"))
+        warnings = adapter_with_mqtt._check_ams_color_mismatch(str(threemf), 1, [0])
+        assert warnings == []
+
+
+# ---------------------------------------------------------------------------
+# Auto-detect filament + AMS integration in start_print
+# ---------------------------------------------------------------------------
+
+
+class TestStartPrintAutoDetect:
+    """Tests for auto-detection of filament count and AMS color warnings in start_print."""
+
+    def test_auto_detect_enables_ams_for_multi_filament(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": ["#FFFFFF", "#808080"]}),
+            )
+        result = adapter_with_mqtt.start_print(
+            "model.3mf", local_file_path=str(threemf),
+        )
+        assert result.success is True
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["use_ams"] is True
+        assert payload["print"]["ams_mapping"] == [0, 1]
+
+    def test_explicit_ams_mapping_overrides_auto_detect(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": ["#FFFFFF", "#808080"]}),
+            )
+        result = adapter_with_mqtt.start_print(
+            "model.3mf", ams_mapping=[2, 3], use_ams=True, local_file_path=str(threemf),
+        )
+        assert result.success is True
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["ams_mapping"] == [2, 3]
+
+    def test_single_filament_no_auto_ams(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": ["#FFFFFF"]}),
+            )
+        result = adapter_with_mqtt.start_print(
+            "model.3mf", local_file_path=str(threemf),
+        )
+        assert result.success is True
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        # Single filament: no AMS needed.
+        assert payload["print"]["use_ams"] is False
+        assert payload["print"]["ams_mapping"] == [0]
+
+    def test_color_warning_in_result_message(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": ["#FFFFFF", "#808080"]}),
+            )
+        adapter_with_mqtt.get_ams_status = mock.MagicMock(return_value={
+            "units": [{
+                "trays": [
+                    {"slot": 0, "tray_color": "FFFFFFFF"},
+                    {"slot": 1, "tray_color": "000000FF"},
+                ],
+            }],
+        })
+        result = adapter_with_mqtt.start_print(
+            "model.3mf", local_file_path=str(threemf),
+        )
+        assert result.success is True
+        assert "WARNING" in result.message
+        assert "mismatch" in result.message.lower()
+
+
+# ---------------------------------------------------------------------------
+# Gcode path based on storage detection
+# ---------------------------------------------------------------------------
+
+
+class TestStartPrintGcodePath:
+    """Tests for gcode file path construction based on detected storage path."""
+
+    def test_default_path_a1_series(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """Default (no cached storage path) uses /sdcard/model/ (A1 series)."""
+        adapter_with_mqtt.start_print("test.gcode")
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["param"] == "/sdcard/model/test.gcode"
+
+    def test_cached_model_path(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """When upload detected /model (A1), gcode uses /sdcard/model/."""
+        adapter_with_mqtt._last_storage_path = "/model"
+        adapter_with_mqtt.start_print("test.gcode")
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["param"] == "/sdcard/model/test.gcode"
+
+    def test_cached_sdcard_path_x1_p1(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """When upload detected /sdcard (X1/P1), gcode uses /sdcard/."""
+        adapter_with_mqtt._last_storage_path = "/sdcard"
+        adapter_with_mqtt.start_print("test.gcode")
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["param"] == "/sdcard/test.gcode"
+
+    def test_full_path_preserved(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """Full path (starts with /) is preserved regardless of cache."""
+        adapter_with_mqtt._last_storage_path = "/model"
+        adapter_with_mqtt.start_print("/sdcard/custom/test.gcode")
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["param"] == "/sdcard/custom/test.gcode"

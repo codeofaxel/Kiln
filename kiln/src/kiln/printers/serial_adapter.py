@@ -722,7 +722,7 @@ class SerialPrinterAdapter(PrinterAdapter):
     # PrinterAdapter -- print control
     # ------------------------------------------------------------------
 
-    def start_print(self, file_name: str) -> PrintResult:
+    def start_print(self, file_name: str, **_kwargs: Any) -> PrintResult:
         """Begin printing a file from the SD card.
 
         Sends ``M23 filename`` (select) then ``M24`` (start).

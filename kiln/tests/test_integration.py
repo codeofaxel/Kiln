@@ -323,7 +323,8 @@ class TestFullPipeline:
         assert result.exit_code == 0
         # Should have uploaded then started
         mock_adapter.upload_file.assert_called_once_with(str(gcode_file))
-        mock_adapter.start_print.assert_called_once_with("model.gcode")
+        mock_adapter.start_print.assert_called_once()
+        assert mock_adapter.start_print.call_args[0][0] == "model.gcode"
 
 
 # ---------------------------------------------------------------------------

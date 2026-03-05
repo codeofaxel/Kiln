@@ -569,7 +569,7 @@ class PrusaConnectAdapter(PrinterAdapter):
     # PrinterAdapter -- print control
     # ------------------------------------------------------------------
 
-    def start_print(self, file_name: str) -> PrintResult:
+    def start_print(self, file_name: str, **_kwargs: Any) -> PrintResult:
         """Begin printing a file on the printer.
 
         Resolves display names to API-safe file paths, then attempts
