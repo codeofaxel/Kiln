@@ -5495,8 +5495,14 @@ def slice_and_print(
     printer_name: str | None = None,
     profile: str | None = None,
     printer_id: str | None = None,
+    material: str | None = None,
 ) -> dict:
     """Slice a 3D model and immediately upload + print it in one step.
+
+    Automatically analyzes bed adhesion and adds brim/raft when needed
+    based on model geometry, material warp tendency, and printer type.
+    This adhesion intelligence only activates when no custom profile is
+    supplied.
 
     Args:
         input_path: Path to the 3D model file (STL, 3MF, STEP, etc.).
@@ -5504,6 +5510,8 @@ def slice_and_print(
         profile: Path to a slicer profile/config file.
         printer_id: Optional printer model ID for bundled profile
             auto-selection (e.g. ``"prusa_mini"``).
+        material: Filament material (e.g. ``"PLA"``, ``"ABS"``).  Affects
+            automatic brim/raft decisions.
 
     Combines ``slice_model``, ``upload_file``, and ``start_print`` into
     a single action.
@@ -5517,6 +5525,63 @@ def slice_and_print(
             profile=profile,
             printer_id=printer_id,
         )
+
+        # --- Auto-adhesion: analyse model and inject brim/raft if needed ---
+        adhesion_rec = None
+        adhesion_overrides: dict[str, str] = {}
+        if profile is None and input_path.lower().endswith((".stl", ".obj", ".3mf")):
+            try:
+                from kiln.printability import (
+                    analyze_printability as _analyze_printability,
+                )
+                from kiln.printability import (
+                    is_bedslinger,
+                    recommend_adhesion,
+                )
+
+                report = _analyze_printability(input_path)
+                if report.bed_adhesion:
+                    has_enclosure = False
+                    is_bs = False
+                    if effective_printer_id:
+                        is_bs = is_bedslinger(effective_printer_id)
+                        try:
+                            from kiln.printer_intelligence import get_printer_intel
+
+                            intel = get_printer_intel(effective_printer_id)
+                            if intel:
+                                has_enclosure = intel.get("has_enclosure", False)
+                        except Exception:
+                            pass
+
+                    rec = recommend_adhesion(
+                        report.bed_adhesion,
+                        material=material or "PLA",
+                        has_enclosure=has_enclosure,
+                        is_bedslinger=is_bs,
+                        model_height_mm=report.model_height_mm,
+                    )
+                    if rec.brim_width_mm > 0 or rec.use_raft:
+                        adhesion_rec = rec.to_dict()
+                        adhesion_overrides = dict(rec.slicer_overrides)
+                        logger.info(
+                            "Auto-adhesion: brim=%dmm raft=%s (%s)",
+                            rec.brim_width_mm,
+                            rec.use_raft,
+                            rec.rationale,
+                        )
+            except Exception:
+                logger.debug("Auto-adhesion analysis failed, proceeding without", exc_info=True)
+
+        # Re-resolve profile with adhesion overrides merged in
+        if adhesion_overrides and effective_printer_id:
+            try:
+                effective_profile = resolve_slicer_profile(
+                    effective_printer_id, overrides=adhesion_overrides
+                )
+            except Exception:
+                logger.debug("Profile override injection failed", exc_info=True)
+
         result = slice_file(
             input_path,
             profile=effective_profile,
@@ -5566,7 +5631,7 @@ def slice_and_print(
         print_result = adapter.start_print(file_name)
         _heater_watchdog.notify_print_started()
 
-        return {
+        resp: dict[str, Any] = {
             "success": True,
             "slice": result.to_dict(),
             "upload": upload.to_dict(),
@@ -5575,6 +5640,9 @@ def slice_and_print(
             "profile_path": effective_profile,
             "message": f"Sliced, uploaded, and started printing {os.path.basename(input_path)}.",
         }
+        if adhesion_rec:
+            resp["adhesion"] = adhesion_rec
+        return resp
     except SlicerNotFoundError as exc:
         return _error_dict(
             f"Failed to slice and print: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.", code="SLICER_NOT_FOUND"

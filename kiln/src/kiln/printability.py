@@ -84,6 +84,44 @@ class SupportAnalysis:
 
 
 @dataclass
+class AdhesionRecommendation:
+    """Recommended brim/raft settings for a model + material + printer.
+
+    Produced by :func:`recommend_adhesion` and consumable directly as
+    slicer profile overrides via ``resolve_slicer_profile(overrides=rec.slicer_overrides)``.
+    """
+
+    brim_width_mm: int
+    use_raft: bool
+    adhesion_risk: str  # "low", "medium", "high" — from BedAdhesionAnalysis
+    contact_percentage: float
+    rationale: str
+    slicer_overrides: dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class PrintFailureDiagnosis:
+    """Synthesised diagnosis from physical state + model analysis.
+
+    Produced by :func:`diagnose_from_signals`.  The ``confidence`` field
+    tells agents whether to auto-act (>0.7) or surface for human review.
+    """
+
+    failure_category: str  # "adhesion", "thermal", "geometry", "mechanical", "unknown"
+    probable_causes: list[str]
+    recommended_fixes: list[str]
+    confidence: float  # 0.0-1.0
+    signals: dict[str, Any] = field(default_factory=dict)
+    slicer_overrides: dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class PrintabilityReport:
     """Full printability analysis report."""
 
@@ -95,11 +133,32 @@ class PrintabilityReport:
     bridging: BridgingAnalysis
     bed_adhesion: BedAdhesionAnalysis
     supports: SupportAnalysis
+    model_height_mm: float = 0.0
     recommendations: list[str] = field(default_factory=list)
     estimated_print_time_modifier: float = 1.0  # 1.0 = normal
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+# Materials with high warping tendency — need wider brims and may need rafts.
+_HIGH_WARP_MATERIALS: frozenset[str] = frozenset({
+    "ABS", "ASA", "PA", "PA6", "PA12", "PC", "ABS-CF", "ASA-CF",
+})
+
+# Known bed-slinger printers where Y-axis bed movement worsens adhesion.
+_BEDSLINGER_PRINTERS: frozenset[str] = frozenset({
+    "bambu_a1", "bambu_a1_mini",
+    "ender3", "ender3_v2", "ender3_s1", "ender3_neo",
+    "cr10", "cr10_v2", "cr10_v3",
+    "prusa_mk3s", "prusa_mini",
+    "anycubic_mega", "anycubic_kobra",
+    "artillery_sidewinder",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -680,6 +739,8 @@ def analyze_printability(
 
     printable = score >= 50
 
+    model_height = bbox["z_max"] - bbox["z_min"]
+
     return PrintabilityReport(
         printable=printable,
         score=score,
@@ -689,6 +750,239 @@ def analyze_printability(
         bridging=bridging,
         bed_adhesion=bed_adhesion,
         supports=supports,
+        model_height_mm=round(model_height, 2),
         recommendations=recommendations,
         estimated_print_time_modifier=round(time_mod, 2),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Adhesion intelligence
+# ---------------------------------------------------------------------------
+
+
+def is_bedslinger(printer_id: str | None) -> bool:
+    """Return True if *printer_id* is a known bed-slinger printer."""
+    if not printer_id:
+        return False
+    return printer_id.lower().replace("-", "_").strip() in _BEDSLINGER_PRINTERS
+
+
+def recommend_adhesion(
+    bed_adhesion: BedAdhesionAnalysis,
+    *,
+    material: str = "PLA",
+    has_enclosure: bool = False,
+    is_bedslinger_printer: bool = False,
+    model_height_mm: float = 0.0,
+) -> AdhesionRecommendation:
+    """Recommend brim/raft settings based on model geometry + material + printer.
+
+    Uses the contact percentage and adhesion risk from
+    :class:`BedAdhesionAnalysis` combined with material warping tendency
+    and printer type to produce actionable slicer overrides.
+
+    :param bed_adhesion: Output from ``_analyze_bed_adhesion()``.
+    :param material: Filament type (PLA, ABS, PETG, etc.).
+    :param has_enclosure: Whether the printer has an enclosure.
+    :param is_bedslinger_printer: Whether the printer is a bed-slinger.
+    :param model_height_mm: Model height for tall-part brim logic.
+    :returns: :class:`AdhesionRecommendation` with slicer overrides.
+    """
+    mat_upper = material.upper()
+    is_warp_material = mat_upper in _HIGH_WARP_MATERIALS
+    pct = bed_adhesion.contact_percentage
+    risk = bed_adhesion.adhesion_risk
+
+    brim = 0
+    raft = False
+    rationale = ""
+
+    # Decision matrix — first match wins
+    if pct < 2.0:
+        brim = 8
+        raft = is_warp_material
+        rationale = (
+            f"Tiny contact area ({pct:.1f}% of footprint) — extreme adhesion risk. "
+            f"{'Raft recommended for warping material.' if raft else '8mm brim mandatory.'}"
+        )
+    elif pct < 5.0 and is_warp_material:
+        brim = 8
+        raft = True
+        rationale = f"Low contact ({pct:.1f}%) with {mat_upper} (high warp) — raft recommended."
+    elif pct < 5.0 and (is_bedslinger_printer or not has_enclosure):
+        brim = 8
+        rationale = f"Low contact ({pct:.1f}%) on {'bed-slinger' if is_bedslinger_printer else 'open-frame'} printer — 8mm brim."
+    elif pct < 5.0:
+        brim = 5
+        rationale = f"Low contact area ({pct:.1f}%) — 5mm brim recommended."
+    elif risk == "medium" and is_warp_material:
+        brim = 8
+        rationale = f"Moderate contact with {mat_upper} (high warp) — wide 8mm brim."
+    elif risk == "medium" and is_bedslinger_printer:
+        brim = 5
+        rationale = "Moderate contact on bed-slinger — 5mm brim for safety."
+    elif risk == "medium":
+        brim = 3
+        rationale = f"Moderate bed contact ({pct:.1f}%) — 3mm brim recommended."
+    elif is_warp_material and model_height_mm > 50.0:
+        brim = 5
+        rationale = f"Tall model ({model_height_mm:.0f}mm) with {mat_upper} — precautionary 5mm brim."
+    else:
+        rationale = f"Good bed contact ({pct:.1f}%), no brim needed."
+
+    # Build slicer overrides
+    overrides: dict[str, str] = {}
+    if brim > 0:
+        overrides["brim_width"] = str(brim)
+        overrides["brim_type"] = "outer_only"
+    if raft:
+        overrides["raft_layers"] = "3"
+
+    return AdhesionRecommendation(
+        brim_width_mm=brim,
+        use_raft=raft,
+        adhesion_risk=risk,
+        contact_percentage=pct,
+        rationale=rationale,
+        slicer_overrides=overrides,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Failure diagnosis
+# ---------------------------------------------------------------------------
+
+
+def diagnose_from_signals(
+    signals: dict[str, Any],
+    *,
+    printer_id: str = "default",
+    material: str | None = None,
+) -> PrintFailureDiagnosis:
+    """Produce a failure diagnosis from collected physical signals.
+
+    This is pure logic — no I/O, no adapter calls — making it easy to test.
+    The ``signals`` dict is assembled by the MCP tool from printer state,
+    model analysis, gcode metadata, and printer intelligence.
+
+    :param signals: Dict of signal values (see source for expected keys).
+    :param printer_id: Printer model identifier for context.
+    :param material: Effective material string (e.g. "PLA", "ABS").
+    :returns: :class:`PrintFailureDiagnosis`.
+    """
+    causes: list[str] = []
+    fixes: list[str] = []
+    category = "unknown"
+    confidence = 0.3
+    slicer_overrides: dict[str, str] = {}
+
+    mat_upper = (material or "").upper()
+    is_warp = mat_upper in _HIGH_WARP_MATERIALS
+
+    # --- Signal extraction (safe defaults) ---
+    adhesion_risk = signals.get("adhesion_risk")
+    contact_pct = signals.get("contact_percentage")
+    tool_actual = signals.get("tool_temp_actual")
+    tool_target = signals.get("tool_temp_target")
+    print_error = signals.get("print_error")
+    overhang_pct = signals.get("overhang_pct", 0.0)
+    max_bridge = signals.get("max_bridge_mm", 0.0)
+    has_enclosure = signals.get("printer_has_enclosure")
+    intel_modes: list[dict[str, str]] = signals.get("failure_modes_from_intel") or []
+
+    # --- Priority 1: Adhesion failure ---
+    if adhesion_risk == "high" or (contact_pct is not None and contact_pct < 5.0):
+        category = "adhesion"
+        confidence = 0.85 if (contact_pct is not None and contact_pct < 3.0) else 0.70
+        pct_str = f"{contact_pct:.1f}%" if contact_pct is not None else "unknown"
+        causes.append(
+            f"Insufficient bed contact area ({pct_str} of bounding box footprint). "
+            f"Model likely has small or lattice-like contact points."
+        )
+        fixes.append("Add a brim (5-8mm) to increase first-layer adhesion surface.")
+        fixes.append("Re-orient the model to maximize the flat base area.")
+        if is_warp:
+            fixes.append(f"{mat_upper} is prone to warping — consider a raft or enclosed printer.")
+            confidence = min(confidence + 0.10, 0.95)
+
+        # Compute slicer override
+        if contact_pct is not None and contact_pct < 5.0:
+            slicer_overrides["brim_width"] = "8"
+        else:
+            slicer_overrides["brim_width"] = "5"
+        slicer_overrides["brim_type"] = "outer_only"
+
+    # --- Priority 2: Thermal anomaly ---
+    elif (
+        tool_actual is not None
+        and tool_target is not None
+        and abs(tool_actual - tool_target) > 10.0
+    ) or (print_error is not None and print_error != 0):
+        category = "thermal"
+        confidence = 0.75
+        if tool_actual is not None and tool_target is not None:
+            delta = tool_actual - tool_target
+            causes.append(
+                f"Hotend temperature anomaly: actual {tool_actual:.0f}°C vs target {tool_target:.0f}°C "
+                f"(delta {delta:+.0f}°C)."
+            )
+            if delta < 0:
+                fixes.append("Check heater cartridge and thermistor connections.")
+                fixes.append("PID tune the hotend for stable temperature.")
+            else:
+                fixes.append("Check for thermistor fault or thermal runaway condition.")
+        if print_error is not None and print_error != 0:
+            causes.append(f"Printer error code: {print_error}.")
+            fixes.append("Check printer display for specific error details.")
+
+    # --- Priority 3: Geometry-induced failure ---
+    elif overhang_pct > 30.0 or max_bridge > 15.0:
+        category = "geometry"
+        confidence = 0.65
+        if overhang_pct > 30.0:
+            causes.append(f"High overhang percentage ({overhang_pct:.0f}%) — unsupported areas may droop or fail.")
+            fixes.append("Enable supports in slicer settings.")
+            fixes.append("Re-orient the model to reduce overhangs below 45°.")
+        if max_bridge > 15.0:
+            causes.append(f"Long bridging span ({max_bridge:.1f}mm) — may sag or fail mid-air.")
+            fixes.append("Enable supports for bridge areas.")
+            fixes.append("Reduce bridge spans by re-orienting or splitting the model.")
+
+    # --- Priority 4: Material-environment mismatch ---
+    elif is_warp and has_enclosure is False:
+        category = "mechanical"
+        confidence = 0.70
+        causes.append(
+            f"{mat_upper} on an open-frame printer — drafts and ambient cooling "
+            f"cause warping, layer splitting, and adhesion failure."
+        )
+        fixes.append(f"Use an enclosure for {mat_upper} printing.")
+        fixes.append("Increase bed temperature by 5-10°C for better adhesion.")
+        fixes.append("Add a wide brim (8mm) to counteract warping forces.")
+        slicer_overrides["brim_width"] = "8"
+        slicer_overrides["brim_type"] = "outer_only"
+
+    # --- Fallback: surface printer intelligence failure modes ---
+    if not causes and intel_modes:
+        for mode in intel_modes[:3]:
+            causes.append(mode.get("cause", mode.get("symptom", "Unknown cause")))
+            fix = mode.get("fix")
+            if fix:
+                fixes.append(fix)
+        if causes:
+            confidence = 0.50
+
+    if not causes:
+        causes.append("No clear failure cause identified from available signals.")
+        fixes.append("Capture a photo of the failed print for visual diagnosis.")
+        fixes.append("Check bed leveling and first-layer calibration.")
+
+    return PrintFailureDiagnosis(
+        failure_category=category,
+        probable_causes=causes,
+        recommended_fixes=fixes,
+        confidence=confidence,
+        signals=signals,
+        slicer_overrides=slicer_overrides,
     )
