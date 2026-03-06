@@ -496,8 +496,9 @@ class TestResliceAndPrintPipeline:
         gcode_result.errors = []
         mock_gcode.return_value = gcode_result
 
-        # Setup adapter mock
-        mock_adapter = MagicMock()
+        # Setup adapter mock — use spec to exclude Bambu-only methods so
+        # the pipeline treats this as a non-Bambu printer (no 3MF wrapping).
+        mock_adapter = MagicMock(spec=["upload_file", "get_state", "start_print"])
         mock_adapter.upload_file.return_value = {"name": "out.gcode"}
         state = MagicMock()
         state.connected = True
@@ -517,6 +518,64 @@ class TestResliceAndPrintPipeline:
         assert len(result.steps) == 6
         assert all(s.success for s in result.steps)
         mock_adapter.start_print.assert_called_once_with("out.gcode")
+
+    @patch("kiln.gcode.scan_gcode_file")
+    @patch("kiln.slicer.slice_file")
+    @patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/p.ini")
+    @patch("kiln.server._registry")
+    def test_bambu_adapter_wraps_gcode_as_3mf(
+        self,
+        mock_registry: MagicMock,
+        mock_resolve: MagicMock,
+        mock_slice: MagicMock,
+        mock_gcode: MagicMock,
+    ) -> None:
+        """Bambu adapters auto-wrap gcode in 3MF for full AMS/timelapse support."""
+        slice_result = MagicMock()
+        slice_result.output_path = "/tmp/out.gcode"
+        slice_result.message = "Sliced OK"
+        slice_result.slicer = "prusaslicer"
+        mock_slice.return_value = slice_result
+
+        gcode_result = MagicMock()
+        gcode_result.valid = True
+        gcode_result.commands = ["G28"]
+        gcode_result.blocked_commands = []
+        gcode_result.warnings = []
+        gcode_result.errors = []
+        mock_gcode.return_value = gcode_result
+
+        # Bambu adapter mock — has wrap_gcode_as_3mf
+        mock_adapter = MagicMock()
+        mock_adapter.wrap_gcode_as_3mf.return_value = "/tmp/out.3mf"
+        mock_adapter.upload_file.return_value = {"name": "out.3mf"}
+        state = MagicMock()
+        state.connected = True
+        state.status.value = "idle"
+        mock_adapter.get_state.return_value = state
+        mock_registry.get_adapter.return_value = mock_adapter
+
+        result = reslice_and_print(
+            model_path="/tmp/model.stl",
+            printer_name="bambu",
+            printer_id="bambu_a1",
+            overrides={"temperature": "220", "bed_temperature": "65"},
+        )
+
+        assert result.success is True
+        # Verify gcode was wrapped as 3MF
+        mock_adapter.wrap_gcode_as_3mf.assert_called_once_with(
+            "/tmp/out.gcode", hotend_temp=220, bed_temp=65
+        )
+        # Verify 3MF was uploaded (not raw gcode)
+        mock_adapter.upload_file.assert_called_once_with("/tmp/out.3mf")
+        # Verify start_print got local_file_path for MD5/AMS
+        mock_adapter.start_print.assert_called_once_with(
+            "out.3mf", local_file_path="/tmp/out.3mf"
+        )
+        # Upload step should note the wrapping
+        upload_step = [s for s in result.steps if s.name == "upload"][0]
+        assert upload_step.data["wrapped_3mf"] is True
 
     @patch("kiln.server._registry")
     @patch("kiln.slicer.slice_file")

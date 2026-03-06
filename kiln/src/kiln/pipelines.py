@@ -680,14 +680,43 @@ def reslice_and_print(
 
             adapter = _registry.get_adapter(printer_name) if printer_name else _registry.get_default_adapter()
             ctx["adapter"] = adapter
-            upload_result = adapter.upload_file(ctx["gcode_path"])
-            remote_name = upload_result.get("name", os.path.basename(ctx["gcode_path"]))
+
+            # Bambu printers need gcode wrapped in a 3MF with proprietary
+            # BambuStudio start/end sequences for the extruder to function.
+            # Other adapters (OctoPrint, Moonraker, Serial) upload raw gcode.
+            upload_path = ctx["gcode_path"]
+            wrapped_3mf = False
+            if (
+                hasattr(adapter, "wrap_gcode_as_3mf")
+                and upload_path.endswith(".gcode")
+            ):
+                try:
+                    wrap_kwargs: dict[str, Any] = {}
+                    if effective_overrides.get("temperature"):
+                        wrap_kwargs["hotend_temp"] = int(effective_overrides["temperature"])
+                    if effective_overrides.get("bed_temperature"):
+                        wrap_kwargs["bed_temp"] = int(effective_overrides["bed_temperature"])
+                    upload_path = adapter.wrap_gcode_as_3mf(
+                        upload_path, **wrap_kwargs
+                    )
+                    wrapped_3mf = True
+                    logger.info("Wrapped gcode as Bambu 3MF: %s", upload_path)
+                except Exception:
+                    logger.warning(
+                        "Bambu 3MF wrapping failed, uploading raw gcode",
+                        exc_info=True,
+                    )
+
+            upload_result = adapter.upload_file(upload_path)
+            remote_name = upload_result.get("name", os.path.basename(upload_path))
             ctx["remote_name"] = remote_name
+            ctx["local_3mf_path"] = upload_path if wrapped_3mf else None
             return PipelineStep(
                 name="upload",
                 success=True,
-                message=f"Uploaded {remote_name}",
-                data={"remote_name": remote_name},
+                message=f"Uploaded {remote_name}"
+                + (" (Bambu 3MF wrapped)" if wrapped_3mf else ""),
+                data={"remote_name": remote_name, "wrapped_3mf": wrapped_3mf},
                 duration_seconds=time.time() - step_start,
             )
         except Exception as exc:
@@ -738,7 +767,14 @@ def reslice_and_print(
                     message="Cannot start print (missing adapter or file name)",
                     duration_seconds=time.time() - step_start,
                 )
-            adapter.start_print(remote_name)
+            # For Bambu 3MF uploads, pass local_file_path so the adapter
+            # can compute MD5 and enable AMS auto-detection.
+            start_kwargs: dict[str, Any] = {}
+            local_3mf = ctx.get("local_3mf_path")
+            if local_3mf:
+                start_kwargs["local_file_path"] = local_3mf
+
+            adapter.start_print(remote_name, **start_kwargs)
             return PipelineStep(
                 name="start_print",
                 success=True,
