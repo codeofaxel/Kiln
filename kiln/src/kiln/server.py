@@ -257,6 +257,19 @@ _THINGIVERSE_DEPRECATION_NOTICE: str = (
 _MMF_API_KEY: str = os.environ.get("KILN_MMF_API_KEY", "")
 _CULTS3D_USERNAME: str = os.environ.get("KILN_CULTS3D_USERNAME", "")
 _CULTS3D_API_KEY: str = os.environ.get("KILN_CULTS3D_API_KEY", "")
+
+# Actionable setup guide shown when no marketplaces are configured.
+_MARKETPLACE_SETUP_GUIDE = (
+    "No marketplace credentials configured. To enable model search, set API keys for at least one:\n"
+    "\n"
+    "1. MyMiniFactory (recommended) — get your API key at https://myminifactory.com/settings/developer"
+    " → export KILN_MMF_API_KEY=your_key\n"
+    "2. Cults3D (search only, no downloads) — get your API key at https://cults3d.com/en/api/keys"
+    " → export KILN_CULTS3D_USERNAME=your_username && export KILN_CULTS3D_API_KEY=your_key\n"
+    "3. Thingiverse (deprecated — acquired by MyMiniFactory, Feb 2026) — create an app at"
+    " https://www.thingiverse.com/apps/create → export KILN_THINGIVERSE_TOKEN=your_token"
+)
+
 _CRAFTCLOUD_API_KEY: str = os.environ.get("KILN_CRAFTCLOUD_API_KEY", "")
 _FULFILLMENT_PROVIDER: str = os.environ.get("KILN_FULFILLMENT_PROVIDER", "")
 _MESHY_API_KEY: str = os.environ.get("KILN_MESHY_API_KEY", "")
@@ -4781,9 +4794,7 @@ def search_all_models(
 
         if _marketplace_registry.count == 0:
             return _error_dict(
-                "No marketplace credentials configured.  Set at least one of: "
-                "KILN_THINGIVERSE_TOKEN, KILN_MMF_API_KEY, "
-                "KILN_CULTS3D_USERNAME + KILN_CULTS3D_API_KEY.",
+                _MARKETPLACE_SETUP_GUIDE,
                 code="NO_MARKETPLACES",
             )
 
@@ -5097,12 +5108,21 @@ def marketplace_info() -> dict:
             )
 
         env_hints = []
-        if not _THINGIVERSE_TOKEN:
-            env_hints.append("Set KILN_THINGIVERSE_TOKEN to enable Thingiverse")
         if not _MMF_API_KEY:
-            env_hints.append("Set KILN_MMF_API_KEY to enable MyMiniFactory")
+            env_hints.append(
+                "MyMiniFactory (recommended): get API key at https://myminifactory.com/settings/developer"
+                " → export KILN_MMF_API_KEY=your_key"
+            )
         if not (_CULTS3D_USERNAME and _CULTS3D_API_KEY):
-            env_hints.append("Set KILN_CULTS3D_USERNAME + KILN_CULTS3D_API_KEY to enable Cults3D")
+            env_hints.append(
+                "Cults3D (search only, no downloads): get API key at https://cults3d.com/en/api/keys"
+                " → export KILN_CULTS3D_USERNAME=your_username && export KILN_CULTS3D_API_KEY=your_key"
+            )
+        if not _THINGIVERSE_TOKEN:
+            env_hints.append(
+                "Thingiverse (deprecated): create app at https://www.thingiverse.com/apps/create"
+                " → export KILN_THINGIVERSE_TOKEN=your_token"
+            )
 
         return {
             "success": True,

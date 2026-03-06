@@ -833,13 +833,19 @@ Kiln includes adapters for discovering and downloading 3D models from popular ma
 | **Cults3D** | Stable | Search, details (metadata-only — no direct download; provides URLs for manual download) |
 | **Thingiverse** | Deprecated | Search, browse, download, categories. *Acquired by MyMiniFactory (Feb 2026). API may be sunset; prefer MyMiniFactory.* |
 
-Configure credentials for the marketplaces you use:
+Marketplace features require free API keys. Get yours and set the environment variables:
+
+| Marketplace | Get your API key | Environment variable(s) |
+|---|---|---|
+| **MyMiniFactory** (recommended) | [Developer Settings](https://myminifactory.com/settings/developer) | `KILN_MMF_API_KEY` |
+| **Cults3D** (search only) | [API Keys](https://cults3d.com/en/api/keys) | `KILN_CULTS3D_USERNAME` + `KILN_CULTS3D_API_KEY` |
+| **Thingiverse** (deprecated) | [Create App](https://www.thingiverse.com/apps/create) | `KILN_THINGIVERSE_TOKEN` |
 
 ```bash
 export KILN_MMF_API_KEY=your_key               # MyMiniFactory (recommended)
 export KILN_CULTS3D_USERNAME=your_username      # Cults3D
 export KILN_CULTS3D_API_KEY=your_key            # Cults3D
-export KILN_THINGIVERSE_TOKEN=your_token       # Thingiverse (deprecated — acquired by MyMiniFactory, Feb 2026)
+export KILN_THINGIVERSE_TOKEN=your_token       # Thingiverse (deprecated)
 ```
 
 All configured marketplaces are searched simultaneously via `search_all_models`. Agents can inspect details, download files, and upload directly to a printer — enabling a full design-to-print workflow without human intervention.

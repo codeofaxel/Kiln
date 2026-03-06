@@ -88,9 +88,15 @@ class _MarketplaceToolsPlugin:
                     "message": (
                         f"{_marketplace_registry.count} marketplace(s) connected"
                         if _marketplace_registry.count > 0
-                        else "No marketplaces configured. Set KILN_THINGIVERSE_TOKEN, "
-                        "KILN_MMF_API_KEY, or KILN_CULTS3D_USERNAME + "
-                        "KILN_CULTS3D_API_KEY to enable marketplace access."
+                        else (
+                            "No marketplaces configured. To enable model search, set API keys for at least one:\n"
+                            "1. MyMiniFactory (recommended) — https://myminifactory.com/settings/developer"
+                            " → export KILN_MMF_API_KEY=your_key\n"
+                            "2. Cults3D (search only) — https://cults3d.com/en/api/keys"
+                            " → export KILN_CULTS3D_USERNAME=your_username && export KILN_CULTS3D_API_KEY=your_key\n"
+                            "3. Thingiverse (deprecated) — https://www.thingiverse.com/apps/create"
+                            " → export KILN_THINGIVERSE_TOKEN=your_token"
+                        )
                     ),
                 }
             except Exception as exc:
@@ -137,10 +143,13 @@ class _MarketplaceToolsPlugin:
                         "error": {
                             "code": "NO_MARKETPLACES",
                             "message": (
-                                "No marketplace credentials configured. "
-                                "Set at least one of: KILN_THINGIVERSE_TOKEN, "
-                                "KILN_MMF_API_KEY, "
-                                "KILN_CULTS3D_USERNAME + KILN_CULTS3D_API_KEY."
+                                "No marketplace credentials configured. To enable model search, set API keys for at least one:\n"
+                                "1. MyMiniFactory (recommended) — https://myminifactory.com/settings/developer"
+                                " → export KILN_MMF_API_KEY=your_key\n"
+                                "2. Cults3D (search only) — https://cults3d.com/en/api/keys"
+                                " → export KILN_CULTS3D_USERNAME=your_username && export KILN_CULTS3D_API_KEY=your_key\n"
+                                "3. Thingiverse (deprecated) — https://www.thingiverse.com/apps/create"
+                                " → export KILN_THINGIVERSE_TOKEN=your_token"
                             ),
                             "retryable": False,
                         },
