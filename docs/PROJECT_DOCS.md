@@ -52,7 +52,7 @@ All three modes use the same MCP tools and CLI commands.
 
 **MCP Tools** — Typed functions exposed to agents via the Model Context Protocol. Each tool has a defined input schema and returns structured JSON.
 
-**MarketplaceAdapter** — Abstract base class for 3D model repositories. Implements: search, details, files, download. Concrete adapters for MyMiniFactory, Cults3D, and Thingiverse (deprecated — acquired by MyMiniFactory, Feb 2026).
+**MarketplaceAdapter** — Abstract base class for 3D model repositories. Implements: search, details, files, download. Concrete adapters for Thingiverse (deprecated — acquired by MyMiniFactory, Feb 2026), MyMiniFactory, and Cults3D (search only).
 
 **MarketplaceRegistry** — Manages connected marketplace adapters. Provides `search_all()` for parallel fan-out search across all sources with round-robin result interleaving.
 

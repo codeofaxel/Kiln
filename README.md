@@ -62,7 +62,7 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link. Manage a mixed fleet from one place.
 - **AI-native** — 343 MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
-- **Search → Slice → Print** — Search MyMiniFactory, Cults3D, and Thingiverse for existing models, auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
+- **Search → Slice → Print** — Search and download 3D models from Thingiverse, MyMiniFactory, and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
 - **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
 
 ## Architecture
@@ -109,7 +109,7 @@ graph TD
     style J fill:#2d2d44,stroke:#533483,color:#fff
 ```
 
-Kiln connects AI agents to **OctoPrint**, **Moonraker** (Klipper), **Bambu Lab**, **Prusa Link**, and **Elegoo** printers. Agents can also outsource jobs through **Craftcloud** fulfillment, and search models on **MyMiniFactory**, **Cults3D**, and **Thingiverse**.
+Kiln connects AI agents to **OctoPrint**, **Moonraker** (Klipper), **Bambu Lab**, **Prusa Link**, and **Elegoo** printers. Agents can also outsource jobs through **Craftcloud** fulfillment, and search models on **MyMiniFactory**, **Cults3D** (search only), and **Thingiverse**.
 
 ## Packages
 
@@ -508,7 +508,7 @@ The Kiln MCP server (`kiln serve`) exposes **343 tools** to agents. Key tools ar
 | `register_webhook` | Register a webhook for event notifications |
 | `list_webhooks` | List all registered webhooks |
 | `delete_webhook` | Remove a webhook endpoint |
-| `search_all_models` | Search MyMiniFactory, Cults3D, and Thingiverse simultaneously |
+| `search_all_models` | Search MyMiniFactory, Cults3D (search only), and Thingiverse simultaneously |
 | `marketplace_info` | Show connected marketplaces and setup hints |
 | `search_models` | Search a single marketplace for 3D models |
 | `model_details` | Get details for a marketplace model |
