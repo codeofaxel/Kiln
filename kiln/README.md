@@ -92,7 +92,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 - **Text-to-model generation** — Meshy AI, Tripo3D, Stability AI, OpenSCAD with auto-discovery registry
 - **Printability analysis** — overhang detection, thin wall analysis, auto-orientation, support estimation
 - **Print DNA** — model fingerprinting, crowd-sourced print settings, intelligent settings prediction
-- **Marketplace publish** — one-click publish to Thingiverse/MyMiniFactory/Thangs with print "birth certificate"
+- **Marketplace publish** — one-click publish to Thingiverse/MyMiniFactory with print "birth certificate"
 - **Revenue tracking** — per-model creator analytics, 2.5% platform fee on Kiln-published models
 - **Print-as-a-Service** — local vs fulfillment cost comparison, order lifecycle management
 - **Failure recovery** — 9 failure types classified, automated recovery planning

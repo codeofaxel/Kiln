@@ -142,7 +142,7 @@
     <text x="970" y="395" text-anchor="middle" fill="#666666" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13">Publish with print certificate</text>
     <text x="970" y="415" text-anchor="middle" fill="#666666" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13">and track revenue</text>
     <!-- Marketplace badges -->
-    <text x="970" y="440" text-anchor="middle" fill="#444444" font-family="monospace" font-size="10">Thingiverse · MyMiniFactory · Thangs</text>
+    <text x="970" y="440" text-anchor="middle" fill="#444444" font-family="monospace" font-size="10">Thingiverse · MyMiniFactory</text>
   </g>
 
   <!-- Stats bar at bottom -->
