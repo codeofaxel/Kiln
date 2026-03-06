@@ -3,7 +3,7 @@
   "name": "io.github.codeofaxel/kiln",
   "title": "Kiln",
   "description": "AI agent control of 3D printers — 343 tools for OctoPrint, Moonraker, Bambu, Prusa, Elegoo",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "repository": {
     "url": "https://github.com/codeofaxel/Kiln",
     "source": "github"
@@ -12,7 +12,7 @@
     {
       "registryType": "pypi",
       "identifier": "kiln3d",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "transport": {
         "type": "stdio"
       },
