@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import ssl
 import subprocess
 import tempfile
 import time
@@ -32,6 +33,8 @@ from kiln.printers.bambu import (
     BambuAdapter,
     _ImplicitFTP_TLS,
     _PRINT_ACTIVE_STATES,
+    _SINGLE_CLIENT_FTPS_MSG,
+    _SINGLE_CLIENT_MSG,
     _STATE_MAP,
     _find_ffmpeg,
 )
@@ -88,6 +91,8 @@ def _pin_store_env(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def mock_ftp_class() -> mock.MagicMock:
     """Create a mock _ImplicitFTP_TLS class that returns a configured mock instance."""
+    import ftplib as _ftplib
+
     mock_ftp = mock.MagicMock()
     mock_ftp.connect = mock.MagicMock()
     mock_ftp.login = mock.MagicMock()
@@ -97,6 +102,13 @@ def mock_ftp_class() -> mock.MagicMock:
     mock_ftp.delete = mock.MagicMock()
     mock_ftp.quit = mock.MagicMock()
     mock_ftp.close = mock.MagicMock()
+
+    # Default: simulate X1/P1 printer (/model fails, /sdcard succeeds).
+    def _cwd_side_effect(path: str) -> None:
+        if path == "/model":
+            raise _ftplib.error_perm("550 No such directory")
+
+    mock_ftp.cwd = mock.MagicMock(side_effect=_cwd_side_effect)
     mock_sock = mock.MagicMock()
     mock_sock.getpeercert.return_value = b"fake-cert-der"
     mock_ftp.sock = mock_sock
@@ -374,6 +386,51 @@ class TestBambuAdapterGetState:
 
 
 # ---------------------------------------------------------------------------
+# Stale "failed" state after cancel
+# ---------------------------------------------------------------------------
+
+
+class TestBambuAdapterStaleCancelState:
+    """Tests that gcode_state="failed" with print_error=0 maps to IDLE.
+
+    After cancelling a print, the Bambu MQTT cache can get stuck showing
+    gcode_state="failed" even though the printer is idle with no error.
+    When print_error is explicitly 0, the adapter should report IDLE so
+    that preflight checks pass.
+    """
+
+    def test_failed_with_print_error_zero_maps_to_idle(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "failed", "print_error": 0}
+        state = adapter_with_mqtt.get_state()
+        assert state.state == PrinterStatus.IDLE
+
+    def test_failed_with_print_error_zero_string_maps_to_idle(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "failed", "print_error": "0"}
+        state = adapter_with_mqtt.get_state()
+        assert state.state == PrinterStatus.IDLE
+
+    def test_failed_with_nonzero_print_error_maps_to_error(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "failed", "print_error": 318734337}
+        state = adapter_with_mqtt.get_state()
+        assert state.state == PrinterStatus.ERROR
+
+    def test_failed_with_no_print_error_key_maps_to_error(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "failed"}
+        state = adapter_with_mqtt.get_state()
+        assert state.state == PrinterStatus.ERROR
+
+    def test_failed_with_print_error_zero_still_reports_error_code(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "failed", "print_error": 0}
+        state = adapter_with_mqtt.get_state()
+        assert state.print_error == 0
+
+    def test_failed_uppercase_with_print_error_zero_maps_to_idle(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "FAILED", "print_error": 0}
+        state = adapter_with_mqtt.get_state()
+        assert state.state == PrinterStatus.IDLE
+
+
+# ---------------------------------------------------------------------------
 # get_job tests
 # ---------------------------------------------------------------------------
 
@@ -619,6 +676,104 @@ class TestBambuAdapterListFiles:
             adapter_with_mqtt.list_files()
 
         mock_ftp_class.quit.assert_called_once()
+
+
+
+# ---------------------------------------------------------------------------
+# list_files NLST fallback tests (A1 LIST 550 bug)
+# ---------------------------------------------------------------------------
+
+class TestListFilesNlstFallback:
+    """Tests for LIST → NLST fallback when the printer returns 550."""
+
+    def test_list_falls_back_to_nlst_on_550(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        import ftplib as _ftplib
+
+        # MLSD fails with 502, NLST fails, LIST fails with 550 → retry NLST.
+        mock_ftp_class.mlsd.side_effect = _ftplib.error_perm("502 Command not implemented")
+
+        # First NLST call fails, second (fallback from LIST 550) succeeds.
+        mock_ftp_class.nlst.side_effect = [
+            _ftplib.error_perm("500 NLST failed"),
+            ["/sdcard/benchy.3mf", "/sdcard/cube.gcode"],
+        ]
+        mock_ftp_class.retrlines.side_effect = _ftplib.error_perm("550 Not supported")
+
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            files = adapter_with_mqtt.list_files()
+
+        assert len(files) == 2
+        assert files[0].name == "benchy.3mf"
+        assert files[0].path == "/sdcard/benchy.3mf"
+        assert files[0].size_bytes is None
+        assert files[1].name == "cube.gcode"
+
+        # NLST was called twice (first attempt + fallback from LIST 550).
+        assert mock_ftp_class.nlst.call_count == 2
+
+    def test_list_uses_list_when_available(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        import ftplib as _ftplib
+
+        # MLSD fails with 502, NLST fails, LIST succeeds.
+        mock_ftp_class.mlsd.side_effect = _ftplib.error_perm("502 Command not implemented")
+        mock_ftp_class.nlst.side_effect = _ftplib.error_perm("500 NLST failed")
+
+        def fake_retrlines(cmd: str, callback: Any) -> str:
+            callback("-rw-r--r-- 1 user group 12345 Jan  1 12:00 benchy.3mf")
+            return "226 Transfer complete"
+
+        mock_ftp_class.retrlines = fake_retrlines
+
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            files = adapter_with_mqtt.list_files()
+
+        assert len(files) == 1
+        assert files[0].name == "benchy.3mf"
+        assert files[0].path == "/sdcard/benchy.3mf"
+        assert files[0].size_bytes == 12345
+        # NLST was only called once (the initial attempt), not as fallback.
+        assert mock_ftp_class.nlst.call_count == 1
+
+    def test_a1_storage_path_with_nlst_fallback(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        import ftplib as _ftplib
+
+        # Simulate A1 printer: /model succeeds in _detect_storage_path.
+        mock_ftp_class.cwd = mock.MagicMock()  # All cwd calls succeed.
+
+        # MLSD fails with 502, NLST fails, LIST fails with 550, NLST retry works.
+        mock_ftp_class.mlsd.side_effect = _ftplib.error_perm("502 Command not implemented")
+        mock_ftp_class.nlst.side_effect = [
+            _ftplib.error_perm("500 NLST failed"),
+            ["/model/plate_1.3mf"],
+        ]
+        mock_ftp_class.retrlines.side_effect = _ftplib.error_perm("550 Not supported")
+
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            files = adapter_with_mqtt.list_files()
+
+        assert len(files) == 1
+        assert files[0].name == "plate_1.3mf"
+        assert files[0].path == "/model/plate_1.3mf"
+
+    def test_list_non_550_error_still_raises(
+        self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock,
+    ) -> None:
+        import ftplib as _ftplib
+
+        # MLSD fails with 502, NLST fails, LIST fails with 530 (auth error).
+        mock_ftp_class.mlsd.side_effect = _ftplib.error_perm("502 Command not implemented")
+        mock_ftp_class.nlst.side_effect = _ftplib.error_perm("500 NLST failed")
+        mock_ftp_class.retrlines.side_effect = _ftplib.error_perm("530 Not logged in")
+
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
+            with pytest.raises(PrinterError, match="Failed to list files"):
+                adapter_with_mqtt.list_files()
 
 
 # ---------------------------------------------------------------------------
@@ -2131,3 +2286,625 @@ class TestStartPrintGcodePath:
         adapter_with_mqtt.start_print("/sdcard/custom/test.gcode")
         payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
         assert payload["print"]["param"] == "/sdcard/custom/test.gcode"
+
+
+class TestWaitForPrintStartErrorDetection:
+    """Tests for print_error detection during _wait_for_print_start polling."""
+
+    def test_returns_error_code_on_known_error(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 84033543}
+        with mock.patch("kiln.printers.bambu.time.sleep"):
+            state, err = adapter_with_mqtt._wait_for_print_start(timeout=2.0)
+        assert state == "failed"
+        assert err == 84033543
+
+    def test_returns_none_error_on_clean_start(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "running", "print_error": 0}
+        state, err = adapter_with_mqtt._wait_for_print_start(timeout=2.0)
+        assert state == "running"
+        assert err is None
+
+    def test_timeout_with_no_error(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 0}
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]):
+            with mock.patch("kiln.printers.bambu.time.sleep"):
+                state, err = adapter_with_mqtt._wait_for_print_start()
+        assert state == "timeout"
+        assert err is None
+
+    def test_error_code_surfaces_while_idle(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """If printer reports error while still IDLE, short-circuit to failed."""
+        adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 0}
+        call_count = 0
+
+        def fake_sleep(secs: float) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                adapter_with_mqtt._last_status["print_error"] = 84033543
+
+        with mock.patch("kiln.printers.bambu.time.sleep", side_effect=fake_sleep):
+            state, err = adapter_with_mqtt._wait_for_print_start(timeout=30.0)
+        assert state == "failed"
+        assert err == 84033543
+
+    def test_string_error_code_parsed(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """print_error may arrive as a string — ensure it's parsed."""
+        adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": "84033543"}
+        with mock.patch("kiln.printers.bambu.time.sleep"):
+            state, err = adapter_with_mqtt._wait_for_print_start(timeout=2.0)
+        assert err == 84033543
+
+
+class TestStartPrintErrorMessages:
+    """Tests that start_print surfaces actionable error messages."""
+
+    def test_known_error_includes_fix_instructions(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 84033543}
+        with mock.patch("kiln.printers.bambu.time.sleep"):
+            result = adapter_with_mqtt.start_print("test.3mf")
+        assert result.success is False
+        assert "authentication expired" in result.message
+        assert "Developer Mode" in result.message
+        assert "access code" in result.message
+
+    def test_nozzle_clump_error_suggests_bypass(self, adapter_with_mqtt: BambuAdapter) -> None:
+        # 0x03008014 = 50364436 decimal — nozzle clumping detection by probing.
+        adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 0x03008014}
+        with mock.patch("kiln.printers.bambu.time.sleep"):
+            result = adapter_with_mqtt.start_print("test.3mf")
+        assert result.success is False
+        assert "nozzle_clog_detect=False" in result.message
+        assert "--no-nozzle-check" in result.message
+
+    def test_nozzle_clump_0300_1a00_detected(self, adapter_with_mqtt: BambuAdapter) -> None:
+        # 0x03001A00 prefix — nozzle wrapped in filament.
+        adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 0x03001A00}
+        with mock.patch("kiln.printers.bambu.time.sleep"):
+            result = adapter_with_mqtt.start_print("test.3mf")
+        assert result.success is False
+        assert "nozzle_clog_detect=False" in result.message
+
+    def test_unknown_error_includes_hex_code(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 12345678}
+        with mock.patch("kiln.printers.bambu.time.sleep"):
+            result = adapter_with_mqtt.start_print("test.3mf")
+        assert result.success is False
+        assert "12345678" in result.message
+        assert "hex" in result.message.lower()
+
+    def test_no_error_code_generic_message(self, adapter_with_mqtt: BambuAdapter) -> None:
+        adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 0}
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]):
+            with mock.patch("kiln.printers.bambu.time.sleep"):
+                result = adapter_with_mqtt.start_print("test.3mf")
+        assert result.success is False
+        assert "did not transition" in result.message
+
+
+class TestValidate3mfFilamentIds:
+    """Tests for filament_ids vs AMS capacity validation."""
+
+    def test_valid_filament_ids(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        """filament_ids within AMS capacity passes validation."""
+        import zipfile
+
+        three_mf = tmp_path / "test.3mf"
+        with zipfile.ZipFile(three_mf, "w") as zf:
+            meta = json.dumps({"filament_ids": [0, 1], "filament_colors": ["#000000", "#FFFFFF"]})
+            zf.writestr("Metadata/plate_1.json", meta)
+
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "idle",
+            "ams": [{"id": 0, "tray": [
+                {"id": "0"}, {"id": "1"}, {"id": "2"}, {"id": "3"},
+            ]}],
+        }
+        issues = adapter_with_mqtt._validate_3mf_filament_ids(str(three_mf), 1)
+        assert issues == []
+
+    def test_filament_ids_exceed_ams_capacity(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        """filament_ids referencing slot 7 on a 4-slot AMS is caught."""
+        import zipfile
+
+        three_mf = tmp_path / "test.3mf"
+        with zipfile.ZipFile(three_mf, "w") as zf:
+            meta = json.dumps({"filament_ids": [7], "filament_colors": ["#161616"]})
+            zf.writestr("Metadata/plate_1.json", meta)
+
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "idle",
+            "ams": [{"id": 0, "tray": [
+                {"id": "0"}, {"id": "1"}, {"id": "2"}, {"id": "3"},
+            ]}],
+        }
+        issues = adapter_with_mqtt._validate_3mf_filament_ids(str(three_mf), 1)
+        assert len(issues) == 1
+        assert "index 7" in issues[0]
+        assert "4 slot" in issues[0]
+
+    def test_no_metadata_no_issues(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        """Missing plate metadata returns no issues."""
+        import zipfile
+
+        three_mf = tmp_path / "test.3mf"
+        with zipfile.ZipFile(three_mf, "w") as zf:
+            zf.writestr("dummy.txt", "placeholder")
+        issues = adapter_with_mqtt._validate_3mf_filament_ids(str(three_mf), 1)
+        assert issues == []
+
+    def test_no_ams_data_skips_validation(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        """No AMS info available — validation is silently skipped."""
+        import zipfile
+
+        three_mf = tmp_path / "test.3mf"
+        with zipfile.ZipFile(three_mf, "w") as zf:
+            meta = json.dumps({"filament_ids": [7], "filament_colors": ["#161616"]})
+            zf.writestr("Metadata/plate_1.json", meta)
+
+        adapter_with_mqtt._last_status = {"gcode_state": "idle"}
+        issues = adapter_with_mqtt._validate_3mf_filament_ids(str(three_mf), 1)
+        assert issues == []
+
+    def test_start_print_blocks_on_filament_ids_mismatch(
+        self, adapter_with_mqtt: BambuAdapter, tmp_path: Any,
+    ) -> None:
+        """start_print refuses to print if filament_ids exceed AMS slots."""
+        import zipfile
+
+        three_mf = tmp_path / "test.3mf"
+        with zipfile.ZipFile(three_mf, "w") as zf:
+            meta = json.dumps({"filament_ids": [7], "filament_colors": ["#161616"]})
+            zf.writestr("Metadata/plate_1.json", meta)
+
+        adapter_with_mqtt._last_status = {
+            "gcode_state": "idle",
+            "ams": [{"id": 0, "tray": [
+                {"id": "0"}, {"id": "1"}, {"id": "2"}, {"id": "3"},
+            ]}],
+        }
+        result = adapter_with_mqtt.start_print(
+            "test.3mf",
+            local_file_path=str(three_mf),
+        )
+        assert result.success is False
+        assert "filament profile index 7" in result.message
+        assert "Re-slice" in result.message
+
+
+# ---------------------------------------------------------------------------
+# 3MF printer model detection tests
+# ---------------------------------------------------------------------------
+
+
+class TestDetect3mfPrinterModel:
+    """Tests for _detect_3mf_printer_model static method.
+
+    Covers: plate JSON model field, XML config files, missing metadata,
+    invalid zip, nonexistent file.
+    """
+
+    def test_model_from_plate_json(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"printer_model": "BBL-X1C", "filament_colors": ["#FFFFFF"]}),
+            )
+        result = BambuAdapter._detect_3mf_printer_model(str(threemf))
+        assert result == "BBL-X1C"
+
+    def test_model_from_plate_json_plate_2(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"printer_model": "BBL-X1C"}),
+            )
+            zf.writestr(
+                "Metadata/plate_2.json",
+                json.dumps({"printer_model": "BBL-A1"}),
+            )
+        result = BambuAdapter._detect_3mf_printer_model(str(threemf), plate_number=2)
+        assert result == "BBL-A1"
+
+    def test_model_from_xml_config_machine_tag(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        xml_content = '<config><machine>Bambu Lab X1 Carbon</machine></config>'
+        with zipfile.ZipFile(threemf, "w") as zf:
+            # No printer_model in plate JSON — fall through to XML.
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": ["#FFFFFF"]}),
+            )
+            zf.writestr("Metadata/model_settings.config", xml_content)
+        result = BambuAdapter._detect_3mf_printer_model(str(threemf))
+        assert result == "Bambu Lab X1 Carbon"
+
+    def test_model_from_xml_config_printer_model_tag(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        xml_content = '<config><printer_model>BBL-P1S</printer_model></config>'
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": ["#FFFFFF"]}),
+            )
+            zf.writestr("Metadata/slice_info.config", xml_content)
+        result = BambuAdapter._detect_3mf_printer_model(str(threemf))
+        assert result == "BBL-P1S"
+
+    def test_model_from_xml_attribute(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        xml_content = '<config printer_model="BBL-A1M" />'
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": ["#FFFFFF"]}),
+            )
+            zf.writestr("Metadata/model_settings.config", xml_content)
+        result = BambuAdapter._detect_3mf_printer_model(str(threemf))
+        assert result == "BBL-A1M"
+
+    def test_no_model_in_metadata_returns_none(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"filament_colors": ["#FFFFFF"]}),
+            )
+        result = BambuAdapter._detect_3mf_printer_model(str(threemf))
+        assert result is None
+
+    def test_missing_plate_metadata_returns_none(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr("3D/model.model", "<model/>")
+        result = BambuAdapter._detect_3mf_printer_model(str(threemf))
+        assert result is None
+
+    def test_invalid_zip_returns_none(self, tmp_path: Any) -> None:
+        bad_file = tmp_path / "notazip.3mf"
+        bad_file.write_text("not a zip")
+        result = BambuAdapter._detect_3mf_printer_model(str(bad_file))
+        assert result is None
+
+    def test_nonexistent_file_returns_none(self) -> None:
+        result = BambuAdapter._detect_3mf_printer_model("/nonexistent/path.3mf")
+        assert result is None
+
+    def test_empty_printer_model_returns_none(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"printer_model": "  "}),
+            )
+        result = BambuAdapter._detect_3mf_printer_model(str(threemf))
+        assert result is None
+
+    def test_plate_json_takes_priority_over_xml(self, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        xml_content = '<config><machine>Bambu Lab A1</machine></config>'
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"printer_model": "BBL-X1C"}),
+            )
+            zf.writestr("Metadata/model_settings.config", xml_content)
+        result = BambuAdapter._detect_3mf_printer_model(str(threemf))
+        assert result == "BBL-X1C"
+
+
+# ---------------------------------------------------------------------------
+# Printer model mismatch check tests
+# ---------------------------------------------------------------------------
+
+
+class TestCheckPrinterModelMismatch:
+    """Tests for _check_printer_model_mismatch method.
+
+    Covers: matching model (no warning), mismatched model (warning),
+    unknown 3MF model (no warning), unknown serial prefix (no warning),
+    no metadata (no warning), exception handling.
+    """
+
+    def test_matching_model_no_warning(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"printer_model": "BBL-P1S"}),
+            )
+        # Default fixture serial is "01P00A000000001" — prefix "01P" → p1s.
+        warnings = adapter_with_mqtt._check_printer_model_mismatch(str(threemf))
+        assert warnings == []
+
+    def test_mismatched_model_returns_warning(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"printer_model": "BBL-X1C"}),
+            )
+        # Fixture serial "01P00A000000001" → p1s, but 3MF is for x1c.
+        warnings = adapter_with_mqtt._check_printer_model_mismatch(str(threemf))
+        assert len(warnings) == 1
+        assert "mismatch" in warnings[0].lower()
+        assert "BBL-X1C" in warnings[0]
+        assert "x1c" in warnings[0]
+        assert "p1s" in warnings[0]
+
+    def test_unknown_3mf_model_no_warning(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"printer_model": "UNKNOWN-PRINTER-2099"}),
+            )
+        warnings = adapter_with_mqtt._check_printer_model_mismatch(str(threemf))
+        assert warnings == []
+
+    def test_unknown_serial_prefix_no_warning(self, tmp_path: Any) -> None:
+        import zipfile
+
+        adapter = _adapter(serial="ZZZ00000000001")
+        adapter._mqtt_connected.set()
+        adapter._connected = True
+        adapter._mqtt_client = mock.MagicMock()
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"printer_model": "BBL-X1C"}),
+            )
+        warnings = adapter._check_printer_model_mismatch(str(threemf))
+        assert warnings == []
+
+    def test_no_metadata_no_warning(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        import zipfile
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr("3D/model.model", "<model/>")
+        warnings = adapter_with_mqtt._check_printer_model_mismatch(str(threemf))
+        assert warnings == []
+
+    def test_invalid_zip_no_warning(self, adapter_with_mqtt: BambuAdapter, tmp_path: Any) -> None:
+        bad_file = tmp_path / "notazip.3mf"
+        bad_file.write_text("not a zip")
+        warnings = adapter_with_mqtt._check_printer_model_mismatch(str(bad_file))
+        assert warnings == []
+
+    def test_a1_serial_with_x1c_profile_warns(self, tmp_path: Any) -> None:
+        import zipfile
+
+        adapter = _adapter(serial="03900A000000001")
+        adapter._mqtt_connected.set()
+        adapter._connected = True
+        adapter._mqtt_client = mock.MagicMock()
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"printer_model": "BBL-X1C"}),
+            )
+        warnings = adapter._check_printer_model_mismatch(str(threemf))
+        assert len(warnings) == 1
+        assert "x1c" in warnings[0]
+        assert "a1" in warnings[0]
+
+    def test_matching_a1_mini_no_warning(self, tmp_path: Any) -> None:
+        import zipfile
+
+        adapter = _adapter(serial="03000A000000001")
+        adapter._mqtt_connected.set()
+        adapter._connected = True
+        adapter._mqtt_client = mock.MagicMock()
+
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr(
+                "Metadata/plate_1.json",
+                json.dumps({"printer_model": "BBL-A1M"}),
+            )
+        warnings = adapter._check_printer_model_mismatch(str(threemf))
+        assert warnings == []
+
+
+class TestBambuAdapterCalibration:
+    """Tests for run_calibration() MQTT command generation and validation."""
+
+    def test_default_bed_leveling(self, adapter_with_mqtt: BambuAdapter) -> None:
+        result = adapter_with_mqtt.run_calibration()
+        assert result.success is True
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["command"] == "calibration"
+        assert payload["print"]["option"] == 2
+
+    def test_all_calibration(self, adapter_with_mqtt: BambuAdapter) -> None:
+        result = adapter_with_mqtt.run_calibration(options=["all"])
+        assert result.success is True
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["command"] == "calibration"
+        assert payload["print"]["option"] == 7
+
+    def test_vibration_only(self, adapter_with_mqtt: BambuAdapter) -> None:
+        result = adapter_with_mqtt.run_calibration(options=["vibration"])
+        assert result.success is True
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["command"] == "calibration"
+        assert payload["print"]["option"] == 1
+
+    def test_multiple_options(self, adapter_with_mqtt: BambuAdapter) -> None:
+        result = adapter_with_mqtt.run_calibration(options=["bed_leveling", "vibration"])
+        assert result.success is True
+        payload = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args[0][1])
+        assert payload["print"]["command"] == "calibration"
+        assert payload["print"]["option"] == 3
+
+    def test_invalid_option(self, adapter_with_mqtt: BambuAdapter) -> None:
+        result = adapter_with_mqtt.run_calibration(options=["invalid"])
+        assert result.success is False
+        assert "Unknown calibration option" in result.message
+        adapter_with_mqtt._mqtt_client.publish.assert_not_called()
+
+    def test_success_message_includes_description(self, adapter_with_mqtt: BambuAdapter) -> None:
+        result = adapter_with_mqtt.run_calibration(options=["vibration", "flow"])
+        assert result.success is True
+        assert "vibration" in result.message
+        assert "flow" in result.message
+        assert "calibration" in result.message
+
+
+class TestDisableNozzleDetection:
+    """Tests for _disable_nozzle_detection() and nozzle_clog_detect param in start_print."""
+
+    def test_disable_sends_two_commands(self, adapter_with_mqtt: BambuAdapter) -> None:
+        """_disable_nozzle_detection sends print_option + xcam_control_set."""
+        adapter_with_mqtt._disable_nozzle_detection()
+        assert adapter_with_mqtt._mqtt_client.publish.call_count == 2
+
+        # First call: print_option with nozzle_blob_detect=False
+        call0 = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args_list[0][0][1])
+        assert call0["print"]["command"] == "print_option"
+        assert call0["print"]["nozzle_blob_detect"] is False
+
+        # Second call: xcam_control_set with clump_detector off
+        call1 = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args_list[1][0][1])
+        assert call1["xcam"]["command"] == "xcam_control_set"
+        assert call1["xcam"]["module_name"] == "clump_detector"
+        assert call1["xcam"]["control"] is False
+        assert call1["xcam"]["print_halt"] is False
+
+    def test_start_print_with_nozzle_clog_detect_false(
+        self, adapter_with_mqtt: BambuAdapter, tmp_path: Path,
+    ) -> None:
+        """start_print(nozzle_clog_detect=False) disables detection before sending print."""
+        three_mf = tmp_path / "test.gcode.3mf"
+        three_mf.write_bytes(b"PK\x03\x04" + b"\x00" * 26)
+
+        # Simulate print_active state so we skip _wait_for_print_start
+        with adapter_with_mqtt._state_lock:
+            adapter_with_mqtt._last_status["gcode_state"] = "RUNNING"
+
+        adapter_with_mqtt.start_print(
+            "test.gcode.3mf",
+            nozzle_clog_detect=False,
+            local_file_path=str(three_mf),
+        )
+
+        # Should have 3 publishes: print_option + xcam_control_set + project_file
+        assert adapter_with_mqtt._mqtt_client.publish.call_count == 3
+
+        call0 = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args_list[0][0][1])
+        assert call0["print"]["command"] == "print_option"
+
+        call1 = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args_list[1][0][1])
+        assert call1["xcam"]["command"] == "xcam_control_set"
+
+        call2 = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args_list[2][0][1])
+        assert call2["print"]["command"] == "project_file"
+
+    def test_start_print_default_does_not_disable(
+        self, adapter_with_mqtt: BambuAdapter, tmp_path: Path,
+    ) -> None:
+        """By default (nozzle_clog_detect=True), no disable commands are sent."""
+        three_mf = tmp_path / "test.gcode.3mf"
+        three_mf.write_bytes(b"PK\x03\x04" + b"\x00" * 26)
+
+        with adapter_with_mqtt._state_lock:
+            adapter_with_mqtt._last_status["gcode_state"] = "RUNNING"
+
+        adapter_with_mqtt.start_print(
+            "test.gcode.3mf",
+            local_file_path=str(three_mf),
+        )
+
+        # Only 1 publish: the project_file command
+        assert adapter_with_mqtt._mqtt_client.publish.call_count == 1
+        call0 = json.loads(adapter_with_mqtt._mqtt_client.publish.call_args_list[0][0][1])
+        assert call0["print"]["command"] == "project_file"
+
+
+# ---------------------------------------------------------------------------
+# MQTT single-client error messaging
+# ---------------------------------------------------------------------------
+
+
+class TestMqttSingleClientErrorMessaging:
+    """Tests that MQTT/FTPS connection-rejected errors surface a clear
+    single-client message instead of a generic connection failure.
+    """
+
+    def test_connection_reset_shows_single_client_message(self) -> None:
+        adapter = _adapter()
+        exc = ConnectionResetError(54, "Connection reset by peer")
+        with mock.patch("paho.mqtt.client.Client") as mock_mqtt_cls:
+            mock_client = mock_mqtt_cls.return_value
+            mock_client.connect.side_effect = exc
+            with pytest.raises(PrinterError, match="another client"):
+                adapter._ensure_mqtt()
+
+    def test_ssl_error_shows_single_client_message(self) -> None:
+        adapter = _adapter()
+        exc = ssl.SSLError("TLS handshake timed out")
+        with mock.patch("paho.mqtt.client.Client") as mock_mqtt_cls:
+            mock_client = mock_mqtt_cls.return_value
+            mock_client.connect.side_effect = exc
+            with pytest.raises(PrinterError, match="another client"):
+                adapter._ensure_mqtt()
+
+    def test_generic_error_preserves_original_message(self) -> None:
+        adapter = _adapter()
+        exc = OSError("Network is unreachable")
+        with mock.patch("paho.mqtt.client.Client") as mock_mqtt_cls:
+            mock_client = mock_mqtt_cls.return_value
+            mock_client.connect.side_effect = exc
+            with pytest.raises(PrinterError, match="Network is unreachable"):
+                adapter._ensure_mqtt()
+
+    def test_ftps_connection_reset_shows_single_client_message(self) -> None:
+        adapter = _adapter()
+        exc = ConnectionResetError(54, "Connection reset by peer")
+        with mock.patch(
+            "kiln.printers.bambu._ImplicitFTP_TLS",
+        ) as mock_ftp_cls:
+            mock_ftp_cls.return_value.connect.side_effect = exc
+            with pytest.raises(PrinterError, match="another client"):
+                adapter._ftp_connect()
+
+    def test_ftps_generic_error_preserves_original_message(self) -> None:
+        adapter = _adapter()
+        exc = OSError("Connection refused")
+        with mock.patch(
+            "kiln.printers.bambu._ImplicitFTP_TLS",
+        ) as mock_ftp_cls:
+            mock_ftp_cls.return_value.connect.side_effect = exc
+            with pytest.raises(PrinterError, match="refused"):
+                adapter._ftp_connect()

@@ -70,6 +70,18 @@ _TLS_PIN_FILE_ENV = "KILN_BAMBU_TLS_PIN_FILE"
 _TLS_MODE_ENV = "KILN_BAMBU_TLS_MODE"
 _TLS_FINGERPRINT_ENV = "KILN_BAMBU_TLS_FINGERPRINT"
 
+# Error message for single-client MQTT/FTPS connection rejection.
+_SINGLE_CLIENT_MSG = (
+    "MQTT connection rejected — another client (BambuStudio, Bambu Handy) "
+    "may be connected. Bambu printers only allow one LAN MQTT client at a "
+    "time. Close other Bambu software and retry."
+)
+_SINGLE_CLIENT_FTPS_MSG = (
+    "FTPS TLS handshake failed — another client (BambuStudio, Bambu Handy) "
+    "may be holding the connection. Bambu printers only allow one LAN client "
+    "at a time. Close other Bambu software and retry."
+)
+
 # Backoff parameters for MQTT reconnection.
 _BACKOFF_INITIAL_DELAY: float = 1.0  # seconds
 _BACKOFF_MULTIPLIER: float = 2.0
@@ -157,9 +169,79 @@ _SPEED_PROFILES: dict[str, int] = {
 }
 _SPEED_PROFILE_NAMES: dict[int, str] = {v: k for k, v in _SPEED_PROFILES.items()}
 
+# Known Bambu firmware error codes with actionable messages.
+# Error codes appear in the ``print_error`` field of MQTT push_status.
+# Hex format: 0502-4007 → decimal 84033543.
+_KNOWN_PRINT_ERRORS: dict[int, str] = {
+    84033543: (
+        "Printer rejected the command (error 0502-4007: authentication expired). "
+        "This happens when the printer is restarted — the access code becomes stale. "
+        "FIX: On the printer touchscreen, go to Settings → Network → "
+        "turn LAN Only Mode OFF then ON, then toggle Developer Mode OFF and ON. "
+        "Copy the NEW access code and update your Kiln config "
+        "(kiln config set access_code <new_code>). "
+        "The old access code will NOT work even if it looks the same — "
+        "you must regenerate it."
+    ),
+}
+
+# HMS error code prefixes that match nozzle clumping / blob detection.
+# These are NOT the lidar first-layer inspection (which uses 0C00 prefix).
+# The full HMS code is 0300-xxxx; the ``print_error`` decimal varies per
+# firmware version, so we match on the descriptive prefix pattern.
+# See: wiki.bambulab.com/en/a1-mini/troubleshooting/hmscode/0300_1A00_0002_0001
+_NOZZLE_CLUMP_ERROR_PREFIXES: tuple[str, ...] = (
+    "03008014",   # Nozzle clumping detection by probing (A1 series)
+    "03001A00",   # Nozzle wrapped in filament / plate placement
+    "03001800",   # Nozzle clumping calibration failure
+)
+
+_NOZZLE_CLUMP_MESSAGE = (
+    "Nozzle clumping / blob detection triggered (HMS 0300-xxxx). "
+    "This is often a false positive on models with thin first-layer geometry "
+    "(grips, cases, bezels). FIX: Retry with nozzle_clog_detect=False to "
+    "bypass the eddy-current probe at layers 4/11/20. "
+    "CLI: kiln print <file> --no-nozzle-check. "
+    "MCP: start_print(file, nozzle_clog_detect=False)."
+)
+
+
+def _is_nozzle_clump_error(error_code: int) -> bool:
+    """Check if an error code matches a known nozzle clumping HMS code."""
+    hex_code = f"{error_code:08X}"
+    return any(hex_code.startswith(prefix) for prefix in _NOZZLE_CLUMP_ERROR_PREFIXES)
+
 # Bambu LED node names.
 _VALID_LED_NODES: frozenset[str] = frozenset({"chamber_light", "work_light"})
 _VALID_LED_MODES: frozenset[str] = frozenset({"on", "off", "flashing"})
+
+# Mapping of printer model identifiers (from 3MF metadata, MQTT, and serial
+# prefixes) to canonical family names.  Used by _check_printer_model_mismatch
+# to detect when a 3MF was sliced for a different printer family.
+_BAMBU_MODEL_FAMILIES: dict[str, str] = {
+    # BambuStudio internal IDs
+    "BBL-A1M": "a1_mini",
+    "BBL-A1": "a1",
+    "BL-A001": "a1",
+    "BL-P002": "x1c",
+    "BBL-X1C": "x1c",
+    "BBL-X1E": "x1e",
+    "BL-P001": "p1s",
+    "BBL-P1S": "p1s",
+    "BBL-P1P": "p1p",
+    # Human-readable names (from slicer config / XML metadata)
+    "Bambu Lab A1 mini": "a1_mini",
+    "Bambu Lab A1": "a1",
+    "Bambu Lab X1 Carbon": "x1c",
+    "Bambu Lab X1E": "x1e",
+    "Bambu Lab P1S": "p1s",
+    "Bambu Lab P1P": "p1p",
+    # Serial number prefixes (first 3 chars of Bambu serial)
+    "030": "a1_mini",
+    "039": "a1",
+    "01S": "x1c",
+    "01P": "p1s",
+}
 
 
 def _normalize_fingerprint(value: str) -> str:
@@ -531,7 +613,13 @@ class BambuAdapter(PrinterAdapter):
         if self._tls_mode == _TLS_MODE_INSECURE:
             return
         if not cert_bytes:
-            raise PrinterError(f"{transport} TLS handshake for {self._host} did not expose a peer certificate.")
+            raise PrinterError(
+                f"{transport} TLS handshake for {self._host} did not expose a peer certificate. "
+                "This can happen if a firewall or proxy is intercepting TLS traffic.\n"
+                "  1) Check that no network proxy is between Kiln and the printer\n"
+                "  2) Try setting KILN_BAMBU_TLS_MODE=insecure temporarily to confirm\n"
+                "Retry with `get_state()`."
+            )
         actual_fp = hashlib.sha256(cert_bytes).hexdigest()
         self._enforce_pin_policy(actual_fp, transport=transport)
 
@@ -667,8 +755,39 @@ class BambuAdapter(PrinterAdapter):
             raise
         except Exception as exc:
             self._backoff.record_failure()
+            # Detect single-client rejection: Bambu printers only allow one
+            # LAN MQTT connection at a time.  When BambuStudio or Bambu Handy
+            # holds the slot, the TLS handshake is reset or times out.
+            exc_str = str(exc).lower()
+            is_single_client = (
+                isinstance(exc, (ConnectionResetError, ssl.SSLError))
+                or "connection reset by peer" in exc_str
+                or "errno 54" in exc_str
+                or "tls" in exc_str and "handshake" in exc_str
+            )
+            if is_single_client:
+                raise PrinterError(
+                    _SINGLE_CLIENT_MSG,
+                    cause=exc,
+                ) from exc
+            exc_lower = str(exc).lower()
+            if isinstance(exc, ConnectionRefusedError) or "connection refused" in exc_lower:
+                detail = (
+                    f"MQTT connection to {self._host}:{_MQTT_PORT} refused. "
+                    "Printer may be powered off or MQTT port 8883 is blocked.\n"
+                    "  1) Check that the printer is powered on\n"
+                    "  2) Check that no firewall is blocking port 8883\n"
+                )
+            elif isinstance(exc, OSError) or "errno" in exc_lower:
+                detail = (
+                    f"Network error connecting MQTT to {self._host}:{_MQTT_PORT}: {exc}\n"
+                    "  1) Check that the printer is on the same network\n"
+                    "  2) Check router/firewall settings\n"
+                )
+            else:
+                detail = f"Failed to connect MQTT to {self._host}:{_MQTT_PORT}: {exc}\n"
             raise PrinterError(
-                f"Failed to connect MQTT to {self._host}:{_MQTT_PORT}: {exc}",
+                detail + "Retry with `get_state()` to check printer reachability.",
                 cause=exc,
             ) from exc
 
@@ -784,9 +903,52 @@ class BambuAdapter(PrinterAdapter):
             result.wait_for_publish(timeout=self._timeout)
         except Exception as exc:
             raise PrinterError(
-                f"Failed to publish MQTT command: {exc}",
+                f"Failed to publish MQTT command: {exc}\n"
+                "MQTT session may have dropped. "
+                "Retry with `get_state()` to re-establish the connection.",
                 cause=exc,
             ) from exc
+
+    def _disable_nozzle_detection(self) -> None:
+        """Disable nozzle clumping / blob detection via MQTT.
+
+        Sends two commands:
+        1. ``print_option`` with ``nozzle_blob_detect: false`` — disables
+           the general nozzle blob detection.
+        2. ``xcam_control_set`` with ``module_name: "clump_detector"`` —
+           disables the eddy-current probing at layers 4/11/20 and
+           prevents ``print_halt`` on detection.
+
+        These commands must be sent **before** the ``project_file``
+        command to take effect for the upcoming print.
+
+        Note: The A1's nozzle clumping detection is also hardcoded into
+        the timelapse G-code section at layer 3.  For complete bypass,
+        users should also edit the slicer's machine G-code to remove
+        or skip the timelapse probing (change ``{if layer_num == 2}``
+        to ``{if layer_num == 20000}``).
+        """
+        logger.info("Disabling nozzle clumping / blob detection for this print")
+        self._publish_command(
+            {
+                "print": {
+                    "sequence_id": self._next_seq(),
+                    "command": "print_option",
+                    "nozzle_blob_detect": False,
+                }
+            }
+        )
+        self._publish_command(
+            {
+                "xcam": {
+                    "sequence_id": self._next_seq(),
+                    "command": "xcam_control_set",
+                    "module_name": "clump_detector",
+                    "control": False,
+                    "print_halt": False,
+                }
+            }
+        )
 
     def _send_print_command(self, command: str) -> None:
         """Send a print-category command (pause/resume/stop).
@@ -862,8 +1024,35 @@ class BambuAdapter(PrinterAdapter):
             if ftp is not None:
                 with contextlib.suppress(Exception):
                     ftp.close()
+            # Detect single-client TLS rejection on FTPS.
+            exc_str = str(exc).lower()
+            is_single_client = (
+                isinstance(exc, (ConnectionResetError, ssl.SSLError))
+                or "connection reset by peer" in exc_str
+                or "tls" in exc_str and "handshake" in exc_str
+            )
+            if is_single_client:
+                raise PrinterError(
+                    _SINGLE_CLIENT_FTPS_MSG,
+                    cause=exc,
+                ) from exc
+            exc_lower = str(exc).lower()
+            if "530" in exc_lower or "login" in exc_lower or "auth" in exc_lower:
+                detail = (
+                    f"FTPS authentication to {self._host}:{_FTPS_PORT} failed. "
+                    "Access code may be wrong or stale.\n"
+                    "  1) Check printer -> Settings -> LAN for the current access code\n"
+                    "  2) Toggle LAN Only Mode off/on to regenerate the code\n"
+                )
+            elif isinstance(exc, ConnectionRefusedError) or "connection refused" in exc_lower:
+                detail = (
+                    f"FTPS connection to {self._host}:{_FTPS_PORT} refused. "
+                    "Printer may be powered off or port 990 is blocked.\n"
+                )
+            else:
+                detail = f"FTPS connection to {self._host}:{_FTPS_PORT} failed: {exc}\n"
             raise PrinterError(
-                f"FTPS connection to {self._host}:{_FTPS_PORT} failed: {exc}",
+                detail + "Retry with `upload_file()` or check reachability with `get_state()`.",
                 cause=exc,
             ) from exc
 
@@ -880,6 +1069,20 @@ class BambuAdapter(PrinterAdapter):
         gcode_state = gcode_state.lower()
 
         mapped = _STATE_MAP.get(gcode_state, PrinterStatus.UNKNOWN)
+
+        # After a cancelled print the MQTT cache can get stuck with
+        # gcode_state="failed" even though the printer is actually idle.
+        # When print_error is explicitly present and equals 0 (no real error),
+        # this is a stale post-cancel state — treat it as IDLE so preflight
+        # checks pass.  If print_error is absent we conservatively keep ERROR.
+        if mapped == PrinterStatus.ERROR:
+            raw_error = status.get("print_error")
+            if raw_error is not None:
+                error_val: int = -1
+                with contextlib.suppress(TypeError, ValueError):
+                    error_val = int(raw_error)
+                if error_val == 0:
+                    mapped = PrinterStatus.IDLE
 
         # Speed profile.
         spd_lvl = status.get("spd_lvl")
@@ -1011,11 +1214,13 @@ class BambuAdapter(PrinterAdapter):
         )
 
     def list_files(self) -> list[PrinterFile]:
-        """Return a list of files stored on the printer's SD card.
+        """Return a list of files stored on the printer's storage.
 
-        Uses FTPS to list the ``/sdcard/`` directory.  Tries MLSD first
-        for rich metadata, falling back to NLST then LIST if the printer's
-        FTP server returns a 502 (command not implemented).
+        Uses FTPS to list the storage directory.  Automatically detects
+        the correct path (``/model/`` for A1 series, ``/sdcard/`` for
+        X1/P1 series).  Tries MLSD first for rich metadata, falling back
+        to NLST then LIST.  If LIST returns a 550 error (common on A1
+        printers), falls back to NLST which the A1 FTP server supports.
         """
         try:
             ftp = self._ftp_connect()
@@ -1023,9 +1228,11 @@ class BambuAdapter(PrinterAdapter):
             raise
 
         try:
+            storage_path = self._detect_storage_path(ftp)
+
             # Try MLSD first (rich metadata: name, size, modify time).
             try:
-                return self._list_via_mlsd(ftp)
+                return self._list_via_mlsd(ftp, storage_path)
             except ftplib.error_perm as exc:
                 if not str(exc).startswith("502"):
                     raise
@@ -1033,17 +1240,28 @@ class BambuAdapter(PrinterAdapter):
 
             # Fallback: NLST (filenames only).
             try:
-                return self._list_via_nlst(ftp)
+                return self._list_via_nlst(ftp, storage_path)
             except Exception:
                 logger.info("NLST failed, falling back to LIST")
 
-            # Last resort: LIST (raw text parsing).
-            return self._list_via_list(ftp)
+            # Last resort: LIST (raw text parsing).  A1 printers return
+            # 550 for LIST; fall back to NLST if that happens.
+            try:
+                return self._list_via_list(ftp, storage_path)
+            except ftplib.error_perm as exc:
+                if not str(exc).startswith("550"):
+                    raise
+                logger.info(
+                    "LIST returned 550 (not supported), falling back to NLST"
+                )
+                return self._list_via_nlst(ftp, storage_path)
         except PrinterError:
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Failed to list files via FTPS: {exc}",
+                f"Failed to list files via FTPS: {exc}\n"
+                "If you just formatted the SD card, the /model/ directory may need to be recreated.\n"
+                "Retry with `list_files()`. If persistent, check FTPS connectivity with `get_state()`.",
                 cause=exc,
             ) from exc
         finally:
@@ -1052,10 +1270,12 @@ class BambuAdapter(PrinterAdapter):
             except Exception as exc:
                 logger.debug("Failed to quit FTP session after listing files: %s", exc)
 
-    def _list_via_mlsd(self, ftp: ftplib.FTP_TLS) -> list[PrinterFile]:
+    def _list_via_mlsd(
+        self, ftp: ftplib.FTP_TLS, storage_path: str,
+    ) -> list[PrinterFile]:
         """List files using MLSD (rich metadata: name, size, modify time)."""
         entries: list[PrinterFile] = []
-        for name, facts in ftp.mlsd("/sdcard/"):
+        for name, facts in ftp.mlsd(f"{storage_path}/"):
             if name in (".", ".."):
                 continue
             if facts.get("type") == "dir":
@@ -1078,16 +1298,18 @@ class BambuAdapter(PrinterAdapter):
             entries.append(
                 PrinterFile(
                     name=name,
-                    path=f"/sdcard/{name}",
+                    path=f"{storage_path}/{name}",
                     size_bytes=size,
                     date=date_ts,
                 )
             )
         return entries
 
-    def _list_via_nlst(self, ftp: ftplib.FTP_TLS) -> list[PrinterFile]:
+    def _list_via_nlst(
+        self, ftp: ftplib.FTP_TLS, storage_path: str,
+    ) -> list[PrinterFile]:
         """List files using NLST (filenames only, no metadata)."""
-        names = ftp.nlst("/sdcard/")
+        names = ftp.nlst(f"{storage_path}/")
         entries: list[PrinterFile] = []
         for raw_name in names:
             name = raw_name.rsplit("/", 1)[-1] if "/" in raw_name else raw_name
@@ -1096,17 +1318,19 @@ class BambuAdapter(PrinterAdapter):
             entries.append(
                 PrinterFile(
                     name=name,
-                    path=f"/sdcard/{name}",
+                    path=f"{storage_path}/{name}",
                     size_bytes=None,
                     date=None,
                 )
             )
         return entries
 
-    def _list_via_list(self, ftp: ftplib.FTP_TLS) -> list[PrinterFile]:
+    def _list_via_list(
+        self, ftp: ftplib.FTP_TLS, storage_path: str,
+    ) -> list[PrinterFile]:
         """List files using LIST (raw text, parse filenames from output)."""
         lines: list[str] = []
-        ftp.retrlines("LIST /sdcard/", lines.append)
+        ftp.retrlines(f"LIST {storage_path}/", lines.append)
         entries: list[PrinterFile] = []
         for line in lines:
             parts = line.split()
@@ -1125,7 +1349,7 @@ class BambuAdapter(PrinterAdapter):
             entries.append(
                 PrinterFile(
                     name=name,
-                    path=f"/sdcard/{name}",
+                    path=f"{storage_path}/{name}",
                     size_bytes=size,
                     date=None,
                 )
@@ -1196,8 +1420,21 @@ class BambuAdapter(PrinterAdapter):
                 cause=exc,
             ) from exc
         except Exception as exc:
+            exc_lower = str(exc).lower()
+            if "550" in exc_lower or "no such file" in exc_lower:
+                detail = (
+                    f"FTPS upload failed — storage path may not exist: {exc}\n"
+                    "Try reformatting the SD card on the printer touchscreen.\n"
+                )
+            elif "timed out" in exc_lower or isinstance(exc, TimeoutError):
+                detail = (
+                    f"FTPS upload timed out: {exc}\n"
+                    "Connection dropped during upload — check network stability.\n"
+                )
+            else:
+                detail = f"FTPS upload failed: {exc}\n"
             raise PrinterError(
-                f"FTPS upload failed: {exc}",
+                detail + "Retry with `upload_file()`.",
                 cause=exc,
             ) from exc
         finally:
@@ -1269,23 +1506,37 @@ class BambuAdapter(PrinterAdapter):
         self,
         timeout: float = 15.0,
         poll_interval: float = 1.0,
-    ) -> str:
+    ) -> tuple[str, int | None]:
         """Poll MQTT cache until printer enters a print-active state.
 
-        Returns the state string that triggered the return (e.g.
-        ``"running"``, ``"prepare"``), ``"failed"`` on error state,
-        or ``"timeout"`` if no transition occurred.
+        Returns a tuple of ``(state, error_code)`` where *state* is the
+        string that triggered the return (e.g. ``"running"``,
+        ``"prepare"``), ``"failed"`` on error state, or ``"timeout"``
+        if no transition occurred.  *error_code* is the ``print_error``
+        value if the printer reported one (often non-zero even before
+        ``gcode_state`` flips to ``"failed"``), or ``None``.
         """
         deadline = time.monotonic() + timeout
+        last_error: int | None = None
         while time.monotonic() < deadline:
             with self._state_lock:
                 state = str(self._last_status.get("gcode_state", "")).lower()
+                raw_err = self._last_status.get("print_error")
+            if raw_err is not None:
+                with contextlib.suppress(TypeError, ValueError):
+                    err_val = int(raw_err)
+                    if err_val != 0:
+                        last_error = err_val
             if state in _PRINT_ACTIVE_STATES:
-                return state
+                return state, last_error
             if state == "failed":
-                return "failed"
+                return "failed", last_error
+            # If the printer set a non-zero error code while still IDLE,
+            # the command was rejected — no point waiting further.
+            if last_error is not None and state in ("idle", "finish"):
+                return "failed", last_error
             time.sleep(poll_interval)
-        return "timeout"
+        return "timeout", last_error
 
     @staticmethod
     def _compute_file_md5(file_path: str) -> str:
@@ -1381,6 +1632,204 @@ class BambuAdapter(PrinterAdapter):
             logger.debug("Could not read 3MF filament metadata from %s", file_path, exc_info=True)
         return None
 
+    @staticmethod
+    def _detect_3mf_printer_model(
+        file_path: str,
+        *,
+        plate_number: int = 1,
+    ) -> str | None:
+        """Extract the printer model from a 3MF's metadata.
+
+        Inspects two locations inside the 3MF archive:
+
+        1. ``Metadata/plate_N.json`` — ``printer_model`` field.
+        2. ``Metadata/model_settings.config`` or
+           ``Metadata/slice_info.config`` — XML files that may contain
+           ``<machine>`` or ``<printer_model>`` tags written by
+           BambuStudio/OrcaSlicer.
+
+        Returns the model identifier string (e.g. ``"BBL-X1C"``) if
+        found, or ``None`` if detection fails.
+
+        Args:
+            file_path: Local path to the 3MF file.
+            plate_number: Which plate's metadata to inspect.
+        """
+        import xml.etree.ElementTree as ET
+        import zipfile
+
+        try:
+            with zipfile.ZipFile(file_path, "r") as zf:
+                # 1. Check plate JSON metadata.
+                meta_name = f"Metadata/plate_{plate_number}.json"
+                if meta_name in zf.namelist():
+                    with zf.open(meta_name) as mf:
+                        meta = json.loads(mf.read())
+                    model = meta.get("printer_model")
+                    if isinstance(model, str) and model.strip():
+                        return model.strip()
+
+                # 2. Check XML config files for printer model info.
+                for config_name in (
+                    "Metadata/model_settings.config",
+                    "Metadata/slice_info.config",
+                ):
+                    if config_name not in zf.namelist():
+                        continue
+                    with zf.open(config_name) as cf:
+                        try:
+                            tree = ET.parse(cf)
+                        except ET.ParseError:
+                            continue
+                        root = tree.getroot()
+                        # Look for <machine> or <printer_model> text.
+                        for tag in ("machine", "printer_model"):
+                            elem = root.find(f".//{tag}")
+                            if elem is not None and elem.text and elem.text.strip():
+                                return elem.text.strip()
+                        # Also check attributes on the root or config elements.
+                        for elem in root.iter():
+                            for attr in ("printer_model", "machine"):
+                                val = elem.get(attr, "").strip()
+                                if val:
+                                    return val
+        except Exception:
+            logger.debug(
+                "Could not read 3MF printer model from %s",
+                file_path,
+                exc_info=True,
+            )
+        return None
+
+    def _check_printer_model_mismatch(
+        self,
+        file_path: str,
+        *,
+        plate_number: int = 1,
+    ) -> list[str]:
+        """Check if a 3MF was sliced for a different printer model.
+
+        Compares the printer model embedded in the 3MF metadata against
+        the connected printer (identified by serial number prefix).
+        Non-blocking — logs warnings and returns them as strings, never
+        raises.
+
+        Args:
+            file_path: Local path to the 3MF file.
+            plate_number: Which plate is being printed.
+
+        Returns:
+            List of human-readable warning strings (empty if no mismatch
+            or if detection fails).
+        """
+        warnings: list[str] = []
+        try:
+            sliced_model = self._detect_3mf_printer_model(
+                file_path, plate_number=plate_number,
+            )
+            if not sliced_model:
+                return warnings
+
+            sliced_family = _BAMBU_MODEL_FAMILIES.get(sliced_model)
+            if not sliced_family:
+                logger.debug(
+                    "Unknown 3MF printer model %r — skipping mismatch check",
+                    sliced_model,
+                )
+                return warnings
+
+            # Identify the connected printer family from the serial prefix.
+            serial_prefix = self._serial[:3] if len(self._serial) >= 3 else ""
+            connected_family = _BAMBU_MODEL_FAMILIES.get(serial_prefix)
+            if not connected_family:
+                logger.debug(
+                    "Unknown serial prefix %r — skipping mismatch check",
+                    serial_prefix,
+                )
+                return warnings
+
+            if sliced_family != connected_family:
+                msg = (
+                    f"Printer profile mismatch: 3MF was sliced for "
+                    f"{sliced_model} ({sliced_family}) but the connected "
+                    f"printer is {connected_family} (serial {self._serial}). "
+                    f"Wrong printer profile means wrong speeds, accelerations, "
+                    f"and firmware-specific gcode — this may cause print "
+                    f"failures. Re-slice with the correct printer profile."
+                )
+                logger.warning("%s", msg)
+                warnings.append(msg)
+        except Exception:
+            logger.debug("Printer model mismatch check failed", exc_info=True)
+        return warnings
+
+    def _validate_3mf_filament_ids(
+        self,
+        file_path: str,
+        plate_number: int = 1,
+    ) -> list[str]:
+        """Check if a 3MF references filament slots that exceed AMS capacity.
+
+        Reads ``filament_ids`` from the 3MF plate metadata and compares
+        against the number of AMS tray slots actually available.  Returns
+        a list of warning/error strings (empty if everything is fine).
+
+        BambuStudio writes ``filament_ids`` as slicer-internal profile
+        indices (e.g. ``[7]`` means the 8th filament profile in the
+        project, NOT physical AMS slot 7).  When mapped to AMS, the
+        physical slot is determined by ``ams_mapping``.  However, if
+        ``filament_ids`` contains values >= total AMS slots AND no
+        explicit ``ams_mapping`` is provided, the print will likely
+        fail because the slicer expected more filament positions than
+        the AMS supports.
+
+        Args:
+            file_path: Local path to the 3MF file.
+            plate_number: Which plate to inspect.
+        """
+        import json
+        import zipfile
+
+        issues: list[str] = []
+        try:
+            with zipfile.ZipFile(file_path, "r") as zf:
+                meta_name = f"Metadata/plate_{plate_number}.json"
+                if meta_name not in zf.namelist():
+                    return issues
+                with zf.open(meta_name) as mf:
+                    meta = json.loads(mf.read())
+
+            filament_ids = meta.get("filament_ids")
+            if not isinstance(filament_ids, list) or not filament_ids:
+                return issues
+
+            # Count available AMS tray slots.
+            ams_info = self.get_ams_status()
+            total_slots = 0
+            for unit in ams_info.get("units", []):
+                total_slots += len(unit.get("trays", []))
+
+            if total_slots == 0:
+                return issues  # No AMS info — can't validate.
+
+            max_id = max(filament_ids)
+            if max_id >= total_slots:
+                issues.append(
+                    f"3MF plate {plate_number} references filament profile "
+                    f"index {max_id} but your AMS only has {total_slots} "
+                    f"slot(s) (indices 0-{total_slots - 1}). This file was "
+                    f"likely sliced with a multi-filament project that "
+                    f"doesn't match your AMS setup. Re-slice the model in "
+                    f"BambuStudio/OrcaSlicer with only your installed "
+                    f"filaments, or provide an explicit --ams-mapping to "
+                    f"remap the extruder indices to valid AMS slots."
+                )
+        except PrinterError:
+            logger.debug("Could not query AMS for filament_ids validation", exc_info=True)
+        except Exception:
+            logger.debug("Could not validate 3MF filament_ids from %s", file_path, exc_info=True)
+        return issues
+
     def _build_print_url(self, basename: str) -> str:
         """Build the correct ``file:///`` URL for the MQTT print command.
 
@@ -1417,8 +1866,15 @@ class BambuAdapter(PrinterAdapter):
                 * ``flow_cali`` (bool): Run flow calibration.  Default ``False``.
                 * ``vibration_cali`` (bool): Run vibration calibration.
                   Default ``False``.
-                * ``layer_inspect`` (bool): Enable first-layer inspection.
-                  Default ``False``.
+                * ``layer_inspect`` (bool): Enable first-layer inspection
+                  (lidar visual scan).  Default ``False``.
+                * ``nozzle_clog_detect`` (bool): Enable nozzle clumping /
+                  blob detection by probing (eddy current sensor check at
+                  layers 4, 11, 20).  Default ``True``.  Set to ``False``
+                  to bypass HMS 0300-8014 errors that trigger on models
+                  with thin first-layer geometry.  This sends both a
+                  ``print_option`` and ``xcam_control_set`` command to
+                  disable the check before starting the print.
                 * ``bed_type`` (str): Bed surface type.  Default ``"auto"``.
                 * ``plate_number`` (int): Plate index in multi-plate 3MF.
                   Default ``1``.
@@ -1432,8 +1888,9 @@ class BambuAdapter(PrinterAdapter):
         with self._state_lock:
             already_active = str(self._last_status.get("gcode_state", "")).lower() in _PRINT_ACTIVE_STATES
 
-        # Collect warnings (e.g. AMS color mismatches) to surface in result.
-        color_warnings: list[str] = []
+        # Collect warnings (e.g. AMS color mismatches, printer model
+        # mismatches) to surface in the result message.
+        warnings: list[str] = []
 
         if basename.lower().endswith(".3mf"):
             plate_num = kwargs.get("plate_number", 1)
@@ -1467,11 +1924,37 @@ class BambuAdapter(PrinterAdapter):
             if not isinstance(ams_mapping, list):
                 ams_mapping = [0]
 
+            # Validate filament_ids against AMS capacity.
+            if local_path and os.path.isfile(local_path):
+                filament_issues = self._validate_3mf_filament_ids(local_path, plate_num)
+                if filament_issues:
+                    return PrintResult(
+                        success=False,
+                        message=" ".join(filament_issues),
+                    )
+
             # Check for AMS color mismatches and surface warnings.
             if use_ams and local_path and os.path.isfile(local_path):
-                color_warnings = self._check_ams_color_mismatch(local_path, plate_num, ams_mapping)
+                warnings.extend(
+                    self._check_ams_color_mismatch(local_path, plate_num, ams_mapping)
+                )
+
+            # Check for printer model mismatch (sliced for wrong printer).
+            if local_path and os.path.isfile(local_path):
+                warnings.extend(
+                    self._check_printer_model_mismatch(
+                        local_path, plate_number=plate_num,
+                    )
+                )
 
             subtask_name = os.path.splitext(basename)[0]
+
+            # Disable nozzle clumping / blob detection if requested.
+            # This must be sent BEFORE the project_file command.
+            # Prevents HMS 0300-8014 false positives on models with
+            # thin first-layer geometry.
+            if not kwargs.get("nozzle_clog_detect", True):
+                self._disable_nozzle_detection()
 
             self._publish_command(
                 {
@@ -1527,21 +2010,35 @@ class BambuAdapter(PrinterAdapter):
                 }
             )
 
-        # Build optional warning suffix from AMS color checks.
+        # Build optional warning suffix from pre-print checks.
         warn_suffix = ""
-        if color_warnings:
-            warn_suffix = " WARNING: " + "; ".join(color_warnings)
+        if warnings:
+            warn_suffix = " WARNING: " + "; ".join(warnings)
 
         # Wait for MQTT confirmation unless already active.
         if not already_active:
-            result_state = self._wait_for_print_start()
+            result_state, error_code = self._wait_for_print_start()
             if result_state in ("timeout", "failed"):
+                # Build a specific error message if we recognise the code.
+                err_detail = ""
+                if error_code is not None:
+                    known = _KNOWN_PRINT_ERRORS.get(error_code)
+                    if known:
+                        err_detail = f" {known}"
+                    elif _is_nozzle_clump_error(error_code):
+                        err_detail = f" {_NOZZLE_CLUMP_MESSAGE}"
+                    else:
+                        err_detail = (
+                            f" Printer reported error code {error_code} "
+                            f"(hex {error_code:08X}). Check the Bambu Wiki "
+                            f"or printer LCD for details."
+                        )
                 return PrintResult(
                     success=False,
                     message=(
                         f"Print command sent for {basename} but printer did not "
-                        f"transition to an active state within timeout. "
-                        f"Check printer LCD for errors."
+                        f"transition to an active state within timeout."
+                        f"{err_detail}"
                     ),
                 )
             if result_state == "running":
@@ -1586,6 +2083,80 @@ class BambuAdapter(PrinterAdapter):
         """Resume a previously paused print job."""
         self._send_print_command("resume")
         return PrintResult(success=True, message="Print resumed.")
+
+    # ------------------------------------------------------------------
+    # PrinterAdapter -- calibration
+    # ------------------------------------------------------------------
+
+    # Bambu calibration option bitmask values.
+    _CALIBRATION_OPTIONS: dict[str, int] = {
+        "bed_leveling": 2,
+        "vibration": 1,
+        "flow": 4,  # xcam / first-layer inspection calibration
+    }
+
+    def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
+        """Run calibration routines on the Bambu printer via MQTT.
+
+        Bambu printers accept a ``calibration`` command with a bitmask
+        ``option`` field:
+
+        * 1 = vibration compensation (input shaper)
+        * 2 = bed leveling + Z offset
+        * 4 = first-layer inspection (xcam)
+        * 7 = all of the above
+
+        The printer must be idle — calibration will fail if a print is
+        running.  Calibration typically takes 2-5 minutes.  The printer
+        will home, probe the bed, and return to idle when complete.
+
+        Args:
+            options: Which routines to run.  Accepts ``"bed_leveling"``,
+                ``"vibration"``, ``"flow"``, or ``"all"``.
+                Defaults to ``["bed_leveling"]``.
+        """
+        if options is None:
+            options = ["bed_leveling"]
+
+        # Resolve "all" shortcut.
+        if "all" in options:
+            bitmask = 7
+            description = "full calibration (bed leveling + vibration + flow)"
+        else:
+            bitmask = 0
+            parts: list[str] = []
+            for opt in options:
+                val = self._CALIBRATION_OPTIONS.get(opt)
+                if val is None:
+                    valid = ", ".join(sorted(self._CALIBRATION_OPTIONS))
+                    return PrintResult(
+                        success=False,
+                        message=(
+                            f"Unknown calibration option {opt!r}. "
+                            f"Valid options: {valid}, all"
+                        ),
+                    )
+                bitmask |= val
+                parts.append(opt)
+            description = " + ".join(parts) + " calibration"
+
+        self._publish_command(
+            {
+                "print": {
+                    "sequence_id": self._next_seq(),
+                    "command": "calibration",
+                    "option": bitmask,
+                }
+            }
+        )
+        return PrintResult(
+            success=True,
+            message=(
+                f"Started {description} on Bambu printer. "
+                f"This takes 2-5 minutes. Use printer_status() to monitor — "
+                f"printer will return to idle when complete."
+            ),
+        )
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- temperature control
@@ -1869,7 +2440,9 @@ class BambuAdapter(PrinterAdapter):
             return True
         except Exception as exc:
             raise PrinterError(
-                f"Failed to delete {file_path} via FTPS: {exc}",
+                f"Failed to delete {file_path} via FTPS: {exc}\n"
+                "File may not exist or the path may be wrong. "
+                "Use `list_files()` to verify the file exists before retrying `delete_file()`.",
                 cause=exc,
             ) from exc
         finally:
@@ -2011,7 +2584,11 @@ class BambuAdapter(PrinterAdapter):
                 "Camera RTSPS stream timed out after 10s. Check camera and network."
             ) from exc
         except Exception as exc:
-            raise PrinterError(f"Camera snapshot failed: {exc}") from exc
+            raise PrinterError(
+                f"Camera snapshot failed: {exc}\n"
+                "Camera may be disabled or in use. Check printer camera settings. "
+                "Retry with `get_snapshot()`.",
+            ) from exc
 
     def get_stream_url(self) -> str | None:
         """Return the RTSPS stream URL for X1 series printers.
