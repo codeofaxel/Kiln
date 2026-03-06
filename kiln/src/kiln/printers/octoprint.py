@@ -454,15 +454,28 @@ class OctoPrintAdapter(PrinterAdapter):
                     body = response.text[:300]
                     if len(response.text) > 300:
                         body += " (truncated)"
+                    sc = response.status_code
+                    if sc == 401:
+                        hint = " API key may be invalid. Check KILN_PRINTER_API_KEY or config. Retry with `get_state()`."
+                    elif sc == 403:
+                        hint = " Insufficient permissions. Check API key scope in OctoPrint settings. Retry with `get_state()`."
+                    elif sc == 404:
+                        hint = " Resource not found — the file or endpoint may not exist. Verify with `list_files()`."
+                    elif sc == 409:
+                        hint = " Conflict — printer may be busy with another operation. Check `get_state()` first."
+                    else:
+                        hint = " Retry with `get_state()` to check printer status."
                     raise PrinterError(
-                        f"OctoPrint returned HTTP {response.status_code} for {method} {path}: {body}",
+                        f"OctoPrint returned HTTP {sc} for {method} {path}: {body}.{hint}",
                     )
 
                 # Retryable HTTP status -- fall through to backoff.
                 last_exc = PrinterError(
                     f"OctoPrint returned HTTP {response.status_code} "
                     f"for {method} {path} "
-                    f"(attempt {attempt + 1}/{self._retries})"
+                    f"(attempt {attempt + 1}/{self._retries}). "
+                    f"OctoPrint backend may be unavailable — check that the service is running. "
+                    f"Retry with `get_state()`."
                 )
 
             except Timeout as exc:
@@ -480,7 +493,9 @@ class OctoPrintAdapter(PrinterAdapter):
             except RequestException as exc:
                 # Non-transient request errors -- raise immediately.
                 raise PrinterError(
-                    f"Request error for {method} {path}: {exc}",
+                    f"Request error for {method} {path}: {exc}. "
+                    f"Cannot reach OctoPrint at {self._host}. Check network and that OctoPrint is running. "
+                    f"Retry with `get_state()`.",
                     cause=exc,
                 ) from exc
 
@@ -968,6 +983,51 @@ class OctoPrintAdapter(PrinterAdapter):
         return True
 
     # ------------------------------------------------------------------
+    # PrinterAdapter -- calibration
+    # ------------------------------------------------------------------
+
+    def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
+        """Run calibration routines via G-code commands.
+
+        OctoPrint does not expose a native calibration API, but bed
+        leveling can be triggered by sending ``G28`` (home all axes)
+        followed by ``G29`` (auto bed leveling probe).
+
+        Only ``"bed_leveling"`` (and the ``"all"`` shortcut) are
+        supported.  Other calibration types require firmware-specific
+        macros or manual intervention.
+
+        Args:
+            options: Which routines to run.  Accepts ``"bed_leveling"``
+                or ``"all"``.  Defaults to ``["bed_leveling"]``.
+        """
+        if options is None:
+            options = ["bed_leveling"]
+
+        supported = {"bed_leveling", "all"}
+        unsupported = [opt for opt in options if opt not in supported]
+        if unsupported:
+            return PrintResult(
+                success=False,
+                message=(
+                    f"Calibration option(s) {', '.join(repr(o) for o in unsupported)} "
+                    "not supported on OctoPrint. Only bed_leveling is available."
+                ),
+            )
+
+        self._post(
+            "/api/printer/command",
+            json={"commands": ["G28", "G29"]},
+        )
+        return PrintResult(
+            success=True,
+            message=(
+                "Bed leveling started (G28 + G29 sent). "
+                "The printer will home and probe the bed."
+            ),
+        )
+
+    # ------------------------------------------------------------------
     # PrinterAdapter -- file deletion
     # ------------------------------------------------------------------
 
@@ -1028,9 +1088,15 @@ class OctoPrintAdapter(PrinterAdapter):
                 "webcam is configured in OctoPrint and the printer is online."
             ) from exc
         except RequestException as exc:
-            raise PrinterError(f"Webcam snapshot failed: {exc}") from exc
+            raise PrinterError(
+                f"Webcam snapshot failed: {exc}. "
+                "Check webcam configuration in OctoPrint. Retry with `get_snapshot()`.",
+            ) from exc
         except Exception as exc:
-            raise PrinterError(f"Webcam snapshot failed unexpectedly: {exc}") from exc
+            raise PrinterError(
+                f"Webcam snapshot failed unexpectedly: {exc}. "
+                "Retry with `get_snapshot()`.",
+            ) from exc
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- webcam streaming
@@ -1194,7 +1260,8 @@ class OctoPrintAdapter(PrinterAdapter):
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Firmware update failed: {exc}",
+                f"Firmware update failed: {exc}. "
+                "Check OctoPrint logs for details. Retry with `update_firmware()`.",
                 cause=exc,
             ) from exc
 

@@ -424,6 +424,37 @@ class PrinterAdapter(ABC):
             PrinterError: If the e-stop command cannot be delivered.
         """
 
+    # -- calibration -----------------------------------------------------
+
+    def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
+        """Run printer calibration routines (bed leveling, Z offset, etc.).
+
+        Calibration capabilities vary by printer.  Subclasses that support
+        remote calibration should override this method.  The default
+        implementation returns a failure indicating no support.
+
+        Args:
+            options: Which calibration routines to run.  Valid values are
+                printer-specific but common ones include:
+
+                * ``"bed_leveling"`` — auto bed mesh / Z offset
+                * ``"vibration"`` — input shaper / vibration compensation
+                * ``"flow"`` — extrusion flow calibration
+                * ``"all"`` — run all available routines
+
+                When ``None``, defaults to ``["bed_leveling"]``.
+
+        Returns:
+            PrintResult indicating success or failure.
+        """
+        return PrintResult(
+            success=False,
+            message=(
+                "Calibration is not supported for this printer type. "
+                "Run calibration manually from the printer's touchscreen or web UI."
+            ),
+        )
+
     # -- temperature control --------------------------------------------
 
     def _validate_temp(self, target: float, max_temp: float, heater: str) -> None:

@@ -486,15 +486,28 @@ class MoonrakerAdapter(PrinterAdapter):
                     body = response.text[:300]
                     if len(response.text) > 300:
                         body += " (truncated)"
+                    sc = response.status_code
+                    if sc == 401:
+                        hint = " API key may be invalid. Check KILN_PRINTER_API_KEY or Moonraker auth config. Retry with `get_state()`."
+                    elif sc == 403:
+                        hint = " Insufficient permissions. Check Moonraker's authorization config. Retry with `get_state()`."
+                    elif sc == 404:
+                        hint = " Resource not found — the endpoint or file may not exist. Verify with `list_files()`."
+                    elif sc == 409:
+                        hint = " Conflict — printer may be busy with another operation. Check `get_state()` first."
+                    else:
+                        hint = " Retry with `get_state()` to check printer status."
                     raise PrinterError(
-                        f"Moonraker returned HTTP {response.status_code} for {method} {path}: {body}",
+                        f"Moonraker returned HTTP {sc} for {method} {path}: {body}.{hint}",
                     )
 
                 # Retryable HTTP status -- fall through to backoff.
                 last_exc = PrinterError(
                     f"Moonraker returned HTTP {response.status_code} "
                     f"for {method} {path} "
-                    f"(attempt {attempt + 1}/{self._retries})"
+                    f"(attempt {attempt + 1}/{self._retries}). "
+                    f"Moonraker backend may be unavailable — check that the service is running. "
+                    f"Retry with `get_state()`."
                 )
 
             except Timeout as exc:
@@ -512,7 +525,9 @@ class MoonrakerAdapter(PrinterAdapter):
             except RequestException as exc:
                 # Non-transient request errors -- raise immediately.
                 raise PrinterError(
-                    f"Request error for {method} {path}: {exc}",
+                    f"Request error for {method} {path}: {exc}. "
+                    f"Cannot reach Moonraker at {self._host}. Check network and that Moonraker is running. "
+                    f"Retry with `get_state()`.",
                     cause=exc,
                 ) from exc
 
@@ -1003,6 +1018,66 @@ class MoonrakerAdapter(PrinterAdapter):
         return True
 
     # ------------------------------------------------------------------
+    # PrinterAdapter -- calibration
+    # ------------------------------------------------------------------
+
+    _CALIBRATION_MACROS: dict[str, str] = {
+        "bed_leveling": "BED_MESH_CALIBRATE",
+        "vibration": "SHAPER_CALIBRATE",
+    }
+
+    def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
+        """Run calibration routines via Klipper G-code macros.
+
+        Moonraker/Klipper supports calibration through built-in macros:
+
+        * ``"bed_leveling"`` — runs ``BED_MESH_CALIBRATE`` to probe and
+          generate a bed mesh compensation map.
+        * ``"vibration"`` — runs ``SHAPER_CALIBRATE`` to measure and
+          compensate for vibration (input shaper).
+        * ``"all"`` — runs both of the above sequentially.
+
+        Other calibration types (e.g. ``"flow"``) are not natively
+        available and require printer-specific macros.
+
+        Args:
+            options: Which routines to run.  Accepts ``"bed_leveling"``,
+                ``"vibration"``, or ``"all"``.
+                Defaults to ``["bed_leveling"]``.
+        """
+        if options is None:
+            options = ["bed_leveling"]
+
+        # Resolve "all" shortcut.
+        if "all" in options:
+            macros = list(self._CALIBRATION_MACROS.values())
+            description = "full calibration (bed leveling + vibration)"
+        else:
+            macros = []
+            parts: list[str] = []
+            for opt in options:
+                macro = self._CALIBRATION_MACROS.get(opt)
+                if macro is None:
+                    valid = ", ".join(sorted(self._CALIBRATION_MACROS))
+                    return PrintResult(
+                        success=False,
+                        message=(
+                            f"Unknown calibration option {opt!r}. "
+                            f"Valid options: {valid}, all"
+                        ),
+                    )
+                macros.append(macro)
+                parts.append(opt)
+            description = " + ".join(parts) + " calibration"
+
+        script = "\n".join(macros)
+        self._send_gcode(script)
+        return PrintResult(
+            success=True,
+            message=f"Started {description}. The printer will calibrate and return to idle.",
+        )
+
+    # ------------------------------------------------------------------
     # PrinterAdapter -- file deletion
     # ------------------------------------------------------------------
 
@@ -1083,9 +1158,15 @@ class MoonrakerAdapter(PrinterAdapter):
                 "webcam is configured and the printer is online."
             ) from exc
         except RequestException as exc:
-            raise PrinterError(f"Webcam snapshot failed: {exc}") from exc
+            raise PrinterError(
+                f"Webcam snapshot failed: {exc}. "
+                "Check webcam configuration in Moonraker. Retry with `get_snapshot()`.",
+            ) from exc
         except Exception as exc:
-            raise PrinterError(f"Webcam snapshot failed unexpectedly: {exc}") from exc
+            raise PrinterError(
+                f"Webcam snapshot failed unexpectedly: {exc}. "
+                "Retry with `get_snapshot()`.",
+            ) from exc
 
     # ------------------------------------------------------------------
     # PrinterAdapter -- webcam streaming
@@ -1272,7 +1353,8 @@ class MoonrakerAdapter(PrinterAdapter):
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Firmware update failed: {exc}",
+                f"Firmware update failed: {exc}. "
+                "Check Moonraker logs for details. Retry with `update_firmware()`.",
                 cause=exc,
             ) from exc
 
@@ -1300,7 +1382,8 @@ class MoonrakerAdapter(PrinterAdapter):
             raise
         except Exception as exc:
             raise PrinterError(
-                f"Firmware rollback failed: {exc}",
+                f"Firmware rollback failed: {exc}. "
+                "Check Moonraker logs for details. Retry with `rollback_firmware()`.",
                 cause=exc,
             ) from exc
 

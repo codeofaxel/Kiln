@@ -890,6 +890,45 @@ class SerialPrinterAdapter(PrinterAdapter):
         return True
 
     # ------------------------------------------------------------------
+    # PrinterAdapter -- calibration
+    # ------------------------------------------------------------------
+
+    def run_calibration(self, *, options: list[str] | None = None) -> PrintResult:
+        """Run calibration routines via raw G-code over the serial link.
+
+        Sends ``G28`` (home all axes) followed by ``G29`` (auto bed
+        leveling probe) for ``"bed_leveling"``.  Other calibration
+        types are not supported over raw serial.
+
+        Args:
+            options: Which routines to run.  Accepts ``"bed_leveling"``
+                or ``"all"``.  Defaults to ``["bed_leveling"]``.
+        """
+        if options is None:
+            options = ["bed_leveling"]
+
+        supported = {"bed_leveling", "all"}
+        unsupported = [opt for opt in options if opt not in supported]
+        if unsupported:
+            return PrintResult(
+                success=False,
+                message=(
+                    f"Calibration option(s) {', '.join(repr(o) for o in unsupported)} "
+                    "not supported over serial. Only bed_leveling is available."
+                ),
+            )
+
+        self._send_command("G28")
+        self._send_command("G29")
+        return PrintResult(
+            success=True,
+            message=(
+                "Bed leveling started (G28 + G29 sent). "
+                "The printer will home and probe the bed."
+            ),
+        )
+
+    # ------------------------------------------------------------------
     # PrinterAdapter -- firmware info (optional)
     # ------------------------------------------------------------------
 

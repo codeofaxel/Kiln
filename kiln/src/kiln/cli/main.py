@@ -1608,6 +1608,7 @@ def preflight(ctx: click.Context, file_path: str | None, material: str | None, j
     default=None,
     help="AMS slot mapping per extruder, comma-separated (e.g. '0,1'). Implies --use-ams.",
 )
+@click.option("--no-nozzle-check", is_flag=True, help="Disable nozzle clumping/blob detection (Bambu). Use when prints trigger false HMS 0300-8014 errors.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def print_cmd(
@@ -1620,6 +1621,7 @@ def print_cmd(
     plate_number: int,
     use_ams: bool,
     ams_mapping: str | None,
+    no_nozzle_check: bool,
     json_mode: bool,
 ) -> None:
     """Start a print or check print status.
@@ -1834,6 +1836,8 @@ def print_cmd(
                     print_kwargs["use_ams"] = True
                 elif use_ams:
                     print_kwargs["use_ams"] = True
+                if no_nozzle_check:
+                    print_kwargs["nozzle_clog_detect"] = False
                 # Pass local file path so the adapter can inspect 3MF
                 # metadata for auto-detection of filament count.
                 if os.path.isfile(f):
@@ -1891,6 +1895,44 @@ def cancel(ctx: click.Context, json_mode: bool) -> None:
         click.echo(
             format_error(
                 f"Failed to cancel print: {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
+@cli.command()
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.option(
+    "--option",
+    "-o",
+    "options",
+    multiple=True,
+    type=click.Choice(["bed_leveling", "vibration", "flow", "all"]),
+    help="Calibration routine(s) to run. Repeat for multiple. Default: bed_leveling.",
+)
+@click.pass_context
+def calibrate(ctx: click.Context, json_mode: bool, options: tuple[str, ...]) -> None:
+    """Run printer calibration (bed leveling, Z offset, vibration)."""
+    try:
+        adapter = _get_adapter_from_ctx(ctx)
+        opt_list: list[str] | None = list(options) if options else None
+        result = adapter.run_calibration(options=opt_list)
+        click.echo(format_action("calibrate", result.to_dict(), json_mode=json_mode))
+    except click.ClickException:
+        raise
+    except PrinterError as exc:
+        click.echo(
+            format_error(
+                f"Failed to run calibration: {exc}. Is the printer idle?",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to run calibration: {exc}",
                 json_mode=json_mode,
             )
         )
