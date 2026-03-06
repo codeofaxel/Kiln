@@ -526,6 +526,252 @@ def quick_print(
 
 
 # ---------------------------------------------------------------------------
+# reslice_and_print pipeline
+# ---------------------------------------------------------------------------
+
+
+def reslice_and_print(
+    *,
+    model_path: str,
+    printer_name: str | None = None,
+    printer_id: str | None = None,
+    overrides: dict[str, str] | None = None,
+    profile_path: str | None = None,
+    slicer_path: str | None = None,
+    pause_after_step: int | None = None,
+) -> PipelineResult:
+    """Reslice a model with parameter overrides, then upload and print.
+
+    Steps:
+        1. resolve_profile — Merge base profile with overrides
+        2. slice — Call slicer with merged profile
+        3. safety_check — Validate gcode against printer limits
+        4. upload — Upload gcode to printer
+        5. preflight — Verify printer is ready
+        6. start_print — Begin printing
+
+    Args:
+        model_path: Path to STL/3MF file.
+        printer_name: Registered printer name in fleet. If omitted,
+            uses the default printer.
+        printer_id: Printer model ID for base profile selection.
+        overrides: Dict of PrusaSlicer INI key-value overrides.
+        profile_path: Explicit profile path (overrides printer_id resolution).
+        slicer_path: Explicit path to slicer binary.
+        pause_after_step: Auto-pause after completing step N (0-indexed).
+
+    Returns:
+        :class:`PipelineResult` with step-by-step outcomes.
+    """
+    effective_overrides = overrides or {}
+
+    # Shared mutable state between step closures
+    ctx: dict[str, Any] = {
+        "effective_profile": profile_path,
+        "gcode_path": None,
+        "adapter": None,
+        "remote_name": None,
+    }
+
+    def _resolve_profile() -> PipelineStep:
+        if ctx["effective_profile"]:
+            return PipelineStep(
+                name="resolve_profile",
+                success=True,
+                message="Using explicit profile",
+            )
+        if not printer_id:
+            return PipelineStep(
+                name="resolve_profile",
+                success=True,
+                message="No profile needed (no printer_id)",
+            )
+        step_start = time.time()
+        try:
+            from kiln.slicer_profiles import resolve_slicer_profile
+
+            ctx["effective_profile"] = resolve_slicer_profile(
+                printer_id, overrides=effective_overrides
+            )
+            override_msg = f" with {len(effective_overrides)} override(s)" if effective_overrides else ""
+            return PipelineStep(
+                name="resolve_profile",
+                success=True,
+                message=f"Using bundled profile for {printer_id}{override_msg}",
+                data={
+                    "profile_path": ctx["effective_profile"],
+                    "printer_id": printer_id,
+                    "overrides": effective_overrides,
+                },
+                duration_seconds=time.time() - step_start,
+            )
+        except Exception as exc:
+            return PipelineStep(
+                name="resolve_profile",
+                success=False,
+                message=f"Profile resolution failed: {exc}",
+                duration_seconds=time.time() - step_start,
+            )
+
+    def _slice() -> PipelineStep:
+        step_start = time.time()
+        try:
+            from kiln.slicer import slice_file
+
+            result = slice_file(
+                model_path,
+                profile=ctx["effective_profile"],
+                slicer_path=slicer_path,
+            )
+            ctx["gcode_path"] = result.output_path
+            return PipelineStep(
+                name="slice",
+                success=True,
+                message=result.message,
+                data={"output_path": result.output_path, "slicer": result.slicer},
+                duration_seconds=time.time() - step_start,
+            )
+        except Exception as exc:
+            return PipelineStep(
+                name="slice",
+                success=False,
+                message=f"Slicing failed: {exc}",
+                duration_seconds=time.time() - step_start,
+            )
+
+    def _safety_check() -> PipelineStep:
+        if not printer_id or not ctx["gcode_path"]:
+            return PipelineStep(
+                name="safety_check",
+                success=True,
+                message="Skipped (no printer_id or gcode_path)",
+            )
+        step_start = time.time()
+        try:
+            from kiln.gcode import scan_gcode_file
+
+            vr = scan_gcode_file(ctx["gcode_path"], printer_id=printer_id)
+            return PipelineStep(
+                name="safety_check",
+                success=vr.valid,
+                message=f"{'Passed' if vr.valid else 'BLOCKED'}: "
+                f"{len(vr.commands)} OK, {len(vr.blocked_commands)} blocked, "
+                f"{len(vr.warnings)} warnings",
+                data={
+                    "valid": vr.valid,
+                    "warnings": vr.warnings[:5],
+                    "errors": vr.errors[:5],
+                },
+                duration_seconds=time.time() - step_start,
+            )
+        except Exception as exc:
+            logger.exception("G-code safety validation failed")
+            return PipelineStep(
+                name="safety_check",
+                success=False,
+                message=f"G-code safety validation error: {exc}",
+                duration_seconds=time.time() - step_start,
+            )
+
+    def _upload() -> PipelineStep:
+        step_start = time.time()
+        try:
+            from kiln.server import _registry
+
+            adapter = _registry.get_adapter(printer_name) if printer_name else _registry.get_default_adapter()
+            ctx["adapter"] = adapter
+            upload_result = adapter.upload_file(ctx["gcode_path"])
+            remote_name = upload_result.get("name", os.path.basename(ctx["gcode_path"]))
+            ctx["remote_name"] = remote_name
+            return PipelineStep(
+                name="upload",
+                success=True,
+                message=f"Uploaded {remote_name}",
+                data={"remote_name": remote_name},
+                duration_seconds=time.time() - step_start,
+            )
+        except Exception as exc:
+            return PipelineStep(
+                name="upload",
+                success=False,
+                message=f"Upload failed: {exc}",
+                duration_seconds=time.time() - step_start,
+            )
+
+    def _preflight() -> PipelineStep:
+        step_start = time.time()
+        try:
+            adapter = ctx["adapter"]
+            if adapter is None:
+                return PipelineStep(
+                    name="preflight",
+                    success=False,
+                    message="No adapter available (upload step may have failed)",
+                    duration_seconds=time.time() - step_start,
+                )
+            state = adapter.get_state()
+            checks_passed = state.connected and state.status.value == "idle"
+            return PipelineStep(
+                name="preflight",
+                success=checks_passed,
+                message="Printer ready" if checks_passed else f"Printer not ready: {state.status.value}",
+                data={"connected": state.connected, "status": state.status.value},
+                duration_seconds=time.time() - step_start,
+            )
+        except Exception as exc:
+            return PipelineStep(
+                name="preflight",
+                success=False,
+                message=f"Preflight check failed: {exc}",
+                duration_seconds=time.time() - step_start,
+            )
+
+    def _start_print() -> PipelineStep:
+        step_start = time.time()
+        try:
+            adapter = ctx["adapter"]
+            remote_name = ctx["remote_name"]
+            if adapter is None or remote_name is None:
+                return PipelineStep(
+                    name="start_print",
+                    success=False,
+                    message="Cannot start print (missing adapter or file name)",
+                    duration_seconds=time.time() - step_start,
+                )
+            adapter.start_print(remote_name)
+            return PipelineStep(
+                name="start_print",
+                success=True,
+                message=f"Print started: {remote_name}",
+                data={"file_name": remote_name},
+                duration_seconds=time.time() - step_start,
+            )
+        except Exception as exc:
+            return PipelineStep(
+                name="start_print",
+                success=False,
+                message=f"Failed to start print: {exc}",
+                duration_seconds=time.time() - step_start,
+            )
+
+    step_defs = [
+        _StepDef(name="resolve_profile", fn=_resolve_profile, fatal=False),
+        _StepDef(name="slice", fn=_slice, fatal=True),
+        _StepDef(name="safety_check", fn=_safety_check, fatal=True),
+        _StepDef(name="upload", fn=_upload, fatal=True),
+        _StepDef(name="preflight", fn=_preflight, fatal=True),
+        _StepDef(name="start_print", fn=_start_print, fatal=True),
+    ]
+
+    execution = PipelineExecution(
+        "reslice_and_print",
+        step_defs,
+        pause_after_step=pause_after_step,
+    )
+    return execution.run()
+
+
+# ---------------------------------------------------------------------------
 # calibrate pipeline
 # ---------------------------------------------------------------------------
 
@@ -861,6 +1107,11 @@ PIPELINES = {
         "function": quick_print,
         "description": "Slice → validate → upload → print in one shot.",
         "params": ["model_path", "printer_name", "printer_id", "profile_path"],
+    },
+    "reslice_and_print": {
+        "function": reslice_and_print,
+        "description": "Reslice with parameter overrides → validate → upload → print.",
+        "params": ["model_path", "printer_name", "printer_id", "overrides", "profile_path"],
     },
     "calibrate": {
         "function": calibrate,

@@ -20,8 +20,11 @@ Covers:
 
 from __future__ import annotations
 
+import json
 import os
+import struct
 import tempfile
+import zipfile
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -56,7 +59,9 @@ from kiln.server import (
     preflight_check,
     printer_files,
     printer_status,
+    reslice_with_overrides,
     resume_print as server_resume_print,
+    rotate_model,
     send_gcode,
     set_temperature,
     start_print as server_start_print,
@@ -2542,3 +2547,271 @@ class TestWrapGcodeAs3mf:
         result = wrap_gcode_as_3mf(gcode_path="/tmp/test.gcode")
         assert result["success"] is False
         assert "not configured" in result["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# TestRotateModel — MCP tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestRotateModel:
+    """Tests for the rotate_model MCP tool.
+
+    Covers STL rotation, 3MF rotation, error cases, and default paths.
+    """
+
+    @staticmethod
+    def _make_stl(path: str) -> str:
+        """Create a minimal binary STL with one triangle."""
+        with open(path, "wb") as f:
+            f.write(b"\x00" * 80)  # header
+            f.write(struct.pack("<I", 1))  # 1 triangle
+            f.write(struct.pack("<fff", 0, 0, 1))  # normal
+            f.write(struct.pack("<fff", 0, 0, 0))  # v1
+            f.write(struct.pack("<fff", 1, 0, 0))  # v2
+            f.write(struct.pack("<fff", 0, 1, 0))  # v3
+            f.write(struct.pack("<H", 0))  # attribute
+        return path
+
+    @staticmethod
+    def _make_3mf(path: str) -> str:
+        """Create a minimal valid 3MF with one build item."""
+        ns = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+        model_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            f'<model xmlns="{ns}" unit="millimeter">'
+            "<resources>"
+            '<object id="1" type="model">'
+            "<mesh>"
+            "<vertices>"
+            '<vertex x="0" y="0" z="0"/>'
+            '<vertex x="1" y="0" z="0"/>'
+            '<vertex x="0" y="1" z="0"/>'
+            "</vertices>"
+            "<triangles>"
+            '<triangle v1="0" v2="1" v3="2"/>'
+            "</triangles>"
+            "</mesh>"
+            "</object>"
+            "</resources>"
+            '<build><item objectid="1"/></build>'
+            "</model>"
+        )
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("3D/3dmodel.model", model_xml)
+        return path
+
+    def test_rotate_stl_z_axis(self, tmp_path):
+        stl = self._make_stl(str(tmp_path / "model.stl"))
+        result = rotate_model(input_path=stl, rotation_z=45.0)
+        assert result["status"] == "success"
+        assert os.path.isfile(result["output_path"])
+        assert result["rotations_applied"]["z"] == 45.0
+
+    def test_rotate_3mf_z_axis(self, tmp_path):
+        threemf = self._make_3mf(str(tmp_path / "model.3mf"))
+        result = rotate_model(input_path=threemf, rotation_z=90.0)
+        assert result["status"] == "success"
+        assert os.path.isfile(result["output_path"])
+        assert result["rotations_applied"]["z"] == 90.0
+
+    def test_rotate_nonexistent_file(self):
+        result = rotate_model(input_path="/nonexistent/model.stl", rotation_z=45.0)
+        assert result["success"] is False
+        assert result["error"]["code"] == "FILE_NOT_FOUND"
+
+    def test_rotate_unsupported_format(self, tmp_path):
+        obj_path = str(tmp_path / "model.gcode")
+        (tmp_path / "model.gcode").write_text("G28")
+        result = rotate_model(input_path=obj_path, rotation_z=45.0)
+        assert result["success"] is False
+        assert result["error"]["code"] == "UNSUPPORTED"
+
+    def test_rotate_default_output_path(self, tmp_path):
+        stl = self._make_stl(str(tmp_path / "my_part.stl"))
+        result = rotate_model(input_path=stl, rotation_z=10.0)
+        assert result["status"] == "success"
+        assert "_rotated" in result["output_path"]
+        assert result["output_path"].endswith(".stl")
+
+    def test_rotate_3mf_default_output_path(self, tmp_path):
+        threemf = self._make_3mf(str(tmp_path / "my_part.3mf"))
+        result = rotate_model(input_path=threemf, rotation_z=10.0)
+        assert result["status"] == "success"
+        assert "_rotated" in result["output_path"]
+        assert result["output_path"].endswith(".3mf")
+
+    def test_rotate_zero_degrees(self, tmp_path):
+        stl = self._make_stl(str(tmp_path / "model.stl"))
+        result = rotate_model(input_path=stl)
+        assert result["status"] == "success"
+        assert os.path.isfile(result["output_path"])
+        assert result["rotations_applied"] == {"x": 0.0, "y": 0.0, "z": 0.0}
+
+    def test_rotate_custom_output_path(self, tmp_path):
+        stl = self._make_stl(str(tmp_path / "model.stl"))
+        out = str(tmp_path / "custom_out.stl")
+        result = rotate_model(input_path=stl, rotation_z=90.0, output_path=out)
+        assert result["status"] == "success"
+        assert result["output_path"] == out
+        assert os.path.isfile(out)
+
+
+# ---------------------------------------------------------------------------
+# reslice_with_overrides
+# ---------------------------------------------------------------------------
+
+
+class TestResliceWithOverrides:
+    """Tests for the reslice_with_overrides MCP tool.
+
+    Covers: basic overrides, no overrides, invalid JSON, missing file,
+    unsupported format, slicer not found, temperature safety validation.
+    """
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.server.resolve_slicer_profile")
+    @patch("kiln.server._map_printer_hint_to_profile_id", return_value="prusa_mini")
+    def test_reslice_basic_overrides(
+        self, mock_map, mock_resolve, mock_auth, tmp_path
+    ):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"solid test\nendsolid test\n")
+        mock_resolve.return_value = "/tmp/merged_profile.ini"
+
+        from kiln.slicer import SliceResult
+
+        with patch("kiln.slicer.slice_file") as mock_slice:
+            mock_slice.return_value = SliceResult(
+                success=True,
+                output_path=str(tmp_path / "model.gcode"),
+                slicer="prusa-slicer",
+                message="Sliced",
+            )
+            result = reslice_with_overrides(
+                input_path=str(stl),
+                printer_id="prusa_mini",
+                overrides=json.dumps({"brim_width": "8", "fill_density": "25%"}),
+            )
+
+        assert result["success"] is True
+        assert result["applied_overrides"] == {"brim_width": "8", "fill_density": "25%"}
+        assert result["printer_id"] == "prusa_mini"
+        mock_resolve.assert_called_once_with(
+            "prusa_mini",
+            overrides={"brim_width": "8", "fill_density": "25%"},
+        )
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.server.resolve_slicer_profile")
+    @patch("kiln.server._map_printer_hint_to_profile_id", return_value="prusa_mini")
+    def test_reslice_no_overrides(
+        self, mock_map, mock_resolve, mock_auth, tmp_path
+    ):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"solid test\nendsolid test\n")
+        mock_resolve.return_value = "/tmp/profile.ini"
+
+        from kiln.slicer import SliceResult
+
+        with patch("kiln.slicer.slice_file") as mock_slice:
+            mock_slice.return_value = SliceResult(
+                success=True,
+                output_path=str(tmp_path / "model.gcode"),
+                slicer="prusa-slicer",
+                message="Sliced",
+            )
+            result = reslice_with_overrides(
+                input_path=str(stl),
+                printer_id="prusa_mini",
+            )
+
+        assert result["success"] is True
+        assert "applied_overrides" not in result
+        # With no overrides, resolve_slicer_profile is called with overrides=None
+        mock_resolve.assert_called_once_with("prusa_mini", overrides=None)
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_reslice_invalid_json_overrides(self, mock_auth, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"solid test\nendsolid test\n")
+
+        result = reslice_with_overrides(
+            input_path=str(stl),
+            overrides="not valid json{{{",
+        )
+        assert result["success"] is False
+        assert result["error"]["code"] == "VALIDATION_ERROR"
+        assert "Invalid overrides JSON" in result["error"]["message"]
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_reslice_invalid_input_path(self, mock_auth):
+        result = reslice_with_overrides(
+            input_path="/nonexistent/model.stl",
+        )
+        assert result["success"] is False
+        assert result["error"]["code"] == "FILE_NOT_FOUND"
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_reslice_unsupported_format(self, mock_auth, tmp_path):
+        txt = tmp_path / "readme.txt"
+        txt.write_text("not a model")
+
+        result = reslice_with_overrides(input_path=str(txt))
+        assert result["success"] is False
+        assert result["error"]["code"] == "UNSUPPORTED_FORMAT"
+        assert ".txt" in result["error"]["message"]
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.server._map_printer_hint_to_profile_id", return_value=None)
+    def test_reslice_slicer_not_found(self, mock_map, mock_auth, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"solid test\nendsolid test\n")
+
+        from kiln.slicer import SlicerNotFoundError
+
+        with patch("kiln.slicer.slice_file") as mock_slice:
+            mock_slice.side_effect = SlicerNotFoundError("No slicer found")
+            result = reslice_with_overrides(input_path=str(stl))
+
+        assert result["success"] is False
+        assert result["error"]["code"] == "SLICER_NOT_FOUND"
+        assert "PrusaSlicer or OrcaSlicer" in result["error"]["message"]
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.server.validate_profile_for_printer")
+    @patch("kiln.server.resolve_slicer_profile")
+    @patch("kiln.server._map_printer_hint_to_profile_id", return_value="bambu_a1")
+    @patch("kiln.server._PRINTER_MODEL", "bambu_a1")
+    def test_reslice_with_temperature_validation(
+        self, mock_map, mock_resolve, mock_validate, mock_auth, tmp_path
+    ):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"solid test\nendsolid test\n")
+        mock_resolve.return_value = "/tmp/merged.ini"
+        mock_validate.return_value = {
+            "compatible": False,
+            "warnings": [],
+            "errors": ["Profile hotend temp temperature=350°C exceeds max 300°C."],
+        }
+
+        from kiln.slicer import SliceResult
+
+        with patch("kiln.slicer.slice_file") as mock_slice:
+            mock_slice.return_value = SliceResult(
+                success=True,
+                output_path=str(tmp_path / "model.gcode"),
+                slicer="prusa-slicer",
+                message="Sliced",
+            )
+            result = reslice_with_overrides(
+                input_path=str(stl),
+                printer_id="bambu_a1",
+                overrides=json.dumps({"temperature": "350"}),
+            )
+
+        assert result["success"] is True
+        assert "profile_validation" in result
+        assert "profile_validation_warning" in result
+        assert "unsafe" in result["profile_validation_warning"].lower()
+        mock_validate.assert_called_once_with("bambu_a1", "bambu_a1")

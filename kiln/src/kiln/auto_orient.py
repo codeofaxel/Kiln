@@ -10,6 +10,8 @@ from __future__ import annotations
 import math
 import os
 import struct
+import xml.etree.ElementTree as ET
+import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -460,3 +462,181 @@ def _write_binary_stl(
                 fh.write(struct.pack("<3f", v[0], v[1], v[2]))
             # Attribute byte count.
             fh.write(struct.pack("<H", 0))
+
+
+# ---------------------------------------------------------------------------
+# File-level rotation — STL
+# ---------------------------------------------------------------------------
+
+
+def rotate_stl_file(
+    input_path: str,
+    output_path: str,
+    *,
+    rotation_z: float = 0.0,
+    rotation_x: float = 0.0,
+    rotation_y: float = 0.0,
+) -> str:
+    """Rotate an STL file by Euler angles (degrees) and save to *output_path*.
+
+    Reuses the existing mesh parser and binary STL writer.  The model is
+    translated so its lowest Z sits on the bed after rotation.
+
+    :param input_path: Path to the source STL file.
+    :param output_path: Where to write the rotated STL.
+    :param rotation_z: Rotation around Z axis in degrees.
+    :param rotation_x: Rotation around X axis in degrees.
+    :param rotation_y: Rotation around Y axis in degrees.
+    :returns: *output_path*.
+    :raises ValueError: If the file cannot be parsed.
+    """
+    triangles, _vertices = _parse_mesh(input_path)
+
+    matrix = _build_rotation_matrix(rotation_x, rotation_y, rotation_z)
+    rotated = _rotate_triangles(triangles, matrix)
+    rotated = _translate_to_bed(rotated)
+
+    _write_binary_stl(rotated, output_path)
+    return output_path
+
+
+# ---------------------------------------------------------------------------
+# File-level rotation — 3MF
+# ---------------------------------------------------------------------------
+
+_3MF_NS = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+_3MF_MODEL_PATH = "3D/3dmodel.model"
+
+
+def _parse_3mf_transform(attr: str) -> list[list[float]]:
+    """Parse a 3MF ``transform`` attribute into a 4x3 matrix.
+
+    The attribute contains 12 floats in row-major order:
+    ``m00 m01 m02 m10 m11 m12 m20 m21 m22 tx ty tz``.
+
+    Returns a list of 4 rows of 3 values each:
+    ``[[m00,m01,m02],[m10,m11,m12],[m20,m21,m22],[tx,ty,tz]]``.
+    """
+    vals = [float(v) for v in attr.strip().split()]
+    if len(vals) != 12:
+        raise ValueError(f"Expected 12 values in transform, got {len(vals)}")
+    return [
+        vals[0:3],
+        vals[3:6],
+        vals[6:9],
+        vals[9:12],
+    ]
+
+
+def _identity_3mf_transform() -> list[list[float]]:
+    """Return the identity 4x3 transform."""
+    return [
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 0.0],
+    ]
+
+
+def _compose_3mf_transform(
+    rot: list[list[float]],
+    existing: list[list[float]],
+) -> list[list[float]]:
+    """Compose a 3x3 rotation matrix with an existing 4x3 3MF transform.
+
+    The 3x3 rotation is applied to the top-left 3x3 block and to the
+    translation row, producing a new 4x3 transform.
+    """
+    rot3 = existing[:3]  # 3x3 rotation part
+    t = existing[3]      # translation row
+
+    new_rot = _mat_mul(rot, rot3)
+    # Rotate the translation vector too.
+    new_t = _apply_rotation(tuple(t), rot)
+
+    return [
+        new_rot[0],
+        new_rot[1],
+        new_rot[2],
+        list(new_t),
+    ]
+
+
+def _format_3mf_transform(mat: list[list[float]]) -> str:
+    """Format a 4x3 matrix back into a 3MF transform attribute string."""
+    vals = mat[0] + mat[1] + mat[2] + mat[3]
+    return " ".join(f"{v:.10g}" for v in vals)
+
+
+def rotate_3mf_file(
+    input_path: str,
+    output_path: str,
+    *,
+    rotation_z: float = 0.0,
+    rotation_x: float = 0.0,
+    rotation_y: float = 0.0,
+) -> str:
+    """Rotate all objects in a 3MF file by updating item transforms.
+
+    Copies the 3MF archive to *output_path*, then modifies the
+    ``3D/3dmodel.model`` XML to compose the requested rotation with each
+    ``<item>`` element's existing ``transform`` attribute.
+
+    :param input_path: Path to the source 3MF file.
+    :param output_path: Where to write the rotated 3MF.
+    :param rotation_z: Rotation around Z axis in degrees.
+    :param rotation_x: Rotation around X axis in degrees.
+    :param rotation_y: Rotation around Y axis in degrees.
+    :returns: *output_path*.
+    :raises ValueError: If the 3MF is missing a model file or build section.
+    :raises FileNotFoundError: If *input_path* does not exist.
+    """
+    if not os.path.isfile(input_path):
+        raise FileNotFoundError(f"File not found: {input_path}")
+
+    # Register the namespace so ET doesn't mangle it on write.
+    ET.register_namespace("", _3MF_NS)
+
+    # Read the model XML from the source archive.
+    with zipfile.ZipFile(input_path, "r") as zin:
+        if _3MF_MODEL_PATH not in zin.namelist():
+            raise ValueError(
+                f"3MF archive missing {_3MF_MODEL_PATH}: not a valid 3MF file"
+            )
+        model_xml = zin.read(_3MF_MODEL_PATH)
+
+    root = ET.fromstring(model_xml)
+    ns = {"m": _3MF_NS}
+
+    build = root.find(".//m:build", ns)
+    if build is None:
+        raise ValueError("3MF model XML missing <build> section")
+
+    items = build.findall("m:item", ns)
+    rot_matrix = _build_rotation_matrix(rotation_x, rotation_y, rotation_z)
+
+    for item in items:
+        existing_attr = item.get("transform")
+        if existing_attr:
+            existing = _parse_3mf_transform(existing_attr)
+        else:
+            existing = _identity_3mf_transform()
+
+        new_transform = _compose_3mf_transform(rot_matrix, existing)
+        item.set("transform", _format_3mf_transform(new_transform))
+
+    updated_xml = ET.tostring(root, encoding="unicode", xml_declaration=True)
+
+    # Build the output 3MF: copy every entry except the model XML from
+    # the source archive, then write the updated model XML.
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    with zipfile.ZipFile(input_path, "r") as zin, zipfile.ZipFile(
+        output_path, "w", compression=zipfile.ZIP_DEFLATED
+    ) as zout:
+        for entry in zin.infolist():
+            if entry.filename == _3MF_MODEL_PATH:
+                continue
+            zout.writestr(entry, zin.read(entry.filename))
+        zout.writestr(_3MF_MODEL_PATH, updated_xml)
+
+    return output_path

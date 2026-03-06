@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import struct
 import tempfile
+import xml.etree.ElementTree as ET
+import zipfile
 
 import pytest
 
@@ -14,6 +16,7 @@ from kiln.auto_orient import (
     SupportEstimate,
     _apply_rotation,
     _build_rotation_matrix,
+    _parse_3mf_transform,
     _rotate_triangles,
     _rotation_matrix_x,
     _rotation_matrix_y,
@@ -22,6 +25,8 @@ from kiln.auto_orient import (
     apply_orientation,
     estimate_supports,
     find_optimal_orientation,
+    rotate_3mf_file,
+    rotate_stl_file,
 )
 
 # ---------------------------------------------------------------------------
@@ -320,3 +325,217 @@ class TestOrientationDataclasses:
         d = s.to_dict()
         assert d["estimated_support_volume_mm3"] == 500.0
         assert d["needs_supports"] is True
+
+
+# ---------------------------------------------------------------------------
+# Helpers — 3MF fixtures
+# ---------------------------------------------------------------------------
+
+_3MF_NS = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+
+
+def _make_minimal_3mf(path: str, *, transform: str | None = None) -> str:
+    """Create a minimal valid 3MF file with one object and one build item."""
+    item_attr = ' objectid="1"'
+    if transform:
+        item_attr += f' transform="{transform}"'
+    model_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f'<model xmlns="{_3MF_NS}" unit="millimeter">'
+        "<resources>"
+        '<object id="1" type="model">'
+        "<mesh>"
+        "<vertices>"
+        '<vertex x="0" y="0" z="0"/>'
+        '<vertex x="1" y="0" z="0"/>'
+        '<vertex x="0" y="1" z="0"/>'
+        "</vertices>"
+        "<triangles>"
+        '<triangle v1="0" v2="1" v3="2"/>'
+        "</triangles>"
+        "</mesh>"
+        "</object>"
+        "</resources>"
+        f"<build><item{item_attr}/></build>"
+        "</model>"
+    )
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("3D/3dmodel.model", model_xml)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# TestRotateStlFile
+# ---------------------------------------------------------------------------
+
+
+class TestRotateStlFile:
+    """Tests for rotate_stl_file — STL file rotation."""
+
+    def test_rotate_z_axis(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = _write_stl(tmpdir, _cube_triangles())
+            output_path = os.path.join(tmpdir, "rotated.stl")
+            result = rotate_stl_file(input_path, output_path, rotation_z=45.0)
+            assert result == output_path
+            assert os.path.isfile(output_path)
+            assert os.path.getsize(output_path) > 0
+
+    def test_rotate_x_axis(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = _write_stl(tmpdir, _cube_triangles())
+            output_path = os.path.join(tmpdir, "rotated.stl")
+            rotate_stl_file(input_path, output_path, rotation_x=90.0)
+            assert os.path.isfile(output_path)
+
+    def test_rotate_combined(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = _write_stl(tmpdir, _cube_triangles())
+            output_path = os.path.join(tmpdir, "rotated.stl")
+            rotate_stl_file(
+                input_path, output_path, rotation_x=30.0, rotation_y=45.0, rotation_z=60.0
+            )
+            assert os.path.isfile(output_path)
+
+    def test_zero_rotation_preserves_size(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = _write_stl(tmpdir, _cube_triangles())
+            output_path = os.path.join(tmpdir, "rotated.stl")
+            rotate_stl_file(input_path, output_path)
+            # Same number of triangles → same file size.
+            assert os.path.getsize(input_path) == os.path.getsize(output_path)
+
+    def test_nonexistent_file_raises(self):
+        with pytest.raises(ValueError, match="File not found"):
+            rotate_stl_file("/nonexistent/model.stl", "/tmp/out.stl", rotation_z=45.0)
+
+
+# ---------------------------------------------------------------------------
+# TestRotate3mfFile
+# ---------------------------------------------------------------------------
+
+
+class TestRotate3mfFile:
+    """Tests for rotate_3mf_file — 3MF file rotation."""
+
+    def test_rotate_z_axis(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = _make_minimal_3mf(os.path.join(tmpdir, "model.3mf"))
+            output_path = os.path.join(tmpdir, "rotated.3mf")
+            result = rotate_3mf_file(input_path, output_path, rotation_z=90.0)
+            assert result == output_path
+            assert os.path.isfile(output_path)
+
+            # Verify the transform was written into the XML.
+            with zipfile.ZipFile(output_path) as zf:
+                xml_bytes = zf.read("3D/3dmodel.model")
+            root = ET.fromstring(xml_bytes)
+            ns = {"m": _3MF_NS}
+            items = root.findall(".//m:build/m:item", ns)
+            assert len(items) == 1
+            transform = items[0].get("transform")
+            assert transform is not None
+            vals = [float(v) for v in transform.split()]
+            assert len(vals) == 12
+
+    def test_rotate_preserves_other_entries(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, "model.3mf")
+            # Add an extra file into the 3MF.
+            _make_minimal_3mf(input_path)
+            with zipfile.ZipFile(input_path, "a") as zf:
+                zf.writestr("Metadata/extra.txt", "hello")
+
+            output_path = os.path.join(tmpdir, "rotated.3mf")
+            rotate_3mf_file(input_path, output_path, rotation_z=45.0)
+
+            with zipfile.ZipFile(output_path) as zf:
+                assert "Metadata/extra.txt" in zf.namelist()
+                assert zf.read("Metadata/extra.txt") == b"hello"
+
+    def test_rotate_composes_with_existing_transform(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Start with an existing identity-ish transform.
+            input_path = _make_minimal_3mf(
+                os.path.join(tmpdir, "model.3mf"),
+                transform="1 0 0 0 1 0 0 0 1 10 20 30",
+            )
+            output_path = os.path.join(tmpdir, "rotated.3mf")
+            rotate_3mf_file(input_path, output_path, rotation_z=90.0)
+
+            with zipfile.ZipFile(output_path) as zf:
+                xml_bytes = zf.read("3D/3dmodel.model")
+            root = ET.fromstring(xml_bytes)
+            ns = {"m": _3MF_NS}
+            item = root.find(".//m:build/m:item", ns)
+            vals = [float(v) for v in item.get("transform").split()]
+            # Translation should have been rotated too (10,20,30 rotated 90° Z).
+            # X' = -20, Y' = 10 (approximately).
+            tx, ty, tz = vals[9], vals[10], vals[11]
+            assert abs(tx - (-20.0)) < 1e-6
+            assert abs(ty - 10.0) < 1e-6
+            assert abs(tz - 30.0) < 1e-6
+
+    def test_zero_rotation_sets_identity_transform(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = _make_minimal_3mf(os.path.join(tmpdir, "model.3mf"))
+            output_path = os.path.join(tmpdir, "rotated.3mf")
+            rotate_3mf_file(input_path, output_path)
+
+            with zipfile.ZipFile(output_path) as zf:
+                xml_bytes = zf.read("3D/3dmodel.model")
+            root = ET.fromstring(xml_bytes)
+            ns = {"m": _3MF_NS}
+            item = root.find(".//m:build/m:item", ns)
+            vals = [float(v) for v in item.get("transform").split()]
+            # Should be identity.
+            expected = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
+            for v, e in zip(vals, expected, strict=True):
+                assert abs(v - e) < 1e-6
+
+    def test_nonexistent_file_raises(self):
+        with pytest.raises(FileNotFoundError, match="File not found"):
+            rotate_3mf_file("/nonexistent/model.3mf", "/tmp/out.3mf", rotation_z=45.0)
+
+    def test_missing_build_section_raises(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, "bad.3mf")
+            bad_xml = (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                f'<model xmlns="{_3MF_NS}" unit="millimeter">'
+                "<resources/>"
+                "</model>"
+            )
+            with zipfile.ZipFile(input_path, "w") as zf:
+                zf.writestr("3D/3dmodel.model", bad_xml)
+
+            with pytest.raises(ValueError, match="missing <build> section"):
+                rotate_3mf_file(input_path, os.path.join(tmpdir, "out.3mf"), rotation_z=45.0)
+
+    def test_missing_model_file_raises(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, "bad.3mf")
+            with zipfile.ZipFile(input_path, "w") as zf:
+                zf.writestr("dummy.txt", "not a 3MF")
+
+            with pytest.raises(ValueError, match="not a valid 3MF"):
+                rotate_3mf_file(input_path, os.path.join(tmpdir, "out.3mf"), rotation_z=45.0)
+
+
+# ---------------------------------------------------------------------------
+# TestParse3mfTransform
+# ---------------------------------------------------------------------------
+
+
+class TestParse3mfTransform:
+    """Tests for _parse_3mf_transform helper."""
+
+    def test_identity(self):
+        m = _parse_3mf_transform("1 0 0 0 1 0 0 0 1 0 0 0")
+        assert len(m) == 4
+        assert m[0] == [1.0, 0.0, 0.0]
+        assert m[3] == [0.0, 0.0, 0.0]
+
+    def test_wrong_count_raises(self):
+        with pytest.raises(ValueError, match="Expected 12"):
+            _parse_3mf_transform("1 0 0")

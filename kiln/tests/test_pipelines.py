@@ -25,6 +25,7 @@ from kiln.pipelines import (
     PipelineResult,
     list_pipelines,
     quick_print,
+    reslice_and_print,
     benchmark,
     PIPELINES,
 )
@@ -175,14 +176,15 @@ class TestPipelineResult:
 class TestListPipelines:
     """Tests for list_pipelines() registry."""
 
-    def test_returns_three_pipelines(self) -> None:
+    def test_returns_four_pipelines(self) -> None:
         pipelines = list_pipelines()
-        assert len(pipelines) == 3
+        assert len(pipelines) == 4
 
     def test_pipeline_names(self) -> None:
         pipelines = list_pipelines()
         names = [p["name"] for p in pipelines]
         assert "quick_print" in names
+        assert "reslice_and_print" in names
         assert "calibrate" in names
         assert "benchmark" in names
 
@@ -372,3 +374,366 @@ class TestPipelineResultSerialization:
             if "data" in step_dict:
                 # If data is present, it must be non-empty
                 assert len(step_dict["data"]) > 0
+
+
+# ===================================================================
+# reslice_and_print pipeline
+# ===================================================================
+
+class TestResliceAndPrintPipeline:
+    """Tests for reslice_and_print() pipeline with mocked dependencies.
+
+    Covers:
+        - Full pipeline execution with mocked slicer + adapter
+        - Overrides passed through to resolve_slicer_profile
+        - Slicer not found error handling
+        - Printer offline at preflight
+        - Upload failure stops pipeline
+        - Pipeline name and serialization
+    """
+
+    @patch("kiln.slicer.slice_file", side_effect=FileNotFoundError("model.stl not found"))
+    def test_fails_at_slice_with_missing_model(self, mock_slice: MagicMock) -> None:
+        result = reslice_and_print(model_path="/nonexistent/model.stl")
+        assert result.success is False
+        assert result.pipeline == "reslice_and_print"
+        slice_steps = [s for s in result.steps if s.name == "slice"]
+        assert len(slice_steps) == 1
+        assert slice_steps[0].success is False
+
+    @patch("kiln.slicer.slice_file", side_effect=RuntimeError("slicer not found"))
+    def test_fails_at_slice_with_slicer_error(self, mock_slice: MagicMock) -> None:
+        result = reslice_and_print(model_path="/tmp/model.stl")
+        assert result.success is False
+        assert any(s.name == "slice" and not s.success for s in result.steps)
+
+    @patch("kiln.slicer.slice_file", side_effect=Exception("slice error"))
+    @patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/profile.ini")
+    def test_overrides_passed_to_resolve_slicer_profile(
+        self,
+        mock_resolve: MagicMock,
+        mock_slice: MagicMock,
+    ) -> None:
+        overrides = {"brim_width": "8", "fill_density": "25%"}
+        reslice_and_print(
+            model_path="/tmp/model.stl",
+            printer_id="ender3",
+            overrides=overrides,
+        )
+        mock_resolve.assert_called_once_with("ender3", overrides=overrides)
+
+    @patch("kiln.slicer.slice_file", side_effect=Exception("slice error"))
+    @patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/profile.ini")
+    def test_profile_resolution_step_recorded_with_overrides(
+        self,
+        mock_resolve: MagicMock,
+        mock_slice: MagicMock,
+    ) -> None:
+        result = reslice_and_print(
+            model_path="/tmp/model.stl",
+            printer_id="ender3",
+            overrides={"brim_width": "8"},
+        )
+        profile_steps = [s for s in result.steps if s.name == "resolve_profile"]
+        assert len(profile_steps) == 1
+        assert profile_steps[0].success is True
+        assert "override" in profile_steps[0].message.lower()
+
+    @patch("kiln.slicer.slice_file", side_effect=Exception("slice error"))
+    @patch("kiln.slicer_profiles.resolve_slicer_profile", side_effect=KeyError("no profile"))
+    def test_profile_resolution_failure_non_fatal(
+        self,
+        mock_resolve: MagicMock,
+        mock_slice: MagicMock,
+    ) -> None:
+        result = reslice_and_print(
+            model_path="/tmp/model.stl",
+            printer_id="unknown_printer",
+            overrides={"brim_width": "8"},
+        )
+        profile_steps = [s for s in result.steps if s.name == "resolve_profile"]
+        assert len(profile_steps) == 1
+        assert profile_steps[0].success is False
+        # Pipeline continues to slice step
+        slice_steps = [s for s in result.steps if s.name == "slice"]
+        assert len(slice_steps) == 1
+
+    def test_explicit_profile_skips_resolution(self) -> None:
+        with patch("kiln.slicer.slice_file", side_effect=Exception("fail")):
+            result = reslice_and_print(
+                model_path="/tmp/model.stl",
+                profile_path="/tmp/custom.ini",
+            )
+        profile_steps = [s for s in result.steps if s.name == "resolve_profile"]
+        assert len(profile_steps) == 1
+        assert profile_steps[0].success is True
+        assert "explicit" in profile_steps[0].message.lower()
+
+    @patch("kiln.server._registry")
+    @patch("kiln.gcode.scan_gcode_file")
+    @patch("kiln.slicer.slice_file")
+    @patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/profile.ini")
+    def test_full_pipeline_success(
+        self,
+        mock_resolve: MagicMock,
+        mock_slice: MagicMock,
+        mock_gcode: MagicMock,
+        mock_registry: MagicMock,
+    ) -> None:
+        # Setup slice mock
+        slice_result = MagicMock()
+        slice_result.output_path = "/tmp/out.gcode"
+        slice_result.message = "Sliced OK"
+        slice_result.slicer = "prusaslicer"
+        mock_slice.return_value = slice_result
+
+        # Setup gcode mock
+        gcode_result = MagicMock()
+        gcode_result.valid = True
+        gcode_result.commands = ["G28"]
+        gcode_result.blocked_commands = []
+        gcode_result.warnings = []
+        gcode_result.errors = []
+        mock_gcode.return_value = gcode_result
+
+        # Setup adapter mock
+        mock_adapter = MagicMock()
+        mock_adapter.upload_file.return_value = {"name": "out.gcode"}
+        state = MagicMock()
+        state.connected = True
+        state.status.value = "idle"
+        mock_adapter.get_state.return_value = state
+        mock_registry.get_adapter.return_value = mock_adapter
+
+        result = reslice_and_print(
+            model_path="/tmp/model.stl",
+            printer_name="myprinter",
+            printer_id="ender3",
+            overrides={"brim_width": "8"},
+        )
+
+        assert result.success is True
+        assert result.pipeline == "reslice_and_print"
+        assert len(result.steps) == 6
+        assert all(s.success for s in result.steps)
+        mock_adapter.start_print.assert_called_once_with("out.gcode")
+
+    @patch("kiln.server._registry")
+    @patch("kiln.slicer.slice_file")
+    def test_upload_failure_stops_pipeline(
+        self,
+        mock_slice: MagicMock,
+        mock_registry: MagicMock,
+    ) -> None:
+        # Setup slice mock
+        slice_result = MagicMock()
+        slice_result.output_path = "/tmp/out.gcode"
+        slice_result.message = "Sliced OK"
+        slice_result.slicer = "prusaslicer"
+        mock_slice.return_value = slice_result
+
+        # Setup adapter that fails on upload
+        mock_adapter = MagicMock()
+        mock_adapter.upload_file.side_effect = RuntimeError("Upload failed: connection timeout")
+        mock_registry.get_adapter.return_value = mock_adapter
+
+        result = reslice_and_print(
+            model_path="/tmp/model.stl",
+            printer_name="myprinter",
+        )
+
+        assert result.success is False
+        upload_steps = [s for s in result.steps if s.name == "upload"]
+        assert len(upload_steps) == 1
+        assert upload_steps[0].success is False
+        # Pipeline should stop — no preflight or start_print steps
+        assert not any(s.name == "start_print" for s in result.steps)
+
+    @patch("kiln.server._registry")
+    @patch("kiln.slicer.slice_file")
+    def test_printer_offline_at_preflight(
+        self,
+        mock_slice: MagicMock,
+        mock_registry: MagicMock,
+    ) -> None:
+        # Setup slice mock
+        slice_result = MagicMock()
+        slice_result.output_path = "/tmp/out.gcode"
+        slice_result.message = "Sliced OK"
+        slice_result.slicer = "prusaslicer"
+        mock_slice.return_value = slice_result
+
+        # Setup adapter that uploads OK but reports offline at preflight
+        mock_adapter = MagicMock()
+        mock_adapter.upload_file.return_value = {"name": "out.gcode"}
+        state = MagicMock()
+        state.connected = False
+        state.status.value = "offline"
+        mock_adapter.get_state.return_value = state
+        mock_registry.get_adapter.return_value = mock_adapter
+
+        result = reslice_and_print(
+            model_path="/tmp/model.stl",
+            printer_name="myprinter",
+        )
+
+        assert result.success is False
+        preflight_steps = [s for s in result.steps if s.name == "preflight"]
+        assert len(preflight_steps) == 1
+        assert preflight_steps[0].success is False
+        assert "offline" in preflight_steps[0].message.lower() or "not ready" in preflight_steps[0].message.lower()
+
+    def test_result_has_pipeline_name(self) -> None:
+        with patch("kiln.slicer.slice_file", side_effect=Exception("fail")):
+            result = reslice_and_print(model_path="/tmp/model.stl")
+        assert result.pipeline == "reslice_and_print"
+
+    def test_result_has_total_duration(self) -> None:
+        with patch("kiln.slicer.slice_file", side_effect=Exception("fail")):
+            result = reslice_and_print(model_path="/tmp/model.stl")
+        assert result.total_duration_seconds >= 0
+
+    def test_result_is_json_serializable(self) -> None:
+        with patch("kiln.slicer.slice_file", side_effect=Exception("fail")):
+            result = reslice_and_print(model_path="/tmp/model.stl")
+        d = result.to_dict()
+        serialized = json.dumps(d)
+        assert isinstance(serialized, str)
+        parsed = json.loads(serialized)
+        assert parsed["pipeline"] == "reslice_and_print"
+
+    def test_empty_overrides_treated_as_no_overrides(self) -> None:
+        with (
+            patch("kiln.slicer.slice_file", side_effect=Exception("fail")),
+            patch("kiln.slicer_profiles.resolve_slicer_profile", return_value="/tmp/p.ini") as mock_resolve,
+        ):
+            reslice_and_print(
+                model_path="/tmp/model.stl",
+                printer_id="ender3",
+                overrides={},
+            )
+            mock_resolve.assert_called_once_with("ender3", overrides={})
+
+    def test_registered_in_pipelines_dict(self) -> None:
+        assert "reslice_and_print" in PIPELINES
+        assert callable(PIPELINES["reslice_and_print"]["function"])
+        assert "overrides" in PIPELINES["reslice_and_print"]["params"]
+
+
+# ===================================================================
+# run_reslice_and_print MCP tool
+# ===================================================================
+
+class TestRunResliceAndPrintTool:
+    """Tests for the run_reslice_and_print MCP tool wrapper in server.py.
+
+    Covers:
+        - Invalid JSON overrides returns VALIDATION_ERROR
+        - Non-object overrides returns VALIDATION_ERROR
+        - Valid overrides parsed and forwarded to pipeline
+        - Pipeline failure propagated as structured result
+    """
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_invalid_overrides_json(self, mock_auth: MagicMock) -> None:
+        from kiln.server import run_reslice_and_print
+
+        result = run_reslice_and_print(
+            model_path="/tmp/model.stl",
+            overrides="not valid json{{{",
+        )
+        assert result["success"] is False
+        assert result["error"]["code"] == "VALIDATION_ERROR"
+        assert "json" in result["error"]["message"].lower()
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_non_object_overrides_json(self, mock_auth: MagicMock) -> None:
+        from kiln.server import run_reslice_and_print
+
+        result = run_reslice_and_print(
+            model_path="/tmp/model.stl",
+            overrides='["not", "an", "object"]',
+        )
+        assert result["success"] is False
+        assert result["error"]["code"] == "VALIDATION_ERROR"
+        assert "object" in result["error"]["message"].lower()
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.server._pipeline_reslice_and_print")
+    def test_valid_overrides_forwarded_to_pipeline(
+        self,
+        mock_pipeline: MagicMock,
+        mock_auth: MagicMock,
+    ) -> None:
+        from kiln.server import run_reslice_and_print
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.to_dict.return_value = {
+            "pipeline": "reslice_and_print",
+            "success": True,
+            "message": "Done",
+            "steps": [],
+            "job_id": None,
+            "total_duration_seconds": 0.1,
+        }
+        mock_pipeline.return_value = mock_result
+
+        result = run_reslice_and_print(
+            model_path="/tmp/model.stl",
+            printer_id="ender3",
+            overrides='{"brim_width": "8", "fill_density": "25%"}',
+        )
+        assert result["success"] is True
+        mock_pipeline.assert_called_once_with(
+            model_path="/tmp/model.stl",
+            printer_name=None,
+            printer_id="ender3",
+            overrides={"brim_width": "8", "fill_density": "25%"},
+            profile_path=None,
+            slicer_path=None,
+        )
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.server._pipeline_reslice_and_print", side_effect=Exception("boom"))
+    def test_unexpected_error_returns_internal_error(
+        self,
+        mock_pipeline: MagicMock,
+        mock_auth: MagicMock,
+    ) -> None:
+        from kiln.server import run_reslice_and_print
+
+        result = run_reslice_and_print(model_path="/tmp/model.stl")
+        assert result["success"] is False
+        assert result["error"]["code"] == "INTERNAL_ERROR"
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.server._pipeline_reslice_and_print")
+    def test_none_overrides_calls_pipeline_with_none(
+        self,
+        mock_pipeline: MagicMock,
+        mock_auth: MagicMock,
+    ) -> None:
+        from kiln.server import run_reslice_and_print
+
+        mock_result = MagicMock()
+        mock_result.success = False
+        mock_result.to_dict.return_value = {
+            "pipeline": "reslice_and_print",
+            "success": False,
+            "message": "Failed",
+            "steps": [],
+            "job_id": None,
+            "total_duration_seconds": 0.0,
+        }
+        mock_pipeline.return_value = mock_result
+
+        run_reslice_and_print(model_path="/tmp/model.stl")
+        mock_pipeline.assert_called_once_with(
+            model_path="/tmp/model.stl",
+            printer_name=None,
+            printer_id=None,
+            overrides=None,
+            profile_path=None,
+            slicer_path=None,
+        )

@@ -146,6 +146,9 @@ from kiln.pipelines import (
 from kiln.pipelines import (
     quick_print as _pipeline_quick_print,
 )
+from kiln.pipelines import (
+    reslice_and_print as _pipeline_reslice_and_print,
+)
 from kiln.plugin_loader import register_all_plugins
 from kiln.plugins import PluginContext, PluginManager
 from kiln.printer_intelligence import (
@@ -5792,6 +5795,269 @@ def slice_model(
         return _error_dict(f"Unexpected error in slice_model: {exc}", code="INTERNAL_ERROR")
 
 
+_SLICER_INPUT_EXTENSIONS = {".stl", ".3mf", ".step", ".stp", ".obj", ".amf"}
+
+
+@mcp.tool()
+def reslice_with_overrides(
+    input_path: str,
+    printer_id: str | None = None,
+    overrides: str | None = None,
+    output_dir: str | None = None,
+    slicer_path: str | None = None,
+) -> dict[str, Any]:
+    """Reslice a 3D model with custom slicer parameter overrides.
+
+    Accepts a base printer profile and a JSON dict of overrides to customize
+    the slice. Common override keys (PrusaSlicer INI format):
+
+      Adhesion: brim_width (mm), skirts (count), skirt_distance (mm)
+      Temperature: temperature, first_layer_temperature, bed_temperature
+      Speed: perimeter_speed, infill_speed, external_perimeter_speed, first_layer_speed, travel_speed (mm/s)
+      Structure: fill_density (e.g. "25%"), fill_pattern (gyroid/grid/honeycomb), layer_height
+      Support: support_material (0/1), support_material_buildplate_only (0/1)
+      Retraction: retract_length, retract_speed
+
+    Example overrides JSON: {"brim_width": "8", "perimeter_speed": "30", "fill_density": "25%"}
+
+    Use this tool when a print failed due to adhesion, wobble, or quality issues
+    and you need to reslice with adjusted settings. Pair with rotate_model to
+    also change part orientation before reslicing.
+
+    Requires PrusaSlicer or OrcaSlicer installed locally.
+    Use kiln find-slicer or the find_slicer MCP tool to verify.
+
+    Args:
+        input_path: Path to the input file (STL, 3MF, STEP, OBJ, AMF).
+        printer_id: Printer model ID for bundled profile selection
+            (e.g. ``"prusa_mini"``, ``"bambu_a1"``).
+        overrides: JSON string of key-value pairs to override in the slicer
+            profile (e.g. ``'{"brim_width": "8", "fill_density": "25%"}'``).
+        output_dir: Directory for the output G-code.  Defaults to the
+            system temp directory.
+        slicer_path: Explicit path to the slicer binary.  Auto-detected
+            if omitted.
+    """
+    if err := _check_auth("slicer"):
+        return err
+
+    import json as _json
+
+    # -- Validate input file --
+    input_abs = os.path.abspath(input_path)
+    if not os.path.isfile(input_abs):
+        return _error_dict(
+            f"Input file not found: {os.path.basename(input_abs)}",
+            code="FILE_NOT_FOUND",
+        )
+
+    ext = Path(input_abs).suffix.lower()
+    if ext not in _SLICER_INPUT_EXTENSIONS:
+        return _error_dict(
+            f"Unsupported input format '{ext}'. "
+            f"Supported: {', '.join(sorted(_SLICER_INPUT_EXTENSIONS))}",
+            code="UNSUPPORTED_FORMAT",
+        )
+
+    # -- Parse overrides --
+    parsed_overrides: dict[str, str] = {}
+    if overrides is not None:
+        try:
+            parsed_overrides = _json.loads(overrides)
+        except (_json.JSONDecodeError, TypeError) as exc:
+            return _error_dict(
+                f"Invalid overrides JSON: {exc}",
+                code="VALIDATION_ERROR",
+            )
+        if not isinstance(parsed_overrides, dict):
+            return _error_dict(
+                "Overrides must be a JSON object (dict), "
+                f"got {type(parsed_overrides).__name__}.",
+                code="VALIDATION_ERROR",
+            )
+
+    try:
+        from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
+
+        # -- Resolve profile with overrides --
+        effective_printer_id = (
+            _map_printer_hint_to_profile_id(printer_id)
+            or _map_printer_hint_to_profile_id(_PRINTER_MODEL)
+        )
+
+        effective_profile: str | None = None
+        if effective_printer_id:
+            try:
+                effective_profile = resolve_slicer_profile(
+                    effective_printer_id,
+                    overrides=parsed_overrides or None,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "Profile resolution failed for %s: %s",
+                    effective_printer_id,
+                    exc,
+                )
+
+        # -- Safety-validate temperature overrides --
+        validation_result: dict[str, Any] | None = None
+        _temp_keys = {
+            "temperature",
+            "first_layer_temperature",
+            "bed_temperature",
+            "first_layer_bed_temperature",
+        }
+        has_temp_overrides = bool(parsed_overrides and _temp_keys & parsed_overrides.keys())
+
+        if has_temp_overrides and effective_printer_id and _PRINTER_MODEL:
+            validation_result = validate_profile_for_printer(
+                effective_printer_id, _PRINTER_MODEL
+            )
+
+        # -- Slice --
+        result = slice_file(
+            input_abs,
+            output_dir=output_dir,
+            profile=effective_profile,
+            slicer_path=slicer_path,
+        )
+
+        response: dict[str, Any] = {
+            "success": True,
+            **result.to_dict(),
+        }
+        if effective_printer_id:
+            response["printer_id"] = effective_printer_id
+        if effective_profile:
+            response["profile_path"] = effective_profile
+        if parsed_overrides:
+            response["applied_overrides"] = parsed_overrides
+
+        # Attach validation warnings/errors when present
+        if validation_result and (
+            validation_result["warnings"] or validation_result["errors"]
+        ):
+            response["profile_validation"] = validation_result
+            if validation_result["errors"]:
+                response["profile_validation_warning"] = (
+                    f"Temperature overrides may be unsafe for {_PRINTER_MODEL}: "
+                    + "; ".join(validation_result["errors"])
+                )
+            elif validation_result["warnings"]:
+                response["profile_validation_warning"] = (
+                    "Profile compatibility note: "
+                    + "; ".join(validation_result["warnings"])
+                )
+
+        return response
+    except SlicerNotFoundError as exc:
+        return _error_dict(
+            f"Failed to reslice model: {exc}. "
+            "Ensure PrusaSlicer or OrcaSlicer is installed.",
+            code="SLICER_NOT_FOUND",
+        )
+    except SlicerError as exc:
+        return _error_dict(
+            f"Failed to reslice model: {exc}",
+            code="SLICER_ERROR",
+        )
+    except FileNotFoundError as exc:
+        return _error_dict(
+            f"Failed to reslice model: {exc}",
+            code="FILE_NOT_FOUND",
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error in reslice_with_overrides")
+        return _error_dict(
+            f"Unexpected error in reslice_with_overrides: {exc}",
+            code="INTERNAL_ERROR",
+        )
+
+
+@mcp.tool()
+def rotate_model(
+    input_path: str,
+    rotation_z: float = 0.0,
+    rotation_x: float = 0.0,
+    rotation_y: float = 0.0,
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Rotate a 3D model file (STL or 3MF) by specified angles before slicing.
+
+    Useful for improving print quality — rotating a tall narrow part 45° around
+    the Z axis can reduce toolhead-induced wobble and ringing artifacts.
+
+    Args:
+        input_path: Path to the STL or 3MF file to rotate.
+        rotation_z: Rotation around Z axis in degrees (most common — rotates
+            on the build plate).
+        rotation_x: Rotation around X axis in degrees.
+        rotation_y: Rotation around Y axis in degrees.
+        output_path: Where to save the rotated file.  Defaults to
+            ``<input>_rotated.<ext>``.
+
+    Returns dict with ``output_path`` (path to rotated file) and
+    ``rotations_applied``.
+
+    Pair with ``reslice_with_overrides`` to re-slice the rotated model with
+    adjusted settings (e.g., stronger brim after rotation).
+    """
+    if err := _check_auth("slicer"):
+        return err
+
+    try:
+        from kiln.auto_orient import rotate_3mf_file, rotate_stl_file
+
+        if not os.path.isfile(input_path):
+            return _error_dict(
+                f"File not found: {input_path}",
+                code="FILE_NOT_FOUND",
+            )
+
+        ext = Path(input_path).suffix.lower()
+        if ext not in (".stl", ".3mf"):
+            return _error_dict(
+                f"Unsupported file format {ext!r}. rotate_model supports .stl and .3mf files.",
+                code="UNSUPPORTED",
+            )
+
+        if output_path is None:
+            p = Path(input_path)
+            output_path = str(p.with_stem(p.stem + "_rotated"))
+
+        if ext == ".stl":
+            rotate_stl_file(
+                input_path,
+                output_path,
+                rotation_z=rotation_z,
+                rotation_x=rotation_x,
+                rotation_y=rotation_y,
+            )
+        else:
+            rotate_3mf_file(
+                input_path,
+                output_path,
+                rotation_z=rotation_z,
+                rotation_x=rotation_x,
+                rotation_y=rotation_y,
+            )
+
+        return {
+            "status": "success",
+            "output_path": output_path,
+            "rotations_applied": {
+                "x": rotation_x,
+                "y": rotation_y,
+                "z": rotation_z,
+            },
+        }
+    except (ValueError, FileNotFoundError) as exc:
+        return _error_dict(f"Failed to rotate model: {exc}", code="ROTATE_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in rotate_model")
+        return _error_dict(f"Unexpected error in rotate_model: {exc}", code="INTERNAL_ERROR")
+
+
 @mcp.tool()
 def find_slicer_tool() -> dict:
     """Check if a slicer (PrusaSlicer/OrcaSlicer) is available on the system.
@@ -9992,6 +10258,77 @@ def run_quick_print(
     except Exception as exc:
         logger.exception("Unexpected error in run_quick_print")
         return _error_dict(f"Unexpected error in run_quick_print: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def run_reslice_and_print(
+    model_path: str,
+    printer_name: str | None = None,
+    printer_id: str | None = None,
+    overrides: str | None = None,
+    profile_path: str | None = None,
+    slicer_path: str | None = None,
+) -> dict:
+    """Reslice a 3D model with custom parameter overrides and immediately print it.
+
+    One-shot pipeline: resolve profile with overrides → slice → safety check →
+    upload to printer → start print. Use this when a previous print failed and
+    you need to retry with adjusted settings (e.g., stronger brim, lower speed).
+
+    The overrides parameter is a JSON string of PrusaSlicer INI key-value pairs:
+      {"brim_width": "8", "perimeter_speed": "30", "fill_density": "25%"}
+
+    Common override keys:
+      Adhesion: brim_width (mm), skirts (count)
+      Temperature: temperature, bed_temperature (degrees C)
+      Speed: perimeter_speed, infill_speed, first_layer_speed (mm/s)
+      Structure: fill_density (%), fill_pattern, layer_height (mm)
+      Support: support_material (0/1)
+
+    Requires PrusaSlicer or OrcaSlicer installed locally.
+    The printer must be idle and connected.
+
+    Args:
+        model_path: Path to input model (STL, 3MF, STEP, OBJ).
+        printer_name: Registered printer name in fleet.
+        printer_id: Printer model ID for auto-profile selection
+            (e.g. ``"ender3"``, ``"bambu_x1c"``, ``"klipper_generic"``).
+        overrides: JSON string of PrusaSlicer INI key-value pairs to override.
+        profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
+        slicer_path: Explicit path to the slicer binary.
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        parsed_overrides: dict[str, str] | None = None
+        if overrides:
+            import json
+
+            try:
+                parsed_overrides = json.loads(overrides)
+                if not isinstance(parsed_overrides, dict):
+                    return _error_dict(
+                        "overrides must be a JSON object (e.g. {\"brim_width\": \"8\"})",
+                        code="VALIDATION_ERROR",
+                    )
+            except json.JSONDecodeError as exc:
+                return _error_dict(
+                    f"Invalid JSON in overrides: {exc}",
+                    code="VALIDATION_ERROR",
+                )
+
+        result = _pipeline_reslice_and_print(
+            model_path=model_path,
+            printer_name=printer_name,
+            printer_id=printer_id,
+            overrides=parsed_overrides,
+            profile_path=profile_path,
+            slicer_path=slicer_path,
+        )
+        return {"success": result.success, **result.to_dict()}
+    except Exception as exc:
+        logger.exception("Unexpected error in run_reslice_and_print")
+        return _error_dict(f"Unexpected error in run_reslice_and_print: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
