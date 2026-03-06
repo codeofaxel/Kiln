@@ -1,7 +1,7 @@
 """Publish-to-marketplace pipeline.
 
 Enables users to publish 3D models to marketplaces (Thingiverse,
-MyMiniFactory, Thangs) with validated print settings, optimal orientation,
+MyMiniFactory) with validated print settings, optimal orientation,
 and a print "birth certificate" — proven settings from successful prints.
 
 The pipeline: validate model → attach print DNA → generate metadata →
@@ -68,7 +68,7 @@ class PublishRequest:
     tags: list[str]
     category: str
     license: str  # "cc-by", "cc-by-sa", "cc-by-nc", "gpl", "public_domain"
-    target_marketplaces: list[str]  # ["thingiverse", "myminifactory", "thangs"]
+    target_marketplaces: list[str]  # ["thingiverse", "myminifactory"]
     include_certificate: bool = True
     include_print_settings: bool = True
     images: list[str] | None = None  # paths to preview images
