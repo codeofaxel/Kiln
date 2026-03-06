@@ -16,20 +16,17 @@ real printers or slicer binaries are needed.
 from __future__ import annotations
 
 import json
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from kiln.pipelines import (
-    PipelineStep,
+    PIPELINES,
     PipelineResult,
+    PipelineStep,
+    benchmark,
     list_pipelines,
     quick_print,
     reslice_and_print,
-    benchmark,
-    PIPELINES,
 )
-
 
 # ===================================================================
 # PipelineStep dataclass
@@ -208,7 +205,7 @@ class TestListPipelines:
 
     def test_pipelines_dict_has_function_key(self) -> None:
         """The PIPELINES registry dict should have a callable 'function' for each entry."""
-        for name, info in PIPELINES.items():
+        for _name, info in PIPELINES.items():
             assert "function" in info
             assert callable(info["function"])
 
@@ -515,7 +512,7 @@ class TestResliceAndPrintPipeline:
 
         assert result.success is True
         assert result.pipeline == "reslice_and_print"
-        assert len(result.steps) == 6
+        assert len(result.steps) == 7  # includes stability_check step
         assert all(s.success for s in result.steps)
         mock_adapter.start_print.assert_called_once_with("out.gcode")
 
@@ -677,6 +674,140 @@ class TestResliceAndPrintPipeline:
         assert "reslice_and_print" in PIPELINES
         assert callable(PIPELINES["reslice_and_print"]["function"])
         assert "overrides" in PIPELINES["reslice_and_print"]["params"]
+
+
+# ===================================================================
+# Stability check in pipelines
+# ===================================================================
+
+class TestStabilityCheckPipeline:
+    """Tests for stability_check step integration in quick_print and reslice_and_print.
+
+    Covers:
+        - Pipeline includes a stability_check step
+        - Unstable model sets stability_warning in context
+        - Stability check failure does not block the pipeline
+        - Non-STL files skip the stability check
+        - Stable model produces no warning
+    """
+
+    @patch("kiln.auto_orient.check_stability", create=True)
+    @patch("kiln.slicer.slice_file", side_effect=Exception("slice error"))
+    def test_quick_print_includes_stability_step(
+        self, mock_slice: MagicMock, mock_stability: MagicMock
+    ) -> None:
+        mock_result = MagicMock()
+        mock_result.stable = True
+        mock_result.risk_level = "low"
+        mock_result.height_to_base_ratio = 0.5
+        mock_result.recommendation = "Orientation looks stable."
+        mock_stability.return_value = mock_result
+
+        result = quick_print(model_path="/tmp/model.stl")
+        stability_steps = [s for s in result.steps if s.name == "stability_check"]
+        assert len(stability_steps) == 1
+        assert stability_steps[0].success is True
+
+    @patch("kiln.auto_orient.check_stability", create=True)
+    @patch("kiln.slicer.slice_file", side_effect=Exception("slice error"))
+    def test_reslice_includes_stability_step(
+        self, mock_slice: MagicMock, mock_stability: MagicMock
+    ) -> None:
+        mock_result = MagicMock()
+        mock_result.stable = True
+        mock_result.risk_level = "low"
+        mock_result.height_to_base_ratio = 0.5
+        mock_result.recommendation = "Looks stable."
+        mock_stability.return_value = mock_result
+
+        result = reslice_and_print(model_path="/tmp/model.stl")
+        stability_steps = [s for s in result.steps if s.name == "stability_check"]
+        assert len(stability_steps) == 1
+        assert stability_steps[0].success is True
+
+    @patch("kiln.auto_orient.check_stability", create=True)
+    @patch("kiln.slicer.slice_file", side_effect=Exception("slice error"))
+    def test_unstable_model_sets_warning_in_step(
+        self, mock_slice: MagicMock, mock_stability: MagicMock
+    ) -> None:
+        mock_result = MagicMock()
+        mock_result.stable = False
+        mock_result.risk_level = "high"
+        mock_result.height_to_base_ratio = 5.0
+        mock_result.recommendation = "High wobble risk. Reorienting recommended."
+        mock_stability.return_value = mock_result
+
+        result = quick_print(model_path="/tmp/tall_tower.stl")
+        stability_steps = [s for s in result.steps if s.name == "stability_check"]
+        assert len(stability_steps) == 1
+        step = stability_steps[0]
+        # Step still succeeds (informational only)
+        assert step.success is True
+        # Warning should be in the message
+        assert "risk" in step.message.lower() or "wobble" in step.message.lower()
+        # Step data should include risk info
+        assert step.data["stable"] is False
+        assert step.data["risk_level"] == "high"
+
+    @patch("kiln.auto_orient.check_stability", create=True, side_effect=RuntimeError("mesh parse failed"))
+    @patch("kiln.slicer.slice_file", side_effect=Exception("slice error"))
+    def test_stability_failure_does_not_block_pipeline(
+        self, mock_slice: MagicMock, mock_stability: MagicMock
+    ) -> None:
+        result = quick_print(model_path="/tmp/model.stl")
+        stability_steps = [s for s in result.steps if s.name == "stability_check"]
+        assert len(stability_steps) == 1
+        # Stability check should succeed even on internal error (it's non-fatal)
+        assert stability_steps[0].success is True
+        assert "skipped" in stability_steps[0].message.lower()
+        # Pipeline continues — slice step should also be present
+        slice_steps = [s for s in result.steps if s.name == "slice"]
+        assert len(slice_steps) == 1
+
+    @patch("kiln.auto_orient.check_stability", create=True)
+    @patch("kiln.slicer.slice_file", side_effect=Exception("slice error"))
+    def test_non_stl_file_skips_stability_check(
+        self, mock_slice: MagicMock, mock_stability: MagicMock
+    ) -> None:
+        result = quick_print(model_path="/tmp/model.gcode")
+        stability_steps = [s for s in result.steps if s.name == "stability_check"]
+        assert len(stability_steps) == 1
+        assert stability_steps[0].success is True
+        assert "skip" in stability_steps[0].message.lower()
+        # check_stability should NOT have been called for non-mesh files
+        mock_stability.assert_not_called()
+
+    @patch("kiln.auto_orient.check_stability", create=True)
+    @patch("kiln.slicer.slice_file", side_effect=Exception("slice error"))
+    def test_3mf_file_skips_stability_check(
+        self, mock_slice: MagicMock, mock_stability: MagicMock
+    ) -> None:
+        result = quick_print(model_path="/tmp/model.3mf")
+        stability_steps = [s for s in result.steps if s.name == "stability_check"]
+        assert len(stability_steps) == 1
+        assert "skip" in stability_steps[0].message.lower()
+        mock_stability.assert_not_called()
+
+    @patch("kiln.auto_orient.check_stability", create=True)
+    @patch("kiln.slicer.slice_file", side_effect=Exception("slice error"))
+    def test_stable_model_no_warning(
+        self, mock_slice: MagicMock, mock_stability: MagicMock
+    ) -> None:
+        mock_result = MagicMock()
+        mock_result.stable = True
+        mock_result.risk_level = "low"
+        mock_result.height_to_base_ratio = 0.3
+        mock_result.recommendation = "Model is stable."
+        mock_stability.return_value = mock_result
+
+        result = quick_print(model_path="/tmp/flat_part.stl")
+        stability_steps = [s for s in result.steps if s.name == "stability_check"]
+        assert len(stability_steps) == 1
+        step = stability_steps[0]
+        assert step.success is True
+        assert "stable" in step.message.lower()
+        assert step.data["stable"] is True
+        assert step.data["risk_level"] == "low"
 
 
 # ===================================================================

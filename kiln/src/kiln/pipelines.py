@@ -302,6 +302,67 @@ def list_executions() -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Shared step helpers
+# ---------------------------------------------------------------------------
+
+
+def _run_stability_check(model_path: str, ctx: dict[str, Any]) -> PipelineStep:
+    """Check model stability and warn if orientation is risky.
+
+    This is informational only — it sets ``ctx["stability_warning"]`` but
+    never fails the pipeline.
+    """
+    step_start = time.time()
+
+    # Only check mesh files — skip pre-sliced gcode/3mf
+    if not model_path.lower().endswith((".stl", ".obj")):
+        ctx["stability_warning"] = None
+        return PipelineStep(
+            name="stability_check",
+            success=True,
+            message="Skipped (not a mesh file)",
+            duration_seconds=time.time() - step_start,
+        )
+
+    try:
+        from kiln.auto_orient import check_stability
+
+        result = check_stability(model_path)
+        ctx["stability_warning"] = None
+        if not result.stable:
+            warning = (
+                f"\u26a0 Stability risk ({result.risk_level}): "
+                f"{result.recommendation}"
+            )
+            ctx["stability_warning"] = warning
+            logger.warning(
+                "Stability check: %s (ratio=%.1f)",
+                result.risk_level,
+                result.height_to_base_ratio,
+            )
+        return PipelineStep(
+            name="stability_check",
+            success=True,
+            message=ctx["stability_warning"] or "Model orientation looks stable",
+            data={
+                "stable": result.stable,
+                "risk_level": result.risk_level,
+                "height_to_base_ratio": result.height_to_base_ratio,
+            },
+            duration_seconds=time.time() - step_start,
+        )
+    except Exception as exc:
+        logger.debug("Stability check skipped: %s", exc, exc_info=True)
+        ctx["stability_warning"] = None
+        return PipelineStep(
+            name="stability_check",
+            success=True,
+            message="Stability check skipped (analysis unavailable)",
+            duration_seconds=time.time() - step_start,
+        )
+
+
+# ---------------------------------------------------------------------------
 # quick_print pipeline
 # ---------------------------------------------------------------------------
 
@@ -508,8 +569,12 @@ def quick_print(
                 duration_seconds=time.time() - step_start,
             )
 
+    def _check_stability() -> PipelineStep:
+        return _run_stability_check(model_path, ctx)
+
     step_defs = [
         _StepDef(name="resolve_profile", fn=_resolve_profile, fatal=False),
+        _StepDef(name="stability_check", fn=_check_stability, fatal=False),
         _StepDef(name="slice", fn=_slice, fatal=True),
         _StepDef(name="safety_check", fn=_safety_check, fatal=True),
         _StepDef(name="upload", fn=_upload, fatal=True),
@@ -790,8 +855,12 @@ def reslice_and_print(
                 duration_seconds=time.time() - step_start,
             )
 
+    def _check_stability() -> PipelineStep:
+        return _run_stability_check(model_path, ctx)
+
     step_defs = [
         _StepDef(name="resolve_profile", fn=_resolve_profile, fatal=False),
+        _StepDef(name="stability_check", fn=_check_stability, fatal=False),
         _StepDef(name="slice", fn=_slice, fatal=True),
         _StepDef(name="safety_check", fn=_safety_check, fatal=True),
         _StepDef(name="upload", fn=_upload, fatal=True),
@@ -805,11 +874,6 @@ def reslice_and_print(
         pause_after_step=pause_after_step,
     )
     return execution.run()
-
-
-# ---------------------------------------------------------------------------
-# calibrate pipeline
-# ---------------------------------------------------------------------------
 
 
 def calibrate(

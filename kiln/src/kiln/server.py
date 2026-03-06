@@ -6079,6 +6079,31 @@ def rotate_model(
 
 
 @mcp.tool()
+async def check_orientation(
+    model_path: str,
+) -> str:
+    """Check if a model's orientation is stable for printing.
+
+    Analyzes the height-to-base ratio and warns if the model is likely to
+    wobble or fail mid-print.  Suggests reorientation if needed.
+
+    :param model_path: Path to the STL or OBJ model file.
+    :returns: JSON with stability assessment.
+    """
+    try:
+        import json
+
+        from kiln.auto_orient import check_stability
+
+        result = check_stability(model_path)
+        return json.dumps(result.to_dict(), indent=2)
+    except Exception as e:
+        import json
+
+        return json.dumps({"error": str(e), "status": "error"})
+
+
+@mcp.tool()
 def find_slicer_tool() -> dict:
     """Check if a slicer (PrusaSlicer/OrcaSlicer) is available on the system.
 
@@ -10349,7 +10374,6 @@ def run_reslice_and_print(
     except Exception as exc:
         logger.exception("Unexpected error in run_reslice_and_print")
         return _error_dict(f"Unexpected error in run_reslice_and_print: {exc}", code="INTERNAL_ERROR")
-
 
 @mcp.tool()
 def run_calibrate(

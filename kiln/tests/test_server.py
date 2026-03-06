@@ -14,12 +14,14 @@ Covers:
 - send_gcode() success, empty commands, and non-supported adapter
 - _get_adapter() missing env vars raises RuntimeError
 - _get_adapter() unsupported printer type raises RuntimeError
+import json
 - _get_adapter() creates correct adapter for octoprint and moonraker
 - _validate_local_file() with valid, invalid extension, missing, and empty files
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import struct
@@ -29,9 +31,8 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from kiln.printers.bambu import BambuAdapter
 from kiln.printers.base import (
-    JobProgress,
-    PrinterCapabilities,
     PrinterError,
     PrinterFile,
     PrinterState,
@@ -39,34 +40,52 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
-from kiln.printers.bambu import BambuAdapter
-from kiln.printers.octoprint import OctoPrintAdapter
 from kiln.printers.moonraker import MoonrakerAdapter
+from kiln.printers.octoprint import OctoPrintAdapter
 from kiln.server import (
     _error_dict,
     _tool_limiter,
     _validate_local_file,
-    cancel_print as server_cancel_print,
-    clear_emergency_stop as server_clear_emergency_stop,
-    delete_file as server_delete_file,
-    emergency_status as server_emergency_status,
-    emergency_trip_input as server_emergency_trip_input,
+    check_orientation,
     get_bed_mesh,
     get_filament_status,
     get_speed_profile,
     get_tool_position,
-    pause_print as server_pause_print,
     preflight_check,
     printer_files,
     printer_status,
     reslice_with_overrides,
-    resume_print as server_resume_print,
     rotate_model,
     send_gcode,
     set_temperature,
-    start_print as server_start_print,
-    upload_file as server_upload_file,
     wrap_gcode_as_3mf,
+)
+from kiln.server import (
+    cancel_print as server_cancel_print,
+)
+from kiln.server import (
+    clear_emergency_stop as server_clear_emergency_stop,
+)
+from kiln.server import (
+    delete_file as server_delete_file,
+)
+from kiln.server import (
+    emergency_status as server_emergency_status,
+)
+from kiln.server import (
+    emergency_trip_input as server_emergency_trip_input,
+)
+from kiln.server import (
+    pause_print as server_pause_print,
+)
+from kiln.server import (
+    resume_print as server_resume_print,
+)
+from kiln.server import (
+    start_print as server_start_print,
+)
+from kiln.server import (
+    upload_file as server_upload_file,
 )
 
 
@@ -1027,37 +1046,48 @@ class TestValidateLocalFile:
 # New tool imports
 # ---------------------------------------------------------------------------
 
-from kiln.server import (
-    validate_gcode as server_validate_gcode,
-    fleet_status,
-    register_printer,
-    recent_events,
-    search_models,
-    model_details,
-    model_files,
-    download_model,
-    browse_models,
-    list_model_categories,
+from kiln.events import EventBus, EventType
+from kiln.plugins.queue_tools import (
+    cancel_job as server_cancel_job,
+)
+from kiln.plugins.queue_tools import (
+    job_status as server_job_status,
+)
+from kiln.plugins.queue_tools import (
+    queue_summary,
 )
 from kiln.plugins.queue_tools import (
     submit_job as server_submit_job,
-    job_status as server_job_status,
-    queue_summary,
-    cancel_job as server_cancel_job,
 )
+from kiln.queue import JobStatus, PrintQueue
 from kiln.registry import PrinterRegistry
-from kiln.queue import PrintQueue, JobStatus
-from kiln.events import EventBus, EventType
+from kiln.server import (
+    browse_models,
+    download_model,
+    fleet_status,
+    list_model_categories,
+    model_details,
+    model_files,
+    recent_events,
+    register_printer,
+    search_models,
+)
+from kiln.server import (
+    validate_gcode as server_validate_gcode,
+)
 from kiln.thingiverse import (
+    Category as TvCategory,
+)
+from kiln.thingiverse import (
+    ThingDetail,
     ThingiverseClient,
     ThingiverseError,
     ThingiverseNotFoundError,
     ThingSummary,
-    ThingDetail,
-    ThingFile as TvFile,
-    Category as TvCategory,
 )
-
+from kiln.thingiverse import (
+    ThingFile as TvFile,
+)
 
 # ---------------------------------------------------------------------------
 # validate_gcode()
@@ -2550,114 +2580,6 @@ class TestWrapGcodeAs3mf:
 
 
 # ---------------------------------------------------------------------------
-# TestRotateModel — MCP tool tests
-# ---------------------------------------------------------------------------
-
-
-class TestRotateModel:
-    """Tests for the rotate_model MCP tool.
-
-    Covers STL rotation, 3MF rotation, error cases, and default paths.
-    """
-
-    @staticmethod
-    def _make_stl(path: str) -> str:
-        """Create a minimal binary STL with one triangle."""
-        with open(path, "wb") as f:
-            f.write(b"\x00" * 80)  # header
-            f.write(struct.pack("<I", 1))  # 1 triangle
-            f.write(struct.pack("<fff", 0, 0, 1))  # normal
-            f.write(struct.pack("<fff", 0, 0, 0))  # v1
-            f.write(struct.pack("<fff", 1, 0, 0))  # v2
-            f.write(struct.pack("<fff", 0, 1, 0))  # v3
-            f.write(struct.pack("<H", 0))  # attribute
-        return path
-
-    @staticmethod
-    def _make_3mf(path: str) -> str:
-        """Create a minimal valid 3MF with one build item."""
-        ns = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
-        model_xml = (
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            f'<model xmlns="{ns}" unit="millimeter">'
-            "<resources>"
-            '<object id="1" type="model">'
-            "<mesh>"
-            "<vertices>"
-            '<vertex x="0" y="0" z="0"/>'
-            '<vertex x="1" y="0" z="0"/>'
-            '<vertex x="0" y="1" z="0"/>'
-            "</vertices>"
-            "<triangles>"
-            '<triangle v1="0" v2="1" v3="2"/>'
-            "</triangles>"
-            "</mesh>"
-            "</object>"
-            "</resources>"
-            '<build><item objectid="1"/></build>'
-            "</model>"
-        )
-        with zipfile.ZipFile(path, "w") as zf:
-            zf.writestr("3D/3dmodel.model", model_xml)
-        return path
-
-    def test_rotate_stl_z_axis(self, tmp_path):
-        stl = self._make_stl(str(tmp_path / "model.stl"))
-        result = rotate_model(input_path=stl, rotation_z=45.0)
-        assert result["status"] == "success"
-        assert os.path.isfile(result["output_path"])
-        assert result["rotations_applied"]["z"] == 45.0
-
-    def test_rotate_3mf_z_axis(self, tmp_path):
-        threemf = self._make_3mf(str(tmp_path / "model.3mf"))
-        result = rotate_model(input_path=threemf, rotation_z=90.0)
-        assert result["status"] == "success"
-        assert os.path.isfile(result["output_path"])
-        assert result["rotations_applied"]["z"] == 90.0
-
-    def test_rotate_nonexistent_file(self):
-        result = rotate_model(input_path="/nonexistent/model.stl", rotation_z=45.0)
-        assert result["success"] is False
-        assert result["error"]["code"] == "FILE_NOT_FOUND"
-
-    def test_rotate_unsupported_format(self, tmp_path):
-        obj_path = str(tmp_path / "model.gcode")
-        (tmp_path / "model.gcode").write_text("G28")
-        result = rotate_model(input_path=obj_path, rotation_z=45.0)
-        assert result["success"] is False
-        assert result["error"]["code"] == "UNSUPPORTED"
-
-    def test_rotate_default_output_path(self, tmp_path):
-        stl = self._make_stl(str(tmp_path / "my_part.stl"))
-        result = rotate_model(input_path=stl, rotation_z=10.0)
-        assert result["status"] == "success"
-        assert "_rotated" in result["output_path"]
-        assert result["output_path"].endswith(".stl")
-
-    def test_rotate_3mf_default_output_path(self, tmp_path):
-        threemf = self._make_3mf(str(tmp_path / "my_part.3mf"))
-        result = rotate_model(input_path=threemf, rotation_z=10.0)
-        assert result["status"] == "success"
-        assert "_rotated" in result["output_path"]
-        assert result["output_path"].endswith(".3mf")
-
-    def test_rotate_zero_degrees(self, tmp_path):
-        stl = self._make_stl(str(tmp_path / "model.stl"))
-        result = rotate_model(input_path=stl)
-        assert result["status"] == "success"
-        assert os.path.isfile(result["output_path"])
-        assert result["rotations_applied"] == {"x": 0.0, "y": 0.0, "z": 0.0}
-
-    def test_rotate_custom_output_path(self, tmp_path):
-        stl = self._make_stl(str(tmp_path / "model.stl"))
-        out = str(tmp_path / "custom_out.stl")
-        result = rotate_model(input_path=stl, rotation_z=90.0, output_path=out)
-        assert result["status"] == "success"
-        assert result["output_path"] == out
-        assert os.path.isfile(out)
-
-
-# ---------------------------------------------------------------------------
 # reslice_with_overrides
 # ---------------------------------------------------------------------------
 
@@ -2815,3 +2737,202 @@ class TestResliceWithOverrides:
         assert "profile_validation_warning" in result
         assert "unsafe" in result["profile_validation_warning"].lower()
         mock_validate.assert_called_once_with("bambu_a1", "bambu_a1")
+
+
+# ---------------------------------------------------------------------------
+# TestRotateModel — MCP tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestRotateModel:
+    """Tests for the rotate_model MCP tool.
+
+    Covers STL rotation, 3MF rotation, error cases, and default paths.
+    """
+
+    @staticmethod
+    def _make_stl(path: str) -> str:
+        """Create a minimal binary STL with one triangle."""
+        with open(path, "wb") as f:
+            f.write(b"\x00" * 80)  # header
+            f.write(struct.pack("<I", 1))  # 1 triangle
+            f.write(struct.pack("<fff", 0, 0, 1))  # normal
+            f.write(struct.pack("<fff", 0, 0, 0))  # v1
+            f.write(struct.pack("<fff", 1, 0, 0))  # v2
+            f.write(struct.pack("<fff", 0, 1, 0))  # v3
+            f.write(struct.pack("<H", 0))  # attribute
+        return path
+
+    @staticmethod
+    def _make_3mf(path: str) -> str:
+        """Create a minimal valid 3MF with one build item."""
+        ns = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+        model_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            f'<model xmlns="{ns}" unit="millimeter">'
+            "<resources>"
+            '<object id="1" type="model">'
+            "<mesh>"
+            "<vertices>"
+            '<vertex x="0" y="0" z="0"/>'
+            '<vertex x="1" y="0" z="0"/>'
+            '<vertex x="0" y="1" z="0"/>'
+            "</vertices>"
+            "<triangles>"
+            '<triangle v1="0" v2="1" v3="2"/>'
+            "</triangles>"
+            "</mesh>"
+            "</object>"
+            "</resources>"
+            '<build><item objectid="1"/></build>'
+            "</model>"
+        )
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("3D/3dmodel.model", model_xml)
+        return path
+
+    def test_rotate_stl_z_axis(self, tmp_path):
+        stl = self._make_stl(str(tmp_path / "model.stl"))
+        result = rotate_model(input_path=stl, rotation_z=45.0)
+        assert result["status"] == "success"
+        assert os.path.isfile(result["output_path"])
+        assert result["rotations_applied"]["z"] == 45.0
+
+    def test_rotate_3mf_z_axis(self, tmp_path):
+        threemf = self._make_3mf(str(tmp_path / "model.3mf"))
+        result = rotate_model(input_path=threemf, rotation_z=90.0)
+        assert result["status"] == "success"
+        assert os.path.isfile(result["output_path"])
+        assert result["rotations_applied"]["z"] == 90.0
+
+    def test_rotate_nonexistent_file(self):
+        result = rotate_model(input_path="/nonexistent/model.stl", rotation_z=45.0)
+        assert result["success"] is False
+        assert result["error"]["code"] == "FILE_NOT_FOUND"
+
+    def test_rotate_unsupported_format(self, tmp_path):
+        obj_path = str(tmp_path / "model.gcode")
+        (tmp_path / "model.gcode").write_text("G28")
+        result = rotate_model(input_path=obj_path, rotation_z=45.0)
+        assert result["success"] is False
+        assert result["error"]["code"] == "UNSUPPORTED"
+
+    def test_rotate_default_output_path(self, tmp_path):
+        stl = self._make_stl(str(tmp_path / "my_part.stl"))
+        result = rotate_model(input_path=stl, rotation_z=10.0)
+        assert result["status"] == "success"
+        assert "_rotated" in result["output_path"]
+        assert result["output_path"].endswith(".stl")
+
+    def test_rotate_3mf_default_output_path(self, tmp_path):
+        threemf = self._make_3mf(str(tmp_path / "my_part.3mf"))
+        result = rotate_model(input_path=threemf, rotation_z=10.0)
+        assert result["status"] == "success"
+        assert "_rotated" in result["output_path"]
+        assert result["output_path"].endswith(".3mf")
+
+    def test_rotate_zero_degrees(self, tmp_path):
+        stl = self._make_stl(str(tmp_path / "model.stl"))
+        result = rotate_model(input_path=stl)
+        assert result["status"] == "success"
+        assert os.path.isfile(result["output_path"])
+        assert result["rotations_applied"] == {"x": 0.0, "y": 0.0, "z": 0.0}
+
+    def test_rotate_custom_output_path(self, tmp_path):
+        stl = self._make_stl(str(tmp_path / "model.stl"))
+        out = str(tmp_path / "custom_out.stl")
+        result = rotate_model(input_path=stl, rotation_z=90.0, output_path=out)
+        assert result["status"] == "success"
+        assert result["output_path"] == out
+        assert os.path.isfile(out)
+
+
+# ---------------------------------------------------------------------------
+# reslice_with_overrides
+# ---------------------------------------------------------------------------
+
+
+class TestCheckOrientation:
+    """Tests for the check_orientation MCP tool.
+
+    Covers: successful stability result, error JSON on failure,
+    high-risk result with recommendation and suggested rotation.
+    """
+
+    def test_returns_stability_result(self):
+        mock_result = MagicMock()
+        mock_result.to_dict.return_value = {
+            "stable": True,
+            "risk_level": "low",
+            "height_mm": 10.0,
+            "base_footprint_mm2": 400.0,
+            "height_to_base_ratio": 0.5,
+            "center_of_gravity_z_mm": 5.0,
+            "recommendation": "Orientation looks stable.",
+            "suggested_rotation": None,
+        }
+        with patch("kiln.auto_orient.check_stability", create=True, return_value=mock_result):
+            result = asyncio.run(check_orientation(model_path="/tmp/test.stl"))
+        data = json.loads(result)
+        assert data["stable"] is True
+        assert data["risk_level"] == "low"
+
+    def test_error_returns_json_error(self):
+        with patch("kiln.auto_orient.check_stability", create=True, side_effect=ValueError("bad file")):
+            result = asyncio.run(check_orientation(model_path="/tmp/bad.stl"))
+        data = json.loads(result)
+        assert "error" in data
+        assert "bad file" in data["error"]
+
+    def test_high_risk_includes_recommendation(self):
+        mock_result = MagicMock()
+        mock_result.to_dict.return_value = {
+            "stable": False,
+            "risk_level": "high",
+            "height_mm": 100.0,
+            "base_footprint_mm2": 25.0,
+            "height_to_base_ratio": 20.0,
+            "center_of_gravity_z_mm": 50.0,
+            "recommendation": "High wobble risk. Reorienting recommended.",
+            "suggested_rotation": {"x": 90, "y": 0, "z": 0},
+        }
+        with patch("kiln.auto_orient.check_stability", create=True, return_value=mock_result):
+            result = asyncio.run(check_orientation(model_path="/tmp/tall.stl"))
+        data = json.loads(result)
+        assert data["stable"] is False
+        assert data["suggested_rotation"] is not None
+        assert data["suggested_rotation"]["x"] == 90
+
+    def test_runtime_error_returns_error_json(self):
+        with patch(
+            "kiln.auto_orient.check_stability",
+            create=True,
+            side_effect=RuntimeError("mesh parse failed"),
+        ):
+            result = asyncio.run(check_orientation(model_path="/tmp/broken.stl"))
+        data = json.loads(result)
+        assert "error" in data
+        assert "mesh parse failed" in data["error"]
+
+    def test_result_is_valid_json(self):
+        mock_result = MagicMock()
+        mock_result.to_dict.return_value = {
+            "stable": True,
+            "risk_level": "low",
+            "height_mm": 5.0,
+            "base_footprint_mm2": 100.0,
+            "height_to_base_ratio": 0.5,
+            "center_of_gravity_z_mm": 2.5,
+            "recommendation": "Stable",
+            "suggested_rotation": None,
+        }
+        with patch("kiln.auto_orient.check_stability", create=True, return_value=mock_result):
+            result = asyncio.run(check_orientation(model_path="/tmp/cube.stl"))
+        # Verify it's parseable JSON with expected keys
+        data = json.loads(result)
+        expected_keys = {
+            "stable", "risk_level", "height_mm", "base_footprint_mm2",
+            "height_to_base_ratio", "center_of_gravity_z_mm",
+            "recommendation", "suggested_rotation",
+        }
+        assert expected_keys.issubset(data.keys())

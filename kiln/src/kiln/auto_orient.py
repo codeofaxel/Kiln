@@ -75,6 +75,23 @@ class SupportEstimate:
         return asdict(self)
 
 
+@dataclass
+class StabilityResult:
+    """Stability assessment for a model in its current orientation."""
+
+    stable: bool  # True if orientation is safe to print
+    risk_level: str  # "low", "medium", "high"
+    height_mm: float
+    base_footprint_mm2: float  # approximate bed contact area
+    height_to_base_ratio: float  # key metric — high = unstable
+    center_of_gravity_z_mm: float  # higher CoG = more tippy
+    recommendation: str  # human-readable advice
+    suggested_rotation: dict[str, float] | None  # {"x": 90, "y": 0, "z": 0} if reorientation would help
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 # ---------------------------------------------------------------------------
 # Rotation math
 # ---------------------------------------------------------------------------
@@ -432,6 +449,136 @@ def estimate_supports(
         overhang_triangle_count=overhangs.overhang_triangle_count,
         overhang_percentage=overhangs.overhang_percentage,
         needs_supports=overhangs.needs_supports,
+    )
+
+
+def check_stability(
+    file_path: str,
+    *,
+    max_height_to_base_ratio: float = 3.0,
+) -> StabilityResult:
+    """Analyze whether a model's current orientation is stable for printing.
+
+    Computes the height-to-base ratio (height divided by the square root of
+    the bed contact footprint area) to detect tall, narrow orientations that
+    are prone to wobble or topple mid-print.
+
+    :param file_path: Path to an STL or OBJ file.
+    :param max_height_to_base_ratio: Ratio at or above which the model is
+        considered high-risk.  Defaults to ``3.0``.
+    :returns: A :class:`StabilityResult`.
+    :raises ValueError: If the file cannot be parsed or is an unsupported
+        format (e.g. 3MF).
+    """
+    ext = Path(file_path).suffix.lower()
+    if ext == ".3mf":
+        raise ValueError(
+            "3MF stability analysis is not yet supported. "
+            "Export the model as STL or OBJ first."
+        )
+
+    triangles, vertices = _parse_mesh(file_path)
+
+    # Translate so the lowest Z sits at Z=0.
+    triangles = _translate_to_bed(triangles)
+
+    # Recompute vertices after translation.
+    all_verts: list[tuple[float, ...]] = []
+    for tri in triangles:
+        all_verts.extend(tri)
+
+    # ---- Bounding box (Z extent only) ----
+    zs = [v[2] for v in all_verts]
+    z_min = min(zs)
+    z_max = max(zs)
+    height_mm = z_max - z_min
+
+    # ---- Center of gravity (vertex average approximation) ----
+    center_of_gravity_z_mm = sum(zs) / len(zs) if zs else 0.0
+
+    # ---- Base footprint area ----
+    # Sum the XY-projected area of triangles whose lowest vertex is within
+    # 0.5mm of the bed (Z=0).
+    bed_threshold = z_min + 0.5
+    base_footprint_mm2 = 0.0
+    for tri in triangles:
+        tri_z_min = min(v[2] for v in tri)
+        if tri_z_min <= bed_threshold:
+            # Projected area onto XY plane using the cross product method.
+            ax, ay = tri[0][0], tri[0][1]
+            bx, by = tri[1][0], tri[1][1]
+            cx, cy = tri[2][0], tri[2][1]
+            projected_area = abs(
+                (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
+            ) / 2.0
+            base_footprint_mm2 += projected_area
+
+    # Guard against degenerate models with zero footprint.
+    if base_footprint_mm2 < 1e-6:
+        base_footprint_mm2 = 1e-6
+
+    # ---- Height-to-base ratio ----
+    # sqrt converts area to a linear dimension for a fair comparison with
+    # height.
+    height_to_base_ratio = height_mm / math.sqrt(base_footprint_mm2)
+
+    # ---- Risk level ----
+    if height_to_base_ratio < 2.0:
+        risk_level = "low"
+    elif height_to_base_ratio < max_height_to_base_ratio:
+        risk_level = "medium"
+    else:
+        risk_level = "high"
+
+    stable = risk_level == "low"
+
+    # ---- Suggested rotation for high-risk models ----
+    suggested_rotation: dict[str, float] | None = None
+    if risk_level == "high":
+        try:
+            orientation = find_optimal_orientation(file_path)
+            best = orientation.best
+            # Only suggest if the best orientation is meaningfully shorter.
+            if best.print_height_mm < height_mm * 0.75:
+                suggested_rotation = {
+                    "x": best.rotation_x,
+                    "y": best.rotation_y,
+                    "z": best.rotation_z,
+                }
+        except (ValueError, OSError):
+            # If orientation analysis fails, skip the suggestion.
+            pass
+
+    # ---- Recommendation text ----
+    if risk_level == "low":
+        recommendation = (
+            "Orientation looks stable. Good bed contact relative to height."
+        )
+    elif risk_level == "medium":
+        recommendation = (
+            "Borderline stability. Consider adding a brim (5-8mm) for extra adhesion."
+        )
+    else:
+        recommendation = (
+            "High wobble risk — tall part on small base. "
+            "Reorienting to lay flat is strongly recommended."
+        )
+        if suggested_rotation is not None:
+            recommendation += (
+                f" Try rotating X={suggested_rotation['x']:.0f}°, "
+                f"Y={suggested_rotation['y']:.0f}°, "
+                f"Z={suggested_rotation['z']:.0f}°."
+            )
+
+    return StabilityResult(
+        stable=stable,
+        risk_level=risk_level,
+        height_mm=round(height_mm, 2),
+        base_footprint_mm2=round(base_footprint_mm2, 2),
+        height_to_base_ratio=round(height_to_base_ratio, 2),
+        center_of_gravity_z_mm=round(center_of_gravity_z_mm, 2),
+        recommendation=recommendation,
+        suggested_rotation=suggested_rotation,
     )
 
 

@@ -23,6 +23,7 @@ from kiln.auto_orient import (
     _rotation_matrix_z,
     _translate_to_bed,
     apply_orientation,
+    check_stability,
     estimate_supports,
     find_optimal_orientation,
     rotate_3mf_file,
@@ -392,9 +393,7 @@ class TestRotateStlFile:
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = _write_stl(tmpdir, _cube_triangles())
             output_path = os.path.join(tmpdir, "rotated.stl")
-            rotate_stl_file(
-                input_path, output_path, rotation_x=30.0, rotation_y=45.0, rotation_z=60.0
-            )
+            rotate_stl_file(input_path, output_path, rotation_x=30.0, rotation_y=45.0, rotation_z=60.0)
             assert os.path.isfile(output_path)
 
     def test_zero_rotation_preserves_size(self):
@@ -501,10 +500,7 @@ class TestRotate3mfFile:
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, "bad.3mf")
             bad_xml = (
-                '<?xml version="1.0" encoding="UTF-8"?>'
-                f'<model xmlns="{_3MF_NS}" unit="millimeter">'
-                "<resources/>"
-                "</model>"
+                f'<?xml version="1.0" encoding="UTF-8"?><model xmlns="{_3MF_NS}" unit="millimeter"><resources/></model>'
             )
             with zipfile.ZipFile(input_path, "w") as zf:
                 zf.writestr("3D/3dmodel.model", bad_xml)
@@ -539,3 +535,158 @@ class TestParse3mfTransform:
     def test_wrong_count_raises(self):
         with pytest.raises(ValueError, match="Expected 12"):
             _parse_3mf_transform("1 0 0")
+
+
+
+
+# ---------------------------------------------------------------------------
+# Helpers — STL rectangular prism generator for stability tests
+# ---------------------------------------------------------------------------
+
+
+def _make_flat_cube_stl(tmp_path, width: float, depth: float, height: float) -> str:
+    """Create a binary STL of a rectangular prism (0,0,0)→(width,depth,height).
+
+    A rectangular prism has 6 faces × 2 triangles = 12 triangles total.
+    Returns the path to the written STL file.
+    """
+    w, d, h = float(width), float(depth), float(height)
+    # 8 vertices of the rectangular prism
+    v = [
+        (0, 0, 0),    # 0 - front bottom left
+        (w, 0, 0),    # 1 - front bottom right
+        (w, d, 0),    # 2 - back bottom right
+        (0, d, 0),    # 3 - back bottom left
+        (0, 0, h),    # 4 - front top left
+        (w, 0, h),    # 5 - front top right
+        (w, d, h),    # 6 - back top right
+        (0, d, h),    # 7 - back top left
+    ]
+    # 12 triangles (2 per face), vertex indices
+    faces = [
+        (0, 2, 1), (0, 3, 2),  # bottom (z=0)
+        (4, 5, 6), (4, 6, 7),  # top (z=h)
+        (0, 1, 5), (0, 5, 4),  # front (y=0)
+        (2, 3, 7), (2, 7, 6),  # back (y=d)
+        (0, 4, 7), (0, 7, 3),  # left (x=0)
+        (1, 2, 6), (1, 6, 5),  # right (x=w)
+    ]
+
+    path = os.path.join(str(tmp_path), f"prism_{width}x{depth}x{height}.stl")
+    with open(path, "wb") as f:
+        f.write(b"\x00" * 80)  # header
+        f.write(struct.pack("<I", len(faces)))  # triangle count
+        for a, b, c in faces:
+            f.write(struct.pack("<3f", 0.0, 0.0, 0.0))  # normal (auto-computed by parsers)
+            f.write(struct.pack("<3f", *v[a]))  # vertex 1
+            f.write(struct.pack("<3f", *v[b]))  # vertex 2
+            f.write(struct.pack("<3f", *v[c]))  # vertex 3
+            f.write(struct.pack("<H", 0))  # attribute byte count
+    return path
+
+
+# ---------------------------------------------------------------------------
+# TestCheckStability
+# ---------------------------------------------------------------------------
+
+
+class TestCheckStability:
+    """Tests for check_stability() — orientation stability analysis.
+
+    Covers:
+        - File not found raises ValueError
+        - 3MF files raise ValueError (not supported)
+        - Stable flat cube → low risk
+        - Tall thin tower → high risk
+        - Medium risk borderline geometry
+        - Custom max_height_to_base_ratio threshold
+        - to_dict() returns all expected fields
+        - Center of gravity is reasonable for uniform geometry
+    """
+
+    def test_file_not_found_raises(self):
+
+        with pytest.raises(ValueError, match="[Ff]ile"):
+            check_stability("/nonexistent/model.stl")
+
+    def test_3mf_raises_not_supported(self, tmp_path):
+
+        p = tmp_path / "model.3mf"
+        p.write_bytes(b"dummy")
+        with pytest.raises(ValueError, match="(?i)3mf"):
+            check_stability(str(p))
+
+    def test_stable_cube_low_risk(self, tmp_path):
+
+        # 20x20x5mm — wide base, short height → low risk
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+        result = check_stability(stl_path)
+        assert result.stable is True
+        assert result.risk_level == "low"
+        assert result.height_to_base_ratio < 2.0
+        assert result.suggested_rotation is None
+        assert "stable" in result.recommendation.lower()
+
+    def test_tall_tower_high_risk(self, tmp_path):
+
+        # 5x5x100mm — tiny base, very tall → high risk
+        stl_path = _make_flat_cube_stl(tmp_path, 5, 5, 100)
+        result = check_stability(stl_path)
+        assert result.stable is False
+        assert result.risk_level == "high"
+        assert result.height_to_base_ratio >= 3.0
+        assert (
+            "reorient" in result.recommendation.lower()
+            or "wobble" in result.recommendation.lower()
+        )
+
+    def test_medium_risk_borderline(self, tmp_path):
+
+        # 10x10x25mm — ratio ≈ 2.5 (between 2.0 and 3.0)
+        stl_path = _make_flat_cube_stl(tmp_path, 10, 10, 25)
+        result = check_stability(stl_path)
+        assert result.risk_level == "medium"
+        assert result.stable is False
+        assert "brim" in result.recommendation.lower()
+
+    def test_custom_threshold(self, tmp_path):
+
+        stl_path = _make_flat_cube_stl(tmp_path, 10, 10, 25)
+        # With a much higher threshold, the same part should be lower risk
+        result = check_stability(stl_path, max_height_to_base_ratio=5.0)
+        assert result.risk_level in ("low", "medium")
+
+    def test_to_dict_returns_all_fields(self, tmp_path):
+
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+        result = check_stability(stl_path)
+        d = result.to_dict()
+        assert "stable" in d
+        assert "risk_level" in d
+        assert "height_mm" in d
+        assert "base_footprint_mm2" in d
+        assert "height_to_base_ratio" in d
+        assert "center_of_gravity_z_mm" in d
+        assert "recommendation" in d
+        assert "suggested_rotation" in d
+
+    def test_center_of_gravity_reasonable(self, tmp_path):
+
+        # Uniform 20mm cube — CoG should be near z=10
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 20)
+        result = check_stability(stl_path)
+        assert 5 < result.center_of_gravity_z_mm < 15
+
+    def test_height_mm_matches_geometry(self, tmp_path):
+
+        stl_path = _make_flat_cube_stl(tmp_path, 10, 10, 30)
+        result = check_stability(stl_path)
+        assert abs(result.height_mm - 30.0) < 1.0
+
+    def test_base_footprint_reasonable(self, tmp_path):
+
+        # 20x20 base → ~400 mm² footprint
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 5)
+        result = check_stability(stl_path)
+        # The footprint should be close to 400 (the bottom face area)
+        assert result.base_footprint_mm2 > 100  # at least a reasonable fraction
