@@ -3,7 +3,7 @@
 Handles proxy fulfillment requests from the REST API:
 - License validation
 - Per-user usage limits
-- 5% orchestration software fee calculation and collection
+- 5% orchestration fee calculation and collection
 - Order forwarding to fulfillment providers
 - Auto-refund on order failure
 - Server-side quote caching (prevents client-side price manipulation)
@@ -214,7 +214,7 @@ class ProxyOrchestrator:
         *,
         user_email: str,
     ) -> dict[str, Any]:
-        """Request a quote and calculate the Kiln orchestration software fee.
+        """Request a quote and calculate the Kiln orchestration fee.
 
         Stores the quote server-side so ``handle_order`` can look up the
         authoritative price instead of trusting client-supplied values.
@@ -236,7 +236,7 @@ class ProxyOrchestrator:
         provider = get_fulfillment_provider(provider_name)
         quote = provider.get_quote(request)
 
-        # Calculate Kiln orchestration software fee
+        # Calculate Kiln orchestration fee
         fee_calc = self._ledger.calculate_fee(
             quote.total_price,
             currency=quote.currency,
@@ -287,7 +287,7 @@ class ProxyOrchestrator:
         Workflow:
             1. Look up cached quote by ``quote_token``.
             2. Check free tier limits if user is on free tier.
-            3. Calculate and charge the orchestration software fee.
+            3. Calculate and charge the orchestration fee.
             4. Forward order to the fulfillment provider.
             5. Auto-refund if order fails after payment.
 

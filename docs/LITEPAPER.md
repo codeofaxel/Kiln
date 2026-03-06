@@ -71,7 +71,7 @@ The agent operates within strict guardrails. It has the autonomy to be useful, b
 
 ## Business Model
 
-Local printing with Kiln is free and always will be. The core software is released under the MIT license.
+Local printing with Kiln is free and always will be. The core infrastructure is released under the MIT license.
 
 Revenue comes from optional services:
 
@@ -80,7 +80,7 @@ Revenue comes from optional services:
 - **Business ($99/month)** -- Up to 50 printers, 5 team seats, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles. Annual: $79/mo.
 - **Enterprise (from $499/month)** -- Unlimited printers (20 included, $15/mo each additional) and unlimited team seats, dedicated single-tenant MCP server, on-premises deployment via Kubernetes and Helm (air-gapped support included), single sign-on via OIDC and SAML (works with Okta, Google Workspace, Azure AD, Auth0), role-based access control (admin/engineer/operator), full audit trail with JSON/CSV export, lockable safety profiles that prevent agent modifications, encrypted G-code at rest, per-printer overage billing via Stripe, 99.9% uptime SLA with rolling health monitoring, and dedicated support channel with onboarding. Annual: $399/mo.
 
-Outsourced manufacturing orders carry a 5% orchestration software fee (first 3 per month are free, with a $0.25 minimum and $200 maximum per order). For provider-routed orders, the provider remains merchant of record.
+Outsourced manufacturing orders carry a 5% orchestration fee (first 3 per month are free, with a $0.25 minimum and $200 maximum per order). For provider-routed orders, the provider remains merchant of record.
 
 Crypto donations are also accepted at kiln3d.sol (Solana) and kiln3d.eth (Ethereum).
 
@@ -100,5 +100,5 @@ Full documentation, CLI reference, and the technical whitepaper are available in
 
 ---
 
-Kiln is open-source software released under the MIT License. Version 0.1.0, February 2026.
+Kiln is open-source infrastructure released under the MIT License. Version 0.1.0, February 2026.
 Kiln is a project of Hadron Labs Inc.

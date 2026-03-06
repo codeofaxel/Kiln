@@ -1166,7 +1166,7 @@ def format_billing_setup(
             content = (
                 f"Open the link below to add a credit card:\n\n"
                 f"  [bold blue]{url}[/bold blue]\n\n"
-                f"After setup, Kiln will charge the orchestration software fee automatically\n"
+                f"After setup, Kiln will charge the orchestration fee automatically\n"
                 f"on each outsourced manufacturing order."
             )
         else:

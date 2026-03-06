@@ -89,7 +89,7 @@ class _FulfillmentToolsPlugin:
 
             Uploads the model, returns pricing from Craftcloud's network of 150+
             print services, including unit price, total, lead time, and shipping
-            options. A Kiln orchestration software fee is shown separately so
+            options. A Kiln orchestration fee is shown separately so
             the user sees the full cost before committing.
 
             If a payment method is linked, a hold is placed on the fee amount
@@ -171,7 +171,7 @@ class _FulfillmentToolsPlugin:
         ) -> dict:
             """Place a manufacturing order based on a previous quote.
 
-            Charges the orchestration software fee BEFORE placing the order to prevent
+            Charges the orchestration fee BEFORE placing the order to prevent
             unpaid orders.  If order placement fails after payment, the
             charge is automatically refunded.
 

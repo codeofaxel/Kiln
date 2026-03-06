@@ -25,7 +25,7 @@ _TERMS_SUMMARY = """\
      reduce risk but do not eliminate it.
   4. Third-party content (marketplaces, fulfillment) is governed by
      those providers' own terms.
-  5. Fulfillment orders incur a 5% orchestration software fee
+  5. Fulfillment orders incur a 5% orchestration fee
      (min $0.25, max $200). Your first 3 orders each month are
      fee-free. Local printing is always free.
   6. Kiln is provided "as is" without warranty of any kind.

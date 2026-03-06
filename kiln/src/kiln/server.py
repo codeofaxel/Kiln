@@ -3843,7 +3843,7 @@ def recent_events(limit: int = 20, *, type: str | None = None) -> dict:
 
 @mcp.tool()
 def billing_summary() -> dict:
-    """Get a summary of Kiln orchestration software fees for the current month.
+    """Get a summary of Kiln orchestration fees for the current month.
 
     Shows total fees collected, number of outsourced orders, free tier
     usage, and the current fee policy.  Only orders placed through
@@ -3875,7 +3875,7 @@ def billing_summary() -> dict:
 
 @mcp.tool()
 def billing_setup_url(rail: str = "stripe") -> dict:
-    """Get a URL to link a payment method for Kiln orchestration software fees.
+    """Get a URL to link a payment method for Kiln orchestration fees.
 
     Args:
         rail: Payment rail — ``"stripe"`` for credit card, ``"crypto"``
@@ -6238,7 +6238,7 @@ def fulfillment_quote(
 
     Uploads the model, returns pricing from Craftcloud's network of 150+
     print services, including unit price, total, lead time, and shipping
-    options. A Kiln orchestration software fee is shown separately so
+    options. A Kiln orchestration fee is shown separately so
     the user sees the full cost before committing.
 
     If a payment method is linked, a hold is placed on the fee amount
@@ -6315,7 +6315,7 @@ def fulfillment_order(
 ) -> dict:
     """Place a manufacturing order based on a previous quote.
 
-    Charges the orchestration software fee BEFORE placing the order to prevent
+    Charges the orchestration fee BEFORE placing the order to prevent
     unpaid orders.  If order placement fails after payment, the
     charge is automatically refunded.
 
