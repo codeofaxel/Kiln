@@ -603,6 +603,7 @@ def reslice_and_print(
     overrides: dict[str, str] | None = None,
     profile_path: str | None = None,
     slicer_path: str | None = None,
+    extra_args: list[str] | None = None,
     pause_after_step: int | None = None,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
@@ -623,6 +624,7 @@ def reslice_and_print(
         overrides: Dict of PrusaSlicer INI key-value overrides.
         profile_path: Explicit profile path (overrides printer_id resolution).
         slicer_path: Explicit path to slicer binary.
+        extra_args: Additional CLI arguments to pass to the slicer.
         pause_after_step: Auto-pause after completing step N (0-indexed).
 
     Returns:
@@ -687,6 +689,7 @@ def reslice_and_print(
                 model_path,
                 profile=ctx["effective_profile"],
                 slicer_path=slicer_path,
+                extra_args=extra_args,
             )
             ctx["gcode_path"] = result.output_path
             return PipelineStep(

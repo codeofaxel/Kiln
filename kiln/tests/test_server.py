@@ -44,6 +44,8 @@ from kiln.printers.moonraker import MoonrakerAdapter
 from kiln.printers.octoprint import OctoPrintAdapter
 from kiln.server import (
     _error_dict,
+    _format_duration,
+    _generate_print_comment,
     _tool_limiter,
     _validate_local_file,
     check_orientation,
@@ -51,6 +53,8 @@ from kiln.server import (
     get_filament_status,
     get_speed_profile,
     get_tool_position,
+    monitor_print,
+    multi_copy_print,
     preflight_check,
     printer_files,
     printer_status,
@@ -2936,3 +2940,597 @@ class TestCheckOrientation:
             "recommendation", "suggested_rotation",
         }
         assert expected_keys.issubset(data.keys())
+
+
+# ---------------------------------------------------------------------------
+# monitor_print
+# ---------------------------------------------------------------------------
+
+
+class TestFormatDuration:
+    """Tests for _format_duration helper."""
+
+    def test_none_returns_na(self):
+        assert _format_duration(None) == "N/A"
+
+    def test_negative_returns_na(self):
+        assert _format_duration(-5) == "N/A"
+
+    def test_zero_seconds(self):
+        assert _format_duration(0) == "~0s"
+
+    def test_minutes_only(self):
+        assert _format_duration(300) == "~5 min"
+
+    def test_hours_and_minutes(self):
+        assert _format_duration(5580) == "~1h 33min"
+
+    def test_seconds_only(self):
+        assert _format_duration(45) == "~45s"
+
+    def test_exactly_one_hour(self):
+        assert _format_duration(3600) == "~1h 0min"
+
+    def test_large_value_24h(self):
+        assert _format_duration(86400) == "~24h 0min"
+
+    def test_float_seconds(self):
+        assert _format_duration(90.7) == "~1 min"
+
+
+class TestGeneratePrintComment:
+    """Tests for _generate_print_comment helper."""
+
+    def test_normal_printing(self):
+        result = _generate_print_comment(
+            "printing",
+            completion=50.0,
+            tool_actual=210.0,
+            tool_target=210.0,
+            bed_actual=60.0,
+            bed_target=60.0,
+            print_error=0,
+        )
+        assert result == "Print progressing normally."
+
+    def test_error_detected(self):
+        result = _generate_print_comment(
+            "printing",
+            completion=50.0,
+            tool_actual=210.0,
+            tool_target=210.0,
+            bed_actual=60.0,
+            bed_target=60.0,
+            print_error=84033543,
+        )
+        assert "Error detected" in result
+
+    def test_paused(self):
+        result = _generate_print_comment(
+            "paused",
+            completion=50.0,
+            tool_actual=210.0,
+            tool_target=210.0,
+            bed_actual=60.0,
+            bed_target=60.0,
+            print_error=0,
+        )
+        assert result == "Print is paused."
+
+    def test_nozzle_heating(self):
+        result = _generate_print_comment(
+            "printing",
+            completion=50.0,
+            tool_actual=150.0,
+            tool_target=210.0,
+            bed_actual=60.0,
+            bed_target=60.0,
+            print_error=0,
+        )
+        assert "Nozzle still heating" in result
+
+    def test_almost_done(self):
+        result = _generate_print_comment(
+            "printing",
+            completion=95.0,
+            tool_actual=210.0,
+            tool_target=210.0,
+            bed_actual=60.0,
+            bed_target=60.0,
+            print_error=0,
+        )
+        assert "Almost done" in result
+
+    def test_just_started(self):
+        result = _generate_print_comment(
+            "printing",
+            completion=2.0,
+            tool_actual=210.0,
+            tool_target=210.0,
+            bed_actual=60.0,
+            bed_target=60.0,
+            print_error=0,
+        )
+        assert "just started" in result
+
+    def test_idle_state(self):
+        result = _generate_print_comment(
+            "idle",
+            completion=None,
+            tool_actual=25.0,
+            tool_target=0.0,
+            bed_actual=25.0,
+            bed_target=0.0,
+            print_error=0,
+        )
+        assert "idle" in result
+
+    def test_bed_heating(self):
+        result = _generate_print_comment(
+            "printing",
+            completion=3.0,
+            tool_actual=210.0,
+            tool_target=210.0,
+            bed_actual=30.0,
+            bed_target=60.0,
+            print_error=0,
+        )
+        assert "Bed still heating" in result
+
+    def test_nozzle_overtemp(self):
+        result = _generate_print_comment(
+            "printing",
+            completion=50.0,
+            tool_actual=230.0,
+            tool_target=210.0,
+            bed_actual=60.0,
+            bed_target=60.0,
+            print_error=0,
+        )
+        assert "Nozzle temperature deviation" in result
+
+    def test_all_none_temps(self):
+        result = _generate_print_comment(
+            "printing",
+            completion=50.0,
+            tool_actual=None,
+            tool_target=None,
+            bed_actual=None,
+            bed_target=None,
+            print_error=0,
+        )
+        assert result == "Print progressing normally."
+
+
+class TestMonitorPrint:
+    """Tests for the monitor_print MCP tool.
+
+    Covers: standard output format, snapshot handling, error states,
+    printer not found, all report sections present.
+    """
+
+    def _mock_state(self, **kwargs):
+        defaults = {
+            "connected": True,
+            "state": "printing",
+            "tool_temp_actual": 210.0,
+            "tool_temp_target": 210.0,
+            "bed_temp_actual": 60.0,
+            "bed_temp_target": 60.0,
+            "speed_profile": "Normal",
+            "speed_magnitude": 100,
+            "print_error": 0,
+        }
+        defaults.update(kwargs)
+        state = MagicMock()
+        state.to_dict.return_value = defaults
+        return state
+
+    def _mock_job(self, **kwargs):
+        defaults = {
+            "file_name": "test_model.gcode",
+            "completion": 45.0,
+            "print_time_seconds": 1800,
+            "print_time_left_seconds": 2200,
+            "current_layer": 50,
+            "total_layers": 120,
+        }
+        defaults.update(kwargs)
+        job = MagicMock()
+        job.to_dict.return_value = defaults
+        return job
+
+    def test_standard_format_contains_all_sections(self):
+        adapter = MagicMock()
+        adapter.get_state.return_value = self._mock_state()
+        adapter.get_job.return_value = self._mock_job()
+        adapter.get_snapshot.return_value = b"\xff\xd8\xff"
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            result = monitor_print(include_snapshot=False)
+
+        assert "Print Status" in result
+        assert "45% complete" in result
+        assert "File: test_model.gcode" in result
+        assert "Layer: 50 / 120" in result
+        assert "Time elapsed:" in result
+        assert "Remaining:" in result
+        assert "Nozzle: 210°C" in result
+        assert "Bed: 60°C" in result
+        assert "Speed: Normal (100%)" in result
+        assert "Errors: None" in result
+        assert "Camera:" in result
+        assert "Comments:" in result
+
+    def test_snapshot_saved_when_enabled(self):
+        adapter = MagicMock()
+        adapter.get_state.return_value = self._mock_state()
+        adapter.get_job.return_value = self._mock_job()
+        adapter.get_snapshot.return_value = b"\xff\xd8\xff\xe0"
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            result = monitor_print(include_snapshot=True)
+
+        assert "Camera:" in result
+        assert "kiln_monitor_" in result
+        assert ".jpg" in result
+        adapter.get_snapshot.assert_called_once()
+
+    def test_no_snapshot_when_disabled(self):
+        adapter = MagicMock()
+        adapter.get_state.return_value = self._mock_state()
+        adapter.get_job.return_value = self._mock_job()
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            result = monitor_print(include_snapshot=False)
+
+        assert "Camera: No camera available" in result
+        adapter.get_snapshot.assert_not_called()
+
+    def test_snapshot_failure_graceful(self):
+        adapter = MagicMock()
+        adapter.get_state.return_value = self._mock_state()
+        adapter.get_job.return_value = self._mock_job()
+        adapter.get_snapshot.side_effect = RuntimeError("camera offline")
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            result = monitor_print(include_snapshot=True)
+
+        assert "Snapshot capture failed" in result
+
+    def test_error_code_shown(self):
+        adapter = MagicMock()
+        adapter.get_state.return_value = self._mock_state(print_error=84033543)
+        adapter.get_job.return_value = self._mock_job()
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            result = monitor_print(include_snapshot=False)
+
+        assert "Errors: Code 84033543" in result
+        assert "Error detected" in result
+
+    def test_printer_not_found(self):
+        from kiln.registry import PrinterNotFoundError
+
+        with patch("kiln.server._registry") as mock_reg:
+            mock_reg.get.side_effect = PrinterNotFoundError("ghost")
+            result = monitor_print(printer_name="ghost", include_snapshot=False)
+
+        assert "not found" in result
+
+    def test_printer_error(self):
+        with patch("kiln.server._get_adapter", side_effect=PrinterError("offline")):
+            result = monitor_print(include_snapshot=False)
+
+        assert "Error:" in result
+        assert "offline" in result
+
+    def test_na_when_fields_missing(self):
+        adapter = MagicMock()
+        adapter.get_state.return_value = self._mock_state(
+            tool_temp_actual=None,
+            tool_temp_target=None,
+            bed_temp_actual=None,
+            bed_temp_target=None,
+        )
+        adapter.get_job.return_value = self._mock_job(
+            completion=None,
+            current_layer=None,
+            total_layers=None,
+            print_time_seconds=None,
+            print_time_left_seconds=None,
+            file_name=None,
+        )
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            result = monitor_print(include_snapshot=False)
+
+        assert "N/A% complete" in result
+        assert "File: N/A" in result
+        assert "Layer: N/A" in result
+        assert "Nozzle: N/A" in result
+        assert "Bed: N/A" in result
+
+    def test_uses_named_printer(self):
+        adapter = MagicMock()
+        adapter.get_state.return_value = self._mock_state()
+        adapter.get_job.return_value = self._mock_job()
+
+        with patch("kiln.server._registry") as mock_reg:
+            mock_reg.get.return_value = adapter
+            result = monitor_print(printer_name="bambu-a1", include_snapshot=False)
+
+        mock_reg.get.assert_called_once_with("bambu-a1")
+        assert "Print Status" in result
+
+    def test_chamber_temp_shown_when_available(self):
+        adapter = MagicMock()
+        adapter.get_state.return_value = self._mock_state(chamber_temp_actual=45.0)
+        adapter.get_job.return_value = self._mock_job()
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            result = monitor_print(include_snapshot=False)
+
+        assert "Chamber: 45°C" in result
+
+    def test_chamber_temp_hidden_when_none(self):
+        adapter = MagicMock()
+        adapter.get_state.return_value = self._mock_state()
+        adapter.get_job.return_value = self._mock_job()
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            result = monitor_print(include_snapshot=False)
+
+        assert "Chamber:" not in result
+
+    def test_speed_na_when_both_fields_none(self):
+        adapter = MagicMock()
+        adapter.get_state.return_value = self._mock_state(
+            speed_profile=None, speed_magnitude=None,
+        )
+        adapter.get_job.return_value = self._mock_job()
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            result = monitor_print(include_snapshot=False)
+
+        assert "Speed: N/A" in result
+        # Must NOT show "N/A (N/A%)"
+        assert "N/A%" not in result
+
+    def test_snapshot_adapter_no_get_snapshot(self):
+        adapter = MagicMock(spec=[])  # empty spec — no get_snapshot method
+        adapter.get_state = MagicMock(return_value=self._mock_state())
+        adapter.get_job = MagicMock(return_value=self._mock_job())
+
+        with patch("kiln.server._get_adapter", return_value=adapter):
+            result = monitor_print(include_snapshot=True)
+
+        # Should degrade gracefully (snapshot capture failed or no camera)
+        assert "Camera:" in result
+
+
+# ---------------------------------------------------------------------------
+# multi_copy_print
+# ---------------------------------------------------------------------------
+
+
+class TestMultiCopyPrint:
+    """Tests for the multi_copy_print MCP tool.
+
+    Covers: validation errors, PrusaSlicer strategy, OrcaSlicer fallback,
+    file not found, invalid overrides, auth check.
+    """
+
+    def _mock_pipeline_result(self, success=True):
+        result = MagicMock()
+        result.success = success
+        result.to_dict.return_value = {
+            "pipeline": "reslice_and_print",
+            "success": success,
+            "steps": [],
+        }
+        return result
+
+    def test_copies_less_than_2_rejected(self, tmp_path):
+        stl = os.path.join(str(tmp_path), "model.stl")
+        with open(stl, "wb") as f:
+            f.write(b"\x00" * 84)
+        result = multi_copy_print(model_path=stl, copies=1)
+        assert result["success"] is False
+        assert "copies must be >= 2" in result["error"]["message"]
+
+    def test_copies_more_than_20_rejected(self, tmp_path):
+        stl = os.path.join(str(tmp_path), "model.stl")
+        with open(stl, "wb") as f:
+            f.write(b"\x00" * 84)
+        result = multi_copy_print(model_path=stl, copies=21)
+        assert result["success"] is False
+        assert "copies must be <= 20" in result["error"]["message"]
+
+    def test_non_stl_file_rejected(self, tmp_path):
+        gcode = os.path.join(str(tmp_path), "model.gcode")
+        with open(gcode, "w") as f:
+            f.write("G28\n")
+        result = multi_copy_print(model_path=gcode, copies=2)
+        assert result["success"] is False
+        assert "STL or OBJ" in result["error"]["message"]
+
+    def test_file_not_found(self):
+        result = multi_copy_print(model_path="/nonexistent/model.stl", copies=2)
+        assert result["success"] is False
+        assert "not found" in result["error"]["message"].lower()
+
+    def test_invalid_overrides_json(self, tmp_path):
+        stl = os.path.join(str(tmp_path), "model.stl")
+        with open(stl, "wb") as f:
+            f.write(b"\x00" * 84)
+        result = multi_copy_print(
+            model_path=stl, copies=2, overrides="not json",
+        )
+        assert result["success"] is False
+        assert "Invalid JSON" in result["error"]["message"]
+
+    def test_overrides_not_dict_rejected(self, tmp_path):
+        stl = os.path.join(str(tmp_path), "model.stl")
+        with open(stl, "wb") as f:
+            f.write(b"\x00" * 84)
+        result = multi_copy_print(
+            model_path=stl, copies=2, overrides="[1, 2, 3]",
+        )
+        assert result["success"] is False
+        assert "JSON object" in result["error"]["message"]
+
+    def test_prusaslicer_uses_duplicate_flag(self, tmp_path):
+        stl = os.path.join(str(tmp_path), "model.stl")
+        with open(stl, "wb") as f:
+            f.write(b"\x00" * 84)
+
+        mock_slicer = MagicMock()
+        mock_slicer.name = "PrusaSlicer"
+
+        pipeline_result = self._mock_pipeline_result()
+
+        with (
+            patch("kiln.slicer.find_slicer", return_value=mock_slicer),
+            patch("kiln.server._pipeline_reslice_and_print", return_value=pipeline_result) as mock_pipeline,
+        ):
+            result = multi_copy_print(model_path=stl, copies=3, spacing_mm=15.0)
+
+        assert result["success"] is True
+        assert result["strategy"] == "prusaslicer_duplicate"
+        assert result["copies"] == 3
+        # Verify extra_args passed to pipeline
+        call_kwargs = mock_pipeline.call_args[1]
+        assert "--duplicate" in call_kwargs["extra_args"]
+        assert "3" in call_kwargs["extra_args"]
+        assert "--duplicate-distance" in call_kwargs["extra_args"]
+        assert "15.0" in call_kwargs["extra_args"]
+
+    def test_orcaslicer_uses_stl_duplication(self, tmp_path):
+        # Create a valid STL with geometry (need parseable triangles)
+        stl = _make_test_stl(tmp_path, 20, 20, 10)
+
+        mock_slicer = MagicMock()
+        mock_slicer.name = "OrcaSlicer"
+
+        pipeline_result = self._mock_pipeline_result()
+
+        with (
+            patch("kiln.slicer.find_slicer", return_value=mock_slicer),
+            patch("kiln.server._pipeline_reslice_and_print", return_value=pipeline_result) as mock_pipeline,
+        ):
+            result = multi_copy_print(model_path=stl, copies=2)
+
+        assert result["success"] is True
+        assert result["strategy"] == "stl_mesh_duplication"
+        assert result["copies"] == 2
+        # The model_path passed to the pipeline should be the merged STL, not the original
+        call_kwargs = mock_pipeline.call_args[1]
+        assert call_kwargs["model_path"] != stl
+
+    def test_negative_spacing_rejected(self, tmp_path):
+        stl = os.path.join(str(tmp_path), "model.stl")
+        with open(stl, "wb") as f:
+            f.write(b"\x00" * 84)
+        result = multi_copy_print(model_path=stl, copies=2, spacing_mm=-5)
+        assert result["success"] is False
+        assert "spacing" in result["error"]["message"].lower()
+
+    def test_auth_check_applied(self):
+        with patch("kiln.server._check_auth", return_value={"error": "denied"}):
+            result = multi_copy_print(model_path="/tmp/model.stl", copies=2)
+        assert result == {"error": "denied"}
+
+    def test_slicer_not_found(self, tmp_path):
+        from kiln.slicer import SlicerNotFoundError
+
+        stl = os.path.join(str(tmp_path), "model.stl")
+        with open(stl, "wb") as f:
+            f.write(b"\x00" * 84)
+        with patch("kiln.slicer.find_slicer", side_effect=SlicerNotFoundError("No slicer installed")):
+            result = multi_copy_print(model_path=stl, copies=2)
+        assert result["success"] is False
+        assert "No slicer" in result["error"]["message"]
+
+    def test_valid_overrides_passed_to_pipeline(self, tmp_path):
+        stl = os.path.join(str(tmp_path), "model.stl")
+        with open(stl, "wb") as f:
+            f.write(b"\x00" * 84)
+
+        mock_slicer = MagicMock()
+        mock_slicer.name = "PrusaSlicer"
+        pipeline_result = self._mock_pipeline_result()
+
+        with (
+            patch("kiln.slicer.find_slicer", return_value=mock_slicer),
+            patch("kiln.server._pipeline_reslice_and_print", return_value=pipeline_result) as mock_pipeline,
+        ):
+            result = multi_copy_print(
+                model_path=stl, copies=2,
+                overrides='{"fill_density": "20%"}',
+            )
+
+        assert result["success"] is True
+        call_kwargs = mock_pipeline.call_args[1]
+        assert call_kwargs["overrides"] == {"fill_density": "20%"}
+
+    def test_obj_file_accepted(self, tmp_path):
+        obj = os.path.join(str(tmp_path), "model.obj")
+        with open(obj, "w") as f:
+            f.write("v 0 0 0\n")
+
+        mock_slicer = MagicMock()
+        mock_slicer.name = "PrusaSlicer"
+        pipeline_result = self._mock_pipeline_result()
+
+        with (
+            patch("kiln.slicer.find_slicer", return_value=mock_slicer),
+            patch("kiln.server._pipeline_reslice_and_print", return_value=pipeline_result),
+        ):
+            result = multi_copy_print(model_path=obj, copies=2)
+
+        assert result["success"] is True
+
+    def test_zero_spacing_accepted(self, tmp_path):
+        stl = os.path.join(str(tmp_path), "model.stl")
+        with open(stl, "wb") as f:
+            f.write(b"\x00" * 84)
+
+        mock_slicer = MagicMock()
+        mock_slicer.name = "PrusaSlicer"
+        pipeline_result = self._mock_pipeline_result()
+
+        with (
+            patch("kiln.slicer.find_slicer", return_value=mock_slicer),
+            patch("kiln.server._pipeline_reslice_and_print", return_value=pipeline_result) as mock_pipeline,
+        ):
+            result = multi_copy_print(model_path=stl, copies=2, spacing_mm=0)
+
+        assert result["success"] is True
+        call_kwargs = mock_pipeline.call_args[1]
+        assert "0" in call_kwargs["extra_args"]
+
+
+def _make_test_stl(tmp_path, width: float, depth: float, height: float) -> str:
+    """Create a binary STL rectangular prism for testing."""
+    w, d, h = float(width), float(depth), float(height)
+    v = [
+        (0, 0, 0), (w, 0, 0), (w, d, 0), (0, d, 0),
+        (0, 0, h), (w, 0, h), (w, d, h), (0, d, h),
+    ]
+    faces = [
+        (0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7),
+        (0, 1, 5), (0, 5, 4), (2, 3, 7), (2, 7, 6),
+        (0, 4, 7), (0, 7, 3), (1, 2, 6), (1, 6, 5),
+    ]
+    path = os.path.join(str(tmp_path), f"test_{width}x{depth}x{height}.stl")
+    with open(path, "wb") as f:
+        f.write(b"\x00" * 80)
+        f.write(struct.pack("<I", len(faces)))
+        for a, b, c in faces:
+            f.write(struct.pack("<3f", 0.0, 0.0, 0.0))
+            f.write(struct.pack("<3f", *v[a]))
+            f.write(struct.pack("<3f", *v[b]))
+            f.write(struct.pack("<3f", *v[c]))
+            f.write(struct.pack("<H", 0))
+    return path

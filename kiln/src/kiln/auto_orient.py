@@ -612,6 +612,126 @@ def _write_binary_stl(
 
 
 # ---------------------------------------------------------------------------
+# Multi-copy plate duplication
+# ---------------------------------------------------------------------------
+
+
+def duplicate_stl_on_plate(
+    file_path: str,
+    count: int,
+    *,
+    spacing_mm: float = 10.0,
+    bed_width_mm: float = 256.0,
+    bed_depth_mm: float = 256.0,
+    output_path: str | None = None,
+) -> str:
+    """Duplicate an STL model into *count* copies arranged in a grid on the build plate.
+
+    Parses the source STL, computes its bounding box, arranges copies in a
+    grid with *spacing_mm* between them, validates they fit within the build
+    volume, and writes a single merged STL with all copies.
+
+    :param file_path: Path to the source STL file.
+    :param count: Number of copies (must be >= 2).
+    :param spacing_mm: Minimum gap between copies in mm.
+    :param bed_width_mm: Build plate width (X) in mm.
+    :param bed_depth_mm: Build plate depth (Y) in mm.
+    :param output_path: Where to write the output STL.  If ``None``, a
+        temp file is created.
+    :returns: Path to the output STL with all copies.
+    :raises ValueError: If copies don't fit on the bed or file is invalid.
+    """
+    if count < 2:
+        raise ValueError(f"count must be >= 2, got {count}")
+
+    triangles, _vertices = _parse_mesh(file_path)
+    triangles = _translate_to_bed(triangles)
+
+    # --- Compute bounding box ---
+    all_verts: list[tuple[float, ...]] = []
+    for tri in triangles:
+        all_verts.extend(tri)
+
+    xs = [v[0] for v in all_verts]
+    ys = [v[1] for v in all_verts]
+
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+
+    model_width = x_max - x_min
+    model_depth = y_max - y_min
+
+    if model_width <= 0 or model_depth <= 0:
+        raise ValueError("Model has zero width or depth.")
+
+    # --- Center model at origin ---
+    center_x = (x_min + x_max) / 2.0
+    center_y = (y_min + y_max) / 2.0
+
+    centered: list[tuple[tuple[float, ...], ...]] = []
+    for tri in triangles:
+        tv = tuple((v[0] - center_x, v[1] - center_y, v[2]) for v in tri)
+        centered.append(tv)
+
+    # --- Calculate grid layout ---
+    cell_w = model_width + spacing_mm
+    cell_d = model_depth + spacing_mm
+
+    cols = int(bed_width_mm // cell_w)
+    rows = int(bed_depth_mm // cell_d)
+
+    if cols < 1 or rows < 1:
+        raise ValueError(
+            f"Model ({model_width:.1f} x {model_depth:.1f} mm) is too large "
+            f"for the build plate ({bed_width_mm} x {bed_depth_mm} mm)."
+        )
+
+    if count > cols * rows:
+        raise ValueError(
+            f"Cannot fit {count} copies on {bed_width_mm}x{bed_depth_mm} mm bed. "
+            f"Max {cols * rows} copies ({cols} cols x {rows} rows) with "
+            f"{spacing_mm} mm spacing."
+        )
+
+    # --- Generate copy positions (centered on bed) ---
+    # Determine how many columns/rows we actually need.
+    actual_cols = min(count, cols)
+    actual_rows = math.ceil(count / actual_cols)
+
+    grid_width = actual_cols * cell_w - spacing_mm
+    grid_depth = actual_rows * cell_d - spacing_mm
+
+    start_x = (bed_width_mm - grid_width) / 2.0 + model_width / 2.0
+    start_y = (bed_depth_mm - grid_depth) / 2.0 + model_depth / 2.0
+
+    # --- Build merged triangles ---
+    merged: list[tuple[tuple[float, ...], ...]] = []
+    placed = 0
+    for row in range(actual_rows):
+        for col in range(actual_cols):
+            if placed >= count:
+                break
+            offset_x = start_x + col * cell_w
+            offset_y = start_y + row * cell_d
+            for tri in centered:
+                tv = tuple(
+                    (v[0] + offset_x, v[1] + offset_y, v[2]) for v in tri
+                )
+                merged.append(tv)
+            placed += 1
+
+    # --- Write output ---
+    if output_path is None:
+        import tempfile as _tempfile
+
+        fd, output_path = _tempfile.mkstemp(suffix="_multi.stl")
+        os.close(fd)
+
+    _write_binary_stl(merged, output_path)
+    return output_path
+
+
+# ---------------------------------------------------------------------------
 # File-level rotation — STL
 # ---------------------------------------------------------------------------
 

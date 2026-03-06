@@ -1612,6 +1612,196 @@ def printer_status() -> dict:
         return _error_dict(f"Unexpected error in printer_status: {exc}", code="INTERNAL_ERROR")
 
 
+def _format_duration(seconds: int | float | None) -> str:
+    """Format seconds as a human-readable duration string."""
+    if seconds is None or seconds < 0:
+        return "N/A"
+    total = int(seconds)
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours > 0:
+        return f"~{hours}h {minutes}min"
+    if minutes > 0:
+        return f"~{minutes} min"
+    return f"~{secs}s"
+
+
+def _generate_print_comment(
+    state_str: str,
+    *,
+    completion: float | None,
+    tool_actual: float | None,
+    tool_target: float | None,
+    bed_actual: float | None,
+    bed_target: float | None,
+    print_error: int | None,
+) -> str:
+    """Generate an auto-observation comment about print health."""
+    if print_error and print_error > 0:
+        return f"Error detected (code {print_error}). Check printer."
+    if state_str == "paused":
+        return "Print is paused."
+    if state_str not in ("printing", "preparing"):
+        return f"Printer state: {state_str}."
+
+    comments: list[str] = []
+
+    # Temperature deviations
+    if tool_actual is not None and tool_target is not None and tool_target > 0:
+        diff = abs(tool_actual - tool_target)
+        if diff > 10:
+            if tool_actual < tool_target:
+                comments.append("Nozzle still heating up.")
+            else:
+                comments.append("Nozzle temperature deviation detected.")
+    if bed_actual is not None and bed_target is not None and bed_target > 0:
+        diff = abs(bed_actual - bed_target)
+        if diff > 10:
+            if bed_actual < bed_target:
+                comments.append("Bed still heating up.")
+            else:
+                comments.append("Bed temperature deviation detected.")
+
+    if completion is not None and completion >= 90:
+        comments.append("Almost done!")
+    elif completion is not None and completion < 5 and state_str == "printing":
+        comments.append("Print just started.")
+
+    if not comments:
+        comments.append("Print progressing normally.")
+
+    return " ".join(comments)
+
+
+@mcp.tool()
+def monitor_print(
+    printer_name: str | None = None,
+    include_snapshot: bool = True,
+) -> str:
+    """Monitor a print job with a standardized status report.
+
+    Returns a fixed-format human-readable report with print progress,
+    temperatures, speed, errors, camera snapshot, and health commentary.
+    Use this tool whenever monitoring a print — it ensures consistent
+    output format across all agents.
+
+    :param printer_name: Target printer name.  Omit for the default printer.
+    :param include_snapshot: Whether to capture and save a camera snapshot.
+    """
+    try:
+        if printer_name:
+            adapter = _registry.get(printer_name)
+        else:
+            adapter = _get_adapter()
+
+        state = adapter.get_state()
+        job = adapter.get_job()
+        sd = state.to_dict()
+        jd = job.to_dict()
+
+        # --- Extract fields ---
+        state_str = sd.get("state", "unknown")
+        completion = jd.get("completion")
+        file_name = jd.get("file_name") or "N/A"
+        current_layer = jd.get("current_layer")
+        total_layers = jd.get("total_layers")
+        elapsed_s = jd.get("print_time_seconds")
+        remaining_s = jd.get("print_time_left_seconds")
+        tool_actual = sd.get("tool_temp_actual")
+        tool_target = sd.get("tool_temp_target")
+        bed_actual = sd.get("bed_temp_actual")
+        bed_target = sd.get("bed_temp_target")
+        chamber_actual = sd.get("chamber_temp_actual")
+        speed_profile = sd.get("speed_profile")
+        speed_magnitude = sd.get("speed_magnitude")
+        print_error = sd.get("print_error", 0)
+
+        # --- Format values ---
+        progress_str = f"{completion:.0f}" if completion is not None else "N/A"
+        layer_str = (
+            f"{current_layer} / {total_layers}"
+            if current_layer is not None and total_layers is not None
+            else "N/A"
+        )
+        elapsed_str = _format_duration(elapsed_s)
+        remaining_str = _format_duration(remaining_s)
+        nozzle_str = (
+            f"{tool_actual:.0f}°C → {tool_target:.0f}°C target"
+            if tool_actual is not None and tool_target is not None
+            else "N/A"
+        )
+        bed_str = (
+            f"{bed_actual:.0f}°C → {bed_target:.0f}°C target"
+            if bed_actual is not None and bed_target is not None
+            else "N/A"
+        )
+        if speed_profile is not None and speed_magnitude is not None:
+            speed_str = f"{speed_profile} ({speed_magnitude}%)"
+        else:
+            speed_str = "N/A"
+        error_str = f"Code {print_error}" if print_error and print_error > 0 else "None"
+
+        # --- Snapshot ---
+        snapshot_line = "No camera available"
+        if include_snapshot:
+            try:
+                image_data = adapter.get_snapshot()
+                if image_data is not None:
+                    import tempfile as _tmpmod
+                    import uuid as _uuid
+
+                    snap_dir = _tmpmod.gettempdir()
+                    snap_path = os.path.join(
+                        snap_dir, f"kiln_monitor_{_uuid.uuid4().hex[:12]}.jpg"
+                    )
+                    with open(snap_path, "wb") as f:
+                        f.write(image_data)
+                    snapshot_line = snap_path
+            except Exception as snap_exc:
+                logger.debug("Snapshot capture failed: %s", snap_exc)
+                snapshot_line = "Snapshot capture failed"
+
+        # --- Comments ---
+        comment = _generate_print_comment(
+            state_str,
+            completion=completion,
+            tool_actual=tool_actual,
+            tool_target=tool_target,
+            bed_actual=bed_actual,
+            bed_target=bed_target,
+            print_error=print_error,
+        )
+
+        # --- Assemble report ---
+        lines = [
+            f"Print Status — {progress_str}% complete",
+            f"- File: {file_name}",
+            f"- Layer: {layer_str}",
+            f"- Time elapsed: {elapsed_str} | Remaining: {remaining_str}",
+            f"- Nozzle: {nozzle_str}",
+            f"- Bed: {bed_str}",
+        ]
+        if chamber_actual is not None:
+            lines.append(f"- Chamber: {chamber_actual:.0f}°C")
+        lines.extend([
+            f"- Speed: {speed_str}",
+            f"- Errors: {error_str}",
+            f"Camera: {snapshot_line}",
+            f"Comments: {comment}",
+        ])
+        report = "\n".join(lines)
+
+        return report
+
+    except PrinterNotFoundError:
+        return f"Error: Printer {printer_name!r} not found in registry."
+    except (PrinterError, RuntimeError) as exc:
+        return f"Error: Failed to monitor print: {exc}"
+    except Exception as exc:
+        logger.exception("Unexpected error in monitor_print")
+        return f"Error: Unexpected error in monitor_print: {exc}"
+
+
 @mcp.tool()
 def printer_files() -> dict:
     """List all G-code files available on the printer.
@@ -10374,6 +10564,145 @@ def run_reslice_and_print(
     except Exception as exc:
         logger.exception("Unexpected error in run_reslice_and_print")
         return _error_dict(f"Unexpected error in run_reslice_and_print: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def multi_copy_print(
+    model_path: str,
+    copies: int,
+    printer_name: str | None = None,
+    printer_id: str | None = None,
+    spacing_mm: float = 10.0,
+    overrides: str | None = None,
+    slicer_path: str | None = None,
+) -> dict:
+    """Print multiple copies of a model arranged on one build plate.
+
+    Automatically arranges copies in a grid with spacing so they don't
+    overlap, slices the plate as a single job, and prints.
+
+    Uses PrusaSlicer's ``--duplicate`` flag when available (handles placement,
+    collision avoidance, and travel optimization). Falls back to STL mesh
+    duplication for OrcaSlicer or when fine control is needed.
+
+    Requires a slicer (PrusaSlicer or OrcaSlicer) installed locally.
+    The printer must be idle and connected.
+
+    Args:
+        model_path: Path to input model (STL, OBJ).
+        copies: Number of copies to print (2-20).
+        printer_name: Registered printer name in fleet.
+        printer_id: Printer model ID for auto-profile selection.
+        spacing_mm: Gap between copies in mm (default 10).
+        overrides: JSON string of slicer parameter overrides.
+        slicer_path: Explicit path to the slicer binary.
+    """
+    if err := _check_auth("print"):
+        return err
+
+    # --- Validation ---
+    if copies < 2:
+        return _error_dict("copies must be >= 2.", code="VALIDATION_ERROR")
+    if copies > 20:
+        return _error_dict("copies must be <= 20.", code="VALIDATION_ERROR")
+    if spacing_mm < 0:
+        return _error_dict("spacing_mm must be >= 0.", code="VALIDATION_ERROR")
+
+    ext = os.path.splitext(model_path)[1].lower()
+    if ext not in (".stl", ".obj"):
+        return _error_dict(
+            f"multi_copy_print requires an STL or OBJ file, got {ext!r}.",
+            code="VALIDATION_ERROR",
+        )
+
+    if not os.path.isfile(model_path):
+        return _error_dict(f"File not found: {model_path}", code="FILE_NOT_FOUND")
+
+    try:
+        # --- Parse overrides ---
+        parsed_overrides: dict[str, str] | None = None
+        if overrides:
+            import json
+
+            try:
+                parsed_overrides = json.loads(overrides)
+                if not isinstance(parsed_overrides, dict):
+                    return _error_dict(
+                        "overrides must be a JSON object.",
+                        code="VALIDATION_ERROR",
+                    )
+            except json.JSONDecodeError as exc:
+                return _error_dict(
+                    f"Invalid JSON in overrides: {exc}",
+                    code="VALIDATION_ERROR",
+                )
+
+        # --- Detect slicer and choose strategy ---
+        from kiln.slicer import find_slicer
+
+        slicer_info = find_slicer(slicer_path)
+        slicer_name = slicer_info.name.lower()
+
+        use_duplicate_flag = "prusaslicer" in slicer_name or "prusa" in slicer_name
+
+        if use_duplicate_flag:
+            # PrusaSlicer path: use --duplicate flag
+            extra_args = [
+                "--duplicate", str(copies),
+                "--duplicate-distance", str(spacing_mm),
+            ]
+            result = _pipeline_reslice_and_print(
+                model_path=model_path,
+                printer_name=printer_name,
+                printer_id=printer_id,
+                overrides=parsed_overrides,
+                slicer_path=slicer_path,
+                extra_args=extra_args,
+            )
+        else:
+            # Fallback: STL mesh duplication
+            from kiln.auto_orient import duplicate_stl_on_plate
+
+            # Get bed dimensions from safety profiles if printer_id available
+            bed_w = 256.0
+            bed_d = 256.0
+            if printer_id:
+                try:
+                    from kiln.safety_profiles import get_profile
+
+                    profile = get_profile(printer_id)
+                    if profile and profile.build_volume:
+                        bed_w = float(profile.build_volume[0])
+                        bed_d = float(profile.build_volume[1])
+                except Exception:
+                    pass
+
+            merged_path = duplicate_stl_on_plate(
+                model_path,
+                copies,
+                spacing_mm=spacing_mm,
+                bed_width_mm=bed_w,
+                bed_depth_mm=bed_d,
+            )
+            result = _pipeline_reslice_and_print(
+                model_path=merged_path,
+                printer_name=printer_name,
+                printer_id=printer_id,
+                overrides=parsed_overrides,
+                slicer_path=slicer_path,
+            )
+
+        summary = {"success": result.success, **result.to_dict()}
+        summary["copies"] = copies
+        summary["strategy"] = "prusaslicer_duplicate" if use_duplicate_flag else "stl_mesh_duplication"
+        return summary
+
+    except ValueError as exc:
+        return _error_dict(str(exc), code="VALIDATION_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in multi_copy_print")
+        return _error_dict(f"Unexpected error in multi_copy_print: {exc}", code="INTERNAL_ERROR")
+
 
 @mcp.tool()
 def run_calibrate(

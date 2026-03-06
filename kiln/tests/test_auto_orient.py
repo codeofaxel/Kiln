@@ -24,6 +24,7 @@ from kiln.auto_orient import (
     _translate_to_bed,
     apply_orientation,
     check_stability,
+    duplicate_stl_on_plate,
     estimate_supports,
     find_optimal_orientation,
     rotate_3mf_file,
@@ -690,3 +691,146 @@ class TestCheckStability:
         result = check_stability(stl_path)
         # The footprint should be close to 400 (the bottom face area)
         assert result.base_footprint_mm2 > 100  # at least a reasonable fraction
+
+
+# ---------------------------------------------------------------------------
+# TestDuplicateStlOnPlate
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicateStlOnPlate:
+    """Tests for duplicate_stl_on_plate() — multi-copy plate arrangement.
+
+    Covers:
+        - Basic 2-copy duplication produces valid STL
+        - 4-copy grid arrangement
+        - Count < 2 raises ValueError
+        - Too many copies for bed raises ValueError
+        - Model too large for bed raises ValueError
+        - Custom spacing
+        - Output triangle count is count × source triangles
+        - All copies fit within bed bounds
+        - Temp file created when output_path is None
+    """
+
+    def test_two_copies_produces_valid_stl(self, tmp_path):
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 10)
+        output = duplicate_stl_on_plate(
+            stl_path, 2, bed_width_mm=256, bed_depth_mm=256,
+            output_path=os.path.join(str(tmp_path), "out.stl"),
+        )
+        assert os.path.isfile(output)
+        assert os.path.getsize(output) > 0
+
+    def test_four_copies_grid(self, tmp_path):
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 10)
+        output = duplicate_stl_on_plate(
+            stl_path, 4, bed_width_mm=256, bed_depth_mm=256,
+            output_path=os.path.join(str(tmp_path), "out4.stl"),
+        )
+        # Read back and verify triangle count: 12 triangles per cube × 4 = 48
+        with open(output, "rb") as f:
+            f.read(80)  # header
+            count = struct.unpack("<I", f.read(4))[0]
+        assert count == 12 * 4
+
+    def test_count_less_than_2_raises(self, tmp_path):
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 10)
+        with pytest.raises(ValueError, match="count must be >= 2"):
+            duplicate_stl_on_plate(stl_path, 1)
+
+    def test_too_many_copies_raises(self, tmp_path):
+        # 100mm model + 10mm spacing = 110mm per cell on a 256mm bed
+        # Only 2 columns × 2 rows = 4 max
+        stl_path = _make_flat_cube_stl(tmp_path, 100, 100, 10)
+        with pytest.raises(ValueError, match="Cannot fit"):
+            duplicate_stl_on_plate(
+                stl_path, 10, bed_width_mm=256, bed_depth_mm=256,
+            )
+
+    def test_model_too_large_for_bed(self, tmp_path):
+        stl_path = _make_flat_cube_stl(tmp_path, 300, 300, 10)
+        with pytest.raises(ValueError, match="too large"):
+            duplicate_stl_on_plate(
+                stl_path, 2, bed_width_mm=256, bed_depth_mm=256,
+            )
+
+    def test_custom_spacing(self, tmp_path):
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 10)
+        output = duplicate_stl_on_plate(
+            stl_path, 2, spacing_mm=50.0, bed_width_mm=256, bed_depth_mm=256,
+            output_path=os.path.join(str(tmp_path), "spaced.stl"),
+        )
+        assert os.path.isfile(output)
+
+    def test_triangle_count_is_multiplied(self, tmp_path):
+        stl_path = _make_flat_cube_stl(tmp_path, 10, 10, 10)
+        # Source has 12 triangles
+        for n in (2, 3, 5):
+            output = duplicate_stl_on_plate(
+                stl_path, n, bed_width_mm=256, bed_depth_mm=256,
+                output_path=os.path.join(str(tmp_path), f"out_{n}.stl"),
+            )
+            with open(output, "rb") as f:
+                f.read(80)
+                count = struct.unpack("<I", f.read(4))[0]
+            assert count == 12 * n
+
+    def test_copies_within_bed_bounds(self, tmp_path):
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 10)
+        output = duplicate_stl_on_plate(
+            stl_path, 4, bed_width_mm=256, bed_depth_mm=256,
+            output_path=os.path.join(str(tmp_path), "bounds.stl"),
+        )
+        # Read all vertices and verify within bed bounds
+        with open(output, "rb") as f:
+            f.read(80)
+            tri_count = struct.unpack("<I", f.read(4))[0]
+            for _ in range(tri_count):
+                f.read(12)  # skip normal
+                for _ in range(3):
+                    x, y, z = struct.unpack("<3f", f.read(12))
+                    assert 0 <= x <= 256, f"x={x} out of bounds"
+                    assert 0 <= y <= 256, f"y={y} out of bounds"
+                    assert z >= 0, f"z={z} below bed"
+                f.read(2)  # attribute
+
+    def test_temp_file_when_no_output_path(self, tmp_path):
+        stl_path = _make_flat_cube_stl(tmp_path, 10, 10, 10)
+        output = duplicate_stl_on_plate(
+            stl_path, 2, bed_width_mm=256, bed_depth_mm=256,
+        )
+        assert os.path.isfile(output)
+        assert output.endswith("_multi.stl")
+        os.unlink(output)  # cleanup
+
+    def test_file_not_found_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="File not found"):
+            duplicate_stl_on_plate("/nonexistent/model.stl", 2)
+
+    def test_non_square_bed(self, tmp_path):
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 10)
+        output = duplicate_stl_on_plate(
+            stl_path, 4, bed_width_mm=300, bed_depth_mm=200,
+            output_path=os.path.join(str(tmp_path), "nonsquare.stl"),
+        )
+        assert os.path.isfile(output)
+        # Verify all vertices within the non-square bed
+        with open(output, "rb") as f:
+            f.read(80)
+            tri_count = struct.unpack("<I", f.read(4))[0]
+            for _ in range(tri_count):
+                f.read(12)
+                for _ in range(3):
+                    x, y, _z = struct.unpack("<3f", f.read(12))
+                    assert 0 <= x <= 300, f"x={x} out of bounds"
+                    assert 0 <= y <= 200, f"y={y} out of bounds"
+                f.read(2)
+
+    def test_zero_spacing(self, tmp_path):
+        stl_path = _make_flat_cube_stl(tmp_path, 20, 20, 10)
+        output = duplicate_stl_on_plate(
+            stl_path, 2, spacing_mm=0.0, bed_width_mm=256, bed_depth_mm=256,
+            output_path=os.path.join(str(tmp_path), "zero_space.stl"),
+        )
+        assert os.path.isfile(output)
