@@ -49,12 +49,15 @@ def _extract_tools(source: str) -> dict[str, str]:
     i = 0
     while i < len(lines):
         if "@mcp.tool()" in lines[i]:
-            # Find the def line
+            # Find the def line (sync or async)
             j = i + 1
-            while j < len(lines) and not lines[j].strip().startswith("def "):
+            while j < len(lines) and not (
+                lines[j].strip().startswith("def ")
+                or lines[j].strip().startswith("async def ")
+            ):
                 j += 1
             if j < len(lines):
-                match = re.match(r"\s*def\s+(\w+)\s*\(", lines[j])
+                match = re.match(r"\s*(?:async\s+)?def\s+(\w+)\s*\(", lines[j])
                 if match:
                     tool_name = match.group(1)
                     # Collect body until next @mcp.tool() or top-level def/class
@@ -200,6 +203,10 @@ READ_ONLY_TOOLS: Set[str] = {
     # Ambient / trend analysis (read-only)
     "check_ambient_conditions",
     "printer_trend_analysis",
+
+    # Orientation / monitoring (read-only)
+    "monitor_print",
+    "check_orientation",
 }
 
 
