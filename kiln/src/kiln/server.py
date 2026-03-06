@@ -760,6 +760,7 @@ _TOOL_RATE_LIMITS: dict[str, tuple[int, int]] = {
     "upload_file": (2000, 10),
     "pause_print": (5000, 6),
     "resume_print": (5000, 6),
+    "run_calibration": (10000, 2),
 }
 
 
@@ -1599,6 +1600,9 @@ def printer_status() -> dict:
 def printer_files() -> dict:
     """List all G-code files available on the printer.
 
+    Handles FTPS directory listing (Bambu), REST file API
+    (OctoPrint/Moonraker) automatically.
+
     Returns a JSON array of file objects, each containing:
     - ``name``: file name
     - ``path``: full path on the printer
@@ -1633,6 +1637,9 @@ def printer_files() -> dict:
 @mcp.tool()
 def upload_file(file_path: str) -> dict:
     """Upload a local G-code file to the printer.
+
+    Handles FTPS (Bambu), REST multipart upload (OctoPrint/Moonraker), and
+    serial file transfer automatically.
 
     Args:
         file_path: Absolute path to the G-code file on the local filesystem.
@@ -1867,6 +1874,7 @@ def start_print(
     flow_cali: bool = True,
     vibration_cali: bool = True,
     layer_inspect: bool = False,
+    nozzle_clog_detect: bool = True,
     bed_type: str = "auto",
     plate_number: int = 1,
 ) -> dict:
@@ -1889,8 +1897,13 @@ def start_print(
         flow_cali: Run flow calibration (Bambu only).  Default ``True``.
         vibration_cali: Run vibration/resonance calibration (Bambu only).
             Default ``True``.
-        layer_inspect: Enable first-layer inspection pause (Bambu only).
+        layer_inspect: Enable first-layer lidar inspection pause (Bambu only).
             Default ``False``.
+        nozzle_clog_detect: Enable nozzle clumping / blob detection by
+            probing (Bambu only).  Default ``True``.  Set ``False`` to
+            bypass HMS 0300-8014 errors on models that trigger false
+            positives (thin first-layer geometry, certain grip/case models).
+            Disables the eddy-current sensor probe at layers 4/11/20.
         bed_type: Bed surface type (Bambu only).  Default ``"auto"``.
         plate_number: Plate index in multi-plate 3MF files (Bambu only).
             Default ``1``.
@@ -1975,6 +1988,8 @@ def start_print(
             print_kwargs["vibration_cali"] = False
         if layer_inspect:
             print_kwargs["layer_inspect"] = True
+        if not nozzle_clog_detect:
+            print_kwargs["nozzle_clog_detect"] = False
         if bed_type != "auto":
             print_kwargs["bed_type"] = bed_type
         if plate_number != 1:
@@ -1995,6 +2010,9 @@ def start_print(
 @mcp.tool()
 def cancel_print() -> dict:
     """Cancel the currently running print job.
+
+    Sends cancel via MQTT (Bambu) or REST API (OctoPrint/Moonraker)
+    automatically.
 
     The printer must have an active job (printing or paused).  After
     cancellation the printer will cool down and return to idle.
@@ -2019,6 +2037,44 @@ def cancel_print() -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in cancel_print")
         return _error_dict(f"Unexpected error in cancel_print: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def run_calibration(options: list[str] | None = None) -> dict:
+    """Run printer calibration (bed leveling, Z offset, vibration compensation).
+
+    Sends calibration commands via MQTT (Bambu) or G-code
+    (OctoPrint/Moonraker) automatically.
+
+    Triggers calibration routines on the connected printer.  The printer
+    must be idle -- calibration cannot run during a print.
+
+    Available options (printer-specific -- not all printers support all):
+    - ``"bed_leveling"``: Auto bed mesh probing and Z offset calibration
+    - ``"vibration"``: Input shaper / vibration compensation tuning
+    - ``"flow"``: Extrusion flow / first-layer inspection calibration
+    - ``"all"``: Run all available calibration routines
+
+    When no options specified, defaults to bed leveling only.
+
+    Bambu printers support all options.  OctoPrint/Moonraker support
+    ``bed_leveling`` and ``vibration``.  Other printers may not support
+    remote calibration.
+    """
+    if err := _check_auth("print"):
+        return err
+    if err := _check_rate_limit("run_calibration"):
+        return err
+    try:
+        adapter = _get_adapter()
+        result = adapter.run_calibration(options=options)
+        _audit("run_calibration", "executed", extra={"options": options})
+        return result.to_dict()
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to run calibration: {exc}. Check that the printer is idle.")
+    except Exception as exc:
+        logger.exception("Unexpected error in run_calibration")
+        return _error_dict(f"Unexpected error in run_calibration: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -2086,7 +2142,23 @@ def emergency_stop(
 
 @mcp.tool()
 def emergency_status(printer_name: str | None = None, include_unlatched: bool = False) -> dict:
-    """Return emergency latch status for one printer or the fleet."""
+    """Get the emergency stop latch status for one printer or the entire fleet.
+
+    Returns whether an emergency stop is active and whether the printer is
+    locked from printing operations.  When an e-stop is active, all print
+    commands are blocked until ``clear_emergency_stop()`` is called with an
+    acknowledgement note.
+
+    :param printer_name: Query a specific printer, or omit for all printers.
+    :param include_unlatched: When True, include printers that have no active
+        latch.  Defaults to False (only active latches).
+
+    :returns: Latch state per printer: ``active`` (bool), ``reason``,
+        ``source``, ``timestamp``, and whether critical interlocks prevent
+        clearing.
+
+    See also: ``emergency_stop()``, ``clear_emergency_stop()``.
+    """
     if err := _check_auth("print"):
         return err
     try:
@@ -2117,7 +2189,24 @@ def clear_emergency_stop(
     acknowledgement_note: str,
     acknowledged_by: str = "operator",
 ) -> dict:
-    """Acknowledge and clear a printer emergency latch."""
+    """Acknowledge and clear a printer's emergency stop latch.
+
+    This is a safety-critical operation.  The latch may be blocked from
+    clearing if critical interlocks are still active (e.g. thermal sensor
+    failure).  Call ``emergency_status()`` first to check whether clearing
+    is possible.
+
+    :param printer_name: Printer whose latch to clear.
+    :param acknowledgement_note: Free-text note explaining why the e-stop is
+        being cleared (required -- cannot be empty).
+    :param acknowledged_by: Identity of the person or system clearing the
+        latch (default ``"operator"``).
+
+    :returns: Updated latch state, or an error if critical interlocks prevent
+        clearing.
+
+    See also: ``emergency_status()``, ``emergency_stop()``.
+    """
     if err := _check_auth("print"):
         return err
     if conf := _check_confirmation(
@@ -2169,7 +2258,25 @@ def emergency_trip_input(
     token: str | None = None,
     note: str | None = None,
 ) -> dict:
-    """Trip emergency stop from an external input bridge (e.g. ESP32/PLC)."""
+    """Trip emergency stop from an external hardware bridge.
+
+    Designed for physical input devices (ESP32, PLC, wired push buttons)
+    that call this endpoint over HTTP to trigger a software e-stop.  This
+    is different from ``emergency_stop()`` which is for agent/software-
+    initiated stops.
+
+    If ``KILN_ESTOP_INPUT_TOKEN`` is configured, the request must include
+    a matching ``token`` or it will be rejected.
+
+    :param printer_name: Printer to emergency-stop.
+    :param input_name: Label for the input source (default
+        ``"external_button"``).
+    :param token: Authorization token -- required when
+        ``KILN_ESTOP_INPUT_TOKEN`` is set.
+    :param note: Optional free-text note describing the trigger reason.
+
+    See also: ``emergency_stop()``, ``emergency_status()``.
+    """
     if err := _check_auth("print"):
         return err
     if err := _check_rate_limit("emergency_trip_input"):
@@ -2489,6 +2596,41 @@ def set_speed_profile(profile: str) -> dict:
 
 
 @mcp.tool()
+def get_speed_profile() -> dict:
+    """Get the current speed profile (Bambu Lab printers only).
+
+    Returns the active speed profile with:
+    - ``level``: numeric level 1–4
+    - ``name``: profile name — ``"silent"`` (50%), ``"standard"`` (100%),
+      ``"sport"`` (124%), or ``"ludicrous"`` (166%)
+    - ``speed_magnitude``: actual speed multiplier percentage reported by the
+      printer firmware
+
+    Use this to check the current speed before adjusting it with
+    ``set_speed_profile()``.
+    """
+    if err := _check_auth("read"):
+        return err
+    if err := _check_rate_limit("get_speed_profile"):
+        return err
+    try:
+        adapter = _get_adapter()
+        if not hasattr(adapter, "get_speed_profile"):
+            return _error_dict(
+                "Speed profile is only available on Bambu Lab printers.",
+                code="UNSUPPORTED",
+            )
+        result = adapter.get_speed_profile()
+        _audit("get_speed_profile", "queried")
+        return {"status": "success", **result}
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to get speed profile: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in get_speed_profile")
+        return _error_dict(f"Unexpected error in get_speed_profile: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
 def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
     """Control the printer's LED lights (Bambu Lab printers only).
 
@@ -2526,6 +2668,191 @@ def set_printer_light(node: str = "chamber_light", mode: str = "on") -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in set_printer_light")
         return _error_dict(f"Unexpected error in set_printer_light: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def wrap_gcode_as_3mf(
+    gcode_path: str,
+    hotend_temp: int = 220,
+    bed_temp: int = 65,
+    filament_type: str = "PLA",
+    source_3mf_path: str | None = None,
+) -> dict:
+    """Wrap raw PrusaSlicer G-code in a Bambu-compatible 3MF (Bambu Lab only).
+
+    Bambu printers require the proprietary BambuStudio start/end sequences
+    (motor enable, AMS load, extrusion calibration) to function correctly.
+    This tool takes PrusaSlicer G-code output and packages it into a 3MF
+    that the printer will accept.
+
+    Args:
+        gcode_path: Absolute path to a PrusaSlicer ``.gcode`` file on the
+            local filesystem.  The file must have been sliced with
+            ``--use-relative-e-distances`` and empty start/end G-code.
+        hotend_temp: Hotend temperature in °C (default 220 for PLA).
+        bed_temp: Bed temperature in °C (default 65 for PLA).
+        filament_type: Filament type string — ``"PLA"``, ``"PETG"``,
+            ``"ABS"``, etc.
+        source_3mf_path: Optional path to a source 3MF to copy
+            thumbnails and geometry from.
+
+    Returns a dict with ``output_path`` pointing to the generated 3MF.
+    Use ``upload_file()`` to send it to the printer, then ``start_print()``
+    to begin printing.
+    """
+    if err := _check_auth("files"):
+        return err
+    if err := _check_rate_limit("wrap_gcode_as_3mf"):
+        return err
+    try:
+        adapter = _get_adapter()
+        if not hasattr(adapter, "wrap_gcode_as_3mf"):
+            return _error_dict(
+                "3MF wrapping is only available on Bambu Lab printers. "
+                "Other printers accept G-code files directly via upload_file().",
+                code="UNSUPPORTED",
+            )
+        output_path = adapter.wrap_gcode_as_3mf(
+            gcode_path,
+            hotend_temp=hotend_temp,
+            bed_temp=bed_temp,
+            filament_type=filament_type,
+            source_3mf_path=source_3mf_path,
+        )
+        _audit("wrap_gcode_as_3mf", "executed", details={"gcode_path": gcode_path})
+        return {
+            "status": "success",
+            "output_path": output_path,
+            "gcode_path": gcode_path,
+            "filament_type": filament_type,
+        }
+    except FileNotFoundError as exc:
+        return _error_dict(f"G-code file not found: {exc}")
+    except ValueError as exc:
+        return _error_dict(f"Invalid G-code: {exc}")
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to wrap G-code as 3MF: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in wrap_gcode_as_3mf")
+        return _error_dict(f"Unexpected error in wrap_gcode_as_3mf: {exc}", code="INTERNAL_ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Optional adapter tools (bed mesh, filament sensor, tool position)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def get_bed_mesh() -> dict:
+    """Get the bed mesh / probe data (OctoPrint and Moonraker only).
+
+    Returns the probed bed leveling mesh including:
+    - ``probed_matrix``: 2D array of Z-offset measurements across the bed
+    - ``mesh_min`` / ``mesh_max``: bounding coordinates of the probed area
+    - ``variance``: overall variance of the mesh (lower = flatter bed)
+
+    Use this to diagnose first-layer adhesion issues.  High variance or
+    significant dips/peaks indicate a warped bed or loose leveling screws.
+
+    Not supported on Bambu Lab printers — Bambu handles bed leveling
+    internally and does not expose mesh data.
+    """
+    if err := _check_auth("read"):
+        return err
+    if err := _check_rate_limit("get_bed_mesh"):
+        return err
+    try:
+        adapter = _get_adapter()
+        result = adapter.get_bed_mesh()
+        if result is None:
+            return _error_dict(
+                "This printer does not support bed mesh data. "
+                "Bambu printers handle leveling internally. "
+                "OctoPrint and Moonraker printers expose mesh data after a G29 probe.",
+                code="UNSUPPORTED",
+            )
+        _audit("get_bed_mesh", "queried")
+        return {"status": "success", **result}
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to get bed mesh: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in get_bed_mesh")
+        return _error_dict(f"Unexpected error in get_bed_mesh: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def get_filament_status() -> dict:
+    """Get the filament runout sensor status (OctoPrint and Moonraker only).
+
+    Returns sensor information including:
+    - ``detected``: whether filament is currently detected by the sensor
+    - ``sensor_enabled``: whether the runout sensor is active
+
+    Use this to verify filament is loaded before starting a print on
+    non-Bambu printers.
+
+    For Bambu Lab printers, use ``ams_status()`` instead — it provides
+    per-tray filament presence, type, color, and remaining percentage.
+    """
+    if err := _check_auth("read"):
+        return err
+    if err := _check_rate_limit("get_filament_status"):
+        return err
+    try:
+        adapter = _get_adapter()
+        result = adapter.get_filament_status()
+        if result is None:
+            return _error_dict(
+                "This printer does not support filament sensor queries. "
+                "For Bambu Lab printers, use ams_status() to check filament.",
+                code="UNSUPPORTED",
+            )
+        _audit("get_filament_status", "queried")
+        return {"status": "success", **result}
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to get filament status: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in get_filament_status")
+        return _error_dict(f"Unexpected error in get_filament_status: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def get_tool_position() -> dict:
+    """Get the current nozzle / tool-head XYZ position (Moonraker and Serial).
+
+    Returns a dict with at least ``x``, ``y``, ``z`` coordinates in mm
+    relative to the printer's home position.  Some printers also report
+    ``e`` (extruder position).
+
+    Use this for:
+    - Verifying the printer has been homed (coordinates are valid only
+      after homing)
+    - Calibration sequences that need to know the current position
+    - Move planning when issuing manual jog commands
+
+    Not all adapters support this — returns an error if position data is
+    not available.
+    """
+    if err := _check_auth("read"):
+        return err
+    if err := _check_rate_limit("get_tool_position"):
+        return err
+    try:
+        adapter = _get_adapter()
+        result = adapter.get_tool_position()
+        if result is None:
+            return _error_dict(
+                "This printer does not support tool position queries. "
+                "Try using printer_status() for general state information.",
+                code="UNSUPPORTED",
+            )
+        _audit("get_tool_position", "queried")
+        return {"status": "success", "position": result}
+    except (PrinterError, RuntimeError) as exc:
+        return _error_dict(f"Failed to get tool position: {exc}")
+    except Exception as exc:
+        logger.exception("Unexpected error in get_tool_position")
+        return _error_dict(f"Unexpected error in get_tool_position: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -5693,12 +6020,12 @@ def printer_snapshot(
 ) -> dict:
     """Capture a webcam snapshot from the printer.
 
-    Args:
-        printer_name: Target printer name.  Omit for the default printer.
-        save_path: Optional path to save the image file.  If omitted, the
-            image is returned as a base64-encoded string.
+    Handles TLS+JPEG camera protocol (Bambu A1/P1), MJPEG stream capture
+    (OctoPrint/Moonraker), and RTSPS (Bambu X1) automatically.
 
-    Supports OctoPrint, Moonraker, and Bambu (via RTSP/ffmpeg) webcams.
+    :param printer_name: Target printer name.  Omit for the default printer.
+    :param save_path: Optional path to save the image file.  If omitted, the
+        image is returned as a base64-encoded string.
     """
     try:
         if printer_name:
@@ -10626,9 +10953,15 @@ def start_printer_health_monitoring(
 ) -> dict:
     """Start continuous background health monitoring for a printer.
 
-    Args:
-        printer_name: Printer to monitor.
-        interval_seconds: Check interval in seconds (default 30).
+    Runs periodic checks covering connectivity, temperature stability,
+    print job health (layer progress stalls, error codes), and active
+    error detection.  Alerts are generated when anomalies are found.
+
+    :param printer_name: Printer to monitor.
+    :param interval_seconds: Seconds between health checks (default 30).
+
+    See also: ``stop_printer_health_monitoring()``,
+    ``check_printer_health()``, ``printer_status()``.
     """
     if err := _check_auth("monitoring"):
         return err
@@ -10648,8 +10981,12 @@ def start_printer_health_monitoring(
 def stop_printer_health_monitoring(printer_name: str) -> dict:
     """Stop background health monitoring for a printer.
 
-    Args:
-        printer_name: Printer to stop monitoring.
+    Cancels the periodic health-check loop started by
+    ``start_printer_health_monitoring()``.  Active alerts are cleared.
+    Monitoring can be restarted at any time by calling
+    ``start_printer_health_monitoring()`` again.
+
+    :param printer_name: Printer to stop monitoring.
     """
     if err := _check_auth("monitoring"):
         return err
@@ -10675,14 +11012,24 @@ def estimate_print_progress(
 ) -> dict:
     """Estimate print progress with phase-aware time prediction.
 
-    Breaks a print into phases (preparing, printing, cooling, post-processing)
-    and estimates time remaining using historical data.
+    Breaks a print into phases -- preparing, printing, cooling, and
+    post-processing -- and uses historical data from the print outcomes
+    database to estimate time remaining.  Typically more accurate than
+    raw firmware estimates for predicting true completion time.
 
-    Args:
-        printer_name: Printer running the job.
-        elapsed_seconds: Time elapsed since print start.
-        total_layers: Total layer count for the job.
-        current_layer: Current layer being printed.
+    Supply ``elapsed_seconds``, ``total_layers``, and ``current_layer``
+    when available; any omitted values will be read from the printer's
+    live status.
+
+    :param printer_name: Printer running the job.
+    :param elapsed_seconds: Seconds elapsed since print start.  Omit to
+        read from printer status.
+    :param total_layers: Total layer count for the job.  Omit to read
+        from printer/G-code metadata.
+    :param current_layer: Current layer being printed.  Omit to read
+        from printer status.
+
+    See also: ``printer_status()``, ``get_print_outcomes()``.
     """
     try:
         from kiln.progress import get_progress_estimator

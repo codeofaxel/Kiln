@@ -48,6 +48,10 @@ from kiln.server import (
     delete_file as server_delete_file,
     emergency_status as server_emergency_status,
     emergency_trip_input as server_emergency_trip_input,
+    get_bed_mesh,
+    get_filament_status,
+    get_speed_profile,
+    get_tool_position,
     pause_print as server_pause_print,
     preflight_check,
     printer_files,
@@ -57,6 +61,7 @@ from kiln.server import (
     set_temperature,
     start_print as server_start_print,
     upload_file as server_upload_file,
+    wrap_gcode_as_3mf,
 )
 
 
@@ -2200,3 +2205,340 @@ class TestListModelCategories:
 
         result = list_model_categories()
         assert result["success"] is False
+
+
+# ---------------------------------------------------------------------------
+# get_speed_profile()
+# ---------------------------------------------------------------------------
+
+
+class TestGetSpeedProfile:
+    """Tests for the get_speed_profile MCP tool (Bambu-only)."""
+
+    @patch("kiln.server._get_adapter")
+    def test_returns_current_profile(self, mock_get_adapter):
+        adapter = MagicMock(spec=BambuAdapter)
+        adapter.get_speed_profile.return_value = {
+            "level": 2,
+            "name": "standard",
+            "speed_magnitude": 100,
+        }
+        mock_get_adapter.return_value = adapter
+
+        result = get_speed_profile()
+        assert result["status"] == "success"
+        assert result["level"] == 2
+        assert result["name"] == "standard"
+        assert result["speed_magnitude"] == 100
+
+    @patch("kiln.server._get_adapter")
+    def test_unsupported_printer_returns_error(self, mock_get_adapter):
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        # OctoPrintAdapter does not have get_speed_profile
+        del adapter.get_speed_profile
+        mock_get_adapter.return_value = adapter
+
+        result = get_speed_profile()
+        assert result["success"] is False
+        assert result["error"]["code"] == "UNSUPPORTED"
+        assert "Bambu" in result["error"]["message"]
+
+    @patch("kiln.server._get_adapter")
+    def test_printer_error(self, mock_get_adapter):
+        adapter = MagicMock(spec=BambuAdapter)
+        adapter.get_speed_profile.side_effect = PrinterError("MQTT timeout")
+        mock_get_adapter.return_value = adapter
+
+        result = get_speed_profile()
+        assert result["success"] is False
+        assert "MQTT timeout" in result["error"]["message"]
+
+    @patch("kiln.server._get_adapter")
+    def test_runtime_error(self, mock_get_adapter):
+        mock_get_adapter.side_effect = RuntimeError("not configured")
+
+        result = get_speed_profile()
+        assert result["success"] is False
+        assert "not configured" in result["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# get_bed_mesh()
+# ---------------------------------------------------------------------------
+
+
+class TestGetBedMesh:
+    """Tests for the get_bed_mesh MCP tool (OctoPrint / Moonraker)."""
+
+    @patch("kiln.server._get_adapter")
+    def test_returns_mesh_data(self, mock_get_adapter):
+        adapter = MagicMock(spec=MoonrakerAdapter)
+        adapter.get_bed_mesh.return_value = {
+            "probed_matrix": [[0.1, 0.2], [0.0, -0.1]],
+            "mesh_min": [10.0, 10.0],
+            "mesh_max": [200.0, 200.0],
+            "variance": 0.05,
+        }
+        mock_get_adapter.return_value = adapter
+
+        result = get_bed_mesh()
+        assert result["status"] == "success"
+        assert result["probed_matrix"] == [[0.1, 0.2], [0.0, -0.1]]
+        assert result["variance"] == 0.05
+
+    @patch("kiln.server._get_adapter")
+    def test_unsupported_returns_error(self, mock_get_adapter):
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        adapter.get_bed_mesh.return_value = None
+        mock_get_adapter.return_value = adapter
+
+        result = get_bed_mesh()
+        assert result["success"] is False
+        assert result["error"]["code"] == "UNSUPPORTED"
+        assert "G29" in result["error"]["message"]
+
+    @patch("kiln.server._get_adapter")
+    def test_printer_error(self, mock_get_adapter):
+        adapter = MagicMock(spec=MoonrakerAdapter)
+        adapter.get_bed_mesh.side_effect = PrinterError("connection refused")
+        mock_get_adapter.return_value = adapter
+
+        result = get_bed_mesh()
+        assert result["success"] is False
+        assert "connection refused" in result["error"]["message"]
+
+    @patch("kiln.server._get_adapter")
+    def test_runtime_error(self, mock_get_adapter):
+        mock_get_adapter.side_effect = RuntimeError("env not set")
+
+        result = get_bed_mesh()
+        assert result["success"] is False
+        assert "env not set" in result["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# get_filament_status()
+# ---------------------------------------------------------------------------
+
+
+class TestGetFilamentStatus:
+    """Tests for the get_filament_status MCP tool (OctoPrint / Moonraker)."""
+
+    @patch("kiln.server._get_adapter")
+    def test_returns_filament_status(self, mock_get_adapter):
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        adapter.get_filament_status.return_value = {
+            "detected": True,
+            "sensor_enabled": True,
+        }
+        mock_get_adapter.return_value = adapter
+
+        result = get_filament_status()
+        assert result["status"] == "success"
+        assert result["detected"] is True
+        assert result["sensor_enabled"] is True
+
+    @patch("kiln.server._get_adapter")
+    def test_unsupported_suggests_ams_status(self, mock_get_adapter):
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        adapter.get_filament_status.return_value = None
+        mock_get_adapter.return_value = adapter
+
+        result = get_filament_status()
+        assert result["success"] is False
+        assert result["error"]["code"] == "UNSUPPORTED"
+        assert "ams_status" in result["error"]["message"]
+
+    @patch("kiln.server._get_adapter")
+    def test_printer_error(self, mock_get_adapter):
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        adapter.get_filament_status.side_effect = PrinterError("sensor fault")
+        mock_get_adapter.return_value = adapter
+
+        result = get_filament_status()
+        assert result["success"] is False
+        assert "sensor fault" in result["error"]["message"]
+
+    @patch("kiln.server._get_adapter")
+    def test_runtime_error(self, mock_get_adapter):
+        mock_get_adapter.side_effect = RuntimeError("missing config")
+
+        result = get_filament_status()
+        assert result["success"] is False
+        assert "missing config" in result["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# get_tool_position()
+# ---------------------------------------------------------------------------
+
+
+class TestGetToolPosition:
+    """Tests for the get_tool_position MCP tool (Moonraker / Serial)."""
+
+    @patch("kiln.server._get_adapter")
+    def test_returns_xyz_position(self, mock_get_adapter):
+        adapter = MagicMock(spec=MoonrakerAdapter)
+        adapter.get_tool_position.return_value = {
+            "x": 120.5,
+            "y": 80.3,
+            "z": 0.2,
+        }
+        mock_get_adapter.return_value = adapter
+
+        result = get_tool_position()
+        assert result["status"] == "success"
+        assert result["position"]["x"] == 120.5
+        assert result["position"]["y"] == 80.3
+        assert result["position"]["z"] == 0.2
+
+    @patch("kiln.server._get_adapter")
+    def test_unsupported_returns_error(self, mock_get_adapter):
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        adapter.get_tool_position.return_value = None
+        mock_get_adapter.return_value = adapter
+
+        result = get_tool_position()
+        assert result["success"] is False
+        assert result["error"]["code"] == "UNSUPPORTED"
+        assert "printer_status" in result["error"]["message"]
+
+    @patch("kiln.server._get_adapter")
+    def test_includes_extruder_position(self, mock_get_adapter):
+        adapter = MagicMock(spec=MoonrakerAdapter)
+        adapter.get_tool_position.return_value = {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 10.0,
+            "e": 5.2,
+        }
+        mock_get_adapter.return_value = adapter
+
+        result = get_tool_position()
+        assert result["status"] == "success"
+        assert result["position"]["e"] == 5.2
+
+    @patch("kiln.server._get_adapter")
+    def test_printer_error(self, mock_get_adapter):
+        adapter = MagicMock(spec=MoonrakerAdapter)
+        adapter.get_tool_position.side_effect = PrinterError("homing required")
+        mock_get_adapter.return_value = adapter
+
+        result = get_tool_position()
+        assert result["success"] is False
+        assert "homing required" in result["error"]["message"]
+
+    @patch("kiln.server._get_adapter")
+    def test_runtime_error(self, mock_get_adapter):
+        mock_get_adapter.side_effect = RuntimeError("env not set")
+
+        result = get_tool_position()
+        assert result["success"] is False
+        assert "env not set" in result["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# wrap_gcode_as_3mf()
+# ---------------------------------------------------------------------------
+
+
+class TestWrapGcodeAs3mf:
+    """Tests for the wrap_gcode_as_3mf MCP tool (Bambu-only)."""
+
+    @patch("kiln.server._get_adapter")
+    def test_wraps_gcode_successfully(self, mock_get_adapter):
+        adapter = MagicMock(spec=BambuAdapter)
+        adapter.wrap_gcode_as_3mf.return_value = "/tmp/output.3mf"
+        mock_get_adapter.return_value = adapter
+
+        result = wrap_gcode_as_3mf(
+            gcode_path="/tmp/test.gcode",
+            hotend_temp=210,
+            bed_temp=60,
+            filament_type="PLA",
+        )
+        assert result["status"] == "success"
+        assert result["output_path"] == "/tmp/output.3mf"
+        assert result["gcode_path"] == "/tmp/test.gcode"
+        assert result["filament_type"] == "PLA"
+
+        adapter.wrap_gcode_as_3mf.assert_called_once_with(
+            "/tmp/test.gcode",
+            hotend_temp=210,
+            bed_temp=60,
+            filament_type="PLA",
+            source_3mf_path=None,
+        )
+
+    @patch("kiln.server._get_adapter")
+    def test_unsupported_printer_returns_error(self, mock_get_adapter):
+        adapter = MagicMock(spec=OctoPrintAdapter)
+        # OctoPrintAdapter does not have wrap_gcode_as_3mf
+        del adapter.wrap_gcode_as_3mf
+        mock_get_adapter.return_value = adapter
+
+        result = wrap_gcode_as_3mf(gcode_path="/tmp/test.gcode")
+        assert result["success"] is False
+        assert result["error"]["code"] == "UNSUPPORTED"
+        assert "upload_file" in result["error"]["message"]
+
+    @patch("kiln.server._get_adapter")
+    def test_file_not_found(self, mock_get_adapter):
+        adapter = MagicMock(spec=BambuAdapter)
+        adapter.wrap_gcode_as_3mf.side_effect = FileNotFoundError(
+            "/tmp/missing.gcode"
+        )
+        mock_get_adapter.return_value = adapter
+
+        result = wrap_gcode_as_3mf(gcode_path="/tmp/missing.gcode")
+        assert result["success"] is False
+        assert "not found" in result["error"]["message"].lower()
+
+    @patch("kiln.server._get_adapter")
+    def test_invalid_gcode(self, mock_get_adapter):
+        adapter = MagicMock(spec=BambuAdapter)
+        adapter.wrap_gcode_as_3mf.side_effect = ValueError(
+            "Missing relative E distances"
+        )
+        mock_get_adapter.return_value = adapter
+
+        result = wrap_gcode_as_3mf(gcode_path="/tmp/bad.gcode")
+        assert result["success"] is False
+        assert "Invalid G-code" in result["error"]["message"]
+
+    @patch("kiln.server._get_adapter")
+    def test_printer_error(self, mock_get_adapter):
+        adapter = MagicMock(spec=BambuAdapter)
+        adapter.wrap_gcode_as_3mf.side_effect = PrinterError("3MF generation failed")
+        mock_get_adapter.return_value = adapter
+
+        result = wrap_gcode_as_3mf(gcode_path="/tmp/test.gcode")
+        assert result["success"] is False
+        assert "3MF generation failed" in result["error"]["message"]
+
+    @patch("kiln.server._get_adapter")
+    def test_with_source_3mf(self, mock_get_adapter):
+        adapter = MagicMock(spec=BambuAdapter)
+        adapter.wrap_gcode_as_3mf.return_value = "/tmp/output.3mf"
+        mock_get_adapter.return_value = adapter
+
+        result = wrap_gcode_as_3mf(
+            gcode_path="/tmp/test.gcode",
+            source_3mf_path="/tmp/source.3mf",
+        )
+        assert result["status"] == "success"
+        adapter.wrap_gcode_as_3mf.assert_called_once_with(
+            "/tmp/test.gcode",
+            hotend_temp=220,
+            bed_temp=65,
+            filament_type="PLA",
+            source_3mf_path="/tmp/source.3mf",
+        )
+
+    @patch("kiln.server._get_adapter")
+    def test_runtime_error(self, mock_get_adapter):
+        mock_get_adapter.side_effect = RuntimeError("not configured")
+
+        result = wrap_gcode_as_3mf(gcode_path="/tmp/test.gcode")
+        assert result["success"] is False
+        assert "not configured" in result["error"]["message"]
