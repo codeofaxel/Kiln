@@ -5145,7 +5145,7 @@ def billing() -> None:
 )
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def billing_setup(rail: str, json_mode: bool) -> None:
-    """Link a payment method for orchestration software fees.
+    """Link a payment method for orchestration fees.
 
     Generates a setup URL to add a credit card (Stripe) or configure
     crypto payments (USDC on Solana/Base).
