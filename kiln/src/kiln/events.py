@@ -136,6 +136,11 @@ class EventType(enum.Enum):
     VISION_CHECK = "vision.check"
     VISION_ALERT = "vision.alert"
 
+    # Safety monitor (kiln monitor)
+    MONITOR_ALERT = "monitor.alert"
+    MONITOR_SNAPSHOT = "monitor.snapshot"
+    MONITOR_COMPLETE = "monitor.complete"
+
 
 @dataclass
 class Event:

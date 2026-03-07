@@ -2758,6 +2758,95 @@ def wait(ctx: click.Context, interval: float, max_timeout: float, json_mode: boo
 
 
 # ---------------------------------------------------------------------------
+# monitor
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--interval", default=10.0, type=float, help="State poll interval in seconds (default: 10).")
+@click.option("--snapshot-interval", default=300, type=int, help="Seconds between snapshots (default: 300, 0 to disable).")
+@click.option("--snapshot-dir", default=None, type=click.Path(), help="Directory for snapshots (default: ~/.kiln/snapshots/).")
+@click.option("--auto-pause/--no-auto-pause", default=True, help="Auto-pause on critical alerts (default: enabled).")
+@click.option("--auto-cancel", is_flag=True, default=False, help="Auto-cancel on emergency alerts (default: disabled).")
+@click.option("--timeout", default=0.0, type=float, help="Max monitoring time in seconds (0 = unlimited).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON Lines to stdout.")
+@click.pass_context
+def monitor(ctx: click.Context, interval: float, snapshot_interval: int, snapshot_dir: str | None,
+            auto_pause: bool, auto_cancel: bool, timeout: float, json_mode: bool) -> None:
+    """Monitor a print job for safety anomalies.
+
+    Runs for the duration of the print, polling printer state at --interval.
+    Detects temperature drift, stalls, errors, and connection loss.
+    Auto-pauses on critical alerts by default.
+
+    \b
+    Exit codes:
+      0  — print completed successfully
+      1  — print failed, cancelled, or monitoring error
+      130 — interrupted by Ctrl+C
+
+    \b
+    Examples:
+      kiln monitor                        # Rich terminal output, auto-pause on
+      kiln monitor --json                 # JSON Lines for agent consumption
+      kiln monitor --interval 5           # Poll every 5 seconds
+      kiln monitor --auto-cancel          # Also auto-cancel on emergency
+      kiln monitor --snapshot-interval 0  # Disable snapshots
+    """
+    from pathlib import Path as _Path
+
+    from kiln.print_safety_monitor import MonitorConfig, PrintSafetyMonitor
+
+    try:
+        adapter = _get_adapter_from_ctx(ctx)
+        printer_name = ctx.obj.get("printer") or "default"
+
+        config = MonitorConfig(
+            poll_interval=interval,
+            snapshot_interval=snapshot_interval,
+            snapshot_dir=_Path(snapshot_dir) if snapshot_dir else _Path.home() / ".kiln" / "snapshots",
+            auto_pause=auto_pause,
+            auto_cancel=auto_cancel,
+            timeout=timeout,
+        )
+
+        if not json_mode:
+            click.echo(f"  Monitoring printer '{printer_name}' (poll every {interval}s, "
+                       f"Ctrl+C to stop)")
+            flags = []
+            if auto_pause:
+                flags.append("auto-pause")
+            if auto_cancel:
+                flags.append("auto-cancel")
+            if flags:
+                click.echo(f"  Safety: {', '.join(flags)}")
+            click.echo()
+
+        mon = PrintSafetyMonitor(
+            adapter=adapter,
+            printer_name=printer_name,
+            config=config,
+            json_mode=json_mode,
+        )
+
+        exit_code = mon.run()
+        sys.exit(exit_code)
+
+    except KeyboardInterrupt:
+        if not json_mode:
+            click.echo("\nMonitoring interrupted.")
+        sys.exit(130)
+    except click.ClickException:
+        raise
+    except PrinterError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # history
 # ---------------------------------------------------------------------------
 
