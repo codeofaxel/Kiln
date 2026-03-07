@@ -11,34 +11,28 @@ import json
 import os
 import ssl
 import subprocess
-import tempfile
 import time
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import pytest
 
+from kiln.printers.bambu import (
+    _STATE_MAP,
+    BambuAdapter,
+    _ImplicitFTP_TLS,
+)
 from kiln.printers.base import (
     JobProgress,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,
     PrinterFile,
-    PrinterState,
     PrinterStatus,
     PrintResult,
     UploadResult,
 )
-from kiln.printers.bambu import (
-    BambuAdapter,
-    _ImplicitFTP_TLS,
-    _PRINT_ACTIVE_STATES,
-    _SINGLE_CLIENT_FTPS_MSG,
-    _SINGLE_CLIENT_MSG,
-    _STATE_MAP,
-    _find_ffmpeg,
-)
-
 
 # ---------------------------------------------------------------------------
 # Fixtures & helpers
@@ -51,7 +45,7 @@ SERIAL = "01P00A000000001"
 
 def _adapter(**kwargs: Any) -> BambuAdapter:
     """Create a :class:`BambuAdapter` with sensible test defaults."""
-    defaults: Dict[str, Any] = {
+    defaults: dict[str, Any] = {
         "host": HOST,
         "access_code": ACCESS_CODE,
         "serial": SERIAL,
@@ -585,9 +579,9 @@ class TestBambuAdapterListFiles:
     def test_ftp_mlsd_error(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
         mock_ftp_class.mlsd.side_effect = Exception("MLSD failed")
 
-        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
-            with pytest.raises(PrinterError, match="Failed to list files"):
-                adapter_with_mqtt.list_files()
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
+                pytest.raises(PrinterError, match="Failed to list files"):
+            adapter_with_mqtt.list_files()
 
     def test_mlsd_502_falls_back_to_nlst(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
         import ftplib
@@ -631,9 +625,9 @@ class TestBambuAdapterListFiles:
 
         mock_ftp_class.mlsd.side_effect = ftplib.error_perm("550 Permission denied")
 
-        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
-            with pytest.raises(PrinterError, match="Failed to list files"):
-                adapter_with_mqtt.list_files()
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
+                pytest.raises(PrinterError, match="Failed to list files"):
+            adapter_with_mqtt.list_files()
 
     def test_nlst_skips_dot_entries(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
         import ftplib
@@ -771,9 +765,9 @@ class TestListFilesNlstFallback:
         mock_ftp_class.nlst.side_effect = _ftplib.error_perm("500 NLST failed")
         mock_ftp_class.retrlines.side_effect = _ftplib.error_perm("530 Not logged in")
 
-        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
-            with pytest.raises(PrinterError, match="Failed to list files"):
-                adapter_with_mqtt.list_files()
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
+                pytest.raises(PrinterError, match="Failed to list files"):
+            adapter_with_mqtt.list_files()
 
 
 # ---------------------------------------------------------------------------
@@ -814,9 +808,9 @@ class TestBambuAdapterUploadFile:
         test_file.write_text("content")
         mock_ftp_class.storbinary.side_effect = Exception("Upload failed")
 
-        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
-            with pytest.raises(PrinterError, match="FTPS upload failed"):
-                adapter_with_mqtt.upload_file(str(test_file))
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
+                pytest.raises(PrinterError, match="FTPS upload failed"):
+            adapter_with_mqtt.upload_file(str(test_file))
 
     def test_permission_error(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock, tmp_path: Any) -> None:
         test_file = tmp_path / "locked.3mf"
@@ -829,10 +823,10 @@ class TestBambuAdapterUploadFile:
                 raise PermissionError("no read")
             return real_open(path, *args, **kwargs)
 
-        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
-            with mock.patch("builtins.open", side_effect=selective_open):
-                with pytest.raises(PrinterError, match="Permission denied"):
-                    adapter_with_mqtt.upload_file(str(test_file))
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
+                mock.patch("builtins.open", side_effect=selective_open), \
+                pytest.raises(PrinterError, match="Permission denied"):
+            adapter_with_mqtt.upload_file(str(test_file))
 
     def test_ftp_quit_called_on_success(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock, tmp_path: Any) -> None:
         test_file = tmp_path / "test.3mf"
@@ -884,7 +878,7 @@ class TestBambuAdapterStartPrint:
         assert payload["print"]["subtask_name"] == "model"
 
     def test_start_print_gcode_with_full_path(self, adapter_with_mqtt: BambuAdapter) -> None:
-        result = adapter_with_mqtt.start_print("/sdcard/test.gcode")
+        adapter_with_mqtt.start_print("/sdcard/test.gcode")
 
         call_args = adapter_with_mqtt._mqtt_client.publish.call_args
         payload = json.loads(call_args[0][1])
@@ -892,7 +886,7 @@ class TestBambuAdapterStartPrint:
         assert payload["print"]["param"] == "/sdcard/test.gcode"
 
     def test_start_print_3mf_uppercase(self, adapter_with_mqtt: BambuAdapter) -> None:
-        result = adapter_with_mqtt.start_print("MODEL.3MF")
+        adapter_with_mqtt.start_print("MODEL.3MF")
 
         call_args = adapter_with_mqtt._mqtt_client.publish.call_args
         payload = json.loads(call_args[0][1])
@@ -1063,9 +1057,9 @@ class TestBambuAdapterDeleteFile:
     def test_ftp_delete_error(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
         mock_ftp_class.delete.side_effect = Exception("File not found")
 
-        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
-            with pytest.raises(PrinterError, match="Failed to delete"):
-                adapter_with_mqtt.delete_file("/sdcard/nonexistent.3mf")
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
+                pytest.raises(PrinterError, match="Failed to delete"):
+            adapter_with_mqtt.delete_file("/sdcard/nonexistent.3mf")
 
     def test_ftp_quit_called(self, adapter_with_mqtt: BambuAdapter, mock_ftp_class: mock.MagicMock) -> None:
         with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
@@ -1308,9 +1302,9 @@ class TestBambuAdapterFTPSInternals:
         adapter = _adapter()
         mock_ftp_class.sock.getpeercert.return_value = b"cert-b"
 
-        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class):
-            with pytest.raises(PrinterError, match="pin mismatch"):
-                adapter._ftp_connect()
+        with mock.patch("kiln.printers.bambu._ImplicitFTP_TLS", return_value=mock_ftp_class), \
+                pytest.raises(PrinterError, match="pin mismatch"):
+            adapter._ftp_connect()
 
     def test_ftp_connect_insecure_mode_skips_cert_checks(
         self, mock_ftp_class: mock.MagicMock,
@@ -1462,7 +1456,6 @@ class TestBambuAdapterPrintConfirmation:
         # Pre-set idle so it enters the wait path.
         adapter_with_mqtt._last_status = {"gcode_state": "idle"}
         # Simulate state transition after a brief delay.
-        original_sleep = time.sleep
 
         call_count = 0
 
@@ -1479,9 +1472,9 @@ class TestBambuAdapterPrintConfirmation:
     def test_timeout_returns_failure(self, adapter_with_mqtt: BambuAdapter) -> None:
         adapter_with_mqtt._last_status = {"gcode_state": "idle"}
         # Mock time.monotonic to simulate timeout.
-        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]):
-            with mock.patch("kiln.printers.bambu.time.sleep"):
-                result = adapter_with_mqtt.start_print("test.3mf")
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]), \
+                mock.patch("kiln.printers.bambu.time.sleep"):
+            result = adapter_with_mqtt.start_print("test.3mf")
         assert result.success is False
         assert "did not transition" in result.message
 
@@ -1920,6 +1913,143 @@ class TestBambuAdapterAMSStatus:
         assert len(result["units"]) == 1
         assert result["units"][0]["trays"] == []
 
+    # ------------------------------------------------------------------
+    # Dict-wrapper AMS format (A1 / AMS Lite)
+    # ------------------------------------------------------------------
+    # The A1 series sends AMS data as a dict containing an inner "ams"
+    # list plus top-level metadata, rather than a flat list at the
+    # status level.  These tests verify the unwrapping logic.
+
+    def _adapter_with_ams_dict_wrapper(
+        self, ams_units: list[dict[str, Any]], **extra_fields: Any,
+    ) -> BambuAdapter:
+        """Create adapter with A1-style dict-wrapped AMS data in cache."""
+        adapter = _adapter()
+        adapter._mqtt_connected.set()
+        adapter._connected = True
+        adapter._mqtt_client = mock.MagicMock()
+        publish_result = mock.MagicMock()
+        publish_result.wait_for_publish = mock.MagicMock()
+        adapter._mqtt_client.publish.return_value = publish_result
+        wrapper: dict[str, Any] = {
+            "ams": ams_units,
+            "ams_exist_bits": "1",
+            "tray_exist_bits": "f",
+            "tray_now": "0",
+            "tray_is_bbl_bits": "f",
+            "tray_tar": "0",
+            "tray_pre": "0",
+            "tray_read_done_bits": "f",
+            "tray_reading_bits": "0",
+            "version": 4,
+            "insert_flag": True,
+            "power_on_flag": True,
+        }
+        wrapper.update(extra_fields)
+        adapter._last_status = {
+            "gcode_state": "IDLE",
+            "ams": wrapper,
+        }
+        adapter._last_state_time = time.monotonic()
+        return adapter
+
+    def test_ams_dict_wrapper_basic(self) -> None:
+        """A1-style dict wrapper is unwrapped and trays are parsed."""
+        adapter = self._adapter_with_ams_dict_wrapper([
+            {
+                "id": "0",
+                "humidity": "5",
+                "tray": [
+                    {"id": "0", "tray_type": "PLA", "tray_color": "FFFFFFFF", "remain": 80, "tag_uid": ""},
+                    {"id": "1", "tray_type": "PLA", "tray_color": "161616FF", "remain": 60, "tag_uid": ""},
+                    {"id": "2", "tray_type": "PLA", "tray_color": "898989FF", "remain": 40, "tag_uid": ""},
+                    {"id": "3", "tray_type": "PLA", "tray_color": "F72323FF", "remain": 20, "tag_uid": ""},
+                ],
+            }
+        ])
+        result = adapter.get_ams_status()
+        assert result["ams_exist_bits"] == "1"
+        assert result["tray_exist_bits"] == "f"
+        assert result["tray_now"] == "0"
+        assert len(result["units"]) == 1
+        trays = result["units"][0]["trays"]
+        assert len(trays) == 4
+        assert trays[0]["tray_color"] == "FFFFFFFF"
+        assert trays[1]["tray_color"] == "161616FF"
+        assert trays[3]["tray_color"] == "F72323FF"
+
+    def test_ams_dict_wrapper_metadata_from_wrapper(self) -> None:
+        """ams_exist_bits / tray_exist_bits come from the wrapper, not status root."""
+        adapter = self._adapter_with_ams_dict_wrapper(
+            [],
+            ams_exist_bits="3",
+            tray_exist_bits="ff",
+            tray_now="2",
+        )
+        result = adapter.get_ams_status()
+        assert result["ams_exist_bits"] == "3"
+        assert result["tray_exist_bits"] == "ff"
+        assert result["tray_now"] == "2"
+
+    def test_ams_dict_wrapper_empty_units(self) -> None:
+        """Dict wrapper with empty inner ams list returns no units."""
+        adapter = self._adapter_with_ams_dict_wrapper([])
+        result = adapter.get_ams_status()
+        assert result["units"] == []
+        # Metadata still comes from wrapper.
+        assert result["ams_exist_bits"] == "1"
+
+    def test_ams_dict_wrapper_inner_not_list(self) -> None:
+        """Dict wrapper where inner 'ams' is not a list returns no units."""
+        adapter = self._adapter_with_ams_dict_wrapper([])
+        adapter._last_status["ams"]["ams"] = "corrupt"
+        result = adapter.get_ams_status()
+        assert result["units"] == []
+
+    def test_ams_dict_wrapper_missing_inner_ams_key(self) -> None:
+        """Dict wrapper missing the inner 'ams' key returns no units."""
+        adapter = self._adapter_with_ams_dict_wrapper([])
+        del adapter._last_status["ams"]["ams"]
+        result = adapter.get_ams_status()
+        assert result["units"] == []
+
+    def test_ams_dict_wrapper_string_ids_coerced(self) -> None:
+        """A1 sends slot IDs as strings; they should be parsed correctly."""
+        adapter = self._adapter_with_ams_dict_wrapper([
+            {
+                "id": "0",
+                "humidity": "3",
+                "tray": [
+                    {"id": "0", "tray_type": "PLA", "tray_color": "FF0000FF", "remain": "72", "tag_uid": ""},
+                ],
+            }
+        ])
+        result = adapter.get_ams_status()
+        unit = result["units"][0]
+        assert unit["humidity"] == 3
+        assert unit["trays"][0]["remain"] == 72
+
+    def test_ams_dict_wrapper_tray_now_255_external_spool(self) -> None:
+        """tray_now=255 inside dict wrapper means external spool."""
+        adapter = self._adapter_with_ams_dict_wrapper(
+            [{"id": "0", "humidity": "5", "tray": []}],
+            tray_now="255",
+        )
+        result = adapter.get_ams_status()
+        assert result["tray_now"] == "255"
+
+    def test_ams_flat_list_still_works(self) -> None:
+        """Flat list format (X1/P1 style) continues to work after fix."""
+        adapter = self._adapter_with_ams([
+            {"id": 0, "humidity": 3, "tray": [
+                {"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF", "remain": 85, "tag_uid": ""},
+            ]},
+        ])
+        result = adapter.get_ams_status()
+        assert len(result["units"]) == 1
+        assert result["units"][0]["trays"][0]["tray_color"] == "FF0000FF"
+        assert result["ams_exist_bits"] == "1"
+
 
 class TestBambuAdapterStartPrintConfigurable:
     """Tests for configurable start_print parameters (AMS, calibration, etc.)."""
@@ -2306,9 +2436,9 @@ class TestWaitForPrintStartErrorDetection:
 
     def test_timeout_with_no_error(self, adapter_with_mqtt: BambuAdapter) -> None:
         adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 0}
-        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]):
-            with mock.patch("kiln.printers.bambu.time.sleep"):
-                state, err = adapter_with_mqtt._wait_for_print_start()
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]), \
+                mock.patch("kiln.printers.bambu.time.sleep"):
+            state, err = adapter_with_mqtt._wait_for_print_start()
         assert state == "timeout"
         assert err is None
 
@@ -2375,9 +2505,9 @@ class TestStartPrintErrorMessages:
 
     def test_no_error_code_generic_message(self, adapter_with_mqtt: BambuAdapter) -> None:
         adapter_with_mqtt._last_status = {"gcode_state": "idle", "print_error": 0}
-        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]):
-            with mock.patch("kiln.printers.bambu.time.sleep"):
-                result = adapter_with_mqtt.start_print("test.3mf")
+        with mock.patch("kiln.printers.bambu.time.monotonic", side_effect=[0.0, 0.0, 100.0]), \
+                mock.patch("kiln.printers.bambu.time.sleep"):
+            result = adapter_with_mqtt.start_print("test.3mf")
         assert result.success is False
         assert "did not transition" in result.message
 

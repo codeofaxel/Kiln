@@ -2312,10 +2312,28 @@ class BambuAdapter(PrinterAdapter):
         """
         status = self._get_cached_status()
         ams_data = status.get("ams")
+
+        # Bambu printers may nest AMS data as a dict wrapper containing an
+        # inner "ams" list alongside top-level fields like ams_exist_bits.
+        # Unwrap the dict to get the actual unit list.
+        ams_wrapper: dict[str, Any] = {}
+        if isinstance(ams_data, dict):
+            ams_wrapper = ams_data
+            ams_data = ams_data.get("ams")
+
         result: dict[str, Any] = {
-            "ams_exist_bits": status.get("ams_exist_bits", "0"),
-            "tray_exist_bits": status.get("tray_exist_bits", "0"),
-            "tray_now": status.get("tray_now", "255"),
+            "ams_exist_bits": (
+                ams_wrapper.get("ams_exist_bits")
+                or status.get("ams_exist_bits", "0")
+            ),
+            "tray_exist_bits": (
+                ams_wrapper.get("tray_exist_bits")
+                or status.get("tray_exist_bits", "0")
+            ),
+            "tray_now": (
+                ams_wrapper.get("tray_now")
+                or status.get("tray_now", "255")
+            ),
             "units": [],
         }
 
