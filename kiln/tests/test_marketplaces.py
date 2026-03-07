@@ -1501,3 +1501,372 @@ class TestMarketplaceRegistryHealth:
         registry.search_all("test")
         statuses = registry.marketplace_health()
         assert statuses[0].health == MarketplaceHealth.HEALTHY
+
+
+# ===================================================================
+# upload_model() tests — base class default
+# ===================================================================
+
+
+class TestMarketplaceAdapterDefaultUpload:
+    """MarketplaceAdapter.upload_model raises by default."""
+
+    def test_default_upload_raises(self):
+
+        class StubAdapter(MarketplaceAdapter):
+            @property
+            def name(self) -> str:
+                return "stub"
+
+            @property
+            def display_name(self) -> str:
+                return "Stub"
+
+            def search(self, query, *, page=1, per_page=20, sort="relevant"):
+                return []
+
+            def get_details(self, model_id):
+                return ModelDetail(id=model_id, name="", url="", creator="", source="stub")
+
+            def get_files(self, model_id):
+                return []
+
+        adapter = StubAdapter()
+        assert adapter.supports_upload is False
+        with pytest.raises(MarketplaceError, match="does not support direct model uploads"):
+            adapter.upload_model(
+                file_path="/tmp/test.stl", title="Test", description="Desc",
+                tags=["tag"], category="cat", license_type="cc-by",
+            )
+
+
+# ===================================================================
+# ThingiverseAdapter.upload_model() tests
+# ===================================================================
+
+
+class TestThingiverseAdapterSupportsUpload:
+    def test_supports_upload_true(self):
+        client = MagicMock(spec=ThingiverseClient)
+        adapter = ThingiverseAdapter(client)
+        assert adapter.supports_upload is True
+
+
+class TestThingiverseAdapterUploadModel:
+    """ThingiverseAdapter.upload_model — create thing, set metadata, upload file."""
+
+    def test_upload_success(self, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"FAKE_STL_DATA")
+
+        client = MagicMock(spec=ThingiverseClient)
+        client._base_url = "https://api.thingiverse.com"
+        client._token = "test-token"
+
+        # Step 1: POST /things returns thing ID
+        client._request.return_value = {"id": 42}
+
+        # Steps 2 & 3: PATCH and POST for metadata/upload
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        client._session = MagicMock()
+        client._session.patch.return_value = mock_resp
+        client._session.post.return_value = mock_resp
+
+        adapter = ThingiverseAdapter(client)
+        result = adapter.upload_model(
+            file_path=str(stl), title="My Model", description="A model",
+            tags=["test"], category="3D Printing", license_type="cc-by",
+        )
+
+        assert result["id"] == "42"
+        assert "thingiverse.com/thing:42" in result["url"]
+        client._request.assert_called_once_with("POST", "/things")
+        client._session.patch.assert_called_once()
+        client._session.post.assert_called_once()
+
+    def test_upload_file_not_found(self):
+        client = MagicMock(spec=ThingiverseClient)
+        adapter = ThingiverseAdapter(client)
+        with pytest.raises(MarketplaceError, match="File not found"):
+            adapter.upload_model(
+                file_path="/nonexistent/model.stl", title="T", description="D",
+                tags=["t"], category="c", license_type="cc-by",
+            )
+
+    def test_upload_no_thing_id(self, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"data")
+
+        client = MagicMock(spec=ThingiverseClient)
+        client._request.return_value = {}
+
+        adapter = ThingiverseAdapter(client)
+        with pytest.raises(MarketplaceError, match="did not return a thing ID"):
+            adapter.upload_model(
+                file_path=str(stl), title="T", description="D",
+                tags=["t"], category="c", license_type="cc-by",
+            )
+
+    def test_upload_metadata_failure(self, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"data")
+
+        client = MagicMock(spec=ThingiverseClient)
+        client._base_url = "https://api.thingiverse.com"
+        client._token = "test-token"
+        client._request.return_value = {"id": 10}
+
+        fail_resp = MagicMock()
+        fail_resp.status_code = 400
+        fail_resp.text = "Bad Request"
+        client._session = MagicMock()
+        client._session.patch.return_value = fail_resp
+
+        adapter = ThingiverseAdapter(client)
+        with pytest.raises(MarketplaceError, match="Failed to set thing metadata"):
+            adapter.upload_model(
+                file_path=str(stl), title="T", description="D",
+                tags=["t"], category="c", license_type="cc-by",
+            )
+
+    def test_upload_file_upload_failure(self, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"data")
+
+        client = MagicMock(spec=ThingiverseClient)
+        client._base_url = "https://api.thingiverse.com"
+        client._token = "test-token"
+        client._request.return_value = {"id": 10}
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+
+        fail_resp = MagicMock()
+        fail_resp.status_code = 413
+        fail_resp.text = "File too large"
+
+        client._session = MagicMock()
+        client._session.patch.return_value = ok_resp
+        client._session.post.return_value = fail_resp
+
+        adapter = ThingiverseAdapter(client)
+        with pytest.raises(MarketplaceError, match="File upload failed"):
+            adapter.upload_model(
+                file_path=str(stl), title="T", description="D",
+                tags=["t"], category="c", license_type="cc-by",
+            )
+
+    def test_upload_wraps_thingiverse_error(self, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"data")
+
+        client = MagicMock(spec=ThingiverseClient)
+        client._request.side_effect = ThingiverseAuthError("bad token", status_code=401)
+
+        adapter = ThingiverseAdapter(client)
+        with pytest.raises(MarketplaceAuthError, match="bad token"):
+            adapter.upload_model(
+                file_path=str(stl), title="T", description="D",
+                tags=["t"], category="c", license_type="cc-by",
+            )
+
+    def test_upload_license_mapping(self, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"data")
+
+        client = MagicMock(spec=ThingiverseClient)
+        client._base_url = "https://api.thingiverse.com"
+        client._token = "tok"
+        client._request.return_value = {"id": 5}
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        client._session = MagicMock()
+        client._session.patch.return_value = ok_resp
+        client._session.post.return_value = ok_resp
+
+        adapter = ThingiverseAdapter(client)
+        adapter.upload_model(
+            file_path=str(stl), title="T", description="D",
+            tags=["t"], category="c", license_type="public_domain",
+        )
+
+        patch_call = client._session.patch.call_args
+        body = patch_call.kwargs.get("json") or patch_call[1].get("json")
+        assert body["license"] == "pd0"
+
+
+# ===================================================================
+# MyMiniFactoryAdapter.upload_model() tests
+# ===================================================================
+
+
+class TestMyMiniFactoryAdapterSupportsUpload:
+    def test_supports_upload_true(self, mmf_adapter):
+        assert mmf_adapter.supports_upload is True
+
+
+class TestMyMiniFactoryAdapterUploadModel:
+    """MyMiniFactoryAdapter.upload_model — create object, upload file, publish."""
+
+    @responses.activate
+    def test_upload_success(self, mmf_adapter, tmp_path):
+        stl = tmp_path / "dragon.stl"
+        stl.write_bytes(b"FAKE_STL_DATA")
+
+        # Step 1: POST /objects → create
+        responses.add(
+            responses.POST,
+            f"{MMF_BASE}/objects",
+            json={"id": 42, "url": "https://mmf.io/d/42"},
+            status=201,
+        )
+        # Step 2: POST /objects/42/files → upload file
+        responses.add(
+            responses.POST,
+            f"{MMF_BASE}/objects/42/files",
+            json={"id": 100, "filename": "dragon.stl"},
+            status=201,
+        )
+        # Step 3: PATCH /objects/42 → publish
+        responses.add(
+            responses.PATCH,
+            f"{MMF_BASE}/objects/42",
+            json={"id": 42, "status": "published"},
+            status=200,
+        )
+
+        result = mmf_adapter.upload_model(
+            file_path=str(stl), title="Dragon", description="A dragon",
+            tags=["dragon"], category="Tabletop", license_type="cc-by",
+        )
+
+        assert result["id"] == "42"
+        assert result["url"] == "https://mmf.io/d/42"
+        assert len(responses.calls) == 3
+
+    @responses.activate
+    def test_upload_file_not_found(self, mmf_adapter):
+        with pytest.raises(MarketplaceError, match="File not found"):
+            mmf_adapter.upload_model(
+                file_path="/nonexistent/model.stl", title="T", description="D",
+                tags=["t"], category="c", license_type="cc-by",
+            )
+
+    @responses.activate
+    def test_upload_auth_error(self, mmf_adapter, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"data")
+
+        responses.add(responses.POST, f"{MMF_BASE}/objects", status=401, json={"error": "Unauthorized"})
+
+        with pytest.raises(MarketplaceAuthError, match="Invalid or expired"):
+            mmf_adapter.upload_model(
+                file_path=str(stl), title="T", description="D",
+                tags=["t"], category="c", license_type="cc-by",
+            )
+
+    @responses.activate
+    def test_upload_create_fails(self, mmf_adapter, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"data")
+
+        responses.add(responses.POST, f"{MMF_BASE}/objects", status=500, body="Internal Server Error")
+
+        with pytest.raises(MarketplaceError, match="Failed to create object"):
+            mmf_adapter.upload_model(
+                file_path=str(stl), title="T", description="D",
+                tags=["t"], category="c", license_type="cc-by",
+            )
+
+    @responses.activate
+    def test_upload_no_object_id(self, mmf_adapter, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"data")
+
+        responses.add(responses.POST, f"{MMF_BASE}/objects", json={}, status=201)
+
+        with pytest.raises(MarketplaceError, match="did not return an object ID"):
+            mmf_adapter.upload_model(
+                file_path=str(stl), title="T", description="D",
+                tags=["t"], category="c", license_type="cc-by",
+            )
+
+    @responses.activate
+    def test_upload_file_upload_fails(self, mmf_adapter, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"data")
+
+        responses.add(responses.POST, f"{MMF_BASE}/objects", json={"id": 10}, status=201)
+        responses.add(responses.POST, f"{MMF_BASE}/objects/10/files", status=413, body="Too large")
+
+        with pytest.raises(MarketplaceError, match="File upload failed"):
+            mmf_adapter.upload_model(
+                file_path=str(stl), title="T", description="D",
+                tags=["t"], category="c", license_type="cc-by",
+            )
+
+    @responses.activate
+    def test_upload_publish_failure_non_fatal(self, mmf_adapter, tmp_path):
+        """Publish (PATCH) failure is non-fatal — object still exists."""
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"data")
+
+        responses.add(responses.POST, f"{MMF_BASE}/objects", json={"id": 7, "url": "https://mmf.io/d/7"}, status=201)
+        responses.add(responses.POST, f"{MMF_BASE}/objects/7/files", json={}, status=201)
+        # PATCH fails — connection error
+        responses.add(responses.PATCH, f"{MMF_BASE}/objects/7", body=requests.ConnectionError("down"))
+
+        result = mmf_adapter.upload_model(
+            file_path=str(stl), title="T", description="D",
+            tags=["t"], category="c", license_type="cc-by",
+        )
+        # Still returns success since object was created
+        assert result["id"] == "7"
+        assert result["url"] == "https://mmf.io/d/7"
+
+    @responses.activate
+    def test_upload_license_mapping(self, mmf_adapter, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"data")
+
+        responses.add(responses.POST, f"{MMF_BASE}/objects", json={"id": 1}, status=201)
+        responses.add(responses.POST, f"{MMF_BASE}/objects/1/files", json={}, status=201)
+        responses.add(responses.PATCH, f"{MMF_BASE}/objects/1", json={}, status=200)
+
+        mmf_adapter.upload_model(
+            file_path=str(stl), title="T", description="D",
+            tags=["t"], category="c", license_type="public_domain",
+        )
+
+        # Verify license was mapped correctly in the create call
+        create_call = responses.calls[0]
+        body = json.loads(create_call.request.body)
+        assert body["license"] == "cc0"
+
+    @responses.activate
+    def test_upload_connection_error(self, mmf_adapter, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"data")
+
+        responses.add(responses.POST, f"{MMF_BASE}/objects", body=requests.ConnectionError("conn failed"))
+
+        with pytest.raises(MarketplaceError, match="Connection"):
+            mmf_adapter.upload_model(
+                file_path=str(stl), title="T", description="D",
+                tags=["t"], category="c", license_type="cc-by",
+            )
+
+    @responses.activate
+    def test_upload_timeout_error(self, mmf_adapter, tmp_path):
+        stl = tmp_path / "model.stl"
+        stl.write_bytes(b"data")
+
+        responses.add(responses.POST, f"{MMF_BASE}/objects", body=requests.Timeout("timed out"))
+
+        with pytest.raises(MarketplaceError, match="timed out"):
+            mmf_adapter.upload_model(
+                file_path=str(stl), title="T", description="D",
+                tags=["t"], category="c", license_type="cc-by",
+            )

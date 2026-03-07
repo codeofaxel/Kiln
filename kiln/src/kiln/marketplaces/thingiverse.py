@@ -13,6 +13,8 @@ Wraps :class:`kiln.thingiverse.ThingiverseClient` to implement the
 from __future__ import annotations
 
 import logging
+import os
+from typing import Any
 
 from kiln.marketplaces.base import (
     MarketplaceAdapter,
@@ -78,6 +80,10 @@ class ThingiverseAdapter(MarketplaceAdapter):
     @property
     def display_name(self) -> str:
         return "Thingiverse"
+
+    @property
+    def supports_upload(self) -> bool:
+        return True
 
     def search(
         self,
@@ -161,5 +167,82 @@ class ThingiverseAdapter(MarketplaceAdapter):
                 dest_dir,
                 file_name=file_name,
             )
+        except ThingiverseError as exc:
+            raise _wrap_error(exc) from exc
+
+    def upload_model(
+        self,
+        *,
+        file_path: str,
+        title: str,
+        description: str,
+        tags: list[str],
+        category: str,
+        license_type: str,
+    ) -> dict[str, Any]:
+        """Create a new thing on Thingiverse and upload the model file.
+
+        Uses the Thingiverse REST API v1:
+        1. POST /things — create the thing (returns thing ID)
+        2. PATCH /things/{id} — set metadata (title, description, tags, license)
+        3. POST /things/{id}/files — upload the STL/3MF file
+        """
+        if not os.path.isfile(file_path):
+            raise MarketplaceError(f"File not found: {file_path}")
+
+        _LICENSE_MAP = {
+            "cc-by": "cc",
+            "cc-by-sa": "cc-sa",
+            "cc-by-nc": "cc-nc",
+            "gpl": "gpl",
+            "public_domain": "pd0",
+        }
+
+        try:
+            # Step 1: Create the thing
+            thing_data = self._client._request("POST", "/things")
+            thing_id = thing_data.get("id")
+            if not thing_id:
+                raise MarketplaceError("Thingiverse did not return a thing ID.")
+
+            # Step 2: Update thing metadata
+            resp = self._client._session.patch(
+                f"{self._client._base_url}/things/{thing_id}",
+                params={"access_token": self._client._token},
+                json={
+                    "name": title,
+                    "description": description,
+                    "tags": tags,
+                    "category": category,
+                    "license": _LICENSE_MAP.get(license_type, "cc"),
+                    "is_published": True,
+                },
+                timeout=30,
+            )
+            if resp.status_code >= 400:
+                raise MarketplaceError(
+                    f"Failed to set thing metadata ({resp.status_code}): {resp.text[:200]}",
+                    status_code=resp.status_code,
+                )
+
+            # Step 3: Upload the file
+            filename = os.path.basename(file_path)
+            with open(file_path, "rb") as fh:
+                resp = self._client._session.post(
+                    f"{self._client._base_url}/things/{thing_id}/files",
+                    params={"access_token": self._client._token},
+                    files={"file": (filename, fh)},
+                    timeout=120,
+                )
+            if resp.status_code >= 400:
+                raise MarketplaceError(
+                    f"File upload failed ({resp.status_code}): {resp.text[:200]}",
+                    status_code=resp.status_code,
+                )
+
+            thing_url = f"https://www.thingiverse.com/thing:{thing_id}"
+            _logger.info("Published to Thingiverse: %s", thing_url)
+            return {"id": str(thing_id), "url": thing_url}
+
         except ThingiverseError as exc:
             raise _wrap_error(exc) from exc

@@ -11,6 +11,7 @@ Environment variables
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 from pathlib import Path
@@ -68,6 +69,10 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
     @property
     def display_name(self) -> str:
         return "MyMiniFactory"
+
+    @property
+    def supports_upload(self) -> bool:
+        return True
 
     # -- low-level request helper ------------------------------------------
 
@@ -195,6 +200,102 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
             raise MarketplaceError(
                 f"Failed to download file {file_id}: {exc}",
             ) from exc
+
+    def upload_model(
+        self,
+        *,
+        file_path: str,
+        title: str,
+        description: str,
+        tags: list[str],
+        category: str,
+        license_type: str,
+    ) -> dict[str, Any]:
+        """Create a new object on MyMiniFactory and upload the model file.
+
+        Uses the MyMiniFactory REST API v2:
+        1. POST /objects — create the object with metadata
+        2. POST /objects/{id}/files — upload the STL/3MF file
+        3. PATCH /objects/{id} — publish the object
+        """
+        if not os.path.isfile(file_path):
+            raise MarketplaceError(f"File not found: {file_path}")
+
+        _LICENSE_MAP = {
+            "cc-by": "cc-by",
+            "cc-by-sa": "cc-by-sa",
+            "cc-by-nc": "cc-by-nc",
+            "gpl": "gpl",
+            "public_domain": "cc0",
+        }
+
+        # Step 1: Create the object
+        url = f"{self._base_url}/objects"
+        try:
+            resp = self._session.post(
+                url,
+                params={"key": self._api_key},
+                json={
+                    "name": title,
+                    "description": description,
+                    "tags": tags,
+                    "category": category,
+                    "license": _LICENSE_MAP.get(license_type, "cc-by"),
+                    "visibility": "public",
+                },
+                timeout=_REQUEST_TIMEOUT,
+            )
+        except requests.ConnectionError as exc:
+            raise MarketplaceError(f"Connection to MyMiniFactory failed: {exc}") from exc
+        except requests.Timeout as exc:
+            raise MarketplaceError(f"MyMiniFactory request timed out: {exc}") from exc
+
+        if resp.status_code == 401:
+            raise MarketplaceAuthError("Invalid or expired MyMiniFactory API key.", status_code=401)
+        if resp.status_code >= 400:
+            raise MarketplaceError(
+                f"Failed to create object ({resp.status_code}): {resp.text[:200]}",
+                status_code=resp.status_code,
+            )
+
+        data = resp.json()
+        object_id = data.get("id")
+        if not object_id:
+            raise MarketplaceError("MyMiniFactory did not return an object ID.")
+
+        # Step 2: Upload the file
+        filename = os.path.basename(file_path)
+        try:
+            with open(file_path, "rb") as fh:
+                resp = self._session.post(
+                    f"{self._base_url}/objects/{object_id}/files",
+                    params={"key": self._api_key},
+                    files={"file": (filename, fh)},
+                    timeout=_DOWNLOAD_TIMEOUT,
+                )
+        except requests.ConnectionError as exc:
+            raise MarketplaceError(f"File upload connection failed: {exc}") from exc
+        except requests.Timeout as exc:
+            raise MarketplaceError(f"File upload timed out: {exc}") from exc
+
+        if resp.status_code >= 400:
+            raise MarketplaceError(
+                f"File upload failed ({resp.status_code}): {resp.text[:200]}",
+                status_code=resp.status_code,
+            )
+
+        # Step 3: Publish the object (non-fatal if it fails)
+        with contextlib.suppress(requests.ConnectionError, requests.Timeout):
+            self._session.patch(
+                f"{self._base_url}/objects/{object_id}",
+                params={"key": self._api_key},
+                json={"status": "published"},
+                timeout=_REQUEST_TIMEOUT,
+            )
+
+        object_url = data.get("url", f"https://www.myminifactory.com/object/{object_id}")
+        logger.info("Published to MyMiniFactory: %s", object_url)
+        return {"id": str(object_id), "url": object_url}
 
     # -- parsing helpers ---------------------------------------------------
 
