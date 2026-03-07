@@ -327,8 +327,9 @@ def get_all_tool_schemas(tier: str = "full") -> list[dict]:
     """Get OpenAI function-calling schemas for all tools in a tier.
 
     Args:
-        tier: Tool tier name — ``"essential"``, ``"standard"``, or
-            ``"full"``.  Defaults to ``"full"`` (all tools).
+        tier: Tool tier name — ``"essential"``, ``"standard"``,
+            ``"full"``, or ``"all"`` (every registered tool).
+            Defaults to ``"full"``.
 
     Returns:
         A list of OpenAI function-calling schema dicts, one per tool.
@@ -337,12 +338,27 @@ def get_all_tool_schemas(tier: str = "full") -> list[dict]:
         KeyError: If *tier* is not a recognised tier name.
     """
     _ensure_loaded()
+
+    if tier == "all":
+        # Bypass the allowlist — return schemas for every registered tool.
+        return list(_SCHEMA_CACHE.values())
+
     tool_names = get_tier(tier)
     schemas = []
     for name in tool_names:
         if name in _SCHEMA_CACHE:
             schemas.append(_SCHEMA_CACHE[name])
     return schemas
+
+
+def get_all_registered_tool_names() -> list[str]:
+    """Return names of every tool registered on the MCP server.
+
+    Used by ``tool_tiers.get_tier("all")`` to dynamically resolve the
+    ``"all"`` tier without maintaining a hardcoded list.
+    """
+    _ensure_loaded()
+    return list(_SCHEMA_CACHE.keys())
 
 
 def _find_tier_for_tool(name: str) -> str | None:
@@ -454,7 +470,8 @@ def get_annotated_tool_schemas(tier: str = "full") -> list[dict]:
     the tool's safety classification from ``data/tool_safety.json``.
 
     Args:
-        tier: Tool tier name (``"essential"``, ``"standard"``, ``"full"``).
+        tier: Tool tier name (``"essential"``, ``"standard"``, ``"full"``,
+            or ``"all"``).
 
     Returns:
         A list of annotated OpenAI function-calling schema dicts.

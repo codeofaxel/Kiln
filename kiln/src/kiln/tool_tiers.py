@@ -12,7 +12,9 @@ Tiers
 ``standard``
     ~50 tools for capable models (GPT-4o-mini, Gemini Flash, Command R+).
 ``full``
-    All 101 tools for strong models (Claude, GPT-4, Gemini Pro).
+    ~160 curated tools for strong models (Claude, GPT-4, Gemini Pro).
+``all``
+    Every registered tool (includes plugin-contributed tools not in other tiers).
 """
 
 from __future__ import annotations
@@ -264,6 +266,7 @@ TIERS: dict[str, list[str]] = {
     "essential": TIER_ESSENTIAL,
     "standard": TIER_STANDARD,
     "full": TIER_FULL,
+    # "all" is resolved dynamically in get_tier() — not a static list.
 }
 
 
@@ -276,7 +279,8 @@ def get_tier(name: str) -> list[str]:
     """Return tool names for a tier.
 
     Args:
-        name: Tier name — ``"essential"``, ``"standard"``, or ``"full"``.
+        name: Tier name — ``"essential"``, ``"standard"``, ``"full"``,
+            or ``"all"`` (every registered tool, bypasses allowlist).
 
     Returns:
         List of tool name strings belonging to that tier.
@@ -284,10 +288,17 @@ def get_tier(name: str) -> list[str]:
     Raises:
         KeyError: If *name* is not a recognised tier.
     """
+    if name == "all":
+        # Dynamically return every tool registered on the MCP instance.
+        # Lazy import to avoid circular dependency with tool_schema.
+        from kiln.tool_schema import get_all_registered_tool_names
+
+        return get_all_registered_tool_names()
     try:
         return TIERS[name]
     except KeyError:
-        raise KeyError(f"Unknown tier {name!r}. Available tiers: {', '.join(sorted(TIERS))}") from None
+        valid = sorted(set(TIERS) | {"all"})
+        raise KeyError(f"Unknown tier {name!r}. Available tiers: {', '.join(valid)}") from None
 
 
 # ---------------------------------------------------------------------------
