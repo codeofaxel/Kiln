@@ -4798,9 +4798,15 @@ def material_set(
 
 @material.command("show")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.option("--live", is_flag=True, default=False, help="Query printer directly (AMS/filament sensor).")
 @click.pass_context
-def material_show(ctx: click.Context, json_mode: bool) -> None:
-    """Show loaded materials for the active printer."""
+def material_show(ctx: click.Context, json_mode: bool, live: bool) -> None:
+    """Show loaded materials for the active printer.
+
+    By default queries the local material database.  Use --live to query
+    the printer directly (e.g. Bambu AMS slot data via MQTT).  When the
+    local database is empty, --live is tried automatically as a fallback.
+    """
     import json as _json
 
     from kiln.materials import MaterialTracker
@@ -4808,28 +4814,130 @@ def material_show(ctx: click.Context, json_mode: bool) -> None:
 
     try:
         printer_name = ctx.obj.get("printer") or "default"
-        tracker = MaterialTracker(db=get_db())
-        materials = tracker.get_all_materials(printer_name)
-        if json_mode:
-            click.echo(
-                _json.dumps(
-                    {
-                        "status": "success",
-                        "data": [m.to_dict() for m in materials],
-                    },
-                    indent=2,
-                )
-            )
+
+        # --live: skip local DB, go straight to printer.
+        if not live:
+            tracker = MaterialTracker(db=get_db())
+            materials = tracker.get_all_materials(printer_name)
+            if materials:
+                if json_mode:
+                    click.echo(
+                        _json.dumps(
+                            {"status": "success", "source": "database",
+                             "data": [m.to_dict() for m in materials]},
+                            indent=2,
+                        )
+                    )
+                else:
+                    for m in materials:
+                        line = f"Tool {m.tool_index}: {m.material_type}"
+                        if m.color:
+                            line += f" ({m.color})"
+                        if m.remaining_grams is not None:
+                            line += f" — {m.remaining_grams:.0f}g remaining"
+                        click.echo(line)
+                return
+            # Local DB empty — fall through to live query.
+
+        # Live query: ask the printer what's loaded.
+        import time as _time
+
+        try:
+            adapter = _get_adapter_from_ctx(ctx)
+        except (click.ClickException, Exception) as exc:
+            if not live:
+                # Was a silent fallback — just say nothing loaded.
+                if json_mode:
+                    click.echo(_json.dumps({"status": "success", "source": "database", "data": []}, indent=2))
+                else:
+                    click.echo("No materials loaded. Use --live to query printer directly.")
+                return
+            raise
+
+        ams_data = None
+        if hasattr(adapter, "get_ams_status"):
+            # AMS data may arrive after the initial MQTT pushall response.
+            # Bambu printers send AMS tray info in a separate MQTT message
+            # that can arrive 3-8s after the initial status dump.
+            # Warm up the MQTT session with get_state(), then poll for
+            # the AMS payload with increasing delays.
+            if not json_mode:
+                click.echo("Querying printer for AMS data...")
+            try:
+                adapter.get_state()  # Triggers MQTT connect + pushall.
+            except Exception:
+                pass
+            for _attempt in range(5):
+                _time.sleep(2.0)
+                ams_data = adapter.get_ams_status()
+                if ams_data and ams_data.get("units"):
+                    break
+                # Request another pushall to coax the AMS data out.
+                if hasattr(adapter, "_publish_command") and hasattr(adapter, "_next_seq"):
+                    try:
+                        adapter._publish_command(
+                            {"pushing": {"sequence_id": adapter._next_seq(), "command": "pushall"}}
+                        )
+                    except Exception:
+                        pass
+
+        if ams_data and ams_data.get("units"):
+            tray_now = ams_data.get("tray_now", "255")
+            slots: list[dict] = []
+            for unit in ams_data["units"]:
+                unit_id = unit.get("unit_id", 0)
+                humidity = unit.get("humidity")
+                for tray in unit.get("trays", []):
+                    slot_num = unit_id * 4 + tray.get("slot", 0) + 1  # 1-indexed
+                    color_hex = tray.get("tray_color", "")
+                    # Convert RRGGBBAA hex to readable color name or short hex.
+                    color_display = f"#{color_hex[:6]}" if len(color_hex) >= 6 else color_hex
+                    tray_type = tray.get("tray_type", "")
+                    remain = tray.get("remain")
+                    is_active = str(tray.get("slot", -1)) == str(tray_now)
+                    entry = {
+                        "slot": slot_num,
+                        "type": tray_type,
+                        "color": color_display,
+                        "color_raw": color_hex,
+                        "remain_pct": remain,
+                        "active": is_active,
+                        "nozzle_temp_min": tray.get("nozzle_temp_min"),
+                        "nozzle_temp_max": tray.get("nozzle_temp_max"),
+                        "bed_temp": tray.get("bed_temp"),
+                    }
+                    if humidity is not None:
+                        entry["humidity_pct"] = humidity
+                    slots.append(entry)
+
+            if json_mode:
+                click.echo(_json.dumps({"status": "success", "source": "printer", "data": slots}, indent=2))
+            else:
+                click.echo(f"AMS slots (live from printer):")
+                for s in slots:
+                    active = " ◀ active" if s["active"] else ""
+                    remain = f" — {s['remain_pct']}% left" if s.get("remain_pct") is not None else ""
+                    ttype = s["type"] or "empty"
+                    color = f" ({s['color']})" if s["color"] else ""
+                    click.echo(f"  Slot {s['slot']}: {ttype}{color}{remain}{active}")
         else:
-            if not materials:
-                click.echo("No materials loaded.")
-            for m in materials:
-                line = f"Tool {m.tool_index}: {m.material_type}"
-                if m.color:
-                    line += f" ({m.color})"
-                if m.remaining_grams is not None:
-                    line += f" — {m.remaining_grams:.0f}g remaining"
-                click.echo(line)
+            # No AMS — try filament sensor.
+            filament = None
+            if hasattr(adapter, "get_filament_status"):
+                filament = adapter.get_filament_status()
+            if filament:
+                if json_mode:
+                    click.echo(_json.dumps({"status": "success", "source": "printer", "data": filament}, indent=2))
+                else:
+                    detected = filament.get("detected", "unknown")
+                    click.echo(f"Filament sensor: {'detected' if detected else 'not detected'}")
+            else:
+                if json_mode:
+                    click.echo(_json.dumps({"status": "success", "source": "printer", "data": []}, indent=2))
+                else:
+                    click.echo("No AMS or filament data available from printer.")
+    except click.ClickException:
+        raise
     except OSError as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
         sys.exit(1)
