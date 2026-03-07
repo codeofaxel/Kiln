@@ -2221,6 +2221,102 @@ class TestDetect3mfFilaments:
         assert result is None
 
 
+class TestBuildAmsMappingFrom3mf:
+    """Tests for _build_ams_mapping_from_3mf: gap-aware mapping builder."""
+
+    def _make_3mf(
+        self, tmp_path: Any, *,
+        filament_colors: list[str],
+        filament_ids: list[int] | None = None,
+    ) -> str:
+        import zipfile
+        meta: dict[str, Any] = {"filament_colors": filament_colors}
+        if filament_ids is not None:
+            meta["filament_ids"] = filament_ids
+        threemf = tmp_path / "model.3mf"
+        with zipfile.ZipFile(threemf, "w") as zf:
+            zf.writestr("Metadata/plate_1.json", json.dumps(meta))
+        return str(threemf)
+
+    def test_contiguous_ids(self, tmp_path: Any) -> None:
+        """filament_ids [0, 1] produces simple [0, 1] mapping."""
+        path = self._make_3mf(
+            tmp_path,
+            filament_colors=["#000000", "#FFFFFF"],
+            filament_ids=[0, 1],
+        )
+        result = BambuAdapter._build_ams_mapping_from_3mf(path)
+        assert result == [0, 1]
+
+    def test_gap_in_ids(self, tmp_path: Any) -> None:
+        """filament_ids [0, 2] produces [0, -1, 1] with placeholder for unused ID 1."""
+        path = self._make_3mf(
+            tmp_path,
+            filament_colors=["#161616", "#FFFFFF"],
+            filament_ids=[0, 2],
+        )
+        result = BambuAdapter._build_ams_mapping_from_3mf(path)
+        assert result == [0, -1, 1]
+
+    def test_three_filaments_with_gap(self, tmp_path: Any) -> None:
+        """filament_ids [0, 2, 3] → [0, -1, 1, 2]."""
+        path = self._make_3mf(
+            tmp_path,
+            filament_colors=["#FF0000", "#00FF00", "#0000FF"],
+            filament_ids=[0, 2, 3],
+        )
+        result = BambuAdapter._build_ams_mapping_from_3mf(path)
+        assert result == [0, -1, 1, 2]
+
+    def test_single_filament_returns_none(self, tmp_path: Any) -> None:
+        """Single-color model doesn't need multi-material mapping."""
+        path = self._make_3mf(
+            tmp_path,
+            filament_colors=["#000000"],
+            filament_ids=[0],
+        )
+        result = BambuAdapter._build_ams_mapping_from_3mf(path)
+        assert result is None
+
+    def test_missing_filament_ids_falls_back_to_sequential(self, tmp_path: Any) -> None:
+        """No filament_ids key → sequential fallback [0, 1]."""
+        path = self._make_3mf(
+            tmp_path,
+            filament_colors=["#000000", "#FFFFFF"],
+        )
+        result = BambuAdapter._build_ams_mapping_from_3mf(path)
+        assert result == [0, 1]
+
+    def test_mismatched_lengths_falls_back_to_sequential(self, tmp_path: Any) -> None:
+        """filament_ids length != colors length → sequential fallback."""
+        path = self._make_3mf(
+            tmp_path,
+            filament_colors=["#000000", "#FFFFFF"],
+            filament_ids=[0, 1, 2],  # 3 IDs but only 2 colors
+        )
+        result = BambuAdapter._build_ams_mapping_from_3mf(path)
+        assert result == [0, 1]
+
+    def test_nonexistent_file_returns_none(self) -> None:
+        result = BambuAdapter._build_ams_mapping_from_3mf("/nonexistent.3mf")
+        assert result is None
+
+    def test_gba_holder_real_metadata(self, tmp_path: Any) -> None:
+        """Reproduces the exact GBA holder case: filament_ids [0, 2]."""
+        path = self._make_3mf(
+            tmp_path,
+            filament_colors=["#161616", "#FFFFFF"],
+            filament_ids=[0, 2],
+        )
+        mapping = BambuAdapter._build_ams_mapping_from_3mf(path)
+        # ID 0 (black) → tray 0, ID 1 → unused, ID 2 (white) → tray 1
+        assert mapping == [0, -1, 1]
+        # So for the user's AMS (slot 0=white, slot 1=black):
+        # They'd override: ams_mapping=[1, -1, 0]
+        # mapping[0]=1 → filament 0 (black) → AMS tray 1 (black) ✓
+        # mapping[2]=0 → filament 2 (white) → AMS tray 0 (white) ✓
+
+
 # ---------------------------------------------------------------------------
 # AMS color mismatch check tests
 # ---------------------------------------------------------------------------

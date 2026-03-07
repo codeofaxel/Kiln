@@ -1601,6 +1601,30 @@ class BambuAdapter(PrinterAdapter):
         return warnings
 
     @staticmethod
+    def _read_3mf_plate_meta(
+        file_path: str,
+        plate_number: int = 1,
+    ) -> dict[str, Any] | None:
+        """Read plate metadata from a 3MF archive.
+
+        Returns the parsed JSON dict for ``Metadata/plate_N.json``,
+        or ``None`` if the file cannot be read.
+        """
+        import json
+        import zipfile
+
+        try:
+            with zipfile.ZipFile(file_path, "r") as zf:
+                meta_name = f"Metadata/plate_{plate_number}.json"
+                if meta_name not in zf.namelist():
+                    return None
+                with zf.open(meta_name) as mf:
+                    return json.loads(mf.read())
+        except Exception:
+            logger.debug("Could not read 3MF plate metadata from %s", file_path, exc_info=True)
+        return None
+
+    @staticmethod
     def _detect_3mf_filaments(
         file_path: str,
         plate_number: int = 1,
@@ -1615,22 +1639,60 @@ class BambuAdapter(PrinterAdapter):
             file_path: Local path to the 3MF file.
             plate_number: Which plate's metadata to inspect.
         """
-        import json
-        import zipfile
-
-        try:
-            with zipfile.ZipFile(file_path, "r") as zf:
-                meta_name = f"Metadata/plate_{plate_number}.json"
-                if meta_name not in zf.namelist():
-                    return None
-                with zf.open(meta_name) as mf:
-                    meta = json.loads(mf.read())
-                colors = meta.get("filament_colors")
-                if isinstance(colors, list) and len(colors) >= 1:
-                    return colors
-        except Exception:
-            logger.debug("Could not read 3MF filament metadata from %s", file_path, exc_info=True)
+        meta = BambuAdapter._read_3mf_plate_meta(file_path, plate_number)
+        if meta is None:
+            return None
+        colors = meta.get("filament_colors")
+        if isinstance(colors, list) and len(colors) >= 1:
+            return colors
         return None
+
+    @staticmethod
+    def _build_ams_mapping_from_3mf(
+        file_path: str,
+        plate_number: int = 1,
+    ) -> list[int] | None:
+        """Build an ``ams_mapping`` array from 3MF plate metadata.
+
+        BambuStudio/OrcaSlicer write ``filament_ids`` as the slicer-internal
+        profile indices used by the plate.  The ``ams_mapping`` sent to the
+        printer is a positional array where
+        ``ams_mapping[filament_id] = tray_index``.
+
+        When ``filament_ids`` has gaps (e.g. ``[0, 2]`` — filament profiles 0
+        and 2 but not 1), the mapping must include placeholder entries (``-1``)
+        for unused positions so the printer routes each filament to the
+        correct AMS tray.
+
+        Without this, a 2-color model sliced with filament IDs ``[0, 2]``
+        would get a mapping of ``[0, 1]`` which only covers IDs 0 and 1,
+        leaving ID 2 unmapped and defaulting to the wrong tray.
+
+        Returns a positional mapping list (e.g. ``[0, -1, 1]``), or ``None``
+        if the metadata cannot be read or has < 2 filaments.
+        """
+        meta = BambuAdapter._read_3mf_plate_meta(file_path, plate_number)
+        if meta is None:
+            return None
+
+        filament_ids = meta.get("filament_ids")
+        colors = meta.get("filament_colors")
+
+        # Need at least 2 filaments for multi-material.
+        if not isinstance(colors, list) or len(colors) < 2:
+            return None
+
+        # If filament_ids is missing or malformed, fall back to sequential.
+        if not isinstance(filament_ids, list) or len(filament_ids) != len(colors):
+            return list(range(len(colors)))
+
+        # Build a positional mapping: ams_mapping[filament_id] = tray_index.
+        # Filament IDs may have gaps (e.g. [0, 2]) — fill gaps with -1.
+        max_id = max(filament_ids)
+        mapping = [-1] * (max_id + 1)
+        for tray_idx, fid in enumerate(filament_ids):
+            mapping[fid] = tray_idx
+        return mapping
 
     @staticmethod
     def _detect_3mf_printer_model(
@@ -1906,14 +1968,15 @@ class BambuAdapter(PrinterAdapter):
             # Auto-detect filament count from 3MF plate metadata when
             # the caller didn't specify ams_mapping explicitly.
             if ams_mapping is None and local_path and os.path.isfile(local_path):
-                detected = self._detect_3mf_filaments(local_path, plate_num)
-                if detected is not None and len(detected) > 1:
-                    ams_mapping = list(range(len(detected)))
+                auto_mapping = self._build_ams_mapping_from_3mf(
+                    local_path, plate_num,
+                )
+                if auto_mapping is not None:
+                    ams_mapping = auto_mapping
                     use_ams = True
                     logger.info(
-                        "Auto-detected %d filaments in plate %d — "
+                        "Auto-detected multi-material in plate %d — "
                         "setting use_ams=True, ams_mapping=%s",
-                        len(detected),
                         plate_num,
                         ams_mapping,
                     )
@@ -1923,6 +1986,28 @@ class BambuAdapter(PrinterAdapter):
                 ams_mapping = [0]
             if not isinstance(ams_mapping, list):
                 ams_mapping = [0]
+
+            # Validate ams_mapping length covers all filament_ids in the 3MF.
+            # If the mapping is too short, filament IDs beyond the mapping
+            # length will silently default to the wrong AMS tray.
+            if use_ams and local_path and os.path.isfile(local_path):
+                meta = self._read_3mf_plate_meta(local_path, plate_num)
+                if meta is not None:
+                    filament_ids = meta.get("filament_ids")
+                    if isinstance(filament_ids, list) and filament_ids:
+                        max_id = max(filament_ids)
+                        if max_id >= len(ams_mapping):
+                            msg = (
+                                f"ams_mapping has {len(ams_mapping)} "
+                                f"entries but the 3MF uses filament ID "
+                                f"{max_id} (filament_ids={filament_ids}). "
+                                f"Entries beyond the mapping length will "
+                                f"default to unexpected AMS trays. The "
+                                f"mapping needs at least {max_id + 1} "
+                                f"entries (use -1 for unused positions)."
+                            )
+                            logger.warning("%s", msg)
+                            warnings.append(msg)
 
             # Validate filament_ids against AMS capacity.
             if local_path and os.path.isfile(local_path):
