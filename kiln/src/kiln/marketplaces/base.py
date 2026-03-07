@@ -160,6 +160,15 @@ class MarketplaceAdapter(ABC):
         """
         return True
 
+    @property
+    def supports_upload(self) -> bool:
+        """Whether this adapter can upload/publish models.
+
+        Returns ``False`` by default.  Override to ``True`` for
+        adapters that implement :meth:`upload_model`.
+        """
+        return False
+
     @abstractmethod
     def search(
         self,
@@ -195,6 +204,28 @@ class MarketplaceAdapter(ABC):
         """
         raise MarketplaceError(
             f"{self.display_name} does not support direct file downloads.",
+        )
+
+    def upload_model(
+        self,
+        *,
+        file_path: str,
+        title: str,
+        description: str,
+        tags: list[str],
+        category: str,
+        license_type: str,
+    ) -> dict[str, Any]:
+        """Upload/publish a model to this marketplace.
+
+        Returns a dict with at least ``"id"`` and ``"url"`` keys.
+
+        The default implementation raises :class:`MarketplaceError`.
+        Adapters that support uploads must override this method and
+        set :attr:`supports_upload` to ``True``.
+        """
+        raise MarketplaceError(
+            f"{self.display_name} does not support direct model uploads.",
         )
 
 
