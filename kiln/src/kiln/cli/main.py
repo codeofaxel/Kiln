@@ -4844,7 +4844,7 @@ def material_show(ctx: click.Context, json_mode: bool, live: bool) -> None:
 
         try:
             adapter = _get_adapter_from_ctx(ctx)
-        except (click.ClickException, Exception) as exc:
+        except (click.ClickException, Exception):
             if not live:
                 # Was a silent fallback — just say nothing loaded.
                 if json_mode:
@@ -4863,10 +4863,8 @@ def material_show(ctx: click.Context, json_mode: bool, live: bool) -> None:
             # the AMS payload with increasing delays.
             if not json_mode:
                 click.echo("Querying printer for AMS data...")
-            try:
+            with contextlib.suppress(Exception):
                 adapter.get_state()  # Triggers MQTT connect + pushall.
-            except Exception:
-                pass
             for _attempt in range(5):
                 _time.sleep(2.0)
                 ams_data = adapter.get_ams_status()
@@ -4874,12 +4872,10 @@ def material_show(ctx: click.Context, json_mode: bool, live: bool) -> None:
                     break
                 # Request another pushall to coax the AMS data out.
                 if hasattr(adapter, "_publish_command") and hasattr(adapter, "_next_seq"):
-                    try:
+                    with contextlib.suppress(Exception):
                         adapter._publish_command(
                             {"pushing": {"sequence_id": adapter._next_seq(), "command": "pushall"}}
                         )
-                    except Exception:
-                        pass
 
         if ams_data and ams_data.get("units"):
             tray_now = ams_data.get("tray_now", "255")
@@ -4913,7 +4909,7 @@ def material_show(ctx: click.Context, json_mode: bool, live: bool) -> None:
             if json_mode:
                 click.echo(_json.dumps({"status": "success", "source": "printer", "data": slots}, indent=2))
             else:
-                click.echo(f"AMS slots (live from printer):")
+                click.echo("AMS slots (live from printer):")
                 for s in slots:
                     active = " ◀ active" if s["active"] else ""
                     remain = f" — {s['remain_pct']}% left" if s.get("remain_pct") is not None else ""

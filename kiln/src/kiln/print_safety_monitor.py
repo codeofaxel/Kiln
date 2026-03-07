@@ -22,6 +22,7 @@ Usage (programmatic)::
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import time
@@ -399,14 +400,12 @@ class PrintSafetyMonitor:
         ):
             return True
         # Check if bed is still ramping.
-        if (
+        return (
             state.bed_temp_actual is not None
             and state.bed_temp_target is not None
             and state.bed_temp_target > 0
             and state.bed_temp_actual < (state.bed_temp_target - 10)
-        ):
-            return True
-        return False
+        )
 
     # ------------------------------------------------------------------
     # Tier 1 — Emergency
@@ -439,8 +438,7 @@ class PrintSafetyMonitor:
             self._connection_lost_since = None
 
         # Rule: thermal_runaway — hotend
-        if state and state.tool_temp_actual is not None and state.tool_temp_target is not None:
-            if state.tool_temp_target > 0:
+        if state and state.tool_temp_actual is not None and state.tool_temp_target is not None and state.tool_temp_target > 0:
                 overshoot = state.tool_temp_actual - state.tool_temp_target
                 if overshoot > 20.0 and self._is_temp_rising("hotend"):
                     return Alert(
@@ -451,8 +449,7 @@ class PrintSafetyMonitor:
                     )
 
         # Rule: thermal_runaway — bed
-        if state and state.bed_temp_actual is not None and state.bed_temp_target is not None:
-            if state.bed_temp_target > 0:
+        if state and state.bed_temp_actual is not None and state.bed_temp_target is not None and state.bed_temp_target > 0:
                 overshoot = state.bed_temp_actual - state.bed_temp_target
                 if overshoot > 20.0 and self._is_temp_rising("bed"):
                     return Alert(
@@ -554,8 +551,7 @@ class PrintSafetyMonitor:
         preheat = self._is_in_preheat_phase(state)
 
         # Rule: temp_fluctuation — transient >5°C deviation
-        if not preheat and state.tool_temp_actual is not None and state.tool_temp_target is not None:
-            if state.tool_temp_target > 0:
+        if not preheat and state.tool_temp_actual is not None and state.tool_temp_target is not None and state.tool_temp_target > 0:
                 drift = abs(state.tool_temp_actual - state.tool_temp_target)
                 if drift > 5.0:
                     return Alert(
@@ -587,9 +583,7 @@ class PrintSafetyMonitor:
     def _should_debounce(self, alert: Alert) -> bool:
         """Return True if this alert should be suppressed (same rule fired recently)."""
         last = self._last_alert_by_rule.get(alert.rule)
-        if last is not None and (alert.timestamp - last) < _ALERT_DEBOUNCE_SECONDS:
-            return True
-        return False
+        return last is not None and (alert.timestamp - last) < _ALERT_DEBOUNCE_SECONDS
 
     # ------------------------------------------------------------------
     # Action execution
@@ -613,7 +607,7 @@ class PrintSafetyMonitor:
 
         # Publish to event bus if available.
         if self._event_bus:
-            try:
+            with contextlib.suppress(Exception):
                 self._event_bus.publish(
                     EventType.MONITOR_ALERT,
                     {
@@ -625,8 +619,6 @@ class PrintSafetyMonitor:
                     },
                     source="print_safety_monitor",
                 )
-            except Exception:
-                pass  # Event bus failure is never fatal.
 
     # ------------------------------------------------------------------
     # Snapshot capture
@@ -670,14 +662,12 @@ class PrintSafetyMonitor:
 
         # Publish event.
         if self._event_bus:
-            try:
+            with contextlib.suppress(Exception):
                 self._event_bus.publish(
                     EventType.MONITOR_SNAPSHOT,
                     {"printer_name": self._printer_name, "path": str(filepath), "completion": completion},
                     source="print_safety_monitor",
                 )
-            except Exception:
-                pass
 
         return {
             "path": str(filepath),
@@ -801,14 +791,12 @@ class PrintSafetyMonitor:
 
         # Publish event.
         if self._event_bus:
-            try:
+            with contextlib.suppress(Exception):
                 self._event_bus.publish(
                     EventType.MONITOR_COMPLETE,
                     {"printer_name": self._printer_name, "result": result, "duration_s": duration},
                     source="print_safety_monitor",
                 )
-            except Exception:
-                pass
 
     # ------------------------------------------------------------------
     # Rich terminal output helpers
