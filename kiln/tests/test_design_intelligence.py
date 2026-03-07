@@ -414,6 +414,26 @@ class TestDesignBrief:
         assert isinstance(brief, DesignBrief)
         assert brief.recommended_material is not None
 
+    def test_printer_model_influences_brief(self):
+        brief = get_design_constraints(
+            "outdoor garden sign that lives in the sun",
+            printer_model="bambu_a1",
+        )
+        assert brief.recommended_material is not None
+        assert brief.recommended_material.material.material_id != "asa"
+        assert "printer_build_volume_mm" in brief.combined_rules
+        assert "printer_supported_materials" in brief.combined_rules
+        assert any("consumer platform" in note.lower() for note in brief.combined_guidance)
+
+    def test_material_override_warns_when_printer_is_a_bad_fit(self):
+        brief = get_design_constraints(
+            "outdoor bracket",
+            material="asa",
+            printer_model="bambu_a1",
+        )
+        assert brief.recommended_material is not None
+        assert any("open-frame" in warning.lower() or "not profiled" in warning.lower() for warning in brief.recommended_material.warnings)
+
 
 # ---------------------------------------------------------------------------
 # Structural load estimation
@@ -692,6 +712,15 @@ class TestGenerationFeedbackEnhancement:
 
         result = enhance_prompt_with_design_intelligence("a cool robot toy")
         assert len(result.constraints_added) > 0
+
+    def test_enhance_can_include_printer_build_volume(self):
+        from kiln.generation_feedback import enhance_prompt_with_design_intelligence
+
+        result = enhance_prompt_with_design_intelligence(
+            "small desk organizer",
+            printer_model="bambu_a1_mini",
+        )
+        assert "180 x 180 x 180 mm" in result.improved_prompt
 
 
 # ---------------------------------------------------------------------------

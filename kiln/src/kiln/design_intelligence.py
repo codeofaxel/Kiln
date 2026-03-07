@@ -500,6 +500,7 @@ def recommend_material_for_design(
     printer_has_enclosure: bool = False,
     printer_has_direct_drive: bool = True,
     max_hotend_temp_c: int = 300,
+    supported_materials: list[str] | None = None,
 ) -> MaterialRecommendation:
     """Recommend the best material for a set of functional requirements.
 
@@ -515,9 +516,12 @@ def recommend_material_for_design(
         drive extruder (required for TPU).
     :param max_hotend_temp_c: Maximum hotend temperature the printer
         can reach.
+    :param supported_materials: Optional allowlist from the target printer
+        profile. Materials outside this set are heavily penalized.
     """
     kb = _get_kb()
     matched = match_requirements(requirements_text)
+    supported = {m.lower() for m in supported_materials} if supported_materials else None
 
     # Collect material constraints from all matched requirements
     preferred: set[str] = set()
@@ -543,6 +547,10 @@ def recommend_material_for_design(
         # Hard exclusion
         if mid in excluded:
             continue
+
+        if supported is not None and mid not in supported:
+            warnings.append("Not in the target printer's supported material set.")
+            score -= 60
 
         # Requirement match bonuses
         if mid in required:
@@ -1098,22 +1106,64 @@ def get_design_constraints(
     """
     # 1. Match functional requirements
     constraints = match_requirements(requirements_text)
+    printer_profile = (
+        get_printer_design_profile(printer_model)
+        if printer_model
+        else None
+    )
 
     # 2. Recommend material (unless overridden)
     recommendation: MaterialRecommendation | None = None
     if material:
         profile = get_material_profile(material)
         if profile:
+            warnings: list[str] = []
+            if printer_profile:
+                material_key = profile.material_id.lower()
+                supported = {m.lower() for m in printer_profile.supported_materials}
+                min_print_temp = profile.thermal.get("print_temp_range_c", [0, 0])[0]
+                warping = profile.thermal.get("warping_tendency", "").lower()
+
+                if material_key not in supported:
+                    warnings.append(
+                        f"{printer_profile.display_name} is not profiled for {profile.display_name}."
+                    )
+                if min_print_temp > printer_profile.max_hotend_temp_c:
+                    warnings.append(
+                        f"{profile.display_name} needs {min_print_temp}C hotend temperature, "
+                        f"but {printer_profile.display_name} is capped at "
+                        f"{printer_profile.max_hotend_temp_c}C."
+                    )
+                if material_key == "tpu" and not printer_profile.has_direct_drive:
+                    warnings.append(
+                        f"{printer_profile.display_name} does not have direct drive, "
+                        "so TPU reliability will be poor."
+                    )
+                if warping in {"high", "very_high"} and not printer_profile.has_enclosure:
+                    warnings.append(
+                        f"{profile.display_name} benefits from an enclosure, "
+                        f"but {printer_profile.display_name} is open-frame."
+                    )
+
             recommendation = MaterialRecommendation(
                 material=profile,
                 score=100.0,
                 reasons=["User-specified material."],
-                warnings=[],
+                warnings=warnings,
                 design_limits_summary=profile.design_limits,
                 alternatives=[],
             )
     else:
-        recommendation = recommend_material_for_design(requirements_text)
+        if printer_profile:
+            recommendation = recommend_material_for_design(
+                requirements_text,
+                printer_has_enclosure=printer_profile.has_enclosure,
+                printer_has_direct_drive=printer_profile.has_direct_drive,
+                max_hotend_temp_c=printer_profile.max_hotend_temp_c,
+                supported_materials=printer_profile.supported_materials,
+            )
+        else:
+            recommendation = recommend_material_for_design(requirements_text)
 
     # 3. Find applicable patterns
     patterns = _find_patterns_from_text(requirements_text)
@@ -1149,9 +1199,23 @@ def get_design_constraints(
             limit_key = f"material_{key}"
             combined_rules[limit_key] = value
 
+    if printer_profile:
+        combined_guidance.extend(printer_profile.agent_notes)
+        combined_rules["printer_build_volume_mm"] = dict(printer_profile.build_volume_mm)
+        combined_rules["printer_typical_tolerance_mm"] = printer_profile.typical_tolerance_mm
+        combined_rules["printer_default_layer_heights_mm"] = list(
+            printer_profile.default_layer_heights_mm
+        )
+        combined_rules["printer_supported_materials"] = list(
+            printer_profile.supported_materials
+        )
+
     # Add pattern guidance
     for pattern in patterns:
         combined_guidance.extend(pattern.agent_guidance)
+
+    # Preserve order while removing duplicates.
+    combined_guidance = list(dict.fromkeys(combined_guidance))
 
     return DesignBrief(
         functional_constraints=constraints,

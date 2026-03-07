@@ -254,6 +254,9 @@
     "generate_model": {
       "level": "confirm"
     },
+    "generate_original_design": {
+      "level": "confirm"
+    },
     "generation_status": {
       "level": "safe"
     },

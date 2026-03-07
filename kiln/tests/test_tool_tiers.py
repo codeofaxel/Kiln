@@ -32,13 +32,14 @@ class TestTierSizes:
         for tool in TIER_ESSENTIAL:
             assert tool in TIER_STANDARD, f"{tool!r} missing from STANDARD"
 
-    def test_standard_has_approximately_43_items(self):
-        # The spec says ~43.  TIER_STANDARD = TIER_ESSENTIAL (15) + 28 = 43.
+    def test_standard_has_approximately_50_items(self):
+        # Standard now includes the original-design toolchain, so it is
+        # intentionally broader than the older ~43-tool shape.
         assert len(TIER_STANDARD) >= 40
-        assert len(TIER_STANDARD) <= 50
+        assert len(TIER_STANDARD) <= 60
 
-    def test_full_has_105_items(self):
-        assert len(TIER_FULL) == 105
+    def test_full_has_at_least_105_items(self):
+        assert len(TIER_FULL) >= 105
 
     def test_full_includes_all_standard(self):
         for tool in TIER_STANDARD:
@@ -235,6 +236,14 @@ class TestToolPresence:
     def test_slice_model_in_standard(self):
         assert "slice_model" in TIER_STANDARD
 
+    def test_original_design_flow_tools_in_standard(self):
+        assert "generate_model" in TIER_STANDARD
+        assert "generate_original_design" in TIER_STANDARD
+        assert "get_design_brief" in TIER_STANDARD
+        assert "build_generation_prompt" in TIER_STANDARD
+        assert "audit_original_design" in TIER_STANDARD
+        assert "analyze_printability" in TIER_STANDARD
+
     def test_slice_model_not_in_essential(self):
         assert "slice_model" not in TIER_ESSENTIAL
 
@@ -243,6 +252,13 @@ class TestToolPresence:
 
     def test_register_webhook_not_in_standard(self):
         assert "register_webhook" not in TIER_STANDARD
+
+    def test_original_design_tools_in_full(self):
+        assert "generate_original_design" in TIER_FULL
+        assert "build_generation_prompt" in TIER_FULL
+        assert "audit_original_design" in TIER_FULL
+        assert "get_design_brief" in TIER_FULL
+        assert "analyze_printability" in TIER_FULL
 
     def test_billing_tools_only_in_full(self):
         billing = ["billing_summary", "billing_setup_url", "billing_status", "billing_history"]

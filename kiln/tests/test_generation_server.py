@@ -548,6 +548,12 @@ class TestListGenerationProviders:
         assert openscad["styles"] == []
         assert openscad["async"] is False
 
+    def test_cloud_provider_metadata_includes_tripo_and_stability(self):
+        result = list_generation_providers()
+        names = {provider["name"] for provider in result["providers"]}
+        assert "tripo3d" in names
+        assert "stability" in names
+
 
 # ---------------------------------------------------------------------------
 # Provider singleton caching
@@ -568,6 +574,24 @@ class TestProviderCaching:
         assert first is second
         # Constructor called only once.
         assert MockMeshy.call_count == 1
+
+    def test_tripo3d_provider_can_be_constructed(self):
+        _generation_providers.clear()
+        with patch("kiln.server.Tripo3DProvider") as MockTripo:
+            instance = MagicMock()
+            MockTripo.return_value = instance
+            provider = _get_generation_provider("tripo3d")
+        assert provider is instance
+        MockTripo.assert_called_once()
+
+    def test_stability_provider_can_be_constructed(self):
+        _generation_providers.clear()
+        with patch("kiln.server.StabilityProvider") as MockStability:
+            instance = MagicMock()
+            MockStability.return_value = instance
+            provider = _get_generation_provider("stability")
+        assert provider is instance
+        MockStability.assert_called_once()
         _generation_providers.clear()
 
     def test_different_providers_are_distinct(self):

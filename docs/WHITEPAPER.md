@@ -139,9 +139,11 @@ The complete agent workflows are:
 ```
 Discovery path: Idea → Search marketplace → Download STL → Slice → Print
 Generation path: Idea → Generate model → Validate mesh → Slice → Print
+Original-design path: Idea → Build design-aware prompt → Generate original design → Audit → Retry if needed
 ```
 
 The `generate_and_print` MCP tool collapses the generation path into a single tool call: text prompt in, physical object out. Each step is also available individually for agents that need finer control.
+For custom part creation, `generate_original_design` is the harsher engineering path: it chooses the best idea-to-3D backend, audits printability and design requirements, and feeds failures back into another attempt before the part ever reaches slicing.
 
 ## 4. Fleet Management and Job Scheduling
 

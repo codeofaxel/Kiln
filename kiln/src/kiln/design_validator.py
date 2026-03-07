@@ -133,10 +133,9 @@ def _check_overhang_angle(
 ) -> DesignValidationCheck:
     """Check overhang angle against the material's unsupported limit.
 
-    The printability engine reports max_overhang_angle as the steepest
-    overhang angle (angle from straight down — lower is more severe).
-    The material limit is ``max_unsupported_overhang_deg``: faces with
-    angle_from_down <= this value are printable without supports.
+    The printability engine reports ``max_overhang_angle`` in the usual
+    FDM convention: degrees from vertical, where 0 is a vertical wall and
+    90 is a horizontal ceiling. Higher values are more difficult to print.
     """
     # No overhangs detected = pass.
     if max_overhang_deg == 0:

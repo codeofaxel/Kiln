@@ -247,6 +247,35 @@ class TestAnalyzeForFeedback:
         assert FeedbackType.PRINTABILITY in types
         assert FeedbackType.STRUCTURAL in types
 
+    def test_nested_kiln_reports_are_normalized(self):
+        result = analyze_for_feedback(
+            "/tmp/test.stl",
+            original_prompt="a printable bracket",
+            printability_report={
+                "report": {
+                    "overhangs": {"max_overhang_angle": 62},
+                    "thin_walls": {"min_wall_thickness_mm": 0.8},
+                    "bridging": {"bridge_count": 2},
+                    "bed_adhesion": {"contact_percentage": 4.0},
+                },
+                "validation": {"is_manifold": False},
+                "mesh_diagnostics": {
+                    "has_floating_fragments": True,
+                    "hole_count": 2,
+                },
+            },
+        )
+        types = {fb.feedback_type for fb in result}
+        assert FeedbackType.PRINTABILITY in types
+        assert FeedbackType.STRUCTURAL in types
+        constraints = [c.lower() for fb in result for c in fb.constraints]
+        assert any("overhang" in c for c in constraints)
+        assert any("wall thickness" in c for c in constraints)
+        assert any("bridge" in c for c in constraints)
+        assert any("watertight" in c or "manifold" in c for c in constraints)
+        assert any("continuous" in c or "floating" in c for c in constraints)
+        assert any("base" in c for c in constraints)
+
 
 class TestGenerateImprovedPrompt:
     """generate_improved_prompt adds constraints to prompts."""

@@ -27,6 +27,167 @@ logger = logging.getLogger(__name__)
 _MAX_PROMPT_LENGTH = 600
 
 
+def _dimensions_from_bbox(bbox: dict[str, Any]) -> dict[str, float] | None:
+    """Derive width/depth/height dimensions from a bounding-box-like dict."""
+    if not isinstance(bbox, dict):
+        return None
+
+    if {"width", "depth", "height"} <= set(bbox):
+        return {
+            "width": float(bbox["width"]),
+            "depth": float(bbox["depth"]),
+            "height": float(bbox["height"]),
+        }
+
+    if {"x", "y", "z"} <= set(bbox):
+        return {
+            "width": float(bbox["x"]),
+            "depth": float(bbox["y"]),
+            "height": float(bbox["z"]),
+        }
+
+    if {"x_min", "x_max", "y_min", "y_max", "z_min", "z_max"} <= set(bbox):
+        return {
+            "width": float(bbox["x_max"]) - float(bbox["x_min"]),
+            "depth": float(bbox["y_max"]) - float(bbox["y_min"]),
+            "height": float(bbox["z_max"]) - float(bbox["z_min"]),
+        }
+
+    return None
+
+
+def _coerce_build_volume(build_volume: Any) -> dict[str, float] | None:
+    """Normalize build-volume inputs to an ``x/y/z`` dict."""
+    if isinstance(build_volume, dict):
+        if {"x", "y", "z"} <= set(build_volume):
+            return {
+                "x": float(build_volume["x"]),
+                "y": float(build_volume["y"]),
+                "z": float(build_volume["z"]),
+            }
+        if {"width", "depth", "height"} <= set(build_volume):
+            return {
+                "x": float(build_volume["width"]),
+                "y": float(build_volume["depth"]),
+                "z": float(build_volume["height"]),
+            }
+        return None
+
+    if isinstance(build_volume, (list, tuple)) and len(build_volume) == 3:
+        return {
+            "x": float(build_volume[0]),
+            "y": float(build_volume[1]),
+            "z": float(build_volume[2]),
+        }
+
+    return None
+
+
+def _normalize_feedback_report(report: dict[str, Any] | None) -> dict[str, Any]:
+    """Flatten real Kiln analysis reports into feedback-friendly keys."""
+    if not report:
+        return {}
+
+    normalized: dict[str, Any] = {}
+
+    def merge(data: Any) -> None:
+        if not isinstance(data, dict):
+            return
+
+        for nested_key in (
+            "report",
+            "validation",
+            "mesh_validation",
+            "diagnostics",
+            "mesh_diagnostics",
+        ):
+            nested = data.get(nested_key)
+            if isinstance(nested, dict):
+                merge(nested)
+
+        overhangs = data.get("overhangs")
+        if isinstance(overhangs, dict):
+            angle = overhangs.get("max_overhang_angle")
+            if angle is not None:
+                normalized["max_overhang_angle"] = float(angle)
+
+        thin_walls = data.get("thin_walls")
+        if isinstance(thin_walls, dict):
+            min_wall = thin_walls.get("min_wall_thickness_mm")
+            if min_wall is not None:
+                normalized["min_wall_thickness"] = float(min_wall)
+
+        bridging = data.get("bridging")
+        if isinstance(bridging, dict):
+            bridge_count = int(bridging.get("bridge_count", 0) or 0)
+            if bridge_count > 0 or bridging.get("needs_supports_for_bridges"):
+                normalized["has_bridges"] = True
+
+        adhesion = data.get("bed_adhesion")
+        if isinstance(adhesion, dict):
+            contact_pct = adhesion.get("contact_percentage")
+            if contact_pct is not None:
+                normalized["bed_contact_percentage"] = float(contact_pct)
+
+        dims = data.get("dimensions")
+        if isinstance(dims, dict) and {"width", "depth", "height"} <= set(dims):
+            normalized["dimensions"] = {
+                "width": float(dims["width"]),
+                "depth": float(dims["depth"]),
+                "height": float(dims["height"]),
+            }
+
+        dims_mm = data.get("dimensions_mm")
+        if isinstance(dims_mm, dict):
+            if {"x", "y", "z"} <= set(dims_mm):
+                normalized["dimensions"] = {
+                    "width": float(dims_mm["x"]),
+                    "depth": float(dims_mm["y"]),
+                    "height": float(dims_mm["z"]),
+                }
+            elif {"width_mm", "depth_mm", "height_mm"} <= set(dims_mm):
+                normalized["dimensions"] = {
+                    "width": float(dims_mm["width_mm"]),
+                    "depth": float(dims_mm["depth_mm"]),
+                    "height": float(dims_mm["height_mm"]),
+                }
+
+        bbox = data.get("bounding_box")
+        bbox_dims = _dimensions_from_bbox(bbox) if isinstance(bbox, dict) else None
+        if bbox_dims:
+            normalized.setdefault("dimensions", bbox_dims)
+
+        build_volume = _coerce_build_volume(data.get("build_volume"))
+        if build_volume:
+            normalized["build_volume"] = build_volume
+
+        if data.get("has_floating_fragments") or int(data.get("component_count", 1) or 1) > 1:
+            normalized["has_floating_parts"] = True
+
+        if "is_manifold" in data and not bool(data.get("is_manifold")):
+            normalized["non_manifold"] = True
+        if "is_watertight" in data and not bool(data.get("is_watertight")):
+            normalized["non_manifold"] = True
+        if int(data.get("hole_count", 0) or 0) > 0:
+            normalized["non_manifold"] = True
+
+        if "max_overhang_angle" in data:
+            normalized["max_overhang_angle"] = float(data["max_overhang_angle"])
+        if "min_wall_thickness" in data:
+            normalized["min_wall_thickness"] = float(data["min_wall_thickness"])
+        if "min_wall_thickness_mm" in data:
+            normalized["min_wall_thickness"] = float(data["min_wall_thickness_mm"])
+        if data.get("has_bridges"):
+            normalized["has_bridges"] = True
+        if data.get("has_floating_parts"):
+            normalized["has_floating_parts"] = True
+        if data.get("non_manifold"):
+            normalized["non_manifold"] = True
+
+    merge(report)
+    return normalized
+
+
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -144,7 +305,7 @@ def analyze_for_feedback(
     :returns: List of :class:`PrintFeedback` items.
     """
     feedback_items: list[PrintFeedback] = []
-    report = printability_report or {}
+    report = _normalize_feedback_report(printability_report)
 
     # --- Printability checks ---
     printability_issues: list[str] = []
@@ -181,6 +342,18 @@ def analyze_for_feedback(
                 issues=printability_issues,
                 constraints=printability_constraints,
                 severity=severity,
+            )
+        )
+
+    contact_pct = report.get("bed_contact_percentage")
+    if contact_pct is not None and contact_pct < 15.0:
+        feedback_items.append(
+            PrintFeedback(
+                original_prompt=original_prompt,
+                feedback_type=FeedbackType.STRUCTURAL,
+                issues=[f"Low bed contact area ({contact_pct:.1f}%)"],
+                constraints=[_STRUCTURAL_CONSTRAINTS["weak_base"]],
+                severity="moderate" if contact_pct >= 5.0 else "critical",
             )
         )
 
@@ -437,6 +610,7 @@ def enhance_prompt_with_design_intelligence(
     prompt: str,
     *,
     material: str | None = None,
+    printer_model: str | None = None,
     max_length: int = _MAX_PROMPT_LENGTH,
 ) -> ImprovedPrompt:
     """Enhance a generation prompt with design intelligence constraints.
@@ -454,9 +628,21 @@ def enhance_prompt_with_design_intelligence(
     :returns: An :class:`ImprovedPrompt` with design constraints applied.
     """
     try:
-        from kiln.design_intelligence import get_design_constraints
+        from kiln.design_intelligence import (
+            get_design_constraints,
+            get_printer_design_profile,
+        )
 
-        brief = get_design_constraints(prompt, material=material)
+        brief = get_design_constraints(
+            prompt,
+            material=material,
+            printer_model=printer_model,
+        )
+        printer_profile = (
+            get_printer_design_profile(printer_model)
+            if printer_model
+            else None
+        )
     except Exception:
         logger.debug("Design intelligence unavailable, returning original prompt", exc_info=True)
         return ImprovedPrompt(
@@ -486,6 +672,12 @@ def enhance_prompt_with_design_intelligence(
     mat = brief.recommended_material
     if mat and mat.material:
         constraints.append(f"designed for {mat.material.display_name} material")
+
+    if printer_profile:
+        build = printer_profile.build_volume_mm
+        constraints.append(
+            f"fit within {build['x']} x {build['y']} x {build['z']} mm build volume"
+        )
 
     # Pattern-specific constraints
     for pattern in brief.applicable_patterns[:2]:  # limit to top 2

@@ -343,6 +343,16 @@ class TestAnalyzePrintability:
             assert report.grade in ("A", "B", "C", "D", "F")
             assert isinstance(report.recommendations, list)
 
+    def test_clean_cube_does_not_get_false_support_penalties(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = _write_stl(tmpdir, _cube_triangles(10.0))
+            report = analyze_printability(path)
+            assert report.overhangs.overhang_triangle_count == 0
+            assert report.bridging.bridge_count == 0
+            assert report.supports.support_percentage == 0.0
+            assert report.score >= 95
+            assert report.grade == "A"
+
     def test_cube_to_dict(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = _write_stl(tmpdir, _cube_triangles())

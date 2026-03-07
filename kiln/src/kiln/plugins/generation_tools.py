@@ -26,6 +26,7 @@ class _GenerationToolsPlugin:
     Tools:
         - list_generation_providers
         - generate_model
+        - generate_original_design
         - generation_status
         - download_generated_model
         - await_generation
@@ -39,7 +40,11 @@ class _GenerationToolsPlugin:
 
     @property
     def description(self) -> str:
-        return "Text-to-3D model generation tools (Meshy, OpenSCAD)"
+        return (
+            "Text-to-3D model generation tools "
+            "(Meshy, Gemini, OpenSCAD, Tripo3D, Stability), including "
+            "closed-loop original design generation"
+        )
 
     def register(self, mcp: Any) -> None:  # noqa: PLR0915
         """Register generation tools with the MCP server."""
@@ -54,38 +59,7 @@ class _GenerationToolsPlugin:
             """
             import kiln.server as _srv
 
-            providers = [
-                {
-                    "name": "meshy",
-                    "display_name": "Meshy",
-                    "description": (
-                        "Cloud AI text-to-3D.  Generates 3D models from natural "
-                        "language descriptions.  Requires KILN_MESHY_API_KEY."
-                    ),
-                    "requires_api_key": True,
-                    "api_key_env": "KILN_MESHY_API_KEY",
-                    "api_key_set": bool(_srv._MESHY_API_KEY),
-                    "styles": ["realistic", "sculpture"],
-                    "async": True,
-                    "typical_time_seconds": 60,
-                },
-                {
-                    "name": "openscad",
-                    "display_name": "OpenSCAD",
-                    "description": (
-                        "Local parametric generation.  Prompt must be valid "
-                        "OpenSCAD code.  Completes synchronously, no API key needed."
-                    ),
-                    "requires_api_key": False,
-                    "styles": [],
-                    "async": False,
-                    "typical_time_seconds": 5,
-                },
-            ]
-            return {
-                "success": True,
-                "providers": providers,
-            }
+            return _srv.list_generation_providers()
 
         @mcp.tool()
         def generate_model(
@@ -163,6 +137,103 @@ class _GenerationToolsPlugin:
                 _logger.exception("Unexpected error in generate_model")
                 return _srv._error_dict(
                     f"Unexpected error in generate_model: {exc}", code="INTERNAL_ERROR"
+                )
+
+        @mcp.tool()
+        def generate_original_design(
+            requirements: str,
+            provider: str = "auto",
+            material: str | None = None,
+            printer_model: str | None = None,
+            style: str | None = None,
+            output_dir: str | None = None,
+            build_volume_x: float | None = None,
+            build_volume_y: float | None = None,
+            build_volume_z: float | None = None,
+            nozzle_diameter: float = 0.4,
+            layer_height: float = 0.2,
+            max_overhang_angle: float = 45.0,
+            timeout: int = 600,
+            max_attempts: int = 2,
+        ) -> dict:
+            """Generate and harshly audit an original printable design.
+
+            This is the highest-level original-creation tool in Kiln. It takes
+            a natural-language design brief, chooses the best available
+            idea-to-3D backend, generates a candidate, audits the result for
+            printability and design correctness, and can perform one or more
+            corrective retries using feedback from failed attempts.
+
+            Provider notes:
+            - ``auto`` prefers Gemini for idea-to-CAD when available.
+            - ``openscad`` is intentionally rejected here because it compiles
+              code; it does not turn a natural-language idea into geometry.
+
+            Args:
+                requirements: Natural-language description of the part to create.
+                provider: ``auto``, ``gemini``, ``meshy``, ``tripo3d``, or ``stability``.
+                material: Optional material target (e.g. ``"petg"``).
+                printer_model: Optional printer model ID (e.g. ``"bambu_a1"``).
+                style: Optional style hint for providers that support it.
+                output_dir: Optional directory for generated files.
+                build_volume_x: Optional build volume X override in mm.
+                build_volume_y: Optional build volume Y override in mm.
+                build_volume_z: Optional build volume Z override in mm.
+                nozzle_diameter: Printer nozzle diameter in mm.
+                layer_height: Printer layer height in mm.
+                max_overhang_angle: Supportless overhang threshold in degrees.
+                timeout: Max seconds to wait per generation attempt.
+                max_attempts: Max corrective generation attempts.
+            """
+            import kiln.server as _srv
+            from kiln.generation import GenerationError
+            from kiln.original_design import generate_original_design as _generate_original
+
+            if err := _srv._check_auth("generate"):
+                return err
+            try:
+                build_volume = None
+                if (
+                    build_volume_x is not None
+                    and build_volume_y is not None
+                    and build_volume_z is not None
+                ):
+                    build_volume = (
+                        build_volume_x,
+                        build_volume_y,
+                        build_volume_z,
+                    )
+
+                session = _generate_original(
+                    requirements,
+                    provider=provider,
+                    material=material,
+                    printer_model=printer_model,
+                    style=style,
+                    output_dir=output_dir,
+                    build_volume=build_volume,
+                    nozzle_diameter=nozzle_diameter,
+                    layer_height=layer_height,
+                    max_overhang_angle=max_overhang_angle,
+                    timeout=timeout,
+                    max_attempts=max_attempts,
+                )
+                result = session.to_dict()
+                result["status"] = "success"
+                result["message"] = session.summary
+                return result
+            except ValueError as exc:
+                return _srv._error_dict(str(exc), code="INVALID_INPUT")
+            except GenerationError as exc:
+                return _srv._error_dict(
+                    str(exc),
+                    code=exc.code or "GENERATION_ERROR",
+                )
+            except Exception as exc:
+                _logger.exception("Unexpected error in generate_original_design")
+                return _srv._error_dict(
+                    f"Unexpected error in generate_original_design: {exc}",
+                    code="INTERNAL_ERROR",
                 )
 
         @mcp.tool()

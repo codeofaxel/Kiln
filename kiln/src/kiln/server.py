@@ -102,6 +102,8 @@ from kiln.generation import (
     GenerationStatus,
     MeshyProvider,
     OpenSCADProvider,
+    StabilityProvider,
+    Tripo3DProvider,
     convert_to_stl,
     validate_mesh,
 )
@@ -8405,9 +8407,13 @@ def _get_generation_provider(provider: str = "meshy") -> GenerationProvider:
         inst = OpenSCADProvider()
     elif provider == "gemini":
         inst = GeminiDeepThinkProvider(api_key=_GEMINI_API_KEY)
+    elif provider == "tripo3d":
+        inst = Tripo3DProvider(api_key=os.environ.get("KILN_TRIPO3D_API_KEY", ""))
+    elif provider == "stability":
+        inst = StabilityProvider(api_key=os.environ.get("KILN_STABILITY_API_KEY", ""))
     else:
         raise GenerationError(
-            f"Unknown generation provider: {provider!r}.  Supported: meshy, openscad, gemini.",
+            f"Unknown generation provider: {provider!r}.  Supported: meshy, openscad, gemini, tripo3d, stability.",
             code="UNKNOWN_PROVIDER",
         )
 
@@ -8465,6 +8471,34 @@ def list_generation_providers() -> dict:
             "styles": ["organic", "mechanical", "decorative"],
             "async": False,
             "typical_time_seconds": 30,
+        },
+        {
+            "name": "tripo3d",
+            "display_name": "Tripo3D",
+            "description": (
+                "Cloud text-to-3D generation via Tripo3D. Produces high-detail "
+                "meshes with async job polling. Requires KILN_TRIPO3D_API_KEY."
+            ),
+            "requires_api_key": True,
+            "api_key_env": "KILN_TRIPO3D_API_KEY",
+            "api_key_set": bool(os.environ.get("KILN_TRIPO3D_API_KEY", "").strip()),
+            "styles": [],
+            "async": True,
+            "typical_time_seconds": 90,
+        },
+        {
+            "name": "stability",
+            "display_name": "Stability AI",
+            "description": (
+                "Synchronous text-to-3D generation via Stability AI. Returns "
+                "GLB output directly. Requires KILN_STABILITY_API_KEY."
+            ),
+            "requires_api_key": True,
+            "api_key_env": "KILN_STABILITY_API_KEY",
+            "api_key_set": bool(os.environ.get("KILN_STABILITY_API_KEY", "").strip()),
+            "styles": [],
+            "async": False,
+            "typical_time_seconds": 60,
         },
     ]
     return {
@@ -11226,6 +11260,46 @@ def get_skill_manifest() -> dict:
 # ---------------------------------------------------------------------------
 
 
+_INTERNAL_TOOL_PLUGINS_REGISTERED = False
+
+
+class _DedupingToolRegistrationProxy:
+    """Proxy FastMCP tool registration and skip names that already exist."""
+
+    def __init__(self, base_mcp: Any) -> None:
+        self._base_mcp = base_mcp
+
+    def tool(self, *args: Any, **kwargs: Any):
+        base_decorator = self._base_mcp.tool(*args, **kwargs)
+
+        def decorator(fn):
+            existing = getattr(self._base_mcp._tool_manager, "_tools", {})
+            if fn.__name__ in existing:
+                return fn
+            return base_decorator(fn)
+
+        return decorator
+
+
+def _ensure_internal_tool_plugins_registered() -> None:
+    """Register internal MCP tool plugins exactly once.
+
+    Tool-schema generation, agent-loop tool discovery, and other in-process
+    callers import :mod:`kiln.server` without running :func:`main`. Those
+    paths still need the plugin-backed tools to exist on the shared MCP
+    instance, or they get a false, incomplete capability surface.
+    """
+    global _INTERNAL_TOOL_PLUGINS_REGISTERED
+    if _INTERNAL_TOOL_PLUGINS_REGISTERED:
+        return
+
+    register_all_plugins(
+        _DedupingToolRegistrationProxy(mcp),
+        plugin_package="kiln.plugins",
+    )
+    _INTERNAL_TOOL_PLUGINS_REGISTERED = True
+
+
 def main() -> None:
     """Run the Kiln MCP server."""
     # Load .env file if present (project root or ~/.kiln/.env).
@@ -11284,7 +11358,7 @@ def main() -> None:
     # Tools are being migrated to kiln/plugins/ for modularity — each
     # plugin module registers its own tools via the ToolPlugin protocol.
     # See kiln/plugins/marketplace_tools.py for the migration pattern.
-    register_all_plugins(mcp, plugin_package="kiln.plugins")
+    _ensure_internal_tool_plugins_registered()
 
     # Rebuild MCP instructions now that config, printers, marketplaces,
     # and plugins are all loaded.  This replaces the static fallback with
@@ -12979,6 +13053,9 @@ def check_ambient_conditions(
     except Exception as exc:
         logger.exception("Error in check_ambient_conditions")
         return _error_dict(f"Failed to check ambient conditions: {exc}", code="AMBIENT_CHECK_ERROR")
+
+
+_ensure_internal_tool_plugins_registered()
 
 
 if __name__ == "__main__":

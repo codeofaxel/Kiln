@@ -22,6 +22,8 @@ class _DesignToolsPlugin:
 
     Tools (FDM desktop):
         - get_design_brief
+        - build_generation_prompt
+        - audit_original_design
         - get_material_design_profile
         - list_design_materials
         - recommend_design_material
@@ -102,6 +104,118 @@ class _DesignToolsPlugin:
                 return result
             except Exception as exc:
                 _logger.error("Design brief failed: %s", exc, exc_info=True)
+                return {"status": "error", "error": str(exc)}
+
+        @mcp.tool()
+        def build_generation_prompt(
+            requirements: str,
+            material: str | None = None,
+            printer_model: str | None = None,
+        ) -> dict:
+            """Build a design-aware generation prompt for original 3D creation.
+
+            This is the best pre-generation tool for original designs. It takes
+            a natural-language idea and appends manufacturing constraints,
+            printer-fit limits, and material guidance so text-to-3D backends
+            receive a prompt grounded in real printability constraints.
+
+            Args:
+                requirements: Natural language description of the desired part.
+                material: Optional material override (e.g. "petg").
+                printer_model: Optional printer model ID (e.g. "bambu_a1").
+            """
+            from kiln.generation_feedback import enhance_prompt_with_design_intelligence
+
+            try:
+                prompt = enhance_prompt_with_design_intelligence(
+                    requirements,
+                    material=material,
+                    printer_model=printer_model,
+                )
+                return {
+                    "status": "success",
+                    "prompt": prompt.to_dict(),
+                    "message": (
+                        f"Built a design-aware prompt with "
+                        f"{len(prompt.constraints_added)} constraints."
+                    ),
+                }
+            except Exception as exc:
+                _logger.error("Build generation prompt failed: %s", exc, exc_info=True)
+                return {"status": "error", "error": str(exc)}
+
+        @mcp.tool()
+        def audit_original_design(
+            file_path: str,
+            requirements: str,
+            material: str | None = None,
+            printer_model: str | None = None,
+            build_volume_x: float | None = None,
+            build_volume_y: float | None = None,
+            build_volume_z: float | None = None,
+            nozzle_diameter: float = 0.4,
+            layer_height: float = 0.2,
+            max_overhang_angle: float = 45.0,
+        ) -> dict:
+            """Run a ruthless audit of an original design before printing.
+
+            Combines design briefing, prompt enhancement, mesh validation,
+            printability scoring, orientation analysis, advanced diagnostics,
+            and regeneration feedback into a single report.
+
+            Use this after generating or modeling a new part to answer:
+            "Is this genuinely ready to print, and if not, what exact changes
+            should the agent make next?"
+
+            Args:
+                file_path: Path to STL or OBJ file.
+                requirements: Functional requirements the design must satisfy.
+                material: Optional material constraint (e.g. "petg").
+                printer_model: Optional printer model ID (e.g. "bambu_a1").
+                build_volume_x: Optional build volume X override in mm.
+                build_volume_y: Optional build volume Y override in mm.
+                build_volume_z: Optional build volume Z override in mm.
+                nozzle_diameter: Printer nozzle diameter in mm.
+                layer_height: Layer height in mm.
+                max_overhang_angle: Supportless overhang threshold in degrees.
+            """
+            from kiln.original_design import audit_original_design as _audit
+
+            try:
+                build_volume = None
+                if (
+                    build_volume_x is not None
+                    and build_volume_y is not None
+                    and build_volume_z is not None
+                ):
+                    build_volume = (
+                        build_volume_x,
+                        build_volume_y,
+                        build_volume_z,
+                    )
+
+                audit = _audit(
+                    file_path,
+                    requirements,
+                    material=material,
+                    printer_model=printer_model,
+                    build_volume=build_volume,
+                    nozzle_diameter=nozzle_diameter,
+                    layer_height=layer_height,
+                    max_overhang_angle=max_overhang_angle,
+                )
+                result = audit.to_dict()
+                result["status"] = "success"
+                result["message"] = (
+                    f"Original design readiness: {audit.readiness_score}/100 "
+                    f"({audit.readiness_grade}). "
+                    f"{'Ready for print.' if audit.ready_for_print else 'Not ready for print.'}"
+                )
+                return result
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+            except Exception as exc:
+                _logger.error("Original design audit failed: %s", exc, exc_info=True)
                 return {"status": "error", "error": str(exc)}
 
         @mcp.tool()
@@ -1062,3 +1176,6 @@ class _DesignToolsPlugin:
 def register_plugin(mcp: Any) -> None:
     """Entry point for plugin auto-discovery."""
     _DesignToolsPlugin().register(mcp)
+
+
+plugin = _DesignToolsPlugin()

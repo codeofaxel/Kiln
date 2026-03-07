@@ -10,7 +10,7 @@ Tiers
 ``essential``
     15 core tools for weak models (Llama, Mistral, Phi, Qwen).
 ``standard``
-    ~40 tools for capable models (GPT-4o-mini, Gemini Flash, Command R+).
+    ~50 tools for capable models (GPT-4o-mini, Gemini Flash, Command R+).
 ``full``
     All 101 tools for strong models (Claude, GPT-4, Gemini Pro).
 """
@@ -65,6 +65,21 @@ TIER_STANDARD: list[str] = TIER_ESSENTIAL + [
     # Validation
     "validate_gcode",
     "validate_gcode_safe",
+    # Original design & generation
+    "generate_model",
+    "generate_original_design",
+    "download_generated_model",
+    "await_generation",
+    "validate_generated_mesh",
+    "get_design_brief",
+    "build_generation_prompt",
+    "audit_original_design",
+    "validate_design_for_requirements",
+    "analyze_printability",
+    "auto_orient_model",
+    "recommend_adhesion_settings",
+    "analyze_generation_feedback",
+    "improve_generation_prompt",
     # Workflow helpers
     "await_print_completion",
     "compare_print_options",
@@ -174,11 +189,35 @@ TIER_FULL: list[str] = [
     # --- Generation ---
     "list_generation_providers",
     "generate_model",
+    "generate_original_design",
     "generation_status",
     "download_generated_model",
     "await_generation",
     "generate_and_print",
     "validate_generated_mesh",
+    "analyze_printability",
+    "auto_orient_model",
+    "estimate_supports",
+    "recommend_adhesion_settings",
+    "diagnose_mesh",
+    "analyze_generation_feedback",
+    "improve_generation_prompt",
+    # --- Original design intelligence ---
+    "get_design_brief",
+    "build_generation_prompt",
+    "audit_original_design",
+    "get_material_design_profile",
+    "list_design_materials",
+    "recommend_design_material",
+    "estimate_structural_load",
+    "check_material_environment",
+    "get_printer_design_capabilities",
+    "list_printer_design_profiles",
+    "get_design_pattern_info",
+    "list_design_patterns_catalog",
+    "find_design_patterns",
+    "match_design_requirements",
+    "validate_design_for_requirements",
     # --- Firmware ---
     "firmware_status",
     "update_firmware",

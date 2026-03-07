@@ -13,6 +13,7 @@ from kiln.tool_schema import (
     _build_schema_from_function,
     _parse_docstring,
     _python_type_to_json_schema,
+    get_all_tool_schemas,
 )
 
 
@@ -259,6 +260,25 @@ class TestBuildSchemaFromFunction:
         props = schema["function"]["parameters"]["properties"]
         assert "self" not in props
         assert "name" in props
+
+
+class TestSchemaIntegration:
+    def test_full_schema_includes_internal_plugin_tools(self):
+        names = {
+            schema["function"]["name"]
+            for schema in get_all_tool_schemas("full")
+        }
+
+        for tool_name in (
+            "submit_job",
+            "save_agent_note",
+            "analyze_printability",
+            "get_design_brief",
+            "build_generation_prompt",
+            "audit_original_design",
+            "generate_original_design",
+        ):
+            assert tool_name in names
 
     def test_no_docstring(self):
         def bare_tool(x: int):

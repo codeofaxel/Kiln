@@ -24,7 +24,7 @@ from kiln.generation.validation import _parse_obj, _parse_stl
 class OverhangAnalysis:
     """Results of overhang detection."""
 
-    max_overhang_angle: float  # degrees
+    max_overhang_angle: float  # degrees from vertical; 90 = horizontal ceiling
     overhang_triangle_count: int
     overhang_percentage: float  # % of total triangles
     needs_supports: bool
@@ -238,6 +238,60 @@ def _vertex_distance(
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
 
 
+def _normalize_triangle_winding(
+    triangles: list[tuple[tuple[float, ...], ...]],
+) -> list[tuple[tuple[float, ...], ...]]:
+    """Orient triangle winding outward using a mesh-center heuristic.
+
+    STL files often contain inconsistent or inverted winding, which causes
+    naive normal-based overhang and bridge analysis to treat top surfaces as
+    unsupported ceilings.  For printability heuristics we only need a stable
+    approximation, so we flip triangles whose normals point toward the mesh
+    center rather than away from it.
+    """
+    if not triangles:
+        return triangles
+
+    xs = [v[0] for tri in triangles for v in tri]
+    ys = [v[1] for tri in triangles for v in tri]
+    zs = [v[2] for tri in triangles for v in tri]
+    center = (
+        (min(xs) + max(xs)) / 2.0,
+        (min(ys) + max(ys)) / 2.0,
+        (min(zs) + max(zs)) / 2.0,
+    )
+
+    oriented: list[tuple[tuple[float, ...], ...]] = []
+    for tri in triangles:
+        normal = _triangle_normal(tri[0], tri[1], tri[2])
+        centroid = _triangle_centroid(tri[0], tri[1], tri[2])
+        radial = (
+            centroid[0] - center[0],
+            centroid[1] - center[1],
+            centroid[2] - center[2],
+        )
+        if (
+            normal[0] * radial[0]
+            + normal[1] * radial[1]
+            + normal[2] * radial[2]
+        ) < 0.0:
+            oriented.append((tri[0], tri[2], tri[1]))
+        else:
+            oriented.append(tri)
+
+    return oriented
+
+
+def _is_bed_supported_triangle(
+    tri: tuple[tuple[float, ...], ...],
+    z_min: float,
+    layer_height: float,
+) -> bool:
+    """Return True when a triangle is effectively resting on the build plate."""
+    threshold = z_min + layer_height * 2.0
+    return all(v[2] <= threshold for v in tri)
+
+
 def _parse_mesh(
     file_path: str,
 ) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
@@ -277,80 +331,56 @@ def _analyze_overhangs(
     triangles: list[tuple[tuple[float, ...], ...]],
     *,
     max_overhang_angle: float = 45.0,
+    z_min: float | None = None,
+    layer_height: float = 0.2,
+    normalize_winding: bool = True,
 ) -> OverhangAnalysis:
     """Detect overhanging triangles.
 
     A triangle is an overhang if its normal points downward (negative Z
-    component) at an angle greater than ``max_overhang_angle`` from
-    vertical.
+    component) and the face angle from vertical exceeds
+    ``max_overhang_angle``.
     """
+    if normalize_winding:
+        triangles = _normalize_triangle_winding(triangles)
+
     total = len(triangles)
     overhang_count = 0
     max_angle = 0.0
     worst_regions: list[dict[str, float]] = []
 
-    # The build direction is +Z.  A triangle overhangs when the angle
-    # between its outward normal and the downward direction (-Z) is
-    # small, which is equivalent to the angle between the normal and +Z
-    # being large (> 90 + threshold).  We measure the angle from
-    # vertical (angle between normal and +Z), and flag triangles where
-    # the normal has a downward Z component and the angle from the
-    # horizontal plane exceeds the threshold.
     for tri in triangles:
+        if z_min is not None and _is_bed_supported_triangle(tri, z_min, layer_height):
+            continue
+
         n = _triangle_normal(tri[0], tri[1], tri[2])
         nn = _normalize(n)
         nz = nn[2]
 
-        # Only consider downward-facing normals (nz < 0 means the
-        # face points downward).
+        # Only consider downward-facing normals.
         if nz >= 0:
             continue
 
-        # Angle from the horizontal plane (0 = horizontal, 90 = straight down).
-        # We want the overhang angle measured from vertical.
-        # cos(angle_from_down) = -nz (dot product with (0,0,-1))
-        # overhang_angle_from_vertical = 180 - angle_from_vertical
-        # Simpler: the angle the normal makes with the downward
-        # vector is acos(-nz).  If acos(-nz) < max_overhang_angle
-        # from horizontal, it needs supports.
-        # We define overhang angle as the angle between the face and
-        # the horizontal.  A flat face pointing down has 0 deg
-        # overhang (from horizontal), fully supported bottom face at
-        # 0 deg too, but a 45 deg overhang means the face is 45 deg
-        # from vertical.
-        #
-        # Standard definition: overhang angle = angle between
-        # downward normal and the vertical (build direction).
-        # If that angle < threshold, it needs supports.
-        # angle = acos(dot(normal, (0,0,-1))) = acos(-nz)
         angle_from_down = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
+        overhang_angle = max(0.0, 90.0 - angle_from_down)
+        if overhang_angle < max_overhang_angle:
+            continue
 
-        # If the angle from the straight-down direction is less than
-        # (90 - max_overhang_angle), the overhang is too steep.
-        # Equivalently, if the face normal is within max_overhang_angle
-        # of straight down, it needs supports.
-        overhang_angle = 90.0 - angle_from_down
-        if overhang_angle < 0:
-            overhang_angle = 0.0
+        overhang_count += 1
+        if overhang_angle > max_angle:
+            max_angle = overhang_angle
+        centroid = _triangle_centroid(tri[0], tri[1], tri[2])
+        if len(worst_regions) < 10:
+            worst_regions.append(
+                {
+                    "x": round(centroid[0], 2),
+                    "y": round(centroid[1], 2),
+                    "z": round(centroid[2], 2),
+                    "angle": round(overhang_angle, 1),
+                }
+            )
 
-        effective_angle = angle_from_down  # angle from straight down
-        if effective_angle <= max_overhang_angle:
-            overhang_count += 1
-            if effective_angle > max_angle:
-                max_angle = effective_angle
-            centroid = _triangle_centroid(tri[0], tri[1], tri[2])
-            if len(worst_regions) < 10:
-                worst_regions.append(
-                    {
-                        "x": round(centroid[0], 2),
-                        "y": round(centroid[1], 2),
-                        "z": round(centroid[2], 2),
-                        "angle": round(effective_angle, 1),
-                    }
-                )
-
-    # Sort worst regions by angle (smallest = most overhung).
-    worst_regions.sort(key=lambda r: r["angle"])
+    worst_regions.sort(key=lambda r: r["angle"], reverse=True)
 
     overhang_pct = (overhang_count / total * 100.0) if total > 0 else 0.0
 
@@ -421,6 +451,7 @@ def _analyze_bridging(
     z_min: float,
     *,
     layer_height: float = 0.2,
+    normalize_winding: bool = True,
 ) -> BridgingAnalysis:
     """Detect unsupported horizontal spans (bridges).
 
@@ -428,12 +459,18 @@ def _analyze_bridging(
     that are above the first layer (not bed-touching).  Measures the
     longest edge of such triangles as the bridge length.
     """
+    if normalize_winding:
+        triangles = _normalize_triangle_winding(triangles)
+
     bridge_count = 0
     max_bridge_len = 0.0
 
     bed_threshold = z_min + layer_height * 2
 
     for tri in triangles:
+        if _is_bed_supported_triangle(tri, z_min, layer_height):
+            continue
+
         # Skip triangles near the bed (they're supported).
         centroid = _triangle_centroid(tri[0], tri[1], tri[2])
         if centroid[2] <= bed_threshold:
@@ -509,16 +546,24 @@ def _analyze_supports(
     z_min: float,
     *,
     max_overhang_angle: float = 45.0,
+    layer_height: float = 0.2,
+    normalize_winding: bool = True,
 ) -> SupportAnalysis:
     """Estimate support volume.
 
     For each overhang triangle, projects it downward to the build plate
     and estimates the support column volume as area x height.
     """
+    if normalize_winding:
+        triangles = _normalize_triangle_winding(triangles)
+
     support_volume = 0.0
     support_regions: list[dict[str, float]] = []
 
     for tri in triangles:
+        if _is_bed_supported_triangle(tri, z_min, layer_height):
+            continue
+
         n = _triangle_normal(tri[0], tri[1], tri[2])
         nn = _normalize(n)
         nz = nn[2]
@@ -527,7 +572,8 @@ def _analyze_supports(
             continue
 
         angle_from_down = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
-        if angle_from_down > max_overhang_angle:
+        overhang_angle = max(0.0, 90.0 - angle_from_down)
+        if overhang_angle < max_overhang_angle:
             continue
 
         centroid = _triangle_centroid(tri[0], tri[1], tri[2])
@@ -692,6 +738,7 @@ def analyze_printability(
     :raises ValueError: If the file cannot be parsed.
     """
     triangles, vertices = _parse_mesh(file_path)
+    triangles = _normalize_triangle_winding(triangles)
 
     # Bounding box.
     xs = [v[0] for v in vertices]
@@ -707,11 +754,28 @@ def analyze_printability(
     }
     z_min = bbox["z_min"]
 
-    overhangs = _analyze_overhangs(triangles, max_overhang_angle=max_overhang_angle)
+    overhangs = _analyze_overhangs(
+        triangles,
+        max_overhang_angle=max_overhang_angle,
+        z_min=z_min,
+        layer_height=layer_height,
+        normalize_winding=False,
+    )
     thin_walls = _analyze_thin_walls(triangles, vertices, nozzle_diameter=nozzle_diameter)
-    bridging = _analyze_bridging(triangles, z_min, layer_height=layer_height)
+    bridging = _analyze_bridging(
+        triangles,
+        z_min,
+        layer_height=layer_height,
+        normalize_winding=False,
+    )
     bed_adhesion = _analyze_bed_adhesion(triangles, z_min, bbox, layer_height=layer_height)
-    supports = _analyze_supports(triangles, z_min, max_overhang_angle=max_overhang_angle)
+    supports = _analyze_supports(
+        triangles,
+        z_min,
+        max_overhang_angle=max_overhang_angle,
+        layer_height=layer_height,
+        normalize_winding=False,
+    )
 
     score = _compute_score(overhangs, thin_walls, bridging, bed_adhesion, supports)
     grade = _score_to_grade(score)
@@ -736,6 +800,7 @@ def analyze_printability(
                 f"Model ({dx:.1f} x {dy:.1f} x {dz:.1f} mm) exceeds build volume ({bx:.0f} x {by:.0f} x {bz:.0f} mm).",
             )
             score = max(0, score - 20)
+            grade = _score_to_grade(score)
 
     printable = score >= 50
 

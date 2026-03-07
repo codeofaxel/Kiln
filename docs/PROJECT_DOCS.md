@@ -474,11 +474,12 @@ Kiln does not operate a first-party marketplace/network. These tools integrate w
 
 #### Model Generation
 
-Supported providers: `meshy`, `tripo3d`, `stability`, `openscad`. Set `KILN_MESHY_API_KEY`, `KILN_TRIPO3D_API_KEY`, or `KILN_STABILITY_API_KEY` to enable cloud providers.
+Supported providers: `meshy`, `gemini`, `tripo3d`, `stability`, `openscad`. Set `KILN_GEMINI_API_KEY`, `KILN_MESHY_API_KEY`, `KILN_TRIPO3D_API_KEY`, or `KILN_STABILITY_API_KEY` to enable cloud providers. For original idea-to-part creation, prefer `generate_original_design`, which chooses idea-to-CAD backends and explicitly does not treat raw `openscad` compilation as natural-language generation.
 
 | Tool | Input | Output |
 |---|---|---|
 | `generate_model` | `prompt`, `provider`, `format`, `style` | Generation job ID |
+| `generate_original_design` | `requirements`, `provider`, `material`, `printer_model`, `max_attempts` | Best generated candidate plus readiness audit and retry history |
 | `generation_status` | `job_id` | Job status and progress |
 | `download_generated_model` | `job_id`, `output_dir` | Local file path with mesh validation |
 | `await_generation` | `job_id`, `timeout`, `poll_interval` | Completed job result |

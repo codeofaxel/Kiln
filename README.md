@@ -559,6 +559,7 @@ The Kiln MCP server (`kiln serve`) exposes **345 tools** to agents. Key tools ar
 | `analyze_print_failure` | Diagnose a failed print job with causes and recommendations |
 | `validate_print_quality` | Post-print quality assessment with snapshot and event analysis |
 | `generate_model` | Generate a 3D model from text (Meshy, Tripo3D, Stability AI, Gemini Deep Think, or OpenSCAD) |
+| `generate_original_design` | Closed-loop original design generation: printer-aware prompt -> generate -> audit -> corrective retry |
 | `generation_status` | Check the status of a model generation job |
 | `download_generated_model` | Download a completed generated model with mesh validation |
 | `await_generation` | Wait for a generation job to complete (polling) |
@@ -662,6 +663,8 @@ The Kiln MCP server (`kiln serve`) exposes **345 tools** to agents. Key tools ar
 | `project_cost_summary` | Aggregate cost summary with budget tracking for a project (Enterprise) |
 | `client_cost_report` | Cross-project cost report for a client (Enterprise) |
 | `get_design_brief` | Complete design brief for a functional requirement (materials, patterns, constraints) |
+| `build_generation_prompt` | Turn a natural-language idea into a printer-aware, design-constrained generation prompt |
+| `audit_original_design` | Harsh original-design audit: brief + validation + printability + diagnostics + feedback |
 | `get_material_design_profile` | Full engineering properties for a 3D printing material |
 | `list_design_materials` | List all available materials with summary properties |
 | `recommend_design_material` | Recommend the best material for a design task |
@@ -875,6 +878,7 @@ OpenSCAD is also available for local parametric generation (no API key needed â€
 
 Generated models are automatically validated for printability (manifold check, triangle count, bounding box dimensions) before printing. The registry pattern means new providers can be added in under 100 lines.
 `kiln generate` and `kiln generate-and-print` now render a 3-view preview (isometric/dimetric/trimetric) by default; use `--no-preview` to disable.
+The MCP provider list reports every supported backend and whether its API key is configured, so agents can reason about the real generation surface instead of a partial subset.
 
 ## Slicer Integration
 
