@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import click
 import pytest
 import yaml
 from click.testing import CliRunner
@@ -474,7 +475,8 @@ class TestMaterial:
         mock_tracker = MagicMock()
         mock_tracker.get_all_materials.return_value = []
         with patch("kiln.materials.MaterialTracker", return_value=mock_tracker), \
-             patch("kiln.persistence.get_db"):
+             patch("kiln.persistence.get_db"), \
+             patch("kiln.cli.main._get_adapter_from_ctx", side_effect=click.ClickException("no printer")):
             result = runner.invoke(cli, ["material", "show"])
         assert result.exit_code == 0
         assert "No materials loaded" in result.output

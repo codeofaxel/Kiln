@@ -1331,6 +1331,227 @@ def status(ctx: click.Context, json_mode: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# report (standalone monitor_print equivalent)
+# ---------------------------------------------------------------------------
+
+
+def _format_duration_cli(seconds: int | float | None) -> str:
+    """Format seconds as a human-readable duration string."""
+    if seconds is None or seconds < 0:
+        return "N/A"
+    total = int(seconds)
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours > 0:
+        return f"~{hours}h {minutes}min"
+    if minutes > 0:
+        return f"~{minutes} min"
+    return f"~{secs}s"
+
+
+def _generate_print_comment_cli(
+    state_str: str,
+    *,
+    completion: float | None,
+    tool_actual: float | None,
+    tool_target: float | None,
+    bed_actual: float | None,
+    bed_target: float | None,
+    print_error: int | None,
+) -> str:
+    """Generate a health observation comment about the print."""
+    if print_error and print_error > 0:
+        return f"Error detected (code {print_error}). Check printer."
+    if state_str == "paused":
+        return "Print is paused."
+    if state_str not in ("printing", "preparing"):
+        return f"Printer state: {state_str}."
+
+    comments: list[str] = []
+    if tool_actual is not None and tool_target is not None and tool_target > 0 and abs(tool_actual - tool_target) > 10:
+        comments.append(
+            "Nozzle still heating up."
+            if tool_actual < tool_target
+            else "Nozzle temperature deviation detected."
+        )
+    if bed_actual is not None and bed_target is not None and bed_target > 0 and abs(bed_actual - bed_target) > 10:
+        comments.append(
+            "Bed still heating up."
+            if bed_actual < bed_target
+            else "Bed temperature deviation detected."
+        )
+
+    if completion is not None and completion >= 90:
+        comments.append("Almost done!")
+    elif completion is not None and completion < 5 and state_str == "printing":
+        comments.append("Print just started.")
+
+    if not comments:
+        comments.append("Print progressing normally.")
+    return " ".join(comments)
+
+
+@cli.command()
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.option("--no-snapshot", is_flag=True, help="Skip camera snapshot.")
+@click.option(
+    "--repeat",
+    type=int,
+    default=0,
+    help="Repeat every N seconds (0 = once).",
+)
+@click.pass_context
+def report(
+    ctx: click.Context,
+    json_mode: bool,
+    no_snapshot: bool,
+    repeat: int,
+) -> None:
+    """Print status report matching the monitor_print MCP tool format.
+
+    Produces the same standardized output as the ``monitor_print()``
+    MCP tool, but without requiring the full MCP server.
+    """
+    try:
+        adapter = _get_adapter_from_ctx(ctx)
+    except (click.ClickException, PrinterError, Exception) as exc:
+        click.echo(format_error(f"Failed to connect: {exc}", json_mode=json_mode))
+        sys.exit(1)
+
+    while True:
+        try:
+            state = adapter.get_state()
+            job = adapter.get_job()
+            sd = state.to_dict()
+            jd = job.to_dict()
+
+            state_str = sd.get("state", "unknown")
+            completion = jd.get("completion")
+            file_name = jd.get("file_name") or "N/A"
+            current_layer = jd.get("current_layer")
+            total_layers = jd.get("total_layers")
+            elapsed_s = jd.get("print_time_seconds")
+            remaining_s = jd.get("print_time_left_seconds")
+            tool_actual = sd.get("tool_temp_actual")
+            tool_target = sd.get("tool_temp_target")
+            bed_actual = sd.get("bed_temp_actual")
+            bed_target = sd.get("bed_temp_target")
+            chamber_actual = sd.get("chamber_temp_actual")
+            speed_profile = sd.get("speed_profile")
+            speed_magnitude = sd.get("speed_magnitude")
+            print_error = sd.get("print_error", 0)
+
+            # Snapshot
+            snapshot_line = "Skipped"
+            if not no_snapshot:
+                try:
+                    image_data = adapter.get_snapshot()
+                    if image_data is not None:
+                        import uuid as _uuid
+
+                        snap_path = os.path.join(
+                            tempfile.gettempdir(),
+                            f"kiln_monitor_{_uuid.uuid4().hex[:12]}.jpg",
+                        )
+                        with open(snap_path, "wb") as f:
+                            f.write(image_data)
+                        snapshot_line = snap_path
+                    else:
+                        snapshot_line = "No camera available"
+                except Exception:
+                    snapshot_line = "Snapshot capture failed"
+
+            comment = _generate_print_comment_cli(
+                state_str,
+                completion=completion,
+                tool_actual=tool_actual,
+                tool_target=tool_target,
+                bed_actual=bed_actual,
+                bed_target=bed_target,
+                print_error=print_error,
+            )
+
+            if json_mode:
+                data = {
+                    "state": state_str,
+                    "completion": completion,
+                    "file_name": file_name,
+                    "current_layer": current_layer,
+                    "total_layers": total_layers,
+                    "elapsed_seconds": elapsed_s,
+                    "remaining_seconds": remaining_s,
+                    "nozzle_actual": tool_actual,
+                    "nozzle_target": tool_target,
+                    "bed_actual": bed_actual,
+                    "bed_target": bed_target,
+                    "chamber_actual": chamber_actual,
+                    "speed_profile": speed_profile,
+                    "speed_magnitude": speed_magnitude,
+                    "print_error": print_error,
+                    "snapshot_path": snapshot_line if snapshot_line not in ("Skipped", "No camera available", "Snapshot capture failed") else None,
+                    "comment": comment,
+                }
+                click.echo(json.dumps({"status": "success", "data": data}))
+            else:
+                progress_str = f"{completion:.0f}" if completion is not None else "N/A"
+                layer_str = (
+                    f"{current_layer} / {total_layers}"
+                    if current_layer is not None and total_layers is not None
+                    else "N/A"
+                )
+                nozzle_str = (
+                    f"{tool_actual:.0f}\u00b0C \u2192 {tool_target:.0f}\u00b0C target"
+                    if tool_actual is not None and tool_target is not None
+                    else "N/A"
+                )
+                bed_str = (
+                    f"{bed_actual:.0f}\u00b0C \u2192 {bed_target:.0f}\u00b0C target"
+                    if bed_actual is not None and bed_target is not None
+                    else "N/A"
+                )
+                speed_str = (
+                    f"{speed_profile} ({speed_magnitude}%)"
+                    if speed_profile is not None and speed_magnitude is not None
+                    else "N/A"
+                )
+                error_str = f"Code {print_error}" if print_error and print_error > 0 else "None"
+
+                lines = [
+                    f"Print Status \u2014 {progress_str}% complete",
+                    f"- File: {file_name}",
+                    f"- Layer: {layer_str}",
+                    f"- Time elapsed: {_format_duration_cli(elapsed_s)} | Remaining: {_format_duration_cli(remaining_s)}",
+                    f"- Nozzle: {nozzle_str}",
+                    f"- Bed: {bed_str}",
+                ]
+                if chamber_actual is not None:
+                    lines.append(f"- Chamber: {chamber_actual:.0f}\u00b0C")
+                lines.extend([
+                    f"- Speed: {speed_str}",
+                    f"- Errors: {error_str}",
+                    f"Camera: {snapshot_line}",
+                    f"Comments: {comment}",
+                ])
+                click.echo("\n".join(lines))
+
+        except PrinterError as exc:
+            click.echo(format_error(f"Monitor failed: {exc}", json_mode=json_mode))
+            if repeat <= 0:
+                sys.exit(1)
+        except Exception as exc:
+            click.echo(format_error(f"Monitor failed: {exc}", json_mode=json_mode))
+            if repeat <= 0:
+                sys.exit(1)
+
+        if repeat <= 0:
+            break
+        try:
+            time.sleep(repeat)
+        except KeyboardInterrupt:
+            break
+
+
+# ---------------------------------------------------------------------------
 # files
 # ---------------------------------------------------------------------------
 

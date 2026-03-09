@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 from unittest import mock
 
 import pytest
 
-from kiln.rest_api import RestApiConfig, _get_mcp_instance, _list_tool_schemas, _get_tool_function
-
+from kiln.rest_api import RestApiConfig, _get_tool_function, _list_tool_schemas
 
 # ---------------------------------------------------------------------------
 # 1. RestApiConfig defaults
@@ -152,22 +150,18 @@ class TestCreateApp:
     def _check_fastapi_available(self):
         """Skip tests if FastAPI is not installed."""
         try:
-            import fastapi
+            import fastapi  # noqa: F401
             return True
         except ImportError:
             return False
 
     def test_create_app_without_fastapi_raises(self):
         """If FastAPI is not importable, create_app should raise ImportError."""
-        with mock.patch.dict(sys.modules, {"fastapi": None}):
-            # Clear any cached import
-            import kiln.rest_api as mod
-            # We need to reload to pick up the mocked module
-            # Instead, let's directly test the import path
-            with mock.patch("builtins.__import__", side_effect=ImportError("no fastapi")):
-                # This tests the conceptual behavior. The actual test depends
-                # on whether fastapi is installed.
-                pass
+        with mock.patch.dict(sys.modules, {"fastapi": None}), \
+             mock.patch("builtins.__import__", side_effect=ImportError("no fastapi")):
+            # This tests the conceptual behavior. The actual test depends
+            # on whether fastapi is installed.
+            pass
 
     @pytest.fixture
     def mock_mcp(self):
@@ -195,16 +189,22 @@ class TestCreateApp:
         return mcp
 
     @pytest.fixture
-    def client(self, mock_mcp):
+    def client(self, mock_mcp, monkeypatch):
         """Create a TestClient if FastAPI is available."""
         try:
             from fastapi.testclient import TestClient
         except ImportError:
             pytest.skip("FastAPI not installed")
 
+        # Ensure no auth tokens leak from .env or prior tests.
+        monkeypatch.delenv("KILN_API_AUTH_TOKEN", raising=False)
+        monkeypatch.delenv("KILN_AUTH_TOKEN", raising=False)
+        monkeypatch.delenv("KILN_AUTH_ENABLED", raising=False)
+        monkeypatch.delenv("KILN_AUTH_KEY", raising=False)
+
         with mock.patch("kiln.rest_api._get_mcp_instance", return_value=mock_mcp):
             from kiln.rest_api import create_app
-            app = create_app(RestApiConfig())
+            app = create_app(RestApiConfig(auth_token=None))
             yield TestClient(app)
 
     @pytest.fixture
@@ -350,11 +350,16 @@ class TestCreateApp:
         assert resp.status_code == 400
 
     @mock.patch("kiln.rest_api._get_mcp_instance")
-    def test_agent_endpoint_runs_loop(self, mock_get_mcp, mock_mcp):
+    def test_agent_endpoint_runs_loop(self, mock_get_mcp, mock_mcp, monkeypatch):
         try:
             from fastapi.testclient import TestClient
         except ImportError:
             pytest.skip("FastAPI not installed")
+
+        monkeypatch.delenv("KILN_API_AUTH_TOKEN", raising=False)
+        monkeypatch.delenv("KILN_AUTH_TOKEN", raising=False)
+        monkeypatch.delenv("KILN_AUTH_ENABLED", raising=False)
+        monkeypatch.delenv("KILN_AUTH_KEY", raising=False)
 
         mock_get_mcp.return_value = mock_mcp
 
@@ -371,7 +376,7 @@ class TestCreateApp:
 
             from kiln.rest_api import create_app
 
-            app = create_app(RestApiConfig())
+            app = create_app(RestApiConfig(auth_token=None))
             client = TestClient(app)
 
             resp = client.post(
@@ -500,14 +505,14 @@ class TestRunRestServer:
 
         from kiln.rest_api import run_rest_server
 
-        with mock.patch("builtins.__import__", side_effect=mock_import):
-            with pytest.raises(ImportError, match="Uvicorn"):
-                run_rest_server()
+        with mock.patch("builtins.__import__", side_effect=mock_import), \
+             pytest.raises(ImportError, match="Uvicorn"):
+            run_rest_server()
 
     @mock.patch("kiln.rest_api.create_app")
     def test_run_rest_server_calls_uvicorn(self, mock_create_app):
         try:
-            import uvicorn
+            import uvicorn  # noqa: F401
         except ImportError:
             pytest.skip("uvicorn not installed")
 
@@ -540,7 +545,7 @@ class TestRunRestServer:
     @mock.patch("kiln.rest_api.create_app")
     def test_run_rest_server_allows_non_localhost_with_auth(self, mock_create_app):
         try:
-            import uvicorn
+            import uvicorn  # noqa: F401
         except ImportError:
             pytest.skip("uvicorn not installed")
 
@@ -559,7 +564,7 @@ class TestRunRestServer:
     @mock.patch("kiln.rest_api.create_app")
     def test_run_rest_server_allows_non_localhost_with_scoped_auth(self, mock_create_app, monkeypatch):
         try:
-            import uvicorn
+            import uvicorn  # noqa: F401
         except ImportError:
             pytest.skip("uvicorn not installed")
 

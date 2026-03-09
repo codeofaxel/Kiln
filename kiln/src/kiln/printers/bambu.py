@@ -87,6 +87,7 @@ _BACKOFF_INITIAL_DELAY: float = 1.0  # seconds
 _BACKOFF_MULTIPLIER: float = 2.0
 _BACKOFF_MAX_DELAY: float = 30.0  # seconds
 _STALE_STATE_MAX_AGE: float = 60.0  # seconds — max age before cached state is "too old"
+_FTPS_MAX_RETRIES: int = 3  # retry count for transient FTPS connection failures
 
 
 # ---------------------------------------------------------------------------
@@ -652,6 +653,29 @@ class BambuAdapter(PrinterAdapter):
     # Internal: MQTT
     # ------------------------------------------------------------------
 
+    def _safe_stop_client(self, client: mqtt.Client) -> None:
+        """Stop an MQTT client with a timeout to prevent hangs.
+
+        ``loop_stop()`` calls ``threading.join()`` with no timeout,
+        which can block forever if the network thread is stuck.  This
+        helper wraps the stop in a daemon thread with a deadline.
+        """
+        try:
+            client.disconnect()
+        except Exception:
+            logger.debug("MQTT client disconnect call failed", exc_info=True)
+        try:
+            stopper = threading.Thread(target=client.loop_stop, daemon=True)
+            stopper.start()
+            stopper.join(timeout=self._timeout)
+            if stopper.is_alive():
+                logger.debug(
+                    "MQTT loop_stop did not complete within %ss — abandoning",
+                    self._timeout,
+                )
+        except Exception:
+            logger.debug("MQTT loop_stop wrapper failed", exc_info=True)
+
     def _next_seq(self) -> str:
         """Return the next sequence ID as a string."""
         with self._state_lock:
@@ -686,11 +710,7 @@ class BambuAdapter(PrinterAdapter):
         # Tear down stale client that lost its connection.
         if self._mqtt_client is not None:
             logger.debug("MQTT client exists but disconnected; tearing down stale client")
-            try:
-                self._mqtt_client.loop_stop()
-                self._mqtt_client.disconnect()
-            except Exception as exc:
-                logger.debug("Failed to tear down stale MQTT client: %s", exc)
+            self._safe_stop_client(self._mqtt_client)
             self._mqtt_client = None
 
         try:
@@ -714,7 +734,7 @@ class BambuAdapter(PrinterAdapter):
 
             # Wait for the connection to be established.
             if not self._mqtt_connected.wait(timeout=self._timeout):
-                client.loop_stop()
+                self._safe_stop_client(client)
                 self._backoff.record_failure()
                 raise PrinterError(
                     f"MQTT connection to {self._host} timed out after "
@@ -739,11 +759,7 @@ class BambuAdapter(PrinterAdapter):
                     transport="MQTT",
                 )
             except PrinterError:
-                try:
-                    client.loop_stop()
-                    client.disconnect()
-                except Exception:
-                    pass
+                self._safe_stop_client(client)
                 self._backoff.record_failure()
                 raise
 
@@ -999,7 +1015,46 @@ class BambuAdapter(PrinterAdapter):
     # ------------------------------------------------------------------
 
     def _ftp_connect(self) -> ftplib.FTP_TLS:
-        """Open an FTPS connection to the printer.
+        """Open an FTPS connection with retry and exponential backoff.
+
+        Transient errors (connection refused, timeout, no route) are retried
+        up to :data:`_FTPS_MAX_RETRIES` times.  Auth failures and
+        single-client locks are raised immediately.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(_FTPS_MAX_RETRIES):
+            try:
+                return self._ftp_connect_once()
+            except PrinterError as exc:
+                err_msg = str(exc).lower()
+                # Don't retry auth failures or single-client locks.
+                if any(
+                    k in err_msg
+                    for k in (
+                        "authentication",
+                        "login",
+                        "530",
+                        "already connected",
+                        "another client",
+                        "only allow one",
+                    )
+                ):
+                    raise
+                last_exc = exc
+                if attempt < _FTPS_MAX_RETRIES - 1:
+                    delay = 2**attempt  # 1s, 2s
+                    logger.info(
+                        "FTPS connection failed (attempt %d/%d), retrying in %ds: %s",
+                        attempt + 1,
+                        _FTPS_MAX_RETRIES,
+                        delay,
+                        exc,
+                    )
+                    time.sleep(delay)
+        raise last_exc  # type: ignore[misc]
+
+    def _ftp_connect_once(self) -> ftplib.FTP_TLS:
+        """Open a single FTPS connection attempt (no retry).
 
         Returns:
             A connected and authenticated :class:`ftplib.FTP_TLS` instance.
@@ -1504,7 +1559,7 @@ class BambuAdapter(PrinterAdapter):
 
     def _wait_for_print_start(
         self,
-        timeout: float = 15.0,
+        timeout: float = 5.0,
         poll_interval: float = 1.0,
     ) -> tuple[str, int | None]:
         """Poll MQTT cache until printer enters a print-active state.
@@ -2398,6 +2453,17 @@ class BambuAdapter(PrinterAdapter):
         status = self._get_cached_status()
         ams_data = status.get("ams")
 
+        # A1/AMS Lite printers don't push AMS data as frequently as X1/P1.
+        # If the cache has no AMS data yet, request a full status update
+        # and give the printer a moment to respond.
+        if not ams_data:
+            self._publish_command(
+                {"pushing": {"sequence_id": self._next_seq(), "command": "pushall"}}
+            )
+            time.sleep(min(2.0, self._timeout / 2))
+            status = self._get_cached_status()
+            ams_data = status.get("ams")
+
         # Bambu printers may nest AMS data as a dict wrapper containing an
         # inner "ams" list alongside top-level fields like ams_exist_bits.
         # Unwrap the dict to get the actual unit list.
@@ -2586,7 +2652,7 @@ class BambuAdapter(PrinterAdapter):
         # Fallback to RTSPS (X1 series, port 322) via ffmpeg.
         return self._capture_rtsps_frame()
 
-    def _capture_jpeg_frame(self, *, timeout: float = 15.0) -> bytes | None:
+    def _capture_jpeg_frame(self, *, timeout: float = 5.0) -> bytes | None:
         """Capture a JPEG frame via the TLS+JPEG protocol on port 6000.
 
         The A1/P1 series printers stream sequential JPEG frames over a
@@ -2672,7 +2738,7 @@ class BambuAdapter(PrinterAdapter):
                     "pipe:1",
                 ],
                 capture_output=True,
-                timeout=10,
+                timeout=5,
             )
             if result.returncode == 0 and result.stdout and len(result.stdout) > 100:
                 return result.stdout
@@ -2684,7 +2750,7 @@ class BambuAdapter(PrinterAdapter):
             raise
         except subprocess.TimeoutExpired as exc:
             raise PrinterError(
-                "Camera RTSPS stream timed out after 10s. Check camera and network."
+                "Camera RTSPS stream timed out after 5s. Check camera and network."
             ) from exc
         except Exception as exc:
             raise PrinterError(
@@ -2709,15 +2775,31 @@ class BambuAdapter(PrinterAdapter):
     def disconnect(self) -> None:
         """Disconnect the MQTT client and release resources."""
         if self._mqtt_client is not None:
-            try:
-                self._mqtt_client.loop_stop()
-                self._mqtt_client.disconnect()
-            except Exception as exc:
-                logger.debug("Failed to disconnect MQTT client: %s", exc)
+            client = self._mqtt_client
+            self._mqtt_client = None
+            self._safe_stop_client(client)
+            self._mqtt_connected.clear()
+            with self._state_lock:
+                self._connected = False
+
+    def update_credentials(self, access_code: str) -> None:
+        """Update the access code and force MQTT reconnection.
+
+        Bambu printers rotate their LAN access code periodically.  Call
+        this method to update the stored credential without recreating
+        the entire adapter instance.
+
+        :param access_code: New LAN access code from the printer's screen.
+        """
+        self._access_code = access_code
+        # Force MQTT reconnection with new credentials on next operation.
+        if self._mqtt_client is not None:
+            self._safe_stop_client(self._mqtt_client)
             self._mqtt_client = None
             self._mqtt_connected.clear()
             with self._state_lock:
                 self._connected = False
+        logger.info("Access code updated; MQTT will reconnect on next operation")
 
     # ------------------------------------------------------------------
     # Dunder helpers
@@ -2727,5 +2809,9 @@ class BambuAdapter(PrinterAdapter):
         return f"<BambuAdapter host={self._host!r} serial={self._serial!r}>"
 
     def __del__(self) -> None:
-        if hasattr(self, "_mqtt_client"):
-            self.disconnect()
+        # Don't call full disconnect() from GC — loop_stop() can deadlock
+        # during interpreter shutdown.  Just send DISCONNECT and drop ref.
+        if hasattr(self, "_mqtt_client") and self._mqtt_client is not None:
+            with contextlib.suppress(Exception):
+                self._mqtt_client.disconnect()
+            self._mqtt_client = None
