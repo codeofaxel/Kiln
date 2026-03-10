@@ -1614,6 +1614,61 @@ def printer_status() -> dict:
         return _error_dict(f"Unexpected error in printer_status: {exc}", code="INTERNAL_ERROR")
 
 
+# -- Material cost estimation --------------------------------------------------
+# Mirrors _MATERIAL_DB from kiln.generation.validation but kept local to avoid
+# importing the heavy mesh-analysis module at server startup.
+_MATERIAL_COST_PER_KG: dict[str, float] = {
+    "pla": 20.0,
+    "pla+": 22.0,
+    "petg": 22.0,
+    "abs": 18.0,
+    "tpu": 30.0,
+    "asa": 25.0,
+    "nylon": 35.0,
+    "pc": 40.0,
+    "carbon_fiber_pla": 45.0,
+}
+
+# Average FDM filament consumption: ~7.5 g/hour is a reasonable mid-range
+# estimate across typical desktop prints (5-10 g/hr range).
+_AVG_FILAMENT_G_PER_HOUR: float = 7.5
+
+
+def _estimate_print_cost(
+    elapsed_s: int | float | None,
+    remaining_s: int | float | None,
+    *,
+    material: str | None = None,
+) -> dict[str, Any] | None:
+    """Estimate filament cost from total print time.
+
+    Returns a dict with cost details, or ``None`` if estimation is not
+    possible (e.g. both time values are missing).
+    """
+    # Need at least one time value to estimate
+    elapsed = elapsed_s if elapsed_s is not None and elapsed_s >= 0 else 0
+    remaining = remaining_s if remaining_s is not None and remaining_s >= 0 else 0
+    total_s = elapsed + remaining
+    if total_s <= 0:
+        return None
+
+    mat_key = (material or "pla").lower().strip()
+    cost_per_kg = _MATERIAL_COST_PER_KG.get(mat_key, _MATERIAL_COST_PER_KG["pla"])
+    mat_label = mat_key.upper()
+
+    total_hours = total_s / 3600.0
+    estimated_weight_g = total_hours * _AVG_FILAMENT_G_PER_HOUR
+    estimated_cost = (estimated_weight_g / 1000.0) * cost_per_kg
+
+    return {
+        "material": mat_label,
+        "estimated_weight_g": round(estimated_weight_g, 1),
+        "estimated_cost_usd": round(estimated_cost, 2),
+        "cost_per_kg_usd": cost_per_kg,
+        "total_print_time_hours": round(total_hours, 2),
+    }
+
+
 def _format_duration(seconds: int | float | None) -> str:
     """Format seconds as a human-readable duration string."""
     if seconds is None or seconds < 0:
@@ -1788,6 +1843,18 @@ def monitor_print(
         lines.extend([
             f"- Speed: {speed_str}",
             f"- Errors: {error_str}",
+        ])
+
+        # --- Cost estimate ---
+        cost_info = _estimate_print_cost(elapsed_s, remaining_s)
+        if cost_info is not None:
+            lines.append(
+                f"- Estimated filament cost: ~${cost_info['estimated_cost_usd']:.2f} "
+                f"({cost_info['material']} @ ${cost_info['cost_per_kg_usd']:.0f}/kg, "
+                f"~{cost_info['estimated_weight_g']:.0f}g)"
+            )
+
+        lines.extend([
             f"Camera: {snapshot_line}",
             f"Comments: {comment}",
         ])
@@ -3400,6 +3467,55 @@ def preflight_check(
                 )
                 errors.append("Unable to list files on printer to verify remote file")
 
+        # -- Cost estimate (advisory) --------------------------------------
+        cost_estimate: dict[str, Any] | None = None
+        _cost_time_s: int | float | None = None
+
+        # 1) Try remote file metadata (has estimated_time_seconds)
+        if remote_file is not None:
+            try:
+                for pf in adapter.list_files():
+                    if pf.name.lower() == remote_file.lower() or pf.path.lower() == remote_file.lower():
+                        if pf.estimated_time_seconds:
+                            _cost_time_s = pf.estimated_time_seconds
+                        break
+            except Exception:
+                pass  # Already handled in remote file check above
+
+        # 2) Try local gcode file metadata (parse estimated time)
+        if _cost_time_s is None and file_path is not None:
+            try:
+                _gcode_ext = {".gcode", ".gco", ".g", ".3mf"}
+                if Path(file_path).suffix.lower() in _gcode_ext:
+                    with open(file_path, errors="replace") as _fh:
+                        # Read first 200 lines for slicer time estimates
+                        for _i, _line in enumerate(_fh):
+                            if _i > 200:
+                                break
+                            _line_lower = _line.lower()
+                            # PrusaSlicer/OrcaSlicer: ; estimated printing time
+                            if "estimated printing time" in _line_lower:
+                                _time_match = re.findall(r"(\d+)\s*h", _line)
+                                _min_match = re.findall(r"(\d+)\s*m", _line)
+                                _sec_match = re.findall(r"(\d+)\s*s", _line)
+                                _cost_time_s = (
+                                    sum(int(h) * 3600 for h in _time_match)
+                                    + sum(int(m) * 60 for m in _min_match)
+                                    + sum(int(s) for s in _sec_match)
+                                )
+                                break
+                            # Cura: ;TIME:seconds
+                            if _line.startswith(";TIME:"):
+                                _cost_time_s = float(_line.split(":")[1].strip())
+                                break
+            except Exception as exc:
+                logger.debug("Cost estimate gcode parse failed: %s", exc)
+
+        if _cost_time_s is not None and _cost_time_s > 0:
+            cost_estimate = _estimate_print_cost(
+                _cost_time_s, 0, material=expected_material
+            )
+
         # -- Summary -------------------------------------------------------
         ready = all(c["passed"] for c in checks)
         summary = (
@@ -3423,6 +3539,8 @@ def preflight_check(
         }
         if file_result is not None:
             result["file"] = file_result
+        if cost_estimate is not None:
+            result["estimated_cost"] = cost_estimate
 
         return result
 
@@ -10316,6 +10434,121 @@ def analyze_non_manifold_edges(file_path: str) -> dict:
         return {"status": "success", **count_non_manifold_edges(file_path)}
     except Exception as exc:
         return _error_dict(f"Edge analysis failed: {exc}")
+
+
+@mcp.tool()
+def scale_mesh_to_fit(
+    file_path: str,
+    max_x_mm: float = 256.0,
+    max_y_mm: float = 256.0,
+    max_z_mm: float = 256.0,
+    output_path: str = "",
+) -> dict:
+    """Auto-scale a mesh to fit within a build volume while maintaining aspect ratio.
+
+    Useful when a model is too large for your printer — this uniformly
+    shrinks it to the largest size that fits.
+
+    :param file_path: Path to mesh file (.stl).
+    :param max_x_mm: Maximum X dimension of build volume.
+    :param max_y_mm: Maximum Y dimension of build volume.
+    :param max_z_mm: Maximum Z dimension of build volume.
+    :param output_path: Output path. Defaults to overwriting input.
+    :returns: Dict with original/new dimensions and scale factor.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import scale_to_fit
+
+        return {"status": "success", **scale_to_fit(
+            file_path, max_x_mm=max_x_mm, max_y_mm=max_y_mm,
+            max_z_mm=max_z_mm, output_path=output_path or None,
+        )}
+    except Exception as exc:
+        return _error_dict(f"Scale failed: {exc}")
+
+
+@mcp.tool()
+def merge_mesh_files(
+    file_paths: list[str],
+    output_path: str,
+) -> dict:
+    """Combine multiple STL files into a single mesh file.
+
+    Useful for composing multi-part designs into one printable file.
+
+    :param file_paths: List of STL file paths to merge.
+    :param output_path: Destination path for the merged file.
+    :returns: Dict with merge statistics.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import merge_stl_files
+
+        return {"status": "success", **merge_stl_files(file_paths, output_path=output_path)}
+    except Exception as exc:
+        return _error_dict(f"Merge failed: {exc}")
+
+
+@mcp.tool()
+def split_mesh_by_component(
+    file_path: str,
+    output_dir: str = "",
+) -> dict:
+    """Split a multi-component mesh into separate STL files.
+
+    Identifies disconnected bodies (components) using shared-edge
+    analysis and writes each as a separate file.
+
+    :param file_path: Path to mesh file (.stl).
+    :param output_dir: Directory for output files. Defaults to input directory.
+    :returns: Dict with component count and file paths.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import split_by_component
+
+        return {"status": "success", **split_by_component(
+            file_path, output_dir=output_dir or None,
+        )}
+    except Exception as exc:
+        return _error_dict(f"Split failed: {exc}")
+
+
+@mcp.tool()
+def estimate_mesh_print_time(
+    file_path: str,
+    layer_height_mm: float = 0.2,
+    print_speed_mm_s: float = 60.0,
+    material: str = "pla",
+) -> dict:
+    """Rough print time estimate from mesh geometry (STL/OBJ/GLB).
+
+    Uses model height, surface area, and layer count to approximate
+    print duration. This is a ballpark estimate — actual time depends
+    on slicer settings, infill density, supports, and acceleration.
+
+    Unlike estimate_print_time (which uses slicer profiles), this
+    works directly on mesh files before slicing.
+
+    :param file_path: Path to mesh file.
+    :param layer_height_mm: Layer height for slicing.
+    :param print_speed_mm_s: Average print speed in mm/s.
+    :param material: Material hint (affects per-layer overhead).
+    :returns: Dict with estimated time, layer count, and note.
+    """
+    try:
+        from kiln.generation.validation import estimate_print_time_from_mesh
+
+        return {"status": "success", **estimate_print_time_from_mesh(
+            file_path, layer_height_mm=layer_height_mm,
+            print_speed_mm_s=print_speed_mm_s, material=material,
+        )}
+    except Exception as exc:
+        return _error_dict(f"Time estimate failed: {exc}")
 
 
 # ---------------------------------------------------------------------------

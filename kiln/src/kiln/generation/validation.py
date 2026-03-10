@@ -2845,3 +2845,362 @@ def count_non_manifold_edges(file_path: str) -> dict[str, Any]:
         "is_watertight": non_manifold == 0,
         "manifold_pct": round(manifold / total_edges * 100, 1) if total_edges > 0 else 0.0,
     }
+
+
+# ---------------------------------------------------------------------------
+# Scale to fit build volume
+# ---------------------------------------------------------------------------
+
+
+def scale_to_fit(
+    file_path: str,
+    *,
+    max_x_mm: float = 256.0,
+    max_y_mm: float = 256.0,
+    max_z_mm: float = 256.0,
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Auto-scale a mesh to fit within a build volume.
+
+    Applies uniform scaling so the mesh fits inside the given
+    bounding box while maintaining aspect ratio.  If the mesh
+    already fits, no scaling is applied.
+
+    Args:
+        file_path: Path to the STL file.
+        max_x_mm: Maximum X dimension of the build volume.
+        max_y_mm: Maximum Y dimension of the build volume.
+        max_z_mm: Maximum Z dimension of the build volume.
+        output_path: Output path.  Defaults to overwriting input.
+
+    Returns:
+        Dict with original/new dimensions and scale factor.
+    """
+    if max_x_mm <= 0 or max_y_mm <= 0 or max_z_mm <= 0:
+        raise ValueError("Build volume dimensions must be positive.")
+
+    path = Path(file_path)
+    errors: list[str] = []
+    triangles, vertices = _parse_stl(path, errors)
+    if errors:
+        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+    if not triangles:
+        raise ValueError("STL contains no geometry.")
+
+    bbox = _bounding_box(vertices)
+    dim_x = bbox["x_max"] - bbox["x_min"]
+    dim_y = bbox["y_max"] - bbox["y_min"]
+    dim_z = bbox["z_max"] - bbox["z_min"]
+
+    original_dimensions = {
+        "x": round(dim_x, 3),
+        "y": round(dim_y, 3),
+        "z": round(dim_z, 3),
+    }
+
+    # Compute uniform scale factor (smallest ratio wins).
+    ratios: list[float] = []
+    if dim_x > 0:
+        ratios.append(max_x_mm / dim_x)
+    if dim_y > 0:
+        ratios.append(max_y_mm / dim_y)
+    if dim_z > 0:
+        ratios.append(max_z_mm / dim_z)
+
+    if not ratios:
+        raise ValueError("Mesh has zero extent on all axes.")
+
+    scale = min(ratios)
+
+    out = output_path or file_path
+    if scale >= 1.0:
+        # Already fits — write copy if separate output requested.
+        if output_path and output_path != file_path:
+            _write_binary_stl(triangles, out)
+        return {
+            "path": out,
+            "original_dimensions": original_dimensions,
+            "new_dimensions": original_dimensions,
+            "scale_factor": 1.0,
+            "already_fits": True,
+        }
+
+    # Scale around bounding-box center so it stays centered.
+    cx = (bbox["x_min"] + bbox["x_max"]) / 2.0
+    cy = (bbox["y_min"] + bbox["y_max"]) / 2.0
+    cz = (bbox["z_min"] + bbox["z_max"]) / 2.0
+
+    scaled: list[tuple[tuple[float, ...], ...]] = []
+    for tri in triangles:
+        new_tri = tuple(
+            (
+                (v[0] - cx) * scale + cx,
+                (v[1] - cy) * scale + cy,
+                (v[2] - cz) * scale + cz,
+            )
+            for v in tri
+        )
+        scaled.append(new_tri)
+
+    _write_binary_stl(scaled, out)
+
+    new_dimensions = {
+        "x": round(dim_x * scale, 3),
+        "y": round(dim_y * scale, 3),
+        "z": round(dim_z * scale, 3),
+    }
+
+    return {
+        "path": out,
+        "original_dimensions": original_dimensions,
+        "new_dimensions": new_dimensions,
+        "scale_factor": round(scale, 6),
+        "already_fits": False,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Merge multiple STL files
+# ---------------------------------------------------------------------------
+
+
+def merge_stl_files(
+    file_paths: list[str],
+    *,
+    output_path: str,
+) -> dict[str, Any]:
+    """Combine multiple STL files into a single file.
+
+    Reads triangles from each input file and writes a single
+    combined binary STL.
+
+    Args:
+        file_paths: List of paths to STL files.
+        output_path: Destination path for the merged file.
+
+    Returns:
+        Dict with merge statistics.
+    """
+    if not file_paths:
+        raise ValueError("file_paths must not be empty.")
+    if not output_path:
+        raise ValueError("output_path is required.")
+
+    all_triangles: list[tuple[tuple[float, ...], ...]] = []
+
+    for fp in file_paths:
+        path = Path(fp)
+        if not path.exists():
+            raise ValueError(f"File not found: {fp}")
+        errors: list[str] = []
+        tris, _ = _parse_stl(path, errors)
+        if errors:
+            raise ValueError(f"Failed to parse {fp}: {'; '.join(errors)}")
+        all_triangles.extend(tris)
+
+    if not all_triangles:
+        raise ValueError("No triangles found across input files.")
+
+    _write_binary_stl(all_triangles, output_path)
+
+    return {
+        "path": output_path,
+        "file_count": len(file_paths),
+        "total_triangles": len(all_triangles),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Split mesh by connected component
+# ---------------------------------------------------------------------------
+
+
+def split_by_component(
+    file_path: str,
+    *,
+    output_dir: str | None = None,
+) -> dict[str, Any]:
+    """Split a multi-component mesh into separate STL files.
+
+    Uses union-find on shared edges to identify connected
+    components, then writes each component as a separate file.
+
+    Args:
+        file_path: Path to the STL file.
+        output_dir: Directory for output files.  Defaults to
+            the same directory as the input file.
+
+    Returns:
+        Dict with component count and file paths.
+    """
+    path = Path(file_path)
+    errors: list[str] = []
+    triangles, _ = _parse_stl(path, errors)
+    if errors:
+        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+    if not triangles:
+        raise ValueError("STL contains no geometry.")
+
+    n = len(triangles)
+
+    # Union-find
+    parent = list(range(n))
+
+    def _find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def _union(a: int, b: int) -> None:
+        ra, rb = _find(a), _find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    edge_to_tri: dict[tuple[tuple[float, ...], tuple[float, ...]], int] = {}
+    for i, tri in enumerate(triangles):
+        for j in range(3):
+            va, vb = tri[j], tri[(j + 1) % 3]
+            edge = (min(va, vb), max(va, vb))
+            if edge in edge_to_tri:
+                _union(i, edge_to_tri[edge])
+            else:
+                edge_to_tri[edge] = i
+
+    # Group triangles by component root
+    components: dict[int, list[int]] = {}
+    for i in range(n):
+        root = _find(i)
+        if root not in components:
+            components[root] = []
+        components[root].append(i)
+
+    # Sort components by size (largest first) for deterministic ordering
+    sorted_comps = sorted(components.values(), key=len, reverse=True)
+
+    out_dir = Path(output_dir) if output_dir else path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = path.stem
+
+    written_paths: list[str] = []
+    for idx, comp_indices in enumerate(sorted_comps):
+        comp_tris = [triangles[i] for i in comp_indices]
+        out_file = str(out_dir / f"{stem}_component_{idx}.stl")
+        _write_binary_stl(comp_tris, out_file)
+        written_paths.append(out_file)
+
+    return {
+        "component_count": len(sorted_comps),
+        "file_paths": written_paths,
+        "triangles_per_component": [len(c) for c in sorted_comps],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Rough print time estimation from mesh geometry
+# ---------------------------------------------------------------------------
+
+
+def estimate_print_time_from_mesh(
+    file_path: str,
+    *,
+    layer_height_mm: float = 0.2,
+    print_speed_mm_s: float = 60.0,
+    material: str = "pla",
+) -> dict[str, Any]:
+    """Rough print time estimate from mesh geometry.
+
+    Algorithm:
+        1. Compute bounding-box height → number of layers.
+        2. Approximate total surface area of the mesh.
+        3. Estimate perimeter per layer ≈ sqrt(surface_area / height).
+        4. Total toolpath length ≈ perimeter * layers.
+        5. Time ≈ toolpath / speed + per-layer overhead.
+
+    This is a *rough* estimate — actual time depends on infill,
+    supports, acceleration, retraction, and slicer settings.
+
+    Args:
+        file_path: Path to mesh file.
+        layer_height_mm: Slicing layer height.
+        print_speed_mm_s: Average print move speed.
+        material: Material hint (used for per-layer overhead).
+
+    Returns:
+        Dict with estimated time and layer info.
+    """
+    if layer_height_mm <= 0:
+        raise ValueError("layer_height_mm must be positive.")
+    if print_speed_mm_s <= 0:
+        raise ValueError("print_speed_mm_s must be positive.")
+
+    path = Path(file_path)
+    errors: list[str] = []
+    tris = _load_triangles(path, errors)
+    if errors or not tris:
+        raise ValueError(f"Cannot parse mesh: {errors or ['No geometry']}")
+
+    # Collect all vertices for bounding box
+    all_verts: list[tuple[float, ...]] = []
+    for tri in tris:
+        all_verts.extend(tri)
+    bbox = _bounding_box(all_verts)
+
+    height = bbox["z_max"] - bbox["z_min"]
+    if height <= 0:
+        raise ValueError("Mesh has zero height (flat on Z axis).")
+
+    layers = max(1, int(math.ceil(height / layer_height_mm)))
+
+    # Approximate surface area using triangle areas
+    total_surface_area = 0.0
+    for tri in tris:
+        v0, v1, v2 = tri
+        # Cross product of two edge vectors
+        ax, ay, az = v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]
+        bx, by, bz = v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]
+        cx = ay * bz - az * by
+        cy = az * bx - ax * bz
+        cz = ax * by - ay * bx
+        total_surface_area += 0.5 * math.sqrt(cx * cx + cy * cy + cz * cz)
+
+    # Perimeter per layer ≈ sqrt(surface_area / height)
+    # This approximates the average cross-section perimeter.
+    perimeter_per_layer = math.sqrt(total_surface_area / height) if height > 0 else 0.0
+
+    # Total toolpath ≈ perimeter * layers (accounts for walls)
+    # Add ~30% for infill estimate (rough)
+    infill_factor = 1.3
+    total_path_length = perimeter_per_layer * layers * infill_factor
+
+    # Per-layer overhead (homing, z-move, retraction).
+    # Slightly higher for materials needing heated bed stabilisation.
+    material_lower = material.lower()
+    if material_lower in ("abs", "asa", "nylon", "pc"):
+        overhead_per_layer_s = 3.0
+    else:
+        overhead_per_layer_s = 2.0
+
+    travel_time_s = total_path_length / print_speed_mm_s if print_speed_mm_s > 0 else 0.0
+    overhead_time_s = layers * overhead_per_layer_s
+    total_seconds = travel_time_s + overhead_time_s
+
+    # Human-readable format
+    hours = int(total_seconds // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    if hours > 0:
+        human = f"{hours}h {minutes}m"
+    else:
+        human = f"{minutes}m"
+
+    return {
+        "estimated_time_seconds": round(total_seconds, 1),
+        "estimated_time_human": human,
+        "layers": layers,
+        "perimeter_per_layer_mm": round(perimeter_per_layer, 2),
+        "total_path_length_mm": round(total_path_length, 1),
+        "surface_area_mm2": round(total_surface_area, 1),
+        "height_mm": round(height, 2),
+        "material": material_lower,
+        "note": "Rough estimate. Actual time depends on slicer settings, infill, supports, and acceleration.",
+    }

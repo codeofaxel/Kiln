@@ -1974,3 +1974,239 @@ class TestNonManifoldEdges:
         result = count_non_manifold_edges(f)
 
         assert result["non_manifold_edges"] == result["boundary_edges"] + result["t_junction_edges"]
+
+
+# ===========================================================================
+# Phase 6 Tests: Scale-to-Fit, Merge, Split, Print Time Estimation
+# ===========================================================================
+
+
+class TestScaleToFit:
+    """Tests for scale_to_fit() — auto-scale mesh to fit build volume."""
+
+    def test_oversized_cube_scaled_down(self, tmp_path):
+        from kiln.generation.validation import scale_to_fit
+
+        f = str(tmp_path / "big.stl")
+        _write_cube_stl(f, 300.0)
+        out = str(tmp_path / "fitted.stl")
+        result = scale_to_fit(f, max_x_mm=200.0, max_y_mm=200.0, max_z_mm=200.0, output_path=out)
+
+        assert result["scale_factor"] < 1.0
+        assert result["new_dimensions"]["x"] <= 200.1
+        assert result["new_dimensions"]["y"] <= 200.1
+        assert result["new_dimensions"]["z"] <= 200.1
+        assert os.path.isfile(out)
+
+    def test_small_cube_already_fits(self, tmp_path):
+        from kiln.generation.validation import scale_to_fit
+
+        f = str(tmp_path / "small.stl")
+        _write_cube_stl(f, 20.0)
+        out = str(tmp_path / "same.stl")
+        result = scale_to_fit(f, max_x_mm=256.0, max_y_mm=256.0, max_z_mm=256.0, output_path=out)
+
+        assert result["already_fits"] is True
+        assert result["scale_factor"] == 1.0
+
+    def test_maintains_aspect_ratio(self, tmp_path):
+        from pathlib import Path
+
+        from kiln.generation.validation import _parse_stl, scale_to_fit
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 100.0)
+        out = str(tmp_path / "scaled.stl")
+        scale_to_fit(f, max_x_mm=50.0, max_y_mm=50.0, max_z_mm=50.0, output_path=out)
+
+        errors: list[str] = []
+        _, verts = _parse_stl(Path(out), errors)
+        xs = [v[0] for v in verts]
+        ys = [v[1] for v in verts]
+        zs = [v[2] for v in verts]
+        w = max(xs) - min(xs)
+        d = max(ys) - min(ys)
+        h = max(zs) - min(zs)
+        assert abs(w - d) < 0.1
+        assert abs(w - h) < 0.1
+
+    def test_bad_file_raises(self, tmp_path):
+        from kiln.generation.validation import scale_to_fit
+
+        f = str(tmp_path / "bad.stl")
+        (tmp_path / "bad.stl").write_bytes(b"nope")
+        with pytest.raises(ValueError):
+            scale_to_fit(f)
+
+    def test_negative_volume_raises(self, tmp_path):
+        from kiln.generation.validation import scale_to_fit
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        with pytest.raises(ValueError, match="positive"):
+            scale_to_fit(f, max_x_mm=-1.0)
+
+
+class TestMergeSTLFiles:
+    """Tests for merge_stl_files() — combine multiple STLs."""
+
+    def test_merge_two_cubes(self, tmp_path):
+        from kiln.generation.validation import merge_stl_files
+
+        f1 = str(tmp_path / "c1.stl")
+        f2 = str(tmp_path / "c2.stl")
+        _write_cube_stl(f1, 10.0)
+        _write_cube_stl(f2, 20.0)
+        out = str(tmp_path / "merged.stl")
+        result = merge_stl_files([f1, f2], output_path=out)
+
+        assert result["file_count"] == 2
+        assert result["total_triangles"] == 24
+        assert os.path.isfile(out)
+
+    def test_merge_single_file(self, tmp_path):
+        from kiln.generation.validation import merge_stl_files
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 10.0)
+        out = str(tmp_path / "merged.stl")
+        result = merge_stl_files([f], output_path=out)
+        assert result["total_triangles"] == 12
+
+    def test_empty_list_raises(self, tmp_path):
+        from kiln.generation.validation import merge_stl_files
+
+        with pytest.raises(ValueError, match="empty"):
+            merge_stl_files([], output_path=str(tmp_path / "out.stl"))
+
+    def test_missing_file_raises(self, tmp_path):
+        from kiln.generation.validation import merge_stl_files
+
+        with pytest.raises(ValueError, match="not found"):
+            merge_stl_files(["/nonexistent.stl"], output_path=str(tmp_path / "out.stl"))
+
+
+class TestSplitByComponent:
+    """Tests for split_by_component() — split multi-body mesh."""
+
+    def test_single_component_one_file(self, tmp_path):
+        from kiln.generation.validation import split_by_component
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = split_by_component(f, output_dir=str(tmp_path / "parts"))
+
+        assert result["component_count"] >= 1
+        assert len(result["file_paths"]) >= 1
+        for p in result["file_paths"]:
+            assert os.path.isfile(p)
+
+    def test_two_components_two_files(self, tmp_path):
+        from kiln.generation.validation import split_by_component
+
+        f = str(tmp_path / "multi.stl")
+        _write_two_component_stl(f)
+        result = split_by_component(f, output_dir=str(tmp_path / "split"))
+
+        assert result["component_count"] == 2
+        assert len(result["file_paths"]) == 2
+        # Largest component first
+        assert result["triangles_per_component"][0] >= result["triangles_per_component"][1]
+
+    def test_bad_file_raises(self, tmp_path):
+        from kiln.generation.validation import split_by_component
+
+        f = str(tmp_path / "bad.stl")
+        (tmp_path / "bad.stl").write_bytes(b"bad")
+        with pytest.raises(ValueError):
+            split_by_component(f)
+
+
+class TestPrintTimeEstimate:
+    """Tests for estimate_print_time_from_mesh() — rough time estimate."""
+
+    def test_cube_time_positive(self, tmp_path):
+        from kiln.generation.validation import estimate_print_time_from_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = estimate_print_time_from_mesh(f)
+
+        assert result["estimated_time_seconds"] > 0
+        assert result["estimated_time_human"]
+        assert result["layers"] > 0
+        assert result["material"] == "pla"
+
+    def test_bigger_takes_longer(self, tmp_path):
+        from kiln.generation.validation import estimate_print_time_from_mesh
+
+        small = str(tmp_path / "small.stl")
+        big = str(tmp_path / "big.stl")
+        _write_cube_stl(small, 10.0)
+        _write_cube_stl(big, 50.0)
+
+        r_small = estimate_print_time_from_mesh(small)
+        r_big = estimate_print_time_from_mesh(big)
+
+        assert r_big["estimated_time_seconds"] > r_small["estimated_time_seconds"]
+
+    def test_slower_speed_takes_longer(self, tmp_path):
+        from kiln.generation.validation import estimate_print_time_from_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+
+        fast = estimate_print_time_from_mesh(f, print_speed_mm_s=100.0)
+        slow = estimate_print_time_from_mesh(f, print_speed_mm_s=30.0)
+
+        assert slow["estimated_time_seconds"] > fast["estimated_time_seconds"]
+
+    def test_high_temp_material_overhead(self, tmp_path):
+        from kiln.generation.validation import estimate_print_time_from_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+
+        pla = estimate_print_time_from_mesh(f, material="pla")
+        abs_ = estimate_print_time_from_mesh(f, material="abs")
+
+        # ABS has higher per-layer overhead
+        assert abs_["estimated_time_seconds"] > pla["estimated_time_seconds"]
+
+    def test_bad_file_raises(self, tmp_path):
+        from kiln.generation.validation import estimate_print_time_from_mesh
+
+        f = str(tmp_path / "bad.stl")
+        (tmp_path / "bad.stl").write_bytes(b"garbage")
+        with pytest.raises(ValueError):
+            estimate_print_time_from_mesh(f)
+
+    def test_zero_layer_height_raises(self, tmp_path):
+        from kiln.generation.validation import estimate_print_time_from_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        with pytest.raises(ValueError, match="positive"):
+            estimate_print_time_from_mesh(f, layer_height_mm=0)
+
+
+# ===========================================================================
+# Cost Estimate Helper Tests
+# ===========================================================================
+
+
+class TestEstimatePrintCost:
+    """Tests for material cost estimation integration."""
+
+    def test_cost_increases_with_size(self, tmp_path):
+        from kiln.generation.validation import estimate_material_cost
+
+        small = str(tmp_path / "small.stl")
+        big = str(tmp_path / "big.stl")
+        _write_cube_stl(small, 10.0)
+        _write_cube_stl(big, 40.0)
+
+        r_small = estimate_material_cost(small)
+        r_big = estimate_material_cost(big)
+
+        assert r_big["estimated_cost_usd"] > r_small["estimated_cost_usd"]

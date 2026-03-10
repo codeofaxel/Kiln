@@ -222,6 +222,9 @@ READ_ONLY_TOOLS: set[str] = {
 
     # Design generation analysis — Phase 5 (read-only)
     "analyze_non_manifold_edges",
+
+    # Design generation analysis — Phase 6 (read-only)
+    "estimate_mesh_print_time",
 }
 
 
