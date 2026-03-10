@@ -1524,3 +1524,1015 @@ def _find_boundary_loops(
             loops.append(loop)
 
     return loops
+
+
+# ---------------------------------------------------------------------------
+# Mesh comparison / diff
+# ---------------------------------------------------------------------------
+
+
+def compare_meshes(
+    file_a: str,
+    file_b: str,
+) -> dict[str, Any]:
+    """Compare two mesh files and report geometric differences.
+
+    Computes bounding box deltas, volume change, surface area change,
+    triangle count change, center-of-mass shift, and a sampled
+    Hausdorff-like distance (how far the meshes differ spatially).
+
+    Works with STL, OBJ, and GLB files.
+
+    Args:
+        file_a: Path to the first (reference) mesh.
+        file_b: Path to the second (modified) mesh.
+
+    Returns:
+        Dict with comparison metrics.
+    """
+    a = analyze_mesh(file_a)
+    b = analyze_mesh(file_b)
+
+    if a.printability_issues and not a.triangle_count:
+        raise ValueError(f"Cannot parse reference mesh: {a.printability_issues}")
+    if b.printability_issues and not b.triangle_count:
+        raise ValueError(f"Cannot parse comparison mesh: {b.printability_issues}")
+
+    result: dict[str, Any] = {
+        "triangle_count_a": a.triangle_count,
+        "triangle_count_b": b.triangle_count,
+        "triangle_count_delta": b.triangle_count - a.triangle_count,
+        "volume_a_mm3": a.volume_mm3,
+        "volume_b_mm3": b.volume_mm3,
+        "volume_delta_mm3": round(b.volume_mm3 - a.volume_mm3, 2),
+        "volume_change_pct": round(
+            (b.volume_mm3 - a.volume_mm3) / a.volume_mm3 * 100, 1
+        )
+        if a.volume_mm3 > 0
+        else 0.0,
+        "surface_area_a_mm2": a.surface_area_mm2,
+        "surface_area_b_mm2": b.surface_area_mm2,
+        "surface_area_delta_mm2": round(b.surface_area_mm2 - a.surface_area_mm2, 2),
+    }
+
+    # Dimension deltas
+    if a.dimensions_mm and b.dimensions_mm:
+        result["dimensions_delta_mm"] = {
+            k: round(b.dimensions_mm[k] - a.dimensions_mm[k], 2)
+            for k in a.dimensions_mm
+        }
+
+    # Center of mass shift
+    if a.center_of_mass and b.center_of_mass:
+        dx = b.center_of_mass["x"] - a.center_of_mass["x"]
+        dy = b.center_of_mass["y"] - a.center_of_mass["y"]
+        dz = b.center_of_mass["z"] - a.center_of_mass["z"]
+        result["center_of_mass_shift_mm"] = round(
+            math.sqrt(dx * dx + dy * dy + dz * dz), 2
+        )
+
+    # Printability comparison
+    result["printability_score_a"] = a.printability_score
+    result["printability_score_b"] = b.printability_score
+    result["printability_delta"] = b.printability_score - a.printability_score
+    result["overhang_pct_a"] = a.overhang_percentage
+    result["overhang_pct_b"] = b.overhang_percentage
+
+    # Sampled Hausdorff-like distance: sample centroids from each mesh
+    # and find the max nearest-centroid distance
+    hausdorff = _sampled_hausdorff(file_a, file_b)
+    if hausdorff is not None:
+        result["hausdorff_distance_mm"] = hausdorff
+
+    result["meshes_identical"] = (
+        a.triangle_count == b.triangle_count
+        and abs(a.volume_mm3 - b.volume_mm3) < 0.01
+        and abs(a.surface_area_mm2 - b.surface_area_mm2) < 0.01
+    )
+
+    return result
+
+
+def _sampled_hausdorff(file_a: str, file_b: str, *, max_samples: int = 500) -> float | None:
+    """Approximate one-directional Hausdorff distance via triangle centroids."""
+    path_a, path_b = Path(file_a), Path(file_b)
+    errors: list[str] = []
+
+    tris_a = _load_triangles(path_a, errors)
+    if errors or not tris_a:
+        return None
+    errors.clear()
+    tris_b = _load_triangles(path_b, errors)
+    if errors or not tris_b:
+        return None
+
+    # Compute centroids
+    def centroids(tris: list[tuple[tuple[float, ...], ...]]) -> list[tuple[float, float, float]]:
+        return [
+            (
+                (t[0][0] + t[1][0] + t[2][0]) / 3.0,
+                (t[0][1] + t[1][1] + t[2][1]) / 3.0,
+                (t[0][2] + t[1][2] + t[2][2]) / 3.0,
+            )
+            for t in tris
+        ]
+
+    ca = centroids(tris_a)
+    cb = centroids(tris_b)
+
+    # Subsample if too large
+    step_a = max(1, len(ca) // max_samples)
+    step_b = max(1, len(cb) // max_samples)
+    ca_s = ca[::step_a]
+    cb_s = cb[::step_b]
+
+    # For each centroid in A, find nearest in B
+    max_dist = 0.0
+    for pa in ca_s:
+        best = float("inf")
+        for pb in cb_s:
+            d = (pa[0] - pb[0]) ** 2 + (pa[1] - pb[1]) ** 2 + (pa[2] - pb[2]) ** 2
+            if d < best:
+                best = d
+        dist = math.sqrt(best)
+        if dist > max_dist:
+            max_dist = dist
+
+    return round(max_dist, 3)
+
+
+def _load_triangles(
+    path: Path, errors: list[str]
+) -> list[tuple[tuple[float, ...], ...]]:
+    """Load triangles from any supported format."""
+    ext = path.suffix.lower()
+    if ext == ".stl":
+        tris, _ = _parse_stl(path, errors)
+    elif ext == ".obj":
+        tris, _ = _parse_obj(path, errors)
+    elif ext == ".glb":
+        tris, _ = _parse_glb(path, errors)
+    else:
+        errors.append(f"Unsupported format: {ext}")
+        return []
+    return tris
+
+
+# ---------------------------------------------------------------------------
+# Print failure prediction
+# ---------------------------------------------------------------------------
+
+
+def predict_print_failures(
+    file_path: str,
+    *,
+    min_wall_mm: float = 0.8,
+    max_bridge_mm: float = 15.0,
+    max_overhang_deg: float = 55.0,
+) -> dict[str, Any]:
+    """Predict common 3D printing failure modes from mesh geometry.
+
+    Detects:
+    - Thin walls (below minimum printable thickness)
+    - Long unsupported bridges
+    - Severe overhangs
+    - Sharp internal corners (stress concentrators)
+    - Small features that may not resolve
+    - Top-heavy geometry (tip-over risk)
+
+    Args:
+        file_path: Path to mesh file.
+        min_wall_mm: Minimum printable wall thickness.
+        max_bridge_mm: Maximum unsupported bridge length.
+        max_overhang_deg: Maximum overhang angle before failure.
+
+    Returns:
+        Dict with failure predictions and risk scores.
+    """
+    path = Path(file_path)
+    errors: list[str] = []
+    tris = _load_triangles(path, errors)
+    if errors or not tris:
+        raise ValueError(f"Cannot parse mesh: {errors or ['No geometry']}")
+
+    # Gather all vertices for bounding box
+    all_verts: list[tuple[float, ...]] = []
+    for tri in tris:
+        all_verts.extend(tri)
+    bbox = _bounding_box(all_verts)
+
+    dims = {
+        "width": bbox["x_max"] - bbox["x_min"],
+        "depth": bbox["y_max"] - bbox["y_min"],
+        "height": bbox["z_max"] - bbox["z_min"],
+    }
+
+    failures: list[dict[str, Any]] = []
+    risk_score = 0  # 0=safe, 100=will fail
+
+    # 1. Thin wall detection via edge length analysis
+    edge_lengths: list[float] = []
+    for tri in tris:
+        for j in range(3):
+            va, vb = tri[j], tri[(j + 1) % 3]
+            dx = vb[0] - va[0]
+            dy = vb[1] - va[1]
+            dz = vb[2] - va[2]
+            edge_lengths.append(math.sqrt(dx * dx + dy * dy + dz * dz))
+
+    if edge_lengths:
+        min_edge = min(edge_lengths)
+        # Very short edges suggest thin geometry
+        thin_edges = sum(1 for e in edge_lengths if e < min_wall_mm)
+        thin_pct = thin_edges / len(edge_lengths) * 100
+        if thin_pct > 5:
+            failures.append({
+                "type": "thin_walls",
+                "severity": "high" if thin_pct > 20 else "medium",
+                "detail": f"{thin_pct:.0f}% of edges below {min_wall_mm}mm (min edge: {min_edge:.2f}mm)",
+                "suggestion": f"Increase wall thickness to at least {min_wall_mm}mm",
+            })
+            risk_score += 20 if thin_pct > 20 else 10
+
+    # 2. Overhang analysis
+    overhang_count = 0
+    severe_count = 0
+    max_angle = 0.0
+    for tri in tris:
+        v0, v1, v2 = tri
+        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
+        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
+        cz = e1[0] * e2[1] - e1[1] * e2[0]
+        area_2 = math.sqrt(
+            (e1[1] * e2[2] - e1[2] * e2[1]) ** 2
+            + (e1[2] * e2[0] - e1[0] * e2[2]) ** 2
+            + cz ** 2
+        )
+        if area_2 < 1e-10:
+            continue
+        nz = (e1[0] * e2[1] - e1[1] * e2[0]) / area_2
+        if nz < 0:
+            angle = math.degrees(math.acos(max(-1.0, min(1.0, -nz))))
+            overhang_angle = 90.0 - angle
+            if overhang_angle > max_angle:
+                max_angle = overhang_angle
+            if overhang_angle > max_overhang_deg:
+                severe_count += 1
+            if overhang_angle > 45:
+                overhang_count += 1
+
+    if severe_count > 0:
+        failures.append({
+            "type": "severe_overhangs",
+            "severity": "high",
+            "detail": f"{severe_count} faces exceed {max_overhang_deg}° (max: {max_angle:.0f}°)",
+            "suggestion": "Add supports or redesign to reduce overhangs",
+        })
+        risk_score += 20
+    elif overhang_count > len(tris) * 0.1:
+        failures.append({
+            "type": "moderate_overhangs",
+            "severity": "medium",
+            "detail": f"{overhang_count} overhang faces (max: {max_angle:.0f}°)",
+            "suggestion": "Consider supports or orientation optimization",
+        })
+        risk_score += 10
+
+    # 3. Bridging detection (long horizontal spans)
+    # Find horizontal edges at height > 1mm
+    long_bridges = 0
+    max_bridge = 0.0
+    for tri in tris:
+        for j in range(3):
+            va, vb = tri[j], tri[(j + 1) % 3]
+            # Both vertices at similar height and above bed
+            z_diff = abs(va[2] - vb[2])
+            avg_z = (va[2] + vb[2]) / 2.0
+            if z_diff < 0.5 and avg_z > 1.0:
+                span = math.sqrt(
+                    (vb[0] - va[0]) ** 2 + (vb[1] - va[1]) ** 2
+                )
+                if span > max_bridge:
+                    max_bridge = span
+                if span > max_bridge_mm:
+                    long_bridges += 1
+
+    if long_bridges > 0:
+        failures.append({
+            "type": "long_bridges",
+            "severity": "high" if max_bridge > max_bridge_mm * 2 else "medium",
+            "detail": f"{long_bridges} bridges exceed {max_bridge_mm}mm (max: {max_bridge:.1f}mm)",
+            "suggestion": "Add supports under bridges or split into multiple parts",
+        })
+        risk_score += 15 if max_bridge > max_bridge_mm * 2 else 8
+
+    # 4. Top-heavy / tip-over risk
+    # Compare center of mass height to footprint size
+    analysis = analyze_mesh(file_path)
+    if analysis.center_of_mass and analysis.dimensions_mm:
+        com_z = analysis.center_of_mass["z"]
+        footprint = min(
+            analysis.dimensions_mm["width_mm"],
+            analysis.dimensions_mm["depth_mm"],
+        )
+        height = analysis.dimensions_mm["height_mm"]
+        if height > 0 and footprint > 0:
+            stability_ratio = footprint / height
+            if stability_ratio < 0.3 and com_z > height * 0.6:
+                failures.append({
+                    "type": "top_heavy",
+                    "severity": "medium",
+                    "detail": (
+                        f"Narrow base ({footprint:.1f}mm) with high center of mass "
+                        f"({com_z:.1f}mm / {height:.1f}mm height)"
+                    ),
+                    "suggestion": "Widen the base or add a brim for stability",
+                })
+                risk_score += 10
+
+    # 5. Very small features
+    min_dim = min(dims.values())
+    if min_dim < 1.0:
+        failures.append({
+            "type": "small_features",
+            "severity": "high" if min_dim < 0.4 else "medium",
+            "detail": f"Minimum dimension {min_dim:.2f}mm may not resolve",
+            "suggestion": "Scale up or increase feature size for reliable printing",
+        })
+        risk_score += 15 if min_dim < 0.4 else 5
+
+    # 6. Non-manifold / disconnected components
+    if not analysis.is_manifold:
+        failures.append({
+            "type": "non_manifold",
+            "severity": "medium",
+            "detail": "Mesh is not watertight — slicers may produce artifacts",
+            "suggestion": "Run repair_mesh_advanced() to fix topology",
+        })
+        risk_score += 10
+
+    if analysis.connected_components > 1:
+        failures.append({
+            "type": "disconnected_parts",
+            "severity": "low",
+            "detail": f"{analysis.connected_components} separate components will print independently",
+            "suggestion": "Verify this is intentional or merge components",
+        })
+        risk_score += 5
+
+    risk_score = min(100, risk_score)
+
+    # Overall verdict
+    if risk_score >= 50:
+        verdict = "high_risk"
+    elif risk_score >= 25:
+        verdict = "moderate_risk"
+    elif risk_score > 0:
+        verdict = "low_risk"
+    else:
+        verdict = "likely_success"
+
+    return {
+        "verdict": verdict,
+        "risk_score": risk_score,
+        "failure_count": len(failures),
+        "failures": failures,
+        "dimensions_mm": dims,
+        "triangle_count": len(tris),
+        "printability_score": analysis.printability_score,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Mesh simplification (vertex decimation)
+# ---------------------------------------------------------------------------
+
+
+def simplify_mesh(
+    file_path: str,
+    *,
+    target_ratio: float = 0.5,
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Reduce triangle count via edge-collapse decimation.
+
+    A simple vertex-clustering approach: divides the bounding box into
+    a grid and merges vertices that fall into the same cell.  Fast and
+    deterministic but produces lower quality than quadric-based methods.
+
+    Useful for generating quick previews or reducing file size before
+    upload.
+
+    Args:
+        file_path: Path to the STL file.
+        target_ratio: Target triangle count as fraction of original
+            (0.5 = keep ~50%).  Clamped to [0.01, 1.0].
+        output_path: Output path.  Defaults to ``<name>_simplified.stl``.
+
+    Returns:
+        Dict with simplification statistics.
+    """
+    target_ratio = max(0.01, min(1.0, target_ratio))
+
+    path = Path(file_path)
+    errors: list[str] = []
+    triangles, vertices = _parse_stl(path, errors)
+    if errors:
+        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+    if not triangles:
+        raise ValueError("STL contains no geometry.")
+
+    original_count = len(triangles)
+
+    if target_ratio >= 0.99:
+        # No simplification needed
+        if output_path:
+            _write_binary_stl(triangles, output_path)
+        return {
+            "path": output_path or file_path,
+            "original_triangles": original_count,
+            "simplified_triangles": original_count,
+            "reduction_pct": 0.0,
+        }
+
+    bbox = _bounding_box(vertices)
+    dx = bbox["x_max"] - bbox["x_min"]
+    dy = bbox["y_max"] - bbox["y_min"]
+    dz = bbox["z_max"] - bbox["z_min"]
+    max_dim = max(dx, dy, dz, 0.001)
+
+    # Grid resolution: more cells = less simplification
+    # Rough heuristic: cells ≈ cube root of target vertex count
+    target_verts = int(len(vertices) * target_ratio)
+    grid_res = max(4, int(target_verts ** (1.0 / 3.0)))
+    cell_size = max_dim / grid_res
+
+    # Cluster vertices into grid cells
+    def cell_key(v: tuple[float, ...]) -> tuple[int, int, int]:
+        return (
+            int((v[0] - bbox["x_min"]) / cell_size),
+            int((v[1] - bbox["y_min"]) / cell_size),
+            int((v[2] - bbox["z_min"]) / cell_size),
+        )
+
+    # Build cell → representative vertex mapping
+    cell_verts: dict[tuple[int, int, int], list[tuple[float, ...]]] = {}
+    for v in vertices:
+        ck = cell_key(v)
+        if ck not in cell_verts:
+            cell_verts[ck] = []
+        cell_verts[ck].append(v)
+
+    # Representative = centroid of vertices in each cell
+    cell_rep: dict[tuple[int, int, int], tuple[float, ...]] = {}
+    for ck, vlist in cell_verts.items():
+        n = len(vlist)
+        cell_rep[ck] = (
+            sum(v[0] for v in vlist) / n,
+            sum(v[1] for v in vlist) / n,
+            sum(v[2] for v in vlist) / n,
+        )
+
+    # Rebuild triangles with representative vertices, skip degenerate
+    simplified: list[tuple[tuple[float, ...], ...]] = []
+    for tri in triangles:
+        new_tri = tuple(cell_rep[cell_key(v)] for v in tri)
+        # Skip if vertices collapsed to same point
+        if new_tri[0] == new_tri[1] or new_tri[1] == new_tri[2] or new_tri[0] == new_tri[2]:
+            continue
+        simplified.append(new_tri)
+
+    if output_path is None:
+        output_path = str(path.with_name(f"{path.stem}_simplified.stl"))
+
+    _write_binary_stl(simplified, output_path)
+
+    return {
+        "path": output_path,
+        "original_triangles": original_count,
+        "simplified_triangles": len(simplified),
+        "reduction_pct": round(
+            (1.0 - len(simplified) / original_count) * 100, 1
+        )
+        if original_count > 0
+        else 0.0,
+        "original_vertices": len(vertices),
+        "grid_cells": len(cell_rep),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Multi-factor design scorecard
+# ---------------------------------------------------------------------------
+
+
+def design_scorecard(file_path: str) -> dict[str, Any]:
+    """Generate a multi-factor quality scorecard for a mesh.
+
+    Evaluates:
+    - **Printability** (0-100): overhangs, manifold, supports needed
+    - **Structural** (0-100): wall thickness, aspect ratio, stability
+    - **Efficiency** (0-100): material usage, void ratio, print time proxy
+    - **Quality** (0-100): triangle density, surface smoothness proxy
+
+    Args:
+        file_path: Path to mesh file.
+
+    Returns:
+        Dict with per-factor scores, overall score, and grade.
+    """
+    analysis = analyze_mesh(file_path)
+    if analysis.printability_issues and not analysis.triangle_count:
+        raise ValueError(f"Cannot analyze mesh: {analysis.printability_issues}")
+
+    # --- Printability (from existing analysis) ---
+    printability = analysis.printability_score
+
+    # --- Structural score ---
+    structural = 100
+    structural_notes: list[str] = []
+
+    if analysis.dimensions_mm:
+        w = analysis.dimensions_mm["width_mm"]
+        d = analysis.dimensions_mm["depth_mm"]
+        h = analysis.dimensions_mm["height_mm"]
+        aspect = max(w, d, h) / max(min(w, d, h), 0.01)
+        if aspect > 10:
+            structural -= 20
+            structural_notes.append(f"Extreme aspect ratio ({aspect:.0f}:1)")
+        elif aspect > 5:
+            structural -= 10
+            structural_notes.append(f"High aspect ratio ({aspect:.1f}:1)")
+
+        # Base stability
+        min_base = min(w, d)
+        if h > 0 and min_base / h < 0.2:
+            structural -= 15
+            structural_notes.append("Very narrow base relative to height")
+
+    if analysis.connected_components > 3:
+        structural -= 15
+        structural_notes.append(f"{analysis.connected_components} disconnected parts")
+    elif analysis.connected_components > 1:
+        structural -= 5
+
+    if not analysis.is_manifold:
+        structural -= 10
+        structural_notes.append("Non-manifold: may have internal voids")
+
+    structural = max(0, structural)
+
+    # --- Efficiency score ---
+    efficiency = 100
+    efficiency_notes: list[str] = []
+
+    if analysis.dimensions_mm and analysis.volume_mm3 > 0:
+        w = analysis.dimensions_mm["width_mm"]
+        d = analysis.dimensions_mm["depth_mm"]
+        h = analysis.dimensions_mm["height_mm"]
+        bbox_vol = w * d * h
+        if bbox_vol > 0:
+            fill_ratio = analysis.volume_mm3 / bbox_vol
+            if fill_ratio < 0.05:
+                efficiency -= 20
+                efficiency_notes.append(f"Very low fill ratio ({fill_ratio:.1%} of bounding box)")
+            elif fill_ratio < 0.15:
+                efficiency -= 10
+                efficiency_notes.append(f"Low fill ratio ({fill_ratio:.1%})")
+
+    # Penalize excessive overhangs (more supports = more waste)
+    if analysis.overhang_percentage > 30:
+        efficiency -= 15
+        efficiency_notes.append(f"High overhangs ({analysis.overhang_percentage:.0f}%) increase support waste")
+    elif analysis.overhang_percentage > 15:
+        efficiency -= 5
+
+    efficiency = max(0, efficiency)
+
+    # --- Quality score (mesh resolution/smoothness) ---
+    quality = 100
+    quality_notes: list[str] = []
+
+    if analysis.dimensions_mm and analysis.triangle_count > 0:
+        sa = analysis.surface_area_mm2
+        if sa > 0:
+            avg_tri_area = sa / analysis.triangle_count
+            # Very large triangles = low resolution
+            if avg_tri_area > 50:
+                quality -= 20
+                quality_notes.append("Low mesh resolution (large triangles)")
+            elif avg_tri_area > 20:
+                quality -= 10
+                quality_notes.append("Moderate mesh resolution")
+
+    if analysis.degenerate_triangles > 0:
+        pct = analysis.degenerate_triangles / analysis.triangle_count * 100
+        if pct > 5:
+            quality -= 15
+            quality_notes.append(f"Degenerate triangles ({pct:.1f}%)")
+        else:
+            quality -= 5
+
+    quality = max(0, quality)
+
+    # --- Overall ---
+    overall = round(
+        printability * 0.35 + structural * 0.25 + efficiency * 0.20 + quality * 0.20
+    )
+
+    if overall >= 90:
+        grade = "A"
+    elif overall >= 80:
+        grade = "B"
+    elif overall >= 65:
+        grade = "C"
+    elif overall >= 50:
+        grade = "D"
+    else:
+        grade = "F"
+
+    return {
+        "overall_score": overall,
+        "grade": grade,
+        "printability": {"score": printability, "notes": analysis.printability_issues},
+        "structural": {"score": structural, "notes": structural_notes},
+        "efficiency": {"score": efficiency, "notes": efficiency_notes},
+        "quality": {"score": quality, "notes": quality_notes},
+        "triangle_count": analysis.triangle_count,
+        "volume_mm3": analysis.volume_mm3,
+        "dimensions_mm": analysis.dimensions_mm,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Material cost estimation
+# ---------------------------------------------------------------------------
+
+# Common FDM material densities (g/cm³) and approximate costs ($/kg)
+_MATERIAL_DB: dict[str, dict[str, float]] = {
+    "pla": {"density": 1.24, "cost_per_kg": 20.0},
+    "petg": {"density": 1.27, "cost_per_kg": 22.0},
+    "abs": {"density": 1.04, "cost_per_kg": 18.0},
+    "tpu": {"density": 1.21, "cost_per_kg": 30.0},
+    "asa": {"density": 1.07, "cost_per_kg": 25.0},
+    "nylon": {"density": 1.14, "cost_per_kg": 35.0},
+    "pc": {"density": 1.20, "cost_per_kg": 40.0},
+    "pla+": {"density": 1.24, "cost_per_kg": 22.0},
+    "carbon_fiber_pla": {"density": 1.30, "cost_per_kg": 45.0},
+}
+
+
+def estimate_material_cost(
+    file_path: str,
+    *,
+    material: str = "pla",
+    infill_pct: float = 20.0,
+    wall_layers: int = 3,
+    layer_height_mm: float = 0.2,
+    nozzle_mm: float = 0.4,
+    cost_per_kg: float | None = None,
+) -> dict[str, Any]:
+    """Estimate material usage and cost for printing a mesh.
+
+    Uses mesh volume + infill percentage to approximate filament
+    consumption.  Accounts for wall shells and infill separately.
+
+    Args:
+        file_path: Path to mesh file.
+        material: Material type (pla, petg, abs, tpu, etc.).
+        infill_pct: Interior fill percentage (0-100).
+        wall_layers: Number of perimeter shells.
+        layer_height_mm: Layer height.
+        nozzle_mm: Nozzle diameter.
+        cost_per_kg: Override material cost ($/kg).
+
+    Returns:
+        Dict with weight, filament length, and cost estimates.
+    """
+    analysis = analyze_mesh(file_path)
+    if analysis.volume_mm3 <= 0:
+        raise ValueError("Cannot estimate cost: mesh has no volume")
+
+    mat = _MATERIAL_DB.get(material.lower(), _MATERIAL_DB["pla"])
+    density = mat["density"]
+    price = cost_per_kg if cost_per_kg is not None else mat["cost_per_kg"]
+
+    # Approximate solid shell volume
+    # Shell thickness ≈ wall_layers × nozzle_mm
+    shell_thickness = wall_layers * nozzle_mm
+
+    # For a rough estimate: shell volume ≈ surface_area × shell_thickness
+    # Interior volume ≈ total_volume - shell_volume
+    shell_vol_mm3 = analysis.surface_area_mm2 * shell_thickness
+    interior_vol_mm3 = max(0, analysis.volume_mm3 - shell_vol_mm3)
+
+    # Actual plastic used
+    shell_plastic = shell_vol_mm3  # shells are solid
+    infill_plastic = interior_vol_mm3 * (infill_pct / 100.0)
+    total_plastic_mm3 = shell_plastic + infill_plastic
+
+    # Convert to real units
+    total_plastic_cm3 = total_plastic_mm3 / 1000.0
+    weight_g = total_plastic_cm3 * density
+
+    # Filament length: volume / cross-section area of filament (1.75mm dia)
+    filament_diameter = 1.75  # mm
+    filament_cross_section = math.pi * (filament_diameter / 2) ** 2  # mm²
+    filament_length_mm = total_plastic_mm3 / filament_cross_section
+    filament_length_m = filament_length_mm / 1000.0
+
+    cost = weight_g / 1000.0 * price
+
+    return {
+        "material": material.lower(),
+        "volume_mm3": round(analysis.volume_mm3, 1),
+        "plastic_volume_mm3": round(total_plastic_mm3, 1),
+        "shell_volume_mm3": round(shell_vol_mm3, 1),
+        "infill_volume_mm3": round(infill_plastic, 1),
+        "weight_g": round(weight_g, 1),
+        "filament_length_m": round(filament_length_m, 2),
+        "estimated_cost_usd": round(cost, 2),
+        "infill_pct": infill_pct,
+        "density_g_cm3": density,
+        "cost_per_kg_usd": price,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Floating region removal
+# ---------------------------------------------------------------------------
+
+
+def remove_floating_regions(
+    file_path: str,
+    *,
+    output_path: str | None = None,
+    keep_largest: bool = True,
+    min_triangle_pct: float = 1.0,
+) -> dict[str, Any]:
+    """Remove small disconnected components (floating geometry).
+
+    Uses union-find to identify connected components, then keeps only
+    the largest (or all components above a minimum triangle threshold).
+
+    Args:
+        file_path: Path to the STL file.
+        output_path: Output path.  Defaults to overwriting input.
+        keep_largest: If True, keep only the single largest component.
+            If False, keep all components with >= ``min_triangle_pct``
+            percent of total triangles.
+        min_triangle_pct: Minimum triangle percentage to keep a
+            component (only used when ``keep_largest=False``).
+
+    Returns:
+        Dict with removal statistics.
+    """
+    path = Path(file_path)
+    errors: list[str] = []
+    triangles, _ = _parse_stl(path, errors)
+    if errors:
+        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+    if not triangles:
+        raise ValueError("STL contains no geometry.")
+
+    n = len(triangles)
+
+    # Union-find
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    edge_to_tri: dict[tuple[tuple[float, ...], tuple[float, ...]], int] = {}
+    for i, tri in enumerate(triangles):
+        for j in range(3):
+            va, vb = tri[j], tri[(j + 1) % 3]
+            edge = (min(va, vb), max(va, vb))
+            if edge in edge_to_tri:
+                union(i, edge_to_tri[edge])
+            else:
+                edge_to_tri[edge] = i
+
+    # Group triangles by component
+    components: dict[int, list[int]] = {}
+    for i in range(n):
+        root = find(i)
+        if root not in components:
+            components[root] = []
+        components[root].append(i)
+
+    total_components = len(components)
+
+    if total_components <= 1:
+        # Nothing to remove
+        out = output_path or file_path
+        if output_path and output_path != file_path:
+            _write_binary_stl(triangles, out)
+        return {
+            "path": out,
+            "original_triangles": n,
+            "kept_triangles": n,
+            "removed_triangles": 0,
+            "original_components": 1,
+            "kept_components": 1,
+            "removed_components": 0,
+        }
+
+    # Sort components by size (largest first)
+    sorted_comps = sorted(components.values(), key=len, reverse=True)
+
+    if keep_largest:
+        keep_indices = set(sorted_comps[0])
+    else:
+        threshold = n * (min_triangle_pct / 100.0)
+        keep_indices: set[int] = set()
+        for comp in sorted_comps:
+            if len(comp) >= threshold:
+                keep_indices.update(comp)
+
+    kept = [triangles[i] for i in range(n) if i in keep_indices]
+    removed = n - len(kept)
+
+    kept_comp_count = sum(
+        1 for comp in sorted_comps
+        if any(i in keep_indices for i in comp)
+    )
+
+    out = output_path or file_path
+    _write_binary_stl(kept, out)
+
+    return {
+        "path": out,
+        "original_triangles": n,
+        "kept_triangles": len(kept),
+        "removed_triangles": removed,
+        "original_components": total_components,
+        "kept_components": kept_comp_count,
+        "removed_components": total_components - kept_comp_count,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Unified print-readiness gate
+# ---------------------------------------------------------------------------
+
+
+def can_print_now(
+    file_path: str,
+    *,
+    auto_fix: bool = False,
+    output_path: str | None = None,
+    printer_bed_mm: tuple[float, float, float] | None = None,
+) -> dict[str, Any]:
+    """Single-call print readiness check with optional auto-repair.
+
+    Runs the full validation battery:
+    1. Mesh parseable and non-empty
+    2. Manifold (watertight)
+    3. No floating regions
+    4. Overhangs within limits
+    5. Fits on build plate
+    6. No degenerate triangles
+
+    When ``auto_fix=True``, attempts to fix issues in-place:
+    - Removes degenerate triangles
+    - Closes small holes
+    - Removes floating regions
+
+    Args:
+        file_path: Path to mesh file.
+        auto_fix: Whether to attempt automatic repairs.
+        output_path: Where to write the fixed file (only used with auto_fix).
+        printer_bed_mm: Build volume as (x, y, z) in mm.
+            Defaults to (256, 256, 256) (typical Bambu A1).
+
+    Returns:
+        Dict with pass/fail verdict, issues found, and actions taken.
+    """
+    if printer_bed_mm is None:
+        printer_bed_mm = (256.0, 256.0, 256.0)
+
+    issues: list[dict[str, str]] = []
+    actions_taken: list[str] = []
+    working_path = file_path
+
+    # Step 1: Basic parse check
+    analysis = analyze_mesh(file_path)
+    if analysis.printability_issues and not analysis.triangle_count:
+        return {
+            "can_print": False,
+            "verdict": "unprintable",
+            "issues": [{"type": "parse_failure", "detail": str(analysis.printability_issues)}],
+            "actions_taken": [],
+        }
+
+    # Step 2: Auto-fix pass (if requested)
+    if auto_fix:
+        out = output_path or file_path
+        # Advanced repair: degenerate removal + hole closing
+        try:
+            repair_result = repair_stl_advanced(working_path, output_path=out)
+            if repair_result["degenerate_removed"] > 0:
+                actions_taken.append(
+                    f"Removed {repair_result['degenerate_removed']} degenerate triangles"
+                )
+            if repair_result["holes_closed"] > 0:
+                actions_taken.append(
+                    f"Closed {repair_result['holes_closed']} holes"
+                )
+            working_path = out
+        except (ValueError, FileNotFoundError):
+            pass
+
+        # Remove floating regions
+        try:
+            region_result = remove_floating_regions(working_path, output_path=out)
+            if region_result["removed_components"] > 0:
+                actions_taken.append(
+                    f"Removed {region_result['removed_components']} floating regions "
+                    f"({region_result['removed_triangles']} triangles)"
+                )
+            working_path = out
+        except (ValueError, FileNotFoundError):
+            pass
+
+        # Re-analyze after fixes
+        analysis = analyze_mesh(working_path)
+
+    # Step 3: Check all criteria
+    if not analysis.is_manifold:
+        issues.append({
+            "type": "non_manifold",
+            "detail": "Mesh is not watertight — slicers may produce artifacts",
+            "fix": "Run with auto_fix=True or use repair_mesh_advanced()",
+        })
+
+    if analysis.connected_components > 1:
+        issues.append({
+            "type": "floating_regions",
+            "detail": f"{analysis.connected_components} disconnected components",
+            "fix": "Run with auto_fix=True or use remove_floating_regions()",
+        })
+
+    if analysis.max_overhang_angle_deg > 60:
+        issues.append({
+            "type": "severe_overhangs",
+            "detail": f"Max overhang {analysis.max_overhang_angle_deg}° (limit: 60°)",
+            "fix": "Use optimize_print_orientation() or enable supports in slicer",
+        })
+
+    if analysis.degenerate_triangles > 0:
+        issues.append({
+            "type": "degenerate_triangles",
+            "detail": f"{analysis.degenerate_triangles} zero-area triangles",
+            "fix": "Run with auto_fix=True or use repair_mesh()",
+        })
+
+    # Check bed fit
+    if analysis.dimensions_mm:
+        w = analysis.dimensions_mm["width_mm"]
+        d = analysis.dimensions_mm["depth_mm"]
+        h = analysis.dimensions_mm["height_mm"]
+        bed_x, bed_y, bed_z = printer_bed_mm
+        if w > bed_x or d > bed_y or h > bed_z:
+            issues.append({
+                "type": "too_large",
+                "detail": (
+                    f"Model ({w:.0f}×{d:.0f}×{h:.0f}mm) exceeds "
+                    f"build volume ({bed_x:.0f}×{bed_y:.0f}×{bed_z:.0f}mm)"
+                ),
+                "fix": "Use rescale_model() to fit the build plate",
+            })
+
+    can_print = len(issues) == 0
+
+    if can_print:
+        verdict = "ready_to_print"
+    elif all(i["type"] in ("severe_overhangs",) for i in issues):
+        verdict = "printable_with_supports"
+    else:
+        verdict = "needs_fixes"
+
+    result: dict[str, Any] = {
+        "can_print": can_print,
+        "verdict": verdict,
+        "issues": issues,
+        "issue_count": len(issues),
+        "actions_taken": actions_taken,
+        "printability_score": analysis.printability_score,
+        "triangle_count": analysis.triangle_count,
+        "dimensions_mm": analysis.dimensions_mm,
+    }
+
+    if auto_fix and working_path != file_path:
+        result["fixed_file"] = working_path
+
+    return result

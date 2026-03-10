@@ -1196,7 +1196,378 @@ class TestTemplateVariations:
         assert "error" in result or result.get("status") == "error"
 
 
+# ---- Phase 4: comparison, failure prediction, simplification, scorecard, cost,
+#      floating regions, print readiness gate ----
+
+
+class TestMeshComparison:
+    """Tests for compare_meshes()."""
+
+    def test_identical_meshes(self, tmp_path):
+        from kiln.generation.validation import compare_meshes
+
+        a = str(tmp_path / "a.stl")
+        b = str(tmp_path / "b.stl")
+        _write_cube_stl(a, 20.0)
+        _write_cube_stl(b, 20.0)
+        result = compare_meshes(a, b)
+
+        assert result["meshes_identical"] is True
+        assert result["volume_delta_mm3"] == 0.0
+        assert result["triangle_count_delta"] == 0
+
+    def test_different_sizes_detected(self, tmp_path):
+        from kiln.generation.validation import compare_meshes
+
+        a = str(tmp_path / "small.stl")
+        b = str(tmp_path / "big.stl")
+        _write_cube_stl(a, 10.0)
+        _write_cube_stl(b, 20.0)
+        result = compare_meshes(a, b)
+
+        assert result["meshes_identical"] is False
+        assert result["volume_delta_mm3"] > 0
+        assert result["volume_change_pct"] > 0
+        assert "hausdorff_distance_mm" in result
+
+    def test_hausdorff_zero_for_same(self, tmp_path):
+        from kiln.generation.validation import compare_meshes
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 15.0)
+        result = compare_meshes(f, f)
+        assert result["hausdorff_distance_mm"] == 0.0
+
+    def test_dimension_deltas(self, tmp_path):
+        from kiln.generation.validation import compare_meshes
+
+        a = str(tmp_path / "a.stl")
+        b = str(tmp_path / "b.stl")
+        _write_cube_stl(a, 10.0)
+        _write_cube_stl(b, 20.0)
+        result = compare_meshes(a, b)
+
+        assert "dimensions_delta_mm" in result
+        assert result["dimensions_delta_mm"]["width_mm"] == 10.0
+
+
+class TestFailurePrediction:
+    """Tests for predict_print_failures()."""
+
+    def test_cube_not_high_risk(self, tmp_path):
+        from kiln.generation.validation import predict_print_failures
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = predict_print_failures(f)
+
+        assert result["verdict"] != "high_risk"
+        assert result["risk_score"] < 50
+        assert "failures" in result
+
+    def test_result_has_required_keys(self, tmp_path):
+        from kiln.generation.validation import predict_print_failures
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = predict_print_failures(f)
+
+        for key in ("verdict", "risk_score", "failure_count", "failures",
+                     "dimensions_mm", "triangle_count", "printability_score"):
+            assert key in result
+
+    def test_unsupported_format_raises(self, tmp_path):
+        from kiln.generation.validation import predict_print_failures
+
+        bad = tmp_path / "model.fbx"
+        bad.write_bytes(b"fake")
+        with pytest.raises(ValueError):
+            predict_print_failures(str(bad))
+
+    def test_custom_thresholds(self, tmp_path):
+        from kiln.generation.validation import predict_print_failures
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        # Very strict thresholds — should still work without error
+        result = predict_print_failures(
+            f, min_wall_mm=5.0, max_bridge_mm=1.0, max_overhang_deg=10.0
+        )
+        assert isinstance(result["risk_score"], int)
+
+
+class TestMeshSimplification:
+    """Tests for simplify_mesh()."""
+
+    def test_simplify_reduces_triangles(self, tmp_path):
+        from kiln.generation.validation import simplify_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = simplify_mesh(f, target_ratio=0.5, output_path=str(tmp_path / "simple.stl"))
+
+        assert result["simplified_triangles"] <= result["original_triangles"]
+        assert result["reduction_pct"] >= 0.0
+        assert os.path.isfile(result["path"])
+
+    def test_ratio_1_no_change(self, tmp_path):
+        from kiln.generation.validation import simplify_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = simplify_mesh(f, target_ratio=1.0, output_path=str(tmp_path / "same.stl"))
+
+        assert result["simplified_triangles"] == result["original_triangles"]
+        assert result["reduction_pct"] == 0.0
+
+    def test_extreme_simplification(self, tmp_path):
+        from kiln.generation.validation import simplify_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = simplify_mesh(f, target_ratio=0.01, output_path=str(tmp_path / "tiny.stl"))
+
+        # Even extreme simplification should produce a valid file
+        assert os.path.isfile(result["path"])
+        assert result["simplified_triangles"] <= result["original_triangles"]
+
+    def test_default_output_path(self, tmp_path):
+        from kiln.generation.validation import simplify_mesh
+
+        f = str(tmp_path / "model.stl")
+        _write_cube_stl(f, 10.0)
+        result = simplify_mesh(f, target_ratio=0.5)
+
+        assert "_simplified" in result["path"]
+
+
+class TestDesignScorecard:
+    """Tests for design_scorecard()."""
+
+    def test_cube_gets_good_grade(self, tmp_path):
+        from kiln.generation.validation import design_scorecard
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = design_scorecard(f)
+
+        assert result["grade"] in ("A", "B", "C")
+        assert 0 <= result["overall_score"] <= 100
+        assert "printability" in result
+        assert "structural" in result
+        assert "efficiency" in result
+        assert "quality" in result
+
+    def test_scorecard_factors_have_scores(self, tmp_path):
+        from kiln.generation.validation import design_scorecard
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = design_scorecard(f)
+
+        for factor in ("printability", "structural", "efficiency", "quality"):
+            assert "score" in result[factor]
+            assert "notes" in result[factor]
+            assert 0 <= result[factor]["score"] <= 100
+
+    def test_unparseable_raises(self, tmp_path):
+        from kiln.generation.validation import design_scorecard
+
+        bad = tmp_path / "bad.stl"
+        bad.write_bytes(b"not an stl")
+        with pytest.raises(ValueError):
+            design_scorecard(str(bad))
+
+
+class TestMaterialCost:
+    """Tests for estimate_material_cost()."""
+
+    def test_pla_cost_positive(self, tmp_path):
+        from kiln.generation.validation import estimate_material_cost
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = estimate_material_cost(f)
+
+        assert result["material"] == "pla"
+        assert result["weight_g"] > 0
+        assert result["filament_length_m"] > 0
+        assert result["estimated_cost_usd"] > 0
+
+    def test_different_materials(self, tmp_path):
+        from kiln.generation.validation import estimate_material_cost
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+
+        pla = estimate_material_cost(f, material="pla")
+        petg = estimate_material_cost(f, material="petg")
+        tpu = estimate_material_cost(f, material="tpu")
+
+        # Different materials should have different costs
+        assert pla["density_g_cm3"] != tpu["density_g_cm3"]
+        assert petg["cost_per_kg_usd"] != tpu["cost_per_kg_usd"]
+
+    def test_infill_affects_cost(self, tmp_path):
+        from kiln.generation.validation import estimate_material_cost
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+
+        low = estimate_material_cost(f, infill_pct=10.0)
+        high = estimate_material_cost(f, infill_pct=80.0)
+
+        assert high["weight_g"] > low["weight_g"]
+        assert high["estimated_cost_usd"] > low["estimated_cost_usd"]
+
+    def test_custom_cost_override(self, tmp_path):
+        from kiln.generation.validation import estimate_material_cost
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+
+        result = estimate_material_cost(f, cost_per_kg=100.0)
+        assert result["cost_per_kg_usd"] == 100.0
+
+    def test_unknown_material_defaults_to_pla(self, tmp_path):
+        from kiln.generation.validation import estimate_material_cost
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+
+        result = estimate_material_cost(f, material="unobtanium")
+        assert result["density_g_cm3"] == 1.24  # PLA density
+
+
+class TestFloatingRegionRemoval:
+    """Tests for remove_floating_regions()."""
+
+    def test_single_component_unchanged(self, tmp_path):
+        from kiln.generation.validation import remove_floating_regions
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = remove_floating_regions(f, output_path=str(tmp_path / "out.stl"))
+
+        assert result["removed_components"] == 0
+        assert result["kept_triangles"] == result["original_triangles"]
+
+    def test_removes_small_component(self, tmp_path):
+        from kiln.generation.validation import remove_floating_regions
+
+        f = str(tmp_path / "multi.stl")
+        _write_two_component_stl(f)  # big cube + tiny cube
+        result = remove_floating_regions(f, output_path=str(tmp_path / "clean.stl"))
+
+        assert result["original_components"] == 2
+        assert result["removed_components"] == 1
+        assert result["kept_triangles"] < result["original_triangles"]
+
+    def test_keep_all_above_threshold(self, tmp_path):
+        from kiln.generation.validation import remove_floating_regions
+
+        f = str(tmp_path / "multi.stl")
+        _write_two_component_stl(f)
+        # Set threshold very low so both components are kept
+        result = remove_floating_regions(
+            f, keep_largest=False, min_triangle_pct=0.1,
+            output_path=str(tmp_path / "all.stl"),
+        )
+        assert result["kept_components"] == 2
+
+
+class TestPrintReadinessGate:
+    """Tests for can_print_now()."""
+
+    def test_clean_cube_can_print(self, tmp_path):
+        from kiln.generation.validation import can_print_now
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = can_print_now(f)
+
+        assert result["can_print"] is True or result["verdict"] in ("ready_to_print", "printable_with_supports")
+        assert "issues" in result
+
+    def test_oversized_fails(self, tmp_path):
+        from kiln.generation.validation import can_print_now
+
+        f = str(tmp_path / "huge.stl")
+        _write_cube_stl(f, 300.0)
+        result = can_print_now(f, printer_bed_mm=(200.0, 200.0, 200.0))
+
+        assert result["can_print"] is False
+        assert any(i["type"] == "too_large" for i in result["issues"])
+
+    def test_auto_fix_returns_actions(self, tmp_path):
+        from kiln.generation.validation import can_print_now
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        out = str(tmp_path / "fixed.stl")
+        result = can_print_now(f, auto_fix=True, output_path=out)
+
+        assert "actions_taken" in result
+        assert isinstance(result["actions_taken"], list)
+
+    def test_bad_file_returns_unprintable(self, tmp_path):
+        from kiln.generation.validation import can_print_now
+
+        f = str(tmp_path / "bad.stl")
+        (tmp_path / "bad.stl").write_bytes(b"not valid")
+        result = can_print_now(f)
+
+        assert result["can_print"] is False
+        assert result["verdict"] == "unprintable"
+
+
 # ---- Helpers ----
+
+
+def _write_two_component_stl(path: str) -> None:
+    """Write an STL with two disconnected cubes (big + tiny)."""
+    s = 20.0  # big cube
+    t = 2.0   # tiny cube offset far away
+    ox, oy, oz = 50.0, 50.0, 50.0  # offset for tiny cube
+
+    big_tris = [
+        ((0, 0, 0), (s, 0, 0), (s, s, 0)),
+        ((0, 0, 0), (s, s, 0), (0, s, 0)),
+        ((0, 0, s), (s, s, s), (s, 0, s)),
+        ((0, 0, s), (0, s, s), (s, s, s)),
+        ((0, 0, 0), (s, 0, s), (s, 0, 0)),
+        ((0, 0, 0), (0, 0, s), (s, 0, s)),
+        ((0, s, 0), (s, s, 0), (s, s, s)),
+        ((0, s, 0), (s, s, s), (0, s, s)),
+        ((0, 0, 0), (0, s, 0), (0, s, s)),
+        ((0, 0, 0), (0, s, s), (0, 0, s)),
+        ((s, 0, 0), (s, 0, s), (s, s, s)),
+        ((s, 0, 0), (s, s, s), (s, s, 0)),
+    ]
+    tiny_tris = [
+        ((ox, oy, oz), (ox + t, oy, oz), (ox + t, oy + t, oz)),
+        ((ox, oy, oz), (ox + t, oy + t, oz), (ox, oy + t, oz)),
+        ((ox, oy, oz + t), (ox + t, oy + t, oz + t), (ox + t, oy, oz + t)),
+        ((ox, oy, oz + t), (ox, oy + t, oz + t), (ox + t, oy + t, oz + t)),
+        ((ox, oy, oz), (ox + t, oy, oz + t), (ox + t, oy, oz)),
+        ((ox, oy, oz), (ox, oy, oz + t), (ox + t, oy, oz + t)),
+        ((ox, oy + t, oz), (ox + t, oy + t, oz), (ox + t, oy + t, oz + t)),
+        ((ox, oy + t, oz), (ox + t, oy + t, oz + t), (ox, oy + t, oz + t)),
+        ((ox, oy, oz), (ox, oy + t, oz), (ox, oy + t, oz + t)),
+        ((ox, oy, oz), (ox, oy + t, oz + t), (ox, oy, oz + t)),
+        ((ox + t, oy, oz), (ox + t, oy, oz + t), (ox + t, oy + t, oz + t)),
+        ((ox + t, oy, oz), (ox + t, oy + t, oz + t), (ox + t, oy + t, oz)),
+    ]
+    all_tris = big_tris + tiny_tris
+
+    with open(path, "wb") as fh:
+        fh.write(b"\x00" * 80)
+        fh.write(struct.pack("<I", len(all_tris)))
+        for tri in all_tris:
+            fh.write(struct.pack("<3f", 0.0, 0.0, 0.0))
+            for v in tri:
+                fh.write(struct.pack("<3f", *v))
+            fh.write(struct.pack("<H", 0))
 
 
 def _write_cube_stl(path: str, size: float) -> None:

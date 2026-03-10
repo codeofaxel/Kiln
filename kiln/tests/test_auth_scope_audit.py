@@ -213,6 +213,12 @@ READ_ONLY_TOOLS: set[str] = {
     # Orientation / monitoring (read-only)
     "monitor_print",
     "check_orientation",
+
+    # Design generation analysis — Phase 4 (read-only)
+    "compare_mesh_versions",
+    "predict_print_failure",
+    "mesh_quality_scorecard",
+    "estimate_material_cost",
 }
 
 

@@ -9954,6 +9954,250 @@ def design_advisor(prompt: str, printer_model: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Phase 4: Mesh comparison, failure prediction, simplification, scoring, cost
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def compare_mesh_versions(file_a: str, file_b: str) -> dict:
+    """Compare two mesh files and report geometric differences.
+
+    Computes volume change, surface area change, dimension deltas,
+    center-of-mass shift, printability delta, and an approximate
+    Hausdorff distance showing how far the meshes differ spatially.
+
+    Useful for verifying that a repair, rescale, or regeneration
+    actually improved the model.
+
+    :param file_a: Path to the reference (original) mesh.
+    :param file_b: Path to the modified mesh.
+    :returns: Dict with comparison metrics and ``meshes_identical`` flag.
+    """
+    try:
+        from kiln.generation.validation import compare_meshes
+
+        return {"status": "success", **compare_meshes(file_a, file_b)}
+    except Exception as exc:
+        return _error_dict(f"Mesh comparison failed: {exc}")
+
+
+@mcp.tool()
+def predict_print_failure(
+    file_path: str,
+    min_wall_mm: float = 0.8,
+    max_bridge_mm: float = 15.0,
+    max_overhang_deg: float = 55.0,
+) -> dict:
+    """Predict common 3D printing failure modes from mesh geometry.
+
+    Analyzes the mesh for thin walls, long unsupported bridges,
+    severe overhangs, top-heavy geometry, small features, and
+    non-manifold issues.  Returns a risk score (0-100) and
+    per-failure details with fix suggestions.
+
+    :param file_path: Path to mesh file (.stl, .obj, or .glb).
+    :param min_wall_mm: Minimum printable wall thickness (default 0.8).
+    :param max_bridge_mm: Maximum unsupported bridge length (default 15).
+    :param max_overhang_deg: Maximum overhang angle before failure (default 55).
+    :returns: Dict with verdict, risk score, and failure list.
+    """
+    try:
+        from kiln.generation.validation import predict_print_failures
+
+        return {
+            "status": "success",
+            **predict_print_failures(
+                file_path,
+                min_wall_mm=min_wall_mm,
+                max_bridge_mm=max_bridge_mm,
+                max_overhang_deg=max_overhang_deg,
+            ),
+        }
+    except Exception as exc:
+        return _error_dict(f"Failure prediction failed: {exc}")
+
+
+@mcp.tool()
+def simplify_mesh_model(
+    file_path: str,
+    target_ratio: float = 0.5,
+    output_path: str = "",
+) -> dict:
+    """Reduce mesh triangle count for faster preview or smaller files.
+
+    Uses vertex-clustering decimation to merge nearby vertices.
+    The result is a lower-resolution version of the same shape.
+
+    :param file_path: Path to the STL file.
+    :param target_ratio: Target fraction of original triangles (0.01-1.0).
+    :param output_path: Output path (defaults to ``<name>_simplified.stl``).
+    :returns: Dict with original/simplified triangle counts and reduction percentage.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import simplify_mesh
+
+        return {
+            "status": "success",
+            **simplify_mesh(
+                file_path,
+                target_ratio=target_ratio,
+                output_path=output_path or None,
+            ),
+        }
+    except Exception as exc:
+        return _error_dict(f"Mesh simplification failed: {exc}")
+
+
+@mcp.tool()
+def mesh_quality_scorecard(file_path: str) -> dict:
+    """Generate a multi-factor quality scorecard for a mesh.
+
+    Evaluates four dimensions:
+    - **Printability** (35%): overhangs, manifold, support needs
+    - **Structural** (25%): aspect ratio, base stability, component count
+    - **Efficiency** (20%): fill ratio, support waste
+    - **Quality** (20%): triangle density, degenerate count
+
+    Returns per-factor scores, an overall 0-100 score, and a letter
+    grade (A-F).
+
+    :param file_path: Path to mesh file (.stl, .obj, or .glb).
+    :returns: Dict with scores, grade, and per-factor notes.
+    """
+    try:
+        from kiln.generation.validation import design_scorecard
+
+        return {"status": "success", **design_scorecard(file_path)}
+    except Exception as exc:
+        return _error_dict(f"Scorecard generation failed: {exc}")
+
+
+@mcp.tool()
+def estimate_material_cost(
+    file_path: str,
+    material: str = "pla",
+    infill_pct: float = 20.0,
+    wall_layers: int = 3,
+    cost_per_kg: float = 0.0,
+) -> dict:
+    """Estimate material usage and cost for printing a mesh.
+
+    Computes filament weight, length, and cost based on mesh volume,
+    infill percentage, wall shell count, and material density.
+
+    Supported materials: pla, petg, abs, tpu, asa, nylon, pc, pla+,
+    carbon_fiber_pla.
+
+    :param file_path: Path to mesh file (.stl, .obj, or .glb).
+    :param material: Material type (default "pla").
+    :param infill_pct: Interior fill percentage 0-100 (default 20).
+    :param wall_layers: Number of perimeter shells (default 3).
+    :param cost_per_kg: Override material cost in $/kg (0 = use default).
+    :returns: Dict with weight, filament length, and cost.
+    """
+    try:
+        from kiln.generation.validation import (
+            estimate_material_cost as _estimate_cost,
+        )
+
+        return {
+            "status": "success",
+            **_estimate_cost(
+                file_path,
+                material=material,
+                infill_pct=infill_pct,
+                wall_layers=wall_layers,
+                cost_per_kg=cost_per_kg if cost_per_kg > 0 else None,
+            ),
+        }
+    except Exception as exc:
+        return _error_dict(f"Cost estimation failed: {exc}")
+
+
+@mcp.tool()
+def remove_mesh_floating_regions(
+    file_path: str,
+    output_path: str = "",
+    keep_largest: bool = True,
+    min_triangle_pct: float = 1.0,
+) -> dict:
+    """Remove small disconnected components (floating geometry).
+
+    Downloads and marketplace models often contain support pillars,
+    internal fragments, or other floating geometry.  This tool
+    identifies connected components and removes the small ones.
+
+    :param file_path: Path to the STL file.
+    :param output_path: Output path (defaults to overwriting input).
+    :param keep_largest: Keep only the largest component (default True).
+    :param min_triangle_pct: Min triangle % to keep (when keep_largest=False).
+    :returns: Dict with removal statistics.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import remove_floating_regions
+
+        return {
+            "status": "success",
+            **remove_floating_regions(
+                file_path,
+                output_path=output_path or None,
+                keep_largest=keep_largest,
+                min_triangle_pct=min_triangle_pct,
+            ),
+        }
+    except Exception as exc:
+        return _error_dict(f"Floating region removal failed: {exc}")
+
+
+@mcp.tool()
+def check_print_readiness(
+    file_path: str,
+    auto_fix: bool = False,
+    output_path: str = "",
+    bed_x_mm: float = 256.0,
+    bed_y_mm: float = 256.0,
+    bed_z_mm: float = 256.0,
+) -> dict:
+    """Single-call print readiness check with optional auto-repair.
+
+    Runs the full validation battery: parseable, manifold, no floating
+    regions, overhangs within limits, fits build plate, no degenerate
+    triangles.
+
+    With ``auto_fix=True``, automatically repairs degenerate triangles,
+    closes holes, and removes floating regions.
+
+    :param file_path: Path to mesh file.
+    :param auto_fix: Attempt automatic repairs (default False).
+    :param output_path: Where to write the fixed file.
+    :param bed_x_mm: Build plate X dimension (default 256).
+    :param bed_y_mm: Build plate Y dimension (default 256).
+    :param bed_z_mm: Build plate Z dimension (default 256).
+    :returns: Dict with can_print verdict, issues, and actions taken.
+    """
+    if auto_fix and (err := _check_auth("generate")):
+        return err
+    try:
+        from kiln.generation.validation import can_print_now
+
+        return {
+            "status": "success",
+            **can_print_now(
+                file_path,
+                auto_fix=auto_fix,
+                output_path=output_path or None,
+                printer_bed_mm=(bed_x_mm, bed_y_mm, bed_z_mm),
+            ),
+        }
+    except Exception as exc:
+        return _error_dict(f"Print readiness check failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Firmware update tools
 # ---------------------------------------------------------------------------
 
