@@ -9185,6 +9185,143 @@ def get_feedback_loop_status(model_id: str) -> dict:
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
+@mcp.tool()
+def list_design_templates() -> dict:
+    """List available parametric design templates for common objects.
+
+    Templates provide ready-to-use OpenSCAD code with customizable
+    parameters.  Use ``generate_from_template`` to render one into
+    a printable STL.
+
+    Each template includes:
+    - Customizable parameters with defaults, ranges, and descriptions
+    - Pre-validated OpenSCAD code (prints without supports)
+    - Category and description
+    """
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+
+        tpl_path = _Path(__file__).parent / "data" / "design_templates.json"
+        with open(tpl_path) as fh:
+            data = _json.load(fh)
+
+        templates = []
+        for key, tpl in data.items():
+            if key.startswith("_"):
+                continue
+            templates.append({
+                "id": key,
+                "name": tpl["display_name"],
+                "description": tpl["description"],
+                "category": tpl.get("category", "general"),
+                "parameters": {
+                    k: {
+                        "default": v["default"],
+                        "description": v.get("description", ""),
+                        "unit": v.get("unit", ""),
+                    }
+                    for k, v in tpl.get("parameters", {}).items()
+                },
+            })
+
+        return {
+            "success": True,
+            "templates": templates,
+            "count": len(templates),
+            "message": f"{len(templates)} design templates available.",
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in list_design_templates")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def generate_from_template(
+    template_id: str,
+    parameters: dict | None = None,
+) -> dict:
+    """Generate a 3D model from a parametric design template.
+
+    Renders the template's OpenSCAD code with custom parameter values
+    into a printable STL.  Use ``list_design_templates`` to see
+    available templates and their parameters.
+
+    Args:
+        template_id: Template ID from ``list_design_templates``.
+        parameters: Optional dict of parameter overrides
+            (e.g., ``{"phone_width": 80, "angle": 70}``).
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        from string import Template
+
+        tpl_path = _Path(__file__).parent / "data" / "design_templates.json"
+        with open(tpl_path) as fh:
+            data = _json.load(fh)
+
+        tpl = data.get(template_id)
+        if not tpl or template_id.startswith("_"):
+            available = [k for k in data if not k.startswith("_")]
+            return _error_dict(
+                f"Template {template_id!r} not found. Available: {', '.join(available)}",
+                code="NOT_FOUND",
+            )
+
+        # Merge defaults with provided parameters
+        defaults = {k: v["default"] for k, v in tpl.get("parameters", {}).items()}
+        params = {**defaults, **(parameters or {})}
+
+        # Substitute parameters into SCAD code
+        scad_code = Template(tpl["scad_template"]).safe_substitute(params)
+
+        # Generate via OpenSCAD provider
+        gen = _get_generation_provider("openscad")
+        job = gen.generate(scad_code, format="stl")
+
+        if job.status.value == "failed":
+            return _error_dict(
+                f"Template compilation failed: {job.error}",
+                code="COMPILATION_ERROR",
+            )
+
+        result_dict: dict[str, Any] = {
+            "success": True,
+            "job": job.to_dict(),
+            "template": template_id,
+            "parameters_used": params,
+            "message": f"Generated {tpl['display_name']} from template.",
+        }
+
+        # If succeeded, also validate the mesh
+        if job.status.value == "succeeded":
+            dl = gen.download_result(job.id)
+            val = validate_mesh(dl.local_path)
+            result_dict["result"] = dl.to_dict()
+            result_dict["validation"] = val.to_dict()
+            if val.bounding_box:
+                bb = val.bounding_box
+                w = bb.get("x_max", 0) - bb.get("x_min", 0)
+                d = bb.get("y_max", 0) - bb.get("y_min", 0)
+                h = bb.get("z_max", 0) - bb.get("z_min", 0)
+                result_dict["dimensions"] = {
+                    "width_mm": round(w, 2),
+                    "depth_mm": round(d, 2),
+                    "height_mm": round(h, 2),
+                    "summary": f"{w:.1f} x {d:.1f} x {h:.1f} mm",
+                }
+
+        return result_dict
+    except GenerationError as exc:
+        return _error_dict(f"Template generation failed: {exc}", code=exc.code or "GENERATION_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in generate_from_template")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
 # ---------------------------------------------------------------------------
 # Firmware update tools
 # ---------------------------------------------------------------------------

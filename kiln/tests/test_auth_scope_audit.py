@@ -165,6 +165,7 @@ READ_ONLY_TOOLS: Set[str] = {
     "validate_generated_mesh",
     "render_model_preview",
     "get_feedback_loop_status",
+    "list_design_templates",
 
     # Onboarding / help (no side effects)
     "get_started",

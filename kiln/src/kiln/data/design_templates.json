@@ -1,0 +1,82 @@
+{
+  "_meta": {
+    "description": "Parametric design templates for common 3D printable objects. Each template provides OpenSCAD code with customizable parameters.",
+    "version": "1.0.0"
+  },
+  "phone_stand": {
+    "display_name": "Phone Stand",
+    "description": "Angled phone stand with adjustable cradle width, angle, and base dimensions. Prints flat, no supports needed.",
+    "category": "desk_accessories",
+    "parameters": {
+      "phone_width": {"default": 75, "min": 55, "max": 100, "unit": "mm", "description": "Phone width"},
+      "angle": {"default": 65, "min": 45, "max": 80, "unit": "degrees", "description": "Viewing angle from horizontal"},
+      "base_depth": {"default": 80, "min": 60, "max": 120, "unit": "mm", "description": "Base depth"},
+      "thickness": {"default": 4, "min": 3, "max": 8, "unit": "mm", "description": "Wall thickness"},
+      "lip_height": {"default": 12, "min": 8, "max": 20, "unit": "mm", "description": "Front lip to hold phone"}
+    },
+    "scad_template": "// Parametric Phone Stand\nphone_width = ${phone_width};\nangle = ${angle};\nbase_depth = ${base_depth};\nthickness = ${thickness};\nlip_height = ${lip_height};\n\nmodule phone_stand() {\n    // Base plate\n    cube([phone_width + 10, base_depth, thickness]);\n    // Back support\n    translate([0, base_depth - thickness, 0])\n        rotate([90 - angle, 0, 0])\n            cube([phone_width + 10, base_depth * 0.8, thickness]);\n    // Front lip\n    translate([0, thickness, 0])\n        cube([phone_width + 10, thickness, lip_height]);\n    // Side rails\n    for (x = [0, phone_width + 10 - thickness]) {\n        translate([x, 0, 0])\n            cube([thickness, base_depth * 0.4, lip_height]);\n    }\n}\n\nphone_stand();"
+  },
+  "hook": {
+    "display_name": "Wall Hook",
+    "description": "Simple wall hook with screw hole. Prints flat on back surface.",
+    "category": "hardware",
+    "parameters": {
+      "hook_radius": {"default": 15, "min": 8, "max": 30, "unit": "mm", "description": "Inner hook curve radius"},
+      "thickness": {"default": 5, "min": 3, "max": 10, "unit": "mm", "description": "Hook thickness"},
+      "width": {"default": 20, "min": 10, "max": 40, "unit": "mm", "description": "Hook width"},
+      "plate_height": {"default": 50, "min": 30, "max": 80, "unit": "mm", "description": "Mounting plate height"},
+      "screw_hole_dia": {"default": 4, "min": 3, "max": 6, "unit": "mm", "description": "Screw hole diameter"}
+    },
+    "scad_template": "// Parametric Wall Hook\nhook_radius = ${hook_radius};\nthickness = ${thickness};\nwidth = ${width};\nplate_height = ${plate_height};\nscrew_hole_dia = ${screw_hole_dia};\n\nmodule wall_hook() {\n    difference() {\n        union() {\n            // Mounting plate\n            cube([width, thickness, plate_height]);\n            // Hook arm\n            translate([0, 0, 0])\n                cube([width, hook_radius + thickness * 2, thickness]);\n            // Hook curve\n            translate([0, hook_radius + thickness, thickness])\n                rotate([0, 90, 0])\n                    difference() {\n                        cylinder(h=width, r=hook_radius + thickness, $fn=60);\n                        cylinder(h=width, r=hook_radius, $fn=60);\n                        translate([-hook_radius * 2, 0, 0])\n                            cube([hook_radius * 4, hook_radius * 2, width]);\n                    }\n        }\n        // Screw hole\n        translate([width/2, -1, plate_height * 0.7])\n            rotate([-90, 0, 0])\n                cylinder(h=thickness+2, d=screw_hole_dia, $fn=30);\n    }\n}\n\nwall_hook();"
+  },
+  "box_with_lid": {
+    "display_name": "Box with Snap Lid",
+    "description": "Rectangular box with snap-fit lid. Two-piece print, no supports needed.",
+    "category": "containers",
+    "parameters": {
+      "inner_width": {"default": 60, "min": 20, "max": 200, "unit": "mm", "description": "Inner width"},
+      "inner_depth": {"default": 40, "min": 20, "max": 200, "unit": "mm", "description": "Inner depth"},
+      "inner_height": {"default": 30, "min": 10, "max": 100, "unit": "mm", "description": "Inner height"},
+      "wall": {"default": 2.4, "min": 1.6, "max": 5, "unit": "mm", "description": "Wall thickness"},
+      "corner_radius": {"default": 3, "min": 0, "max": 10, "unit": "mm", "description": "Corner rounding radius"}
+    },
+    "scad_template": "// Parametric Box with Snap Lid\niw = ${inner_width};\nid = ${inner_depth};\nih = ${inner_height};\nwall = ${wall};\ncr = ${corner_radius};\n\nmodule rounded_box(w, d, h, r) {\n    if (r > 0) {\n        hull() {\n            for (x = [r, w-r]) for (y = [r, d-r])\n                translate([x, y, 0]) cylinder(h=h, r=r, $fn=30);\n        }\n    } else {\n        cube([w, d, h]);\n    }\n}\n\nmodule box() {\n    ow = iw + wall*2;\n    od = id + wall*2;\n    oh = ih + wall;\n    difference() {\n        rounded_box(ow, od, oh, cr);\n        translate([wall, wall, wall])\n            rounded_box(iw, id, ih+1, max(0, cr-wall));\n    }\n    // Lip for lid\n    translate([wall-0.4, wall-0.4, oh])\n        difference() {\n            rounded_box(iw+0.8, id+0.8, 2, max(0, cr-wall));\n            translate([1, 1, -0.1])\n                rounded_box(iw-1.2, id-1.2, 2.2, max(0, cr-wall-1));\n        }\n}\n\nmodule lid() {\n    ow = iw + wall*2;\n    od = id + wall*2;\n    translate([ow + 10, 0, 0]) {\n        rounded_box(ow, od, wall, cr);\n        translate([wall+0.2, wall+0.2, wall])\n            difference() {\n                rounded_box(iw-0.4, id-0.4, 2.5, max(0, cr-wall));\n                translate([1.2, 1.2, -0.1])\n                    rounded_box(iw-2.8, id-2.8, 2.7, max(0, cr-wall-1));\n            }\n    }\n}\n\nbox();\nlid();"
+  },
+  "cable_clip": {
+    "display_name": "Cable Management Clip",
+    "description": "Adhesive-back cable clip for desk cable management. Prints flat.",
+    "category": "desk_accessories",
+    "parameters": {
+      "cable_dia": {"default": 6, "min": 2, "max": 20, "unit": "mm", "description": "Cable diameter"},
+      "channels": {"default": 1, "min": 1, "max": 4, "unit": "count", "description": "Number of cable channels"},
+      "base_width": {"default": 12, "min": 8, "max": 30, "unit": "mm", "description": "Base pad width per channel"}
+    },
+    "scad_template": "// Parametric Cable Clip\ncable_dia = ${cable_dia};\nchannels = ${channels};\nbase_w = ${base_width};\n\nwall = 2;\ntotal_w = base_w * channels;\n\nmodule clip() {\n    difference() {\n        union() {\n            // Base pad\n            cube([total_w, base_w, 2]);\n            // Clip arms\n            for (ch = [0:channels-1]) {\n                cx = base_w/2 + ch * base_w;\n                translate([cx, base_w/2, 2])\n                    difference() {\n                        cylinder(h=cable_dia/2 + wall, d=cable_dia + wall*2, $fn=40);\n                        cylinder(h=cable_dia/2 + wall + 1, d=cable_dia, $fn=40);\n                        // Entry slot\n                        translate([0, 0, cable_dia*0.3])\n                            cube([cable_dia*0.7, cable_dia*2, cable_dia], center=true);\n                    }\n            }\n        }\n        // Flatten bottom\n        translate([-1, -1, -1]) cube([total_w+2, base_w+2, 1]);\n    }\n}\n\nclip();"
+  },
+  "shelf_bracket": {
+    "display_name": "L-Bracket / Shelf Bracket",
+    "description": "Triangulated shelf bracket with mounting holes. Prints upright.",
+    "category": "hardware",
+    "parameters": {
+      "arm_length": {"default": 80, "min": 40, "max": 200, "unit": "mm", "description": "Shelf arm length"},
+      "wall_length": {"default": 80, "min": 40, "max": 200, "unit": "mm", "description": "Wall arm length"},
+      "width": {"default": 25, "min": 15, "max": 50, "unit": "mm", "description": "Bracket width"},
+      "thickness": {"default": 5, "min": 3, "max": 10, "unit": "mm", "description": "Material thickness"},
+      "hole_dia": {"default": 5, "min": 3, "max": 8, "unit": "mm", "description": "Mounting hole diameter"}
+    },
+    "scad_template": "// Parametric Shelf Bracket\narm = ${arm_length};\nwall_arm = ${wall_length};\nw = ${width};\nt = ${thickness};\nhole_d = ${hole_dia};\n\nmodule bracket() {\n    difference() {\n        union() {\n            // Wall plate\n            cube([w, t, wall_arm]);\n            // Shelf arm\n            cube([w, arm, t]);\n            // Gusset (triangle)\n            translate([0, 0, 0])\n                linear_extrude(height=w)\n                    polygon([[0,t],[0,wall_arm],[t,t]]);\n            // Mirrored gusset for width\n        }\n        // Mounting holes\n        for (z = [wall_arm*0.25, wall_arm*0.75]) {\n            translate([w/2, -1, z])\n                rotate([-90, 0, 0])\n                    cylinder(h=t+2, d=hole_d, $fn=30);\n        }\n    }\n}\n\nbracket();"
+  },
+  "nameplate": {
+    "display_name": "Desk Nameplate",
+    "description": "Raised text nameplate with angled face. Prints flat, no supports.",
+    "category": "desk_accessories",
+    "parameters": {
+      "text_string": {"default": "KILN", "type": "string", "description": "Text to display"},
+      "font_size": {"default": 14, "min": 8, "max": 30, "unit": "mm", "description": "Font size"},
+      "plate_width": {"default": 120, "min": 60, "max": 200, "unit": "mm", "description": "Plate width"},
+      "plate_height": {"default": 35, "min": 20, "max": 60, "unit": "mm", "description": "Plate height"},
+      "base_depth": {"default": 30, "min": 20, "max": 50, "unit": "mm", "description": "Base depth"}
+    },
+    "scad_template": "// Parametric Nameplate\ntxt = \"${text_string}\";\nfs = ${font_size};\npw = ${plate_width};\nph = ${plate_height};\nbd = ${base_depth};\nt = 3;\n\nmodule nameplate() {\n    // Base wedge\n    hull() {\n        cube([pw, bd, t]);\n        translate([0, 0, ph])\n            cube([pw, t, t]);\n    }\n    // Raised text\n    translate([pw/2, bd*0.3, ph*0.4])\n        rotate([atan2(ph, bd-t), 0, 0])\n            linear_extrude(height=1.2)\n                text(txt, size=fs, halign=\"center\", valign=\"center\", font=\"Liberation Sans:style=Bold\");\n}\n\nnameplate();"
+  }
+}
