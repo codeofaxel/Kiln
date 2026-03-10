@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.codeofaxel/kiln",
   "title": "Kiln",
-  "description": "AI agent control of 3D printers — 395 tools for OctoPrint, Moonraker, Bambu, Prusa, Elegoo",
-  "version": "0.3.3",
+  "description": "AI agent control of 3D printers — 404 tools for OctoPrint, Moonraker, Bambu, Prusa, Elegoo",
+  "version": "0.4.0",
   "repository": {
     "url": "https://github.com/codeofaxel/Kiln",
     "source": "github"
@@ -12,7 +12,7 @@
     {
       "registryType": "pypi",
       "identifier": "kiln3d",
-      "version": "0.3.3",
+      "version": "0.4.0",
       "transport": {
         "type": "stdio"
       },

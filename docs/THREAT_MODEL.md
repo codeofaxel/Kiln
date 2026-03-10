@@ -9,7 +9,7 @@ This threat model covers the following components of the Kiln system:
 
 | Component | Interface | Transport |
 |---|---|---|
-| MCP Server (`kiln serve`) | 395 MCP tools via FastMCP | stdio (local) |
+| MCP Server (`kiln serve`) | 404 MCP tools via FastMCP | stdio (local) |
 | REST API (`kiln rest`) | HTTP endpoints via FastAPI/uvicorn | TCP (local or network) |
 | CLI (`kiln`, `octoprint-cli`) | Click commands | Local process |
 | Printer Adapters | OctoPrint (HTTP), Moonraker (HTTP), Bambu Lab (MQTT/FTPS), Prusa Link (HTTP) | LAN or WAN |
@@ -192,7 +192,7 @@ This threat model covers the following components of the Kiln system:
 | D-5 | Printer connection exhaustion | Medium | Low | None at Kiln layer; printers have their own limits | Medium — could crash embedded printer servers |
 | D-6 | Large file upload | Medium | Low | None | Medium — no file size enforcement |
 | E-1 | Tool tier bypass | Medium | Low | Server-side configuration | Low — requires server reconfiguration |
-| E-2 | Auth scope escalation | High | Medium | Per-tool scope checks; 273 tools to audit | High — large surface area for missed checks |
+| E-2 | Auth scope escalation | High | Medium | Per-tool scope checks; 262 tools to audit | High — large surface area for missed checks |
 | E-3 | Plugin privilege escalation | High | Low | Allow-list; fault isolation for exceptions | Medium — no capability sandbox |
 | E-4 | DB write to full access | High | Low | Filesystem permissions | Medium — trivial if FS access obtained |
 | E-5 | Env var manipulation | Critical | Low | None — standard process model | Medium — OS-level process isolation is only defense |
@@ -204,7 +204,7 @@ The following are known gaps that have not been addressed in the current impleme
 
 1. **No formal penetration test.** The security model has not been validated by an external security firm. All mitigations are self-assessed.
 
-2. **No fuzz testing of MCP tools.** The 273 MCP tool handlers have not been subjected to automated fuzz testing for input validation edge cases, malformed JSON, or type confusion.
+2. **No fuzz testing of MCP tools.** The 262 MCP tool handlers have not been subjected to automated fuzz testing for input validation edge cases, malformed JSON, or type confusion.
 
 3. **No mTLS or certificate pinning for printer connections.** The Bambu adapter explicitly disables TLS certificate verification. OctoPrint and Moonraker connections rely on system CA stores. No certificate pinning is implemented for any adapter.
 
@@ -212,7 +212,7 @@ The following are known gaps that have not been addressed in the current impleme
 
 5. **Auth disabled by default.** The security model assumes local-only deployment when auth is off. No warning is emitted when the REST API binds to `0.0.0.0` (all interfaces) without authentication enabled.
 
-6. **No per-tool scope audit.** With 395 MCP tools, there is no automated verification that every tool correctly enforces its required auth scope. Manual review is the current approach.
+6. **No per-tool scope audit.** With 404 MCP tools, there is no automated verification that every tool correctly enforces its required auth scope. Manual review is the current approach.
 
 7. **Audit log does not detect deletion.** The HMAC scheme signs individual rows but does not chain hashes. An attacker with database access can delete audit entries without detection. A Merkle tree or hash chain would address this.
 
