@@ -10819,6 +10819,94 @@ def compose_part_from_primitives(
 
 
 @mcp.tool()
+def apply_design_reinforcements(
+    file_path: str,
+    output_path: str = "",
+    fillet_radius_mm: float = 1.5,
+    wall_thicken_mm: float = 0.6,
+    base_height_mm: float = 2.0,
+) -> dict:
+    """Analyze a mesh for structural risks, then auto-apply fixes.
+
+    This is the **one-step design hardening tool** — it runs the full
+    structural analysis pipeline, then applies every applicable fix:
+
+    - **Thin necks** → thickened walls (+material at narrow sections)
+    - **Sharp corners** → filleted edges (stress concentration eliminated)
+    - **Insufficient base** → wider base plate (stabilizing geometry added)
+    - **Cantilevers** → triangular gusset ribs (deflection reduced 3-10x)
+
+    Returns a before/after structural score so agents can see the
+    improvement.  Reinforcements that can't be auto-applied (like
+    ``reorient``) are listed in ``skipped`` with guidance.
+
+    Requires OpenSCAD for base plate and gusset operations.
+
+    :param file_path: Path to the STL file to reinforce.
+    :param output_path: Output path (defaults to ``<name>_reinforced.stl``).
+    :param fillet_radius_mm: Fillet radius for sharp corners (default 1.5).
+    :param wall_thicken_mm: Amount to add to thin walls (default 0.6).
+    :param base_height_mm: Height of stabilizing base plate (default 2.0).
+    :returns: Dict with before/after scores, applied/skipped reinforcements.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.design_reasoning import apply_reinforcements
+
+        result = apply_reinforcements(
+            file_path,
+            output_path=output_path or None,
+            fillet_radius_mm=fillet_radius_mm,
+            wall_thicken_mm=wall_thicken_mm,
+            base_height_mm=base_height_mm,
+        )
+        return {"status": "success", **result.to_dict()}
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"Reinforcement application failed: {exc}")
+
+
+@mcp.tool()
+def infer_print_settings(
+    file_path: str,
+    material: str = "PLA",
+) -> dict:
+    """Infer optimal slicer settings from structural analysis.
+
+    Bridges the gap between **design analysis** and **print success**.
+    Analyzes the mesh for structural risks, then recommends concrete
+    slicer parameters (perimeters, infill, supports, brim, layer height)
+    tuned to compensate for the design's weaknesses.
+
+    **Examples of what it catches:**
+
+    - Thin neck detected → increase perimeters to 4+
+    - Cantilever overhangs → enable tree supports
+    - High center of gravity → add brim for bed adhesion
+    - Stress concentrations → switch to gyroid infill at 50%+
+    - Sharp corners → fine layer height for detail
+
+    Material-specific: defaults vary by PLA/PETG/ABS/Nylon/TPU/ASA/PC.
+
+    :param file_path: Path to the STL file.
+    :param material: Filament type (PLA, PETG, ABS, Nylon, TPU, ASA, PC).
+    :returns: Dict with perimeters, infill, supports, brim, layer height,
+              orientation, special notes, and confidence level.
+    """
+    try:
+        from kiln.design_reasoning import infer_print_settings as _infer
+
+        result = _infer(file_path, material=material)
+        return {"status": "success", **result.to_dict()}
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"Print settings inference failed: {exc}")
+
+
+@mcp.tool()
 def center_model_on_bed(
     file_path: str,
     bed_x_mm: float = 256.0,

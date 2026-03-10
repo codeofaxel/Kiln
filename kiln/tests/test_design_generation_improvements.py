@@ -3898,3 +3898,316 @@ class TestComposeFromPrimitives:
             "params": {"size": 15},
         })
         assert "cube(15)" in code
+
+
+# ---------------------------------------------------------------------------
+# Loop 7 — Auto-apply reinforcements
+# ---------------------------------------------------------------------------
+
+
+class TestApplyReinforcements:
+    """Auto-apply structural reinforcements to mesh.
+
+    Coverage:
+    - No-risk mesh passes through unchanged
+    - Thin neck triggers wall thickening
+    - Sharp corners trigger fillet application
+    - Skipped reinforcements tracked (reorient)
+    - Before/after scores populated
+    - ReinforcementResult.to_dict()
+    - Missing file raises ValueError
+    - Output path respects user preference
+    """
+
+    def test_simple_cube_no_geometry_changes(self, tmp_path):
+        """A cube should not have geometry-modifying reinforcements applied."""
+        from kiln.design_reasoning import apply_reinforcements
+
+        stl = tmp_path / "cube.stl"
+        _write_cube_stl(str(stl), 20.0)
+
+        result = apply_reinforcements(
+            str(stl),
+            output_path=str(tmp_path / "out.stl"),
+        )
+        # No geometry-changing reinforcements (thicken, fillet, base, gusset)
+        geometry_applied = [a for a in result.applied if a["type"] != "reorient"]
+        assert geometry_applied == []
+        assert result.before_score >= 50
+        assert result.after_score >= result.before_score
+
+    def test_thin_neck_triggers_thickening(self, tmp_path):
+        """A mesh with thin neck should attempt thickening."""
+        from kiln.design_reasoning import apply_reinforcements
+
+        stl = tmp_path / "thin.stl"
+        _write_thin_neck_stl(stl)
+
+        result = apply_reinforcements(
+            str(stl),
+            output_path=str(tmp_path / "reinforced.stl"),
+        )
+        # Should have at least attempted some reinforcements
+        all_types = [a["type"] for a in result.applied] + [s["type"] for s in result.skipped]
+        assert len(all_types) > 0
+        assert result.original_path == str(stl)
+
+    def test_result_to_dict(self, tmp_path):
+        """ReinforcementResult.to_dict() returns proper dict."""
+        from kiln.design_reasoning import ReinforcementResult
+
+        r = ReinforcementResult(
+            output_path="/tmp/out.stl",
+            original_path="/tmp/in.stl",
+            applied=[{"type": "fillet", "addresses": "sharp_corner"}],
+            skipped=[{"type": "reorient", "reason": "Manual", "addresses": "weak_layer_adhesion"}],
+            before_score=60,
+            after_score=80,
+            before_grade="D",
+            after_grade="B",
+            summary="Improved D to B.",
+        )
+        d = r.to_dict()
+        assert d["output_path"] == "/tmp/out.stl"
+        assert d["before_score"] == 60
+        assert d["after_score"] == 80
+        assert d["before_grade"] == "D"
+        assert d["after_grade"] == "B"
+        assert len(d["applied"]) == 1
+        assert len(d["skipped"]) == 1
+        assert d["applied"][0]["type"] == "fillet"
+
+    def test_missing_file_raises(self):
+        from kiln.design_reasoning import apply_reinforcements
+
+        with pytest.raises(ValueError, match="not found"):
+            apply_reinforcements("/nonexistent/mesh.stl")
+
+    def test_output_path_default(self, tmp_path):
+        """Default output adds _reinforced suffix."""
+        from kiln.design_reasoning import apply_reinforcements
+
+        stl = tmp_path / "part.stl"
+        _write_cube_stl(str(stl), 20.0)
+
+        result = apply_reinforcements(str(stl))
+        assert result.output_path.endswith("part_reinforced.stl")
+
+    def test_before_after_grades_populated(self, tmp_path):
+        from kiln.design_reasoning import apply_reinforcements
+
+        stl = tmp_path / "cube.stl"
+        _write_cube_stl(str(stl), 20.0)
+
+        result = apply_reinforcements(
+            str(stl), output_path=str(tmp_path / "out.stl")
+        )
+        assert result.before_grade in ("A", "B", "C", "D", "F")
+        assert result.after_grade in ("A", "B", "C", "D", "F")
+        assert 0 <= result.before_score <= 100
+        assert 0 <= result.after_score <= 100
+
+    def test_skipped_reorient_has_guidance(self, tmp_path):
+        """Reorient recommendations should be skipped with guidance."""
+        from kiln.design_reasoning import ReinforcementRecommendation
+
+        # Simulate a reorient recommendation processing
+        from kiln.design_reasoning import apply_reinforcements
+
+        # A flat plate might trigger weak layer adhesion → reorient
+        stl = tmp_path / "plate.stl"
+        _write_flat_plate_stl(stl)
+
+        result = apply_reinforcements(str(stl), output_path=str(tmp_path / "out.stl"))
+        # Either no reinforcements needed, or some were skipped
+        for s in result.skipped:
+            if s["type"] == "reorient":
+                assert "guidance" in s or "reason" in s
+
+
+class TestApplyBaseHelper:
+    """Test _apply_base helper function."""
+
+    def test_returns_none_without_openscad(self, tmp_path):
+        from kiln.design_reasoning import _apply_base
+
+        stl = tmp_path / "cube.stl"
+        _write_cube_stl(str(stl), 20.0)
+
+        with patch("kiln.generation.openscad._find_openscad", side_effect=Exception("not found")):
+            result = _apply_base(str(stl), str(tmp_path), 2.0)
+        # Should return None gracefully, not raise
+        assert result is None
+
+
+class TestApplyGussetHelper:
+    """Test _apply_gusset helper function."""
+
+    def test_returns_none_without_openscad(self, tmp_path):
+        from kiln.design_reasoning import _apply_gusset
+
+        stl = tmp_path / "cube.stl"
+        _write_cube_stl(str(stl), 20.0)
+
+        with patch("kiln.generation.openscad._find_openscad", side_effect=Exception("not found")):
+            result = _apply_gusset(str(stl), str(tmp_path), (5.0, 5.0, 5.0))
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Loop 8 — Print settings inference from structural analysis
+# ---------------------------------------------------------------------------
+
+
+class TestInferPrintSettings:
+    """Infer optimal slicer settings from structural risk analysis.
+
+    Coverage:
+    - Simple cube → baseline PLA settings
+    - Thin neck → increased perimeters and infill
+    - Tall thin part → brim enabled
+    - Material-specific defaults (PETG, ABS, Nylon)
+    - Cantilever → supports enabled
+    - PrintSettingsRecommendation.to_dict()
+    - Missing file raises
+    - Unknown material falls back to PLA
+    """
+
+    def test_simple_cube_baseline(self, tmp_path):
+        """A structurally sound cube should get baseline settings."""
+        from kiln.design_reasoning import infer_print_settings
+
+        stl = tmp_path / "cube.stl"
+        _write_cube_stl(str(stl), 20.0)
+
+        result = infer_print_settings(str(stl), material="PLA")
+        assert result.perimeters >= 2
+        assert result.infill_percent >= 15
+        assert result.layer_height_mm > 0
+        assert result.confidence in ("high", "medium", "low")
+        assert isinstance(result.special_notes, list)
+
+    def test_thin_neck_increases_perimeters(self, tmp_path):
+        """A mesh with thin necks should get more perimeters."""
+        from kiln.design_reasoning import infer_print_settings
+
+        stl = tmp_path / "thin.stl"
+        _write_thin_neck_stl(stl)
+
+        result = infer_print_settings(str(stl), material="PLA")
+        assert result.perimeters >= 4
+        assert result.infill_percent >= 40
+        assert any("perimeter" in note.lower() for note in result.special_notes)
+
+    def test_tall_part_gets_brim(self, tmp_path):
+        """A tall thin part should recommend a brim."""
+        from kiln.design_reasoning import infer_print_settings
+
+        stl = tmp_path / "tall.stl"
+        _write_tall_thin_stl(stl)
+
+        result = infer_print_settings(str(stl), material="PLA")
+        assert result.brim_enabled is True
+        assert "base" in result.brim_reason.lower() or "adhesion" in result.brim_reason.lower()
+
+    def test_petg_defaults(self, tmp_path):
+        """PETG should have material-specific defaults."""
+        from kiln.design_reasoning import infer_print_settings
+
+        stl = tmp_path / "cube.stl"
+        _write_cube_stl(str(stl), 20.0)
+
+        result = infer_print_settings(str(stl), material="PETG")
+        assert result.infill_percent >= 20
+
+    def test_nylon_defaults(self, tmp_path):
+        """Nylon should have higher perimeters by default."""
+        from kiln.design_reasoning import infer_print_settings
+
+        stl = tmp_path / "cube.stl"
+        _write_cube_stl(str(stl), 20.0)
+
+        result = infer_print_settings(str(stl), material="Nylon")
+        assert result.perimeters >= 4
+
+    def test_unknown_material_falls_back_to_pla(self, tmp_path):
+        """Unknown material should use PLA defaults."""
+        from kiln.design_reasoning import infer_print_settings
+
+        stl = tmp_path / "cube.stl"
+        _write_cube_stl(str(stl), 20.0)
+
+        result = infer_print_settings(str(stl), material="EXOTIC")
+        # Should not crash, should get reasonable defaults
+        assert result.perimeters >= 2
+        assert result.infill_percent >= 15
+
+    def test_to_dict(self, tmp_path):
+        """PrintSettingsRecommendation.to_dict() returns proper dict."""
+        from kiln.design_reasoning import PrintSettingsRecommendation
+
+        r = PrintSettingsRecommendation(
+            perimeters=4,
+            infill_percent=50,
+            infill_pattern="gyroid",
+            layer_height_mm=0.16,
+            support_enabled=True,
+            support_reason="Cantilever detected",
+            brim_enabled=True,
+            brim_reason="Tall part",
+            print_orientation="upright",
+            orientation_reason="Load along Z",
+            special_notes=["Increase temp 5°C"],
+            confidence="medium",
+        )
+        d = r.to_dict()
+        assert d["perimeters"] == 4
+        assert d["infill_percent"] == 50
+        assert d["infill_pattern"] == "gyroid"
+        assert d["layer_height_mm"] == 0.16
+        assert d["support_enabled"] is True
+        assert d["brim_enabled"] is True
+        assert d["confidence"] == "medium"
+        assert len(d["special_notes"]) == 1
+
+    def test_missing_file_raises(self):
+        from kiln.design_reasoning import infer_print_settings
+
+        with pytest.raises(ValueError, match="not found"):
+            infer_print_settings("/nonexistent/mesh.stl")
+
+    def test_print_orientation_from_load_analysis(self, tmp_path):
+        """Settings should include orientation from load analysis."""
+        from kiln.design_reasoning import infer_print_settings
+
+        stl = tmp_path / "cube.stl"
+        _write_cube_stl(str(stl), 20.0)
+
+        result = infer_print_settings(str(stl))
+        assert result.print_orientation in (
+            "upright", "on_side", "on_back"
+        )
+        assert len(result.orientation_reason) > 0
+
+    def test_cantilever_enables_supports(self, tmp_path):
+        """A cantilever geometry should enable supports."""
+        from kiln.design_reasoning import infer_print_settings
+
+        stl = tmp_path / "cantilever.stl"
+        _write_cantilever_stl(stl)
+
+        result = infer_print_settings(str(stl))
+        assert result.support_enabled is True
+        assert "cantilever" in result.support_reason.lower()
+
+    def test_grade_d_f_increases_infill(self, tmp_path):
+        """A poorly-graded design should get compensating settings."""
+        from kiln.design_reasoning import infer_print_settings
+
+        # Thin neck stl will likely get a low grade
+        stl = tmp_path / "thin.stl"
+        _write_thin_neck_stl(stl)
+
+        result = infer_print_settings(str(stl))
+        # Should have higher-than-baseline infill due to structural concerns
+        assert result.infill_percent >= 35

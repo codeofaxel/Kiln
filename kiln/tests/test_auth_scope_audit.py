@@ -231,6 +231,7 @@ READ_ONLY_TOOLS: set[str] = {
     "recommend_design_reinforcements",
     "assess_load_bearing",
     "design_improvement_plan",
+    "infer_print_settings",
 }
 
 

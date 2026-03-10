@@ -11,13 +11,18 @@ Public API:
     recommend_reinforcements   — gussets, ribs, fillets at specific locations
     assess_load_bearing        — identify load surfaces and stress flow
     generate_improvement_plan  — full actionable plan for a design
+    apply_reinforcements       — auto-apply fixes (thicken, fillet, base, gusset)
+    infer_print_settings       — structural risks → optimal slicer settings
     StructuralRisk             — single risk finding dataclass
     ReinforcementRecommendation — single fix recommendation dataclass
+    ReinforcementResult        — result of auto-applying reinforcements
+    PrintSettingsRecommendation — recommended slicer settings dataclass
     DesignImprovementPlan      — complete plan dataclass
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 import struct
@@ -1321,3 +1326,708 @@ def generate_improvement_plan(
         warning_count=warning_count,
         summary=summary,
     )
+
+
+# ---------------------------------------------------------------------------
+# Auto-apply reinforcements
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ReinforcementResult:
+    """Result of applying reinforcements to a mesh."""
+
+    output_path: str
+    original_path: str
+    applied: list[dict[str, Any]] = field(default_factory=list)
+    skipped: list[dict[str, Any]] = field(default_factory=list)
+    before_score: int = 0
+    after_score: int = 0
+    before_grade: str = ""
+    after_grade: str = ""
+    summary: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "output_path": self.output_path,
+            "original_path": self.original_path,
+            "applied": self.applied,
+            "skipped": self.skipped,
+            "before_score": self.before_score,
+            "after_score": self.after_score,
+            "before_grade": self.before_grade,
+            "after_grade": self.after_grade,
+            "summary": self.summary,
+        }
+
+
+@dataclass
+class PrintSettingsRecommendation:
+    """Recommended print settings based on structural analysis."""
+
+    perimeters: int
+    infill_percent: int
+    infill_pattern: str
+    layer_height_mm: float
+    support_enabled: bool
+    support_reason: str
+    brim_enabled: bool
+    brim_reason: str
+    print_orientation: str
+    orientation_reason: str
+    special_notes: list[str] = field(default_factory=list)
+    confidence: str = "high"  # "high", "medium", "low"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "perimeters": self.perimeters,
+            "infill_percent": self.infill_percent,
+            "infill_pattern": self.infill_pattern,
+            "layer_height_mm": self.layer_height_mm,
+            "support_enabled": self.support_enabled,
+            "support_reason": self.support_reason,
+            "brim_enabled": self.brim_enabled,
+            "brim_reason": self.brim_reason,
+            "print_orientation": self.print_orientation,
+            "orientation_reason": self.orientation_reason,
+            "special_notes": self.special_notes,
+            "confidence": self.confidence,
+        }
+
+
+def apply_reinforcements(
+    file_path: str,
+    *,
+    output_path: str | None = None,
+    min_cross_section_mm2: float = _MIN_CROSS_SECTION_MM2,
+    sharp_angle_threshold_deg: float = 60.0,
+    fillet_radius_mm: float = 1.5,
+    wall_thicken_mm: float = 0.6,
+    base_height_mm: float = 2.0,
+) -> ReinforcementResult:
+    """Analyze a mesh, then auto-apply structural reinforcements.
+
+    Runs the full improvement plan, then applies fixable reinforcements
+    in sequence:
+
+    1. **thicken_wall** → runs ``thicken_walls()`` on thin sections
+    2. **fillet** → runs ``add_fillet()`` on sharp edges
+    3. **add_base** → unions a wider base plate via OpenSCAD boolean
+    4. **gusset** → unions triangular gusset ribs at cantilever bases
+
+    Reinforcements that can't be auto-applied (like ``reorient``) are
+    listed in ``skipped`` with guidance for the agent.
+
+    :param file_path: Path to the input STL file.
+    :param output_path: Output path (defaults to ``<name>_reinforced.stl``).
+    :param min_cross_section_mm2: Minimum safe cross-section area.
+    :param sharp_angle_threshold_deg: Angle for sharp edge detection.
+    :param fillet_radius_mm: Fillet radius for sharp corners.
+    :param wall_thicken_mm: Amount to thicken thin walls.
+    :param base_height_mm: Height of stabilizing base plate.
+    :returns: :class:`ReinforcementResult` with before/after scores.
+    """
+    path = Path(file_path)
+    if not path.is_file():
+        raise ValueError(f"File not found: {file_path}")
+
+    # Step 1: Get the improvement plan (before state)
+    plan = generate_improvement_plan(
+        file_path,
+        min_cross_section_mm2=min_cross_section_mm2,
+        sharp_angle_threshold_deg=sharp_angle_threshold_deg,
+    )
+
+    if not plan.reinforcements:
+        out = output_path or str(path)
+        if output_path and output_path != file_path:
+            import shutil
+            shutil.copy2(file_path, output_path)
+        return ReinforcementResult(
+            output_path=out,
+            original_path=file_path,
+            before_score=plan.overall_structural_score,
+            after_score=plan.overall_structural_score,
+            before_grade=plan.structural_grade,
+            after_grade=plan.structural_grade,
+            summary="No reinforcements needed — design is structurally sound.",
+        )
+
+    # Step 2: Apply reinforcements in priority order
+    applied: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+
+    # Work on a temp copy so we can chain operations
+    import shutil
+    import tempfile
+
+    work_dir = tempfile.mkdtemp(prefix="kiln_reinforce_")
+    current_path = str(Path(work_dir) / "working.stl")
+    shutil.copy2(file_path, current_path)
+
+    # Sort by priority: high first
+    priority_order = {"high": 0, "medium": 1, "low": 2}
+    sorted_recs = sorted(
+        plan.reinforcements,
+        key=lambda r: priority_order.get(r.priority, 3),
+    )
+
+    for rec in sorted_recs:
+        try:
+            if rec.reinforcement_type == "thicken_wall":
+                result = _apply_thicken(current_path, work_dir, wall_thicken_mm)
+                if result:
+                    current_path = result
+                    applied.append({
+                        "type": "thicken_wall",
+                        "amount_mm": wall_thicken_mm,
+                        "addresses": rec.addresses_risk,
+                    })
+                else:
+                    skipped.append({
+                        "type": "thicken_wall",
+                        "reason": "No thin walls detected in mesh",
+                        "addresses": rec.addresses_risk,
+                    })
+
+            elif rec.reinforcement_type == "fillet":
+                result = _apply_fillet(
+                    current_path, work_dir,
+                    fillet_radius_mm, sharp_angle_threshold_deg,
+                )
+                if result:
+                    current_path = result
+                    applied.append({
+                        "type": "fillet",
+                        "radius_mm": fillet_radius_mm,
+                        "addresses": rec.addresses_risk,
+                    })
+                else:
+                    skipped.append({
+                        "type": "fillet",
+                        "reason": "No sharp edges found at threshold",
+                        "addresses": rec.addresses_risk,
+                    })
+
+            elif rec.reinforcement_type == "add_base":
+                result = _apply_base(
+                    current_path, work_dir, base_height_mm,
+                )
+                if result:
+                    current_path = result
+                    applied.append({
+                        "type": "add_base",
+                        "height_mm": base_height_mm,
+                        "addresses": rec.addresses_risk,
+                    })
+                else:
+                    skipped.append({
+                        "type": "add_base",
+                        "reason": "Could not generate base (OpenSCAD not available)",
+                        "addresses": rec.addresses_risk,
+                    })
+
+            elif rec.reinforcement_type == "gusset":
+                result = _apply_gusset(
+                    current_path, work_dir, rec.location_mm,
+                )
+                if result:
+                    current_path = result
+                    applied.append({
+                        "type": "gusset",
+                        "location_mm": list(rec.location_mm),
+                        "addresses": rec.addresses_risk,
+                    })
+                else:
+                    skipped.append({
+                        "type": "gusset",
+                        "reason": "Could not generate gusset (OpenSCAD not available)",
+                        "addresses": rec.addresses_risk,
+                    })
+
+            elif rec.reinforcement_type == "reorient":
+                # Can't auto-apply rotation — agent needs to decide
+                skipped.append({
+                    "type": "reorient",
+                    "reason": (
+                        "Print orientation must be changed in the slicer, not the mesh. "
+                        "Recommended orientation: see load analysis."
+                    ),
+                    "addresses": rec.addresses_risk,
+                    "guidance": rec.description,
+                })
+
+            elif rec.reinforcement_type == "chamfer":
+                result = _apply_chamfer(
+                    current_path, work_dir, sharp_angle_threshold_deg,
+                )
+                if result:
+                    current_path = result
+                    applied.append({
+                        "type": "chamfer",
+                        "addresses": rec.addresses_risk,
+                    })
+                else:
+                    skipped.append({
+                        "type": "chamfer",
+                        "reason": "No sharp edges at threshold",
+                        "addresses": rec.addresses_risk,
+                    })
+
+            else:
+                skipped.append({
+                    "type": rec.reinforcement_type,
+                    "reason": f"Unknown reinforcement type: {rec.reinforcement_type}",
+                    "addresses": rec.addresses_risk,
+                })
+
+        except Exception as exc:
+            logger.warning(
+                "Reinforcement %s failed: %s", rec.reinforcement_type, exc
+            )
+            skipped.append({
+                "type": rec.reinforcement_type,
+                "reason": f"Application failed: {exc}",
+                "addresses": rec.addresses_risk,
+            })
+
+    # Step 3: Copy result to output path
+    if output_path is None:
+        stem = path.stem
+        output_path = str(path.parent / f"{stem}_reinforced.stl")
+
+    shutil.copy2(current_path, output_path)
+
+    # Step 4: Re-score the reinforced mesh
+    after_plan = generate_improvement_plan(
+        output_path,
+        min_cross_section_mm2=min_cross_section_mm2,
+        sharp_angle_threshold_deg=sharp_angle_threshold_deg,
+    )
+
+    # Clean up temp dir
+    with contextlib.suppress(Exception):
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+    summary_parts = []
+    if applied:
+        summary_parts.append(
+            f"Applied {len(applied)} reinforcement(s): "
+            f"{', '.join(a['type'] for a in applied)}."
+        )
+    if skipped:
+        summary_parts.append(
+            f"Skipped {len(skipped)}: "
+            f"{', '.join(s['type'] for s in skipped)}."
+        )
+    score_delta = after_plan.overall_structural_score - plan.overall_structural_score
+    if score_delta > 0:
+        summary_parts.append(
+            f"Score improved {plan.overall_structural_score} → "
+            f"{after_plan.overall_structural_score} "
+            f"({plan.structural_grade} → {after_plan.structural_grade})."
+        )
+    elif score_delta == 0 and applied:
+        summary_parts.append(
+            f"Score unchanged at {plan.overall_structural_score} "
+            f"({plan.structural_grade}) — improvements may be micro-level."
+        )
+
+    return ReinforcementResult(
+        output_path=output_path,
+        original_path=file_path,
+        applied=applied,
+        skipped=skipped,
+        before_score=plan.overall_structural_score,
+        after_score=after_plan.overall_structural_score,
+        before_grade=plan.structural_grade,
+        after_grade=after_plan.structural_grade,
+        summary=" ".join(summary_parts),
+    )
+
+
+def _apply_thicken(
+    stl_path: str,
+    work_dir: str,
+    amount_mm: float,
+) -> str | None:
+    """Apply wall thickening and return new path, or None on failure."""
+    try:
+        from kiln.generation.validation import thicken_walls
+
+        out = str(Path(work_dir) / "thickened.stl")
+        result = thicken_walls(stl_path, amount_mm=amount_mm, output_path=out)
+        if result.get("vertices_modified", 0) > 0:
+            return out
+        return None
+    except Exception:
+        return None
+
+
+def _apply_fillet(
+    stl_path: str,
+    work_dir: str,
+    radius_mm: float,
+    angle_deg: float,
+) -> str | None:
+    """Apply fillets to sharp edges and return new path, or None on failure."""
+    try:
+        from kiln.generation.validation import add_fillet
+
+        out = str(Path(work_dir) / "filleted.stl")
+        result = add_fillet(
+            stl_path,
+            radius_mm=radius_mm,
+            angle_threshold_deg=angle_deg,
+            output_path=out,
+        )
+        if result.get("sharp_edges_found", 0) > 0:
+            return out
+        return None
+    except Exception:
+        return None
+
+
+def _apply_chamfer(
+    stl_path: str,
+    work_dir: str,
+    angle_deg: float,
+) -> str | None:
+    """Apply chamfers to sharp edges and return new path, or None."""
+    try:
+        from kiln.generation.validation import add_chamfer
+
+        out = str(Path(work_dir) / "chamfered.stl")
+        result = add_chamfer(
+            stl_path,
+            distance_mm=0.5,
+            angle_threshold_deg=angle_deg,
+            output_path=out,
+        )
+        if result.get("sharp_edges_found", 0) > 0:
+            return out
+        return None
+    except Exception:
+        return None
+
+
+def _apply_base(
+    stl_path: str,
+    work_dir: str,
+    height_mm: float,
+) -> str | None:
+    """Add a stabilizing base plate via OpenSCAD boolean union."""
+    try:
+        from kiln.generation.openscad import _find_openscad, boolean_mesh_operation
+
+        # Need OpenSCAD for boolean union
+        _find_openscad()
+
+        # Parse mesh to get bounding box
+        _, vertices = _parse_stl_for_analysis(stl_path)
+        if not vertices:
+            return None
+        bbox = _bounding_box(vertices)
+
+        # Create a base plate wider than the part
+        width_x = (bbox["max_x"] - bbox["min_x"]) * 1.3
+        width_y = (bbox["max_y"] - bbox["min_y"]) * 1.3
+        cx = (bbox["min_x"] + bbox["max_x"]) / 2
+        cy = (bbox["min_y"] + bbox["max_y"]) / 2
+
+        # Generate base plate as OpenSCAD → STL
+        from kiln.generation.openscad import compose_from_primitives
+
+        base_path = str(Path(work_dir) / "base_plate.stl")
+        compose_from_primitives(
+            [
+                {
+                    "type": "primitive",
+                    "shape": "cube",
+                    "params": {"size": [width_x, width_y, height_mm]},
+                    "translate": [
+                        cx - width_x / 2,
+                        cy - width_y / 2,
+                        bbox["min_z"] - height_mm,
+                    ],
+                }
+            ],
+            output_path=base_path,
+        )
+
+        # Union the base with the original
+        out = str(Path(work_dir) / "with_base.stl")
+        boolean_mesh_operation("union", [stl_path, base_path], output_path=out)
+        return out
+
+    except Exception as exc:
+        logger.debug("Base plate application failed: %s", exc)
+        return None
+
+
+def _apply_gusset(
+    stl_path: str,
+    work_dir: str,
+    location_mm: tuple[float, float, float],
+) -> str | None:
+    """Add a triangular gusset rib at a cantilever base via OpenSCAD."""
+    try:
+        from kiln.generation.openscad import _find_openscad, boolean_mesh_operation
+
+        _find_openscad()
+
+        # Parse mesh for context
+        _, vertices = _parse_stl_for_analysis(stl_path)
+        if not vertices:
+            return None
+        bbox = _bounding_box(vertices)
+
+        # Gusset dimensions: proportional to part size
+        gusset_thickness = 2.0  # mm
+        gusset_size = min(
+            (bbox["max_x"] - bbox["min_x"]) * 0.3,
+            (bbox["max_z"] - bbox["min_z"]) * 0.3,
+            15.0,  # cap at 15mm
+        )
+        gusset_size = max(gusset_size, 3.0)  # minimum 3mm
+
+        # Create a triangular gusset using OpenSCAD polyhedron
+        # The gusset sits at the identified location as a right-triangle rib
+        x, y, z = location_mm
+
+        # Generate gusset as a right-triangle prism via OpenSCAD code
+        import subprocess
+
+        scad_code = f"""
+// Triangular gusset rib
+translate([{x - gusset_thickness / 2}, {y}, {bbox['min_z']}])
+linear_extrude(height={gusset_thickness})
+polygon(points=[
+    [0, 0],
+    [{gusset_size}, 0],
+    [0, {gusset_size}]
+]);
+"""
+        scad_path = str(Path(work_dir) / "gusset.scad")
+        gusset_stl = str(Path(work_dir) / "gusset.stl")
+        Path(scad_path).write_text(scad_code)
+
+        from kiln.generation.openscad import _find_openscad as _find
+
+        binary = _find()
+        subprocess.run(
+            [binary, "-o", gusset_stl, scad_path],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+
+        if not Path(gusset_stl).is_file() or Path(gusset_stl).stat().st_size < 100:
+            return None
+
+        # Union the gusset with the part
+        out = str(Path(work_dir) / "with_gusset.stl")
+        boolean_mesh_operation("union", [stl_path, gusset_stl], output_path=out)
+        return out
+
+    except Exception as exc:
+        logger.debug("Gusset application failed: %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Slicer profile inference from structural analysis
+# ---------------------------------------------------------------------------
+
+
+def infer_print_settings(
+    file_path: str,
+    *,
+    material: str = "PLA",
+    min_cross_section_mm2: float = _MIN_CROSS_SECTION_MM2,
+    sharp_angle_threshold_deg: float = 60.0,
+) -> PrintSettingsRecommendation:
+    """Infer optimal print settings from structural analysis.
+
+    Bridges the gap between "this design has structural risks" and
+    "here are the slicer settings that compensate."  Analyzes the mesh,
+    considers the material, and returns concrete slicer parameters.
+
+    :param file_path: Path to STL file.
+    :param material: Filament material (PLA, PETG, ABS, Nylon, TPU).
+    :param min_cross_section_mm2: Minimum safe cross-section area.
+    :param sharp_angle_threshold_deg: Angle for sharp edge detection.
+    :returns: :class:`PrintSettingsRecommendation`.
+    """
+    plan = generate_improvement_plan(
+        file_path,
+        min_cross_section_mm2=min_cross_section_mm2,
+        sharp_angle_threshold_deg=sharp_angle_threshold_deg,
+    )
+
+    # Material-specific defaults
+    mat = material.upper()
+    defaults = _MATERIAL_DEFAULTS.get(mat, _MATERIAL_DEFAULTS["PLA"])
+
+    perimeters = defaults["perimeters"]
+    infill = defaults["infill"]
+    infill_pattern = defaults["infill_pattern"]
+    layer_height = defaults["layer_height"]
+    support = False
+    support_reason = "No overhangs requiring support detected."
+    brim = False
+    brim_reason = "Base contact area is adequate."
+    notes: list[str] = []
+
+    # Adjust based on structural risks
+    has_thin_neck = any(r.risk_type == "thin_neck" for r in plan.risks)
+    has_stress_conc = any(r.risk_type == "stress_concentration" for r in plan.risks)
+    has_cantilever = any(r.risk_type == "cantilever" for r in plan.risks)
+    has_weak_adhesion = any(r.risk_type == "weak_layer_adhesion" for r in plan.risks)
+    has_insufficient_base = any(
+        r.risk_type == "insufficient_base" for r in plan.risks
+    )
+    has_sharp_corners = any(r.risk_type == "sharp_corner" for r in plan.risks)
+
+    # Thin necks → more perimeters for wall strength
+    if has_thin_neck:
+        perimeters = max(perimeters, 4)
+        infill = max(infill, 40)
+        notes.append(
+            "Increased perimeters to 4+ for thin-neck zones. "
+            "More perimeters add structural shells around narrow sections."
+        )
+
+    # Stress concentration → higher infill for load distribution
+    if has_stress_conc:
+        infill = max(infill, 50)
+        infill_pattern = "gyroid"
+        notes.append(
+            "Switched to gyroid infill at 50%+ for uniform stress distribution "
+            "at cross-section transitions."
+        )
+
+    # Cantilever → enable supports, increase perimeters
+    if has_cantilever:
+        support = True
+        support_reason = (
+            "Cantilever geometry detected — supports prevent drooping "
+            "during printing and maintain dimensional accuracy."
+        )
+        perimeters = max(perimeters, 3)
+        notes.append(
+            "Supports enabled for cantilever overhangs. Consider tree supports "
+            "for easier removal."
+        )
+
+    # Weak layer adhesion → slower speed, higher temp, more perimeters
+    if has_weak_adhesion:
+        perimeters = max(perimeters, 4)
+        infill = max(infill, 35)
+        notes.append(
+            "Weak layer adhesion zones detected. Increase nozzle temperature "
+            "by 5-10°C and reduce print speed by 20% in the slicer for better "
+            "inter-layer bonding at overhang surfaces."
+        )
+
+    # Insufficient base → add brim
+    if has_insufficient_base:
+        brim = True
+        brim_reason = (
+            "Design has high height-to-base ratio. A brim provides additional "
+            "bed adhesion to prevent tipping or warping during printing."
+        )
+
+    # Sharp corners → finer layers for detail
+    if has_sharp_corners:
+        layer_height = min(layer_height, 0.16)
+        notes.append(
+            "Fine layer height recommended for sharp corner detail. "
+            "Thinner layers better approximate curved transitions."
+        )
+
+    # Determine print orientation from load analysis
+    orientation = "upright"
+    orientation_reason = "Default upright orientation."
+    if plan.load_analysis:
+        orientation = plan.load_analysis.recommended_print_orientation
+        orientation_reason = plan.load_analysis.orientation_reasoning
+
+    # Grade-based overall adjustments
+    if plan.structural_grade in ("D", "F"):
+        infill = max(infill, 50)
+        perimeters = max(perimeters, 4)
+        notes.append(
+            f"Structural grade {plan.structural_grade} — using high infill "
+            f"and perimeters to compensate for geometry weaknesses."
+        )
+
+    # Confidence assessment
+    if plan.critical_count == 0 and plan.warning_count <= 2:
+        confidence = "high"
+    elif plan.critical_count <= 1:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    return PrintSettingsRecommendation(
+        perimeters=perimeters,
+        infill_percent=infill,
+        infill_pattern=infill_pattern,
+        layer_height_mm=layer_height,
+        support_enabled=support,
+        support_reason=support_reason,
+        brim_enabled=brim,
+        brim_reason=brim_reason,
+        print_orientation=orientation,
+        orientation_reason=orientation_reason,
+        special_notes=notes,
+        confidence=confidence,
+    )
+
+
+# Material-specific slicer defaults
+_MATERIAL_DEFAULTS: dict[str, dict[str, Any]] = {
+    "PLA": {
+        "perimeters": 3,
+        "infill": 20,
+        "infill_pattern": "grid",
+        "layer_height": 0.2,
+    },
+    "PETG": {
+        "perimeters": 3,
+        "infill": 25,
+        "infill_pattern": "grid",
+        "layer_height": 0.2,
+    },
+    "ABS": {
+        "perimeters": 3,
+        "infill": 25,
+        "infill_pattern": "gyroid",
+        "layer_height": 0.2,
+    },
+    "NYLON": {
+        "perimeters": 4,
+        "infill": 30,
+        "infill_pattern": "gyroid",
+        "layer_height": 0.2,
+    },
+    "TPU": {
+        "perimeters": 3,
+        "infill": 15,
+        "infill_pattern": "gyroid",
+        "layer_height": 0.24,
+    },
+    "ASA": {
+        "perimeters": 3,
+        "infill": 25,
+        "infill_pattern": "gyroid",
+        "layer_height": 0.2,
+    },
+    "PC": {
+        "perimeters": 4,
+        "infill": 30,
+        "infill_pattern": "gyroid",
+        "layer_height": 0.2,
+    },
+}
