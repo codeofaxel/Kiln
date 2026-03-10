@@ -6,6 +6,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- 24 mesh analysis and transformation MCP tools (pure Python, no external mesh libraries):
+  - Geometry analysis: `analyze_mesh_geometry`, `mesh_quality_scorecard`, `analyze_non_manifold_edges`, `diagnose_mesh`
+  - Repair: `repair_mesh`, `repair_mesh_advanced` (hole closing), `remove_mesh_floating_regions`
+  - Transformations: `mirror_mesh_model`, `hollow_mesh_model`, `center_model_on_bed`, `scale_mesh_to_fit`, `optimize_print_orientation`, `simplify_mesh_model`
+  - Composition: `compose_models`, `merge_mesh_files`, `split_mesh_by_component`
+  - Estimation: `estimate_material_cost`, `estimate_support_material`, `estimate_mesh_print_time`, `predict_print_failure`
+  - Comparison: `compare_mesh_versions` (with Hausdorff distance)
+  - Readiness: `check_print_readiness` (single-call gate with optional auto-repair)
+  - Export: `export_model_3mf`
+- Parametric design templates with `list_design_templates`, `generate_from_template`, `generate_template_variations`
+- Design advisor tool for recommending generation approach (template, OpenSCAD, or AI)
+- Closed-loop design iteration: `iterate_design` (generate → validate → improve → regenerate)
+- Print cost estimation in `monitor_print` and `preflight_check` (9 materials, USD estimates)
 - Cross-printer learning feedback loop with auto-outcome recording from scheduler
 - `recommend_settings` MCP tool for history-based print setting recommendations
 - Outcome-aware preflight warnings (low success rate advisories)

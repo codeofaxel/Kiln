@@ -90,7 +90,8 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 - **Model marketplaces** — search/download from MyMiniFactory, Cults3D (Thingiverse deprecated — acquired by MMF, Feb 2026)
 - **Slicer integration** — PrusaSlicer and OrcaSlicer with auto-detection
 - **Text-to-model generation** — Meshy AI, Tripo3D, Stability AI, OpenSCAD with auto-discovery registry
-- **Printability analysis** — overhang detection, thin wall analysis, auto-orientation, support estimation
+- **Printability analysis** — overhang detection, thin wall analysis, auto-orientation, support estimation, failure prediction, quality scorecard
+- **Mesh operations** — mirror, hollow, center, scale-to-fit, merge, split, simplify, repair, non-manifold analysis — all pure Python, no external mesh libraries
 - **Print DNA** — model fingerprinting, crowd-sourced print settings, intelligent settings prediction
 - **Marketplace publish** — one-click publish to Thingiverse/MyMiniFactory with print "birth certificate"
 - **Revenue tracking** — per-model creator analytics, 2.5% platform fee on Kiln-published models

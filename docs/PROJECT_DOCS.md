@@ -486,6 +486,54 @@ Supported providers: `meshy`, `gemini`, `tripo3d`, `stability`, `openscad`. Set 
 | `generate_and_print` | `prompt`, `provider`, `printer_name`, `profile` | Full pipeline: generate → validate → slice → print |
 | `validate_generated_mesh` | `file_path` | Mesh validation report |
 
+#### Mesh Analysis & Repair
+
+Pure-Python mesh operations — no external mesh libraries required. Operates directly on STL binary geometry for analysis, repair, transformation, and composition.
+
+| Tool | Input | Output |
+|---|---|---|
+| `analyze_mesh_geometry` | `file_path` | Volume, surface area, center of mass, overhangs, components, printability score (0-100) |
+| `repair_mesh` | `file_path`, `output_path` | Degenerate triangle removal, normal recomputation, repair stats |
+| `repair_mesh_advanced` | `file_path`, `output_path`, `close_holes` | Advanced repair: degenerate removal + boundary hole closing via fan triangulation |
+| `compose_models` | `file_paths`, `output_path` | Merge multiple mesh files into one STL (no booleans — geometry concatenation) |
+| `export_model_3mf` | `file_path`, `output_path` | Convert STL/OBJ/GLB to 3MF format (preferred by modern slicers) |
+| `optimize_print_orientation` | `file_path`, `output_path` | Auto-rotate mesh to minimize overhangs and maximize bed contact |
+| `estimate_support_material` | `file_path` | Support volume (mm³), weight (g), overhang triangle stats |
+| `compare_mesh_versions` | `file_a`, `file_b` | Volume/surface area delta, Hausdorff distance, dimension changes, `meshes_identical` flag |
+| `predict_print_failure` | `file_path`, thresholds | Risk score (0-100), verdict, per-failure details (thin walls, bridges, overhangs, top-heavy) |
+| `simplify_mesh_model` | `file_path`, `target_ratio`, `output_path` | Vertex-clustering decimation — reduce triangle count while preserving shape |
+| `mesh_quality_scorecard` | `file_path` | Multi-factor quality score: printability (35%), structural (25%), efficiency (20%), quality (20%). Letter grade A-F |
+| `estimate_material_cost` | `file_path`, `material`, `infill_pct`, `wall_layers` | Filament weight (g), length (m), cost ($) for 9 materials |
+| `remove_mesh_floating_regions` | `file_path`, `output_path`, `keep_largest` | Detect and remove disconnected geometry (fragments, support pillars) |
+| `check_print_readiness` | `file_path`, `auto_fix`, bed dimensions | Single-call readiness gate: manifold, overhangs, build volume, degenerates. Optional auto-repair |
+| `mirror_mesh_model` | `file_path`, `axis`, `output_path` | Mirror (reflect) mesh along X/Y/Z axis with correct winding order |
+| `hollow_mesh_model` | `file_path`, `wall_thickness_mm`, `output_path` | Create hollow shell to save material, reports savings percentage |
+| `center_model_on_bed` | `file_path`, `bed_x_mm`, `bed_y_mm`, `output_path` | Center mesh on build plate with z=0 grounding |
+| `analyze_non_manifold_edges` | `file_path` | Edge classification: boundary (1 tri), manifold (2 tri), T-junction (3+). Watertight status |
+| `scale_mesh_to_fit` | `file_path`, `max_x/y/z_mm`, `output_path` | Uniform scale to fit build volume while preserving aspect ratio |
+| `merge_mesh_files` | `file_paths`, `output_path` | Combine multiple STL files into one (for multi-part assemblies) |
+| `split_mesh_by_component` | `file_path`, `output_dir` | Split multi-body mesh into separate STL files per connected component |
+| `estimate_mesh_print_time` | `file_path`, `layer_height`, `print_speed`, `material` | Geometry-based print time estimate (before slicing) |
+| `diagnose_mesh` | `file_path` | Advanced defect analysis: self-intersections, normals, degenerate faces, floating fragments, holes |
+
+#### Parametric Design Templates
+
+| Tool | Input | Output |
+|---|---|---|
+| `list_design_templates` | — | Available parametric templates (phone stand, hook, box, etc.) |
+| `generate_from_template` | `template_id`, parameters | Generate model from template with custom parameters via OpenSCAD |
+| `generate_template_variations` | `template_id`, `variation_count`, `parameter_ranges` | Batch-generate N variations across parameter space |
+
+#### Design Advisor & Iteration
+
+| Tool | Input | Output |
+|---|---|---|
+| `design_advisor` | `prompt`, `printer_model` | Recommend approach (template, OpenSCAD, or AI), material, and constraints |
+| `iterate_design` | `prompt`, `provider`, `max_iterations`, `material` | Closed-loop: generate → validate → improve prompt → regenerate until passing |
+| `validate_openscad_code` | `code` | Compile-check OpenSCAD code with structured error/warning output |
+| `estimate_print_time` | `file_path`, `profile`, `slicer_path` | Slicer-based print time and filament estimate (requires slicer installed) |
+| `get_feedback_loop_status` | `model_id` | Feedback loop iteration history and resolution status |
+
 #### Print Analysis
 
 | Tool | Input | Output |
