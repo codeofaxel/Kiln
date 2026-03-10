@@ -278,7 +278,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **382 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **383 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
 
 #### Printer Control
 
@@ -514,6 +514,7 @@ Pure-Python mesh operations — no external mesh libraries required. Operates di
 | `merge_mesh_files` | `file_paths`, `output_path` | Combine multiple STL files into one (for multi-part assemblies) |
 | `split_mesh_by_component` | `file_path`, `output_dir` | Split multi-body mesh into separate STL files per connected component |
 | `estimate_mesh_print_time` | `file_path`, `layer_height`, `print_speed`, `material` | Geometry-based print time estimate (before slicing) |
+| `extract_model_from_3mf` | `file_path`, `output_path` | Extract embedded mesh from .3mf or .gcode.3mf to STL (handles multi-object, Bambu files) |
 | `diagnose_mesh` | `file_path` | Advanced defect analysis: self-intersections, normals, degenerate faces, floating fragments, holes |
 
 #### Parametric Design Templates

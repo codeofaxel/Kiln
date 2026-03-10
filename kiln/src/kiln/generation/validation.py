@@ -3204,3 +3204,156 @@ def estimate_print_time_from_mesh(
         "material": material_lower,
         "note": "Rough estimate. Actual time depends on slicer settings, infill, supports, and acceleration.",
     }
+
+
+# ---------------------------------------------------------------------------
+# 3MF model extraction (3MF → STL)
+# ---------------------------------------------------------------------------
+
+
+def extract_model_from_3mf(
+    file_path: str,
+    *,
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Extract embedded 3D model geometry from a .3mf file to STL.
+
+    3MF files (including .gcode.3mf from Bambu Studio) are ZIP archives
+    containing an XML model file at ``3D/3dmodel.model``.  This function
+    parses the XML, extracts all mesh objects (vertices + triangles), and
+    writes a binary STL.
+
+    Handles both standard 3MF and Bambu-style .gcode.3mf files.  When
+    multiple objects exist they are merged into a single STL.
+
+    Args:
+        file_path: Path to the .3mf or .gcode.3mf file.
+        output_path: Output STL path.  Defaults to ``<stem>.stl`` next
+            to the input file.
+
+    Returns:
+        Dict with output path, triangle/vertex counts, and dimensions.
+
+    Raises:
+        ValueError: If the file is not a valid 3MF or contains no geometry.
+        FileNotFoundError: If the input file does not exist.
+    """
+    import xml.etree.ElementTree as ET
+
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    if not zipfile.is_zipfile(file_path):
+        raise ValueError(f"Not a valid ZIP/3MF file: {file_path}")
+
+    # Locate the model XML inside the archive.
+    model_xml: str | None = None
+    with zipfile.ZipFile(file_path, "r") as zf:
+        names = zf.namelist()
+
+        # Prefer the standard path; fall back to any .model file.
+        candidates = [
+            "3D/3dmodel.model",
+            "3d/3dmodel.model",  # case-insensitive fallback
+        ]
+        for candidate in candidates:
+            if candidate in names:
+                model_xml = zf.read(candidate).decode("utf-8")
+                break
+
+        if model_xml is None:
+            # Broader search for any .model file in the archive.
+            for name in names:
+                if name.lower().endswith(".model"):
+                    model_xml = zf.read(name).decode("utf-8")
+                    break
+
+    if model_xml is None:
+        raise ValueError(
+            f"No 3D model found in {file_path}. "
+            f"Archive contains: {', '.join(names[:20])}"
+        )
+
+    # Parse the XML model.
+    root = ET.fromstring(model_xml)
+
+    # Handle XML namespace — 3MF uses a default namespace.
+    ns = ""
+    if root.tag.startswith("{"):
+        ns = root.tag.split("}")[0] + "}"
+
+    # Collect all mesh objects (a 3MF can have multiple objects).
+    all_triangles: list[tuple[tuple[float, ...], ...]] = []
+    total_vertices = 0
+
+    for obj in root.iter(f"{ns}object"):
+        mesh_el = obj.find(f"{ns}mesh")
+        if mesh_el is None:
+            continue
+
+        verts_el = mesh_el.find(f"{ns}vertices")
+        tris_el = mesh_el.find(f"{ns}triangles")
+        if verts_el is None or tris_el is None:
+            continue
+
+        # Parse vertices.
+        vertices: list[tuple[float, ...]] = []
+        for v_el in verts_el.findall(f"{ns}vertex"):
+            x = float(v_el.get("x", "0"))
+            y = float(v_el.get("y", "0"))
+            z = float(v_el.get("z", "0"))
+            vertices.append((x, y, z))
+
+        total_vertices += len(vertices)
+
+        # Parse triangles (index references into vertices).
+        for t_el in tris_el.findall(f"{ns}triangle"):
+            v1_idx = int(t_el.get("v1", "0"))
+            v2_idx = int(t_el.get("v2", "0"))
+            v3_idx = int(t_el.get("v3", "0"))
+
+            if (
+                v1_idx >= len(vertices)
+                or v2_idx >= len(vertices)
+                or v3_idx >= len(vertices)
+            ):
+                continue  # Skip invalid index references.
+
+            all_triangles.append(
+                (vertices[v1_idx], vertices[v2_idx], vertices[v3_idx])
+            )
+
+    if not all_triangles:
+        raise ValueError(
+            f"3MF file contains no mesh geometry: {file_path}"
+        )
+
+    # Determine output path.
+    if output_path is None:
+        # Strip compound extensions like .gcode.3mf → .stl
+        stem = path.stem
+        if stem.lower().endswith(".gcode"):
+            stem = stem[: -len(".gcode")]
+        output_path = str(path.parent / f"{stem}.stl")
+
+    _write_binary_stl(all_triangles, output_path)
+
+    # Compute bounding box for dimension reporting.
+    xs = [v[0] for tri in all_triangles for v in tri]
+    ys = [v[1] for tri in all_triangles for v in tri]
+    zs = [v[2] for tri in all_triangles for v in tri]
+
+    dims = {
+        "x_mm": round(max(xs) - min(xs), 2),
+        "y_mm": round(max(ys) - min(ys), 2),
+        "z_mm": round(max(zs) - min(zs), 2),
+    }
+
+    return {
+        "output_path": output_path,
+        "triangle_count": len(all_triangles),
+        "vertex_count": total_vertices,
+        "dimensions": dims,
+        "source_file": file_path,
+    }

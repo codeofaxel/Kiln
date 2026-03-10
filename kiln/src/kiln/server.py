@@ -9539,6 +9539,38 @@ def export_model_3mf(file_path: str, output_path: str = "") -> dict:
 
 
 @mcp.tool()
+def extract_model_from_3mf(file_path: str, output_path: str = "") -> dict:
+    """Extract the embedded 3D model from a .3mf or .gcode.3mf file to STL.
+
+    3MF files are ZIP archives containing XML mesh geometry.  This tool
+    parses the embedded model, extracts all mesh objects, and writes a
+    binary STL file ready for slicing, multi-copy printing, or further
+    mesh operations.
+
+    Works with both standard 3MF files and Bambu Studio .gcode.3mf files
+    (which bundle both G-code and the source model).  When multiple
+    objects exist they are merged into a single STL.
+
+    :param file_path: Path to the .3mf or .gcode.3mf file.
+    :param output_path: Output STL path (auto-generated if empty).
+    :returns: Dict with output path, triangle/vertex counts, and dimensions.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import (
+            extract_model_from_3mf as _extract,
+        )
+
+        result = _extract(file_path, output_path=output_path or None)
+        return {"status": "success", **result}
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except Exception as exc:
+        return _error_dict(f"3MF extraction failed: {exc}", code="EXTRACT_ERROR")
+
+
+@mcp.tool()
 def validate_openscad_code(code: str) -> dict:
     """Validate OpenSCAD code without generating geometry.
 

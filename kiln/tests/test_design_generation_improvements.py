@@ -11,6 +11,7 @@ Covers:
 - Phase 3: orientation optimizer, support estimation, advanced repair, design advisor
 - Phase 4: mesh comparison, failure prediction, simplification, scorecard, cost, floating regions
 - Phase 5: mesh mirroring, hollow shell, center on bed, non-manifold edge analysis
+- Phase 7: 3MF model extraction (3MF → STL)
 """
 
 from __future__ import annotations
@@ -2210,3 +2211,291 @@ class TestEstimatePrintCost:
         r_big = estimate_material_cost(big)
 
         assert r_big["estimated_cost_usd"] > r_small["estimated_cost_usd"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: 3MF model extraction tests
+# ---------------------------------------------------------------------------
+
+
+def _write_3mf_with_cube(path: str, size: float) -> None:
+    """Write a valid 3MF file containing a cube mesh."""
+    import zipfile as _zf
+
+    half = size / 2.0
+    verts = [
+        (-half, -half, -half), (half, -half, -half),
+        (half, half, -half), (-half, half, -half),
+        (-half, -half, half), (half, -half, half),
+        (half, half, half), (-half, half, half),
+    ]
+    tris = [
+        (0, 1, 2), (0, 2, 3),  # bottom
+        (4, 6, 5), (4, 7, 6),  # top
+        (0, 4, 5), (0, 5, 1),  # front
+        (2, 6, 7), (2, 7, 3),  # back
+        (0, 3, 7), (0, 7, 4),  # left
+        (1, 5, 6), (1, 6, 2),  # right
+    ]
+    vert_lines = "\n".join(
+        f'        <vertex x="{v[0]}" y="{v[1]}" z="{v[2]}" />'
+        for v in verts
+    )
+    tri_lines = "\n".join(
+        f'        <triangle v1="{t[0]}" v2="{t[1]}" v3="{t[2]}" />'
+        for t in tris
+    )
+    model_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US"
+       xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <object id="1" type="model">
+      <mesh>
+        <vertices>
+{vert_lines}
+        </vertices>
+        <triangles>
+{tri_lines}
+        </triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build>
+    <item objectid="1" />
+  </build>
+</model>"""
+    content_types = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml" />
+</Types>"""
+    rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Target="/3D/3dmodel.model" Id="rel0"
+                 Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" />
+</Relationships>"""
+    with _zf.ZipFile(path, "w", _zf.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", rels)
+        zf.writestr("3D/3dmodel.model", model_xml)
+
+
+class TestExtractModelFrom3MF:
+    """Tests for 3MF → STL extraction.
+
+    Covers:
+    - Round-trip: STL → 3MF → extracted STL preserves geometry
+    - Direct 3MF extraction with correct triangle/vertex counts
+    - .gcode.3mf compound extension handling
+    - Multi-object 3MF merging
+    - Custom output path
+    - Missing model file raises ValueError
+    - Non-ZIP file raises ValueError
+    - File not found raises FileNotFoundError
+    - Extracted STL is valid binary STL
+    """
+
+    def test_basic_extraction(self, tmp_path):
+        """Extract a cube 3MF and verify triangle/vertex counts."""
+        from kiln.generation.validation import extract_model_from_3mf
+
+        threemf = str(tmp_path / "cube.3mf")
+        _write_3mf_with_cube(threemf, 20.0)
+
+        result = extract_model_from_3mf(threemf)
+
+        assert result["triangle_count"] == 12  # cube = 12 tris
+        assert result["vertex_count"] == 8
+        assert os.path.exists(result["output_path"])
+        assert result["output_path"].endswith(".stl")
+
+    def test_extracted_stl_is_valid_binary(self, tmp_path):
+        """Verify the extracted STL can be re-parsed by validate_mesh."""
+        from kiln.generation.validation import extract_model_from_3mf
+
+        threemf = str(tmp_path / "cube.3mf")
+        _write_3mf_with_cube(threemf, 20.0)
+
+        result = extract_model_from_3mf(threemf)
+        out = result["output_path"]
+
+        # Parse the output STL — should be a valid binary STL.
+        vr = validate_mesh(out)
+        assert vr.valid
+        assert vr.triangle_count == 12
+
+    def test_dimensions_match_cube_size(self, tmp_path):
+        """Extracted dimensions should match the cube size."""
+        from kiln.generation.validation import extract_model_from_3mf
+
+        threemf = str(tmp_path / "cube.3mf")
+        _write_3mf_with_cube(threemf, 30.0)
+
+        result = extract_model_from_3mf(threemf)
+        dims = result["dimensions"]
+
+        assert abs(dims["x_mm"] - 30.0) < 0.01
+        assert abs(dims["y_mm"] - 30.0) < 0.01
+        assert abs(dims["z_mm"] - 30.0) < 0.01
+
+    def test_roundtrip_stl_to_3mf_to_stl(self, tmp_path):
+        """STL → export_3mf → extract back → same triangle count."""
+        from kiln.generation.validation import (
+            export_3mf,
+            extract_model_from_3mf,
+        )
+
+        # Create original STL cube.
+        stl_orig = str(tmp_path / "orig.stl")
+        _write_cube_stl(stl_orig, 20.0)
+
+        # Export to 3MF.
+        threemf = export_3mf(stl_orig, output_path=str(tmp_path / "rt.3mf"))
+
+        # Extract back.
+        result = extract_model_from_3mf(threemf, output_path=str(tmp_path / "extracted.stl"))
+
+        assert result["triangle_count"] == 12  # cube = 12 tris
+        assert os.path.exists(result["output_path"])
+
+        # Validate the extracted STL.
+        vr = validate_mesh(result["output_path"])
+        assert vr.valid
+
+    def test_gcode_3mf_extension_handling(self, tmp_path):
+        """Files named .gcode.3mf should strip .gcode from the output stem."""
+        from kiln.generation.validation import extract_model_from_3mf
+
+        # Create a .gcode.3mf (same format, different extension).
+        gcode_3mf = str(tmp_path / "model.gcode.3mf")
+        _write_3mf_with_cube(gcode_3mf, 10.0)
+
+        result = extract_model_from_3mf(gcode_3mf)
+
+        # Should produce "model.stl", not "model.gcode.stl".
+        assert result["output_path"].endswith("model.stl")
+        assert ".gcode." not in os.path.basename(result["output_path"])
+        assert os.path.exists(result["output_path"])
+
+    def test_custom_output_path(self, tmp_path):
+        """Custom output_path is respected."""
+        from kiln.generation.validation import extract_model_from_3mf
+
+        threemf = str(tmp_path / "cube.3mf")
+        _write_3mf_with_cube(threemf, 15.0)
+        custom_out = str(tmp_path / "custom_output.stl")
+
+        result = extract_model_from_3mf(threemf, output_path=custom_out)
+        assert result["output_path"] == custom_out
+        assert os.path.exists(custom_out)
+
+    def test_multi_object_3mf(self, tmp_path):
+        """3MF with two mesh objects should merge them into one STL."""
+        import zipfile as _zf
+
+        from kiln.generation.validation import extract_model_from_3mf
+
+        # Build a 3MF with two separate cube objects.
+        model_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US"
+       xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <object id="1" type="model">
+      <mesh>
+        <vertices>
+          <vertex x="0" y="0" z="0" />
+          <vertex x="10" y="0" z="0" />
+          <vertex x="0" y="10" z="0" />
+        </vertices>
+        <triangles>
+          <triangle v1="0" v2="1" v3="2" />
+        </triangles>
+      </mesh>
+    </object>
+    <object id="2" type="model">
+      <mesh>
+        <vertices>
+          <vertex x="20" y="0" z="0" />
+          <vertex x="30" y="0" z="0" />
+          <vertex x="20" y="10" z="0" />
+        </vertices>
+        <triangles>
+          <triangle v1="0" v2="1" v3="2" />
+        </triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build>
+    <item objectid="1" />
+    <item objectid="2" />
+  </build>
+</model>"""
+
+        threemf = str(tmp_path / "multi.3mf")
+        with _zf.ZipFile(threemf, "w") as zf:
+            zf.writestr("3D/3dmodel.model", model_xml)
+            zf.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>')
+
+        result = extract_model_from_3mf(threemf)
+
+        # Two objects × 1 triangle each = 2 triangles total.
+        assert result["triangle_count"] == 2
+        assert result["vertex_count"] == 6
+
+    def test_no_model_file_raises(self, tmp_path):
+        """3MF ZIP with no .model file should raise ValueError."""
+        import zipfile as _zf
+
+        from kiln.generation.validation import extract_model_from_3mf
+
+        bad_3mf = str(tmp_path / "empty.3mf")
+        with _zf.ZipFile(bad_3mf, "w") as zf:
+            zf.writestr("readme.txt", "not a model")
+
+        with pytest.raises(ValueError, match="No 3D model found"):
+            extract_model_from_3mf(bad_3mf)
+
+    def test_not_a_zip_raises(self, tmp_path):
+        """Non-ZIP file should raise ValueError."""
+        from kiln.generation.validation import extract_model_from_3mf
+
+        bad = str(tmp_path / "notzip.3mf")
+        with open(bad, "w") as fh:
+            fh.write("this is not a zip file")
+
+        with pytest.raises(ValueError, match="Not a valid ZIP"):
+            extract_model_from_3mf(bad)
+
+    def test_file_not_found_raises(self, tmp_path):
+        """Missing file should raise FileNotFoundError."""
+        from kiln.generation.validation import extract_model_from_3mf
+
+        with pytest.raises(FileNotFoundError):
+            extract_model_from_3mf(str(tmp_path / "nope.3mf"))
+
+    def test_empty_mesh_raises(self, tmp_path):
+        """3MF with object but no triangles should raise ValueError."""
+        import zipfile as _zf
+
+        from kiln.generation.validation import extract_model_from_3mf
+
+        model_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US"
+       xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <object id="1" type="model">
+      <mesh>
+        <vertices></vertices>
+        <triangles></triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1" /></build>
+</model>"""
+
+        threemf = str(tmp_path / "empty_mesh.3mf")
+        with _zf.ZipFile(threemf, "w") as zf:
+            zf.writestr("3D/3dmodel.model", model_xml)
+            zf.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>')
+
+        with pytest.raises(ValueError, match="no mesh geometry"):
+            extract_model_from_3mf(threemf)
