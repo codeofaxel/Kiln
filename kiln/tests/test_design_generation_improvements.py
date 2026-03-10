@@ -570,7 +570,7 @@ class TestDesignTemplates:
             data = json.load(fh)
 
         templates = {k: v for k, v in data.items() if not k.startswith("_")}
-        assert len(templates) >= 20
+        assert len(templates) >= 55
 
         for key, tpl in templates.items():
             assert "display_name" in tpl, f"{key} missing display_name"
