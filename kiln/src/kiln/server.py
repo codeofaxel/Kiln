@@ -10757,6 +10757,68 @@ def design_improvement_plan(
 
 
 @mcp.tool()
+def compose_part_from_primitives(
+    operations: list[dict],
+    output_path: str = "",
+) -> dict:
+    """Build a functional part by composing geometric primitives with booleans.
+
+    The **CAD-aware generation path** — instead of asking text-to-mesh AI
+    to guess at geometry, describe parts as a tree of primitives combined
+    with boolean operations. Produces exact, deterministic, functional parts.
+
+    **Operation format** — each item is either a primitive or boolean:
+
+    Primitive: ``{"type": "primitive", "shape": "cube|cylinder|sphere|cone",
+    "params": {...}, "translate": [x,y,z], "rotate": [rx,ry,rz]}``
+
+    Boolean: ``{"type": "boolean", "operation": "union|difference|intersection",
+    "children": [op1, op2, ...]}``
+
+    **Primitive params:**
+    - cube: ``{"size": [x,y,z]}``
+    - cylinder: ``{"h": height, "r": radius}`` or ``{"h", "r1", "r2"}``
+    - sphere: ``{"r": radius}``
+    - cone: ``{"h": height, "r1": bottom_r, "r2": top_r}``
+
+    **Example — L-bracket with mounting hole:**
+    ```json
+    [{"type": "boolean", "operation": "difference", "children": [
+        {"type": "boolean", "operation": "union", "children": [
+            {"type": "primitive", "shape": "cube", "params": {"size": [40, 5, 30]}},
+            {"type": "primitive", "shape": "cube", "params": {"size": [5, 30, 30]}}
+        ]},
+        {"type": "primitive", "shape": "cylinder",
+         "params": {"h": 10, "r": 3},
+         "translate": [20, -1, 15], "rotate": [-90, 0, 0]}
+    ]}]
+    ```
+
+    Requires OpenSCAD installed on the system.
+
+    :param operations: List of operation dicts (primitive/boolean tree).
+    :param output_path: Output path (defaults to temp file).
+    :returns: Dict with result path, SCAD code, and triangle count.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.openscad import compose_from_primitives
+
+        return {
+            "status": "success",
+            **compose_from_primitives(
+                operations,
+                output_path=output_path or None,
+            ),
+        }
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"Composition failed: {exc}")
+
+
+@mcp.tool()
 def center_model_on_bed(
     file_path: str,
     bed_x_mm: float = 256.0,

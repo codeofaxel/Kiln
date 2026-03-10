@@ -3701,3 +3701,200 @@ class TestDesignImprovementPlan:
 
         with pytest.raises(ValueError, match="File not found"):
             generate_improvement_plan("/no/such/file.stl")
+
+
+# ---------------------------------------------------------------------------
+# Compositional Generation Tests
+# ---------------------------------------------------------------------------
+
+
+class TestComposeFromPrimitives:
+    """Tests for the compose_from_primitives function."""
+
+    def test_empty_operations_raises(self):
+        from kiln.generation.openscad import compose_from_primitives
+
+        with pytest.raises(ValueError, match="empty"):
+            compose_from_primitives([])
+
+    def test_invalid_primitive_shape_raises(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        with pytest.raises(ValueError, match="Unknown primitive shape"):
+            _primitive_to_scad({"type": "primitive", "shape": "torus", "params": {}})
+
+    def test_invalid_operation_type_raises(self):
+        from kiln.generation.openscad import _op_to_scad
+
+        with pytest.raises(ValueError, match="Unknown operation type"):
+            _op_to_scad({"type": "foobar"})
+
+    def test_invalid_boolean_operation_raises(self):
+        from kiln.generation.openscad import _boolean_to_scad
+
+        with pytest.raises(ValueError, match="Unknown boolean operation"):
+            _boolean_to_scad({
+                "operation": "xor",
+                "children": [
+                    {"type": "primitive", "shape": "cube", "params": {"size": 10}},
+                    {"type": "primitive", "shape": "cube", "params": {"size": 5}},
+                ],
+            })
+
+    def test_boolean_too_few_children_raises(self):
+        from kiln.generation.openscad import _boolean_to_scad
+
+        with pytest.raises(ValueError, match="at least 2 children"):
+            _boolean_to_scad({
+                "operation": "union",
+                "children": [
+                    {"type": "primitive", "shape": "cube", "params": {"size": 10}},
+                ],
+            })
+
+    def test_cube_scad_generation(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "cube",
+            "params": {"size": [10, 20, 30]},
+        })
+        assert "cube([10, 20, 30])" in code
+
+    def test_cylinder_scad_generation(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "cylinder",
+            "params": {"h": 15, "r": 5},
+        })
+        assert "cylinder(h=15, r=5)" in code
+
+    def test_sphere_scad_generation(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "sphere",
+            "params": {"r": 8},
+        })
+        assert "sphere(r=8)" in code
+
+    def test_cone_scad_generation(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "cone",
+            "params": {"h": 20, "r1": 10, "r2": 0},
+        })
+        assert "cylinder(h=20, r1=10, r2=0)" in code
+
+    def test_translate_applied(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "cube",
+            "params": {"size": 10},
+            "translate": [5, 10, 15],
+        })
+        assert "translate([5, 10, 15])" in code
+        assert "cube(10)" in code
+
+    def test_rotate_applied(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "cube",
+            "params": {"size": 10},
+            "rotate": [90, 0, 0],
+        })
+        assert "rotate([90, 0, 0])" in code
+
+    def test_translate_and_rotate(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "cube",
+            "params": {"size": 10},
+            "translate": [1, 2, 3],
+            "rotate": [45, 0, 0],
+        })
+        assert "translate([1, 2, 3])" in code
+        assert "rotate([45, 0, 0])" in code
+
+    def test_boolean_union_scad(self):
+        from kiln.generation.openscad import _boolean_to_scad
+
+        code = _boolean_to_scad({
+            "operation": "union",
+            "children": [
+                {"type": "primitive", "shape": "cube", "params": {"size": 10}},
+                {"type": "primitive", "shape": "sphere", "params": {"r": 5}},
+            ],
+        })
+        assert "union()" in code
+        assert "cube(10)" in code
+        assert "sphere(r=5)" in code
+
+    def test_boolean_difference_scad(self):
+        from kiln.generation.openscad import _boolean_to_scad
+
+        code = _boolean_to_scad({
+            "operation": "difference",
+            "children": [
+                {"type": "primitive", "shape": "cube", "params": {"size": [20, 20, 20]}},
+                {"type": "primitive", "shape": "cylinder",
+                 "params": {"h": 25, "r": 5},
+                 "translate": [10, 10, -1]},
+            ],
+        })
+        assert "difference()" in code
+        assert "cube([20, 20, 20])" in code
+        assert "cylinder(h=25, r=5)" in code
+
+    def test_nested_booleans(self):
+        """Nested boolean tree generates valid SCAD."""
+        from kiln.generation.openscad import _op_to_scad
+
+        code = _op_to_scad({
+            "type": "boolean", "operation": "difference",
+            "children": [
+                {"type": "boolean", "operation": "union", "children": [
+                    {"type": "primitive", "shape": "cube", "params": {"size": [40, 5, 30]}},
+                    {"type": "primitive", "shape": "cube", "params": {"size": [5, 30, 30]}},
+                ]},
+                {"type": "primitive", "shape": "cylinder",
+                 "params": {"h": 10, "r": 3},
+                 "translate": [20, -1, 15], "rotate": [-90, 0, 0]},
+            ],
+        })
+        assert "difference()" in code
+        assert "union()" in code
+        assert "cube([40, 5, 30])" in code
+        assert "cylinder(h=10, r=3)" in code
+
+    @patch("kiln.generation.openscad._find_openscad", return_value=None)
+    def test_no_openscad_raises(self, mock_find):
+        from kiln.generation.openscad import compose_from_primitives
+
+        with pytest.raises(GenerationError, match="OpenSCAD not found"):
+            compose_from_primitives([
+                {"type": "primitive", "shape": "cube", "params": {"size": 10}},
+            ])
+
+    def test_cylinder_with_d_param(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "cylinder",
+            "params": {"h": 10, "d": 8},
+        })
+        assert "cylinder(h=10, d=8)" in code
+
+    def test_scalar_cube(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "cube",
+            "params": {"size": 15},
+        })
+        assert "cube(15)" in code
