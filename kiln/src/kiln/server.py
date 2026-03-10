@@ -13122,7 +13122,8 @@ def main() -> None:
     # Rebuild MCP instructions now that config, printers, marketplaces,
     # and plugins are all loaded.  This replaces the static fallback with
     # a context-aware summary of the user's actual capabilities.
-    mcp.instructions = _build_instructions()
+    # FastMCP.instructions is a read-only property in mcp>=1.9 — update the underlying server directly.
+    mcp._mcp_server.instructions = _build_instructions()
 
     # Initialise cloud sync from saved config
     global _cloud_sync

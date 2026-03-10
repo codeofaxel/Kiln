@@ -349,6 +349,7 @@ def _make_adapter(cfg: dict[str, Any]):
     """Create a PrinterAdapter from a config dict."""
     from kiln.printers import (
         BambuAdapter,
+        ElegooAdapter,
         MoonrakerAdapter,
         OctoPrintAdapter,
         PrusaConnectAdapter,
@@ -369,6 +370,13 @@ def _make_adapter(cfg: dict[str, Any]):
             access_code=cfg.get("access_code", ""),
             serial=cfg.get("serial", ""),
         )
+    elif ptype == "elegoo":
+        if ElegooAdapter is None:
+            raise click.ClickException(
+                "Elegoo support requires websocket-client. "
+                "Install it with: uv pip install 'kiln3d[elegoo]' or pip install websocket-client"
+            )
+        return ElegooAdapter(host=host, mainboard_id=cfg.get("serial") or "")
     elif ptype == "prusaconnect":
         return PrusaConnectAdapter(
             host=host,
