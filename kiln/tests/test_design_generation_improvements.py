@@ -325,7 +325,7 @@ class TestMeshyImageTo3D:
 
         assert job.id == "img-job-001"
         assert job.status == GenerationStatus.PENDING
-        assert "[image]" in job.prompt
+        assert "[image-to-3d]" in job.prompt
 
     @responses.activate
     def test_image_job_polls_correct_endpoint(self):
@@ -536,8 +536,10 @@ class TestOpenSCADRenderPreview:
             result = provider.render_preview("/tmp/model.stl")
 
         assert result == "/tmp/preview.png"
-        call_args = mock_render.call_args[0]
-        assert 'import("/tmp/model.stl")' in call_args[0]
+        # The stash version writes a temp .scad file with an import()
+        # statement and passes the file path to _render_scad_to_png.
+        scad_path = mock_render.call_args[0][0]
+        assert scad_path.endswith(".scad")
 
     @patch("kiln.generation.openscad._find_openscad", return_value="/usr/bin/openscad")
     @patch("subprocess.run")
@@ -548,7 +550,7 @@ class TestOpenSCADRenderPreview:
         provider = OpenSCADProvider(binary_path="/usr/bin/openscad")
 
         with pytest.raises(GenerationError, match="timed out"):
-            provider._render_scad_to_png("cube();", "/tmp/out.png", 800, 600)
+            provider._render_scad_to_png("/tmp/cube.scad", output_path="/tmp/out.png", width=800, height=600)
 
 
 # ---------------------------------------------------------------------------

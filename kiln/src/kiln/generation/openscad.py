@@ -286,99 +286,120 @@ class OpenSCADProvider(GenerationProvider):
         output_path: str | None = None,
         width: int = 800,
         height: int = 600,
+        camera: str | None = None,
     ) -> str:
-        """Render a PNG preview of an STL or SCAD file.
+        """Render a PNG preview of an STL or OpenSCAD file.
 
-        For STL files, wraps in an ``import()`` statement and renders.
-        For SCAD files, renders directly.
+        Uses OpenSCAD's rendering pipeline to produce a visual preview
+        image.  Agents can use this to visually inspect generated geometry
+        before sending it to the printer.
 
         Args:
-            file_path: Path to .stl or .scad file.
-            output_path: Output PNG path.  Auto-generated if omitted.
+            file_path: Path to ``.stl`` or ``.scad`` file to render.
+            output_path: Path for the output PNG.  Defaults to a temp file.
             width: Image width in pixels.
             height: Image height in pixels.
+            camera: OpenSCAD camera spec.  Defaults to auto-centering.
 
         Returns:
             Path to the rendered PNG file.
 
         Raises:
-            GenerationError: If rendering fails or format is unsupported.
+            GenerationError: If rendering fails.
         """
-        p = Path(file_path)
-        ext = p.suffix.lower()
-        if ext not in (".stl", ".scad"):
+        src = Path(file_path)
+        ext = src.suffix.lower()
+
+        if ext == ".stl":
+            # Wrap the STL in an OpenSCAD import statement.
+            # This is safe here because we control the file path — the
+            # security sandbox in generate() blocks agent-supplied imports.
+            scad_code = f'import("{src.resolve()}");'
+            scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_preview_")
+            try:
+                with os.fdopen(scad_fd, "w") as fh:
+                    fh.write(scad_code)
+                return self._render_scad_to_png(
+                    scad_path, output_path=output_path,
+                    width=width, height=height, camera=camera,
+                )
+            finally:
+                with contextlib.suppress(OSError):
+                    os.unlink(scad_path)
+        elif ext == ".scad":
+            return self._render_scad_to_png(
+                file_path, output_path=output_path,
+                width=width, height=height, camera=camera,
+            )
+        else:
             raise GenerationError(
-                f"Cannot render preview for {ext!r} — only .stl and .scad supported.",
+                f"Cannot render preview for {ext!r} files. Supported: .stl, .scad",
                 code="UNSUPPORTED_FORMAT",
             )
 
-        if output_path is None:
-            output_path = os.path.join(
-                tempfile.gettempdir(), "kiln_previews", f"{p.stem}_preview.png"
-            )
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-        if ext == ".stl":
-            # Wrap STL in a minimal SCAD import (safe — we control the path)
-            scad_code = f'import("{file_path}");'
-            return self._render_scad_to_png(scad_code, output_path, width, height)
-        else:
-            with open(file_path) as fh:
-                scad_code = fh.read()
-            return self._render_scad_to_png(scad_code, output_path, width, height)
-
     def _render_scad_to_png(
         self,
-        scad_code: str,
-        output_path: str,
-        width: int,
-        height: int,
+        scad_path: str,
+        *,
+        output_path: str | None = None,
+        width: int = 800,
+        height: int = 600,
+        camera: str | None = None,
     ) -> str:
-        """Render OpenSCAD code to PNG."""
-        scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_preview_")
+        """Render a .scad file to PNG using the OpenSCAD CLI."""
+        if output_path is None:
+            out_fd, output_path = tempfile.mkstemp(suffix=".png", prefix="kiln_preview_")
+            os.close(out_fd)
+
+        cmd = [
+            self._binary,
+            "-o", output_path,
+            f"--imgsize={width},{height}",
+            "--render",
+        ]
+        if camera:
+            cmd.extend(["--camera", camera])
+        else:
+            cmd.append("--autocenter")
+            cmd.append("--viewall")
+        cmd.append(scad_path)
+
+        work_dir = tempfile.mkdtemp(prefix="kiln_preview_")
         try:
-            with os.fdopen(scad_fd, "w") as fh:
-                fh.write(scad_code)
-
-            cmd = [
-                self._binary,
-                "-o", output_path,
-                "--render",
-                f"--imgsize={width},{height}",
-                "--autocenter",
-                "--viewall",
-                scad_path,
-            ]
-            try:
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=self._timeout,
-                )
-            except subprocess.TimeoutExpired as err:
-                raise GenerationError(
-                    f"OpenSCAD render timed out after {self._timeout}s.",
-                    code="RENDER_TIMEOUT",
-                ) from err
-
-            if result.returncode != 0:
-                stderr = (result.stderr or "").strip()[:500]
-                raise GenerationError(
-                    f"OpenSCAD render failed (code {result.returncode}): {stderr}",
-                    code="RENDER_ERROR",
-                )
-
-            if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
-                raise GenerationError(
-                    "OpenSCAD render produced no output.",
-                    code="RENDER_EMPTY",
-                )
-
-            return output_path
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=work_dir,
+            )
+        except subprocess.TimeoutExpired:
+            raise GenerationError(
+                "OpenSCAD preview render timed out after 60s.",
+                code="RENDER_TIMEOUT",
+            ) from None
+        except OSError as exc:
+            raise GenerationError(
+                f"Failed to run OpenSCAD for preview: {exc}",
+                code="OPENSCAD_EXEC_ERROR",
+            ) from exc
         finally:
-            with contextlib.suppress(OSError):
-                os.unlink(scad_path)
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+        if result.returncode != 0:
+            stderr = (result.stderr or "").strip()[:500]
+            raise GenerationError(
+                f"OpenSCAD preview failed (exit {result.returncode}): {stderr}",
+                code="RENDER_FAILED",
+            )
+
+        if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+            raise GenerationError(
+                "OpenSCAD preview produced no output image.",
+                code="RENDER_EMPTY",
+            )
+
+        return output_path
 
     def validate_scad(self, code: str) -> dict[str, Any]:
         """Validate OpenSCAD code without generating output.

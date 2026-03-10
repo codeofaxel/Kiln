@@ -8539,6 +8539,7 @@ def _get_generation_provider(provider: str = "meshy") -> GenerationProvider:
     return inst
 
 
+
 @mcp.tool()
 def list_generation_providers() -> dict:
     """List available text-to-3D generation providers.
@@ -8726,6 +8727,67 @@ def generate_model(
 
 
 @mcp.tool()
+def generate_model_from_image(
+    image_url: str,
+    provider: str = "meshy",
+    style: str | None = None,
+) -> dict:
+    """Generate a 3D model from a reference image.
+
+    Takes a URL to an image (photo, sketch, drawing) and reconstructs
+    it as a 3D model using AI.  The image should show the object
+    clearly against a clean background for best results.
+
+    **EXPERIMENTAL:** AI-generated models are experimental.  Always
+    validate the mesh before printing.
+
+    **Image tips:**
+    - Use a clear, well-lit photo of the object.
+    - Plain/solid backgrounds produce better results.
+    - Show the full object — avoid cropped or partial views.
+    - Multiple angles are not supported; use the best single view.
+
+    Args:
+        image_url: URL to the reference image (PNG, JPG).  Must be
+            publicly accessible.
+        provider: Generation provider.  Currently only ``"meshy"``
+            supports image-to-3D.
+        style: Optional style hint (``"realistic"`` or ``"sculpture"``).
+    """
+    if err := _check_auth("generate"):
+        return err
+    if provider != "meshy":
+        return _error_dict(
+            f"Image-to-3D is only supported by the 'meshy' provider, got {provider!r}.",
+            code="UNSUPPORTED_PROVIDER",
+        )
+    try:
+        gen = _get_generation_provider(provider)
+        job = gen.generate("", format="stl", style=style, image_url=image_url)
+        return {
+            "success": True,
+            "job": job.to_dict(),
+            "experimental": True,
+            "safety_notice": (
+                "AI-generated models from images are experimental. "
+                "Dimensional accuracy is not guaranteed — always validate "
+                "the mesh and check dimensions before printing."
+            ),
+            "message": f"Image-to-3D job submitted to {gen.display_name}.",
+        }
+    except GenerationAuthError as exc:
+        return _error_dict(
+            f"Failed to generate from image (auth): {exc}. Set KILN_MESHY_API_KEY.",
+            code="AUTH_ERROR",
+        )
+    except GenerationError as exc:
+        return _error_dict(f"Failed to generate from image: {exc}", code=exc.code or "GENERATION_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in generate_model_from_image")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
 def generation_status(
     job_id: str,
     provider: str = "meshy",
@@ -8795,10 +8857,10 @@ def download_generated_model(
             except Exception as exc:
                 logger.warning("%s→STL conversion failed, keeping original: %s", result.format.upper(), exc)
 
-        # Validate the mesh if it's an STL or OBJ.
+        # Validate the mesh if it's a supported format.
         validation = None
         dimensions = None
-        if result.format in ("stl", "obj"):
+        if result.format in ("stl", "obj", "glb"):
             val = validate_mesh(result.local_path)
             validation = val.to_dict()
             if val.bounding_box:
@@ -8988,8 +9050,8 @@ def generate_and_print(
         # Step 3: Download
         result = gen.download_result(job.id)
 
-        # Step 3.5: Auto-convert OBJ → STL
-        if result.format == "obj":
+        # Step 3.5: Auto-convert OBJ/GLB → STL
+        if result.format in ("obj", "glb"):
             try:
                 stl_path = convert_to_stl(result.local_path)
                 result = GenerationResult(
@@ -9001,10 +9063,10 @@ def generate_and_print(
                     prompt=result.prompt,
                 )
             except Exception as exc:
-                logger.warning("OBJ→STL conversion failed, keeping OBJ: %s", exc)
+                logger.warning("%s→STL conversion failed: %s", result.format.upper(), exc)
 
         # Step 4: Validate
-        if result.format in ("stl", "obj"):
+        if result.format in ("stl", "obj", "glb"):
             val = validate_mesh(result.local_path)
             if not val.valid:
                 return _error_dict(
@@ -9036,7 +9098,7 @@ def generate_and_print(
         # Compute dimensions for review
         gen_validation = None
         gen_dimensions = None
-        if result.format in ("stl", "obj"):
+        if result.format in ("stl", "obj", "glb"):
             val_result = validate_mesh(result.local_path)
             gen_validation = val_result.to_dict()
             if val_result.bounding_box:
@@ -9138,12 +9200,12 @@ def generate_and_print(
 def validate_generated_mesh(file_path: str) -> dict:
     """Validate a 3D mesh file for printing readiness.
 
-    Checks that the file is a valid STL or OBJ, has reasonable
+    Checks that the file is a valid STL, OBJ, or GLB, has reasonable
     dimensions, an acceptable polygon count, and is manifold
     (watertight).
 
     Args:
-        file_path: Path to an STL or OBJ file.
+        file_path: Path to an STL, OBJ, or GLB file.
     """
     try:
         result = validate_mesh(file_path)
@@ -9158,47 +9220,6 @@ def validate_generated_mesh(file_path: str) -> dict:
 
 
 @mcp.tool()
-def generate_model_from_image(
-    image_url: str,
-    provider: str = "meshy",
-    style: str | None = None,
-) -> dict:
-    """Generate a 3D model from a reference image or sketch.
-
-    Submits an image-to-3D generation job.  The image URL must be
-    publicly accessible (HTTPS).  Currently supported by Meshy only.
-
-    **Use cases:**
-    - Convert a photo of an object into a printable 3D model
-    - Turn a hand-drawn sketch into geometry
-    - Create a 3D model from a product reference image
-
-    Args:
-        image_url: Public URL of the reference image (JPEG/PNG).
-        provider: Generation backend (``"meshy"``).
-        style: Optional style (``"realistic"`` or ``"sculpture"``).
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        gen = _get_generation_provider(provider)
-        job = gen.generate("", format="stl", style=style, image_url=image_url)
-        return {
-            "success": True,
-            "job": job.to_dict(),
-            "experimental": True,
-            "message": f"Image-to-3D job submitted to {gen.display_name}.",
-        }
-    except GenerationAuthError as exc:
-        return _error_dict(f"Image-to-3D auth error: {exc}", code="AUTH_ERROR")
-    except GenerationError as exc:
-        return _error_dict(f"Image-to-3D failed: {exc}", code=exc.code or "GENERATION_ERROR")
-    except Exception as exc:
-        logger.exception("Unexpected error in generate_model_from_image")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
 def render_model_preview(
     file_path: str,
     width: int = 800,
@@ -9207,10 +9228,14 @@ def render_model_preview(
     """Render a PNG preview of a 3D model for visual inspection.
 
     Uses OpenSCAD to render an STL or SCAD file to a PNG image.
-    Useful for visually inspecting generated geometry before printing.
+    This lets agents visually inspect generated geometry before
+    printing -- check proportions, verify the shape matches intent,
+    and spot obvious defects.
+
+    Requires OpenSCAD to be installed on the system.
 
     Args:
-        file_path: Path to an STL or SCAD file.
+        file_path: Path to an ``.stl`` or ``.scad`` file.
         width: Image width in pixels (default 800).
         height: Image height in pixels (default 600).
     """
@@ -9222,7 +9247,8 @@ def render_model_preview(
         return {
             "success": True,
             "preview_path": png_path,
-            "dimensions": f"{width}x{height}",
+            "width": width,
+            "height": height,
             "message": f"Preview rendered to {png_path}.",
         }
     except GenerationError as exc:

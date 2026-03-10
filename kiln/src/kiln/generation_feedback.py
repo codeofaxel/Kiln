@@ -23,10 +23,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Maximum prompt length for Meshy API.
+# Default maximum prompt length (Meshy API limit).  Use
+# ``get_provider_prompt_limit()`` for provider-aware limits.
 _MAX_PROMPT_LENGTH = 600
 
-# Per-provider prompt length limits (characters).
+# Per-provider prompt length limits.  Providers with larger budgets
+# allow richer design-intelligence constraints to be injected.
 _PROVIDER_PROMPT_LIMITS: dict[str, int] = {
     "meshy": 600,
     "gemini": 10_000,
@@ -39,11 +41,9 @@ _PROVIDER_PROMPT_LIMITS: dict[str, int] = {
 def get_provider_prompt_limit(provider: str | None = None) -> int:
     """Return the maximum prompt length for a provider.
 
-    Args:
-        provider: Provider name.  Defaults to Meshy's limit.
-
-    Returns:
-        Maximum prompt length in characters.
+    :param provider: Provider name (e.g. ``"meshy"``).  Returns the
+        default (600) when ``None``.
+    :returns: Maximum prompt length in characters.
     """
     if provider is None:
         return _MAX_PROMPT_LENGTH
@@ -468,16 +468,17 @@ def generate_improved_prompt(
     """Construct an improved prompt incorporating feedback constraints.
 
     Adds physical constraints to the end of the original prompt without
-    modifying the creative intent.
+    modifying the creative intent. Keeps the total prompt under the
+    provider-specific limit (or ``max_length`` if given explicitly).
 
     :param original_prompt: The original generation prompt.
     :param feedback: List of :class:`PrintFeedback` items to apply.
     :param iteration: Which retry iteration this is (default 1).
-    :param provider: Provider name for provider-aware length limits.
-    :param max_length: Explicit max length override.
+    :param provider: Provider name for prompt-length limit lookup.
+    :param max_length: Explicit maximum prompt length (overrides provider lookup).
     :returns: An :class:`ImprovedPrompt` with the improved text.
     """
-    limit = max_length or get_provider_prompt_limit(provider)
+    limit = max_length if max_length is not None else get_provider_prompt_limit(provider)
 
     # Collect unique constraints from all feedback
     all_constraints: list[str] = []
@@ -494,6 +495,7 @@ def generate_improved_prompt(
     if all_constraints:
         requirements = ". ".join(all_constraints)
         suffix = f" Requirements: {requirements}."
+        # Trim original prompt if needed to fit within limit
         max_original_len = limit - len(suffix)
         if max_original_len < 20:
             suffix = f" Requirements: {'. '.join(all_constraints[:3])}."
@@ -726,23 +728,30 @@ def enhance_prompt_with_design_intelligence(
     if cantilever_limit:
         constraints.append(f"max cantilever length {cantilever_limit}mm")
 
-    # Printability basics
-    constraints.append("flat bottom for bed adhesion")
-    constraints.append("single solid body, no floating parts")
-
-    # Pattern-specific design rules (not just orientation)
-    max_constraint_count = 8 if max_length <= 600 else 15
+    # Pattern-specific constraints — include design rules, not just orientation
     for pattern in brief.applicable_patterns[:2]:
         if pattern.print_orientation:
             constraints.append(pattern.print_orientation_reason)
+        # Include the most important pattern-specific rule
+        if hasattr(pattern, "design_rules") and pattern.design_rules:
+            for key in ("min_arm_thickness_mm", "min_wall_thickness_mm"):
+                val = pattern.design_rules.get(key)
+                if val:
+                    constraints.append(f"{pattern.display_name}: min {key.replace('_', ' ')} {val}")
+                    break
 
-    # Include combined_guidance expert rules when prompt budget allows
-    if max_length > 800:
-        guidance = getattr(brief, "combined_guidance", [])
-        if isinstance(guidance, list):
-            for g in guidance[:3]:
-                if isinstance(g, str) and g not in constraints:
-                    constraints.append(g)
+    # Printability fundamentals
+    constraints.append("flat bottom for bed adhesion")
+    constraints.append("single solid body, no floating parts")
+
+    # Inject top combined_guidance strings (expert rules) when budget allows.
+    # These are the most actionable material/requirement-specific notes.
+    if max_length > 800 and brief.combined_guidance:
+        for guidance in brief.combined_guidance[:3]:
+            # Trim long guidance strings to fit budget
+            short = guidance[:120].rstrip(". ") if len(guidance) > 120 else guidance.rstrip(". ")
+            if short not in constraints:
+                constraints.append(short)
 
     if not constraints:
         return ImprovedPrompt(
@@ -754,8 +763,9 @@ def enhance_prompt_with_design_intelligence(
             expected_improvements=[],
         )
 
-    # Build the enhanced prompt
-    requirements = ". ".join(constraints[:max_constraint_count])
+    # Build the enhanced prompt — use more constraints when budget allows
+    max_constraints = 8 if max_length <= 600 else 15
+    requirements = ". ".join(constraints[:max_constraints])
     suffix = f" Requirements: {requirements}."
 
     max_original = max_length - len(suffix)

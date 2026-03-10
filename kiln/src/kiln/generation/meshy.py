@@ -102,12 +102,14 @@ class MeshyProvider(GenerationProvider):
             prompt: Text description (max 600 characters).
             format: Desired output format (stored for later download).
             style: Optional art style (``"realistic"`` or ``"sculpture"``).
+            **kwargs: Pass ``image_url`` to use image-to-3D instead of
+                text-to-3D.
 
         Returns:
             :class:`GenerationJob` with ``PENDING`` status.
         """
         # Route to image-to-3D if an image_url is provided.
-        image_url = kwargs.get("image_url")
+        image_url: str | None = kwargs.get("image_url")
         if image_url:
             return self._generate_from_image(image_url, format=format, style=style)
 
@@ -134,6 +136,56 @@ class MeshyProvider(GenerationProvider):
             id=task_id,
             provider=self.name,
             prompt=prompt,
+            status=GenerationStatus.PENDING,
+            progress=0,
+            created_at=time.time(),
+            format=format,
+            style=style,
+        )
+
+    def _generate_from_image(
+        self,
+        image_url: str,
+        *,
+        format: str = "stl",
+        style: str | None = None,
+    ) -> GenerationJob:
+        """Submit an image-to-3D generation task to Meshy.
+
+        Args:
+            image_url: URL of a reference image to reconstruct as 3D.
+            format: Desired output format (stored for later download).
+            style: Optional art style.
+
+        Returns:
+            :class:`GenerationJob` with ``PENDING`` status.
+        """
+        body: dict[str, Any] = {
+            "image_url": image_url,
+            "ai_model": "meshy-6",
+            "topology": "triangle",
+            "target_polycount": 30000,
+        }
+        if style:
+            body["art_style"] = style
+
+        resp = self._request("POST", f"{_BASE_URL}/image-to-3d", json_body=body)
+
+        data = resp.json()
+        task_id = data.get("result", "")
+        if not task_id:
+            raise GenerationError(
+                "Meshy image-to-3D API returned no task ID.",
+                code="INVALID_RESPONSE",
+            )
+
+        self._prompts[task_id] = f"[image-to-3d] {image_url}"
+        self._image_jobs.add(task_id)
+
+        return GenerationJob(
+            id=task_id,
+            provider=self.name,
+            prompt=f"[image-to-3d] {image_url}",
             status=GenerationStatus.PENDING,
             progress=0,
             created_at=time.time(),
@@ -237,47 +289,6 @@ class MeshyProvider(GenerationProvider):
             format=ext,
             file_size_bytes=file_size,
             prompt=prompt,
-        )
-
-    def _generate_from_image(
-        self,
-        image_url: str,
-        *,
-        format: str = "stl",
-        style: str | None = None,
-    ) -> GenerationJob:
-        """Submit an image-to-3D task to Meshy.
-
-        Uses the ``/v2/image-to-3d`` endpoint.  The image URL must be
-        publicly accessible.
-        """
-        body: dict[str, Any] = {
-            "image_url": image_url,
-            "ai_model": "meshy-6",
-            "topology": "triangle",
-            "target_polycount": 30000,
-        }
-        if style:
-            body["art_style"] = style
-
-        resp = self._request("POST", f"{_BASE_URL}/image-to-3d", json_body=body)
-        data = resp.json()
-        task_id = data.get("result", "")
-        if not task_id:
-            raise GenerationError("Meshy image-to-3D returned no task ID.", code="INVALID_RESPONSE")
-
-        self._image_jobs.add(task_id)
-        self._prompts[task_id] = f"[image] {image_url}"
-
-        return GenerationJob(
-            id=task_id,
-            provider=self.name,
-            prompt=f"[image] {image_url}",
-            status=GenerationStatus.PENDING,
-            progress=0,
-            created_at=time.time(),
-            format=format,
-            style=style,
         )
 
     def list_styles(self) -> list[str]:

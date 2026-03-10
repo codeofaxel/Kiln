@@ -1822,7 +1822,7 @@ def preflight(ctx: click.Context, file_path: str | None, material: str | None, j
 @click.option("--skip-preflight", is_flag=True, help="Skip automatic pre-print safety checks.")
 @click.option("--dry-run", is_flag=True, help="Preview what would happen without actually printing.")
 @click.option("--plate", "plate_number", type=click.IntRange(min=1), default=1, help="Plate number for multi-plate 3MF files (Bambu). Default 1.")
-@click.option("--use-ams", is_flag=True, help="Enable AMS filament feeding (Bambu).")
+@click.option("--use-ams/--no-ams", default=None, help="Enable AMS filament feeding (Bambu). Default: auto-detect. Use --no-ams to force external spool.")
 @click.option(
     "--ams-mapping",
     type=str,
@@ -1840,7 +1840,7 @@ def print_cmd(
     skip_preflight: bool,
     dry_run: bool,
     plate_number: int,
-    use_ams: bool,
+    use_ams: bool | None,
     ams_mapping: str | None,
     no_nozzle_check: bool,
     json_mode: bool,
@@ -2055,8 +2055,8 @@ def print_cmd(
                         sys.exit(1)
                     print_kwargs["ams_mapping"] = parsed_ams_mapping
                     print_kwargs["use_ams"] = True
-                elif use_ams:
-                    print_kwargs["use_ams"] = True
+                elif use_ams is not None:
+                    print_kwargs["use_ams"] = use_ams
                 if no_nozzle_check:
                     print_kwargs["nozzle_clog_detect"] = False
                 # Pass local file path so the adapter can inspect 3MF

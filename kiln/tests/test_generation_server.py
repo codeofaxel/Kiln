@@ -11,7 +11,6 @@ Covers:
 
 from __future__ import annotations
 
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -25,12 +24,9 @@ from kiln.generation.base import (
     MeshValidationResult,
 )
 from kiln.printers.base import (
-    PrinterError,
-    PrintResult,
     UploadResult,
 )
 from kiln.server import (
-    _error_dict,
     _generation_providers,
     _get_generation_provider,
     await_generation,
@@ -41,7 +37,6 @@ from kiln.server import (
     list_generation_providers,
     validate_generated_mesh,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -662,7 +657,7 @@ class TestDownloadDimensions:
     @patch("kiln.server.validate_mesh")
     @patch("kiln.server._get_generation_provider")
     def test_dimensions_none_for_non_stl(self, mock_get_provider, mock_validate, _auth):
-        """GLB format should have no dimensions (no validation)."""
+        """Non-convertible format should have no dimensions (no validation)."""
         provider = MagicMock()
         provider.download_result.return_value = _make_result(fmt="fbx")
         mock_get_provider.return_value = provider
