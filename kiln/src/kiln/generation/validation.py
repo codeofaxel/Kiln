@@ -1164,3 +1164,363 @@ def rescale_stl(
         "original_dimensions": orig_dims,
         "new_dimensions": new_dims,
     }
+
+
+# ---------------------------------------------------------------------------
+# Print orientation optimization
+# ---------------------------------------------------------------------------
+
+
+def optimize_orientation(
+    file_path: str,
+    *,
+    output_path: str | None = None,
+    candidates: int = 6,
+) -> dict[str, Any]:
+    """Find the print orientation that minimizes overhangs.
+
+    Tests the mesh in several candidate rotations (around X and Y axes)
+    and picks the orientation with the fewest overhang triangles and
+    largest bed contact area.
+
+    Only operates on STL files (binary read/write).
+
+    Args:
+        file_path: Path to the STL file.
+        output_path: Where to write the re-oriented STL.  Defaults to
+            overwriting the input.
+        candidates: Number of candidate rotations per axis (default 6,
+            tests 0/30/60/90/120/150 degrees around X and Y = 36 combos).
+
+    Returns:
+        Dict with best rotation angles, overhang stats, and output path.
+    """
+    path = Path(file_path)
+    errors: list[str] = []
+    triangles, vertices = _parse_stl(path, errors)
+    if errors:
+        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+    if not triangles:
+        raise ValueError("STL contains no geometry.")
+
+    step = 180.0 / candidates
+    angles = [i * step for i in range(candidates)]
+
+    best_score = -1.0
+    best_rx = 0.0
+    best_ry = 0.0
+    best_tris: list[tuple[tuple[float, ...], ...]] = triangles
+
+    for rx in angles:
+        for ry in angles:
+            if rx == 0 and ry == 0:
+                rotated = triangles
+            else:
+                rotated = _rotate_triangles(triangles, rx, ry)
+
+            # Score: minimize overhangs, maximize bed contact
+            overhang_count = 0
+            bed_contact = 0.0
+            for tri in rotated:
+                v0, v1, v2 = tri
+                e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
+                e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
+                # Full cross product for area and normal
+                cx = e1[1] * e2[2] - e1[2] * e2[1]
+                cy = e1[2] * e2[0] - e1[0] * e2[2]
+                cz = e1[0] * e2[1] - e1[1] * e2[0]
+                area_2 = math.sqrt(cx * cx + cy * cy + cz * cz)
+                if area_2 < 1e-10:
+                    continue
+
+                nz_norm = cz / area_2
+                if nz_norm < -0.7:  # face points strongly downward
+                    overhang_count += 1
+                # Bottom face contributes to bed contact
+                min_z = min(v0[2], v1[2], v2[2])
+                if min_z < 0.5 and nz_norm < -0.9:
+                    bed_contact += area_2 / 2.0
+
+            # Score: less overhangs is better, more bed contact is better
+            score = bed_contact * 10.0 - overhang_count
+            if score > best_score:
+                best_score = score
+                best_rx = rx
+                best_ry = ry
+                best_tris = rotated
+
+    # Center the best orientation on the build plate (z_min = 0)
+    all_z = [v[2] for tri in best_tris for v in tri]
+    z_shift = -min(all_z) if all_z else 0.0
+    if abs(z_shift) > 1e-6:
+        best_tris = [
+            tuple((v[0], v[1], v[2] + z_shift) for v in tri)
+            for tri in best_tris
+        ]
+
+    out = output_path or file_path
+    _write_binary_stl(best_tris, out)
+
+    # Analyze the result
+    analysis = analyze_mesh(out)
+
+    return {
+        "path": out,
+        "rotation_x_deg": round(best_rx, 1),
+        "rotation_y_deg": round(best_ry, 1),
+        "overhang_percentage": analysis.overhang_percentage,
+        "max_overhang_angle": analysis.max_overhang_angle_deg,
+        "printability_score": analysis.printability_score,
+        "dimensions_mm": analysis.dimensions_mm,
+    }
+
+
+def _rotate_triangles(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    rx_deg: float,
+    ry_deg: float,
+) -> list[tuple[tuple[float, ...], ...]]:
+    """Rotate all triangles around X then Y axis (degrees)."""
+    rx = math.radians(rx_deg)
+    ry = math.radians(ry_deg)
+    cos_x, sin_x = math.cos(rx), math.sin(rx)
+    cos_y, sin_y = math.cos(ry), math.sin(ry)
+
+    def rot(v: tuple[float, ...]) -> tuple[float, ...]:
+        x, y, z = v[0], v[1], v[2]
+        # Rotate around X
+        y2 = y * cos_x - z * sin_x
+        z2 = y * sin_x + z * cos_x
+        # Rotate around Y
+        x3 = x * cos_y + z2 * sin_y
+        z3 = -x * sin_y + z2 * cos_y
+        return (x3, y2, z3)
+
+    return [tuple(rot(v) for v in tri) for tri in triangles]
+
+
+# ---------------------------------------------------------------------------
+# Support volume estimation
+# ---------------------------------------------------------------------------
+
+
+def estimate_support_volume(file_path: str) -> dict[str, Any]:
+    """Estimate the volume of support material needed for printing.
+
+    Projects each overhang triangle downward to the build plate (z=0)
+    and sums the prism volumes.  This is a rough estimate — real slicer
+    support generation is more sophisticated.
+
+    Args:
+        file_path: Path to .stl, .obj, or .glb file.
+
+    Returns:
+        Dict with support volume estimate and overhang statistics.
+    """
+    path = Path(file_path)
+    ext = path.suffix.lower()
+    errors: list[str] = []
+
+    if ext == ".stl":
+        triangles, _ = _parse_stl(path, errors)
+    elif ext == ".obj":
+        triangles, _ = _parse_obj(path, errors)
+    elif ext == ".glb":
+        triangles, _ = _parse_glb(path, errors)
+    else:
+        raise ValueError(f"Unsupported format: {ext}")
+
+    if errors:
+        raise ValueError(f"Failed to parse: {'; '.join(errors)}")
+
+    support_volume = 0.0
+    overhang_area = 0.0
+    overhang_count = 0
+    total_count = 0
+
+    for tri in triangles:
+        v0, v1, v2 = tri
+        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
+        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
+        cross = (
+            e1[1] * e2[2] - e1[2] * e2[1],
+            e1[2] * e2[0] - e1[0] * e2[2],
+            e1[0] * e2[1] - e1[1] * e2[0],
+        )
+        area_2 = math.sqrt(cross[0] ** 2 + cross[1] ** 2 + cross[2] ** 2)
+        if area_2 < 1e-10:
+            continue
+
+        total_count += 1
+        nz = cross[2] / area_2  # normalized Z of face normal
+
+        # Overhang: face points downward past 45 degrees
+        if nz < -0.707:  # cos(45°) ≈ 0.707
+            tri_area = area_2 / 2.0
+            overhang_area += tri_area
+            overhang_count += 1
+
+            # Approximate support volume: project triangle down to z=0
+            avg_z = (v0[2] + v1[2] + v2[2]) / 3.0
+            if avg_z > 0:
+                # Prism volume = projected area × height
+                # Projected XY area ≈ tri_area × |nz| (projection onto XY)
+                proj_area = tri_area * abs(nz)
+                support_volume += proj_area * avg_z
+
+    # Estimate support weight (typical PLA density ~1.24 g/cm³)
+    support_volume_cm3 = support_volume / 1000.0
+    support_weight_g = support_volume_cm3 * 1.24
+
+    return {
+        "support_volume_mm3": round(support_volume, 1),
+        "support_volume_cm3": round(support_volume_cm3, 2),
+        "support_weight_g": round(support_weight_g, 1),
+        "overhang_area_mm2": round(overhang_area, 1),
+        "overhang_triangle_count": overhang_count,
+        "total_triangles": total_count,
+        "overhang_percentage": round(overhang_count / total_count * 100, 1) if total_count else 0.0,
+        "needs_supports": overhang_count > 0,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Enhanced mesh repair: hole closing
+# ---------------------------------------------------------------------------
+
+
+def repair_stl_advanced(
+    file_path: str,
+    *,
+    output_path: str | None = None,
+    close_holes: bool = True,
+) -> dict[str, Any]:
+    """Enhanced STL repair: degenerate removal, normal recompute, hole closing.
+
+    Finds boundary edges (edges shared by only one triangle) and attempts
+    to close small holes by fan-triangulating the boundary loop.
+
+    Args:
+        file_path: Path to the STL file.
+        output_path: Output path.  Defaults to overwriting input.
+        close_holes: Whether to attempt hole closing (default True).
+
+    Returns:
+        Dict with repair statistics.
+    """
+    path = Path(file_path)
+    errors: list[str] = []
+    triangles, _ = _parse_stl(path, errors)
+    if errors:
+        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+    if not triangles:
+        raise ValueError("STL contains no geometry.")
+
+    # Phase 1: Remove degenerate triangles
+    cleaned: list[tuple[tuple[float, ...], ...]] = []
+    degenerate_removed = 0
+    for tri in triangles:
+        v0, v1, v2 = tri
+        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
+        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
+        mag = math.sqrt(
+            (e1[1] * e2[2] - e1[2] * e2[1]) ** 2
+            + (e1[2] * e2[0] - e1[0] * e2[2]) ** 2
+            + (e1[0] * e2[1] - e1[1] * e2[0]) ** 2
+        )
+        if mag < 1e-10:
+            degenerate_removed += 1
+            continue
+        cleaned.append(tri)
+
+    # Phase 2: Find and close boundary holes
+    holes_closed = 0
+    new_triangles: list[tuple[tuple[float, ...], ...]] = []
+
+    if close_holes and cleaned:
+        # Find boundary edges (edges with exactly 1 adjacent triangle)
+        edge_count: dict[tuple[tuple[float, ...], tuple[float, ...]], int] = {}
+        # Track directed edges for winding order
+        directed: dict[tuple[tuple[float, ...], tuple[float, ...]], bool] = {}
+
+        for tri in cleaned:
+            for j in range(3):
+                va, vb = tri[j], tri[(j + 1) % 3]
+                edge = (min(va, vb), max(va, vb))
+                edge_count[edge] = edge_count.get(edge, 0) + 1
+                directed[(va, vb)] = True
+
+        boundary_edges: list[tuple[tuple[float, ...], tuple[float, ...]]] = []
+        for edge, count in edge_count.items():
+            if count == 1:
+                # Determine correct direction from the directed edge map
+                if (edge[0], edge[1]) in directed:
+                    # Reverse to close the hole (opposite winding)
+                    boundary_edges.append((edge[1], edge[0]))
+                else:
+                    boundary_edges.append((edge[0], edge[1]))
+
+        # Try to form loops from boundary edges
+        if boundary_edges:
+            loops = _find_boundary_loops(boundary_edges)
+            for loop in loops:
+                if len(loop) < 3 or len(loop) > 50:
+                    continue  # Skip trivially small or huge holes
+                # Fan triangulate from first vertex
+                center = loop[0]
+                for i in range(1, len(loop) - 1):
+                    new_triangles.append((center, loop[i], loop[i + 1]))
+                holes_closed += 1
+
+    all_tris = cleaned + new_triangles
+    out = output_path or file_path
+    _write_binary_stl(all_tris, out)
+
+    return {
+        "path": out,
+        "original_triangles": len(triangles),
+        "cleaned_triangles": len(cleaned),
+        "degenerate_removed": degenerate_removed,
+        "holes_closed": holes_closed,
+        "triangles_added": len(new_triangles),
+        "final_triangles": len(all_tris),
+    }
+
+
+def _find_boundary_loops(
+    edges: list[tuple[tuple[float, ...], tuple[float, ...]]],
+) -> list[list[tuple[float, ...]]]:
+    """Find closed loops from a set of directed boundary edges.
+
+    Returns a list of vertex loops (each a list of vertices forming
+    a closed boundary).
+    """
+    # Build adjacency: vertex → next vertex
+    adj: dict[tuple[float, ...], tuple[float, ...]] = {}
+    for a, b in edges:
+        adj[a] = b
+
+    visited: set[tuple[float, ...]] = set()
+    loops: list[list[tuple[float, ...]]] = []
+
+    for start in adj:
+        if start in visited:
+            continue
+        loop: list[tuple[float, ...]] = []
+        current = start
+        for _ in range(len(adj) + 1):  # safety limit
+            if current in visited and current != start:
+                break
+            if current == start and len(loop) > 0:
+                break
+            visited.add(current)
+            loop.append(current)
+            nxt = adj.get(current)
+            if nxt is None:
+                break
+            current = nxt
+
+        if len(loop) >= 3:
+            loops.append(loop)
+
+    return loops

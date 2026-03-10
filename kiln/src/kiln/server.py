@@ -9621,6 +9621,338 @@ def iterate_design(
     }
 
 
+@mcp.tool()
+def optimize_print_orientation(file_path: str, output_path: str = "") -> dict:
+    """Auto-rotate a mesh to minimize overhangs and maximize bed contact.
+
+    Tests multiple candidate orientations and picks the one with the
+    best printability score.  Re-orients the mesh and places it flat
+    on the build plate (z_min = 0).
+
+    :param file_path: Path to the STL file.
+    :param output_path: Output path.  Defaults to overwriting the input.
+    :returns: Dict with rotation angles, overhang stats, and new dimensions.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import optimize_orientation
+
+        result = optimize_orientation(file_path, output_path=output_path or None)
+        return {"status": "success", **result}
+    except Exception as exc:
+        return _error_dict(f"Orientation optimization failed: {exc}", code="ORIENT_ERROR")
+
+
+@mcp.tool()
+def estimate_support_material(file_path: str) -> dict:
+    """Estimate support material needed for a mesh.
+
+    Analyzes overhang triangles and projects them to the build plate
+    to estimate the volume and weight of support material required.
+
+    :param file_path: Path to .stl, .obj, or .glb file.
+    :returns: Dict with support volume (mm³), weight (g), and overhang stats.
+    """
+    try:
+        from kiln.generation.validation import estimate_support_volume
+
+        result = estimate_support_volume(file_path)
+        return {"status": "success", **result}
+    except Exception as exc:
+        return _error_dict(f"Support estimation failed: {exc}", code="SUPPORT_ERROR")
+
+
+@mcp.tool()
+def repair_mesh_advanced(
+    file_path: str,
+    output_path: str = "",
+    close_holes: bool = True,
+) -> dict:
+    """Advanced mesh repair: degenerate removal + hole closing.
+
+    Goes beyond basic repair by finding boundary edges (edges shared
+    by only one triangle) and closing small holes via fan triangulation.
+
+    :param file_path: Path to the STL file.
+    :param output_path: Output path.  Defaults to overwriting the input.
+    :param close_holes: Whether to attempt closing holes (default True).
+    :returns: Dict with repair statistics.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import repair_stl_advanced
+
+        result = repair_stl_advanced(
+            file_path,
+            output_path=output_path or None,
+            close_holes=close_holes,
+        )
+        return {"status": "success", **result}
+    except Exception as exc:
+        return _error_dict(f"Advanced repair failed: {exc}", code="REPAIR_ERROR")
+
+
+@mcp.tool()
+def generate_template_variations(
+    template_id: str,
+    variation_count: int = 3,
+    parameter_ranges: dict[str, list[float]] | None = None,
+) -> dict:
+    """Generate multiple variations of a parametric template.
+
+    Creates N variations by sampling parameter values across their
+    valid ranges.  Useful for exploring design space or offering
+    choices to the user.
+
+    :param template_id: Template ID (e.g. ``"phone_stand"``).
+    :param variation_count: Number of variations (1-10, default 3).
+    :param parameter_ranges: Optional overrides ``{param: [min, max]}``.
+    :returns: Dict with list of generated variations and their files.
+    """
+    if err := _check_auth("generate"):
+        return err
+    import json
+    from string import Template
+
+    variation_count = max(1, min(10, variation_count))
+
+    try:
+        tpl_path = os.path.join(os.path.dirname(__file__), "data", "design_templates.json")
+        with open(tpl_path) as fh:
+            templates = json.load(fh)
+
+        tpl = templates.get(template_id)
+        if not tpl:
+            available = [k for k in templates if not k.startswith("_")]
+            return _error_dict(
+                f"Unknown template '{template_id}'. Available: {available}",
+                code="UNKNOWN_TEMPLATE",
+            )
+
+        gen = _get_generation_provider("openscad")
+        variations: list[dict[str, Any]] = []
+
+        for i in range(variation_count):
+            params: dict[str, Any] = {}
+            for pname, pdef in tpl.get("parameters", {}).items():
+                if pdef.get("type") == "string":
+                    params[pname] = pdef["default"]
+                    continue
+
+                # Use custom range or template defaults
+                if parameter_ranges and pname in parameter_ranges:
+                    pmin, pmax = parameter_ranges[pname]
+                else:
+                    pmin = pdef.get("min", pdef["default"] * 0.5)
+                    pmax = pdef.get("max", pdef["default"] * 1.5)
+
+                # Evenly space across range for deterministic exploration
+                if variation_count == 1:
+                    val = pdef["default"]
+                else:
+                    t = i / (variation_count - 1)
+                    val = pmin + t * (pmax - pmin)
+                params[pname] = round(val, 1)
+
+            scad_code = Template(tpl["scad_template"]).safe_substitute(params)
+            job = gen.generate(scad_code, format="stl")
+
+            var_entry: dict[str, Any] = {
+                "variation": i + 1,
+                "parameters": params,
+                "status": job.status.value,
+            }
+
+            if job.status.value == "succeeded":
+                dl = gen.download_result(job.id)
+                var_entry["file_path"] = dl.local_path
+                var_entry["file_size_bytes"] = dl.file_size_bytes
+
+            variations.append(var_entry)
+
+        return {
+            "status": "success",
+            "template": template_id,
+            "variation_count": len(variations),
+            "variations": variations,
+        }
+    except GenerationError as exc:
+        return _error_dict(f"Variation generation failed: {exc}", code=exc.code or "GENERATION_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in generate_template_variations")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def design_advisor(prompt: str, printer_model: str = "") -> dict:
+    """Recommend the best approach for creating a 3D printable design.
+
+    Analyzes the design prompt and recommends:
+    - Which generation approach to use (template, OpenSCAD, or AI)
+    - Which template matches (if any)
+    - Material recommendations
+    - Key constraints to consider
+    - Estimated complexity
+
+    :param prompt: Text description of the desired object.
+    :param printer_model: Optional printer model for constraints.
+    :returns: Dict with recommendations.
+    """
+    import json
+
+    prompt_lower = prompt.lower()
+    recommendations: dict[str, Any] = {"prompt": prompt}
+
+    # Check for template matches
+    try:
+        tpl_path = os.path.join(os.path.dirname(__file__), "data", "design_templates.json")
+        with open(tpl_path) as fh:
+            templates = json.load(fh)
+
+        matching_templates: list[dict[str, str]] = []
+        template_keywords: dict[str, list[str]] = {
+            "phone_stand": ["phone", "stand", "holder", "dock", "cradle"],
+            "hook": ["hook", "hanger", "wall hook", "coat hook"],
+            "box_with_lid": ["box", "container", "case", "enclosure", "storage"],
+            "cable_clip": ["cable", "clip", "wire", "cord", "organizer"],
+            "shelf_bracket": ["bracket", "shelf", "support", "mount", "l-bracket"],
+            "nameplate": ["nameplate", "name", "sign", "desk", "plaque", "label"],
+        }
+
+        for tid, keywords in template_keywords.items():
+            if any(kw in prompt_lower for kw in keywords):
+                tpl = templates.get(tid, {})
+                matching_templates.append({
+                    "template_id": tid,
+                    "display_name": tpl.get("display_name", tid),
+                    "description": tpl.get("description", ""),
+                })
+
+        recommendations["matching_templates"] = matching_templates
+    except Exception:
+        recommendations["matching_templates"] = []
+
+    # Determine best approach
+    is_geometric = any(
+        w in prompt_lower
+        for w in [
+            "box", "bracket", "mount", "holder", "clip", "hook",
+            "shelf", "stand", "frame", "enclosure", "gear", "hinge",
+            "screw", "nut", "bolt", "washer", "spacer", "bushing",
+        ]
+    )
+    is_organic = any(
+        w in prompt_lower
+        for w in [
+            "figure", "sculpture", "animal", "character", "face",
+            "statue", "bust", "organic", "creature", "dragon",
+            "plant", "flower", "tree", "body",
+        ]
+    )
+    is_simple = len(prompt.split()) < 8 and not is_organic
+
+    if recommendations["matching_templates"]:
+        approach = "template"
+        approach_reason = (
+            f"Template '{recommendations['matching_templates'][0]['template_id']}' "
+            f"matches your request. Templates produce reliable, parameterized designs."
+        )
+        confidence = "high"
+    elif is_geometric and not is_organic:
+        approach = "openscad"
+        approach_reason = (
+            "Geometric/mechanical objects work best with OpenSCAD parametric code. "
+            "Have the AI write OpenSCAD code, then compile it locally."
+        )
+        confidence = "high"
+    elif is_organic:
+        approach = "meshy"
+        approach_reason = (
+            "Organic/sculptural objects work best with AI mesh generation. "
+            "Meshy or similar providers excel at organic shapes."
+        )
+        confidence = "medium"
+    else:
+        approach = "openscad" if is_simple else "meshy"
+        approach_reason = (
+            "Could work with either approach. "
+            "OpenSCAD for precise dimensions, Meshy for complex/artistic shapes."
+        )
+        confidence = "low"
+
+    recommendations["recommended_approach"] = approach
+    recommendations["approach_reason"] = approach_reason
+    recommendations["confidence"] = confidence
+
+    # Complexity estimate
+    word_count = len(prompt.split())
+    if word_count < 5:
+        complexity = "simple"
+    elif word_count < 15:
+        complexity = "moderate"
+    else:
+        complexity = "complex"
+    recommendations["estimated_complexity"] = complexity
+
+    # Material recommendations
+    try:
+        from kiln.design_intelligence import get_design_constraints
+
+        brief = get_design_constraints(prompt, printer_model=printer_model or None)
+        if brief.recommended_material:
+            mat = brief.recommended_material
+            recommendations["recommended_material"] = {
+                "name": mat.material.display_name if mat.material else mat.material_id,
+                "reason": mat.reason,
+            }
+        if brief.combined_rules:
+            rules = brief.combined_rules
+            key_constraints = []
+            if rules.get("min_wall_thickness_mm"):
+                key_constraints.append(f"Min wall: {rules['min_wall_thickness_mm']}mm")
+            if rules.get("max_unsupported_overhang_deg"):
+                key_constraints.append(f"Max overhang: {rules['max_unsupported_overhang_deg']}°")
+            recommendations["key_constraints"] = key_constraints
+    except Exception:
+        pass
+
+    # Suggested workflow
+    if approach == "template":
+        tid = recommendations["matching_templates"][0]["template_id"]
+        recommendations["suggested_workflow"] = [
+            f"1. list_design_templates() — review '{tid}' parameters",
+            f"2. generate_from_template('{tid}', ...) — customize parameters",
+            "3. analyze_mesh_geometry(file) — verify printability",
+            "4. estimate_print_time(file) — check time/filament",
+            "5. Upload and print",
+        ]
+    elif approach == "openscad":
+        recommendations["suggested_workflow"] = [
+            "1. Write OpenSCAD code for the design",
+            "2. validate_openscad_code(code) — check for errors",
+            "3. generate_model(code, provider='openscad') — compile",
+            "4. analyze_mesh_geometry(file) — verify printability",
+            "5. optimize_print_orientation(file) — if needed",
+            "6. estimate_print_time(file) — check time/filament",
+            "7. Upload and print",
+        ]
+    else:
+        recommendations["suggested_workflow"] = [
+            "1. generate_model(prompt, provider='meshy') — AI generation",
+            "2. await_generation(job_id) — wait for completion",
+            "3. download_generated_model(job_id) — auto-converts to STL",
+            "4. analyze_mesh_geometry(file) — verify printability",
+            "5. repair_mesh(file) — fix common issues",
+            "6. optimize_print_orientation(file) — minimize supports",
+            "7. estimate_print_time(file) — check time/filament",
+            "8. Upload and print",
+        ]
+
+    return {"status": "success", **recommendations}
+
+
 # ---------------------------------------------------------------------------
 # Firmware update tools
 # ---------------------------------------------------------------------------

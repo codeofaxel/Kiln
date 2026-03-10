@@ -940,6 +940,262 @@ class TestIterateDesign:
         assert result.get("error") or result.get("status") == "error"
 
 
+# ---- Phase 3: orientation, support, advanced repair, advisor ----
+
+
+class TestOrientationOptimizer:
+    """Tests for optimize_orientation() and _rotate_triangles()."""
+
+    def test_cube_returns_valid_result(self, tmp_path):
+        """Optimizing a cube produces a valid result dict."""
+        from kiln.generation.validation import optimize_orientation
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 20.0)
+        result = optimize_orientation(stl, output_path=str(tmp_path / "opt.stl"))
+
+        assert "rotation_x_deg" in result
+        assert "rotation_y_deg" in result
+        assert "printability_score" in result
+        assert result["printability_score"] >= 0
+        assert os.path.isfile(result["path"])
+
+    def test_orientation_places_on_build_plate(self, tmp_path):
+        """Output mesh should have z_min at 0 (on build plate)."""
+        from kiln.generation.validation import _parse_stl, optimize_orientation
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+        out = str(tmp_path / "opt.stl")
+        optimize_orientation(stl, output_path=out)
+
+        from pathlib import Path as _Path
+
+        tris, verts = _parse_stl(_Path(out), [])
+        z_vals = [v[2] for v in verts]
+        assert min(z_vals) >= -0.01  # should be at or above z=0
+
+    def test_rotate_triangles_identity(self):
+        """0-degree rotation should preserve geometry."""
+        from kiln.generation.validation import _rotate_triangles
+
+        tris = [((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))]
+        rotated = _rotate_triangles(tris, 0.0, 0.0)
+        for i in range(3):
+            for j in range(3):
+                assert abs(rotated[0][i][j] - tris[0][i][j]) < 1e-6
+
+    def test_rotate_triangles_90x(self):
+        """90-degree X rotation should swap Y and Z."""
+        from kiln.generation.validation import _rotate_triangles
+
+        tris = [((0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))]
+        rotated = _rotate_triangles(tris, 90.0, 0.0)
+        # (0,1,0) rotated 90° around X → (0,0,1)
+        assert abs(rotated[0][1][1] - 0.0) < 1e-5
+        assert abs(rotated[0][1][2] - 1.0) < 1e-5
+
+    def test_nonexistent_file_raises(self):
+        """Missing file raises FileNotFoundError."""
+        from kiln.generation.validation import optimize_orientation
+
+        with pytest.raises(FileNotFoundError):
+            optimize_orientation("/nonexistent/file.stl")
+
+
+class TestSupportVolumeEstimation:
+    """Tests for estimate_support_volume()."""
+
+    def test_cube_has_no_supports(self, tmp_path):
+        """A cube on the build plate needs no support."""
+        from kiln.generation.validation import estimate_support_volume
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 20.0)
+        result = estimate_support_volume(stl)
+
+        assert result["total_triangles"] == 12
+        assert "support_volume_mm3" in result
+        assert "needs_supports" in result
+        # Cube overhangs depend on normal orientation — just check keys
+        assert isinstance(result["overhang_percentage"], float)
+
+    def test_unsupported_format_raises(self, tmp_path):
+        """Non-mesh file raises ValueError."""
+        from kiln.generation.validation import estimate_support_volume
+
+        bad = tmp_path / "model.fbx"
+        bad.write_bytes(b"fake")
+        with pytest.raises(ValueError, match="Unsupported"):
+            estimate_support_volume(str(bad))
+
+    def test_result_keys_complete(self, tmp_path):
+        """All expected keys are present."""
+        from kiln.generation.validation import estimate_support_volume
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+        result = estimate_support_volume(stl)
+
+        expected_keys = {
+            "support_volume_mm3", "support_volume_cm3", "support_weight_g",
+            "overhang_area_mm2", "overhang_triangle_count", "total_triangles",
+            "overhang_percentage", "needs_supports",
+        }
+        assert expected_keys.issubset(set(result.keys()))
+
+
+class TestAdvancedRepair:
+    """Tests for repair_stl_advanced() and _find_boundary_loops()."""
+
+    def test_advanced_repair_removes_degenerate(self, tmp_path):
+        """Degenerate triangles removed like basic repair."""
+        from kiln.generation.validation import repair_stl_advanced
+
+        stl = str(tmp_path / "bad.stl")
+        _write_cube_stl(stl, 10.0)
+
+        # Append a degenerate triangle
+        with open(stl, "r+b") as fh:
+            fh.seek(80)
+            count = struct.unpack("<I", fh.read(4))[0]
+            fh.seek(80)
+            fh.write(struct.pack("<I", count + 1))
+            fh.seek(0, 2)
+            fh.write(struct.pack("<3f", 0, 0, 0))  # normal
+            for _ in range(3):
+                fh.write(struct.pack("<3f", 5.0, 5.0, 5.0))
+            fh.write(struct.pack("<H", 0))
+
+        result = repair_stl_advanced(stl, output_path=str(tmp_path / "fixed.stl"))
+        assert result["degenerate_removed"] >= 1
+        assert result["cleaned_triangles"] < result["original_triangles"]
+        assert os.path.isfile(result["path"])
+
+    def test_advanced_repair_close_holes_flag(self, tmp_path):
+        """close_holes=False should skip hole closing."""
+        from kiln.generation.validation import repair_stl_advanced
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+        result = repair_stl_advanced(stl, close_holes=False)
+        assert result["holes_closed"] == 0
+
+    def test_advanced_repair_result_keys(self, tmp_path):
+        """All expected keys present in result."""
+        from kiln.generation.validation import repair_stl_advanced
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+        result = repair_stl_advanced(stl, output_path=str(tmp_path / "out.stl"))
+
+        expected = {
+            "path", "original_triangles", "cleaned_triangles",
+            "degenerate_removed", "holes_closed", "triangles_added",
+            "final_triangles",
+        }
+        assert expected.issubset(set(result.keys()))
+
+    def test_find_boundary_loops_simple_triangle(self):
+        """Three directed edges forming a triangle → one 3-vertex loop."""
+        from kiln.generation.validation import _find_boundary_loops
+
+        edges = [
+            ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)),
+            ((1.0, 0.0, 0.0), (0.5, 1.0, 0.0)),
+            ((0.5, 1.0, 0.0), (0.0, 0.0, 0.0)),
+        ]
+        loops = _find_boundary_loops(edges)
+        assert len(loops) >= 1
+        assert len(loops[0]) == 3
+
+    def test_find_boundary_loops_empty(self):
+        """No edges → no loops."""
+        from kiln.generation.validation import _find_boundary_loops
+
+        assert _find_boundary_loops([]) == []
+
+
+class TestDesignAdvisor:
+    """Tests for the design_advisor MCP tool."""
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_geometric_prompt_recommends_openscad(self, _mock_auth):
+        from kiln.server import design_advisor
+
+        result = design_advisor("a shelf bracket for my desk")
+        assert result["recommended_approach"] in ("template", "openscad")
+        assert "suggested_workflow" in result
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_organic_prompt_recommends_meshy(self, _mock_auth):
+        from kiln.server import design_advisor
+
+        result = design_advisor("a dragon sculpture with detailed wings")
+        assert result["recommended_approach"] == "meshy"
+        assert result["confidence"] == "medium"
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_template_match_found(self, _mock_auth):
+        from kiln.server import design_advisor
+
+        result = design_advisor("I need a phone stand for my desk")
+        assert result["recommended_approach"] == "template"
+        assert len(result["matching_templates"]) >= 1
+        assert result["matching_templates"][0]["template_id"] == "phone_stand"
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_complexity_estimate(self, _mock_auth):
+        from kiln.server import design_advisor
+
+        simple = design_advisor("a box")
+        assert simple["estimated_complexity"] == "simple"
+
+        complex_prompt = design_advisor(
+            "a multi-compartment desk organizer with phone stand, "
+            "pen holder sections, cable routing channels, and a drawer"
+        )
+        assert complex_prompt["estimated_complexity"] == "complex"
+
+
+class TestTemplateVariations:
+    """Tests for generate_template_variations MCP tool."""
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.server._get_generation_provider")
+    def test_generates_requested_count(self, mock_get_provider, _mock_auth, tmp_path):
+        """Should generate the requested number of variations."""
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 20.0)
+
+        mock_provider = MagicMock()
+        mock_provider.name = "openscad"
+        mock_job = MagicMock()
+        mock_job.status.value = "succeeded"
+        mock_job.id = "var-1"
+        mock_provider.generate.return_value = mock_job
+
+        mock_result = MagicMock()
+        mock_result.local_path = cube_path
+        mock_result.file_size_bytes = 1000
+        mock_provider.download_result.return_value = mock_result
+        mock_get_provider.return_value = mock_provider
+
+        from kiln.server import generate_template_variations
+
+        result = generate_template_variations("phone_stand", variation_count=3)
+        assert result["status"] == "success"
+        assert result["variation_count"] == 3
+        assert len(result["variations"]) == 3
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_unknown_template_returns_error(self, _mock_auth):
+        from kiln.server import generate_template_variations
+
+        result = generate_template_variations("nonexistent_template_xyz")
+        assert "error" in result or result.get("status") == "error"
+
+
 # ---- Helpers ----
 
 

@@ -24,10 +24,8 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Set
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -98,7 +96,7 @@ def _tool_has_auth_check(body: str) -> bool:
 # files, jobs, configuration, or any persistent data.
 # ---------------------------------------------------------------------------
 
-READ_ONLY_TOOLS: Set[str] = {
+READ_ONLY_TOOLS: set[str] = {
     # Printer status / info (read-only queries)
     "printer_status",
     "printer_files",
@@ -169,6 +167,8 @@ READ_ONLY_TOOLS: Set[str] = {
     "analyze_mesh_geometry",
     "validate_openscad_code",
     "estimate_print_time",
+    "estimate_support_material",
+    "design_advisor",
 
     # Onboarding / help (no side effects)
     "get_started",
@@ -226,7 +226,7 @@ READ_ONLY_TOOLS: Set[str] = {
 # added without being in either allowlist.
 # ---------------------------------------------------------------------------
 
-KNOWN_UNSCOPED_MUTATING_TOOLS: Set[str] = set()
+KNOWN_UNSCOPED_MUTATING_TOOLS: set[str] = set()
 
 
 # ---------------------------------------------------------------------------
