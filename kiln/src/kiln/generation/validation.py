@@ -1604,10 +1604,14 @@ def compare_meshes(
     if hausdorff is not None:
         result["hausdorff_distance_mm"] = hausdorff
 
+    # Meshes are identical only if tri count, volume, surface area match AND
+    # the geometric distance is negligible (catches mirrors, translations, etc.)
+    hausdorff_ok = hausdorff is not None and hausdorff < 0.01
     result["meshes_identical"] = (
         a.triangle_count == b.triangle_count
         and abs(a.volume_mm3 - b.volume_mm3) < 0.01
         and abs(a.surface_area_mm2 - b.surface_area_mm2) < 0.01
+        and hausdorff_ok
     )
 
     return result
@@ -1798,14 +1802,29 @@ def predict_print_failures(
         })
         risk_score += 10
 
-    # 3. Bridging detection (long horizontal spans)
-    # Find horizontal edges at height > 1mm
+    # 3. Bridging detection (long horizontal spans on interior ceiling faces)
+    # True bridges are flat downward-facing faces in the model interior.
+    # The topmost face at z_max is always supported by layers below and
+    # should not be flagged.
+    z_max = max(v[2] for tri in tris for v in tri) if tris else 0.0
     long_bridges = 0
     max_bridge = 0.0
     for tri in tris:
+        v0, v1, v2 = tri
+        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
+        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
+        nz = e1[0] * e2[1] - e1[1] * e2[0]  # z-component of cross product
+        if nz >= -0.1:
+            continue  # face isn't downward-facing — not a bridge candidate
+
+        # Skip faces at/near the top of the model — they're supported by
+        # the layer stack below them.
+        face_z = (v0[2] + v1[2] + v2[2]) / 3.0
+        if face_z >= z_max - 0.5:
+            continue
+
         for j in range(3):
             va, vb = tri[j], tri[(j + 1) % 3]
-            # Both vertices at similar height and above bed
             z_diff = abs(va[2] - vb[2])
             avg_z = (va[2] + vb[2]) / 2.0
             if z_diff < 0.5 and avg_z > 1.0:
@@ -2512,14 +2531,15 @@ def can_print_now(
                 "fix": "Use rescale_model() to fit the build plate",
             })
 
-    can_print = len(issues) == 0
-
-    if can_print:
+    if len(issues) == 0:
         verdict = "ready_to_print"
+        can_print = True
     elif all(i["type"] in ("severe_overhangs",) for i in issues):
         verdict = "printable_with_supports"
+        can_print = True  # printable — just needs support enabled in slicer
     else:
         verdict = "needs_fixes"
+        can_print = False
 
     result: dict[str, Any] = {
         "can_print": can_print,
@@ -2536,3 +2556,292 @@ def can_print_now(
         result["fixed_file"] = working_path
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Mesh mirroring
+# ---------------------------------------------------------------------------
+
+
+def mirror_mesh(
+    file_path: str,
+    *,
+    axis: str = "x",
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Mirror (reflect) a mesh along an axis.
+
+    Useful for creating left/right symmetric pairs or fixing
+    mirrored exports from CAD tools.
+
+    Args:
+        file_path: Path to the STL file.
+        axis: Axis to mirror across ("x", "y", or "z").
+        output_path: Output path.  Defaults to overwriting input.
+
+    Returns:
+        Dict with mirror statistics.
+    """
+    axis = axis.lower()
+    if axis not in ("x", "y", "z"):
+        raise ValueError(f"axis must be 'x', 'y', or 'z', got {axis!r}")
+
+    path = Path(file_path)
+    errors: list[str] = []
+    triangles, _ = _parse_stl(path, errors)
+    if errors:
+        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+    if not triangles:
+        raise ValueError("STL contains no geometry.")
+
+    axis_idx = {"x": 0, "y": 1, "z": 2}[axis]
+
+    mirrored: list[tuple[tuple[float, ...], ...]] = []
+    for tri in triangles:
+        new_tri = []
+        for v in tri:
+            vl = list(v)
+            vl[axis_idx] = -vl[axis_idx]
+            new_tri.append(tuple(vl))
+        # Reverse winding order to flip normals after mirror
+        mirrored.append((new_tri[0], new_tri[2], new_tri[1]))
+
+    out = output_path or file_path
+    _write_binary_stl(mirrored, out)
+
+    return {
+        "path": out,
+        "axis": axis,
+        "triangle_count": len(mirrored),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Hollow shell (for resin printing or material savings)
+# ---------------------------------------------------------------------------
+
+
+def hollow_mesh(
+    file_path: str,
+    *,
+    wall_thickness_mm: float = 2.0,
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Create a hollow version of a mesh by generating an inner offset shell.
+
+    Approximates hollowing by scaling a copy of the mesh inward from its
+    center of mass and combining both shells.  This is a rough approach
+    that works well for convex/simple shapes but may self-intersect on
+    complex geometry.
+
+    Args:
+        file_path: Path to the STL file.
+        wall_thickness_mm: Wall thickness in mm (default 2.0).
+        output_path: Output path.  Defaults to ``<name>_hollow.stl``.
+
+    Returns:
+        Dict with hollowing statistics.
+    """
+    path = Path(file_path)
+    errors: list[str] = []
+    triangles, vertices = _parse_stl(path, errors)
+    if errors:
+        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+    if not triangles:
+        raise ValueError("STL contains no geometry.")
+
+    bbox = _bounding_box(vertices)
+    dims = [
+        bbox["x_max"] - bbox["x_min"],
+        bbox["y_max"] - bbox["y_min"],
+        bbox["z_max"] - bbox["z_min"],
+    ]
+    max_dim = max(dims)
+    if max_dim < wall_thickness_mm * 2:
+        raise ValueError(
+            f"Model too small ({max_dim:.1f}mm) for {wall_thickness_mm}mm wall thickness"
+        )
+
+    # Compute center of mass
+    cx = (bbox["x_min"] + bbox["x_max"]) / 2.0
+    cy = (bbox["y_min"] + bbox["y_max"]) / 2.0
+    cz = (bbox["z_min"] + bbox["z_max"]) / 2.0
+
+    # Scale factor for inner shell: shrink by wall_thickness from each side
+    # Approximate: scale = 1 - (2 * wall_thickness / max_dim)
+    scale = 1.0 - (2.0 * wall_thickness_mm / max_dim)
+    if scale <= 0.05:
+        raise ValueError("Wall thickness too large relative to model size")
+
+    # Create inner shell (scaled + reversed winding)
+    inner: list[tuple[tuple[float, ...], ...]] = []
+    for tri in triangles:
+        new_tri = []
+        for v in tri:
+            # Scale toward center
+            nx = cx + (v[0] - cx) * scale
+            ny = cy + (v[1] - cy) * scale
+            nz = cz + (v[2] - cz) * scale
+            new_tri.append((nx, ny, nz))
+        # Reverse winding for inner shell (normals face inward)
+        inner.append((new_tri[0], new_tri[2], new_tri[1]))
+
+    # Combine outer + inner shells
+    combined = list(triangles) + inner
+
+    if output_path is None:
+        output_path = str(path.with_name(f"{path.stem}_hollow.stl"))
+
+    _write_binary_stl(combined, output_path)
+
+    original_vol = 0.0
+    for tri in triangles:
+        v0, v1, v2 = tri
+        original_vol += abs(
+            v0[0] * (v1[1] * v2[2] - v2[1] * v1[2])
+            - v1[0] * (v0[1] * v2[2] - v2[1] * v0[2])
+            + v2[0] * (v0[1] * v1[2] - v1[1] * v0[2])
+        ) / 6.0
+
+    inner_vol = original_vol * (scale ** 3)
+    # Material saved = the hollow void (inner volume that's now empty)
+    saved_vol = inner_vol
+
+    return {
+        "path": output_path,
+        "wall_thickness_mm": wall_thickness_mm,
+        "original_triangles": len(triangles),
+        "total_triangles": len(combined),
+        "scale_factor": round(scale, 4),
+        "estimated_volume_saved_mm3": round(saved_vol, 1),
+        "estimated_material_saved_pct": round(
+            saved_vol / original_vol * 100, 1
+        ) if original_vol > 0 else 0.0,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Center on build plate
+# ---------------------------------------------------------------------------
+
+
+def center_on_bed(
+    file_path: str,
+    *,
+    bed_x_mm: float = 256.0,
+    bed_y_mm: float = 256.0,
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Center a mesh on the build plate and place z_min at z=0.
+
+    Args:
+        file_path: Path to the STL file.
+        bed_x_mm: Build plate X dimension.
+        bed_y_mm: Build plate Y dimension.
+        output_path: Output path.  Defaults to overwriting input.
+
+    Returns:
+        Dict with new position info.
+    """
+    path = Path(file_path)
+    errors: list[str] = []
+    triangles, vertices = _parse_stl(path, errors)
+    if errors:
+        raise ValueError(f"Failed to parse STL: {'; '.join(errors)}")
+    if not triangles:
+        raise ValueError("STL contains no geometry.")
+
+    bbox = _bounding_box(vertices)
+
+    # Current center
+    cur_cx = (bbox["x_min"] + bbox["x_max"]) / 2.0
+    cur_cy = (bbox["y_min"] + bbox["y_max"]) / 2.0
+    cur_zmin = bbox["z_min"]
+
+    # Target center
+    target_cx = bed_x_mm / 2.0
+    target_cy = bed_y_mm / 2.0
+
+    dx = target_cx - cur_cx
+    dy = target_cy - cur_cy
+    dz = -cur_zmin  # place z_min at 0
+
+    if abs(dx) < 0.001 and abs(dy) < 0.001 and abs(dz) < 0.001:
+        out = output_path or file_path
+        if output_path and output_path != file_path:
+            _write_binary_stl(triangles, out)
+        return {
+            "path": out,
+            "already_centered": True,
+            "translation_mm": {"x": 0.0, "y": 0.0, "z": 0.0},
+        }
+
+    moved: list[tuple[tuple[float, ...], ...]] = [
+        tuple((v[0] + dx, v[1] + dy, v[2] + dz) for v in tri)
+        for tri in triangles
+    ]
+
+    out = output_path or file_path
+    _write_binary_stl(moved, out)
+
+    return {
+        "path": out,
+        "already_centered": False,
+        "translation_mm": {
+            "x": round(dx, 2),
+            "y": round(dy, 2),
+            "z": round(dz, 2),
+        },
+        "new_center_mm": {
+            "x": round(target_cx, 2),
+            "y": round(target_cy, 2),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Non-manifold edge analysis
+# ---------------------------------------------------------------------------
+
+
+def count_non_manifold_edges(file_path: str) -> dict[str, Any]:
+    """Count and classify non-manifold edges in a mesh.
+
+    A manifold mesh has every edge shared by exactly 2 triangles.
+    Non-manifold edges are shared by 1 (boundary) or 3+ (T-junction)
+    triangles.
+
+    Args:
+        file_path: Path to mesh file.
+
+    Returns:
+        Dict with edge counts broken down by type.
+    """
+    path = Path(file_path)
+    errors: list[str] = []
+    tris = _load_triangles(path, errors)
+    if errors or not tris:
+        raise ValueError(f"Cannot parse mesh: {errors or ['No geometry']}")
+
+    edge_count: dict[tuple[tuple[float, ...], tuple[float, ...]], int] = {}
+    for tri in tris:
+        for j in range(3):
+            va, vb = tri[j], tri[(j + 1) % 3]
+            edge = (min(va, vb), max(va, vb))
+            edge_count[edge] = edge_count.get(edge, 0) + 1
+
+    total_edges = len(edge_count)
+    boundary = sum(1 for c in edge_count.values() if c == 1)
+    manifold = sum(1 for c in edge_count.values() if c == 2)
+    t_junction = sum(1 for c in edge_count.values() if c >= 3)
+    non_manifold = boundary + t_junction
+
+    return {
+        "total_edges": total_edges,
+        "manifold_edges": manifold,
+        "boundary_edges": boundary,
+        "t_junction_edges": t_junction,
+        "non_manifold_edges": non_manifold,
+        "is_watertight": non_manifold == 0,
+        "manifold_pct": round(manifold / total_edges * 100, 1) if total_edges > 0 else 0.0,
+    }

@@ -219,6 +219,9 @@ READ_ONLY_TOOLS: set[str] = {
     "predict_print_failure",
     "mesh_quality_scorecard",
     "estimate_material_cost",
+
+    # Design generation analysis — Phase 5 (read-only)
+    "analyze_non_manifold_edges",
 }
 
 

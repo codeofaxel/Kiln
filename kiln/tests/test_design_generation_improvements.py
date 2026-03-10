@@ -8,6 +8,9 @@ Covers:
 - OpenSCAD render preview
 - Mesh rescaling
 - Design templates
+- Phase 3: orientation optimizer, support estimation, advanced repair, design advisor
+- Phase 4: mesh comparison, failure prediction, simplification, scorecard, cost, floating regions
+- Phase 5: mesh mirroring, hollow shell, center on bed, non-manifold edge analysis
 """
 
 from __future__ import annotations
@@ -1603,3 +1606,371 @@ def _write_cube_stl(path: str, size: float) -> None:
             for v in tri:
                 fh.write(struct.pack("<3f", *v))
             fh.write(struct.pack("<H", 0))
+
+
+def _write_offset_cube_stl(path: str, size: float, offset_x: float, offset_y: float, offset_z: float) -> None:
+    """Write a cube STL offset from origin."""
+    s = size
+    ox, oy, oz = offset_x, offset_y, offset_z
+    tris = [
+        ((ox, oy, oz), (ox + s, oy, oz), (ox + s, oy + s, oz)),
+        ((ox, oy, oz), (ox + s, oy + s, oz), (ox, oy + s, oz)),
+        ((ox, oy, oz + s), (ox + s, oy + s, oz + s), (ox + s, oy, oz + s)),
+        ((ox, oy, oz + s), (ox, oy + s, oz + s), (ox + s, oy + s, oz + s)),
+        ((ox, oy, oz), (ox + s, oy, oz + s), (ox + s, oy, oz)),
+        ((ox, oy, oz), (ox, oy, oz + s), (ox + s, oy, oz + s)),
+        ((ox, oy + s, oz), (ox + s, oy + s, oz), (ox + s, oy + s, oz + s)),
+        ((ox, oy + s, oz), (ox + s, oy + s, oz + s), (ox, oy + s, oz + s)),
+        ((ox, oy, oz), (ox, oy + s, oz), (ox, oy + s, oz + s)),
+        ((ox, oy, oz), (ox, oy + s, oz + s), (ox, oy, oz + s)),
+        ((ox + s, oy, oz), (ox + s, oy, oz + s), (ox + s, oy + s, oz + s)),
+        ((ox + s, oy, oz), (ox + s, oy + s, oz + s), (ox + s, oy + s, oz)),
+    ]
+    with open(path, "wb") as fh:
+        fh.write(b"\x00" * 80)
+        fh.write(struct.pack("<I", len(tris)))
+        for tri in tris:
+            fh.write(struct.pack("<3f", 0, 0, 0))
+            for v in tri:
+                fh.write(struct.pack("<3f", *v))
+            fh.write(struct.pack("<H", 0))
+
+
+# ===========================================================================
+# Phase 5 Tests: Mirror, Hollow, Center, Non-Manifold Edge Analysis
+# ===========================================================================
+
+
+class TestMirrorMesh:
+    """Tests for mirror_mesh() — reflect mesh along an axis with winding reversal."""
+
+    def test_mirror_x_negates_x_coords(self, tmp_path):
+        from kiln.generation.validation import _parse_stl, mirror_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        out = str(tmp_path / "mirrored.stl")
+        result = mirror_mesh(f, axis="x", output_path=out)
+
+        assert result["axis"] == "x"
+        assert result["triangle_count"] == 12
+        assert os.path.isfile(out)
+
+        # Verify mirrored geometry: all x coords should be <= 0
+        from pathlib import Path
+        errors = []
+        tris, verts = _parse_stl(Path(out), errors)
+        assert not errors
+        xs = [v[0] for v in verts]
+        assert max(xs) <= 0.001  # original was 0..20, mirrored should be -20..0
+
+    def test_mirror_y_negates_y_coords(self, tmp_path):
+        from kiln.generation.validation import _parse_stl, mirror_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 15.0)
+        out = str(tmp_path / "mirrored_y.stl")
+        result = mirror_mesh(f, axis="y", output_path=out)
+
+        assert result["axis"] == "y"
+        from pathlib import Path
+        errors = []
+        _, verts = _parse_stl(Path(out), errors)
+        ys = [v[1] for v in verts]
+        assert max(ys) <= 0.001
+
+    def test_mirror_z_negates_z_coords(self, tmp_path):
+        from kiln.generation.validation import _parse_stl, mirror_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 10.0)
+        out = str(tmp_path / "mirrored_z.stl")
+        result = mirror_mesh(f, axis="z", output_path=out)
+
+        assert result["axis"] == "z"
+        from pathlib import Path
+        errors = []
+        _, verts = _parse_stl(Path(out), errors)
+        zs = [v[2] for v in verts]
+        assert max(zs) <= 0.001
+
+    def test_invalid_axis_raises(self, tmp_path):
+        from kiln.generation.validation import mirror_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 10.0)
+        with pytest.raises(ValueError, match="axis must be"):
+            mirror_mesh(f, axis="q")
+
+    def test_preserves_triangle_count(self, tmp_path):
+        from kiln.generation.validation import mirror_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = mirror_mesh(f, axis="x", output_path=str(tmp_path / "m.stl"))
+        assert result["triangle_count"] == 12
+
+    def test_double_mirror_roundtrip(self, tmp_path):
+        from pathlib import Path
+
+        from kiln.generation.validation import _parse_stl, mirror_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+
+        # Read original vertices
+        errors = []
+        _, orig_verts = _parse_stl(Path(f), errors)
+        orig_xs = sorted(v[0] for v in orig_verts)
+
+        # Mirror twice should restore original coordinates
+        m1 = str(tmp_path / "m1.stl")
+        mirror_mesh(f, axis="x", output_path=m1)
+        m2 = str(tmp_path / "m2.stl")
+        mirror_mesh(m1, axis="x", output_path=m2)
+
+        errors2 = []
+        _, round_verts = _parse_stl(Path(m2), errors2)
+        round_xs = sorted(v[0] for v in round_verts)
+
+        assert len(orig_xs) == len(round_xs)
+        for a, b in zip(orig_xs, round_xs, strict=True):
+            assert abs(a - b) < 0.01
+
+    def test_bad_file_raises(self, tmp_path):
+        from kiln.generation.validation import mirror_mesh
+
+        f = str(tmp_path / "bad.stl")
+        (tmp_path / "bad.stl").write_bytes(b"garbage")
+        with pytest.raises(ValueError):
+            mirror_mesh(f)
+
+
+class TestHollowMesh:
+    """Tests for hollow_mesh() — create inner offset shell for material savings."""
+
+    def test_hollow_doubles_triangles(self, tmp_path):
+        from kiln.generation.validation import hollow_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 30.0)
+        out = str(tmp_path / "hollow.stl")
+        result = hollow_mesh(f, wall_thickness_mm=2.0, output_path=out)
+
+        assert result["original_triangles"] == 12
+        assert result["total_triangles"] == 24  # outer + inner shells
+        assert os.path.isfile(out)
+
+    def test_material_savings_reported(self, tmp_path):
+        from kiln.generation.validation import hollow_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 40.0)
+        result = hollow_mesh(f, wall_thickness_mm=3.0, output_path=str(tmp_path / "h.stl"))
+
+        assert result["estimated_volume_saved_mm3"] > 0
+        assert 0 < result["estimated_material_saved_pct"] < 100
+        assert result["scale_factor"] > 0
+        assert result["scale_factor"] < 1.0
+
+    def test_thin_wall_increases_savings(self, tmp_path):
+        from kiln.generation.validation import hollow_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 40.0)
+
+        thin = hollow_mesh(f, wall_thickness_mm=1.0, output_path=str(tmp_path / "thin.stl"))
+        thick = hollow_mesh(f, wall_thickness_mm=5.0, output_path=str(tmp_path / "thick.stl"))
+
+        # Thinner walls = more material saved
+        assert thin["estimated_material_saved_pct"] > thick["estimated_material_saved_pct"]
+
+    def test_too_thick_raises(self, tmp_path):
+        from kiln.generation.validation import hollow_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 10.0)
+        with pytest.raises(ValueError, match="too small"):
+            hollow_mesh(f, wall_thickness_mm=6.0)
+
+    def test_extremely_thick_wall_raises(self, tmp_path):
+        from kiln.generation.validation import hollow_mesh
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        with pytest.raises(ValueError):
+            hollow_mesh(f, wall_thickness_mm=9.6)  # scale < 0.05
+
+    def test_default_output_path_suffix(self, tmp_path):
+        from kiln.generation.validation import hollow_mesh
+
+        f = str(tmp_path / "model.stl")
+        _write_cube_stl(f, 30.0)
+        result = hollow_mesh(f)
+
+        assert "_hollow" in result["path"]
+        assert os.path.isfile(result["path"])
+
+    def test_bad_file_raises(self, tmp_path):
+        from kiln.generation.validation import hollow_mesh
+
+        f = str(tmp_path / "bad.stl")
+        (tmp_path / "bad.stl").write_bytes(b"not valid")
+        with pytest.raises(ValueError):
+            hollow_mesh(f)
+
+
+class TestCenterOnBed:
+    """Tests for center_on_bed() — center model on build plate at z=0."""
+
+    def test_offset_cube_gets_centered(self, tmp_path):
+        from pathlib import Path
+
+        from kiln.generation.validation import _parse_stl, center_on_bed
+
+        f = str(tmp_path / "offset.stl")
+        _write_offset_cube_stl(f, 20.0, 100.0, 100.0, 50.0)
+        out = str(tmp_path / "centered.stl")
+        result = center_on_bed(f, bed_x_mm=200.0, bed_y_mm=200.0, output_path=out)
+
+        assert result["already_centered"] is False
+        assert "translation_mm" in result
+        assert os.path.isfile(out)
+
+        # Verify the mesh is now centered on bed
+        errors = []
+        _, verts = _parse_stl(Path(out), errors)
+        xs = [v[0] for v in verts]
+        ys = [v[1] for v in verts]
+        zs = [v[2] for v in verts]
+
+        center_x = (min(xs) + max(xs)) / 2.0
+        center_y = (min(ys) + max(ys)) / 2.0
+        assert abs(center_x - 100.0) < 0.1  # centered on bed_x/2
+        assert abs(center_y - 100.0) < 0.1  # centered on bed_y/2
+        assert min(zs) >= -0.01  # z_min at ~0
+
+    def test_floating_cube_drops_to_z0(self, tmp_path):
+        from pathlib import Path
+
+        from kiln.generation.validation import _parse_stl, center_on_bed
+
+        f = str(tmp_path / "floating.stl")
+        _write_offset_cube_stl(f, 10.0, 0.0, 0.0, 30.0)  # z starts at 30
+        out = str(tmp_path / "grounded.stl")
+        result = center_on_bed(f, output_path=out)
+
+        assert result["translation_mm"]["z"] == -30.0
+        errors = []
+        _, verts = _parse_stl(Path(out), errors)
+        assert min(v[2] for v in verts) >= -0.01
+
+    def test_already_centered_returns_flag(self, tmp_path):
+        from kiln.generation.validation import center_on_bed
+
+        f = str(tmp_path / "centered.stl")
+        # Write cube at bed center: bed 256x256, cube 20x20 centered at (128, 128, 0)
+        _write_offset_cube_stl(f, 20.0, 118.0, 118.0, 0.0)
+        result = center_on_bed(f, bed_x_mm=256.0, bed_y_mm=256.0)
+
+        assert result["already_centered"] is True
+
+    def test_custom_bed_size(self, tmp_path):
+        from kiln.generation.validation import center_on_bed
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = center_on_bed(f, bed_x_mm=300.0, bed_y_mm=300.0, output_path=str(tmp_path / "c.stl"))
+
+        assert result["new_center_mm"]["x"] == 150.0
+        assert result["new_center_mm"]["y"] == 150.0
+
+    def test_preserves_triangle_count(self, tmp_path):
+        from pathlib import Path
+
+        from kiln.generation.validation import _parse_stl, center_on_bed
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        out = str(tmp_path / "c.stl")
+        center_on_bed(f, output_path=out)
+
+        errors = []
+        tris, _ = _parse_stl(Path(out), errors)
+        assert len(tris) == 12
+
+    def test_bad_file_raises(self, tmp_path):
+        from kiln.generation.validation import center_on_bed
+
+        f = str(tmp_path / "bad.stl")
+        (tmp_path / "bad.stl").write_bytes(b"nope")
+        with pytest.raises(ValueError):
+            center_on_bed(f)
+
+
+class TestNonManifoldEdges:
+    """Tests for count_non_manifold_edges() — boundary/manifold/T-junction classification."""
+
+    def test_cube_mostly_manifold(self, tmp_path):
+        from kiln.generation.validation import count_non_manifold_edges
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = count_non_manifold_edges(f)
+
+        assert result["total_edges"] > 0
+        assert result["manifold_edges"] >= 0
+        assert result["boundary_edges"] >= 0
+        assert result["t_junction_edges"] >= 0
+        assert result["total_edges"] == (
+            result["manifold_edges"] + result["boundary_edges"] + result["t_junction_edges"]
+        )
+
+    def test_manifold_pct_in_range(self, tmp_path):
+        from kiln.generation.validation import count_non_manifold_edges
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = count_non_manifold_edges(f)
+
+        assert 0 <= result["manifold_pct"] <= 100
+
+    def test_two_component_has_more_edges(self, tmp_path):
+        from kiln.generation.validation import count_non_manifold_edges
+
+        single = str(tmp_path / "single.stl")
+        _write_cube_stl(single, 20.0)
+        multi = str(tmp_path / "multi.stl")
+        _write_two_component_stl(multi)
+
+        r_single = count_non_manifold_edges(single)
+        r_multi = count_non_manifold_edges(multi)
+
+        assert r_multi["total_edges"] > r_single["total_edges"]
+
+    def test_is_watertight_field(self, tmp_path):
+        from kiln.generation.validation import count_non_manifold_edges
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = count_non_manifold_edges(f)
+
+        assert isinstance(result["is_watertight"], bool)
+        assert result["is_watertight"] == (result["non_manifold_edges"] == 0)
+
+    def test_bad_file_raises(self, tmp_path):
+        from kiln.generation.validation import count_non_manifold_edges
+
+        f = str(tmp_path / "bad.stl")
+        (tmp_path / "bad.stl").write_bytes(b"garbage")
+        with pytest.raises(ValueError):
+            count_non_manifold_edges(f)
+
+    def test_non_manifold_sum(self, tmp_path):
+        from kiln.generation.validation import count_non_manifold_edges
+
+        f = str(tmp_path / "cube.stl")
+        _write_cube_stl(f, 20.0)
+        result = count_non_manifold_edges(f)
+
+        assert result["non_manifold_edges"] == result["boundary_edges"] + result["t_junction_edges"]

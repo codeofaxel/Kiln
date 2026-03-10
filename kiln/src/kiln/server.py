@@ -10198,6 +10198,127 @@ def check_print_readiness(
 
 
 # ---------------------------------------------------------------------------
+# Phase 5: Mirror, hollow, center, non-manifold analysis
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def mirror_mesh_model(file_path: str, axis: str = "x", output_path: str = "") -> dict:
+    """Mirror (reflect) a mesh along an axis.
+
+    Creates a mirror image by negating coordinates on the chosen axis
+    and reversing triangle winding order to preserve correct normals.
+
+    :param file_path: Path to the STL file.
+    :param axis: Axis to mirror ("x", "y", or "z", default "x").
+    :param output_path: Output path (defaults to overwriting input).
+    :returns: Dict with mirror info.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import mirror_mesh
+
+        return {
+            "status": "success",
+            **mirror_mesh(file_path, axis=axis, output_path=output_path or None),
+        }
+    except Exception as exc:
+        return _error_dict(f"Mirror failed: {exc}")
+
+
+@mcp.tool()
+def hollow_mesh_model(
+    file_path: str,
+    wall_thickness_mm: float = 2.0,
+    output_path: str = "",
+) -> dict:
+    """Create a hollow version of a mesh to save material.
+
+    Generates an inner offset shell and combines it with the outer
+    surface.  Reports estimated material savings.
+
+    :param file_path: Path to the STL file.
+    :param wall_thickness_mm: Wall thickness in mm (default 2.0).
+    :param output_path: Output path (defaults to ``<name>_hollow.stl``).
+    :returns: Dict with hollowing stats and material savings.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import hollow_mesh
+
+        return {
+            "status": "success",
+            **hollow_mesh(
+                file_path,
+                wall_thickness_mm=wall_thickness_mm,
+                output_path=output_path or None,
+            ),
+        }
+    except Exception as exc:
+        return _error_dict(f"Hollowing failed: {exc}")
+
+
+@mcp.tool()
+def center_model_on_bed(
+    file_path: str,
+    bed_x_mm: float = 256.0,
+    bed_y_mm: float = 256.0,
+    output_path: str = "",
+) -> dict:
+    """Center a mesh on the build plate and place at z=0.
+
+    Translates the model so it sits centered on the bed with its
+    lowest point touching the build plate.
+
+    :param file_path: Path to the STL file.
+    :param bed_x_mm: Build plate X dimension (default 256).
+    :param bed_y_mm: Build plate Y dimension (default 256).
+    :param output_path: Output path (defaults to overwriting input).
+    :returns: Dict with translation applied.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import center_on_bed
+
+        return {
+            "status": "success",
+            **center_on_bed(
+                file_path,
+                bed_x_mm=bed_x_mm,
+                bed_y_mm=bed_y_mm,
+                output_path=output_path or None,
+            ),
+        }
+    except Exception as exc:
+        return _error_dict(f"Centering failed: {exc}")
+
+
+@mcp.tool()
+def analyze_non_manifold_edges(file_path: str) -> dict:
+    """Count and classify non-manifold edges in a mesh.
+
+    Reports boundary edges (shared by 1 triangle), T-junction edges
+    (shared by 3+ triangles), and manifold edges (shared by exactly 2).
+
+    This is the diagnostic version of the manifold check — use it
+    to understand exactly how many edges are problematic before
+    deciding whether to repair.
+
+    :param file_path: Path to mesh file (.stl, .obj, or .glb).
+    :returns: Dict with edge count breakdown and watertight status.
+    """
+    try:
+        from kiln.generation.validation import count_non_manifold_edges
+
+        return {"status": "success", **count_non_manifold_edges(file_path)}
+    except Exception as exc:
+        return _error_dict(f"Edge analysis failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Firmware update tools
 # ---------------------------------------------------------------------------
 
