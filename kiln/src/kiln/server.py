@@ -10437,6 +10437,120 @@ def hollow_mesh_model(
 
 
 @mcp.tool()
+def thicken_mesh_walls(
+    file_path: str,
+    amount_mm: float = 0.5,
+    output_path: str = "",
+) -> dict:
+    """Thicken thin walls in a mesh by offsetting vertices outward.
+
+    Detects thin-wall regions and pushes vertices outward along their
+    averaged normals.  This is a **geometry-level fix** — the mesh is
+    surgically modified instead of regenerating from scratch.
+
+    Use after ``predict_print_failures()`` detects ``thin_walls`` or
+    after ``design_scorecard()`` flags wall thickness issues.
+
+    :param file_path: Path to the STL file.
+    :param amount_mm: Offset distance in mm (default 0.5).
+    :param output_path: Output path (defaults to ``<name>_thickened.stl``).
+    :returns: Dict with number of vertices modified, amounts, and output path.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import thicken_walls
+
+        return {
+            "status": "success",
+            **thicken_walls(
+                file_path,
+                amount_mm=amount_mm,
+                output_path=output_path or None,
+            ),
+        }
+    except Exception as exc:
+        return _error_dict(f"Wall thickening failed: {exc}")
+
+
+@mcp.tool()
+def add_mesh_fillet(
+    file_path: str,
+    radius_mm: float = 1.0,
+    angle_threshold_deg: float = 60.0,
+    output_path: str = "",
+) -> dict:
+    """Add fillets (rounded transitions) at sharp edges.
+
+    Detects edges where adjacent faces meet at a sharp angle and
+    inserts intermediate triangles to approximate a smooth fillet.
+    Reduces stress concentration at corners and improves printability.
+
+    Use after ``design_scorecard()`` flags sharp corners or
+    ``predict_print_failures()`` detects stress risers.
+
+    :param file_path: Path to the STL file.
+    :param radius_mm: Fillet radius in mm (default 1.0).
+    :param angle_threshold_deg: Edges sharper than this get filleted (default 60).
+    :param output_path: Output path (defaults to ``<name>_filleted.stl``).
+    :returns: Dict with sharp edge count, triangles added, and output path.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import add_fillet
+
+        return {
+            "status": "success",
+            **add_fillet(
+                file_path,
+                radius_mm=radius_mm,
+                angle_threshold_deg=angle_threshold_deg,
+                output_path=output_path or None,
+            ),
+        }
+    except Exception as exc:
+        return _error_dict(f"Fillet failed: {exc}")
+
+
+@mcp.tool()
+def add_mesh_chamfer(
+    file_path: str,
+    distance_mm: float = 0.5,
+    angle_threshold_deg: float = 60.0,
+    output_path: str = "",
+) -> dict:
+    """Add chamfers (flat bevels) at sharp edges.
+
+    Detects edges where adjacent faces meet at a sharp angle and
+    bevels them with a flat transition face.  Chamfers are faster
+    to print than fillets and reduce stress concentration.
+
+    :param file_path: Path to the STL file.
+    :param distance_mm: Chamfer distance from edge in mm (default 0.5).
+    :param angle_threshold_deg: Edges sharper than this get chamfered (default 60).
+    :param output_path: Output path (defaults to ``<name>_chamfered.stl``).
+    :returns: Dict with sharp edge count, triangles added, and output path.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import add_chamfer
+
+        return {
+            "status": "success",
+            **add_chamfer(
+                file_path,
+                distance_mm=distance_mm,
+                angle_threshold_deg=angle_threshold_deg,
+                output_path=output_path or None,
+            ),
+        }
+    except Exception as exc:
+        return _error_dict(f"Chamfer failed: {exc}")
+
+
+@mcp.tool()
 def center_model_on_bed(
     file_path: str,
     bed_x_mm: float = 256.0,

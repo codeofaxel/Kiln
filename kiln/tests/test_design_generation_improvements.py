@@ -2984,3 +2984,241 @@ class TestEstimatePrintTimeEdgeCases:
 
         with pytest.raises(ValueError, match="[Ss]peed"):
             estimate_print_time_from_mesh(stl, print_speed_mm_s=0.0)
+
+
+# ---------------------------------------------------------------------------
+# Geometry-level mesh repair: thicken, fillet, chamfer
+# ---------------------------------------------------------------------------
+
+
+class TestThickenWalls:
+    """Tests for thicken_walls() — geometry-level thin-wall fix."""
+
+    def test_basic_thickening(self, tmp_path):
+        from kiln.generation.validation import thicken_walls
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+        out = str(tmp_path / "thickened.stl")
+
+        result = thicken_walls(stl, amount_mm=0.5, output_path=out)
+
+        assert result["path"] == out
+        assert result["amount_mm"] == 0.5
+        assert result["triangle_count"] == 12
+        assert os.path.isfile(out)
+
+    def test_thickened_file_is_valid_stl(self, tmp_path):
+        from kiln.generation.validation import thicken_walls, validate_mesh
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+        out = str(tmp_path / "thickened.stl")
+
+        thicken_walls(stl, amount_mm=0.5, output_path=out)
+        val = validate_mesh(out)
+        assert val.valid
+        assert val.triangle_count == 12
+
+    def test_default_output_path(self, tmp_path):
+        from kiln.generation.validation import thicken_walls
+
+        stl = str(tmp_path / "part.stl")
+        _write_cube_stl(stl, 10.0)
+
+        result = thicken_walls(stl, amount_mm=0.3)
+        assert result["path"].endswith("_thickened.stl")
+        assert os.path.isfile(result["path"])
+
+    def test_thin_wall_detection(self, tmp_path):
+        from kiln.generation.validation import thicken_walls
+
+        stl = str(tmp_path / "thin.stl")
+        # A very thin slab (1mm thick) — should detect thin walls
+        _write_thin_wall_stl(stl, width=20.0, height=20.0, thickness=1.0)
+
+        result = thicken_walls(stl, amount_mm=0.5)
+        # Should have modified some vertices
+        assert result["vertices_modified"] > 0
+
+    def test_zero_amount_raises(self, tmp_path):
+        from kiln.generation.validation import thicken_walls
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+
+        with pytest.raises(ValueError, match="positive"):
+            thicken_walls(stl, amount_mm=0)
+
+    def test_negative_amount_raises(self, tmp_path):
+        from kiln.generation.validation import thicken_walls
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+
+        with pytest.raises(ValueError, match="positive"):
+            thicken_walls(stl, amount_mm=-1.0)
+
+    def test_empty_stl_raises(self, tmp_path):
+        from kiln.generation.validation import thicken_walls
+
+        stl = str(tmp_path / "empty.stl")
+        with open(stl, "wb") as fh:
+            fh.write(b"\x00" * 80)
+            fh.write(struct.pack("<I", 0))
+
+        with pytest.raises(ValueError, match="no geometry"):
+            thicken_walls(stl, amount_mm=0.5)
+
+
+class TestAddFillet:
+    """Tests for add_fillet() — round sharp edges."""
+
+    def test_basic_fillet(self, tmp_path):
+        from kiln.generation.validation import add_fillet
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+        out = str(tmp_path / "filleted.stl")
+
+        result = add_fillet(stl, radius_mm=1.0, output_path=out)
+
+        assert result["path"] == out
+        assert result["radius_mm"] == 1.0
+        assert result["angle_threshold_deg"] == 60.0
+        assert os.path.isfile(out)
+
+    def test_cube_has_sharp_edges(self, tmp_path):
+        from kiln.generation.validation import add_fillet
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+
+        result = add_fillet(stl, radius_mm=0.5)
+        # A cube has 12 edges, all at 90 degrees — should find sharp edges
+        assert result["sharp_edges_found"] > 0
+        assert result["fillet_triangles_added"] > 0
+        assert result["triangle_count"] > 12  # Original + fillet tris
+
+    def test_filleted_file_is_valid_stl(self, tmp_path):
+        from kiln.generation.validation import add_fillet, validate_mesh
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+        out = str(tmp_path / "filleted.stl")
+
+        add_fillet(stl, radius_mm=0.5, output_path=out)
+        val = validate_mesh(out)
+        assert val.valid
+        assert val.triangle_count > 12
+
+    def test_default_output_path(self, tmp_path):
+        from kiln.generation.validation import add_fillet
+
+        stl = str(tmp_path / "bracket.stl")
+        _write_cube_stl(stl, 10.0)
+
+        result = add_fillet(stl, radius_mm=1.0)
+        assert result["path"].endswith("_filleted.stl")
+
+    def test_zero_radius_raises(self, tmp_path):
+        from kiln.generation.validation import add_fillet
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+
+        with pytest.raises(ValueError, match="positive"):
+            add_fillet(stl, radius_mm=0)
+
+    def test_invalid_angle_raises(self, tmp_path):
+        from kiln.generation.validation import add_fillet
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+
+        with pytest.raises(ValueError, match="between 0 and 180"):
+            add_fillet(stl, angle_threshold_deg=0)
+
+        with pytest.raises(ValueError, match="between 0 and 180"):
+            add_fillet(stl, angle_threshold_deg=180)
+
+    def test_high_threshold_finds_no_edges(self, tmp_path):
+        from kiln.generation.validation import add_fillet
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+
+        # 170 degrees — almost flat, should find no sharp edges on a cube
+        result = add_fillet(stl, angle_threshold_deg=170.0)
+        # Cube edges are at 90 degrees (cos=0), only edges sharper than
+        # 170 degrees (cos(170)≈-0.985) would be detected — cube doesn't have those
+        assert result["triangle_count"] == 12  # No fillets added
+
+
+class TestAddChamfer:
+    """Tests for add_chamfer() — flat bevel at sharp edges."""
+
+    def test_basic_chamfer(self, tmp_path):
+        from kiln.generation.validation import add_chamfer
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+        out = str(tmp_path / "chamfered.stl")
+
+        result = add_chamfer(stl, distance_mm=0.5, output_path=out)
+
+        assert result["path"] == out
+        assert result["distance_mm"] == 0.5
+        assert result["angle_threshold_deg"] == 60.0
+        assert os.path.isfile(out)
+
+    def test_cube_has_sharp_edges(self, tmp_path):
+        from kiln.generation.validation import add_chamfer
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+
+        result = add_chamfer(stl, distance_mm=0.3)
+        assert result["sharp_edges_found"] > 0
+        assert result["chamfer_triangles_added"] > 0
+        assert result["triangle_count"] > 12
+
+    def test_chamfered_file_is_valid_stl(self, tmp_path):
+        from kiln.generation.validation import add_chamfer, validate_mesh
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+        out = str(tmp_path / "chamfered.stl")
+
+        add_chamfer(stl, distance_mm=0.5, output_path=out)
+        val = validate_mesh(out)
+        assert val.valid
+        assert val.triangle_count > 12
+
+    def test_default_output_path(self, tmp_path):
+        from kiln.generation.validation import add_chamfer
+
+        stl = str(tmp_path / "part.stl")
+        _write_cube_stl(stl, 10.0)
+
+        result = add_chamfer(stl, distance_mm=0.5)
+        assert result["path"].endswith("_chamfered.stl")
+
+    def test_zero_distance_raises(self, tmp_path):
+        from kiln.generation.validation import add_chamfer
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+
+        with pytest.raises(ValueError, match="positive"):
+            add_chamfer(stl, distance_mm=0)
+
+    def test_chamfer_adds_two_tris_per_edge(self, tmp_path):
+        from kiln.generation.validation import add_chamfer
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 10.0)
+
+        result = add_chamfer(stl, distance_mm=0.3)
+        # Each sharp edge gets 2 chamfer triangles
+        assert result["chamfer_triangles_added"] == result["sharp_edges_found"] * 2
