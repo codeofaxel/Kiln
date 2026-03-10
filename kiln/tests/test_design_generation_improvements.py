@@ -3326,3 +3326,378 @@ class TestBooleanMeshOperation:
             with patch("subprocess.run", return_value=mock_result):
                 result = provider.boolean_operation(op, [stl1, stl2], output_path=out)
             assert result == out
+
+
+# ---------------------------------------------------------------------------
+# Design Reasoning Engine Tests
+# ---------------------------------------------------------------------------
+
+
+def _write_thin_neck_stl(path: str) -> None:
+    """Write an STL with a thin neck — wide bottom, narrow middle, wide top."""
+    # Create a dumbbell shape: two cubes connected by a thin bridge
+    tris = []
+
+    # Bottom block: 20x20x10
+    _add_box_tris(tris, 0, 0, 0, 20, 20, 10)
+    # Thin neck: 2x2x10 at center
+    _add_box_tris(tris, 9, 9, 10, 11, 11, 20)
+    # Top block: 20x20x10
+    _add_box_tris(tris, 0, 0, 20, 20, 20, 30)
+
+    _write_tris_as_stl(path, tris)
+
+
+def _write_tall_thin_stl(path: str) -> None:
+    """Write a very tall, thin STL (high aspect ratio)."""
+    tris = []
+    _add_box_tris(tris, 0, 0, 0, 5, 5, 60)  # 5x5x60 = ratio 12:1
+    _write_tris_as_stl(path, tris)
+
+
+def _write_cantilever_stl(path: str) -> None:
+    """Write an L-shaped STL with a cantilever arm."""
+    tris = []
+    # Vertical column: 10x10x30
+    _add_box_tris(tris, 0, 0, 0, 10, 10, 30)
+    # Horizontal cantilever arm: 40x10x5 extending from top
+    _add_box_tris(tris, 10, 0, 25, 50, 10, 30)
+    _write_tris_as_stl(path, tris)
+
+
+def _write_flat_plate_stl(path: str) -> None:
+    """Write a flat plate STL (wide and shallow)."""
+    tris = []
+    _add_box_tris(tris, 0, 0, 0, 80, 60, 3)  # Very flat
+    _write_tris_as_stl(path, tris)
+
+
+def _add_box_tris(
+    tris: list,
+    x0: float, y0: float, z0: float,
+    x1: float, y1: float, z1: float,
+) -> None:
+    """Add 12 triangles forming a box to the list."""
+    # 6 faces × 2 triangles = 12 triangles
+    v = [
+        (x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),  # bottom
+        (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1),  # top
+    ]
+    faces = [
+        # bottom (z0)
+        (v[0], v[2], v[1]), (v[0], v[3], v[2]),
+        # top (z1)
+        (v[4], v[5], v[6]), (v[4], v[6], v[7]),
+        # front (y0)
+        (v[0], v[1], v[5]), (v[0], v[5], v[4]),
+        # back (y1)
+        (v[2], v[3], v[7]), (v[2], v[7], v[6]),
+        # left (x0)
+        (v[0], v[4], v[7]), (v[0], v[7], v[3]),
+        # right (x1)
+        (v[1], v[2], v[6]), (v[1], v[6], v[5]),
+    ]
+    tris.extend(faces)
+
+
+def _write_tris_as_stl(
+    path: str,
+    tris: list[tuple[tuple[float, ...], ...]],
+) -> None:
+    """Write triangles as a binary STL file."""
+    header = b"\x00" * 80
+    data = header + struct.pack("<I", len(tris))
+    for tri in tris:
+        # Compute normal
+        v0, v1, v2 = tri
+        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
+        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
+        nx = e1[1] * e2[2] - e1[2] * e2[1]
+        ny = e1[2] * e2[0] - e1[0] * e2[2]
+        nz = e1[0] * e2[1] - e1[1] * e2[0]
+        data += struct.pack("<3f", nx, ny, nz)
+        for v in tri:
+            data += struct.pack("<3f", *v)
+        data += struct.pack("<H", 0)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+class TestAnalyzeStructuralRisks:
+    """Tests for geometric structural risk analysis."""
+
+    def test_cube_has_no_critical_risks(self, tmp_path):
+        path = str(tmp_path / "cube.stl")
+        _write_cube_stl(path, 20.0)
+
+        from kiln.design_reasoning import analyze_structural_risks
+
+        risks = analyze_structural_risks(path)
+        critical = [r for r in risks if r.severity == "critical"]
+        assert len(critical) == 0
+
+    def test_thin_neck_detected(self, tmp_path):
+        path = str(tmp_path / "dumbbell.stl")
+        _write_thin_neck_stl(path)
+
+        from kiln.design_reasoning import analyze_structural_risks
+
+        risks = analyze_structural_risks(path, min_cross_section_mm2=10.0)
+        neck_risks = [r for r in risks if r.risk_type in ("thin_neck", "stress_concentration")]
+        assert len(neck_risks) > 0
+
+    def test_tall_thin_part_flagged(self, tmp_path):
+        path = str(tmp_path / "tall.stl")
+        _write_tall_thin_stl(path)
+
+        from kiln.design_reasoning import analyze_structural_risks
+
+        risks = analyze_structural_risks(path)
+        base_risks = [r for r in risks if r.risk_type == "insufficient_base"]
+        assert len(base_risks) > 0
+        # 60mm tall / 5mm base = 12:1 ratio
+        assert any(r.metric_value > 10 for r in base_risks)
+
+    def test_flat_plate_low_risk(self, tmp_path):
+        path = str(tmp_path / "flat.stl")
+        _write_flat_plate_stl(path)
+
+        from kiln.design_reasoning import analyze_structural_risks
+
+        risks = analyze_structural_risks(path)
+        # Flat plate should have minimal structural issues
+        critical = [r for r in risks if r.severity == "critical"]
+        assert len(critical) == 0
+
+    def test_missing_file_raises(self):
+        from kiln.design_reasoning import analyze_structural_risks
+
+        with pytest.raises(ValueError, match="File not found"):
+            analyze_structural_risks("/nonexistent/file.stl")
+
+    def test_empty_stl_returns_empty(self, tmp_path):
+        path = str(tmp_path / "empty.stl")
+        # Write a valid binary STL with 0 triangles
+        with open(path, "wb") as f:
+            f.write(b"\x00" * 80)
+            f.write(struct.pack("<I", 0))
+
+        from kiln.design_reasoning import analyze_structural_risks
+
+        risks = analyze_structural_risks(path)
+        assert risks == []
+
+    def test_risk_to_dict(self, tmp_path):
+        path = str(tmp_path / "tall.stl")
+        _write_tall_thin_stl(path)
+
+        from kiln.design_reasoning import analyze_structural_risks
+
+        risks = analyze_structural_risks(path)
+        assert len(risks) > 0
+        d = risks[0].to_dict()
+        assert "risk_type" in d
+        assert "severity" in d
+        assert "location_mm" in d
+        assert isinstance(d["location_mm"], list)
+        assert len(d["location_mm"]) == 3
+
+    def test_risks_sorted_by_severity(self, tmp_path):
+        path = str(tmp_path / "tall.stl")
+        _write_tall_thin_stl(path)
+
+        from kiln.design_reasoning import analyze_structural_risks
+
+        risks = analyze_structural_risks(path)
+        if len(risks) >= 2:
+            severity_order = {"critical": 0, "warning": 1, "info": 2}
+            for i in range(len(risks) - 1):
+                assert severity_order.get(risks[i].severity, 3) <= severity_order.get(
+                    risks[i + 1].severity, 3
+                )
+
+
+class TestRecommendReinforcements:
+    """Tests for reinforcement recommendation engine."""
+
+    def test_thin_neck_gets_thicken_recommendation(self, tmp_path):
+        path = str(tmp_path / "dumbbell.stl")
+        _write_thin_neck_stl(path)
+
+        from kiln.design_reasoning import recommend_reinforcements
+
+        recs = recommend_reinforcements(path, min_cross_section_mm2=10.0)
+        thicken_recs = [r for r in recs if r.reinforcement_type == "thicken_wall"]
+        assert len(thicken_recs) > 0
+        assert "thicken" in thicken_recs[0].description.lower()
+
+    def test_tall_part_gets_base_recommendation(self, tmp_path):
+        path = str(tmp_path / "tall.stl")
+        _write_tall_thin_stl(path)
+
+        from kiln.design_reasoning import recommend_reinforcements
+
+        recs = recommend_reinforcements(path)
+        base_recs = [r for r in recs if r.reinforcement_type == "add_base"]
+        assert len(base_recs) > 0
+
+    def test_cube_gets_minimal_recommendations(self, tmp_path):
+        path = str(tmp_path / "cube.stl")
+        _write_cube_stl(path, 20.0)
+
+        from kiln.design_reasoning import recommend_reinforcements
+
+        recs = recommend_reinforcements(path)
+        # Cube should have few or no recommendations
+        high_priority = [r for r in recs if r.priority == "high"]
+        assert len(high_priority) <= 1
+
+    def test_recommendation_to_dict(self, tmp_path):
+        path = str(tmp_path / "tall.stl")
+        _write_tall_thin_stl(path)
+
+        from kiln.design_reasoning import recommend_reinforcements
+
+        recs = recommend_reinforcements(path)
+        assert len(recs) > 0
+        d = recs[0].to_dict()
+        assert "reinforcement_type" in d
+        assert "priority" in d
+        assert "location_mm" in d
+        assert "estimated_strength_gain" in d
+        assert "addresses_risk" in d
+
+
+class TestAssessLoadBearing:
+    """Tests for load-bearing analysis."""
+
+    def test_flat_plate_vertical_load(self, tmp_path):
+        path = str(tmp_path / "flat.stl")
+        _write_flat_plate_stl(path)
+
+        from kiln.design_reasoning import assess_load_bearing
+
+        analysis = assess_load_bearing(path)
+        assert analysis.primary_load_axis == "vertical"
+        assert "flat" in analysis.recommended_print_orientation.lower() or \
+               "upright" in analysis.recommended_print_orientation.lower()
+
+    def test_tall_column_analysis(self, tmp_path):
+        path = str(tmp_path / "tall.stl")
+        _write_tall_thin_stl(path)
+
+        from kiln.design_reasoning import assess_load_bearing
+
+        analysis = assess_load_bearing(path)
+        assert analysis.primary_load_axis in ("vertical", "multi-axis")
+        assert len(analysis.load_surfaces) > 0
+
+    def test_analysis_to_dict(self, tmp_path):
+        path = str(tmp_path / "cube.stl")
+        _write_cube_stl(path, 20.0)
+
+        from kiln.design_reasoning import assess_load_bearing
+
+        analysis = assess_load_bearing(path)
+        d = analysis.to_dict()
+        assert "primary_load_axis" in d
+        assert "load_surfaces" in d
+        assert "weak_axis" in d
+        assert "recommended_print_orientation" in d
+        assert "layer_direction_concern" in d
+
+    def test_empty_mesh_returns_unknown(self, tmp_path):
+        path = str(tmp_path / "empty.stl")
+        with open(path, "wb") as f:
+            f.write(b"\x00" * 80)
+            f.write(struct.pack("<I", 0))
+
+        from kiln.design_reasoning import assess_load_bearing
+
+        analysis = assess_load_bearing(path)
+        assert analysis.primary_load_axis == "unknown"
+
+
+class TestDesignImprovementPlan:
+    """Tests for the complete improvement plan pipeline."""
+
+    def test_cube_gets_high_score(self, tmp_path):
+        path = str(tmp_path / "cube.stl")
+        _write_cube_stl(path, 20.0)
+
+        from kiln.design_reasoning import generate_improvement_plan
+
+        plan = generate_improvement_plan(path)
+        assert plan.overall_structural_score >= 70
+        assert plan.structural_grade in ("A", "B", "C")
+
+    def test_tall_thin_gets_low_score(self, tmp_path):
+        path = str(tmp_path / "tall.stl")
+        _write_tall_thin_stl(path)
+
+        from kiln.design_reasoning import generate_improvement_plan
+
+        plan = generate_improvement_plan(path)
+        assert plan.overall_structural_score < 80
+        assert plan.critical_count + plan.warning_count > 0
+        assert len(plan.reinforcements) > 0
+
+    def test_plan_includes_load_analysis(self, tmp_path):
+        path = str(tmp_path / "cube.stl")
+        _write_cube_stl(path, 20.0)
+
+        from kiln.design_reasoning import generate_improvement_plan
+
+        plan = generate_improvement_plan(path)
+        assert plan.load_analysis is not None
+        assert plan.load_analysis.primary_load_axis != ""
+
+    def test_plan_to_dict(self, tmp_path):
+        path = str(tmp_path / "cube.stl")
+        _write_cube_stl(path, 20.0)
+
+        from kiln.design_reasoning import generate_improvement_plan
+
+        plan = generate_improvement_plan(path)
+        d = plan.to_dict()
+        assert "risks" in d
+        assert "reinforcements" in d
+        assert "load_analysis" in d
+        assert "overall_structural_score" in d
+        assert "structural_grade" in d
+        assert "summary" in d
+
+    def test_thin_neck_full_pipeline(self, tmp_path):
+        """End-to-end: thin neck → detected → reinforcement recommended."""
+        path = str(tmp_path / "dumbbell.stl")
+        _write_thin_neck_stl(path)
+
+        from kiln.design_reasoning import generate_improvement_plan
+
+        plan = generate_improvement_plan(path, min_cross_section_mm2=10.0)
+        # Should find the neck
+        neck_risks = [r for r in plan.risks if "neck" in r.risk_type or "stress" in r.risk_type]
+        assert len(neck_risks) > 0
+        # Should recommend fixing it
+        assert len(plan.reinforcements) > 0
+        assert plan.summary != ""
+
+    def test_grade_boundaries(self, tmp_path):
+        """Verify score-to-grade mapping — cube gets reasonable grade."""
+        from kiln.design_reasoning import generate_improvement_plan
+
+        # Cube = well-formed geometry = decent score
+        # Note: box shapes have sharp 90° edges which get flagged,
+        # so a perfect A is unlikely for raw box geometry.
+        path = str(tmp_path / "cube.stl")
+        _write_cube_stl(path, 20.0)
+        plan = generate_improvement_plan(path)
+        # Should be at least a C — not failing badly
+        assert plan.structural_grade in ("A", "B", "C")
+        assert plan.overall_structural_score >= 50
+
+    def test_missing_file_handled(self):
+        from kiln.design_reasoning import generate_improvement_plan
+
+        with pytest.raises(ValueError, match="File not found"):
+            generate_improvement_plan("/no/such/file.stl")

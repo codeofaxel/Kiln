@@ -10597,6 +10597,166 @@ def boolean_mesh_op(
 
 
 @mcp.tool()
+def analyze_structural_risks(
+    file_path: str,
+    min_cross_section_mm2: float = 4.0,
+    sharp_angle_threshold_deg: float = 60.0,
+) -> dict:
+    """Analyze an STL mesh for structural weak points.
+
+    Goes beyond printability to find **structural** risks:
+    - **thin_neck**: narrow cross-sections that will snap under load
+    - **stress_concentration**: abrupt section changes that focus stress
+    - **cantilever**: unsupported overhanging geometry
+    - **sharp_corner**: concave edges that initiate cracks
+    - **insufficient_base**: topple risk from height-to-base ratio
+    - **weak_layer_adhesion**: overhangs in structurally critical areas
+
+    Returns risk locations as (x, y, z) coordinates in mm so agents
+    can reason about *where* problems are, not just *that* they exist.
+
+    :param file_path: Path to the STL file.
+    :param min_cross_section_mm2: Minimum safe cross-section area (default 4).
+    :param sharp_angle_threshold_deg: Angle for sharp edge detection (default 60).
+    :returns: Dict with ``risks`` list, each containing location, severity, and description.
+    """
+    try:
+        from kiln.design_reasoning import analyze_structural_risks as _analyze
+
+        risks = _analyze(
+            file_path,
+            min_cross_section_mm2=min_cross_section_mm2,
+            sharp_angle_threshold_deg=sharp_angle_threshold_deg,
+        )
+        return {
+            "status": "success",
+            "risk_count": len(risks),
+            "critical_count": sum(1 for r in risks if r.severity == "critical"),
+            "warning_count": sum(1 for r in risks if r.severity == "warning"),
+            "risks": [r.to_dict() for r in risks],
+        }
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"Structural analysis failed: {exc}")
+
+
+@mcp.tool()
+def recommend_design_reinforcements(
+    file_path: str,
+    min_cross_section_mm2: float = 4.0,
+) -> dict:
+    """Recommend specific reinforcements for an STL mesh.
+
+    Analyzes geometry to find structural risks, then generates actionable
+    recommendations with **specific locations** and **estimated strength gains**:
+    - **gusset**: triangular support at cantilever bases (3-10x stronger)
+    - **fillet**: smooth transitions at stress concentrations (30-60% gain)
+    - **thicken_wall**: add material at thin necks (2-5x gain)
+    - **add_base**: widen the base for stability
+    - **reorient**: change print orientation for layer strength
+
+    Each recommendation includes the coordinates where the reinforcement
+    should be applied and which Kiln tool to use (e.g., ``add_mesh_fillet()``).
+
+    :param file_path: Path to the STL file.
+    :param min_cross_section_mm2: Minimum safe cross-section area.
+    :returns: Dict with ``reinforcements`` list.
+    """
+    try:
+        from kiln.design_reasoning import recommend_reinforcements as _recommend
+
+        recs = _recommend(file_path, min_cross_section_mm2=min_cross_section_mm2)
+        return {
+            "status": "success",
+            "recommendation_count": len(recs),
+            "reinforcements": [r.to_dict() for r in recs],
+        }
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"Reinforcement analysis failed: {exc}")
+
+
+@mcp.tool()
+def assess_load_bearing(file_path: str) -> dict:
+    """Analyze load-bearing characteristics of a mesh from its geometry.
+
+    Infers structural behavior by analyzing surface normals, shape type,
+    and cross-section distribution:
+    - **primary_load_axis**: which direction the part resists force
+    - **load_surfaces**: which surfaces bear load (with area fractions)
+    - **weak_axis**: the most vulnerable direction for failure
+    - **recommended_print_orientation**: how to orient for maximum strength
+    - **layer_direction_concern**: how FDM layers affect structural integrity
+
+    This is the difference between "PLA is good for prototypes" (lookup)
+    and "this bracket should be printed on its side because the load path
+    crosses layer boundaries" (geometric reasoning).
+
+    :param file_path: Path to the STL file.
+    :returns: Dict with load analysis.
+    """
+    try:
+        from kiln.design_reasoning import assess_load_bearing as _assess
+
+        analysis = _assess(file_path)
+        return {
+            "status": "success",
+            **analysis.to_dict(),
+        }
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"Load analysis failed: {exc}")
+
+
+@mcp.tool()
+def design_improvement_plan(
+    file_path: str,
+    min_cross_section_mm2: float = 4.0,
+    sharp_angle_threshold_deg: float = 60.0,
+) -> dict:
+    """Generate a complete structural improvement plan for a design.
+
+    The **full design reasoning pipeline** — combines risk analysis,
+    reinforcement recommendations, and load analysis into one actionable
+    report with an overall structural score (0-100, A-F grade).
+
+    This is the tool that makes Kiln a **design advisor**, not just a
+    geometry validator. It answers: "This bracket needs a gusset at the
+    load point" — not just "the part has thin walls."
+
+    The plan includes:
+    1. **Risks**: all structural weak points with locations and severity
+    2. **Reinforcements**: specific fixes with estimated strength gains
+    3. **Load analysis**: how the part handles forces, best print orientation
+    4. **Score**: overall structural grade with summary
+
+    :param file_path: Path to the STL file.
+    :param min_cross_section_mm2: Minimum safe cross-section area.
+    :param sharp_angle_threshold_deg: Angle for sharp edge detection.
+    :returns: Complete improvement plan as dict.
+    """
+    try:
+        from kiln.design_reasoning import generate_improvement_plan as _plan
+
+        plan = _plan(
+            file_path,
+            min_cross_section_mm2=min_cross_section_mm2,
+            sharp_angle_threshold_deg=sharp_angle_threshold_deg,
+        )
+        return {
+            "status": "success",
+            **plan.to_dict(),
+        }
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"Improvement plan failed: {exc}")
+
+
+@mcp.tool()
 def center_model_on_bed(
     file_path: str,
     bed_x_mm: float = 256.0,

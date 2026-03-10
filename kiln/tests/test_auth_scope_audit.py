@@ -225,6 +225,12 @@ READ_ONLY_TOOLS: set[str] = {
 
     # Design generation analysis — Phase 6 (read-only)
     "estimate_mesh_print_time",
+
+    # Design reasoning engine (read-only structural analysis)
+    "analyze_structural_risks",
+    "recommend_design_reinforcements",
+    "assess_load_bearing",
+    "design_improvement_plan",
 }
 
 
