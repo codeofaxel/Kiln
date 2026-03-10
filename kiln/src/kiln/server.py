@@ -9322,6 +9322,305 @@ def generate_from_template(
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
+@mcp.tool()
+def analyze_mesh_geometry(file_path: str) -> dict:
+    """Deep geometric and printability analysis of a 3D mesh.
+
+    Goes beyond basic validation to compute volume, surface area,
+    center of mass, overhang detection, connected components (floating
+    parts), degenerate triangles, and a composite printability score
+    (0-100).
+
+    Use this after generating a model to understand its geometry and
+    identify printability issues before sending to the slicer.
+
+    :param file_path: Path to .stl, .obj, or .glb file.
+    :returns: Dict with full mesh analysis metrics.
+    """
+    try:
+        from kiln.generation.validation import analyze_mesh
+
+        result = analyze_mesh(file_path)
+        return {"status": "success", **result.to_dict()}
+    except Exception as exc:
+        return _error_dict(f"Mesh analysis failed: {exc}", code="ANALYSIS_ERROR")
+
+
+@mcp.tool()
+def repair_mesh(file_path: str, output_path: str = "") -> dict:
+    """Repair common mesh issues: degenerate triangles, bad normals.
+
+    Removes zero-area triangles and recomputes face normals.  Use
+    this on meshes from AI generation providers before slicing.
+
+    :param file_path: Path to the STL file to repair.
+    :param output_path: Output path.  Defaults to overwriting the input.
+    :returns: Dict with repair statistics.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import repair_stl
+
+        result = repair_stl(file_path, output_path=output_path or None)
+        return {"status": "success", **result}
+    except Exception as exc:
+        return _error_dict(f"Mesh repair failed: {exc}", code="REPAIR_ERROR")
+
+
+@mcp.tool()
+def compose_models(file_paths: list[str], output_path: str) -> dict:
+    """Merge multiple mesh files into a single combined model.
+
+    Concatenates all triangle geometry from the input files into one
+    output STL.  No boolean operations — bodies are simply combined.
+    Useful for multi-part assemblies or adding components to a design.
+
+    :param file_paths: List of .stl/.obj/.glb file paths to merge.
+    :param output_path: Path for the combined output STL.
+    :returns: Dict with merge statistics.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import compose_stls
+
+        result = compose_stls(file_paths, output_path)
+        return {"status": "success", **result}
+    except Exception as exc:
+        return _error_dict(f"Composition failed: {exc}", code="COMPOSE_ERROR")
+
+
+@mcp.tool()
+def export_model_3mf(file_path: str, output_path: str = "") -> dict:
+    """Export a mesh to 3MF format (preferred by modern slicers).
+
+    Converts STL/OBJ/GLB to 3MF, a ZIP-based XML format used by
+    PrusaSlicer, OrcaSlicer, and Bambu Studio.  3MF is more compact
+    and supports metadata better than STL.
+
+    :param file_path: Path to the input mesh file.
+    :param output_path: Output 3MF path.  Auto-generated if empty.
+    :returns: Dict with the output file path.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import export_3mf
+
+        out = export_3mf(file_path, output_path=output_path or None)
+        file_size = os.path.getsize(out)
+        return {
+            "status": "success",
+            "path": out,
+            "file_size_bytes": file_size,
+            "message": f"Exported to 3MF ({file_size} bytes).",
+        }
+    except Exception as exc:
+        return _error_dict(f"3MF export failed: {exc}", code="EXPORT_ERROR")
+
+
+@mcp.tool()
+def validate_openscad_code(code: str) -> dict:
+    """Validate OpenSCAD code without generating geometry.
+
+    Compiles the code and returns structured error/warning information
+    with line numbers.  Use this to check code before calling
+    generate_model with OpenSCAD.
+
+    :param code: OpenSCAD source code to validate.
+    :returns: Dict with ``valid``, ``errors``, and ``warnings``.
+    """
+    try:
+        gen = _get_generation_provider("openscad")
+        result = gen.validate_scad(code)
+        return {"status": "success", **result}
+    except GenerationError as exc:
+        return _error_dict(f"OpenSCAD validation failed: {exc}", code=exc.code or "VALIDATION_ERROR")
+    except Exception as exc:
+        return _error_dict(f"Validation error: {exc}", code="VALIDATION_ERROR")
+
+
+@mcp.tool()
+def estimate_print_time(
+    file_path: str,
+    profile: str = "",
+    slicer_path: str = "",
+) -> dict:
+    """Estimate print time and filament usage for a model.
+
+    Slices the model and parses the G-code for print time, filament
+    length/weight, layer count, and cost estimates.
+
+    :param file_path: Path to STL/3MF/OBJ file.
+    :param profile: Optional slicer profile path.
+    :param slicer_path: Optional explicit slicer binary path.
+    :returns: Dict with time, filament, and layer estimates.
+    """
+    try:
+        from kiln.slicer import estimate_print
+
+        result = estimate_print(
+            file_path,
+            profile=profile or None,
+            slicer_path=slicer_path or None,
+        )
+        return {"status": "success", **result}
+    except Exception as exc:
+        return _error_dict(f"Print estimation failed: {exc}", code="ESTIMATE_ERROR")
+
+
+@mcp.tool()
+def iterate_design(
+    prompt: str,
+    provider: str = "openscad",
+    max_iterations: int = 3,
+    material: str = "",
+    printer_model: str = "",
+) -> dict:
+    """Automated design iteration: generate → validate → improve → regenerate.
+
+    Runs a closed loop that generates a model, validates it for
+    printability issues, and if issues are found, improves the prompt
+    and regenerates.  Stops when the model passes validation or
+    max_iterations is reached.  Returns the best result.
+
+    :param prompt: Text description or OpenSCAD code.
+    :param provider: Generation provider (default ``"openscad"``).
+    :param max_iterations: Maximum improvement attempts (1-5).
+    :param material: Optional material for design intelligence.
+    :param printer_model: Optional printer model for constraints.
+    :returns: Dict with the best result and iteration history.
+    """
+    if err := _check_auth("generate"):
+        return err
+    from kiln.generation.validation import analyze_mesh
+    from kiln.generation_feedback import (
+        analyze_for_feedback,
+        enhance_prompt_with_design_intelligence,
+        generate_improved_prompt,
+        get_provider_prompt_limit,
+    )
+
+    max_iterations = max(1, min(5, max_iterations))
+    iterations: list[dict[str, Any]] = []
+    best_result: dict[str, Any] | None = None
+    best_score = -1
+
+    try:
+        gen = _get_generation_provider(provider)
+    except Exception as exc:
+        return _error_dict(f"Provider error: {exc}", code="PROVIDER_ERROR")
+
+    current_prompt = prompt
+
+    # Pre-enrich with design intelligence (skip for OpenSCAD raw code)
+    if provider != "openscad":
+        try:
+            limit = get_provider_prompt_limit(provider)
+            enriched = enhance_prompt_with_design_intelligence(
+                current_prompt,
+                material=material or None,
+                printer_model=printer_model or None,
+                max_length=limit,
+            )
+            current_prompt = enriched.improved_prompt
+        except Exception:
+            pass
+
+    for i in range(max_iterations):
+        iteration: dict[str, Any] = {"iteration": i + 1, "prompt": current_prompt[:200]}
+
+        # Generate
+        try:
+            job = gen.generate(current_prompt, format="stl")
+        except Exception as exc:
+            iteration["status"] = "generation_failed"
+            iteration["error"] = str(exc)
+            iterations.append(iteration)
+            continue
+
+        if job.status.value == "failed":
+            iteration["status"] = "generation_failed"
+            iteration["error"] = job.error
+            iterations.append(iteration)
+            continue
+
+        # For async providers, we'd need to poll — skip for OpenSCAD
+        if job.status.value != "succeeded":
+            iteration["status"] = "pending"
+            iteration["job_id"] = job.id
+            iterations.append(iteration)
+            # Can't iterate further on async providers in a sync loop
+            best_result = {"job": job.to_dict()}
+            break
+
+        # Download and analyze
+        try:
+            dl = gen.download_result(job.id)
+            analysis = analyze_mesh(dl.local_path)
+            iteration["analysis"] = {
+                "printability_score": analysis.printability_score,
+                "issues": analysis.printability_issues,
+                "triangles": analysis.triangle_count,
+                "volume_mm3": analysis.volume_mm3,
+                "dimensions_mm": analysis.dimensions_mm,
+            }
+            iteration["status"] = "succeeded"
+            iteration["file_path"] = dl.local_path
+
+            if analysis.printability_score > best_score:
+                best_score = analysis.printability_score
+                best_result = {
+                    "job": job.to_dict(),
+                    "result": dl.to_dict(),
+                    "analysis": analysis.to_dict(),
+                }
+
+            # If score is good enough, stop iterating
+            if analysis.printability_score >= 80:
+                iteration["outcome"] = "passed"
+                iterations.append(iteration)
+                break
+
+            # Generate improved prompt
+            if i < max_iterations - 1:
+                feedback = analyze_for_feedback(
+                    dl.local_path,
+                    original_prompt=current_prompt,
+                    printability_report=analysis.to_dict(),
+                )
+                if feedback:
+                    improved = generate_improved_prompt(
+                        prompt,  # Use original, not enriched
+                        feedback,
+                        iteration=i + 2,
+                        provider=provider,
+                    )
+                    current_prompt = improved.improved_prompt
+                    iteration["outcome"] = "needs_improvement"
+                    iteration["feedback_applied"] = len(feedback)
+                else:
+                    iteration["outcome"] = "no_feedback"
+
+        except Exception as exc:
+            iteration["status"] = "analysis_failed"
+            iteration["error"] = str(exc)
+
+        iterations.append(iteration)
+
+    if best_result is None:
+        return _error_dict("All iterations failed.", code="ITERATION_EXHAUSTED")
+
+    return {
+        "status": "success",
+        "iterations": iterations,
+        "iteration_count": len(iterations),
+        "best_score": best_score,
+        **best_result,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Firmware update tools
 # ---------------------------------------------------------------------------

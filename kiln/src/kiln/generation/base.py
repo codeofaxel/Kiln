@@ -116,6 +116,30 @@ class MeshValidationResult:
         return asdict(self)
 
 
+@dataclass
+class MeshAnalysis:
+    """Detailed geometric and printability analysis of a 3D mesh."""
+
+    triangle_count: int = 0
+    vertex_count: int = 0
+    is_manifold: bool = False
+    bounding_box: dict[str, float] | None = None
+    dimensions_mm: dict[str, float] | None = None
+    volume_mm3: float = 0.0
+    surface_area_mm2: float = 0.0
+    center_of_mass: dict[str, float] | None = None
+    connected_components: int = 0
+    degenerate_triangles: int = 0
+    overhang_triangle_count: int = 0
+    overhang_percentage: float = 0.0
+    max_overhang_angle_deg: float = 0.0
+    printability_score: int = 0
+    printability_issues: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 # ---------------------------------------------------------------------------
 # Abstract base
 # ---------------------------------------------------------------------------

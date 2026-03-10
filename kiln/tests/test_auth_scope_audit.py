@@ -166,6 +166,9 @@ READ_ONLY_TOOLS: Set[str] = {
     "render_model_preview",
     "get_feedback_loop_status",
     "list_design_templates",
+    "analyze_mesh_geometry",
+    "validate_openscad_code",
+    "estimate_print_time",
 
     # Onboarding / help (no side effects)
     "get_started",

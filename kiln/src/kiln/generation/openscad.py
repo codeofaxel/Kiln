@@ -356,11 +356,11 @@ class OpenSCADProvider(GenerationProvider):
                     text=True,
                     timeout=self._timeout,
                 )
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as err:
                 raise GenerationError(
                     f"OpenSCAD render timed out after {self._timeout}s.",
                     code="RENDER_TIMEOUT",
-                )
+                ) from err
 
             if result.returncode != 0:
                 stderr = (result.stderr or "").strip()[:500]
@@ -380,5 +380,94 @@ class OpenSCADProvider(GenerationProvider):
             with contextlib.suppress(OSError):
                 os.unlink(scad_path)
 
+    def validate_scad(self, code: str) -> dict[str, Any]:
+        """Validate OpenSCAD code without generating output.
+
+        Compiles the code with ``--export-format=echo`` to check for
+        syntax/semantic errors without producing geometry.
+
+        Args:
+            code: OpenSCAD source code to validate.
+
+        Returns:
+            Dict with ``valid``, ``errors``, and ``warnings`` keys.
+        """
+        scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_validate_")
+        try:
+            with os.fdopen(scad_fd, "w") as fh:
+                fh.write(code)
+
+            # Use /dev/null as output — we only care about stderr
+            null_out = os.path.join(tempfile.gettempdir(), f"kiln_null_{uuid.uuid4().hex[:8]}.stl")
+            cmd = [self._binary, "-o", null_out, scad_path]
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    cwd=tempfile.gettempdir(),
+                )
+            except subprocess.TimeoutExpired:
+                return {
+                    "valid": False,
+                    "errors": [{"message": "Validation timed out after 30s"}],
+                    "warnings": [],
+                }
+            finally:
+                with contextlib.suppress(OSError):
+                    os.unlink(null_out)
+
+            return _parse_openscad_output(result.stderr or "", result.returncode)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(scad_path)
+
     def list_styles(self) -> list[str]:
         return []
+
+
+def _parse_openscad_output(stderr: str, return_code: int) -> dict[str, Any]:
+    """Parse OpenSCAD stderr into structured error/warning lists.
+
+    Args:
+        stderr: Raw stderr output from OpenSCAD.
+        return_code: Process exit code.
+
+    Returns:
+        Dict with ``valid``, ``errors``, and ``warnings``.
+    """
+    errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+
+    for line in stderr.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        entry: dict[str, Any] = {"message": line}
+
+        # Extract file:line info
+        loc_match = re.match(r"(?:ERROR|WARNING|TRACE):\s*(.+?),\s*line\s+(\d+)", line, re.IGNORECASE)
+        if loc_match:
+            entry["line"] = int(loc_match.group(2))
+
+        # Also handle "Parser error in line N:" format
+        parser_match = re.search(r"in line (\d+)", line, re.IGNORECASE)
+        if parser_match and "line" not in entry:
+            entry["line"] = int(parser_match.group(1))
+
+        lower = line.lower()
+        if "error" in lower or "parser error" in lower:
+            errors.append(entry)
+        elif "warning" in lower or "deprecated" in lower:
+            warnings.append(entry)
+        elif return_code != 0:
+            errors.append(entry)
+
+    return {
+        "valid": return_code == 0 and len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+    }

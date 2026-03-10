@@ -594,3 +594,385 @@ class TestDesignTemplates:
         result = Template(scad).safe_substitute({"width": 50, "height": 30})
         assert "width = 50;" in result
         assert "height = 30;" in result
+
+
+# ---- Phase 2: Advanced analysis, repair, composition, 3MF, iteration ----
+
+
+class TestMeshAnalysis:
+    """Tests for analyze_mesh() — volume, surface area, overhangs, components."""
+
+    def test_cube_volume_and_surface_area(self, tmp_path):
+        """A unit cube should have volume ~1 and surface area ~6."""
+        from kiln.generation.validation import analyze_mesh
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 1.0)
+        result = analyze_mesh(cube_path)
+
+        assert result.triangle_count == 12  # 6 faces * 2 triangles
+        assert result.volume_mm3 > 0.5  # ~1.0
+        assert result.surface_area_mm2 > 4.0  # ~6.0
+        assert result.connected_components == 1
+        assert result.degenerate_triangles == 0
+        assert result.printability_score > 0
+
+    def test_cube_center_of_mass(self, tmp_path):
+        """Center of mass of a unit cube should be near (0.5, 0.5, 0.5)."""
+        from kiln.generation.validation import analyze_mesh
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 1.0)
+        result = analyze_mesh(cube_path)
+
+        assert result.center_of_mass is not None
+        assert abs(result.center_of_mass["x"] - 0.5) < 0.1
+        assert abs(result.center_of_mass["y"] - 0.5) < 0.1
+        assert abs(result.center_of_mass["z"] - 0.5) < 0.1
+
+    def test_dimensions_computed(self, tmp_path):
+        """Dimensions should be populated from bounding box."""
+        from kiln.generation.validation import analyze_mesh
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        result = analyze_mesh(cube_path)
+
+        assert result.dimensions_mm is not None
+        assert abs(result.dimensions_mm["width_mm"] - 10.0) < 0.1
+        assert abs(result.dimensions_mm["depth_mm"] - 10.0) < 0.1
+        assert abs(result.dimensions_mm["height_mm"] - 10.0) < 0.1
+
+    def test_printability_score_range(self, tmp_path):
+        """Score should be between 0 and 100."""
+        from kiln.generation.validation import analyze_mesh
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 20.0)
+        result = analyze_mesh(cube_path)
+
+        assert 0 <= result.printability_score <= 100
+
+    def test_nonexistent_file(self):
+        """Analyzing a missing file returns issues."""
+        from kiln.generation.validation import analyze_mesh
+
+        result = analyze_mesh("/nonexistent/file.stl")
+        assert len(result.printability_issues) > 0
+
+    def test_unsupported_format(self, tmp_path):
+        """Unsupported extension returns issues."""
+        from kiln.generation.validation import analyze_mesh
+
+        bad = tmp_path / "model.fbx"
+        bad.write_bytes(b"fake")
+        result = analyze_mesh(str(bad))
+        assert len(result.printability_issues) > 0
+
+
+class TestSTLRepair:
+    """Tests for repair_stl()."""
+
+    def test_repair_removes_degenerate_triangles(self, tmp_path):
+        """Degenerate (zero-area) triangles should be removed."""
+        from kiln.generation.validation import repair_stl
+
+        stl_path = str(tmp_path / "bad.stl")
+        _write_cube_stl(stl_path, 10.0)
+
+        # Add a degenerate triangle (three identical vertices)
+        with open(stl_path, "r+b") as fh:
+            fh.seek(80)
+            count = struct.unpack("<I", fh.read(4))[0]
+            fh.seek(80)
+            fh.write(struct.pack("<I", count + 1))
+            fh.seek(0, 2)  # end of file
+            # Degenerate: all three vertices are the same
+            fh.write(struct.pack("<3f", 0, 0, 0))  # normal
+            for _ in range(3):
+                fh.write(struct.pack("<3f", 5.0, 5.0, 5.0))
+            fh.write(struct.pack("<H", 0))
+
+        result = repair_stl(stl_path)
+        assert result["degenerate_removed"] >= 1
+        assert result["cleaned_triangles"] < result["original_triangles"]
+
+    def test_repair_custom_output(self, tmp_path):
+        """Repair to a custom output path."""
+        from kiln.generation.validation import repair_stl
+
+        stl_path = str(tmp_path / "input.stl")
+        out_path = str(tmp_path / "repaired.stl")
+        _write_cube_stl(stl_path, 10.0)
+
+        result = repair_stl(stl_path, output_path=out_path)
+        assert result["path"] == out_path
+        assert os.path.isfile(out_path)
+
+
+class TestDesignComposition:
+    """Tests for compose_stls()."""
+
+    def test_merge_two_cubes(self, tmp_path):
+        """Merging two cubes doubles the triangle count."""
+        from kiln.generation.validation import compose_stls
+
+        a = str(tmp_path / "a.stl")
+        b = str(tmp_path / "b.stl")
+        out = str(tmp_path / "combined.stl")
+        _write_cube_stl(a, 10.0)
+        _write_cube_stl(b, 5.0)
+
+        result = compose_stls([a, b], out)
+        assert result["total_triangles"] == 24  # 12 + 12
+        assert result["files_merged"] == 2
+        assert os.path.isfile(out)
+
+    def test_empty_list_raises(self):
+        """Empty file list raises ValueError."""
+        from kiln.generation.validation import compose_stls
+
+        with pytest.raises(ValueError, match="No files"):
+            compose_stls([], "/tmp/out.stl")
+
+
+class TestExport3MF:
+    """Tests for export_3mf()."""
+
+    def test_export_cube_to_3mf(self, tmp_path):
+        """A cube STL should export to a valid 3MF ZIP."""
+        import zipfile as zf
+
+        from kiln.generation.validation import export_3mf
+
+        stl_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl_path, 10.0)
+
+        out = export_3mf(stl_path)
+        assert out.endswith(".3mf")
+        assert os.path.isfile(out)
+
+        # Verify it's a valid ZIP with expected entries
+        with zf.ZipFile(out) as z:
+            names = z.namelist()
+            assert "[Content_Types].xml" in names
+            assert "_rels/.rels" in names
+            assert "3D/3dmodel.model" in names
+
+            # Verify XML contains vertices and triangles
+            model = z.read("3D/3dmodel.model").decode("utf-8")
+            assert "<vertex" in model
+            assert "<triangle" in model
+
+    def test_export_custom_output_path(self, tmp_path):
+        """Custom output path should be used."""
+        from kiln.generation.validation import export_3mf
+
+        stl_path = str(tmp_path / "cube.stl")
+        out_path = str(tmp_path / "custom.3mf")
+        _write_cube_stl(stl_path, 10.0)
+
+        result = export_3mf(stl_path, output_path=out_path)
+        assert result == out_path
+        assert os.path.isfile(out_path)
+
+    def test_unsupported_format_raises(self, tmp_path):
+        """Unsupported input format raises."""
+        from kiln.generation.validation import export_3mf
+
+        bad = tmp_path / "model.fbx"
+        bad.write_bytes(b"fake")
+        with pytest.raises(ValueError, match="Unsupported"):
+            export_3mf(str(bad))
+
+
+class TestConnectedComponents:
+    """Tests for _count_components()."""
+
+    def test_single_cube_one_component(self, tmp_path):
+        """A single cube mesh has exactly 1 component."""
+        from kiln.generation.validation import _count_components, _parse_stl
+
+        stl_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl_path, 10.0)
+        from pathlib import Path
+
+        tris, _ = _parse_stl(Path(stl_path), [])
+        assert _count_components(tris) == 1
+
+    def test_empty_mesh_zero_components(self):
+        """Empty triangle list has 0 components."""
+        from kiln.generation.validation import _count_components
+
+        assert _count_components([]) == 0
+
+
+class TestOpenSCADErrorParsing:
+    """Tests for _parse_openscad_output()."""
+
+    def test_clean_output(self):
+        """Clean compilation has no errors."""
+        from kiln.generation.openscad import _parse_openscad_output
+
+        result = _parse_openscad_output("", 0)
+        assert result["valid"] is True
+        assert len(result["errors"]) == 0
+
+    def test_error_detected(self):
+        """Errors in stderr are extracted."""
+        from kiln.generation.openscad import _parse_openscad_output
+
+        result = _parse_openscad_output(
+            "ERROR: Parser error in line 5: syntax error\n", 1
+        )
+        assert result["valid"] is False
+        assert len(result["errors"]) >= 1
+        assert result["errors"][0]["line"] == 5
+
+    def test_warning_detected(self):
+        """Warnings are separated from errors."""
+        from kiln.generation.openscad import _parse_openscad_output
+
+        result = _parse_openscad_output(
+            "WARNING: Duplicate parameter in line 3\n", 0
+        )
+        assert result["valid"] is True
+        assert len(result["warnings"]) >= 1
+
+    def test_mixed_errors_and_warnings(self):
+        """Both errors and warnings are correctly categorized."""
+        from kiln.generation.openscad import _parse_openscad_output
+
+        stderr = (
+            "WARNING: deprecated feature\n"
+            "ERROR: undefined variable 'foo', line 10\n"
+        )
+        result = _parse_openscad_output(stderr, 1)
+        assert result["valid"] is False
+        assert len(result["errors"]) >= 1
+        assert len(result["warnings"]) >= 1
+
+
+class TestSlicerEstimation:
+    """Tests for _parse_gcode_estimates()."""
+
+    def test_parse_prusaslicer_comments(self, tmp_path):
+        """PrusaSlicer-style comments should be parsed."""
+        from kiln.slicer import _parse_gcode_estimates
+
+        gcode = tmp_path / "test.gcode"
+        gcode.write_text(
+            "; generated by PrusaSlicer\n"
+            "G28 ; home\n"
+            "; estimated printing time (normal mode) = 1h 23m 45s\n"
+            "; filament used [mm] = 1234.56\n"
+            "; filament used [g] = 12.34\n"
+            "; filament used [cm3] = 9.87\n"
+            "; total layers count = 150\n"
+            "; filament cost = 0.42\n"
+        )
+
+        result = _parse_gcode_estimates(str(gcode))
+        assert result["estimated_time_seconds"] == 1 * 3600 + 23 * 60 + 45
+        assert result["filament_length_mm"] == 1234.56
+        assert result["filament_weight_g"] == 12.34
+        assert result["filament_volume_cm3"] == 9.87
+        assert result["layer_count"] == 150
+        assert result["filament_cost"] == 0.42
+
+    def test_empty_gcode(self, tmp_path):
+        """Empty gcode file returns just path."""
+        from kiln.slicer import _parse_gcode_estimates
+
+        gcode = tmp_path / "empty.gcode"
+        gcode.write_text("G28\nG1 X10 Y10\n")
+
+        result = _parse_gcode_estimates(str(gcode))
+        assert result["gcode_path"] == str(gcode)
+        assert "estimated_time_seconds" not in result
+
+
+class TestIterateDesign:
+    """Tests for the iterate_design automated loop."""
+
+    @patch("kiln.server._get_generation_provider")
+    def test_iteration_stops_on_high_score(self, mock_get_provider, tmp_path):
+        """Loop stops when printability score is >= 80."""
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 20.0)
+
+        mock_provider = MagicMock()
+        mock_provider.name = "openscad"
+        mock_job = MagicMock()
+        mock_job.status.value = "succeeded"
+        mock_job.to_dict.return_value = {"id": "test-1", "status": "succeeded"}
+        mock_job.id = "test-1"
+        mock_job.error = None
+        mock_provider.generate.return_value = mock_job
+
+        mock_result = MagicMock()
+        mock_result.local_path = cube_path
+        mock_result.to_dict.return_value = {"local_path": cube_path}
+        mock_provider.download_result.return_value = mock_result
+        mock_get_provider.return_value = mock_provider
+
+        from kiln.server import iterate_design
+
+        result = iterate_design("cube(20);", provider="openscad", max_iterations=3)
+
+        assert result["status"] == "success"
+        assert result["best_score"] >= 0
+        assert len(result["iterations"]) >= 1
+
+    @patch("kiln.server._get_generation_provider")
+    def test_iteration_handles_generation_failure(self, mock_get_provider):
+        """Loop handles generation failures gracefully."""
+        mock_provider = MagicMock()
+        mock_provider.name = "openscad"
+        mock_provider.generate.side_effect = Exception("compile error")
+        mock_get_provider.return_value = mock_provider
+
+        from kiln.server import iterate_design
+
+        result = iterate_design("bad code;", provider="openscad", max_iterations=1)
+
+        # Should fail after exhausting iterations
+        assert result.get("error") or result.get("status") == "error"
+
+
+# ---- Helpers ----
+
+
+def _write_cube_stl(path: str, size: float) -> None:
+    """Write a simple cube STL for testing."""
+    s = size
+    # 12 triangles for a cube (2 per face)
+    tris = [
+        # Bottom face (z=0)
+        ((0, 0, 0), (s, 0, 0), (s, s, 0)),
+        ((0, 0, 0), (s, s, 0), (0, s, 0)),
+        # Top face (z=s)
+        ((0, 0, s), (s, s, s), (s, 0, s)),
+        ((0, 0, s), (0, s, s), (s, s, s)),
+        # Front face (y=0)
+        ((0, 0, 0), (s, 0, s), (s, 0, 0)),
+        ((0, 0, 0), (0, 0, s), (s, 0, s)),
+        # Back face (y=s)
+        ((0, s, 0), (s, s, 0), (s, s, s)),
+        ((0, s, 0), (s, s, s), (0, s, s)),
+        # Left face (x=0)
+        ((0, 0, 0), (0, s, 0), (0, s, s)),
+        ((0, 0, 0), (0, s, s), (0, 0, s)),
+        # Right face (x=s)
+        ((s, 0, 0), (s, 0, s), (s, s, s)),
+        ((s, 0, 0), (s, s, s), (s, s, 0)),
+    ]
+
+    with open(path, "wb") as fh:
+        fh.write(b"\x00" * 80)  # header
+        fh.write(struct.pack("<I", len(tris)))
+        for tri in tris:
+            fh.write(struct.pack("<3f", 0, 0, 0))  # normal
+            for v in tri:
+                fh.write(struct.pack("<3f", *v))
+            fh.write(struct.pack("<H", 0))

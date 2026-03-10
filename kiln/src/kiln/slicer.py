@@ -30,6 +30,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -321,3 +322,102 @@ def slice_file(
         stdout=(result.stdout or "").strip(),
         stderr=(result.stderr or "").strip(),
     )
+
+
+def estimate_print(
+    file_path: str,
+    *,
+    profile: str | None = None,
+    slicer_path: str | None = None,
+) -> dict[str, Any]:
+    """Estimate print time and filament usage by slicing to a temp file.
+
+    Slices the model and parses the G-code comments for estimated
+    print time, filament length, and filament weight.
+
+    Args:
+        file_path: Path to STL/3MF/OBJ file.
+        profile: Optional slicer profile path.
+        slicer_path: Optional explicit slicer binary path.
+
+    Returns:
+        Dict with ``estimated_time_seconds``, ``filament_length_mm``,
+        ``filament_weight_g``, ``layer_count``, and ``gcode_path``.
+
+    Raises:
+        SlicerError: If slicing fails.
+    """
+    result = slice_file(file_path, profile=profile, slicer_path=slicer_path)
+    if not result.success or not result.output_path:
+        raise SlicerError("Slicing failed — cannot estimate print.")
+
+    return _parse_gcode_estimates(result.output_path)
+
+
+def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
+    """Parse G-code file for slicer-generated estimates.
+
+    Reads the first and last 200 lines (where PrusaSlicer/OrcaSlicer
+    place their estimate comments) to avoid reading the entire file.
+    """
+    import re as _re
+
+    estimates: dict[str, Any] = {"gcode_path": gcode_path}
+    lines: list[str] = []
+
+    try:
+        with open(gcode_path, errors="replace") as fh:
+            head = []
+            for i, line in enumerate(fh):
+                if i < 200:
+                    head.append(line)
+                lines.append(line)
+            # Keep last 200 lines
+            tail = lines[-200:] if len(lines) > 200 else []
+            search_lines = head + tail
+    except OSError:
+        return estimates
+
+    for line in search_lines:
+        line = line.strip()
+
+        # PrusaSlicer: ; estimated printing time (normal mode) = 1h 23m 45s
+        time_match = _re.search(
+            r"estimated printing time.*?=\s*(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?",
+            line,
+            _re.IGNORECASE,
+        )
+        if time_match:
+            d = int(time_match.group(1) or 0)
+            h = int(time_match.group(2) or 0)
+            m = int(time_match.group(3) or 0)
+            s = int(time_match.group(4) or 0)
+            estimates["estimated_time_seconds"] = d * 86400 + h * 3600 + m * 60 + s
+            estimates["estimated_time_human"] = line.split("=", 1)[-1].strip()
+
+        # ; filament used [mm] = 1234.56
+        fil_mm = _re.search(r"filament used \[mm\]\s*=\s*([\d.]+)", line, _re.IGNORECASE)
+        if fil_mm:
+            estimates["filament_length_mm"] = float(fil_mm.group(1))
+
+        # ; filament used [g] = 12.34 or total filament used [g] = 12.34
+        fil_g = _re.search(r"filament used \[g\]\s*=\s*([\d.]+)", line, _re.IGNORECASE)
+        if fil_g:
+            estimates["filament_weight_g"] = float(fil_g.group(1))
+
+        # ; filament used [cm3] = 12.34
+        fil_cm3 = _re.search(r"filament used \[cm3\]\s*=\s*([\d.]+)", line, _re.IGNORECASE)
+        if fil_cm3:
+            estimates["filament_volume_cm3"] = float(fil_cm3.group(1))
+
+        # ; total layers count = 123
+        layers = _re.search(r"total layers count\s*=\s*(\d+)", line, _re.IGNORECASE)
+        if layers:
+            estimates["layer_count"] = int(layers.group(1))
+
+        # ; filament cost = 1.23
+        cost = _re.search(r"filament cost\s*=\s*([\d.]+)", line, _re.IGNORECASE)
+        if cost:
+            estimates["filament_cost"] = float(cost.group(1))
+
+    return estimates
