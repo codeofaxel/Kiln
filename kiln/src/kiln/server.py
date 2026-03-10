@@ -10551,6 +10551,52 @@ def add_mesh_chamfer(
 
 
 @mcp.tool()
+def boolean_mesh_op(
+    operation: str,
+    file_paths: list[str],
+    output_path: str = "",
+) -> dict:
+    """Perform a CSG boolean operation on two or more STL meshes.
+
+    Uses OpenSCAD's boolean engine to compute:
+    - **union**: combine multiple bodies into one
+    - **difference**: subtract subsequent bodies from the first
+    - **intersection**: keep only the overlapping region
+
+    Requires OpenSCAD installed on the system.
+
+    **Use cases:**
+    - Subtract a cylinder from a block to create a hole
+    - Combine multiple parts into a single printable body
+    - Create complex shapes from simple primitives
+
+    :param operation: ``"union"``, ``"difference"``, or ``"intersection"``.
+    :param file_paths: List of STL file paths (minimum 2).
+    :param output_path: Output path (defaults to a temp file).
+    :returns: Dict with result path, operation, and triangle count.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.openscad import boolean_mesh_operation
+
+        return {
+            "status": "success",
+            **boolean_mesh_operation(
+                operation,
+                file_paths,
+                output_path=output_path or None,
+            ),
+        }
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"Boolean operation failed: {exc}")
+
+
+@mcp.tool()
 def center_model_on_bed(
     file_path: str,
     bed_x_mm: float = 256.0,

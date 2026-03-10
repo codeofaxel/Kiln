@@ -445,8 +445,164 @@ class OpenSCADProvider(GenerationProvider):
             with contextlib.suppress(OSError):
                 os.unlink(scad_path)
 
+    def boolean_operation(
+        self,
+        operation: str,
+        file_paths: list[str],
+        *,
+        output_path: str | None = None,
+    ) -> str:
+        """Perform a CSG boolean operation on two or more STL files.
+
+        Uses OpenSCAD's boolean engine to compute the result of
+        ``union()``, ``difference()``, or ``intersection()`` on
+        the given meshes.
+
+        Args:
+            operation: One of ``"union"``, ``"difference"``, or
+                ``"intersection"``.
+            file_paths: List of STL file paths (minimum 2).
+            output_path: Output STL path.  Defaults to a temp file.
+
+        Returns:
+            Path to the resulting STL file.
+
+        Raises:
+            GenerationError: If the operation fails.
+            ValueError: If arguments are invalid.
+        """
+        operation = operation.lower()
+        if operation not in ("union", "difference", "intersection"):
+            raise ValueError(
+                f"operation must be 'union', 'difference', or 'intersection', "
+                f"got {operation!r}"
+            )
+        if len(file_paths) < 2:
+            raise ValueError("boolean_operation requires at least 2 file paths")
+
+        for fp in file_paths:
+            if not os.path.isfile(fp):
+                raise FileNotFoundError(f"STL file not found: {fp}")
+
+        # Build OpenSCAD code that imports and booleans the meshes.
+        # We use absolute resolved paths to avoid path confusion.
+        imports = []
+        for fp in file_paths:
+            resolved = os.path.abspath(fp)
+            imports.append(f'  import("{resolved}");')
+
+        scad_code = f"{operation}() {{\n" + "\n".join(imports) + "\n}"
+
+        if output_path is None:
+            out_fd, output_path = tempfile.mkstemp(
+                suffix=".stl", prefix=f"kiln_{operation}_"
+            )
+            os.close(out_fd)
+
+        scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_bool_")
+        work_dir = tempfile.mkdtemp(prefix="kiln_bool_")
+        try:
+            with os.fdopen(scad_fd, "w") as fh:
+                fh.write(scad_code)
+
+            cmd = [self._binary, "-o", output_path, scad_path]
+            logger.info("OpenSCAD boolean: %s", " ".join(cmd))
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=self._timeout,
+                    cwd=work_dir,
+                )
+            except subprocess.TimeoutExpired:
+                raise GenerationError(
+                    f"Boolean {operation} timed out after {self._timeout}s.",
+                    code="BOOL_TIMEOUT",
+                ) from None
+            except OSError as exc:
+                raise GenerationError(
+                    f"Failed to run OpenSCAD for boolean: {exc}",
+                    code="OPENSCAD_EXEC_ERROR",
+                ) from exc
+
+            if result.returncode != 0:
+                stderr = (result.stderr or "").strip()[:500]
+                raise GenerationError(
+                    f"Boolean {operation} failed (exit {result.returncode}): {stderr}",
+                    code="BOOL_FAILED",
+                )
+
+            if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+                raise GenerationError(
+                    f"Boolean {operation} produced no output.",
+                    code="BOOL_EMPTY",
+                )
+
+            return output_path
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(scad_path)
+            shutil.rmtree(work_dir, ignore_errors=True)
+
     def list_styles(self) -> list[str]:
         return []
+
+
+def boolean_mesh_operation(
+    operation: str,
+    file_paths: list[str],
+    *,
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Perform a CSG boolean operation on STL meshes via OpenSCAD.
+
+    Convenience function that auto-discovers OpenSCAD and delegates
+    to :meth:`OpenSCADProvider.boolean_operation`.
+
+    Args:
+        operation: ``"union"``, ``"difference"``, or ``"intersection"``.
+        file_paths: List of STL file paths (minimum 2).
+        output_path: Output STL path.
+
+    Returns:
+        Dict with result path, operation, and triangle count.
+
+    Raises:
+        GenerationError: If OpenSCAD is not found or the operation fails.
+    """
+    binary = _find_openscad()
+    if binary is None:
+        raise GenerationError(
+            "OpenSCAD not found. Install it from https://openscad.org/",
+            code="OPENSCAD_NOT_FOUND",
+        )
+
+    provider = OpenSCADProvider(binary_path=binary)
+    result_path = provider.boolean_operation(
+        operation, file_paths, output_path=output_path,
+    )
+
+    # Count triangles in result
+    tri_count = 0
+    try:
+        import struct as _struct
+
+        with open(result_path, "rb") as fh:
+            fh.seek(80)
+            data = fh.read(4)
+            if len(data) == 4:
+                tri_count = _struct.unpack("<I", data)[0]
+    except Exception:
+        pass
+
+    return {
+        "path": result_path,
+        "operation": operation,
+        "input_files": file_paths,
+        "triangle_count": tri_count,
+    }
 
 
 def _parse_openscad_output(stderr: str, return_code: int) -> dict[str, Any]:

@@ -3223,3 +3223,106 @@ class TestAddChamfer:
         result = add_chamfer(stl, distance_mm=0.3)
         # Each sharp edge gets 2 chamfer triangles
         assert result["chamfer_triangles_added"] == result["sharp_edges_found"] * 2
+
+
+# ---------------------------------------------------------------------------
+# Boolean mesh operations (via OpenSCAD)
+# ---------------------------------------------------------------------------
+
+
+class TestBooleanMeshOperation:
+    """Tests for boolean_mesh_operation() — union, difference, intersection."""
+
+    def test_invalid_operation_raises(self, tmp_path):
+        from kiln.generation.openscad import boolean_mesh_operation
+
+        stl1 = str(tmp_path / "a.stl")
+        stl2 = str(tmp_path / "b.stl")
+        _write_cube_stl(stl1, 10.0)
+        _write_cube_stl(stl2, 10.0)
+
+        with pytest.raises(ValueError, match="union.*difference.*intersection"):
+            boolean_mesh_operation("subtract", [stl1, stl2])
+
+    def test_fewer_than_two_files_raises(self, tmp_path):
+        from kiln.generation.openscad import boolean_mesh_operation
+
+        stl = str(tmp_path / "a.stl")
+        _write_cube_stl(stl, 10.0)
+
+        with pytest.raises(ValueError, match="at least 2"):
+            boolean_mesh_operation("union", [stl])
+
+    def test_missing_file_raises(self, tmp_path):
+        from kiln.generation.openscad import boolean_mesh_operation
+
+        stl = str(tmp_path / "a.stl")
+        _write_cube_stl(stl, 10.0)
+
+        with pytest.raises(FileNotFoundError):
+            boolean_mesh_operation("union", [stl, "/nonexistent.stl"])
+
+    @patch("kiln.generation.openscad._find_openscad", return_value=None)
+    def test_no_openscad_raises(self, mock_find, tmp_path):
+        from kiln.generation.openscad import boolean_mesh_operation
+
+        stl1 = str(tmp_path / "a.stl")
+        stl2 = str(tmp_path / "b.stl")
+        _write_cube_stl(stl1, 10.0)
+        _write_cube_stl(stl2, 10.0)
+
+        with pytest.raises(GenerationError, match="not found"):
+            boolean_mesh_operation("union", [stl1, stl2])
+
+    @patch("kiln.generation.openscad._find_openscad", return_value="/usr/bin/openscad")
+    def test_provider_boolean_timeout(self, mock_find, tmp_path):
+        import subprocess as _sp
+
+        stl1 = str(tmp_path / "a.stl")
+        stl2 = str(tmp_path / "b.stl")
+        _write_cube_stl(stl1, 10.0)
+        _write_cube_stl(stl2, 10.0)
+
+        provider = OpenSCADProvider(binary_path="/usr/bin/openscad")
+        with patch("subprocess.run", side_effect=_sp.TimeoutExpired("openscad", 120)), \
+                pytest.raises(GenerationError, match="timed out"):
+            provider.boolean_operation("union", [stl1, stl2])
+
+    @patch("kiln.generation.openscad._find_openscad", return_value="/usr/bin/openscad")
+    def test_provider_boolean_nonzero_exit(self, mock_find, tmp_path):
+        stl1 = str(tmp_path / "a.stl")
+        stl2 = str(tmp_path / "b.stl")
+        _write_cube_stl(stl1, 10.0)
+        _write_cube_stl(stl2, 10.0)
+
+        provider = OpenSCADProvider(binary_path="/usr/bin/openscad")
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = "Error: something went wrong"
+        with patch("subprocess.run", return_value=mock_result), \
+                pytest.raises(GenerationError, match="failed"):
+            provider.boolean_operation("difference", [stl1, stl2])
+
+    @patch("kiln.generation.openscad._find_openscad", return_value="/usr/bin/openscad")
+    def test_all_three_operations_accepted(self, mock_find, tmp_path):
+        """All three boolean operations should pass validation."""
+        from kiln.generation.openscad import OpenSCADProvider
+
+        stl1 = str(tmp_path / "a.stl")
+        stl2 = str(tmp_path / "b.stl")
+        _write_cube_stl(stl1, 10.0)
+        _write_cube_stl(stl2, 5.0)
+
+        provider = OpenSCADProvider(binary_path="/usr/bin/openscad")
+
+        # All three should pass argument validation (may fail at OpenSCAD
+        # execution, but should NOT raise ValueError)
+        for op in ("union", "difference", "intersection"):
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            out = str(tmp_path / f"{op}_result.stl")
+            _write_cube_stl(out, 10.0)
+
+            with patch("subprocess.run", return_value=mock_result):
+                result = provider.boolean_operation(op, [stl1, stl2], output_path=out)
+            assert result == out
