@@ -951,18 +951,21 @@ class TestOrientationOptimizer:
     """Tests for optimize_orientation() and _rotate_triangles()."""
 
     def test_cube_returns_valid_result(self, tmp_path):
-        """Optimizing a cube produces a valid result dict."""
+        """Optimizing a cube produces a valid result with non-negative score."""
         from kiln.generation.validation import optimize_orientation
 
         stl = str(tmp_path / "cube.stl")
         _write_cube_stl(stl, 20.0)
         result = optimize_orientation(stl, output_path=str(tmp_path / "opt.stl"))
 
-        assert "rotation_x_deg" in result
-        assert "rotation_y_deg" in result
-        assert "printability_score" in result
+        assert isinstance(result["rotation_x_deg"], (int, float))
+        assert isinstance(result["rotation_y_deg"], (int, float))
         assert result["printability_score"] >= 0
+        assert result["printability_score"] <= 100
         assert os.path.isfile(result["path"])
+        # Output file should have the same triangle count.
+        vr = validate_mesh(result["path"])
+        assert vr.triangle_count == 12
 
     def test_orientation_places_on_build_plate(self, tmp_path):
         """Output mesh should have z_min at 0 (on build plate)."""
@@ -1019,10 +1022,10 @@ class TestSupportVolumeEstimation:
         result = estimate_support_volume(stl)
 
         assert result["total_triangles"] == 12
-        assert "support_volume_mm3" in result
-        assert "needs_supports" in result
-        # Cube overhangs depend on normal orientation — just check keys
         assert isinstance(result["overhang_percentage"], float)
+        # Cube faces are axis-aligned — overhang % should be low.
+        assert result["overhang_percentage"] < 50.0
+        assert result["support_volume_mm3"] >= 0.0
 
     def test_unsupported_format_raises(self, tmp_path):
         """Non-mesh file raises ValueError."""
@@ -1490,8 +1493,10 @@ class TestPrintReadinessGate:
         _write_cube_stl(f, 20.0)
         result = can_print_now(f)
 
-        assert result["can_print"] is True or result["verdict"] in ("ready_to_print", "printable_with_supports")
-        assert "issues" in result
+        # Both fields must be consistent: can_print=True when verdict is printable.
+        assert result["can_print"] is True
+        assert result["verdict"] in ("ready_to_print", "printable_with_supports")
+        assert isinstance(result["issues"], list)
 
     def test_oversized_fails(self, tmp_path):
         from kiln.generation.validation import can_print_now
@@ -2669,3 +2674,311 @@ class TestExtractModelFrom3MF:
         # Should extract only from object 2 (the one with mesh).
         assert result["triangle_count"] == 1
         assert result["vertex_count"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Geometry helpers for non-ideal mesh tests
+# ---------------------------------------------------------------------------
+
+
+def _write_thin_wall_stl(path: str, width: float, height: float, thickness: float) -> None:
+    """Write a thin rectangular slab (wall) as binary STL.
+
+    width along X, thickness along Y, height along Z.
+    """
+    w, t, h = width, thickness, height
+    tris = [
+        # Front (y=0)
+        ((0, 0, 0), (w, 0, h), (w, 0, 0)),
+        ((0, 0, 0), (0, 0, h), (w, 0, h)),
+        # Back (y=t)
+        ((0, t, 0), (w, t, 0), (w, t, h)),
+        ((0, t, 0), (w, t, h), (0, t, h)),
+        # Bottom (z=0)
+        ((0, 0, 0), (w, 0, 0), (w, t, 0)),
+        ((0, 0, 0), (w, t, 0), (0, t, 0)),
+        # Top (z=h)
+        ((0, 0, h), (w, t, h), (w, 0, h)),
+        ((0, 0, h), (0, t, h), (w, t, h)),
+        # Left (x=0)
+        ((0, 0, 0), (0, t, 0), (0, t, h)),
+        ((0, 0, 0), (0, t, h), (0, 0, h)),
+        # Right (x=w)
+        ((w, 0, 0), (w, 0, h), (w, t, h)),
+        ((w, 0, 0), (w, t, h), (w, t, 0)),
+    ]
+    with open(path, "wb") as fh:
+        fh.write(b"\x00" * 80)
+        fh.write(struct.pack("<I", len(tris)))
+        for tri in tris:
+            fh.write(struct.pack("<3f", 0, 0, 0))
+            for v in tri:
+                fh.write(struct.pack("<3f", *v))
+            fh.write(struct.pack("<H", 0))
+
+
+def _write_single_triangle_stl(path: str) -> None:
+    """Write a degenerate STL with a single open triangle (non-manifold)."""
+    tris = [((0, 0, 0), (10, 0, 0), (5, 10, 0))]
+    with open(path, "wb") as fh:
+        fh.write(b"\x00" * 80)
+        fh.write(struct.pack("<I", 1))
+        fh.write(struct.pack("<3f", 0, 0, 0))
+        for v in tris[0]:
+            fh.write(struct.pack("<3f", *v))
+        fh.write(struct.pack("<H", 0))
+
+
+# ---------------------------------------------------------------------------
+# Audit-driven edge case tests
+# ---------------------------------------------------------------------------
+
+
+class TestFailurePredictionEdgeCases:
+    """Tests that failure prediction actually detects problems.
+
+    Covers:
+    - Thin wall detection with geometry below threshold
+    - Top-heavy model detection
+    - Risk score is non-zero for problematic geometry
+    """
+
+    def test_thin_wall_detected(self, tmp_path):
+        """A 0.3mm thick wall should trigger thin-wall failure prediction."""
+        from kiln.generation.validation import predict_print_failures
+
+        stl = str(tmp_path / "thin.stl")
+        _write_thin_wall_stl(stl, width=20.0, height=30.0, thickness=0.3)
+
+        result = predict_print_failures(stl, min_wall_mm=0.8)
+        failures = result.get("failures", [])
+        types = [f["type"] for f in failures]
+
+        assert "thin_walls" in types, f"Expected thin_walls detection, got: {types}"
+        assert result["risk_score"] > 0
+
+    def test_tall_thin_model_high_risk(self, tmp_path):
+        """A very tall thin slab should score high risk (top-heavy)."""
+        from kiln.generation.validation import predict_print_failures
+
+        stl = str(tmp_path / "tall.stl")
+        _write_thin_wall_stl(stl, width=5.0, height=100.0, thickness=2.0)
+
+        result = predict_print_failures(stl)
+        assert result["risk_score"] >= 20, (
+            f"Tall thin model should have elevated risk, got {result['risk_score']}"
+        )
+
+    def test_cube_low_risk(self, tmp_path):
+        """A standard cube should have low risk score."""
+        from kiln.generation.validation import predict_print_failures
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 20.0)
+
+        result = predict_print_failures(stl)
+        assert result["risk_score"] < 50
+
+
+class TestScorecardGrades:
+    """Tests that scorecard assigns meaningful grades.
+
+    Covers:
+    - Clean cube gets A or B
+    - Single triangle (non-manifold, zero volume) gets D or F
+    """
+
+    def test_cube_gets_good_grade(self, tmp_path):
+        """A well-formed cube should get A or B."""
+        from kiln.generation.validation import design_scorecard
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 20.0)
+        result = design_scorecard(stl)
+
+        assert result["grade"] in ("A", "B"), f"Cube should be A/B, got {result['grade']}"
+        assert result["overall_score"] >= 60
+
+    def test_single_triangle_scores_lower_than_cube(self, tmp_path):
+        """A single open triangle should score strictly lower than a cube."""
+        from kiln.generation.validation import design_scorecard
+
+        cube_stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_stl, 20.0)
+        cube_score = design_scorecard(cube_stl)["overall_score"]
+
+        single_stl = str(tmp_path / "single.stl")
+        _write_single_triangle_stl(single_stl)
+        single_score = design_scorecard(single_stl)["overall_score"]
+
+        assert single_score < cube_score, (
+            f"Single triangle ({single_score}) should score lower than cube ({cube_score})"
+        )
+
+
+class TestRepairErrorPaths:
+    """Tests for repair function error paths.
+
+    Covers:
+    - repair_stl raises on unparseable file
+    - export_3mf raises on empty geometry
+    """
+
+    def test_repair_bad_file_raises(self, tmp_path):
+        from kiln.generation.validation import repair_stl
+
+        bad = str(tmp_path / "garbage.stl")
+        with open(bad, "wb") as fh:
+            fh.write(b"not a valid stl at all")
+
+        with pytest.raises(ValueError, match="Failed to parse"):
+            repair_stl(bad)
+
+    def test_export_3mf_empty_geometry_raises(self, tmp_path):
+        from kiln.generation.validation import export_3mf
+
+        # Create a file that parses as STL but has 0 triangles.
+        empty = str(tmp_path / "empty.stl")
+        with open(empty, "wb") as fh:
+            fh.write(b"\x00" * 80)
+            fh.write(struct.pack("<I", 0))
+
+        with pytest.raises(ValueError, match="no geometry"):
+            export_3mf(empty)
+
+
+class TestHollowMeshValidation:
+    """Tests for hollow_mesh input validation.
+
+    Covers:
+    - Zero wall thickness raises
+    - Negative wall thickness raises
+    """
+
+    def test_zero_wall_raises(self, tmp_path):
+        from kiln.generation.validation import hollow_mesh
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 20.0)
+
+        with pytest.raises(ValueError, match="must be positive"):
+            hollow_mesh(stl, wall_thickness_mm=0)
+
+    def test_negative_wall_raises(self, tmp_path):
+        from kiln.generation.validation import hollow_mesh
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 20.0)
+
+        with pytest.raises(ValueError, match="must be positive"):
+            hollow_mesh(stl, wall_thickness_mm=-1.0)
+
+
+class TestRescaleEdgeCases:
+    """Tests for rescale_stl boundary conditions."""
+
+    def test_zero_height_raises(self, tmp_path):
+        """A flat (zero-height) model should raise ValueError."""
+        from kiln.generation.validation import rescale_stl
+
+        flat = str(tmp_path / "flat.stl")
+        # A flat triangle at z=0
+        _write_single_triangle_stl(flat)
+
+        with pytest.raises(ValueError, match="near-zero height"):
+            rescale_stl(flat, target_height_mm=50.0)
+
+
+class TestSimplifyMeshClamping:
+    """Tests for simplify_mesh target_ratio clamping."""
+
+    def test_zero_ratio_clamps_to_min(self, tmp_path):
+        """target_ratio=0 should be clamped, not crash."""
+        from kiln.generation.validation import simplify_mesh
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 20.0)
+
+        result = simplify_mesh(stl, target_ratio=0.0, output_path=str(tmp_path / "out.stl"))
+        # Should not crash, and should produce fewer triangles.
+        assert result["simplified_triangles"] <= result["original_triangles"]
+
+    def test_ratio_above_one_clamps(self, tmp_path):
+        """target_ratio > 1.0 should be clamped to 1.0 (no simplification)."""
+        from kiln.generation.validation import simplify_mesh
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 20.0)
+
+        result = simplify_mesh(stl, target_ratio=5.0, output_path=str(tmp_path / "out.stl"))
+        assert result["simplified_triangles"] == result["original_triangles"]
+
+
+class TestEstimateMaterialCostEdgeCases:
+    """Tests for material cost estimation edge cases."""
+
+    def test_single_triangle_zero_volume(self, tmp_path):
+        """A flat triangle has zero volume — should raise ValueError."""
+        from kiln.generation.validation import estimate_material_cost
+
+        stl = str(tmp_path / "flat.stl")
+        _write_single_triangle_stl(stl)
+
+        with pytest.raises(ValueError, match="no volume"):
+            estimate_material_cost(stl)
+
+
+class TestNonManifoldDetection:
+    """Tests for manifold detection with known non-manifold geometry."""
+
+    def test_single_triangle_is_non_manifold(self, tmp_path):
+        """A single open triangle should be detected as non-manifold."""
+        from kiln.generation.validation import analyze_mesh
+
+        stl = str(tmp_path / "open.stl")
+        _write_single_triangle_stl(stl)
+
+        result = analyze_mesh(stl)
+        assert result.is_manifold is False
+
+    def test_cube_is_manifold(self, tmp_path):
+        """A closed cube should be detected as manifold."""
+        from kiln.generation.validation import analyze_mesh
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 15.0)
+
+        result = analyze_mesh(stl)
+        assert result.is_manifold is True
+
+
+class TestMergeSTLEdgeCases:
+    """Tests for merge_stl_files edge cases."""
+
+    def test_empty_output_path_raises(self, tmp_path):
+        from kiln.generation.validation import merge_stl_files
+
+        stl = str(tmp_path / "a.stl")
+        _write_cube_stl(stl, 10.0)
+
+        with pytest.raises(ValueError, match="output_path"):
+            merge_stl_files([stl], output_path="")
+
+    def test_no_files_raises(self, tmp_path):
+        from kiln.generation.validation import merge_stl_files
+
+        with pytest.raises(ValueError, match="must not be empty"):
+            merge_stl_files([], output_path=str(tmp_path / "out.stl"))
+
+
+class TestEstimatePrintTimeEdgeCases:
+    """Tests for print time estimation edge cases."""
+
+    def test_zero_speed_raises(self, tmp_path):
+        from kiln.generation.validation import estimate_print_time_from_mesh
+
+        stl = str(tmp_path / "cube.stl")
+        _write_cube_stl(stl, 20.0)
+
+        with pytest.raises(ValueError, match="[Ss]peed"):
+            estimate_print_time_from_mesh(stl, print_speed_mm_s=0.0)

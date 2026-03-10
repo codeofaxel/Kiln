@@ -2650,6 +2650,9 @@ def hollow_mesh(
     if not triangles:
         raise ValueError("STL contains no geometry.")
 
+    if wall_thickness_mm <= 0:
+        raise ValueError("wall_thickness_mm must be positive")
+
     bbox = _bounding_box(vertices)
     dims = [
         bbox["x_max"] - bbox["x_min"],
