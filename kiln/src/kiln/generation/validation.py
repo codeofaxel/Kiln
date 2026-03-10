@@ -3226,6 +3226,12 @@ def extract_model_from_3mf(
     Handles both standard 3MF and Bambu-style .gcode.3mf files.  When
     multiple objects exist they are merged into a single STL.
 
+    .. note::
+        3MF item/component transforms are not applied — geometry is
+        extracted as stored.  This is correct for single-model files
+        and Bambu .gcode.3mf files where geometry is already in world
+        coordinates.
+
     Args:
         file_path: Path to the .3mf or .gcode.3mf file.
         output_path: Output STL path.  Defaults to ``<stem>.stl`` next
@@ -3314,7 +3320,10 @@ def extract_model_from_3mf(
             v3_idx = int(t_el.get("v3", "0"))
 
             if (
-                v1_idx >= len(vertices)
+                v1_idx < 0
+                or v2_idx < 0
+                or v3_idx < 0
+                or v1_idx >= len(vertices)
                 or v2_idx >= len(vertices)
                 or v3_idx >= len(vertices)
             ):

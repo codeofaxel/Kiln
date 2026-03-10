@@ -2499,3 +2499,173 @@ class TestExtractModelFrom3MF:
 
         with pytest.raises(ValueError, match="no mesh geometry"):
             extract_model_from_3mf(threemf)
+
+    def test_roundtrip_volume_preserved(self, tmp_path):
+        """Round-trip STL → 3MF → STL preserves mesh volume exactly."""
+        from kiln.generation.validation import (
+            analyze_mesh,
+            export_3mf,
+            extract_model_from_3mf,
+        )
+
+        stl_orig = str(tmp_path / "orig.stl")
+        _write_cube_stl(stl_orig, 25.0)
+        vol_orig = analyze_mesh(stl_orig).volume_mm3
+
+        threemf = export_3mf(stl_orig, output_path=str(tmp_path / "rt.3mf"))
+        result = extract_model_from_3mf(threemf, output_path=str(tmp_path / "rt.stl"))
+        vol_extracted = analyze_mesh(result["output_path"]).volume_mm3
+
+        # Volume must match within rounding tolerance.
+        assert abs(vol_orig - vol_extracted) < 0.1, (
+            f"Volume changed: {vol_orig} → {vol_extracted}"
+        )
+
+    def test_invalid_triangle_indices_skipped(self, tmp_path):
+        """Triangles referencing out-of-bounds vertices are silently skipped."""
+        import zipfile as _zf
+
+        from kiln.generation.validation import extract_model_from_3mf
+
+        model_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US"
+       xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <object id="1" type="model">
+      <mesh>
+        <vertices>
+          <vertex x="0" y="0" z="0" />
+          <vertex x="10" y="0" z="0" />
+          <vertex x="0" y="10" z="0" />
+        </vertices>
+        <triangles>
+          <triangle v1="0" v2="1" v3="2" />
+          <triangle v1="0" v2="1" v3="99" />
+          <triangle v1="-1" v2="1" v3="2" />
+        </triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1" /></build>
+</model>"""
+
+        threemf = str(tmp_path / "bad_idx.3mf")
+        with _zf.ZipFile(threemf, "w") as zf:
+            zf.writestr("3D/3dmodel.model", model_xml)
+            zf.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+
+        result = extract_model_from_3mf(threemf)
+        # Only the first triangle (valid indices) should survive.
+        assert result["triangle_count"] == 1
+
+    def test_case_insensitive_model_path(self, tmp_path):
+        """3MF with lowercase '3d/' directory should still be found."""
+        import zipfile as _zf
+
+        from kiln.generation.validation import extract_model_from_3mf
+
+        model_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US"
+       xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <object id="1" type="model">
+      <mesh>
+        <vertices>
+          <vertex x="0" y="0" z="0" />
+          <vertex x="5" y="0" z="0" />
+          <vertex x="0" y="5" z="0" />
+        </vertices>
+        <triangles>
+          <triangle v1="0" v2="1" v3="2" />
+        </triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1" /></build>
+</model>"""
+
+        threemf = str(tmp_path / "lower.3mf")
+        with _zf.ZipFile(threemf, "w") as zf:
+            # Use lowercase path
+            zf.writestr("3d/3dmodel.model", model_xml)
+            zf.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+
+        result = extract_model_from_3mf(threemf)
+        assert result["triangle_count"] == 1
+
+    def test_nonstandard_model_path_fallback(self, tmp_path):
+        """3MF with .model file at a non-standard path should still be found."""
+        import zipfile as _zf
+
+        from kiln.generation.validation import extract_model_from_3mf
+
+        model_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US"
+       xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <object id="1" type="model">
+      <mesh>
+        <vertices>
+          <vertex x="0" y="0" z="0" />
+          <vertex x="8" y="0" z="0" />
+          <vertex x="0" y="8" z="0" />
+        </vertices>
+        <triangles>
+          <triangle v1="0" v2="1" v3="2" />
+        </triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1" /></build>
+</model>"""
+
+        threemf = str(tmp_path / "custom_path.3mf")
+        with _zf.ZipFile(threemf, "w") as zf:
+            # Non-standard path — broader .model search should find it.
+            zf.writestr("Models/custom.model", model_xml)
+            zf.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+
+        result = extract_model_from_3mf(threemf)
+        assert result["triangle_count"] == 1
+
+    def test_component_only_object_skipped(self, tmp_path):
+        """Objects with only components (no mesh) should be skipped gracefully."""
+        import zipfile as _zf
+
+        from kiln.generation.validation import extract_model_from_3mf
+
+        # Object 1 has components only (no mesh), object 2 has actual mesh.
+        model_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US"
+       xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+  <resources>
+    <object id="1" type="model">
+      <components>
+        <component objectid="2" />
+      </components>
+    </object>
+    <object id="2" type="model">
+      <mesh>
+        <vertices>
+          <vertex x="0" y="0" z="0" />
+          <vertex x="10" y="0" z="0" />
+          <vertex x="0" y="10" z="0" />
+        </vertices>
+        <triangles>
+          <triangle v1="0" v2="1" v3="2" />
+        </triangles>
+      </mesh>
+    </object>
+  </resources>
+  <build><item objectid="1" /></build>
+</model>"""
+
+        threemf = str(tmp_path / "components.3mf")
+        with _zf.ZipFile(threemf, "w") as zf:
+            zf.writestr("3D/3dmodel.model", model_xml)
+            zf.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+
+        result = extract_model_from_3mf(threemf)
+        # Should extract only from object 2 (the one with mesh).
+        assert result["triangle_count"] == 1
+        assert result["vertex_count"] == 3
