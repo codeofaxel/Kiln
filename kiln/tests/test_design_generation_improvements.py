@@ -570,13 +570,14 @@ class TestDesignTemplates:
             data = json.load(fh)
 
         templates = {k: v for k, v in data.items() if not k.startswith("_")}
-        assert len(templates) >= 6
+        assert len(templates) >= 20
 
         for key, tpl in templates.items():
             assert "display_name" in tpl, f"{key} missing display_name"
             assert "description" in tpl, f"{key} missing description"
             assert "scad_template" in tpl, f"{key} missing scad_template"
             assert "parameters" in tpl, f"{key} missing parameters"
+            assert "category" in tpl, f"{key} missing category"
 
     def test_all_templates_have_defaults(self):
         """Every parameter must have a default value."""
