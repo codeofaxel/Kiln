@@ -4009,7 +4009,6 @@ class TestApplyReinforcements:
 
     def test_skipped_reorient_has_guidance(self, tmp_path):
         """Reorient recommendations should be skipped with guidance."""
-        from kiln.design_reasoning import ReinforcementRecommendation
 
         # Simulate a reorient recommendation processing
         from kiln.design_reasoning import apply_reinforcements
@@ -4440,3 +4439,1179 @@ class TestExpandedPrimitives:
         assert "minkowski()" in code
         assert "cube(" in code
         assert "sphere(r=3" in code
+
+
+# ---------------------------------------------------------------------------
+# Parametric optimization
+# ---------------------------------------------------------------------------
+
+class TestOptimizeTemplateParams:
+    """Tests for parametric template optimization.
+
+    Covers: template loading, parameter sweep, scoring, constraints,
+    error paths, result structure.
+    """
+
+    def test_invalid_template_raises(self):
+        from kiln.design_reasoning import optimize_template_params
+
+        with pytest.raises(ValueError, match="not found"):
+            optimize_template_params("nonexistent_template_xyz")
+
+    def test_meta_key_rejected(self):
+        from kiln.design_reasoning import optimize_template_params
+
+        with pytest.raises(ValueError, match="not found"):
+            optimize_template_params("_meta")
+
+    @patch("kiln.design_reasoning.generate_improvement_plan")
+    @patch("subprocess.run")
+    @patch("kiln.generation.openscad._find_openscad", return_value="/usr/bin/openscad")
+    def test_optimization_returns_best_variant(self, mock_find, mock_run, mock_plan, tmp_path):
+        from kiln.design_reasoning import OptimizationResult, optimize_template_params
+
+        # Mock OpenSCAD compilation — write a tiny STL for each call
+        def fake_run(cmd, **kwargs):
+            stl_path = cmd[2]  # -o <path>
+            _write_cube_stl(stl_path, 15.0)
+            result = MagicMock()
+            result.returncode = 0
+            return result
+
+        mock_run.side_effect = fake_run
+
+        # Return different scores for different variants
+        call_count = [0]
+
+        def fake_plan(path):
+            call_count[0] += 1
+            plan = MagicMock()
+            plan.overall_structural_score = 50 + call_count[0] * 5
+            plan.structural_grade = "B" if call_count[0] > 2 else "C"
+            plan.risks = []
+            return plan
+
+        mock_plan.side_effect = fake_plan
+
+        result = optimize_template_params(
+            "shelf_bracket",
+            samples_per_param=2,
+            max_variants=10,
+            output_dir=str(tmp_path),
+        )
+
+        assert isinstance(result, OptimizationResult)
+        assert result.template_id == "shelf_bracket"
+        assert result.best_score > 50
+        assert result.variants_tested > 0
+        assert len(result.all_scores) > 0
+        assert result.best_stl_path != ""
+        assert result.summary != ""
+
+    @patch("kiln.design_reasoning.generate_improvement_plan")
+    @patch("subprocess.run")
+    @patch("kiln.generation.openscad._find_openscad", return_value="/usr/bin/openscad")
+    def test_constraints_filter_variants(self, mock_find, mock_run, mock_plan, tmp_path):
+        from kiln.design_reasoning import optimize_template_params
+
+        def fake_run(cmd, **kwargs):
+            stl_path = cmd[2]
+            _write_cube_stl(stl_path, 10.0)
+            result = MagicMock()
+            result.returncode = 0
+            return result
+
+        mock_run.side_effect = fake_run
+
+        def fake_plan(path):
+            plan = MagicMock()
+            plan.overall_structural_score = 70
+            plan.structural_grade = "B"
+            plan.risks = []
+            return plan
+
+        mock_plan.side_effect = fake_plan
+
+        # Width range is 15-50; constraining to 30 filters wider variants
+        result_tight = optimize_template_params(
+            "shelf_bracket",
+            samples_per_param=3,
+            max_variants=100,
+            constraints={"max_width_mm": 30},
+            output_dir=str(tmp_path),
+        )
+
+        # Without constraints, all variants should be tested
+        result_loose = optimize_template_params(
+            "shelf_bracket",
+            samples_per_param=3,
+            max_variants=100,
+            output_dir=str(tmp_path / "loose"),
+        )
+
+        # Tight constraints should produce fewer or equal variants
+        assert result_tight.variants_tested <= result_loose.variants_tested
+
+    @patch("kiln.design_reasoning.generate_improvement_plan")
+    @patch("subprocess.run")
+    @patch("kiln.generation.openscad._find_openscad", return_value="/usr/bin/openscad")
+    def test_to_dict_includes_all_fields(self, mock_find, mock_run, mock_plan, tmp_path):
+        from kiln.design_reasoning import optimize_template_params
+
+        def fake_run(cmd, **kwargs):
+            stl_path = cmd[2]
+            _write_cube_stl(stl_path, 10.0)
+            result = MagicMock()
+            result.returncode = 0
+            return result
+
+        mock_run.side_effect = fake_run
+
+        def fake_plan(path):
+            plan = MagicMock()
+            plan.overall_structural_score = 80
+            plan.structural_grade = "B"
+            plan.risks = []
+            return plan
+
+        mock_plan.side_effect = fake_plan
+
+        result = optimize_template_params(
+            "shelf_bracket",
+            samples_per_param=2,
+            max_variants=10,
+            output_dir=str(tmp_path),
+        )
+
+        d = result.to_dict()
+        assert "template_id" in d
+        assert "best_params" in d
+        assert "best_score" in d
+        assert "best_grade" in d
+        assert "best_stl_path" in d
+        assert "variants_tested" in d
+        assert "all_scores" in d
+        assert "summary" in d
+
+    def test_openscad_not_found_raises(self):
+        from kiln.design_reasoning import optimize_template_params
+
+        with (
+            patch("kiln.generation.openscad._find_openscad", side_effect=RuntimeError("not found")),
+            pytest.raises(ValueError, match="OpenSCAD is required"),
+        ):
+            optimize_template_params("shelf_bracket")
+
+    @patch("subprocess.run")
+    @patch("kiln.generation.openscad._find_openscad", return_value="/usr/bin/openscad")
+    def test_all_variants_fail_raises(self, mock_find, mock_run, tmp_path):
+        from kiln.design_reasoning import optimize_template_params
+
+        # OpenSCAD always fails
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_run.return_value = mock_result
+
+        with pytest.raises(ValueError, match="No valid variants"):
+            optimize_template_params(
+                "shelf_bracket",
+                samples_per_param=2,
+                max_variants=4,
+                output_dir=str(tmp_path),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Gatekeeper detection in _find_openscad
+# ---------------------------------------------------------------------------
+
+class TestGatekeeperDetection:
+    """Tests for macOS versioned app bundle detection and Gatekeeper error.
+
+    Covers: versioned path glob, quarantine error message, non-mac skip.
+    """
+
+    @patch("kiln.generation.openscad._MACOS_VERSIONED_PATTERN", "/fake/OpenSCAD-*.app/Contents/MacOS/OpenSCAD")
+    @patch("kiln.generation.openscad._MACOS_APP_PATH", "")
+    @patch("shutil.which", return_value=None)
+    def test_versioned_app_found_and_executable(self, mock_which, tmp_path):
+        """When versioned app exists and is executable, return it."""
+        from kiln.generation.openscad import _find_openscad
+
+        fake_app = tmp_path / "OpenSCAD-2021.01.app" / "Contents" / "MacOS"
+        fake_app.mkdir(parents=True)
+        fake_binary = fake_app / "OpenSCAD"
+        fake_binary.write_text("#!/bin/sh\n")
+        fake_binary.chmod(0o755)
+
+        with (
+            patch("glob.glob", return_value=[str(fake_binary)]),
+            patch("os.path.isfile", return_value=True),
+            patch("os.access", return_value=True),
+        ):
+            result = _find_openscad()
+            assert result == str(fake_binary)
+
+    @patch("kiln.generation.openscad._MACOS_VERSIONED_PATTERN", "/fake/OpenSCAD-*.app/Contents/MacOS/OpenSCAD")
+    @patch("kiln.generation.openscad._MACOS_APP_PATH", "")
+    @patch("shutil.which", return_value=None)
+    def test_versioned_app_quarantined_raises_helpful_error(self, mock_which):
+        """When versioned app exists but isn't executable, raise with xattr hint."""
+        from kiln.generation.base import GenerationError
+        from kiln.generation.openscad import _find_openscad
+
+        fake_path = "/Applications/OpenSCAD-2021.01.app/Contents/MacOS/OpenSCAD"
+        with (
+            patch("glob.glob", return_value=[fake_path]),
+            patch("os.path.isfile", return_value=True),
+            patch("os.access", return_value=False),
+            pytest.raises(GenerationError, match="Gatekeeper"),
+        ):
+            _find_openscad()
+
+    @patch("kiln.generation.openscad._MACOS_VERSIONED_PATTERN", "/fake/OpenSCAD-*.app/Contents/MacOS/OpenSCAD")
+    @patch("kiln.generation.openscad._MACOS_APP_PATH", "")
+    @patch("shutil.which", return_value=None)
+    def test_quarantined_error_includes_xattr_command(self, mock_which):
+        """Error message should include the xattr fix command."""
+        from kiln.generation.base import GenerationError
+        from kiln.generation.openscad import _find_openscad
+
+        fake_path = "/Applications/OpenSCAD-2021.01.app/Contents/MacOS/OpenSCAD"
+        with (
+            patch("glob.glob", return_value=[fake_path]),
+            patch("os.path.isfile", return_value=True),
+            patch("os.access", return_value=False),
+            pytest.raises(GenerationError, match="xattr -dr com.apple.quarantine"),
+        ):
+            _find_openscad()
+
+    @patch("kiln.generation.openscad._MACOS_VERSIONED_PATTERN", "")
+    @patch("kiln.generation.openscad._MACOS_APP_PATH", "")
+    @patch("shutil.which", return_value=None)
+    def test_non_mac_skips_versioned_check(self, mock_which):
+        """On non-macOS, versioned check is skipped entirely."""
+        from kiln.generation.base import GenerationError
+        from kiln.generation.openscad import _find_openscad
+
+        with pytest.raises(GenerationError, match="OpenSCAD not found"):
+            _find_openscad()
+
+
+# ---------------------------------------------------------------------------
+# MCP tool: optimize_template_params
+# ---------------------------------------------------------------------------
+
+class TestOptimizeTemplateParamsTool:
+    """Tests for the optimize_template_params MCP tool wrapper.
+
+    Covers: auth gating, constraints JSON parsing, error handling.
+    """
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_invalid_template_returns_error(self, mock_auth):
+        from kiln.server import optimize_template_params
+
+        result = optimize_template_params("nonexistent_abc")
+        assert result["success"] is False
+        assert "not found" in result["error"]["message"]
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_invalid_constraints_json_returns_error(self, mock_auth):
+        from kiln.server import optimize_template_params
+
+        result = optimize_template_params("shelf_bracket", constraints="not json{")
+        assert result["success"] is False
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.design_reasoning.optimize_template_params")
+    def test_success_returns_result_dict(self, mock_optimize, mock_auth):
+        from kiln.server import optimize_template_params as tool_fn
+
+        mock_result = MagicMock()
+        mock_result.to_dict.return_value = {
+            "template_id": "shelf_bracket",
+            "best_params": {"width": 30},
+            "best_score": 85,
+            "best_grade": "B",
+            "best_stl_path": "/tmp/best.stl",
+            "variants_tested": 8,
+            "all_scores": [],
+            "summary": "Tested 8 variants.",
+        }
+        mock_optimize.return_value = mock_result
+
+        result = tool_fn("shelf_bracket", samples_per_param=2)
+        assert result["status"] == "success"
+        assert result["best_score"] == 85
+
+
+# ---------------------------------------------------------------------------
+# Multi-part plate arrangement
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def _mock_trimesh():
+    """Inject a fake trimesh module so arrange_on_plate can import it."""
+    import sys
+
+    fake = MagicMock()
+    had = "trimesh" in sys.modules
+    old = sys.modules.get("trimesh")
+    sys.modules["trimesh"] = fake
+    yield fake
+    if had:
+        sys.modules["trimesh"] = old
+    else:
+        sys.modules.pop("trimesh", None)
+
+
+@pytest.mark.usefixtures("_mock_trimesh")
+class TestArrangeOnPlate:
+    """Tests for arrange_on_plate bin-packing.
+
+    Covers: single part, multiple parts, overflow, spacing, copies,
+    empty list, missing file, to_dict.
+    """
+
+    @patch("trimesh.load")
+    def test_single_part_fits(self, mock_load, tmp_path):
+        from kiln.design_reasoning import arrange_on_plate
+
+        stl = tmp_path / "cube.stl"
+        _write_cube_stl(str(stl), 20.0)
+
+        mock_mesh = MagicMock()
+        mock_mesh.bounding_box.extents = [20.0, 20.0, 20.0]
+        mock_load.return_value = mock_mesh
+
+        result = arrange_on_plate([str(stl)])
+        assert result.fitted_parts == 1
+        assert result.overflow_parts == []
+        assert result.plate_utilization > 0
+
+    @patch("trimesh.load")
+    def test_multiple_parts_packed(self, mock_load, tmp_path):
+        from kiln.design_reasoning import arrange_on_plate
+
+        files = []
+        for i in range(4):
+            stl = tmp_path / f"part{i}.stl"
+            _write_cube_stl(str(stl), 10.0)
+            files.append(str(stl))
+
+        mock_mesh = MagicMock()
+        mock_mesh.bounding_box.extents = [30.0, 30.0, 10.0]
+        mock_load.return_value = mock_mesh
+
+        result = arrange_on_plate(files)
+        assert result.fitted_parts >= 1
+        assert result.total_parts == 4
+
+    @patch("trimesh.load")
+    def test_part_too_large_overflows(self, mock_load, tmp_path):
+        from kiln.design_reasoning import arrange_on_plate
+
+        stl = tmp_path / "huge.stl"
+        _write_cube_stl(str(stl), 10.0)
+
+        mock_mesh = MagicMock()
+        mock_mesh.bounding_box.extents = [300.0, 300.0, 50.0]
+        mock_load.return_value = mock_mesh
+
+        result = arrange_on_plate([str(stl)], plate_width_mm=200, plate_depth_mm=200)
+        assert result.fitted_parts == 0
+        assert len(result.overflow_parts) == 1
+
+    @patch("trimesh.load")
+    def test_copies_duplicate_parts(self, mock_load, tmp_path):
+        from kiln.design_reasoning import arrange_on_plate
+
+        stl = tmp_path / "small.stl"
+        _write_cube_stl(str(stl), 10.0)
+
+        mock_mesh = MagicMock()
+        mock_mesh.bounding_box.extents = [15.0, 15.0, 10.0]
+        mock_load.return_value = mock_mesh
+
+        result = arrange_on_plate(
+            [str(stl)],
+            copies={"small.stl": 3},
+        )
+        assert result.total_parts == 3
+
+    def test_empty_file_list(self):
+        from kiln.design_reasoning import arrange_on_plate
+
+        result = arrange_on_plate([])
+        assert result.fitted_parts == 0
+        assert result.total_parts == 0
+        assert "No files" in result.summary
+
+    def test_missing_file_raises(self):
+        from kiln.design_reasoning import arrange_on_plate
+
+        with pytest.raises(ValueError, match="File not found"):
+            arrange_on_plate(["/nonexistent/path.stl"])
+
+    @patch("trimesh.load")
+    def test_to_dict_fields(self, mock_load, tmp_path):
+        from kiln.design_reasoning import arrange_on_plate
+
+        stl = tmp_path / "cube.stl"
+        _write_cube_stl(str(stl), 10.0)
+
+        mock_mesh = MagicMock()
+        mock_mesh.bounding_box.extents = [10.0, 10.0, 10.0]
+        mock_load.return_value = mock_mesh
+
+        result = arrange_on_plate([str(stl)])
+        d = result.to_dict()
+        for key in ("arranged_parts", "overflow_parts", "plate_utilization",
+                     "total_parts", "fitted_parts", "plate_width_mm",
+                     "plate_depth_mm", "summary"):
+            assert key in d
+
+    @patch("trimesh.load")
+    def test_spacing_between_parts(self, mock_load, tmp_path):
+        from kiln.design_reasoning import arrange_on_plate
+
+        files = []
+        for i in range(2):
+            stl = tmp_path / f"p{i}.stl"
+            _write_cube_stl(str(stl), 10.0)
+            files.append(str(stl))
+
+        mock_mesh = MagicMock()
+        mock_mesh.bounding_box.extents = [20.0, 20.0, 10.0]
+        mock_load.return_value = mock_mesh
+
+        result = arrange_on_plate(files, spacing_mm=10.0)
+        if result.fitted_parts >= 2:
+            p0 = result.arranged_parts[0]
+            p1 = result.arranged_parts[1]
+            # Parts should not overlap (x1 + width + spacing <= x2 or y-separated)
+            x_separated = (p0["x"] + p0["width"] + 10.0 <= p1["x"] + 0.01 or
+                           p1["x"] + p1["width"] + 10.0 <= p0["x"] + 0.01)
+            y_separated = (p0["y"] + p0["depth"] + 10.0 <= p1["y"] + 0.01 or
+                           p1["y"] + p1["depth"] + 10.0 <= p0["y"] + 0.01)
+            assert x_separated or y_separated
+
+
+# ---------------------------------------------------------------------------
+# Natural language → CSG composition
+# ---------------------------------------------------------------------------
+
+class TestPlanCompositionFromDescription:
+    """Tests for plan_composition_from_description.
+
+    Covers: shape keywords, operation keywords, hole/hollow patterns,
+    default cube, complexity classification, to_dict, text keyword.
+    """
+
+    def test_simple_cube_description(self):
+        from kiln.design_reasoning import plan_composition_from_description
+
+        plan = plan_composition_from_description("a box")
+        shapes = [p["shape"] for p in plan.primitives]
+        assert "cube" in shapes
+
+    def test_cylinder_keywords(self):
+        from kiln.design_reasoning import plan_composition_from_description
+
+        for word in ("a cylinder", "a rod", "a shaft"):
+            plan = plan_composition_from_description(word)
+            shapes = [p["shape"] for p in plan.primitives]
+            assert "cylinder" in shapes, f"Failed for '{word}'"
+
+    def test_sphere_keywords(self):
+        from kiln.design_reasoning import plan_composition_from_description
+
+        for word in ("a ball", "a sphere"):
+            plan = plan_composition_from_description(word)
+            shapes = [p["shape"] for p in plan.primitives]
+            assert "sphere" in shapes
+
+    def test_with_hole_adds_difference(self):
+        from kiln.design_reasoning import plan_composition_from_description
+
+        plan = plan_composition_from_description("a cube with a hole")
+        ops = [o["op"] for o in plan.operations]
+        assert "difference" in ops
+        # Should have added a cylinder for the hole
+        assert len(plan.primitives) >= 2
+
+    def test_hollow_cylinder(self):
+        from kiln.design_reasoning import plan_composition_from_description
+
+        plan = plan_composition_from_description("hollow cylinder")
+        ops = [o["op"] for o in plan.operations]
+        assert "difference" in ops
+
+    def test_multiple_shapes_union(self):
+        from kiln.design_reasoning import plan_composition_from_description
+
+        plan = plan_composition_from_description("a box and a cylinder")
+        assert len(plan.primitives) >= 2
+        ops = [o["op"] for o in plan.operations]
+        assert "union" in ops
+
+    def test_target_size_scales_dimensions(self):
+        from kiln.design_reasoning import plan_composition_from_description
+
+        plan = plan_composition_from_description("a cube", target_size_mm=100)
+        assert plan.estimated_dimensions_mm["width"] == 100
+
+    def test_complexity_simple(self):
+        from kiln.design_reasoning import plan_composition_from_description
+
+        plan = plan_composition_from_description("a sphere")
+        assert plan.complexity == "simple"
+
+    def test_complexity_moderate(self):
+        from kiln.design_reasoning import plan_composition_from_description
+
+        plan = plan_composition_from_description("a box and a cylinder and a sphere")
+        assert plan.complexity in ("moderate", "complex")
+
+    def test_no_keywords_returns_default(self):
+        from kiln.design_reasoning import plan_composition_from_description
+
+        plan = plan_composition_from_description("xyzzy flibbertigibbet")
+        assert len(plan.primitives) >= 1
+        assert plan.primitives[0]["shape"] == "cube"
+        assert any("No shape keywords" in n for n in plan.notes)
+
+    def test_to_dict_has_all_fields(self):
+        from kiln.design_reasoning import plan_composition_from_description
+
+        plan = plan_composition_from_description("a sphere")
+        d = plan.to_dict()
+        for key in ("description", "primitives", "operations",
+                     "estimated_dimensions_mm", "complexity", "notes", "confidence"):
+            assert key in d
+
+    def test_text_keyword(self):
+        from kiln.design_reasoning import plan_composition_from_description
+
+        plan = plan_composition_from_description("a label saying hello")
+        shapes = [p["shape"] for p in plan.primitives]
+        assert "text" in shapes
+
+
+class TestPlanDesignFromDescriptionTool:
+    """MCP tool wrapper tests for plan_design_from_description."""
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_empty_description_still_works(self, mock_auth):
+        from kiln.server import plan_design_from_description
+
+        result = plan_design_from_description("")
+        assert result["status"] == "success"
+        assert len(result["primitives"]) >= 1
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.design_reasoning.plan_composition_from_description")
+    def test_success_returns_result(self, mock_plan, mock_auth):
+        from kiln.design_reasoning import CompositionPlan
+        from kiln.server import plan_design_from_description
+
+        mock_plan.return_value = CompositionPlan(
+            description="a cube",
+            primitives=[{"type": "primitive", "shape": "cube", "params": {"size": [50, 50, 50]}}],
+            operations=[],
+            estimated_dimensions_mm={"width": 50.0, "depth": 50.0, "height": 50.0},
+            complexity="simple",
+            notes=["Material hint: PLA (informational)."],
+            confidence="high",
+        )
+
+        result = plan_design_from_description("a cube")
+        assert result["status"] == "success"
+        assert result["complexity"] == "simple"
+
+
+class TestArrangePartsOnPlateTool:
+    """MCP tool wrapper tests for arrange_parts_on_plate."""
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_invalid_json_returns_error(self, mock_auth):
+        from kiln.server import arrange_parts_on_plate
+
+        result = arrange_parts_on_plate("not json[")
+        assert result["success"] is False
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_missing_file_returns_error(self, mock_auth):
+        from kiln.server import arrange_parts_on_plate
+
+        result = arrange_parts_on_plate('["/nonexistent/file.stl"]')
+        assert result["success"] is False
+        assert "not found" in result["error"]["message"].lower()
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.design_reasoning.arrange_on_plate")
+    def test_success_returns_result(self, mock_arrange, mock_auth):
+        from kiln.design_reasoning import PlateArrangement
+        from kiln.server import arrange_parts_on_plate
+
+        mock_arrange.return_value = PlateArrangement(
+            arranged_parts=[{"path": "/tmp/a.stl", "x": 0, "y": 0, "width": 20, "depth": 20, "height": 10}],
+            plate_utilization=0.05,
+            total_parts=1,
+            fitted_parts=1,
+            summary="Arranged 1/1 parts.",
+        )
+
+        result = arrange_parts_on_plate('["/tmp/a.stl"]')
+        assert result["status"] == "success"
+        assert result["fitted_parts"] == 1
+
+
+# ---- Loop 14: Template search by description ----
+
+
+class TestSearchTemplates:
+    """Tests for search_templates() — keyword-based fuzzy template search."""
+
+    def test_exact_id_match(self):
+        from kiln.design_reasoning import search_templates
+
+        result = search_templates("phone stand")
+        assert result.total_templates > 0
+        ids = [m["template_id"] for m in result.matches]
+        assert "phone_stand" in ids
+
+    def test_category_match(self):
+        from kiln.design_reasoning import search_templates
+
+        result = search_templates("hook")
+        assert len(result.matches) > 0
+        assert any("hook" in m["template_id"] for m in result.matches)
+
+    def test_empty_query_returns_empty(self):
+        from kiln.design_reasoning import search_templates
+
+        result = search_templates("")
+        assert result.matches == []
+
+    def test_category_filter(self):
+        from kiln.design_reasoning import search_templates
+
+        result = search_templates("box", category_filter="containers")
+        for m in result.matches:
+            assert m["category"] == "containers"
+
+    def test_max_results_cap(self):
+        from kiln.design_reasoning import search_templates
+
+        result = search_templates("a", max_results=3)
+        assert len(result.matches) <= 3
+
+    def test_scores_are_between_0_and_1(self):
+        from kiln.design_reasoning import search_templates
+
+        result = search_templates("bracket shelf")
+        for m in result.matches:
+            assert 0 < m["score"] <= 1.0
+
+    def test_no_match_returns_empty(self):
+        from kiln.design_reasoning import search_templates
+
+        result = search_templates("zzz_xylophone_quantum_flux")
+        assert result.matches == []
+
+    def test_to_dict(self):
+        from kiln.design_reasoning import search_templates
+
+        result = search_templates("hook")
+        d = result.to_dict()
+        assert "query" in d
+        assert "matches" in d
+        assert d["search_method"] == "keyword"
+
+
+class TestSearchDesignTemplatesTool:
+    """Tests for the search_design_templates MCP tool."""
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_empty_query(self, mock_auth):
+        from kiln.server import search_design_templates
+
+        result = search_design_templates("")
+        assert result["status"] == "success"
+        assert result["matches"] == []
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_success(self, mock_auth):
+        from kiln.server import search_design_templates
+
+        result = search_design_templates("hook")
+        assert result["status"] == "success"
+        assert len(result["matches"]) > 0
+
+
+# ---- Loop 15: Mesh weight estimation ----
+
+
+class TestEstimateWeight:
+    """Tests for estimate_weight() — volume-based weight estimation."""
+
+    def test_cube_weight(self, tmp_path):
+        from kiln.design_reasoning import estimate_weight
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        result = estimate_weight(cube_path)
+        # 10mm cube = 1000 mm³ = 1.0 cm³, PLA density 1.24
+        # Solid weight should be ~1.24g
+        assert result.volume_mm3 > 500  # at least plausible
+        assert result.solid_weight_g > 0
+        assert result.estimated_weight_g > 0
+        assert result.estimated_weight_g <= result.solid_weight_g
+
+    def test_material_density_applied(self, tmp_path):
+        from kiln.design_reasoning import estimate_weight
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        pla = estimate_weight(cube_path, material="pla")
+        abs_ = estimate_weight(cube_path, material="abs")
+        # PLA (1.24) is denser than ABS (1.04)
+        assert pla.solid_weight_g > abs_.solid_weight_g
+
+    def test_unknown_material_falls_back(self, tmp_path):
+        from kiln.design_reasoning import estimate_weight
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        result = estimate_weight(cube_path, material="unobtanium")
+        assert any("Unknown material" in n for n in result.notes)
+        assert result.density_g_cm3 == 1.24
+
+    def test_high_infill_heavier(self, tmp_path):
+        from kiln.design_reasoning import estimate_weight
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 20.0)
+        low = estimate_weight(cube_path, infill_percent=10.0)
+        high = estimate_weight(cube_path, infill_percent=80.0)
+        assert high.estimated_weight_g > low.estimated_weight_g
+
+    def test_file_not_found_raises(self):
+        from kiln.design_reasoning import estimate_weight
+
+        with pytest.raises(FileNotFoundError):
+            estimate_weight("/nonexistent/file.stl")
+
+    def test_bounding_box_populated(self, tmp_path):
+        from kiln.design_reasoning import estimate_weight
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        result = estimate_weight(cube_path)
+        assert "width" in result.bounding_box_mm
+        assert "depth" in result.bounding_box_mm
+        assert "height" in result.bounding_box_mm
+
+    def test_to_dict(self, tmp_path):
+        from kiln.design_reasoning import estimate_weight
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        d = estimate_weight(cube_path).to_dict()
+        assert "volume_mm3" in d
+        assert "estimated_weight_g" in d
+        assert "material" in d
+
+
+class TestEstimateMeshWeightTool:
+    """Tests for estimate_mesh_weight MCP tool."""
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_file_not_found(self, mock_auth):
+        from kiln.server import estimate_mesh_weight
+
+        result = estimate_mesh_weight("/nonexistent.stl")
+        assert result["success"] is False
+        assert "FILE_NOT_FOUND" in result["error"]["code"]
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_success(self, mock_auth, tmp_path):
+        from kiln.server import estimate_mesh_weight
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        result = estimate_mesh_weight(cube_path)
+        assert result["status"] == "success"
+        assert result["estimated_weight_g"] > 0
+
+
+# ---- Loop 16: Design-to-GCode pipeline ----
+
+
+class TestDesignToGcode:
+    """Tests for design_to_gcode() — end-to-end pipeline."""
+
+    def test_empty_description_returns_error(self):
+        from kiln.design_reasoning import design_to_gcode
+
+        result = design_to_gcode("")
+        assert not result.success
+        assert "Empty description" in result.errors[0]
+
+    def test_no_matching_template(self):
+        from kiln.design_reasoning import design_to_gcode
+
+        result = design_to_gcode("zzz_quantum_flux_widget_9000")
+        assert not result.success
+        assert any("No matching template" in e for e in result.errors)
+
+    @patch("kiln.design_reasoning.search_templates")
+    def test_missing_scad_template(self, mock_search, tmp_path):
+        from kiln.design_reasoning import TemplateSearchResult, design_to_gcode
+
+        mock_search.return_value = TemplateSearchResult(
+            query="test",
+            matches=[{"template_id": "_meta", "score": 1.0, "description": "", "category": ""}],
+        )
+        result = design_to_gcode("test", output_dir=str(tmp_path))
+        assert not result.success
+
+    def test_steps_completed_populated_on_success(self):
+        """Verify that steps_completed is a list (even on failure)."""
+        from kiln.design_reasoning import design_to_gcode
+
+        result = design_to_gcode("hook")
+        assert isinstance(result.steps_completed, list)
+        # At minimum template_search step should have run
+        assert len(result.steps_completed) > 0
+
+    def test_to_dict(self):
+        from kiln.design_reasoning import design_to_gcode
+
+        result = design_to_gcode("zzz_no_match")
+        d = result.to_dict()
+        assert "description" in d
+        assert "steps_completed" in d
+        assert "success" in d
+
+
+class TestDesignToGcodePipelineTool:
+    """Tests for design_to_gcode_pipeline MCP tool."""
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_empty_description(self, mock_auth):
+        from kiln.server import design_to_gcode_pipeline
+
+        result = design_to_gcode_pipeline("")
+        # Empty description → pipeline returns partial/success but with errors
+        assert "status" in result
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.design_reasoning.design_to_gcode")
+    def test_success(self, mock_d2g, mock_auth):
+        from kiln.design_reasoning import DesignToGCodeResult
+        from kiln.server import design_to_gcode_pipeline
+
+        mock_d2g.return_value = DesignToGCodeResult(
+            description="test hook",
+            template_id="hook",
+            stl_file="/tmp/hook.stl",
+            steps_completed=["template_search", "stl_rendering"],
+            success=True,
+        )
+        result = design_to_gcode_pipeline("test hook")
+        assert result["status"] == "success"
+        assert result["template_id"] == "hook"
+
+
+# ---- Loop 17: STL merge / assembly ----
+
+
+class TestMergeStlFiles:
+    """Tests for merge_stl_files() — combining multiple STLs."""
+
+    def test_single_file(self, tmp_path):
+        from kiln.design_reasoning import merge_stl_files
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        out_path = str(tmp_path / "merged.stl")
+        result = merge_stl_files([cube_path], out_path)
+        assert result.success
+        assert result.total_triangles == 12
+        assert os.path.exists(result.output_path)
+
+    def test_two_files(self, tmp_path):
+        from kiln.design_reasoning import merge_stl_files
+
+        c1 = str(tmp_path / "c1.stl")
+        c2 = str(tmp_path / "c2.stl")
+        _write_cube_stl(c1, 10.0)
+        _write_cube_stl(c2, 5.0)
+        out_path = str(tmp_path / "merged.stl")
+        result = merge_stl_files([c1, c2], out_path)
+        assert result.success
+        assert result.total_triangles == 24  # 12 + 12
+
+    def test_with_positions(self, tmp_path):
+        from kiln.design_reasoning import merge_stl_files
+
+        c1 = str(tmp_path / "c1.stl")
+        c2 = str(tmp_path / "c2.stl")
+        _write_cube_stl(c1, 10.0)
+        _write_cube_stl(c2, 10.0)
+        out_path = str(tmp_path / "merged.stl")
+        result = merge_stl_files(
+            [c1, c2],
+            out_path,
+            positions=[{"x": 0, "y": 0, "z": 0}, {"x": 50, "y": 0, "z": 0}],
+        )
+        assert result.success
+        # Width should now span ~60mm (0-10 + 50-60)
+        assert result.bounding_box_mm["width"] > 50
+
+    def test_empty_list_returns_error(self, tmp_path):
+        from kiln.design_reasoning import merge_stl_files
+
+        result = merge_stl_files([], str(tmp_path / "merged.stl"))
+        assert not result.success
+        assert len(result.errors) > 0
+
+    def test_missing_file_returns_error(self, tmp_path):
+        from kiln.design_reasoning import merge_stl_files
+
+        result = merge_stl_files(["/nonexistent.stl"], str(tmp_path / "merged.stl"))
+        assert not result.success
+        assert any("not found" in e.lower() for e in result.errors)
+
+    def test_position_length_mismatch(self, tmp_path):
+        from kiln.design_reasoning import merge_stl_files
+
+        c1 = str(tmp_path / "c1.stl")
+        _write_cube_stl(c1, 10.0)
+        result = merge_stl_files(
+            [c1],
+            str(tmp_path / "merged.stl"),
+            positions=[{"x": 0, "y": 0, "z": 0}, {"x": 10, "y": 0, "z": 0}],
+        )
+        assert not result.success
+        assert any("length" in e.lower() for e in result.errors)
+
+    def test_to_dict(self, tmp_path):
+        from kiln.design_reasoning import merge_stl_files
+
+        c1 = str(tmp_path / "c1.stl")
+        _write_cube_stl(c1, 10.0)
+        out_path = str(tmp_path / "merged.stl")
+        d = merge_stl_files([c1], out_path).to_dict()
+        assert "output_path" in d
+        assert "total_triangles" in d
+        assert "success" in d
+
+
+class TestMergeStlTool:
+    """Tests for merge_stl MCP tool."""
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_invalid_json(self, mock_auth):
+        from kiln.server import merge_stl
+
+        result = merge_stl("not json", "/tmp/out.stl")
+        assert result["success"] is False
+        assert "INVALID_ARGS" in result["error"]["code"]
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_success(self, mock_auth, tmp_path):
+        from kiln.server import merge_stl
+
+        c1 = str(tmp_path / "c1.stl")
+        _write_cube_stl(c1, 10.0)
+        out_path = str(tmp_path / "merged.stl")
+        result = merge_stl(f'["{c1}"]', out_path)
+        assert result["status"] == "success"
+        assert result["total_triangles"] == 12
+
+
+# ---- Loop 18: Cross-section / cutaway view ----
+
+
+class TestCrossSectionAtPlane:
+    """Tests for cross_section_at_plane() — 2D cross-section extraction."""
+
+    def test_cube_z_midpoint(self, tmp_path):
+        from kiln.design_reasoning import cross_section_at_plane
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        result = cross_section_at_plane(cube_path, plane="z", offset_ratio=0.5)
+        assert result.success
+        assert result.contour_count > 0
+        assert result.cross_section_area_mm2 > 0
+
+    def test_cube_z_bottom(self, tmp_path):
+        from kiln.design_reasoning import cross_section_at_plane
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        result = cross_section_at_plane(cube_path, plane="z", offset_ratio=0.0)
+        # At the very bottom, may or may not have contours depending on
+        # whether triangles lie exactly on the plane
+        assert isinstance(result.contour_points, list)
+
+    def test_plane_x(self, tmp_path):
+        from kiln.design_reasoning import cross_section_at_plane
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        result = cross_section_at_plane(cube_path, plane="x", offset_ratio=0.5)
+        assert result.plane == "x"
+
+    def test_offset_mm_override(self, tmp_path):
+        from kiln.design_reasoning import cross_section_at_plane
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        result = cross_section_at_plane(cube_path, plane="z", offset_mm=5.0)
+        assert abs(result.plane_offset_mm - 5.0) < 0.01
+
+    def test_invalid_plane_raises(self, tmp_path):
+        from kiln.design_reasoning import cross_section_at_plane
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        with pytest.raises(ValueError, match="plane must be"):
+            cross_section_at_plane(cube_path, plane="w")
+
+    def test_file_not_found_raises(self):
+        from kiln.design_reasoning import cross_section_at_plane
+
+        with pytest.raises(FileNotFoundError):
+            cross_section_at_plane("/nonexistent.stl")
+
+    def test_to_dict(self, tmp_path):
+        from kiln.design_reasoning import cross_section_at_plane
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        d = cross_section_at_plane(cube_path).to_dict()
+        assert "plane" in d
+        assert "contour_count" in d
+        assert "cross_section_area_mm2" in d
+
+
+class TestCrossSectionViewTool:
+    """Tests for cross_section_view MCP tool."""
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_file_not_found(self, mock_auth):
+        from kiln.server import cross_section_view
+
+        result = cross_section_view("/nonexistent.stl")
+        assert result["success"] is False
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_invalid_plane(self, mock_auth, tmp_path):
+        from kiln.server import cross_section_view
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        result = cross_section_view(cube_path, plane="w")
+        assert result["success"] is False
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_success(self, mock_auth, tmp_path):
+        from kiln.server import cross_section_view
+
+        cube_path = str(tmp_path / "cube.stl")
+        _write_cube_stl(cube_path, 10.0)
+        result = cross_section_view(cube_path)
+        assert result["status"] == "success"
+        assert result["contour_count"] >= 0
+
+
+# ---- Loop 19: Parametric constraint solver ----
+
+
+class TestSolveConstraints:
+    """Tests for solve_constraints() — parametric constraint solving."""
+
+    def test_equals_constraint(self):
+        from kiln.design_reasoning import solve_constraints
+
+        result = solve_constraints("shelf_bracket", {"width": {"equals": 25}})
+        assert result.solved_params["width"] == 25.0
+
+    def test_min_max_constraint(self):
+        from kiln.design_reasoning import solve_constraints
+
+        result = solve_constraints("shelf_bracket", {
+            "width": {"min": 20, "max": 40},
+        })
+        assert result.solved_params["width"] >= 20
+        assert result.solved_params["width"] <= 40
+
+    def test_unknown_template(self):
+        from kiln.design_reasoning import solve_constraints
+
+        result = solve_constraints("zzz_nonexistent", {"x": {"equals": 5}})
+        assert not result.success
+        assert any("Unknown template" in n for n in result.notes)
+
+    def test_unknown_parameter_violation(self):
+        from kiln.design_reasoning import solve_constraints
+
+        result = solve_constraints("shelf_bracket", {
+            "nonexistent_param": {"equals": 5},
+        })
+        assert any("nonexistent_param" in v for v in result.constraints_violated)
+
+    def test_ratio_constraint(self):
+        from kiln.design_reasoning import solve_constraints
+
+        result = solve_constraints("shelf_bracket", {
+            "arm_length": {"equals": 100},
+            "wall_length": {"ratio": ["arm_length", 0.5]},
+        })
+        # wall_length should be ~50 (half of arm_length=100)
+        assert abs(result.solved_params.get("wall_length", 0) - 50.0) < 1.0
+
+    def test_success_flag(self):
+        from kiln.design_reasoning import solve_constraints
+
+        result = solve_constraints("shelf_bracket", {
+            "width": {"min": 10, "max": 100},
+        })
+        assert result.success
+
+    def test_to_dict(self):
+        from kiln.design_reasoning import solve_constraints
+
+        d = solve_constraints("shelf_bracket", {"width": {"equals": 30}}).to_dict()
+        assert "solved_params" in d
+        assert "constraints_satisfied" in d
+        assert "success" in d
+
+
+class TestSolveTemplateConstraintsTool:
+    """Tests for solve_template_constraints MCP tool."""
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_invalid_json(self, mock_auth):
+        from kiln.server import solve_template_constraints
+
+        result = solve_template_constraints("shelf_bracket", "not json")
+        assert result["success"] is False
+        assert "INVALID_ARGS" in result["error"]["code"]
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_success(self, mock_auth):
+        from kiln.server import solve_template_constraints
+
+        result = solve_template_constraints(
+            "shelf_bracket",
+            '{"width": {"equals": 30}}',
+        )
+        assert result["status"] == "success"
+        assert result["solved_params"]["width"] == 30.0

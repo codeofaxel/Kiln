@@ -40,7 +40,6 @@ FastMCP.__init__ = _patched_fastmcp_init  # type: ignore[method-assign]
 # ---------------------------------------------------------------------------
 
 import pytest
-import responses
 
 from kiln.printers.base import (
     JobProgress,
@@ -48,8 +47,6 @@ from kiln.printers.base import (
     PrinterFile,
     PrinterState,
     PrinterStatus,
-    PrintResult,
-    UploadResult,
 )
 from kiln.printers.octoprint import OctoPrintAdapter
 
@@ -444,7 +441,7 @@ def _bypass_license_tier(monkeypatch, tmp_path):
     behaviour can override this by patching ``kiln.licensing._manager``
     themselves.
     """
-    from kiln.licensing import LicenseManager, _KEY_PREFIX_BUSINESS
+    from kiln.licensing import _KEY_PREFIX_BUSINESS, LicenseManager
 
     # Allow legacy prefix keys in tests (no HMAC signature available)
     monkeypatch.setenv("KILN_LICENSE_OFFLINE", "1")

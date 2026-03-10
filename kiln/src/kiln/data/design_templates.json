@@ -8,11 +8,41 @@
     "description": "Angled phone stand with adjustable cradle width, angle, and base dimensions. Prints flat, no supports needed.",
     "category": "desk_accessories",
     "parameters": {
-      "phone_width": {"default": 75, "min": 55, "max": 100, "unit": "mm", "description": "Phone width"},
-      "angle": {"default": 65, "min": 45, "max": 80, "unit": "degrees", "description": "Viewing angle from horizontal"},
-      "base_depth": {"default": 80, "min": 60, "max": 120, "unit": "mm", "description": "Base depth"},
-      "thickness": {"default": 4, "min": 3, "max": 8, "unit": "mm", "description": "Wall thickness"},
-      "lip_height": {"default": 12, "min": 8, "max": 20, "unit": "mm", "description": "Front lip to hold phone"}
+      "phone_width": {
+        "default": 75,
+        "min": 55,
+        "max": 100,
+        "unit": "mm",
+        "description": "Phone width"
+      },
+      "angle": {
+        "default": 65,
+        "min": 45,
+        "max": 80,
+        "unit": "degrees",
+        "description": "Viewing angle from horizontal"
+      },
+      "base_depth": {
+        "default": 80,
+        "min": 60,
+        "max": 120,
+        "unit": "mm",
+        "description": "Base depth"
+      },
+      "thickness": {
+        "default": 4,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "lip_height": {
+        "default": 12,
+        "min": 8,
+        "max": 20,
+        "unit": "mm",
+        "description": "Front lip to hold phone"
+      }
     },
     "scad_template": "// Parametric Phone Stand\nphone_width = ${phone_width};\nangle = ${angle};\nbase_depth = ${base_depth};\nthickness = ${thickness};\nlip_height = ${lip_height};\n\nmodule phone_stand() {\n    // Base plate\n    cube([phone_width + 10, base_depth, thickness]);\n    // Back support\n    translate([0, base_depth - thickness, 0])\n        rotate([90 - angle, 0, 0])\n            cube([phone_width + 10, base_depth * 0.8, thickness]);\n    // Front lip\n    translate([0, thickness, 0])\n        cube([phone_width + 10, thickness, lip_height]);\n    // Side rails\n    for (x = [0, phone_width + 10 - thickness]) {\n        translate([x, 0, 0])\n            cube([thickness, base_depth * 0.4, lip_height]);\n    }\n}\n\nphone_stand();"
   },
@@ -21,11 +51,41 @@
     "description": "Simple wall hook with screw hole. Prints flat on back surface.",
     "category": "hardware",
     "parameters": {
-      "hook_radius": {"default": 15, "min": 8, "max": 30, "unit": "mm", "description": "Inner hook curve radius"},
-      "thickness": {"default": 5, "min": 3, "max": 10, "unit": "mm", "description": "Hook thickness"},
-      "width": {"default": 20, "min": 10, "max": 40, "unit": "mm", "description": "Hook width"},
-      "plate_height": {"default": 50, "min": 30, "max": 80, "unit": "mm", "description": "Mounting plate height"},
-      "screw_hole_dia": {"default": 4, "min": 3, "max": 6, "unit": "mm", "description": "Screw hole diameter"}
+      "hook_radius": {
+        "default": 15,
+        "min": 8,
+        "max": 30,
+        "unit": "mm",
+        "description": "Inner hook curve radius"
+      },
+      "thickness": {
+        "default": 5,
+        "min": 3,
+        "max": 10,
+        "unit": "mm",
+        "description": "Hook thickness"
+      },
+      "width": {
+        "default": 20,
+        "min": 10,
+        "max": 40,
+        "unit": "mm",
+        "description": "Hook width"
+      },
+      "plate_height": {
+        "default": 50,
+        "min": 30,
+        "max": 80,
+        "unit": "mm",
+        "description": "Mounting plate height"
+      },
+      "screw_hole_dia": {
+        "default": 4,
+        "min": 3,
+        "max": 6,
+        "unit": "mm",
+        "description": "Screw hole diameter"
+      }
     },
     "scad_template": "// Parametric Wall Hook\nhook_radius = ${hook_radius};\nthickness = ${thickness};\nwidth = ${width};\nplate_height = ${plate_height};\nscrew_hole_dia = ${screw_hole_dia};\n\nmodule wall_hook() {\n    difference() {\n        union() {\n            // Mounting plate\n            cube([width, thickness, plate_height]);\n            // Hook arm\n            translate([0, 0, 0])\n                cube([width, hook_radius + thickness * 2, thickness]);\n            // Hook curve\n            translate([0, hook_radius + thickness, thickness])\n                rotate([0, 90, 0])\n                    difference() {\n                        cylinder(h=width, r=hook_radius + thickness, $fn=60);\n                        cylinder(h=width, r=hook_radius, $fn=60);\n                        translate([-hook_radius * 2, 0, 0])\n                            cube([hook_radius * 4, hook_radius * 2, width]);\n                    }\n        }\n        // Screw hole\n        translate([width/2, -1, plate_height * 0.7])\n            rotate([-90, 0, 0])\n                cylinder(h=thickness+2, d=screw_hole_dia, $fn=30);\n    }\n}\n\nwall_hook();"
   },
@@ -34,11 +94,41 @@
     "description": "Rectangular box with snap-fit lid. Two-piece print, no supports needed.",
     "category": "containers",
     "parameters": {
-      "inner_width": {"default": 60, "min": 20, "max": 200, "unit": "mm", "description": "Inner width"},
-      "inner_depth": {"default": 40, "min": 20, "max": 200, "unit": "mm", "description": "Inner depth"},
-      "inner_height": {"default": 30, "min": 10, "max": 100, "unit": "mm", "description": "Inner height"},
-      "wall": {"default": 2.4, "min": 1.6, "max": 5, "unit": "mm", "description": "Wall thickness"},
-      "corner_radius": {"default": 3, "min": 0, "max": 10, "unit": "mm", "description": "Corner rounding radius"}
+      "inner_width": {
+        "default": 60,
+        "min": 20,
+        "max": 200,
+        "unit": "mm",
+        "description": "Inner width"
+      },
+      "inner_depth": {
+        "default": 40,
+        "min": 20,
+        "max": 200,
+        "unit": "mm",
+        "description": "Inner depth"
+      },
+      "inner_height": {
+        "default": 30,
+        "min": 10,
+        "max": 100,
+        "unit": "mm",
+        "description": "Inner height"
+      },
+      "wall": {
+        "default": 2.4,
+        "min": 1.6,
+        "max": 5,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "corner_radius": {
+        "default": 3,
+        "min": 0,
+        "max": 10,
+        "unit": "mm",
+        "description": "Corner rounding radius"
+      }
     },
     "scad_template": "// Parametric Box with Snap Lid\niw = ${inner_width};\nid = ${inner_depth};\nih = ${inner_height};\nwall = ${wall};\ncr = ${corner_radius};\n\nmodule rounded_box(w, d, h, r) {\n    if (r > 0) {\n        hull() {\n            for (x = [r, w-r]) for (y = [r, d-r])\n                translate([x, y, 0]) cylinder(h=h, r=r, $fn=30);\n        }\n    } else {\n        cube([w, d, h]);\n    }\n}\n\nmodule box() {\n    ow = iw + wall*2;\n    od = id + wall*2;\n    oh = ih + wall;\n    difference() {\n        rounded_box(ow, od, oh, cr);\n        translate([wall, wall, wall])\n            rounded_box(iw, id, ih+1, max(0, cr-wall));\n    }\n    // Lip for lid\n    translate([wall-0.4, wall-0.4, oh])\n        difference() {\n            rounded_box(iw+0.8, id+0.8, 2, max(0, cr-wall));\n            translate([1, 1, -0.1])\n                rounded_box(iw-1.2, id-1.2, 2.2, max(0, cr-wall-1));\n        }\n}\n\nmodule lid() {\n    ow = iw + wall*2;\n    od = id + wall*2;\n    translate([ow + 10, 0, 0]) {\n        rounded_box(ow, od, wall, cr);\n        translate([wall+0.2, wall+0.2, wall])\n            difference() {\n                rounded_box(iw-0.4, id-0.4, 2.5, max(0, cr-wall));\n                translate([1.2, 1.2, -0.1])\n                    rounded_box(iw-2.8, id-2.8, 2.7, max(0, cr-wall-1));\n            }\n    }\n}\n\nbox();\nlid();"
   },
@@ -47,9 +137,27 @@
     "description": "Adhesive-back cable clip for desk cable management. Prints flat.",
     "category": "desk_accessories",
     "parameters": {
-      "cable_dia": {"default": 6, "min": 2, "max": 20, "unit": "mm", "description": "Cable diameter"},
-      "channels": {"default": 1, "min": 1, "max": 4, "unit": "count", "description": "Number of cable channels"},
-      "base_width": {"default": 12, "min": 8, "max": 30, "unit": "mm", "description": "Base pad width per channel"}
+      "cable_dia": {
+        "default": 6,
+        "min": 2,
+        "max": 20,
+        "unit": "mm",
+        "description": "Cable diameter"
+      },
+      "channels": {
+        "default": 1,
+        "min": 1,
+        "max": 4,
+        "unit": "count",
+        "description": "Number of cable channels"
+      },
+      "base_width": {
+        "default": 12,
+        "min": 8,
+        "max": 30,
+        "unit": "mm",
+        "description": "Base pad width per channel"
+      }
     },
     "scad_template": "// Parametric Cable Clip\ncable_dia = ${cable_dia};\nchannels = ${channels};\nbase_w = ${base_width};\n\nwall = 2;\ntotal_w = base_w * channels;\n\nmodule clip() {\n    difference() {\n        union() {\n            // Base pad\n            cube([total_w, base_w, 2]);\n            // Clip arms\n            for (ch = [0:channels-1]) {\n                cx = base_w/2 + ch * base_w;\n                translate([cx, base_w/2, 2])\n                    difference() {\n                        cylinder(h=cable_dia/2 + wall, d=cable_dia + wall*2, $fn=40);\n                        cylinder(h=cable_dia/2 + wall + 1, d=cable_dia, $fn=40);\n                        // Entry slot\n                        translate([0, 0, cable_dia*0.3])\n                            cube([cable_dia*0.7, cable_dia*2, cable_dia], center=true);\n                    }\n            }\n        }\n        // Flatten bottom\n        translate([-1, -1, -1]) cube([total_w+2, base_w+2, 1]);\n    }\n}\n\nclip();"
   },
@@ -58,11 +166,41 @@
     "description": "Triangulated shelf bracket with mounting holes. Prints upright.",
     "category": "hardware",
     "parameters": {
-      "arm_length": {"default": 80, "min": 40, "max": 200, "unit": "mm", "description": "Shelf arm length"},
-      "wall_length": {"default": 80, "min": 40, "max": 200, "unit": "mm", "description": "Wall arm length"},
-      "width": {"default": 25, "min": 15, "max": 50, "unit": "mm", "description": "Bracket width"},
-      "thickness": {"default": 5, "min": 3, "max": 10, "unit": "mm", "description": "Material thickness"},
-      "hole_dia": {"default": 5, "min": 3, "max": 8, "unit": "mm", "description": "Mounting hole diameter"}
+      "arm_length": {
+        "default": 80,
+        "min": 40,
+        "max": 200,
+        "unit": "mm",
+        "description": "Shelf arm length"
+      },
+      "wall_length": {
+        "default": 80,
+        "min": 40,
+        "max": 200,
+        "unit": "mm",
+        "description": "Wall arm length"
+      },
+      "width": {
+        "default": 25,
+        "min": 15,
+        "max": 50,
+        "unit": "mm",
+        "description": "Bracket width"
+      },
+      "thickness": {
+        "default": 5,
+        "min": 3,
+        "max": 10,
+        "unit": "mm",
+        "description": "Material thickness"
+      },
+      "hole_dia": {
+        "default": 5,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Mounting hole diameter"
+      }
     },
     "scad_template": "// Parametric Shelf Bracket\narm = ${arm_length};\nwall_arm = ${wall_length};\nw = ${width};\nt = ${thickness};\nhole_d = ${hole_dia};\n\nmodule bracket() {\n    difference() {\n        union() {\n            // Wall plate\n            cube([w, t, wall_arm]);\n            // Shelf arm\n            cube([w, arm, t]);\n            // Gusset (triangle)\n            translate([0, 0, 0])\n                linear_extrude(height=w)\n                    polygon([[0,t],[0,wall_arm],[t,t]]);\n            // Mirrored gusset for width\n        }\n        // Mounting holes\n        for (z = [wall_arm*0.25, wall_arm*0.75]) {\n            translate([w/2, -1, z])\n                rotate([-90, 0, 0])\n                    cylinder(h=t+2, d=hole_d, $fn=30);\n        }\n    }\n}\n\nbracket();"
   },
@@ -71,11 +209,39 @@
     "description": "Raised text nameplate with angled face. Prints flat, no supports.",
     "category": "desk_accessories",
     "parameters": {
-      "text_string": {"default": "KILN", "type": "string", "description": "Text to display"},
-      "font_size": {"default": 14, "min": 8, "max": 30, "unit": "mm", "description": "Font size"},
-      "plate_width": {"default": 120, "min": 60, "max": 200, "unit": "mm", "description": "Plate width"},
-      "plate_height": {"default": 35, "min": 20, "max": 60, "unit": "mm", "description": "Plate height"},
-      "base_depth": {"default": 30, "min": 20, "max": 50, "unit": "mm", "description": "Base depth"}
+      "text_string": {
+        "default": "KILN",
+        "type": "string",
+        "description": "Text to display"
+      },
+      "font_size": {
+        "default": 14,
+        "min": 8,
+        "max": 30,
+        "unit": "mm",
+        "description": "Font size"
+      },
+      "plate_width": {
+        "default": 120,
+        "min": 60,
+        "max": 200,
+        "unit": "mm",
+        "description": "Plate width"
+      },
+      "plate_height": {
+        "default": 35,
+        "min": 20,
+        "max": 60,
+        "unit": "mm",
+        "description": "Plate height"
+      },
+      "base_depth": {
+        "default": 30,
+        "min": 20,
+        "max": 50,
+        "unit": "mm",
+        "description": "Base depth"
+      }
     },
     "scad_template": "// Parametric Nameplate\ntxt = \"${text_string}\";\nfs = ${font_size};\npw = ${plate_width};\nph = ${plate_height};\nbd = ${base_depth};\nt = 3;\n\nmodule nameplate() {\n    // Base wedge\n    hull() {\n        cube([pw, bd, t]);\n        translate([0, 0, ph])\n            cube([pw, t, t]);\n    }\n    // Raised text\n    translate([pw/2, bd*0.3, ph*0.4])\n        rotate([atan2(ph, bd-t), 0, 0])\n            linear_extrude(height=1.2)\n                text(txt, size=fs, halign=\"center\", valign=\"center\", font=\"Liberation Sans:style=Bold\");\n}\n\nnameplate();"
   },
@@ -84,10 +250,34 @@
     "description": "Cylindrical pen holder with honeycomb pattern cutouts. Prints without supports.",
     "category": "desk_accessories",
     "parameters": {
-      "diameter": {"default": 70, "min": 40, "max": 120, "unit": "mm", "description": "Outer diameter"},
-      "height": {"default": 100, "min": 60, "max": 150, "unit": "mm", "description": "Height"},
-      "wall": {"default": 2.4, "min": 1.6, "max": 5, "unit": "mm", "description": "Wall thickness"},
-      "hex_size": {"default": 8, "min": 4, "max": 15, "unit": "mm", "description": "Honeycomb cell size"}
+      "diameter": {
+        "default": 70,
+        "min": 40,
+        "max": 120,
+        "unit": "mm",
+        "description": "Outer diameter"
+      },
+      "height": {
+        "default": 100,
+        "min": 60,
+        "max": 150,
+        "unit": "mm",
+        "description": "Height"
+      },
+      "wall": {
+        "default": 2.4,
+        "min": 1.6,
+        "max": 5,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "hex_size": {
+        "default": 8,
+        "min": 4,
+        "max": 15,
+        "unit": "mm",
+        "description": "Honeycomb cell size"
+      }
     },
     "scad_template": "// Parametric Pencil Holder\nd = ${diameter};\nh = ${height};\nwall = ${wall};\nhex = ${hex_size};\n\nmodule pencil_holder() {\n    difference() {\n        cylinder(h=h, d=d, $fn=80);\n        translate([0, 0, 3])\n            cylinder(h=h, d=d - wall*2, $fn=80);\n        // Honeycomb cutouts\n        for (a = [0:30:359]) {\n            for (z = [15:hex*2.2:h-15]) {\n                rotate([0, 0, a])\n                    translate([d/2 - wall/2, 0, z])\n                        rotate([0, 90, 0])\n                            cylinder(h=wall+2, d=hex, $fn=6, center=true);\n            }\n        }\n    }\n}\n\npencil_holder();"
   },
@@ -96,11 +286,41 @@
     "description": "Desktop headphone hanger with curved top rest. Prints in one piece.",
     "category": "desk_accessories",
     "parameters": {
-      "height": {"default": 220, "min": 150, "max": 300, "unit": "mm", "description": "Total height"},
-      "base_width": {"default": 100, "min": 70, "max": 150, "unit": "mm", "description": "Base width"},
-      "arm_width": {"default": 30, "min": 20, "max": 50, "unit": "mm", "description": "Support arm width"},
-      "thickness": {"default": 5, "min": 3, "max": 10, "unit": "mm", "description": "Material thickness"},
-      "hook_depth": {"default": 60, "min": 40, "max": 100, "unit": "mm", "description": "Hook extension depth"}
+      "height": {
+        "default": 220,
+        "min": 150,
+        "max": 300,
+        "unit": "mm",
+        "description": "Total height"
+      },
+      "base_width": {
+        "default": 100,
+        "min": 70,
+        "max": 150,
+        "unit": "mm",
+        "description": "Base width"
+      },
+      "arm_width": {
+        "default": 30,
+        "min": 20,
+        "max": 50,
+        "unit": "mm",
+        "description": "Support arm width"
+      },
+      "thickness": {
+        "default": 5,
+        "min": 3,
+        "max": 10,
+        "unit": "mm",
+        "description": "Material thickness"
+      },
+      "hook_depth": {
+        "default": 60,
+        "min": 40,
+        "max": 100,
+        "unit": "mm",
+        "description": "Hook extension depth"
+      }
     },
     "scad_template": "// Parametric Headphone Stand\nh = ${height};\nbw = ${base_width};\naw = ${arm_width};\nt = ${thickness};\nhd = ${hook_depth};\n\nmodule stand() {\n    // Base plate\n    hull() {\n        cylinder(h=t, d=bw, $fn=60);\n    }\n    // Upright\n    translate([-aw/2, -t/2, 0])\n        cube([aw, t, h - hd/2]);\n    // Top hook\n    translate([0, 0, h - hd/2])\n        rotate([0, 0, 0]) {\n            // Curved top rest\n            translate([-aw/2, -t/2, 0])\n                cube([aw, t, hd/4]);\n            translate([0, hd/2, hd/4])\n                rotate([0, 90, 0])\n                    difference() {\n                        cylinder(h=aw, r=hd/2, $fn=60, center=true);\n                        cylinder(h=aw+2, r=hd/2-t, $fn=60, center=true);\n                        translate([0, -hd, 0])\n                            cube([hd*2, hd*2, aw+4], center=true);\n                    }\n        }\n}\n\nstand();"
   },
@@ -109,12 +329,48 @@
     "description": "Grid-based drawer organizer with customizable compartments. Prints flat.",
     "category": "containers",
     "parameters": {
-      "width": {"default": 150, "min": 80, "max": 250, "unit": "mm", "description": "Total width"},
-      "depth": {"default": 100, "min": 60, "max": 200, "unit": "mm", "description": "Total depth"},
-      "height": {"default": 40, "min": 20, "max": 80, "unit": "mm", "description": "Wall height"},
-      "cols": {"default": 3, "min": 1, "max": 6, "unit": "count", "description": "Number of columns"},
-      "rows": {"default": 2, "min": 1, "max": 4, "unit": "count", "description": "Number of rows"},
-      "wall": {"default": 2, "min": 1.2, "max": 4, "unit": "mm", "description": "Wall thickness"}
+      "width": {
+        "default": 150,
+        "min": 80,
+        "max": 250,
+        "unit": "mm",
+        "description": "Total width"
+      },
+      "depth": {
+        "default": 100,
+        "min": 60,
+        "max": 200,
+        "unit": "mm",
+        "description": "Total depth"
+      },
+      "height": {
+        "default": 40,
+        "min": 20,
+        "max": 80,
+        "unit": "mm",
+        "description": "Wall height"
+      },
+      "cols": {
+        "default": 3,
+        "min": 1,
+        "max": 6,
+        "unit": "count",
+        "description": "Number of columns"
+      },
+      "rows": {
+        "default": 2,
+        "min": 1,
+        "max": 4,
+        "unit": "count",
+        "description": "Number of rows"
+      },
+      "wall": {
+        "default": 2,
+        "min": 1.2,
+        "max": 4,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
     },
     "scad_template": "// Parametric Drawer Organizer\nw = ${width};\nd = ${depth};\nh = ${height};\ncols = ${cols};\nrows = ${rows};\nwall = ${wall};\n\nmodule organizer() {\n    cell_w = (w - wall * (cols + 1)) / cols;\n    cell_d = (d - wall * (rows + 1)) / rows;\n    difference() {\n        cube([w, d, h]);\n        for (c = [0:cols-1]) {\n            for (r = [0:rows-1]) {\n                translate([wall + c * (cell_w + wall), wall + r * (cell_d + wall), wall])\n                    cube([cell_w, cell_d, h]);\n            }\n        }\n    }\n}\n\norganizer();"
   },
@@ -123,9 +379,27 @@
     "description": "Compact holder for SD and microSD cards with labeled slots.",
     "category": "desk_accessories",
     "parameters": {
-      "sd_slots": {"default": 4, "min": 1, "max": 8, "unit": "count", "description": "Number of SD card slots"},
-      "micro_slots": {"default": 4, "min": 0, "max": 8, "unit": "count", "description": "Number of microSD slots"},
-      "wall": {"default": 2, "min": 1.2, "max": 4, "unit": "mm", "description": "Wall thickness"}
+      "sd_slots": {
+        "default": 4,
+        "min": 1,
+        "max": 8,
+        "unit": "count",
+        "description": "Number of SD card slots"
+      },
+      "micro_slots": {
+        "default": 4,
+        "min": 0,
+        "max": 8,
+        "unit": "count",
+        "description": "Number of microSD slots"
+      },
+      "wall": {
+        "default": 2,
+        "min": 1.2,
+        "max": 4,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
     },
     "scad_template": "// Parametric SD Card Holder\nsd_n = ${sd_slots};\nmicro_n = ${micro_slots};\nwall = ${wall};\n\nsd_w = 24.5; sd_h = 32.5; sd_t = 2.5;\nmicro_w = 11.5; micro_h = 15.5; micro_t = 1.5;\nslot_gap = 1;\n\ntotal_w = max(sd_n * (sd_t + slot_gap + wall), micro_n * (micro_t + slot_gap + wall)) + wall;\ntotal_d = max(sd_w, micro_w) + wall * 2;\ntotal_h = sd_h + micro_h + wall * 3;\n\nmodule holder() {\n    difference() {\n        cube([total_w, total_d, total_h]);\n        // SD slots\n        for (i = [0:sd_n-1]) {\n            translate([wall + i * (sd_t + slot_gap + wall), wall, wall])\n                cube([sd_t + slot_gap, sd_w + 1, sd_h]);\n        }\n        // MicroSD slots\n        for (i = [0:micro_n-1]) {\n            translate([wall + i * (micro_t + slot_gap + wall), wall, sd_h + wall * 2])\n                cube([micro_t + slot_gap, micro_w + 1, micro_h]);\n        }\n    }\n}\n\nholder();"
   },
@@ -134,11 +408,41 @@
     "description": "Angled laptop riser for ergonomic typing. Two identical halves, prints flat.",
     "category": "desk_accessories",
     "parameters": {
-      "width": {"default": 60, "min": 30, "max": 100, "unit": "mm", "description": "Riser width"},
-      "depth": {"default": 80, "min": 50, "max": 120, "unit": "mm", "description": "Riser depth"},
-      "front_height": {"default": 10, "min": 5, "max": 20, "unit": "mm", "description": "Front edge height"},
-      "back_height": {"default": 40, "min": 20, "max": 80, "unit": "mm", "description": "Back edge height"},
-      "thickness": {"default": 4, "min": 3, "max": 8, "unit": "mm", "description": "Wall thickness"}
+      "width": {
+        "default": 60,
+        "min": 30,
+        "max": 100,
+        "unit": "mm",
+        "description": "Riser width"
+      },
+      "depth": {
+        "default": 80,
+        "min": 50,
+        "max": 120,
+        "unit": "mm",
+        "description": "Riser depth"
+      },
+      "front_height": {
+        "default": 10,
+        "min": 5,
+        "max": 20,
+        "unit": "mm",
+        "description": "Front edge height"
+      },
+      "back_height": {
+        "default": 40,
+        "min": 20,
+        "max": 80,
+        "unit": "mm",
+        "description": "Back edge height"
+      },
+      "thickness": {
+        "default": 4,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
     },
     "scad_template": "// Parametric Laptop Stand Riser\nw = ${width};\nd = ${depth};\nfh = ${front_height};\nbh = ${back_height};\nt = ${thickness};\n\nmodule riser() {\n    // Side profile (wedge shape)\n    linear_extrude(height=w)\n        polygon([[0,0], [d,0], [d,bh], [d-t,bh], [d-t,t], [t,t], [t,fh], [0,fh]]);\n    // Anti-slip ridges on top\n    for (y = [t*2:10:d-t*2]) {\n        translate([y, fh + (bh-fh)*(y/d) - 1, 0])\n            cube([2, 1, w]);\n    }\n}\n\nriser();"
   },
@@ -147,12 +451,48 @@
     "description": "Wall-mounted coat rack with multiple pegs. Prints flat on back.",
     "category": "hardware",
     "parameters": {
-      "pegs": {"default": 4, "min": 2, "max": 8, "unit": "count", "description": "Number of pegs"},
-      "peg_length": {"default": 40, "min": 20, "max": 70, "unit": "mm", "description": "Peg length"},
-      "peg_dia": {"default": 12, "min": 8, "max": 20, "unit": "mm", "description": "Peg diameter"},
-      "spacing": {"default": 60, "min": 40, "max": 100, "unit": "mm", "description": "Peg spacing"},
-      "plate_height": {"default": 40, "min": 25, "max": 60, "unit": "mm", "description": "Back plate height"},
-      "hole_dia": {"default": 5, "min": 3, "max": 8, "unit": "mm", "description": "Mounting hole diameter"}
+      "pegs": {
+        "default": 4,
+        "min": 2,
+        "max": 8,
+        "unit": "count",
+        "description": "Number of pegs"
+      },
+      "peg_length": {
+        "default": 40,
+        "min": 20,
+        "max": 70,
+        "unit": "mm",
+        "description": "Peg length"
+      },
+      "peg_dia": {
+        "default": 12,
+        "min": 8,
+        "max": 20,
+        "unit": "mm",
+        "description": "Peg diameter"
+      },
+      "spacing": {
+        "default": 60,
+        "min": 40,
+        "max": 100,
+        "unit": "mm",
+        "description": "Peg spacing"
+      },
+      "plate_height": {
+        "default": 40,
+        "min": 25,
+        "max": 60,
+        "unit": "mm",
+        "description": "Back plate height"
+      },
+      "hole_dia": {
+        "default": 5,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Mounting hole diameter"
+      }
     },
     "scad_template": "// Parametric Multi-Peg Coat Hook\npegs = ${pegs};\npeg_l = ${peg_length};\npeg_d = ${peg_dia};\nsp = ${spacing};\nph = ${plate_height};\nhd = ${hole_dia};\nt = 5;\n\ntotal_w = (pegs - 1) * sp + peg_d + 20;\n\nmodule coat_hook() {\n    difference() {\n        union() {\n            // Back plate\n            translate([-10, 0, 0])\n                cube([total_w, t, ph]);\n            // Pegs\n            for (i = [0:pegs-1]) {\n                translate([i * sp + peg_d/2, t, ph/2])\n                    rotate([-90, 0, 0])\n                        cylinder(h=peg_l, d=peg_d, $fn=30);\n                // Peg tip ball\n                translate([i * sp + peg_d/2, t + peg_l, ph/2])\n                    sphere(d=peg_d + 2, $fn=30);\n            }\n        }\n        // Mounting holes\n        for (x = [5, total_w - 15]) {\n            translate([x, -1, ph/2])\n                rotate([-90, 0, 0])\n                    cylinder(h=t+2, d=hd, $fn=20);\n        }\n    }\n}\n\ncoat_hook();"
   },
@@ -161,11 +501,41 @@
     "description": "Box with living hinge that prints as one piece, folds to close.",
     "category": "containers",
     "parameters": {
-      "width": {"default": 60, "min": 30, "max": 150, "unit": "mm", "description": "Box width"},
-      "depth": {"default": 40, "min": 20, "max": 100, "unit": "mm", "description": "Box depth"},
-      "height": {"default": 25, "min": 10, "max": 50, "unit": "mm", "description": "Box height"},
-      "wall": {"default": 2, "min": 1.2, "max": 4, "unit": "mm", "description": "Wall thickness"},
-      "hinge_segments": {"default": 8, "min": 4, "max": 16, "unit": "count", "description": "Living hinge cuts"}
+      "width": {
+        "default": 60,
+        "min": 30,
+        "max": 150,
+        "unit": "mm",
+        "description": "Box width"
+      },
+      "depth": {
+        "default": 40,
+        "min": 20,
+        "max": 100,
+        "unit": "mm",
+        "description": "Box depth"
+      },
+      "height": {
+        "default": 25,
+        "min": 10,
+        "max": 50,
+        "unit": "mm",
+        "description": "Box height"
+      },
+      "wall": {
+        "default": 2,
+        "min": 1.2,
+        "max": 4,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "hinge_segments": {
+        "default": 8,
+        "min": 4,
+        "max": 16,
+        "unit": "count",
+        "description": "Living hinge cuts"
+      }
     },
     "scad_template": "// Print-in-Place Hinge Box\nw = ${width};\nd = ${depth};\nh = ${height};\nwall = ${wall};\nsegs = ${hinge_segments};\n\nhinge_w = 3;\nseg_w = (w - wall) / segs;\n\nmodule box_half() {\n    difference() {\n        cube([w, d, h]);\n        translate([wall, wall, wall])\n            cube([w - wall*2, d - wall*2, h]);\n    }\n}\n\n// Bottom half\nbox_half();\n\n// Living hinge\ntranslate([0, d, 0])\n    for (i = [0:segs-1]) {\n        translate([wall/2 + i * seg_w, 0, 0])\n            cube([seg_w * 0.6, hinge_w, wall * 0.5]);\n    }\n\n// Lid (flat, folds over)\ntranslate([0, d + hinge_w, 0])\n    cube([w, d, wall]);"
   },
@@ -174,11 +544,41 @@
     "description": "Kitchen/workshop funnel with customizable spout and mouth sizes.",
     "category": "kitchen",
     "parameters": {
-      "mouth_dia": {"default": 80, "min": 40, "max": 150, "unit": "mm", "description": "Top opening diameter"},
-      "spout_dia": {"default": 15, "min": 8, "max": 40, "unit": "mm", "description": "Spout diameter"},
-      "height": {"default": 80, "min": 40, "max": 150, "unit": "mm", "description": "Total height"},
-      "spout_length": {"default": 25, "min": 10, "max": 50, "unit": "mm", "description": "Spout length"},
-      "wall": {"default": 1.6, "min": 1.2, "max": 3, "unit": "mm", "description": "Wall thickness"}
+      "mouth_dia": {
+        "default": 80,
+        "min": 40,
+        "max": 150,
+        "unit": "mm",
+        "description": "Top opening diameter"
+      },
+      "spout_dia": {
+        "default": 15,
+        "min": 8,
+        "max": 40,
+        "unit": "mm",
+        "description": "Spout diameter"
+      },
+      "height": {
+        "default": 80,
+        "min": 40,
+        "max": 150,
+        "unit": "mm",
+        "description": "Total height"
+      },
+      "spout_length": {
+        "default": 25,
+        "min": 10,
+        "max": 50,
+        "unit": "mm",
+        "description": "Spout length"
+      },
+      "wall": {
+        "default": 1.6,
+        "min": 1.2,
+        "max": 3,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
     },
     "scad_template": "// Parametric Funnel\nmd = ${mouth_dia};\nsd = ${spout_dia};\nh = ${height};\nsl = ${spout_length};\nwall = ${wall};\n\nmodule funnel() {\n    difference() {\n        union() {\n            // Cone\n            cylinder(h=h-sl, d1=sd+wall*2, d2=md+wall*2, $fn=80);\n            // Spout\n            translate([0, 0, -(sl)])\n                cylinder(h=sl, d=sd+wall*2, $fn=40);\n            // Rim\n            translate([0, 0, h-sl])\n                difference() {\n                    cylinder(h=3, d=md+wall*4, $fn=80);\n                    translate([0, 0, -0.1])\n                        cylinder(h=3.2, d=md, $fn=80);\n                }\n        }\n        // Hollow inside\n        translate([0, 0, -sl-0.1])\n            cylinder(h=sl+0.2, d=sd, $fn=40);\n        translate([0, 0, -0.1])\n            cylinder(h=h-sl+0.2, d1=sd, d2=md, $fn=80);\n    }\n}\n\nfunnel();"
   },
@@ -187,9 +587,27 @@
     "description": "Kitchen scoop with flat-bottom bowl and ergonomic handle.",
     "category": "kitchen",
     "parameters": {
-      "volume_ml": {"default": 15, "min": 5, "max": 50, "unit": "ml", "description": "Scoop volume in milliliters"},
-      "handle_length": {"default": 80, "min": 50, "max": 120, "unit": "mm", "description": "Handle length"},
-      "wall": {"default": 2, "min": 1.2, "max": 4, "unit": "mm", "description": "Wall thickness"}
+      "volume_ml": {
+        "default": 15,
+        "min": 5,
+        "max": 50,
+        "unit": "ml",
+        "description": "Scoop volume in milliliters"
+      },
+      "handle_length": {
+        "default": 80,
+        "min": 50,
+        "max": 120,
+        "unit": "mm",
+        "description": "Handle length"
+      },
+      "wall": {
+        "default": 2,
+        "min": 1.2,
+        "max": 4,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
     },
     "scad_template": "// Parametric Measuring Scoop\nvol = ${volume_ml};\nhl = ${handle_length};\nwall = ${wall};\n\n// Approximate bowl radius from volume (hemisphere: V = 2/3 * pi * r^3)\nbowl_r = pow(vol * 1000 * 3 / (2 * 3.14159), 1/3);\n\nmodule scoop() {\n    // Bowl\n    difference() {\n        sphere(r=bowl_r + wall, $fn=60);\n        sphere(r=bowl_r, $fn=60);\n        translate([0, 0, bowl_r/2])\n            cube([bowl_r*4, bowl_r*4, bowl_r*2], center=true);\n        translate([0, 0, -(bowl_r+wall+1)])\n            cube([bowl_r*4, bowl_r*4, (bowl_r+wall)*2], center=true);\n    }\n    // Flat bottom\n    translate([0, 0, -(bowl_r*0.3)])\n        cylinder(h=wall, r=bowl_r*0.7, $fn=60);\n    // Handle\n    translate([bowl_r + wall, -wall, -wall])\n        hull() {\n            cube([1, wall*2, bowl_r*0.6]);\n            translate([hl, wall*0.3, bowl_r*0.1])\n                cube([1, wall*1.4, bowl_r*0.4]);\n        }\n}\n\nscoop();"
   },
@@ -198,10 +616,32 @@
     "description": "Standard wall plate cover for light switches or outlets.",
     "category": "hardware",
     "parameters": {
-      "style": {"default": "single_toggle", "type": "string", "description": "Switch type: single_toggle, double_toggle, outlet"},
-      "plate_width": {"default": 70, "min": 60, "max": 120, "unit": "mm", "description": "Plate width"},
-      "plate_height": {"default": 115, "min": 100, "max": 140, "unit": "mm", "description": "Plate height"},
-      "corner_radius": {"default": 5, "min": 0, "max": 10, "unit": "mm", "description": "Corner radius"}
+      "style": {
+        "default": "single_toggle",
+        "type": "string",
+        "description": "Switch type: single_toggle, double_toggle, outlet"
+      },
+      "plate_width": {
+        "default": 70,
+        "min": 60,
+        "max": 120,
+        "unit": "mm",
+        "description": "Plate width"
+      },
+      "plate_height": {
+        "default": 115,
+        "min": 100,
+        "max": 140,
+        "unit": "mm",
+        "description": "Plate height"
+      },
+      "corner_radius": {
+        "default": 5,
+        "min": 0,
+        "max": 10,
+        "unit": "mm",
+        "description": "Corner radius"
+      }
     },
     "scad_template": "// Parametric Wall Plate Cover\nstyle = \"${style}\";\npw = ${plate_width};\nph = ${plate_height};\ncr = ${corner_radius};\nt = 3;\n\nmodule rounded_rect(w, h, r) {\n    if (r > 0) {\n        hull() {\n            for (x = [r, w-r]) for (y = [r, h-r])\n                translate([x, y]) circle(r=r, $fn=20);\n        }\n    } else {\n        square([w, h]);\n    }\n}\n\nmodule plate() {\n    difference() {\n        // Plate body\n        linear_extrude(height=t)\n            rounded_rect(pw, ph, cr);\n        // Center cutout based on style\n        if (style == \"single_toggle\") {\n            translate([pw/2, ph/2, -0.1])\n                linear_extrude(height=t+0.2)\n                    square([10, 28], center=true);\n        }\n        if (style == \"double_toggle\") {\n            for (dy = [-20, 20]) {\n                translate([pw/2, ph/2 + dy, -0.1])\n                    linear_extrude(height=t+0.2)\n                        square([10, 28], center=true);\n            }\n        }\n        if (style == \"outlet\") {\n            translate([pw/2, ph/2, -0.1])\n                linear_extrude(height=t+0.2)\n                    square([28, 34], center=true);\n        }\n        // Screw holes\n        for (dy = [-30, 30]) {\n            translate([pw/2, ph/2 + dy, -0.1])\n                cylinder(h=t+0.2, d=4, $fn=20);\n        }\n    }\n}\n\nplate();"
   },
@@ -210,11 +650,41 @@
     "description": "Draining soap dish with raised ridges and drain holes.",
     "category": "kitchen",
     "parameters": {
-      "width": {"default": 90, "min": 60, "max": 130, "unit": "mm", "description": "Dish width"},
-      "depth": {"default": 65, "min": 40, "max": 100, "unit": "mm", "description": "Dish depth"},
-      "height": {"default": 15, "min": 10, "max": 25, "unit": "mm", "description": "Dish height"},
-      "ridge_count": {"default": 6, "min": 3, "max": 10, "unit": "count", "description": "Number of drain ridges"},
-      "corner_radius": {"default": 10, "min": 5, "max": 20, "unit": "mm", "description": "Corner radius"}
+      "width": {
+        "default": 90,
+        "min": 60,
+        "max": 130,
+        "unit": "mm",
+        "description": "Dish width"
+      },
+      "depth": {
+        "default": 65,
+        "min": 40,
+        "max": 100,
+        "unit": "mm",
+        "description": "Dish depth"
+      },
+      "height": {
+        "default": 15,
+        "min": 10,
+        "max": 25,
+        "unit": "mm",
+        "description": "Dish height"
+      },
+      "ridge_count": {
+        "default": 6,
+        "min": 3,
+        "max": 10,
+        "unit": "count",
+        "description": "Number of drain ridges"
+      },
+      "corner_radius": {
+        "default": 10,
+        "min": 5,
+        "max": 20,
+        "unit": "mm",
+        "description": "Corner radius"
+      }
     },
     "scad_template": "// Parametric Soap Dish\nw = ${width};\nd = ${depth};\nh = ${height};\nridges = ${ridge_count};\ncr = ${corner_radius};\nwall = 3;\n\nmodule rounded_box(w, d, h, r) {\n    hull() {\n        for (x = [r, w-r]) for (y = [r, d-r])\n            translate([x, y, 0]) cylinder(h=h, r=r, $fn=20);\n    }\n}\n\nmodule dish() {\n    difference() {\n        rounded_box(w, d, h, cr);\n        translate([wall, wall, wall])\n            rounded_box(w-wall*2, d-wall*2, h, max(1, cr-wall));\n    }\n    // Drain ridges\n    ridge_sp = (w - wall*2 - 4) / (ridges - 1);\n    for (i = [0:ridges-1]) {\n        translate([wall + 2 + i * ridge_sp, wall + 2, wall])\n            cube([2, d - wall*2 - 4, 3]);\n    }\n    // Drain holes in base\n    // (slope the base slightly for drainage)\n}\n\ndish();"
   },
@@ -223,10 +693,34 @@
     "description": "Tabletop filament spool holder with roller bearings and adjustable width.",
     "category": "3d_printing",
     "parameters": {
-      "spool_width": {"default": 70, "min": 40, "max": 100, "unit": "mm", "description": "Max spool width"},
-      "spool_dia": {"default": 200, "min": 150, "max": 300, "unit": "mm", "description": "Max spool diameter"},
-      "roller_dia": {"default": 20, "min": 10, "max": 30, "unit": "mm", "description": "Roller diameter"},
-      "wall": {"default": 4, "min": 3, "max": 8, "unit": "mm", "description": "Wall thickness"}
+      "spool_width": {
+        "default": 70,
+        "min": 40,
+        "max": 100,
+        "unit": "mm",
+        "description": "Max spool width"
+      },
+      "spool_dia": {
+        "default": 200,
+        "min": 150,
+        "max": 300,
+        "unit": "mm",
+        "description": "Max spool diameter"
+      },
+      "roller_dia": {
+        "default": 20,
+        "min": 10,
+        "max": 30,
+        "unit": "mm",
+        "description": "Roller diameter"
+      },
+      "wall": {
+        "default": 4,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
     },
     "scad_template": "// Parametric Spool Holder\nsw = ${spool_width};\nsd = ${spool_dia};\nrd = ${roller_dia};\nwall = ${wall};\n\nbase_w = sw + wall * 4;\nbase_d = sd * 0.6;\nbase_h = wall;\nroller_spacing = sd * 0.35;\n\nmodule spool_holder() {\n    // Base plate\n    cube([base_w, base_d, base_h]);\n    // Side walls\n    for (x = [0, base_w - wall]) {\n        translate([x, 0, 0])\n            cube([wall, base_d, sd/4]);\n    }\n    // Roller cradles\n    for (y = [base_d/2 - roller_spacing/2, base_d/2 + roller_spacing/2]) {\n        translate([0, y, 0]) {\n            // Roller support posts\n            for (x = [wall, base_w - wall*2]) {\n                translate([x, -wall, 0])\n                    cube([wall, wall*2, rd + wall]);\n            }\n        }\n    }\n}\n\nspool_holder();"
   },
@@ -235,10 +729,34 @@
     "description": "Parametric tube coupler for joining pipes or tubes. Straight or angled.",
     "category": "hardware",
     "parameters": {
-      "tube_od": {"default": 20, "min": 5, "max": 50, "unit": "mm", "description": "Tube outer diameter"},
-      "wall": {"default": 3, "min": 2, "max": 6, "unit": "mm", "description": "Connector wall thickness"},
-      "length": {"default": 40, "min": 20, "max": 80, "unit": "mm", "description": "Connector length per side"},
-      "angle": {"default": 0, "min": 0, "max": 90, "unit": "degrees", "description": "Bend angle (0 = straight)"}
+      "tube_od": {
+        "default": 20,
+        "min": 5,
+        "max": 50,
+        "unit": "mm",
+        "description": "Tube outer diameter"
+      },
+      "wall": {
+        "default": 3,
+        "min": 2,
+        "max": 6,
+        "unit": "mm",
+        "description": "Connector wall thickness"
+      },
+      "length": {
+        "default": 40,
+        "min": 20,
+        "max": 80,
+        "unit": "mm",
+        "description": "Connector length per side"
+      },
+      "angle": {
+        "default": 0,
+        "min": 0,
+        "max": 90,
+        "unit": "degrees",
+        "description": "Bend angle (0 = straight)"
+      }
     },
     "scad_template": "// Parametric Tube Connector\ntod = ${tube_od};\nwall = ${wall};\nlen = ${length};\nang = ${angle};\n\nod = tod + wall * 2;\nbend_r = od * 2;\n\nmodule connector() {\n    if (ang == 0) {\n        // Straight connector\n        difference() {\n            cylinder(h=len*2, d=od, $fn=50, center=true);\n            cylinder(h=len*2+2, d=tod, $fn=50, center=true);\n        }\n    } else {\n        // Angled connector\n        difference() {\n            union() {\n                cylinder(h=len, d=od, $fn=50);\n                translate([0, 0, len])\n                    rotate([ang, 0, 0])\n                        cylinder(h=len, d=od, $fn=50);\n                // Elbow joint\n                translate([0, 0, len])\n                    sphere(d=od, $fn=50);\n            }\n            union() {\n                cylinder(h=len+1, d=tod, $fn=50);\n                translate([0, 0, len])\n                    rotate([ang, 0, 0])\n                        cylinder(h=len+1, d=tod, $fn=50);\n                translate([0, 0, len])\n                    sphere(d=tod, $fn=50);\n            }\n        }\n    }\n}\n\nconnector();"
   },
@@ -247,9 +765,25 @@
     "description": "Holder for AA, AAA, or 18650 batteries with snap-fit retention.",
     "category": "electronics",
     "parameters": {
-      "battery_type": {"default": "AA", "type": "string", "description": "Battery size: AA, AAA, or 18650"},
-      "count": {"default": 4, "min": 1, "max": 8, "unit": "count", "description": "Number of batteries"},
-      "wall": {"default": 2, "min": 1.2, "max": 4, "unit": "mm", "description": "Wall thickness"}
+      "battery_type": {
+        "default": "AA",
+        "type": "string",
+        "description": "Battery size: AA, AAA, or 18650"
+      },
+      "count": {
+        "default": 4,
+        "min": 1,
+        "max": 8,
+        "unit": "count",
+        "description": "Number of batteries"
+      },
+      "wall": {
+        "default": 2,
+        "min": 1.2,
+        "max": 4,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
     },
     "scad_template": "// Parametric Battery Holder\nbtype = \"${battery_type}\";\ncount = ${count};\nwall = ${wall};\n\n// Battery dimensions (diameter, length)\nbd = (btype == \"AAA\") ? 10.5 : (btype == \"18650\") ? 18.6 : 14.5;\nbl = (btype == \"AAA\") ? 44.5 : (btype == \"18650\") ? 65 : 50.5;\n\nslot_w = bd + 1;\ntotal_w = count * (slot_w + wall) + wall;\n\nmodule holder() {\n    difference() {\n        cube([total_w, bl + wall * 2, bd/2 + wall + 2]);\n        for (i = [0:count-1]) {\n            // Battery slot\n            translate([wall + i * (slot_w + wall) + slot_w/2, wall, bd/2 + wall])\n                rotate([-90, 0, 0])\n                    cylinder(h=bl, d=bd + 0.5, $fn=30);\n            // Finger scoop for removal\n            translate([wall + i * (slot_w + wall) + slot_w/2, wall + bl/2, bd + wall + 2])\n                cylinder(h=5, d=bd * 0.6, $fn=20);\n        }\n    }\n    // Snap ridges\n    for (i = [0:count-1]) {\n        for (y = [wall + 5, wall + bl - 5]) {\n            translate([wall + i * (slot_w + wall) + 1, y, bd/2 + wall - 1])\n                cube([slot_w - 2, 2, 1.5]);\n        }\n    }\n}\n\nholder();"
   },
@@ -258,9 +792,27 @@
     "description": "Open-ended wrench for hex bolts. Specify the bolt size.",
     "category": "tools",
     "parameters": {
-      "bolt_size_mm": {"default": 10, "min": 4, "max": 24, "unit": "mm", "description": "Hex bolt size (across flats)"},
-      "handle_length": {"default": 100, "min": 50, "max": 200, "unit": "mm", "description": "Handle length"},
-      "thickness": {"default": 6, "min": 4, "max": 12, "unit": "mm", "description": "Wrench thickness"}
+      "bolt_size_mm": {
+        "default": 10,
+        "min": 4,
+        "max": 24,
+        "unit": "mm",
+        "description": "Hex bolt size (across flats)"
+      },
+      "handle_length": {
+        "default": 100,
+        "min": 50,
+        "max": 200,
+        "unit": "mm",
+        "description": "Handle length"
+      },
+      "thickness": {
+        "default": 6,
+        "min": 4,
+        "max": 12,
+        "unit": "mm",
+        "description": "Wrench thickness"
+      }
     },
     "scad_template": "// Parametric Wrench\nbolt = ${bolt_size_mm};\nhl = ${handle_length};\nt = ${thickness};\n\njaw = bolt * 1.15;  // Slight clearance\nhead_r = jaw * 0.9;\n\nmodule wrench() {\n    linear_extrude(height=t) {\n        difference() {\n            union() {\n                // Head\n                circle(r=head_r, $fn=60);\n                // Handle\n                translate([0, -head_r * 0.4])\n                    square([hl, head_r * 0.8]);\n                // Handle end bulge\n                translate([hl, 0])\n                    circle(r=head_r * 0.5, $fn=40);\n            }\n            // Jaw opening (hex shape)\n            rotate([0, 0, 30])\n                circle(d=jaw / cos(30), $fn=6);\n            // Jaw slot (open end)\n            translate([-(jaw/2 + 1), 0])\n                square([jaw/2 + 1, head_r + 1]);\n        }\n    }\n}\n\nwrench();"
   },
@@ -269,9 +821,27 @@
     "description": "Flat spacer ring with configurable inner diameter, outer diameter, and thickness.",
     "category": "hardware",
     "parameters": {
-      "inner_dia": {"default": 5, "min": 2, "max": 30, "unit": "mm", "description": "Inner hole diameter"},
-      "outer_dia": {"default": 12, "min": 6, "max": 50, "unit": "mm", "description": "Outer diameter"},
-      "thickness": {"default": 2, "min": 0.4, "max": 10, "unit": "mm", "description": "Spacer thickness"}
+      "inner_dia": {
+        "default": 5,
+        "min": 2,
+        "max": 30,
+        "unit": "mm",
+        "description": "Inner hole diameter"
+      },
+      "outer_dia": {
+        "default": 12,
+        "min": 6,
+        "max": 50,
+        "unit": "mm",
+        "description": "Outer diameter"
+      },
+      "thickness": {
+        "default": 2,
+        "min": 0.4,
+        "max": 10,
+        "unit": "mm",
+        "description": "Spacer thickness"
+      }
     },
     "scad_template": "// Parametric Spacer/Washer\nid = ${inner_dia};\nod = ${outer_dia};\nt = ${thickness};\n\ndifference() {\n    cylinder(h=t, d=od, $fn=60);\n    translate([0, 0, -0.1])\n        cylinder(h=t+0.2, d=id, $fn=60);\n}"
   },
@@ -280,11 +850,41 @@
     "description": "L-shaped reinforcement bracket with mounting holes for joining perpendicular surfaces.",
     "category": "hardware",
     "parameters": {
-      "arm_length": {"default": 40, "min": 20, "max": 100, "unit": "mm", "description": "Arm length"},
-      "width": {"default": 20, "min": 10, "max": 50, "unit": "mm", "description": "Bracket width"},
-      "thickness": {"default": 4, "min": 2, "max": 8, "unit": "mm", "description": "Material thickness"},
-      "hole_dia": {"default": 4, "min": 2, "max": 8, "unit": "mm", "description": "Mounting hole diameter"},
-      "holes_per_arm": {"default": 2, "min": 1, "max": 4, "unit": "count", "description": "Holes per arm"}
+      "arm_length": {
+        "default": 40,
+        "min": 20,
+        "max": 100,
+        "unit": "mm",
+        "description": "Arm length"
+      },
+      "width": {
+        "default": 20,
+        "min": 10,
+        "max": 50,
+        "unit": "mm",
+        "description": "Bracket width"
+      },
+      "thickness": {
+        "default": 4,
+        "min": 2,
+        "max": 8,
+        "unit": "mm",
+        "description": "Material thickness"
+      },
+      "hole_dia": {
+        "default": 4,
+        "min": 2,
+        "max": 8,
+        "unit": "mm",
+        "description": "Mounting hole diameter"
+      },
+      "holes_per_arm": {
+        "default": 2,
+        "min": 1,
+        "max": 4,
+        "unit": "count",
+        "description": "Holes per arm"
+      }
     },
     "scad_template": "// Parametric Corner Brace\nal = ${arm_length};\nw = ${width};\nt = ${thickness};\nhd = ${hole_dia};\nhn = ${holes_per_arm};\n\nmodule brace() {\n    difference() {\n        union() {\n            cube([al, w, t]);\n            cube([t, w, al]);\n            // Gusset triangle\n            linear_extrude(height=w)\n                polygon([[t, 0, 0], [al*0.6, 0], [t, al*0.6]]);\n        }\n        // Horizontal arm holes\n        for (i = [1:hn]) {\n            translate([t + (al-t) * i/(hn+1), w/2, -0.1])\n                cylinder(h=t+0.2, d=hd, $fn=20);\n        }\n        // Vertical arm holes\n        for (i = [1:hn]) {\n            translate([-0.1, w/2, t + (al-t) * i/(hn+1)])\n                rotate([0, 90, 0])\n                    cylinder(h=t+0.2, d=hd, $fn=20);\n        }\n    }\n}\n\nbrace();"
   },
@@ -293,9 +893,27 @@
     "description": "Hexagonal standoff with through-hole for PCB or panel mounting.",
     "category": "hardware",
     "parameters": {
-      "height": {"default": 10, "min": 3, "max": 40, "unit": "mm", "description": "Standoff height"},
-      "hex_size": {"default": 8, "min": 4, "max": 16, "unit": "mm", "description": "Hex across-flats"},
-      "hole_dia": {"default": 3.2, "min": 2, "max": 6, "unit": "mm", "description": "Through-hole diameter"}
+      "height": {
+        "default": 10,
+        "min": 3,
+        "max": 40,
+        "unit": "mm",
+        "description": "Standoff height"
+      },
+      "hex_size": {
+        "default": 8,
+        "min": 4,
+        "max": 16,
+        "unit": "mm",
+        "description": "Hex across-flats"
+      },
+      "hole_dia": {
+        "default": 3.2,
+        "min": 2,
+        "max": 6,
+        "unit": "mm",
+        "description": "Through-hole diameter"
+      }
     },
     "scad_template": "// Parametric Hex Standoff\nh = ${height};\nhex = ${hex_size};\nhd = ${hole_dia};\n\ndifference() {\n    cylinder(h=h, d=hex/cos(30), $fn=6);\n    translate([0, 0, -0.1])\n        cylinder(h=h+0.2, d=hd, $fn=30);\n}"
   },
@@ -304,10 +922,34 @@
     "description": "Clamping collar for locking position on a round shaft. Split design with bolt hole.",
     "category": "hardware",
     "parameters": {
-      "shaft_dia": {"default": 8, "min": 3, "max": 30, "unit": "mm", "description": "Shaft diameter"},
-      "collar_width": {"default": 10, "min": 5, "max": 25, "unit": "mm", "description": "Collar width"},
-      "wall": {"default": 5, "min": 3, "max": 10, "unit": "mm", "description": "Wall thickness around shaft"},
-      "bolt_dia": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Clamping bolt diameter"}
+      "shaft_dia": {
+        "default": 8,
+        "min": 3,
+        "max": 30,
+        "unit": "mm",
+        "description": "Shaft diameter"
+      },
+      "collar_width": {
+        "default": 10,
+        "min": 5,
+        "max": 25,
+        "unit": "mm",
+        "description": "Collar width"
+      },
+      "wall": {
+        "default": 5,
+        "min": 3,
+        "max": 10,
+        "unit": "mm",
+        "description": "Wall thickness around shaft"
+      },
+      "bolt_dia": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Clamping bolt diameter"
+      }
     },
     "scad_template": "// Parametric Shaft Collar\nsd = ${shaft_dia};\ncw = ${collar_width};\nwall = ${wall};\nbd = ${bolt_dia};\n\nod = sd + wall * 2;\n\nmodule collar() {\n    difference() {\n        cylinder(h=cw, d=od, $fn=60);\n        // Shaft bore\n        translate([0, 0, -0.1])\n            cylinder(h=cw+0.2, d=sd+0.3, $fn=60);\n        // Split gap\n        translate([od/2-wall, -0.5, -0.1])\n            cube([wall+1, 1, cw+0.2]);\n        // Bolt hole through clamp ears\n        translate([od/2-wall/2, 0, cw/2])\n            rotate([90, 0, 0])\n                cylinder(h=od+2, d=bd, $fn=20, center=true);\n    }\n}\n\ncollar();"
   },
@@ -316,11 +958,41 @@
     "description": "Mounting plate with standoff posts for standard PCB sizes. Configurable hole spacing.",
     "category": "electronics",
     "parameters": {
-      "board_width": {"default": 56, "min": 20, "max": 120, "unit": "mm", "description": "PCB width (hole-to-hole)"},
-      "board_depth": {"default": 49, "min": 20, "max": 100, "unit": "mm", "description": "PCB depth (hole-to-hole)"},
-      "standoff_height": {"default": 6, "min": 3, "max": 15, "unit": "mm", "description": "Standoff height"},
-      "screw_dia": {"default": 2.5, "min": 2, "max": 4, "unit": "mm", "description": "Screw hole diameter"},
-      "base_thickness": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Base plate thickness"}
+      "board_width": {
+        "default": 56,
+        "min": 20,
+        "max": 120,
+        "unit": "mm",
+        "description": "PCB width (hole-to-hole)"
+      },
+      "board_depth": {
+        "default": 49,
+        "min": 20,
+        "max": 100,
+        "unit": "mm",
+        "description": "PCB depth (hole-to-hole)"
+      },
+      "standoff_height": {
+        "default": 6,
+        "min": 3,
+        "max": 15,
+        "unit": "mm",
+        "description": "Standoff height"
+      },
+      "screw_dia": {
+        "default": 2.5,
+        "min": 2,
+        "max": 4,
+        "unit": "mm",
+        "description": "Screw hole diameter"
+      },
+      "base_thickness": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Base plate thickness"
+      }
     },
     "scad_template": "// Parametric PCB Mount\nbw = ${board_width};\nbd = ${board_depth};\nsh = ${standoff_height};\nsd = ${screw_dia};\nbt = ${base_thickness};\n\nmargin = 5;\npw = bw + margin * 2;\npd = bd + margin * 2;\npost_d = sd + 4;\n\nmodule mount() {\n    // Base plate\n    cube([pw, pd, bt]);\n    // Standoffs\n    for (x = [margin, margin + bw])\n        for (y = [margin, margin + bd]) {\n            translate([x, y, bt])\n                difference() {\n                    cylinder(h=sh, d=post_d, $fn=20);\n                    translate([0, 0, -0.1])\n                        cylinder(h=sh+0.2, d=sd, $fn=20);\n                }\n        }\n}\n\nmount();"
   },
@@ -329,9 +1001,27 @@
     "description": "Snap-on DIN rail mount adapter for custom modules. Standard 35mm rail.",
     "category": "electronics",
     "parameters": {
-      "mount_width": {"default": 20, "min": 10, "max": 60, "unit": "mm", "description": "Mount plate width"},
-      "mount_height": {"default": 40, "min": 20, "max": 80, "unit": "mm", "description": "Mount plate height"},
-      "wall": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Wall thickness"}
+      "mount_width": {
+        "default": 20,
+        "min": 10,
+        "max": 60,
+        "unit": "mm",
+        "description": "Mount plate width"
+      },
+      "mount_height": {
+        "default": 40,
+        "min": 20,
+        "max": 80,
+        "unit": "mm",
+        "description": "Mount plate height"
+      },
+      "wall": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
     },
     "scad_template": "// Parametric DIN Rail Clip (35mm standard)\nmw = ${mount_width};\nmh = ${mount_height};\nwall = ${wall};\n\nrail_w = 35;\nrail_h = 7.5;\nlip = 1.5;\n\nmodule clip() {\n    // Mounting surface\n    translate([0, wall + rail_h, 0])\n        cube([mw, wall, mh]);\n    // Bottom rail grip\n    cube([mw, wall, rail_h + wall]);\n    // Top rail grip\n    translate([0, rail_w + wall, 0])\n        cube([mw, wall, rail_h + wall]);\n    // Bottom lip\n    translate([0, 0, rail_h + wall - lip])\n        cube([mw, wall + lip, lip]);\n    // Top lip (spring clip)\n    translate([0, rail_w + wall, rail_h + wall - lip])\n        cube([mw, wall + lip, lip]);\n    // Back plate connecting grips\n    cube([mw, rail_w + wall * 2, wall]);\n}\n\nclip();"
   },
@@ -340,11 +1030,41 @@
     "description": "L-bracket for standard hobby servo motors with mounting tabs.",
     "category": "electronics",
     "parameters": {
-      "servo_width": {"default": 23, "min": 10, "max": 40, "unit": "mm", "description": "Servo body width"},
-      "servo_depth": {"default": 12.5, "min": 8, "max": 25, "unit": "mm", "description": "Servo body depth"},
-      "servo_height": {"default": 22, "min": 15, "max": 40, "unit": "mm", "description": "Servo body height"},
-      "tab_width": {"default": 32, "min": 20, "max": 50, "unit": "mm", "description": "Mounting tab width"},
-      "wall": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Bracket wall thickness"}
+      "servo_width": {
+        "default": 23,
+        "min": 10,
+        "max": 40,
+        "unit": "mm",
+        "description": "Servo body width"
+      },
+      "servo_depth": {
+        "default": 12.5,
+        "min": 8,
+        "max": 25,
+        "unit": "mm",
+        "description": "Servo body depth"
+      },
+      "servo_height": {
+        "default": 22,
+        "min": 15,
+        "max": 40,
+        "unit": "mm",
+        "description": "Servo body height"
+      },
+      "tab_width": {
+        "default": 32,
+        "min": 20,
+        "max": 50,
+        "unit": "mm",
+        "description": "Mounting tab width"
+      },
+      "wall": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Bracket wall thickness"
+      }
     },
     "scad_template": "// Parametric Servo Bracket\nsw = ${servo_width};\nsd = ${servo_depth};\nsh = ${servo_height};\ntw = ${tab_width};\nwall = ${wall};\n\nclear = 0.5;\n\nmodule bracket() {\n    difference() {\n        union() {\n            // U-channel for servo\n            cube([sw + wall*2 + clear*2, sd + wall + clear, sh + wall]);\n            // Mounting base flange\n            translate([-(tw - sw - wall*2)/2, 0, 0])\n                cube([tw + clear*2, sd + wall + clear, wall]);\n        }\n        // Servo cavity\n        translate([wall, wall, wall])\n            cube([sw + clear*2, sd + clear + 1, sh + 1]);\n        // Mounting holes\n        for (x = [wall, tw + clear*2 - wall - (tw - sw - wall*2)/2 + (tw - sw - wall*2)/2]) {\n            translate([x, (sd + wall)/2, -0.1])\n                cylinder(h=wall+0.2, d=3, $fn=20);\n        }\n    }\n}\n\nbracket();"
   },
@@ -353,11 +1073,41 @@
     "description": "Box with dovetail-track sliding lid. Prints as two pieces.",
     "category": "containers",
     "parameters": {
-      "inner_width": {"default": 60, "min": 25, "max": 150, "unit": "mm", "description": "Inner width"},
-      "inner_depth": {"default": 80, "min": 30, "max": 200, "unit": "mm", "description": "Inner depth"},
-      "inner_height": {"default": 25, "min": 10, "max": 80, "unit": "mm", "description": "Inner height"},
-      "wall": {"default": 2.4, "min": 1.6, "max": 5, "unit": "mm", "description": "Wall thickness"},
-      "track_depth": {"default": 1.5, "min": 1, "max": 3, "unit": "mm", "description": "Lid track groove depth"}
+      "inner_width": {
+        "default": 60,
+        "min": 25,
+        "max": 150,
+        "unit": "mm",
+        "description": "Inner width"
+      },
+      "inner_depth": {
+        "default": 80,
+        "min": 30,
+        "max": 200,
+        "unit": "mm",
+        "description": "Inner depth"
+      },
+      "inner_height": {
+        "default": 25,
+        "min": 10,
+        "max": 80,
+        "unit": "mm",
+        "description": "Inner height"
+      },
+      "wall": {
+        "default": 2.4,
+        "min": 1.6,
+        "max": 5,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "track_depth": {
+        "default": 1.5,
+        "min": 1,
+        "max": 3,
+        "unit": "mm",
+        "description": "Lid track groove depth"
+      }
     },
     "scad_template": "// Parametric Sliding Lid Box\niw = ${inner_width};\nid = ${inner_depth};\nih = ${inner_height};\nwall = ${wall};\ntd = ${track_depth};\n\now = iw + wall * 2;\nod = id + wall * 2;\ntw = 1.5;\n\nmodule box() {\n    difference() {\n        cube([ow, od, ih + wall]);\n        translate([wall, wall, wall])\n            cube([iw, id, ih + 1]);\n        // Lid tracks on inner sides\n        for (x = [wall - td, ow - wall]) {\n            translate([x, -0.1, ih + wall - tw - td])\n                cube([td, od + 0.2, tw]);\n        }\n        // Lid entry slot at front\n        translate([wall - td, -0.1, ih + wall - tw - td])\n            cube([iw + td * 2, wall + 0.2, tw + td + 1]);\n    }\n}\n\nmodule lid() {\n    translate([ow + 10, 0, 0]) {\n        cube([iw + td * 2 - 0.4, od + 5, tw - 0.3]);\n        // Pull tab\n        translate([(iw + td*2 - 0.4)/2 - 5, -8, 0])\n            cube([10, 8, tw + 2]);\n    }\n}\n\nbox();\nlid();"
   },
@@ -366,11 +1116,41 @@
     "description": "Open-top bin with interlocking lip and ledge for stable vertical stacking.",
     "category": "containers",
     "parameters": {
-      "width": {"default": 80, "min": 40, "max": 200, "unit": "mm", "description": "Bin width"},
-      "depth": {"default": 120, "min": 60, "max": 250, "unit": "mm", "description": "Bin depth"},
-      "height": {"default": 50, "min": 20, "max": 100, "unit": "mm", "description": "Bin height"},
-      "wall": {"default": 2.4, "min": 1.6, "max": 5, "unit": "mm", "description": "Wall thickness"},
-      "label_slot": {"default": 1, "min": 0, "max": 1, "unit": "bool", "description": "Include front label slot (1=yes)"}
+      "width": {
+        "default": 80,
+        "min": 40,
+        "max": 200,
+        "unit": "mm",
+        "description": "Bin width"
+      },
+      "depth": {
+        "default": 120,
+        "min": 60,
+        "max": 250,
+        "unit": "mm",
+        "description": "Bin depth"
+      },
+      "height": {
+        "default": 50,
+        "min": 20,
+        "max": 100,
+        "unit": "mm",
+        "description": "Bin height"
+      },
+      "wall": {
+        "default": 2.4,
+        "min": 1.6,
+        "max": 5,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "label_slot": {
+        "default": 1,
+        "min": 0,
+        "max": 1,
+        "unit": "bool",
+        "description": "Include front label slot (1=yes)"
+      }
     },
     "scad_template": "// Parametric Stackable Bin\nw = ${width};\nd = ${depth};\nh = ${height};\nwall = ${wall};\nlabel = ${label_slot};\n\nlip = 2;\n\nmodule bin() {\n    difference() {\n        union() {\n            // Outer shell\n            cube([w, d, h]);\n            // Stacking lip (extends above)\n            translate([wall, wall, h])\n                difference() {\n                    cube([w - wall*2, d - wall*2, lip]);\n                    translate([wall, wall, -0.1])\n                        cube([w - wall*4, d - wall*4, lip+0.2]);\n                }\n        }\n        // Inner cavity\n        translate([wall, wall, wall])\n            cube([w - wall*2, d - wall*2, h]);\n        // Stacking recess at bottom\n        translate([wall - 0.3, wall - 0.3, -0.1])\n            difference() {\n                cube([w - wall*2 + 0.6, d - wall*2 + 0.6, lip + 0.2]);\n                translate([wall + 0.3, wall + 0.3, -0.1])\n                    cube([w - wall*4, d - wall*4, lip + 0.4]);\n            }\n        // Label slot\n        if (label == 1) {\n            translate([w * 0.15, -0.1, h * 0.5])\n                cube([w * 0.7, wall + 0.2, h * 0.35]);\n        }\n    }\n}\n\nbin();"
   },
@@ -379,10 +1159,34 @@
     "description": "Jar with printed screw threads and matching lid. Two-piece print.",
     "category": "containers",
     "parameters": {
-      "diameter": {"default": 50, "min": 25, "max": 100, "unit": "mm", "description": "Jar outer diameter"},
-      "height": {"default": 60, "min": 25, "max": 120, "unit": "mm", "description": "Jar body height"},
-      "wall": {"default": 2.4, "min": 1.6, "max": 5, "unit": "mm", "description": "Wall thickness"},
-      "thread_pitch": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Thread pitch"}
+      "diameter": {
+        "default": 50,
+        "min": 25,
+        "max": 100,
+        "unit": "mm",
+        "description": "Jar outer diameter"
+      },
+      "height": {
+        "default": 60,
+        "min": 25,
+        "max": 120,
+        "unit": "mm",
+        "description": "Jar body height"
+      },
+      "wall": {
+        "default": 2.4,
+        "min": 1.6,
+        "max": 5,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "thread_pitch": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Thread pitch"
+      }
     },
     "scad_template": "// Parametric Threaded Jar\nd = ${diameter};\nh = ${height};\nwall = ${wall};\npitch = ${thread_pitch};\n\nthread_h = 12;\nthread_depth = 1.2;\n\nmodule thread_profile(od, turns) {\n    for (a = [0:4:360*turns]) {\n        translate([0, 0, a/360*pitch])\n            rotate([0, 0, a])\n                translate([od/2 - thread_depth, 0, 0])\n                    cylinder(h=pitch*0.5, d1=thread_depth*2, d2=0, $fn=10);\n    }\n}\n\nmodule jar() {\n    difference() {\n        cylinder(h=h, d=d, $fn=60);\n        translate([0, 0, wall])\n            cylinder(h=h, d=d - wall*2, $fn=60);\n    }\n    // External threads near top\n    translate([0, 0, h - thread_h])\n        thread_profile(d, thread_h/pitch);\n}\n\nmodule lid() {\n    translate([d + 10, 0, 0]) {\n        difference() {\n            cylinder(h=thread_h + wall, d=d + wall*2 + thread_depth*2, $fn=60);\n            translate([0, 0, wall])\n                cylinder(h=thread_h + 1, d=d + 0.5, $fn=60);\n        }\n    }\n}\n\njar();\nlid();"
   },
@@ -391,11 +1195,41 @@
     "description": "Desktop monitor riser that fits over a keyboard. Parametric width, depth, and height.",
     "category": "desk_accessories",
     "parameters": {
-      "width": {"default": 400, "min": 250, "max": 600, "unit": "mm", "description": "Shelf width"},
-      "depth": {"default": 200, "min": 120, "max": 300, "unit": "mm", "description": "Shelf depth"},
-      "height": {"default": 80, "min": 50, "max": 120, "unit": "mm", "description": "Riser height"},
-      "thickness": {"default": 6, "min": 4, "max": 12, "unit": "mm", "description": "Material thickness"},
-      "leg_width": {"default": 40, "min": 25, "max": 60, "unit": "mm", "description": "Leg width"}
+      "width": {
+        "default": 400,
+        "min": 250,
+        "max": 600,
+        "unit": "mm",
+        "description": "Shelf width"
+      },
+      "depth": {
+        "default": 200,
+        "min": 120,
+        "max": 300,
+        "unit": "mm",
+        "description": "Shelf depth"
+      },
+      "height": {
+        "default": 80,
+        "min": 50,
+        "max": 120,
+        "unit": "mm",
+        "description": "Riser height"
+      },
+      "thickness": {
+        "default": 6,
+        "min": 4,
+        "max": 12,
+        "unit": "mm",
+        "description": "Material thickness"
+      },
+      "leg_width": {
+        "default": 40,
+        "min": 25,
+        "max": 60,
+        "unit": "mm",
+        "description": "Leg width"
+      }
     },
     "scad_template": "// Parametric Monitor Riser\nw = ${width};\nd = ${depth};\nh = ${height};\nt = ${thickness};\nlw = ${leg_width};\n\nmodule riser() {\n    // Top shelf\n    translate([0, 0, h - t])\n        cube([w, d, t]);\n    // Left leg\n    cube([lw, t, h]);\n    translate([0, d - t, 0])\n        cube([lw, t, h]);\n    // Right leg\n    translate([w - lw, 0, 0])\n        cube([lw, t, h]);\n    translate([w - lw, d - t, 0])\n        cube([lw, t, h]);\n    // Back panel for stability\n    translate([0, d - t, 0])\n        cube([w, t, h]);\n}\n\nriser();"
   },
@@ -404,11 +1238,41 @@
     "description": "Adjustable-angle tablet or e-reader stand with cable pass-through slot.",
     "category": "desk_accessories",
     "parameters": {
-      "width": {"default": 180, "min": 100, "max": 280, "unit": "mm", "description": "Stand width"},
-      "angle": {"default": 70, "min": 50, "max": 85, "unit": "degrees", "description": "Viewing angle"},
-      "base_depth": {"default": 100, "min": 60, "max": 150, "unit": "mm", "description": "Base depth"},
-      "thickness": {"default": 5, "min": 3, "max": 8, "unit": "mm", "description": "Material thickness"},
-      "lip_height": {"default": 15, "min": 8, "max": 25, "unit": "mm", "description": "Front retaining lip"}
+      "width": {
+        "default": 180,
+        "min": 100,
+        "max": 280,
+        "unit": "mm",
+        "description": "Stand width"
+      },
+      "angle": {
+        "default": 70,
+        "min": 50,
+        "max": 85,
+        "unit": "degrees",
+        "description": "Viewing angle"
+      },
+      "base_depth": {
+        "default": 100,
+        "min": 60,
+        "max": 150,
+        "unit": "mm",
+        "description": "Base depth"
+      },
+      "thickness": {
+        "default": 5,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Material thickness"
+      },
+      "lip_height": {
+        "default": 15,
+        "min": 8,
+        "max": 25,
+        "unit": "mm",
+        "description": "Front retaining lip"
+      }
     },
     "scad_template": "// Parametric Tablet Stand\nw = ${width};\nang = ${angle};\nbd = ${base_depth};\nt = ${thickness};\nlip = ${lip_height};\n\nback_h = bd * tan(ang - 45) + lip;\n\nmodule stand() {\n    // Base\n    cube([w, bd, t]);\n    // Front lip\n    cube([w, t, lip]);\n    // Back support\n    translate([0, bd - t, 0])\n        rotate([90 - ang, 0, 0])\n            cube([w, back_h, t]);\n    // Side triangles for rigidity\n    for (x = [0, w - t]) {\n        translate([x, 0, 0])\n            linear_extrude(height=t)\n                polygon([[0, t], [0, bd], [0, lip], [0, t]]);\n    }\n    // Cable slot (gap in back support)\n    // Represented by the gap between side supports\n}\n\nstand();"
   },
@@ -417,11 +1281,41 @@
     "description": "Block with graduated holes for organizing drill bit sets by size.",
     "category": "tools",
     "parameters": {
-      "min_dia": {"default": 1, "min": 0.5, "max": 3, "unit": "mm", "description": "Smallest drill bit diameter"},
-      "max_dia": {"default": 10, "min": 5, "max": 20, "unit": "mm", "description": "Largest drill bit diameter"},
-      "count": {"default": 13, "min": 5, "max": 25, "unit": "count", "description": "Number of holes"},
-      "depth": {"default": 20, "min": 10, "max": 40, "unit": "mm", "description": "Hole depth"},
-      "wall": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Wall between holes"}
+      "min_dia": {
+        "default": 1,
+        "min": 0.5,
+        "max": 3,
+        "unit": "mm",
+        "description": "Smallest drill bit diameter"
+      },
+      "max_dia": {
+        "default": 10,
+        "min": 5,
+        "max": 20,
+        "unit": "mm",
+        "description": "Largest drill bit diameter"
+      },
+      "count": {
+        "default": 13,
+        "min": 5,
+        "max": 25,
+        "unit": "count",
+        "description": "Number of holes"
+      },
+      "depth": {
+        "default": 20,
+        "min": 10,
+        "max": 40,
+        "unit": "mm",
+        "description": "Hole depth"
+      },
+      "wall": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Wall between holes"
+      }
     },
     "scad_template": "// Parametric Drill Bit Holder\nmin_d = ${min_dia};\nmax_d = ${max_dia};\nn = ${count};\ndepth = ${depth};\nwall = ${wall};\n\nstep = (max_d - min_d) / (n - 1);\ntotal_w = wall;\nhole_positions = [for (i = [0:n-1]) wall + i * (max_d + wall) + (min_d + step * i) / 2];\nblock_w = n * (max_d + wall) + wall;\nblock_d = max_d + wall * 2;\nbase_h = 5;\n\nmodule holder() {\n    difference() {\n        cube([block_w, block_d, depth + base_h]);\n        for (i = [0:n-1]) {\n            d = min_d + step * i + 0.3;\n            translate([wall + i * (max_d + wall) + max_d/2, block_d/2, base_h])\n                cylinder(h=depth+1, d=d, $fn=max(12, d*4));\n        }\n    }\n}\n\nholder();"
   },
@@ -430,10 +1324,34 @@
     "description": "Wall-mount rack with graduated slots for Allen key sets.",
     "category": "tools",
     "parameters": {
-      "min_size": {"default": 1.5, "min": 0.7, "max": 3, "unit": "mm", "description": "Smallest hex key size"},
-      "max_size": {"default": 10, "min": 5, "max": 14, "unit": "mm", "description": "Largest hex key size"},
-      "count": {"default": 9, "min": 4, "max": 15, "unit": "count", "description": "Number of slots"},
-      "wall": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Wall thickness"}
+      "min_size": {
+        "default": 1.5,
+        "min": 0.7,
+        "max": 3,
+        "unit": "mm",
+        "description": "Smallest hex key size"
+      },
+      "max_size": {
+        "default": 10,
+        "min": 5,
+        "max": 14,
+        "unit": "mm",
+        "description": "Largest hex key size"
+      },
+      "count": {
+        "default": 9,
+        "min": 4,
+        "max": 15,
+        "unit": "count",
+        "description": "Number of slots"
+      },
+      "wall": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
     },
     "scad_template": "// Parametric Hex Key Rack\nmin_s = ${min_size};\nmax_s = ${max_size};\nn = ${count};\nwall = ${wall};\n\nstep = (max_s - min_s) / (n - 1);\nslot_d = 25;\nblock_h = 40;\ntotal_w = wall;\n\nmodule rack() {\n    difference() {\n        // Main block\n        cube([n * (max_s + wall + 2) + wall, slot_d + wall, block_h]);\n        // Slots\n        for (i = [0:n-1]) {\n            s = min_s + step * i + 0.4;\n            translate([wall + i * (max_s + wall + 2) + (max_s + 2)/2, wall, wall])\n                cube([s, slot_d + 1, block_h], center=false);\n        }\n        // Mounting holes\n        for (x = [wall + 5, n * (max_s + wall + 2) - 5]) {\n            translate([x, -0.1, block_h/2])\n                rotate([-90, 0, 0])\n                    cylinder(h=wall+0.2, d=4, $fn=20);\n        }\n    }\n}\n\nrack();"
   },
@@ -442,10 +1360,34 @@
     "description": "Ergonomic sanding block with clip grooves for sandpaper retention.",
     "category": "tools",
     "parameters": {
-      "width": {"default": 70, "min": 40, "max": 100, "unit": "mm", "description": "Block width"},
-      "length": {"default": 120, "min": 80, "max": 180, "unit": "mm", "description": "Block length"},
-      "height": {"default": 30, "min": 20, "max": 50, "unit": "mm", "description": "Block height"},
-      "grip_depth": {"default": 5, "min": 3, "max": 10, "unit": "mm", "description": "Finger grip recess depth"}
+      "width": {
+        "default": 70,
+        "min": 40,
+        "max": 100,
+        "unit": "mm",
+        "description": "Block width"
+      },
+      "length": {
+        "default": 120,
+        "min": 80,
+        "max": 180,
+        "unit": "mm",
+        "description": "Block length"
+      },
+      "height": {
+        "default": 30,
+        "min": 20,
+        "max": 50,
+        "unit": "mm",
+        "description": "Block height"
+      },
+      "grip_depth": {
+        "default": 5,
+        "min": 3,
+        "max": 10,
+        "unit": "mm",
+        "description": "Finger grip recess depth"
+      }
     },
     "scad_template": "// Parametric Sanding Block\nw = ${width};\nl = ${length};\nh = ${height};\ngd = ${grip_depth};\n\nmodule block() {\n    difference() {\n        // Main body with rounded top\n        hull() {\n            cube([w, l, h - 5]);\n            translate([2, 0, h - 5])\n                cube([w - 4, l, 5]);\n        }\n        // Grip recess on top\n        translate([w*0.15, l*0.1, h - gd])\n            cube([w*0.7, l*0.8, gd + 1]);\n        // Paper retention clips (slots at each end)\n        for (y = [-0.1, l - 3]) {\n            translate([w*0.1, y, -0.1])\n                cube([w*0.8, 3.1, 2]);\n        }\n    }\n}\n\nblock();"
   },
@@ -454,9 +1396,27 @@
     "description": "Spring-action clip for sealing food bags. Prints as one piece.",
     "category": "kitchen",
     "parameters": {
-      "width": {"default": 80, "min": 40, "max": 150, "unit": "mm", "description": "Clip width"},
-      "jaw_depth": {"default": 20, "min": 10, "max": 40, "unit": "mm", "description": "Jaw depth"},
-      "thickness": {"default": 4, "min": 3, "max": 6, "unit": "mm", "description": "Material thickness"}
+      "width": {
+        "default": 80,
+        "min": 40,
+        "max": 150,
+        "unit": "mm",
+        "description": "Clip width"
+      },
+      "jaw_depth": {
+        "default": 20,
+        "min": 10,
+        "max": 40,
+        "unit": "mm",
+        "description": "Jaw depth"
+      },
+      "thickness": {
+        "default": 4,
+        "min": 3,
+        "max": 6,
+        "unit": "mm",
+        "description": "Material thickness"
+      }
     },
     "scad_template": "// Parametric Bag Clip\nw = ${width};\njd = ${jaw_depth};\nt = ${thickness};\n\nhinge_r = 5;\n\nmodule clip() {\n    // Bottom jaw\n    cube([w, jd, t]);\n    // Living hinge zone\n    translate([0, jd, 0])\n        cube([w, 2, t * 0.4]);\n    // Top jaw (angled open for grip)\n    translate([0, jd + 2, 0])\n        rotate([-10, 0, 0])\n            cube([w, jd, t]);\n    // Grip ridges on inner surfaces\n    for (y = [5:8:jd-5]) {\n        translate([0, y, t - 0.8])\n            cube([w, 2, 0.8]);\n        translate([0, jd + 2 + y, 0])\n            rotate([-10, 0, 0])\n                cube([w, 2, 0.8]);\n    }\n}\n\nclip();"
   },
@@ -465,11 +1425,41 @@
     "description": "Tiered step rack for uniform spice jars. Configurable jar size and count.",
     "category": "kitchen",
     "parameters": {
-      "jar_dia": {"default": 45, "min": 30, "max": 70, "unit": "mm", "description": "Jar diameter"},
-      "jars_per_row": {"default": 5, "min": 2, "max": 8, "unit": "count", "description": "Jars per row"},
-      "rows": {"default": 3, "min": 2, "max": 4, "unit": "count", "description": "Number of tiered rows"},
-      "step_height": {"default": 20, "min": 10, "max": 40, "unit": "mm", "description": "Step height between rows"},
-      "wall": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Wall thickness"}
+      "jar_dia": {
+        "default": 45,
+        "min": 30,
+        "max": 70,
+        "unit": "mm",
+        "description": "Jar diameter"
+      },
+      "jars_per_row": {
+        "default": 5,
+        "min": 2,
+        "max": 8,
+        "unit": "count",
+        "description": "Jars per row"
+      },
+      "rows": {
+        "default": 3,
+        "min": 2,
+        "max": 4,
+        "unit": "count",
+        "description": "Number of tiered rows"
+      },
+      "step_height": {
+        "default": 20,
+        "min": 10,
+        "max": 40,
+        "unit": "mm",
+        "description": "Step height between rows"
+      },
+      "wall": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
     },
     "scad_template": "// Parametric Spice Rack\njd = ${jar_dia};\njpr = ${jars_per_row};\nrows = ${rows};\nsh = ${step_height};\nwall = ${wall};\n\ntotal_w = jpr * (jd + wall) + wall;\nrow_d = jd + wall * 2;\n\nmodule rack() {\n    for (r = [0:rows-1]) {\n        translate([0, r * row_d, r * sh]) {\n            difference() {\n                cube([total_w, row_d, wall + sh]);\n                // Jar recesses\n                for (j = [0:jpr-1]) {\n                    translate([wall + j * (jd + wall) + jd/2, row_d/2, wall])\n                        cylinder(h=sh+1, d=jd + 0.5, $fn=40);\n                }\n            }\n        }\n    }\n}\n\nrack();"
   },
@@ -478,9 +1468,27 @@
     "description": "Lever-style bottle cap opener with ergonomic grip.",
     "category": "kitchen",
     "parameters": {
-      "length": {"default": 100, "min": 70, "max": 140, "unit": "mm", "description": "Total length"},
-      "width": {"default": 25, "min": 18, "max": 35, "unit": "mm", "description": "Body width"},
-      "thickness": {"default": 6, "min": 4, "max": 10, "unit": "mm", "description": "Material thickness"}
+      "length": {
+        "default": 100,
+        "min": 70,
+        "max": 140,
+        "unit": "mm",
+        "description": "Total length"
+      },
+      "width": {
+        "default": 25,
+        "min": 18,
+        "max": 35,
+        "unit": "mm",
+        "description": "Body width"
+      },
+      "thickness": {
+        "default": 6,
+        "min": 4,
+        "max": 10,
+        "unit": "mm",
+        "description": "Material thickness"
+      }
     },
     "scad_template": "// Parametric Bottle Opener\nl = ${length};\nw = ${width};\nt = ${thickness};\n\ncap_d = 26.5; // Standard bottle cap\nlip = 3;\n\nmodule opener() {\n    linear_extrude(height=t) {\n        difference() {\n            union() {\n                // Handle\n                hull() {\n                    translate([w/2, w/2]) circle(d=w, $fn=40);\n                    translate([l - w/2, w/2]) circle(d=w*0.7, $fn=40);\n                }\n            }\n            // Cap hook opening\n            translate([l - cap_d/2 - 3, w/2])\n                circle(d=cap_d, $fn=40);\n        }\n    }\n    // Lever lip for prying\n    translate([l - 5, w/2 - cap_d/2 - 1, 0])\n        cube([5, lip, t + 2]);\n}\n\nopener();"
   },
@@ -489,10 +1497,34 @@
     "description": "Clip-on filament guide for printer frame extrusions. Directs filament path.",
     "category": "3d_printing",
     "parameters": {
-      "extrusion_size": {"default": 20, "min": 15, "max": 40, "unit": "mm", "description": "Frame extrusion width"},
-      "tube_id": {"default": 4, "min": 2, "max": 6, "unit": "mm", "description": "Filament tube inner diameter"},
-      "arm_length": {"default": 30, "min": 15, "max": 60, "unit": "mm", "description": "Guide arm extension"},
-      "wall": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Wall thickness"}
+      "extrusion_size": {
+        "default": 20,
+        "min": 15,
+        "max": 40,
+        "unit": "mm",
+        "description": "Frame extrusion width"
+      },
+      "tube_id": {
+        "default": 4,
+        "min": 2,
+        "max": 6,
+        "unit": "mm",
+        "description": "Filament tube inner diameter"
+      },
+      "arm_length": {
+        "default": 30,
+        "min": 15,
+        "max": 60,
+        "unit": "mm",
+        "description": "Guide arm extension"
+      },
+      "wall": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
     },
     "scad_template": "// Parametric Filament Guide Clip\nes = ${extrusion_size};\ntid = ${tube_id};\nal = ${arm_length};\nwall = ${wall};\n\nclip_gap = es - 1;\nclip_w = 15;\n\nmodule guide() {\n    // Clip body\n    difference() {\n        cube([es + wall*2, clip_w, es + wall*2]);\n        translate([wall, -0.1, wall])\n            cube([es + 0.5, clip_w + 0.2, es + 0.5]);\n        // Entry slot\n        translate([wall + es/4, -0.1, es + wall])\n            cube([es/2, clip_w + 0.2, wall + 1]);\n    }\n    // Guide arm\n    translate([es/2 + wall, clip_w/2, es + wall*2]) {\n        // Arm\n        cylinder(h=al, d=tid + wall*2, $fn=30);\n        // Tube hole\n    }\n}\n\ndifference() {\n    guide();\n    // Tube through-hole\n    translate([es/2 + wall, clip_w/2, es + wall*2 - 0.1])\n        cylinder(h=al + 0.2, d=tid, $fn=20);\n}"
   },
@@ -501,10 +1533,34 @@
     "description": "Small organizer block with labeled slots for spare printer nozzles.",
     "category": "3d_printing",
     "parameters": {
-      "slots": {"default": 6, "min": 3, "max": 12, "unit": "count", "description": "Number of nozzle slots"},
-      "nozzle_dia": {"default": 8, "min": 6, "max": 12, "unit": "mm", "description": "Nozzle hex diameter"},
-      "depth": {"default": 12, "min": 8, "max": 20, "unit": "mm", "description": "Slot depth"},
-      "wall": {"default": 2, "min": 1.5, "max": 4, "unit": "mm", "description": "Wall between slots"}
+      "slots": {
+        "default": 6,
+        "min": 3,
+        "max": 12,
+        "unit": "count",
+        "description": "Number of nozzle slots"
+      },
+      "nozzle_dia": {
+        "default": 8,
+        "min": 6,
+        "max": 12,
+        "unit": "mm",
+        "description": "Nozzle hex diameter"
+      },
+      "depth": {
+        "default": 12,
+        "min": 8,
+        "max": 20,
+        "unit": "mm",
+        "description": "Slot depth"
+      },
+      "wall": {
+        "default": 2,
+        "min": 1.5,
+        "max": 4,
+        "unit": "mm",
+        "description": "Wall between slots"
+      }
     },
     "scad_template": "// Parametric Nozzle Rack\nn = ${slots};\nnd = ${nozzle_dia};\ndepth = ${depth};\nwall = ${wall};\n\nspacing = nd + wall;\ntotal_w = n * spacing + wall;\ntotal_d = nd + wall * 2;\nbase_h = 3;\n\nmodule rack() {\n    difference() {\n        cube([total_w, total_d, depth + base_h]);\n        for (i = [0:n-1]) {\n            translate([wall + i * spacing + nd/2, total_d/2, base_h])\n                cylinder(h=depth + 1, d=nd + 0.3, $fn=6);\n        }\n    }\n}\n\nrack();"
   },
@@ -513,10 +1569,34 @@
     "description": "Snap-on clip for routing cables along desk edges or walls.",
     "category": "cable_management",
     "parameters": {
-      "cable_dia": {"default": 8, "min": 3, "max": 20, "unit": "mm", "description": "Cable bundle diameter"},
-      "mount_width": {"default": 15, "min": 10, "max": 25, "unit": "mm", "description": "Mounting base width"},
-      "wall": {"default": 2, "min": 1.5, "max": 4, "unit": "mm", "description": "Wall thickness"},
-      "screw_hole": {"default": 4, "min": 3, "max": 5, "unit": "mm", "description": "Screw hole diameter"}
+      "cable_dia": {
+        "default": 8,
+        "min": 3,
+        "max": 20,
+        "unit": "mm",
+        "description": "Cable bundle diameter"
+      },
+      "mount_width": {
+        "default": 15,
+        "min": 10,
+        "max": 25,
+        "unit": "mm",
+        "description": "Mounting base width"
+      },
+      "wall": {
+        "default": 2,
+        "min": 1.5,
+        "max": 4,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "screw_hole": {
+        "default": 4,
+        "min": 3,
+        "max": 5,
+        "unit": "mm",
+        "description": "Screw hole diameter"
+      }
     },
     "scad_template": "// Parametric Cable Raceway Clip\ncd = ${cable_dia};\nmw = ${mount_width};\nwall = ${wall};\nsh = ${screw_hole};\n\nor = cd/2 + wall;\nclip_w = mw;\n\nmodule clip() {\n    difference() {\n        union() {\n            // Mounting base\n            cube([clip_w, or * 2, wall]);\n            // Cable channel\n            translate([0, or, wall + or])\n                rotate([0, 90, 0])\n                    difference() {\n                        cylinder(h=clip_w, r=or, $fn=40);\n                        cylinder(h=clip_w, r=cd/2, $fn=40);\n                        // Entry slot (narrower than cable for snap fit)\n                        translate([or * 0.3, -or, 0])\n                            cube([or, or * 2, clip_w]);\n                    }\n        }\n        // Screw hole\n        translate([clip_w/2, or, -0.1])\n            cylinder(h=wall+0.2, d=sh, $fn=20);\n    }\n}\n\nclip();"
   },
@@ -525,9 +1605,27 @@
     "description": "Desk pass-through ring for cable routing with snap-in cover.",
     "category": "cable_management",
     "parameters": {
-      "hole_dia": {"default": 60, "min": 30, "max": 80, "unit": "mm", "description": "Desk hole diameter"},
-      "desk_thickness": {"default": 20, "min": 10, "max": 35, "unit": "mm", "description": "Desk thickness"},
-      "cable_slot_width": {"default": 15, "min": 8, "max": 25, "unit": "mm", "description": "Cable pass-through slot width"}
+      "hole_dia": {
+        "default": 60,
+        "min": 30,
+        "max": 80,
+        "unit": "mm",
+        "description": "Desk hole diameter"
+      },
+      "desk_thickness": {
+        "default": 20,
+        "min": 10,
+        "max": 35,
+        "unit": "mm",
+        "description": "Desk thickness"
+      },
+      "cable_slot_width": {
+        "default": 15,
+        "min": 8,
+        "max": 25,
+        "unit": "mm",
+        "description": "Cable pass-through slot width"
+      }
     },
     "scad_template": "// Parametric Cable Grommet\nhd = ${hole_dia};\ndt = ${desk_thickness};\ncsw = ${cable_slot_width};\n\nflange = 5;\nwall = 2;\n\nmodule grommet() {\n    difference() {\n        union() {\n            // Top flange\n            cylinder(h=3, d=hd + flange * 2, $fn=60);\n            // Inner sleeve\n            translate([0, 0, -dt])\n                difference() {\n                    cylinder(h=dt + 3, d=hd, $fn=60);\n                    cylinder(h=dt + 3.1, d=hd - wall * 2, $fn=60);\n                }\n            // Bottom snap ring\n            translate([0, 0, -dt])\n                difference() {\n                    cylinder(h=2, d=hd + 2, $fn=60);\n                    cylinder(h=2.1, d=hd - wall * 2, $fn=60);\n                }\n        }\n        // Cable slot\n        translate([-csw/2, -hd/2 - flange - 1, -dt - 0.1])\n            cube([csw, hd + flange * 2 + 2, dt + 3.2]);\n    }\n}\n\ngrommet();"
   },
@@ -536,10 +1634,32 @@
     "description": "Standard GoPro 3-prong mount base with configurable attachment method.",
     "category": "mounts_and_adapters",
     "parameters": {
-      "base_width": {"default": 30, "min": 20, "max": 50, "unit": "mm", "description": "Base plate width"},
-      "base_depth": {"default": 30, "min": 20, "max": 50, "unit": "mm", "description": "Base plate depth"},
-      "base_thickness": {"default": 4, "min": 3, "max": 8, "unit": "mm", "description": "Base plate thickness"},
-      "mount_type": {"default": "flat", "type": "string", "description": "Base type: flat, adhesive, screw"}
+      "base_width": {
+        "default": 30,
+        "min": 20,
+        "max": 50,
+        "unit": "mm",
+        "description": "Base plate width"
+      },
+      "base_depth": {
+        "default": 30,
+        "min": 20,
+        "max": 50,
+        "unit": "mm",
+        "description": "Base plate depth"
+      },
+      "base_thickness": {
+        "default": 4,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Base plate thickness"
+      },
+      "mount_type": {
+        "default": "flat",
+        "type": "string",
+        "description": "Base type: flat, adhesive, screw"
+      }
     },
     "scad_template": "// GoPro Mount Adapter\nbw = ${base_width};\nbd = ${base_depth};\nbt = ${base_thickness};\n\n// GoPro standard dimensions\nprong_w = 3;\nprong_h = 8;\nprong_gap = 3.5;\npin_d = 5;\n\nmodule gopro_fingers() {\n    // 3-prong GoPro mount\n    for (i = [-1, 0, 1]) {\n        translate([i * (prong_w + prong_gap) - prong_w/2, -prong_w/2, 0])\n            cube([prong_w, prong_w + 2, prong_h]);\n    }\n}\n\nmodule mount() {\n    // Base plate\n    translate([-bw/2, -bd/2, 0])\n        cube([bw, bd, bt]);\n    // GoPro prongs\n    translate([0, 0, bt])\n        difference() {\n            gopro_fingers();\n            // Pin hole\n            translate([0, 0, prong_h/2])\n                rotate([0, 90, 0])\n                    cylinder(h=30, d=pin_d, $fn=20, center=true);\n        }\n}\n\nmount();"
   },
@@ -548,10 +1668,34 @@
     "description": "Adapter plate converting between VESA 75mm and 100mm mounting patterns.",
     "category": "mounts_and_adapters",
     "parameters": {
-      "from_spacing": {"default": 75, "min": 50, "max": 100, "unit": "mm", "description": "Source VESA spacing"},
-      "to_spacing": {"default": 100, "min": 75, "max": 200, "unit": "mm", "description": "Target VESA spacing"},
-      "thickness": {"default": 5, "min": 3, "max": 8, "unit": "mm", "description": "Plate thickness"},
-      "bolt_dia": {"default": 5, "min": 4, "max": 6, "unit": "mm", "description": "Bolt hole diameter"}
+      "from_spacing": {
+        "default": 75,
+        "min": 50,
+        "max": 100,
+        "unit": "mm",
+        "description": "Source VESA spacing"
+      },
+      "to_spacing": {
+        "default": 100,
+        "min": 75,
+        "max": 200,
+        "unit": "mm",
+        "description": "Target VESA spacing"
+      },
+      "thickness": {
+        "default": 5,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Plate thickness"
+      },
+      "bolt_dia": {
+        "default": 5,
+        "min": 4,
+        "max": 6,
+        "unit": "mm",
+        "description": "Bolt hole diameter"
+      }
     },
     "scad_template": "// VESA Adapter Plate\nfs = ${from_spacing};\nts = ${to_spacing};\nt = ${thickness};\nbd = ${bolt_dia};\n\nplate_s = max(fs, ts) + 20;\n\nmodule adapter() {\n    difference() {\n        translate([-plate_s/2, -plate_s/2, 0])\n            cube([plate_s, plate_s, t]);\n        // Source pattern (through-holes)\n        for (x = [-fs/2, fs/2])\n            for (y = [-fs/2, fs/2])\n                translate([x, y, -0.1])\n                    cylinder(h=t+0.2, d=bd, $fn=20);\n        // Target pattern (through-holes)\n        for (x = [-ts/2, ts/2])\n            for (y = [-ts/2, ts/2])\n                translate([x, y, -0.1])\n                    cylinder(h=t+0.2, d=bd, $fn=20);\n    }\n}\n\nadapter();"
   },
@@ -560,11 +1704,41 @@
     "description": "Clamp that grips round or square rails for mounting accessories.",
     "category": "mounts_and_adapters",
     "parameters": {
-      "rail_dia": {"default": 25, "min": 10, "max": 50, "unit": "mm", "description": "Rail/tube diameter"},
-      "clamp_width": {"default": 20, "min": 12, "max": 40, "unit": "mm", "description": "Clamp width"},
-      "wall": {"default": 5, "min": 3, "max": 8, "unit": "mm", "description": "Wall thickness"},
-      "bolt_dia": {"default": 5, "min": 3, "max": 8, "unit": "mm", "description": "Clamping bolt diameter"},
-      "mount_holes": {"default": 2, "min": 1, "max": 4, "unit": "count", "description": "Top mounting holes"}
+      "rail_dia": {
+        "default": 25,
+        "min": 10,
+        "max": 50,
+        "unit": "mm",
+        "description": "Rail/tube diameter"
+      },
+      "clamp_width": {
+        "default": 20,
+        "min": 12,
+        "max": 40,
+        "unit": "mm",
+        "description": "Clamp width"
+      },
+      "wall": {
+        "default": 5,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "bolt_dia": {
+        "default": 5,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Clamping bolt diameter"
+      },
+      "mount_holes": {
+        "default": 2,
+        "min": 1,
+        "max": 4,
+        "unit": "count",
+        "description": "Top mounting holes"
+      }
     },
     "scad_template": "// Parametric Rail Clamp\nrd = ${rail_dia};\ncw = ${clamp_width};\nwall = ${wall};\nbd = ${bolt_dia};\nmh = ${mount_holes};\n\nor = rd/2 + wall;\n\nmodule clamp() {\n    difference() {\n        union() {\n            // Clamp body\n            translate([0, 0, 0])\n                rotate([0, 90, 0])\n                    cylinder(h=cw, r=or, $fn=60);\n            // Mounting flat on top\n            translate([0, -or, or - wall])\n                cube([cw, or * 2, wall]);\n            // Bolt ears\n            translate([0, or - wall, -or])\n                cube([cw, wall * 2, or * 2]);\n        }\n        // Rail bore\n        translate([-0.1, 0, 0])\n            rotate([0, 90, 0])\n                cylinder(h=cw+0.2, d=rd+0.5, $fn=60);\n        // Split gap\n        translate([-0.1, or - 0.5, -or - 0.1])\n            cube([cw + 0.2, 1, or * 2 + 0.2]);\n        // Clamping bolt\n        translate([cw/2, or + wall, 0])\n            cylinder(h=or * 2, d=bd, $fn=20, center=true);\n        // Mounting holes on top\n        for (i = [1:mh]) {\n            translate([cw * i / (mh + 1), 0, or])\n                cylinder(h=wall + 0.2, d=bd, $fn=20);\n        }\n    }\n}\n\nclamp();"
   },
@@ -573,11 +1747,39 @@
     "description": "Pointed garden stake with flat label area for marking plants.",
     "category": "garden",
     "parameters": {
-      "label_width": {"default": 40, "min": 25, "max": 70, "unit": "mm", "description": "Label area width"},
-      "label_height": {"default": 25, "min": 15, "max": 50, "unit": "mm", "description": "Label area height"},
-      "stake_length": {"default": 120, "min": 80, "max": 200, "unit": "mm", "description": "Stake length below label"},
-      "thickness": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Material thickness"},
-      "text_string": {"default": "BASIL", "type": "string", "description": "Label text"}
+      "label_width": {
+        "default": 40,
+        "min": 25,
+        "max": 70,
+        "unit": "mm",
+        "description": "Label area width"
+      },
+      "label_height": {
+        "default": 25,
+        "min": 15,
+        "max": 50,
+        "unit": "mm",
+        "description": "Label area height"
+      },
+      "stake_length": {
+        "default": 120,
+        "min": 80,
+        "max": 200,
+        "unit": "mm",
+        "description": "Stake length below label"
+      },
+      "thickness": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Material thickness"
+      },
+      "text_string": {
+        "default": "BASIL",
+        "type": "string",
+        "description": "Label text"
+      }
     },
     "scad_template": "// Parametric Plant Label Stake\nlw = ${label_width};\nlh = ${label_height};\nsl = ${stake_length};\nt = ${thickness};\ntxt = \"${text_string}\";\n\nmodule stake() {\n    // Label area\n    translate([0, 0, sl])\n        cube([lw, t, lh]);\n    // Stake body (tapers to point)\n    hull() {\n        translate([lw/2 - t, 0, 0])\n            cube([t * 2, t, 0.1]);\n        translate([0, 0, sl])\n            cube([lw, t, 0.1]);\n    }\n    // Point\n    hull() {\n        translate([lw/2, 0, 0])\n            cube([0.1, t, 0.1]);\n        translate([lw/2 - t, 0, 15])\n            cube([t * 2, t, 0.1]);\n    }\n    // Embossed text\n    translate([lw/2, t, sl + lh/2])\n        rotate([90, 0, 0])\n            linear_extrude(height=0.8)\n                text(txt, size=lh*0.4, halign=\"center\", valign=\"center\", font=\"Liberation Sans:style=Bold\");\n}\n\nstake();"
   },
@@ -586,10 +1788,34 @@
     "description": "Saucer/drip tray sized for specific pot diameters.",
     "category": "garden",
     "parameters": {
-      "pot_dia": {"default": 100, "min": 50, "max": 250, "unit": "mm", "description": "Pot base diameter"},
-      "rim_height": {"default": 15, "min": 8, "max": 25, "unit": "mm", "description": "Tray rim height"},
-      "wall": {"default": 2.4, "min": 1.6, "max": 4, "unit": "mm", "description": "Wall thickness"},
-      "margin": {"default": 10, "min": 5, "max": 25, "unit": "mm", "description": "Extra margin around pot"}
+      "pot_dia": {
+        "default": 100,
+        "min": 50,
+        "max": 250,
+        "unit": "mm",
+        "description": "Pot base diameter"
+      },
+      "rim_height": {
+        "default": 15,
+        "min": 8,
+        "max": 25,
+        "unit": "mm",
+        "description": "Tray rim height"
+      },
+      "wall": {
+        "default": 2.4,
+        "min": 1.6,
+        "max": 4,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "margin": {
+        "default": 10,
+        "min": 5,
+        "max": 25,
+        "unit": "mm",
+        "description": "Extra margin around pot"
+      }
     },
     "scad_template": "// Parametric Drip Tray\npd = ${pot_dia};\nrh = ${rim_height};\nwall = ${wall};\nmargin = ${margin};\n\nod = pd + margin * 2 + wall * 2;\n\nmodule tray() {\n    difference() {\n        cylinder(h=rh, d=od, $fn=80);\n        translate([0, 0, wall])\n            cylinder(h=rh, d=od - wall * 2, $fn=80);\n    }\n}\n\ntray();"
   },
@@ -598,11 +1824,41 @@
     "description": "Flat template with configurable hole grid for consistent seed spacing.",
     "category": "garden",
     "parameters": {
-      "grid_spacing": {"default": 30, "min": 10, "max": 100, "unit": "mm", "description": "Spacing between seeds"},
-      "cols": {"default": 4, "min": 2, "max": 8, "unit": "count", "description": "Columns"},
-      "rows": {"default": 4, "min": 2, "max": 8, "unit": "count", "description": "Rows"},
-      "hole_dia": {"default": 8, "min": 4, "max": 15, "unit": "mm", "description": "Seed hole diameter"},
-      "thickness": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Template thickness"}
+      "grid_spacing": {
+        "default": 30,
+        "min": 10,
+        "max": 100,
+        "unit": "mm",
+        "description": "Spacing between seeds"
+      },
+      "cols": {
+        "default": 4,
+        "min": 2,
+        "max": 8,
+        "unit": "count",
+        "description": "Columns"
+      },
+      "rows": {
+        "default": 4,
+        "min": 2,
+        "max": 8,
+        "unit": "count",
+        "description": "Rows"
+      },
+      "hole_dia": {
+        "default": 8,
+        "min": 4,
+        "max": 15,
+        "unit": "mm",
+        "description": "Seed hole diameter"
+      },
+      "thickness": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Template thickness"
+      }
     },
     "scad_template": "// Parametric Seed Spacer\ngs = ${grid_spacing};\ncols = ${cols};\nrows = ${rows};\nhd = ${hole_dia};\nt = ${thickness};\n\nmargin = 10;\ntotal_w = (cols - 1) * gs + margin * 2;\ntotal_d = (rows - 1) * gs + margin * 2;\n\nmodule spacer() {\n    difference() {\n        cube([total_w, total_d, t]);\n        for (c = [0:cols-1])\n            for (r = [0:rows-1])\n                translate([margin + c * gs, margin + r * gs, -0.1])\n                    cylinder(h=t+0.2, d=hd, $fn=20);\n    }\n}\n\nspacer();"
   },
@@ -611,10 +1867,34 @@
     "description": "Spring-grip phone holder that clips into car air vents.",
     "category": "automotive",
     "parameters": {
-      "phone_width": {"default": 75, "min": 60, "max": 95, "unit": "mm", "description": "Phone width"},
-      "grip_depth": {"default": 15, "min": 10, "max": 25, "unit": "mm", "description": "Side grip depth"},
-      "vent_slot_width": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Vent blade thickness"},
-      "thickness": {"default": 4, "min": 3, "max": 6, "unit": "mm", "description": "Material thickness"}
+      "phone_width": {
+        "default": 75,
+        "min": 60,
+        "max": 95,
+        "unit": "mm",
+        "description": "Phone width"
+      },
+      "grip_depth": {
+        "default": 15,
+        "min": 10,
+        "max": 25,
+        "unit": "mm",
+        "description": "Side grip depth"
+      },
+      "vent_slot_width": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Vent blade thickness"
+      },
+      "thickness": {
+        "default": 4,
+        "min": 3,
+        "max": 6,
+        "unit": "mm",
+        "description": "Material thickness"
+      }
     },
     "scad_template": "// Parametric Phone Vent Mount\npw = ${phone_width};\ngd = ${grip_depth};\nvsw = ${vent_slot_width};\nt = ${thickness};\n\nbody_h = 40;\nclip_h = 25;\n\nmodule mount() {\n    // Back plate\n    cube([pw + gd * 2, t, body_h]);\n    // Side grips\n    for (x = [0, pw + gd]) {\n        translate([x, 0, 0])\n            cube([gd, gd, body_h]);\n    }\n    // Bottom ledge\n    translate([gd, 0, 0])\n        cube([pw, gd * 0.6, t]);\n    // Vent clip (behind)\n    translate([pw/2 + gd - 5, -clip_h, body_h * 0.3]) {\n        cube([10, clip_h, t]);\n        // Clip hook\n        translate([0, 0, -vsw - 1])\n            cube([10, t + 2, vsw + 1]);\n    }\n}\n\nmount();"
   },
@@ -623,21 +1903,63 @@
     "description": "Tweezers-style tool for extracting automotive blade fuses.",
     "category": "automotive",
     "parameters": {
-      "length": {"default": 60, "min": 40, "max": 80, "unit": "mm", "description": "Tool length"},
-      "fuse_width": {"default": 5, "min": 3, "max": 8, "unit": "mm", "description": "Fuse blade width"},
-      "thickness": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Material thickness"}
+      "length": {
+        "default": 60,
+        "min": 40,
+        "max": 80,
+        "unit": "mm",
+        "description": "Tool length"
+      },
+      "fuse_width": {
+        "default": 5,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Fuse blade width"
+      },
+      "thickness": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Material thickness"
+      }
     },
     "scad_template": "// Parametric Fuse Puller\nl = ${length};\nfw = ${fuse_width};\nt = ${thickness};\n\nhandle_w = 15;\ntip_gap = fw + 1;\n\nmodule puller() {\n    // Left arm\n    hull() {\n        cube([handle_w/2, t, l * 0.6]);\n        translate([-tip_gap/2 + handle_w/4, 0, l - 8])\n            cube([3, t, 8]);\n    }\n    // Right arm\n    hull() {\n        translate([handle_w/2, 0, 0])\n            cube([handle_w/2, t, l * 0.6]);\n        translate([tip_gap/2 + handle_w/4 - 3 + handle_w/2, 0, l - 8])\n            cube([3, t, 8]);\n    }\n    // Bridge at base\n    cube([handle_w, t, 5]);\n    // Grip ridges\n    for (z = [10:8:l*0.5]) {\n        translate([0, t, z])\n            cube([handle_w, 1, 2]);\n    }\n}\n\npuller();"
   },
   "corner_clamp_jig": {
-    "display_name": "90° Corner Clamp Jig",
+    "display_name": "90\u00b0 Corner Clamp Jig",
     "description": "Alignment jig for holding pieces at exact 90 degrees during gluing or welding.",
     "category": "workshop",
     "parameters": {
-      "arm_length": {"default": 80, "min": 40, "max": 150, "unit": "mm", "description": "Arm length"},
-      "arm_width": {"default": 30, "min": 20, "max": 50, "unit": "mm", "description": "Arm width"},
-      "height": {"default": 25, "min": 15, "max": 50, "unit": "mm", "description": "Jig height"},
-      "thickness": {"default": 5, "min": 3, "max": 8, "unit": "mm", "description": "Wall thickness"}
+      "arm_length": {
+        "default": 80,
+        "min": 40,
+        "max": 150,
+        "unit": "mm",
+        "description": "Arm length"
+      },
+      "arm_width": {
+        "default": 30,
+        "min": 20,
+        "max": 50,
+        "unit": "mm",
+        "description": "Arm width"
+      },
+      "height": {
+        "default": 25,
+        "min": 15,
+        "max": 50,
+        "unit": "mm",
+        "description": "Jig height"
+      },
+      "thickness": {
+        "default": 5,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
     },
     "scad_template": "// 90-Degree Corner Clamp Jig\nal = ${arm_length};\naw = ${arm_width};\nh = ${height};\nt = ${thickness};\n\nmodule jig() {\n    // Inner corner block\n    cube([aw, aw, h]);\n    // Arm 1 (X direction)\n    cube([al, t, h]);\n    // Arm 2 (Y direction)\n    cube([t, al, h]);\n    // Base plate\n    cube([al, al, t]);\n    // Diagonal brace\n    translate([aw, aw, 0])\n        linear_extrude(height=t)\n            polygon([[0, 0], [al - aw, 0], [0, al - aw]]);\n}\n\njig();"
   },
@@ -646,10 +1968,34 @@
     "description": "Round bench dog peg for workbench holdfast holes.",
     "category": "workshop",
     "parameters": {
-      "hole_dia": {"default": 20, "min": 15, "max": 25, "unit": "mm", "description": "Bench hole diameter"},
-      "peg_height": {"default": 30, "min": 15, "max": 50, "unit": "mm", "description": "Height above bench"},
-      "peg_depth": {"default": 25, "min": 15, "max": 40, "unit": "mm", "description": "Depth below bench surface"},
-      "head_dia": {"default": 30, "min": 20, "max": 40, "unit": "mm", "description": "Head/stop diameter"}
+      "hole_dia": {
+        "default": 20,
+        "min": 15,
+        "max": 25,
+        "unit": "mm",
+        "description": "Bench hole diameter"
+      },
+      "peg_height": {
+        "default": 30,
+        "min": 15,
+        "max": 50,
+        "unit": "mm",
+        "description": "Height above bench"
+      },
+      "peg_depth": {
+        "default": 25,
+        "min": 15,
+        "max": 40,
+        "unit": "mm",
+        "description": "Depth below bench surface"
+      },
+      "head_dia": {
+        "default": 30,
+        "min": 20,
+        "max": 40,
+        "unit": "mm",
+        "description": "Head/stop diameter"
+      }
     },
     "scad_template": "// Parametric Bench Dog\nhd = ${hole_dia};\nph = ${peg_height};\npd = ${peg_depth};\nhead = ${head_dia};\n\nspring_cut = 1;\n\nmodule dog() {\n    // Below-surface peg\n    difference() {\n        cylinder(h=pd, d=hd - 0.5, $fn=40);\n        // Spring slot for friction fit\n        translate([-spring_cut/2, -hd/2, 0])\n            cube([spring_cut, hd, pd * 0.7]);\n    }\n    // Shoulder/stop\n    translate([0, 0, pd])\n        cylinder(h=3, d=head, $fn=40);\n    // Above-surface head\n    translate([0, 0, pd + 3])\n        cylinder(h=ph - 3, d=head * 0.8, $fn=40);\n}\n\ndog();"
   },
@@ -658,10 +2004,34 @@
     "description": "Barbed fitting for adapting between two different hose diameters.",
     "category": "plumbing",
     "parameters": {
-      "small_id": {"default": 6, "min": 3, "max": 15, "unit": "mm", "description": "Small hose inner diameter"},
-      "large_id": {"default": 10, "min": 6, "max": 25, "unit": "mm", "description": "Large hose inner diameter"},
-      "barb_length": {"default": 20, "min": 12, "max": 35, "unit": "mm", "description": "Barb insertion length per side"},
-      "wall": {"default": 2, "min": 1.5, "max": 4, "unit": "mm", "description": "Wall thickness"}
+      "small_id": {
+        "default": 6,
+        "min": 3,
+        "max": 15,
+        "unit": "mm",
+        "description": "Small hose inner diameter"
+      },
+      "large_id": {
+        "default": 10,
+        "min": 6,
+        "max": 25,
+        "unit": "mm",
+        "description": "Large hose inner diameter"
+      },
+      "barb_length": {
+        "default": 20,
+        "min": 12,
+        "max": 35,
+        "unit": "mm",
+        "description": "Barb insertion length per side"
+      },
+      "wall": {
+        "default": 2,
+        "min": 1.5,
+        "max": 4,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
     },
     "scad_template": "// Parametric Hose Barb Adapter\nsid = ${small_id};\nlid = ${large_id};\nbl = ${barb_length};\nwall = ${wall};\n\nbarb_h = 1.2;\nbarbs = 3;\nstep = bl / barbs;\n\nmodule barb_section(od, len) {\n    for (i = [0:barbs-1]) {\n        translate([0, 0, i * step])\n            cylinder(h=step * 0.7, d1=od + barb_h, d2=od, $fn=30);\n        translate([0, 0, i * step + step * 0.7])\n            cylinder(h=step * 0.3, d=od, $fn=30);\n    }\n}\n\nmodule adapter() {\n    difference() {\n        union() {\n            // Small end barbs\n            barb_section(sid + wall * 2, bl);\n            // Center shoulder\n            translate([0, 0, bl])\n                cylinder(h=5, d=max(sid, lid) + wall * 2 + barb_h * 2, $fn=40);\n            // Large end barbs\n            translate([0, 0, bl + 5])\n                barb_section(lid + wall * 2, bl);\n        }\n        // Through bore (stepped)\n        translate([0, 0, -0.1])\n            cylinder(h=bl + 5.2, d=sid, $fn=30);\n        translate([0, 0, bl + 5])\n            cylinder(h=bl + 0.1, d=lid, $fn=30);\n    }\n}\n\nadapter();"
   },
@@ -670,10 +2040,34 @@
     "description": "Flat strainer disc with radial slot pattern for sink or floor drains.",
     "category": "plumbing",
     "parameters": {
-      "drain_dia": {"default": 60, "min": 30, "max": 100, "unit": "mm", "description": "Drain opening diameter"},
-      "rim_width": {"default": 5, "min": 3, "max": 10, "unit": "mm", "description": "Rim overhang width"},
-      "slot_count": {"default": 12, "min": 6, "max": 24, "unit": "count", "description": "Number of drain slots"},
-      "thickness": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Strainer thickness"}
+      "drain_dia": {
+        "default": 60,
+        "min": 30,
+        "max": 100,
+        "unit": "mm",
+        "description": "Drain opening diameter"
+      },
+      "rim_width": {
+        "default": 5,
+        "min": 3,
+        "max": 10,
+        "unit": "mm",
+        "description": "Rim overhang width"
+      },
+      "slot_count": {
+        "default": 12,
+        "min": 6,
+        "max": 24,
+        "unit": "count",
+        "description": "Number of drain slots"
+      },
+      "thickness": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Strainer thickness"
+      }
     },
     "scad_template": "// Parametric Drain Strainer\ndd = ${drain_dia};\nrim = ${rim_width};\nslots = ${slot_count};\nt = ${thickness};\n\nod = dd + rim * 2;\nslot_w = 2;\n\nmodule strainer() {\n    difference() {\n        union() {\n            // Rim\n            cylinder(h=t, d=od, $fn=60);\n            // Recessed disc that sits inside drain\n            translate([0, 0, -3])\n                cylinder(h=3, d=dd - 1, $fn=60);\n        }\n        // Radial slots\n        for (a = [0:360/slots:359]) {\n            rotate([0, 0, a])\n                translate([-slot_w/2, 5, -3.1])\n                    cube([slot_w, dd/2 - 8, t + 3.2]);\n        }\n        // Center hole\n        translate([0, 0, -3.1])\n            cylinder(h=t + 3.2, d=8, $fn=20);\n    }\n}\n\nstrainer();"
   },
@@ -682,11 +2076,41 @@
     "description": "Snap-fit enclosure for Raspberry Pi boards. Configurable for different Pi models.",
     "category": "electronics",
     "parameters": {
-      "board_width": {"default": 56, "min": 50, "max": 65, "unit": "mm", "description": "Board width"},
-      "board_depth": {"default": 85, "min": 56, "max": 90, "unit": "mm", "description": "Board depth"},
-      "board_height": {"default": 20, "min": 12, "max": 30, "unit": "mm", "description": "Component clearance height"},
-      "wall": {"default": 2.4, "min": 1.6, "max": 4, "unit": "mm", "description": "Wall thickness"},
-      "vent_slots": {"default": 1, "min": 0, "max": 1, "unit": "bool", "description": "Include ventilation slots (1=yes)"}
+      "board_width": {
+        "default": 56,
+        "min": 50,
+        "max": 65,
+        "unit": "mm",
+        "description": "Board width"
+      },
+      "board_depth": {
+        "default": 85,
+        "min": 56,
+        "max": 90,
+        "unit": "mm",
+        "description": "Board depth"
+      },
+      "board_height": {
+        "default": 20,
+        "min": 12,
+        "max": 30,
+        "unit": "mm",
+        "description": "Component clearance height"
+      },
+      "wall": {
+        "default": 2.4,
+        "min": 1.6,
+        "max": 4,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "vent_slots": {
+        "default": 1,
+        "min": 0,
+        "max": 1,
+        "unit": "bool",
+        "description": "Include ventilation slots (1=yes)"
+      }
     },
     "scad_template": "// Parametric RPi Case\nbw = ${board_width};\nbd = ${board_depth};\nbh = ${board_height};\nwall = ${wall};\nvents = ${vent_slots};\n\nclear = 1;\now = bw + clear * 2 + wall * 2;\nod = bd + clear * 2 + wall * 2;\noh = bh + wall * 2 + 3;\n\nmodule case_bottom() {\n    difference() {\n        cube([ow, od, oh/2]);\n        translate([wall, wall, wall])\n            cube([bw + clear*2, bd + clear*2, oh]);\n        // Port cutouts (USB side)\n        translate([ow - wall - 0.1, wall + 10, wall + 3])\n            cube([wall + 0.2, 40, 10]);\n        // SD card slot\n        translate([wall + bw/2 - 6, -0.1, wall])\n            cube([12, wall + 0.2, 3]);\n        // Ventilation\n        if (vents == 1) {\n            for (y = [wall + 5 : 4 : od - wall - 5]) {\n                translate([-0.1, y, wall + 2])\n                    cube([wall + 0.2, 2, oh/2 - wall - 4]);\n            }\n        }\n    }\n    // PCB standoffs\n    for (x = [wall + clear + 3.5, wall + clear + bw - 3.5])\n        for (y = [wall + clear + 3.5, wall + clear + bd - 3.5])\n            translate([x, y, wall])\n                difference() {\n                    cylinder(h=3, d=6, $fn=20);\n                    cylinder(h=3.1, d=2.7, $fn=20);\n                }\n}\n\nmodule case_top() {\n    translate([ow + 10, 0, 0]) {\n        difference() {\n            cube([ow, od, oh/2]);\n            translate([wall, wall, -0.1])\n                cube([bw + clear*2, bd + clear*2, oh/2 - wall + 0.1]);\n        }\n    }\n}\n\ncase_bottom();\ncase_top();"
   },
@@ -695,13 +2119,566 @@
     "description": "Flat panel with configurable cutouts for toggle or rocker switches.",
     "category": "electronics",
     "parameters": {
-      "switches": {"default": 4, "min": 1, "max": 8, "unit": "count", "description": "Number of switch positions"},
-      "switch_dia": {"default": 12, "min": 6, "max": 20, "unit": "mm", "description": "Switch mounting hole diameter"},
-      "panel_height": {"default": 40, "min": 25, "max": 60, "unit": "mm", "description": "Panel height"},
-      "spacing": {"default": 25, "min": 15, "max": 40, "unit": "mm", "description": "Switch spacing"},
-      "thickness": {"default": 3, "min": 2, "max": 5, "unit": "mm", "description": "Panel thickness"},
-      "mount_holes": {"default": 4, "min": 2, "max": 4, "unit": "mm", "description": "Corner mount hole diameter"}
+      "switches": {
+        "default": 4,
+        "min": 1,
+        "max": 8,
+        "unit": "count",
+        "description": "Number of switch positions"
+      },
+      "switch_dia": {
+        "default": 12,
+        "min": 6,
+        "max": 20,
+        "unit": "mm",
+        "description": "Switch mounting hole diameter"
+      },
+      "panel_height": {
+        "default": 40,
+        "min": 25,
+        "max": 60,
+        "unit": "mm",
+        "description": "Panel height"
+      },
+      "spacing": {
+        "default": 25,
+        "min": 15,
+        "max": 40,
+        "unit": "mm",
+        "description": "Switch spacing"
+      },
+      "thickness": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Panel thickness"
+      },
+      "mount_holes": {
+        "default": 4,
+        "min": 2,
+        "max": 4,
+        "unit": "mm",
+        "description": "Corner mount hole diameter"
+      }
     },
     "scad_template": "// Parametric Switch Panel\nn = ${switches};\nsd = ${switch_dia};\nph = ${panel_height};\nsp = ${spacing};\nt = ${thickness};\nmhd = ${mount_holes};\n\npw = (n - 1) * sp + sd + 20;\nmargin = 8;\n\nmodule panel() {\n    difference() {\n        cube([pw, ph, t]);\n        // Switch holes\n        for (i = [0:n-1]) {\n            translate([10 + sd/2 + i * sp, ph/2, -0.1])\n                cylinder(h=t+0.2, d=sd, $fn=30);\n        }\n        // Corner mounting holes\n        for (x = [margin, pw - margin])\n            for (y = [margin, ph - margin])\n                translate([x, y, -0.1])\n                    cylinder(h=t+0.2, d=mhd, $fn=20);\n    }\n}\n\npanel();"
+  },
+  "license_plate_frame": {
+    "display_name": "License Plate Frame",
+    "description": "Custom license plate frame with adjustable border width and text area. Standard US/EU sizes.",
+    "category": "automotive",
+    "parameters": {
+      "width": {
+        "default": 310,
+        "min": 280,
+        "max": 340,
+        "unit": "mm",
+        "description": "Frame outer width"
+      },
+      "height": {
+        "default": 160,
+        "min": 140,
+        "max": 180,
+        "unit": "mm",
+        "description": "Frame outer height"
+      },
+      "border": {
+        "default": 8,
+        "min": 4,
+        "max": 15,
+        "unit": "mm",
+        "description": "Border width"
+      },
+      "thickness": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Frame thickness"
+      },
+      "screw_dia": {
+        "default": 5,
+        "min": 4,
+        "max": 6,
+        "unit": "mm",
+        "description": "Mounting screw hole diameter"
+      }
+    },
+    "scad_template": "// License Plate Frame\nw = ${width};\nh = ${height};\nb = ${border};\nt = ${thickness};\nsd = ${screw_dia};\n\nmodule frame() {\n    difference() {\n        cube([w, h, t]);\n        // Plate window\n        translate([b, b, -0.1])\n            cube([w - 2*b, h - 2*b, t + 0.2]);\n        // Screw holes\n        for (x = [w*0.25, w*0.75])\n            translate([x, h - b/2, -0.1])\n                cylinder(h=t+0.2, d=sd, $fn=20);\n    }\n}\n\nframe();"
+  },
+  "cup_holder_insert": {
+    "display_name": "Cup Holder Insert",
+    "description": "Adapter insert for oversized cup holders \u2014 reduces diameter to fit smaller cups or bottles.",
+    "category": "automotive",
+    "parameters": {
+      "outer_dia": {
+        "default": 85,
+        "min": 60,
+        "max": 110,
+        "unit": "mm",
+        "description": "Outer diameter (existing holder)"
+      },
+      "inner_dia": {
+        "default": 65,
+        "min": 40,
+        "max": 90,
+        "unit": "mm",
+        "description": "Inner diameter (target cup size)"
+      },
+      "depth": {
+        "default": 50,
+        "min": 20,
+        "max": 80,
+        "unit": "mm",
+        "description": "Insert depth"
+      },
+      "wall": {
+        "default": 2,
+        "min": 1.5,
+        "max": 4,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "drain_holes": {
+        "default": 4,
+        "min": 0,
+        "max": 8,
+        "unit": "count",
+        "description": "Number of drain holes"
+      }
+    },
+    "scad_template": "// Cup Holder Insert\nod = ${outer_dia};\nid = ${inner_dia};\ndp = ${depth};\nwall = ${wall};\nnh = ${drain_holes};\n\nmodule insert() {\n    difference() {\n        cylinder(h=dp, d=od, $fn=60);\n        translate([0, 0, wall])\n            cylinder(h=dp, d=id, $fn=60);\n        // Drain holes\n        if (nh > 0)\n            for (i = [0:nh-1])\n                rotate([0, 0, i * 360/nh])\n                    translate([id/4, 0, -0.1])\n                        cylinder(h=wall+0.2, d=5, $fn=15);\n    }\n    // Lip ring at top\n    difference() {\n        cylinder(h=3, d=od, $fn=60);\n        translate([0, 0, -0.1])\n            cylinder(h=3.2, d=od - wall*2, $fn=60);\n    }\n}\n\ninsert();"
+  },
+  "p_trap_cover": {
+    "display_name": "P-Trap Access Cover",
+    "description": "Snap-fit cover plate for exposed P-trap pipes under sinks. Conceals plumbing cleanly.",
+    "category": "plumbing",
+    "parameters": {
+      "width": {
+        "default": 200,
+        "min": 100,
+        "max": 300,
+        "unit": "mm",
+        "description": "Cover width"
+      },
+      "height": {
+        "default": 250,
+        "min": 150,
+        "max": 350,
+        "unit": "mm",
+        "description": "Cover height"
+      },
+      "pipe_dia": {
+        "default": 40,
+        "min": 25,
+        "max": 60,
+        "unit": "mm",
+        "description": "Pipe pass-through diameter"
+      },
+      "thickness": {
+        "default": 2.5,
+        "min": 2,
+        "max": 4,
+        "unit": "mm",
+        "description": "Panel thickness"
+      }
+    },
+    "scad_template": "// P-Trap Access Cover\nw = ${width};\nh = ${height};\npd = ${pipe_dia};\nt = ${thickness};\n\nmodule cover() {\n    difference() {\n        // Main panel with lip\n        union() {\n            cube([w, h, t]);\n            // Perimeter lip\n            translate([0, 0, t])\n                difference() {\n                    cube([w, h, 3]);\n                    translate([2, 2, -0.1])\n                        cube([w-4, h-4, 3.2]);\n                }\n        }\n        // Pipe pass-through (bottom center)\n        translate([w/2, pd/2 + 10, -0.1])\n            cylinder(h=t+3.2, d=pd+1, $fn=40);\n    }\n}\n\ncover();"
+  },
+  "shower_caddy_hook": {
+    "display_name": "Shower Caddy Hook",
+    "description": "Over-the-pipe hook for hanging shower caddies or accessories on shower pipes.",
+    "category": "plumbing",
+    "parameters": {
+      "pipe_dia": {
+        "default": 25,
+        "min": 15,
+        "max": 40,
+        "unit": "mm",
+        "description": "Pipe outer diameter"
+      },
+      "hook_depth": {
+        "default": 40,
+        "min": 20,
+        "max": 60,
+        "unit": "mm",
+        "description": "Hook projection depth"
+      },
+      "width": {
+        "default": 20,
+        "min": 10,
+        "max": 35,
+        "unit": "mm",
+        "description": "Hook width"
+      },
+      "thickness": {
+        "default": 4,
+        "min": 3,
+        "max": 6,
+        "unit": "mm",
+        "description": "Material thickness"
+      }
+    },
+    "scad_template": "// Shower Caddy Hook\npd = ${pipe_dia};\nhd = ${hook_depth};\nw = ${width};\nt = ${thickness};\n\nmodule hook() {\n    // Pipe clamp (270-degree arc)\n    difference() {\n        cylinder(h=w, d=pd+t*2, $fn=40);\n        translate([0, 0, -0.1])\n            cylinder(h=w+0.2, d=pd+0.5, $fn=40);\n        // Opening slot\n        translate([0, -pd/2-t, -0.1])\n            cube([pd+t*2, pd/2+t, w+0.2]);\n    }\n    // Hook arm\n    translate([pd/2+t/2, 0, 0])\n        cube([t, hd, w]);\n    // Hook curl\n    translate([pd/2+t/2-8, hd-8, 0])\n        difference() {\n            cylinder(h=w, r=8+t, $fn=30);\n            translate([0, 0, -0.1])\n                cylinder(h=w+0.2, r=8, $fn=30);\n            translate([-20, -20, -0.1])\n                cube([40, 20, w+0.2]);\n        }\n}\n\nhook();"
+  },
+  "cable_chain_link": {
+    "display_name": "Cable Chain Link",
+    "description": "Parametric snap-fit cable chain link for CNC machines and 3D printers. Print multiple and snap together.",
+    "category": "cable_management",
+    "parameters": {
+      "inner_width": {
+        "default": 15,
+        "min": 8,
+        "max": 30,
+        "unit": "mm",
+        "description": "Inner channel width"
+      },
+      "inner_height": {
+        "default": 10,
+        "min": 6,
+        "max": 20,
+        "unit": "mm",
+        "description": "Inner channel height"
+      },
+      "link_length": {
+        "default": 20,
+        "min": 12,
+        "max": 35,
+        "unit": "mm",
+        "description": "Link length"
+      },
+      "wall": {
+        "default": 2,
+        "min": 1.5,
+        "max": 3,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "pin_dia": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Hinge pin diameter"
+      }
+    },
+    "scad_template": "// Cable Chain Link\niw = ${inner_width};\nih = ${inner_height};\nll = ${link_length};\nwall = ${wall};\npd = ${pin_dia};\n\now = iw + wall * 2;\noh = ih + wall * 2;\n\nmodule link() {\n    difference() {\n        union() {\n            // Main channel\n            difference() {\n                cube([ll, ow, oh]);\n                translate([wall, wall, wall])\n                    cube([ll - wall*2, iw, ih]);\n            }\n            // Pin cylinders at back\n            for (y = [-1, ow+1])\n                translate([ll-wall, y < 0 ? 0 : ow, oh/2])\n                    rotate([90, 0, 0])\n                        cylinder(h=wall, d=pd+wall, $fn=20);\n        }\n        // Pin holes at front\n        translate([0, -1, oh/2])\n            rotate([90, 0, 0])\n                rotate([0, 90, 0])\n                    cylinder(h=2, d=pd+0.3, $fn=20);\n    }\n}\n\nlink();"
+  },
+  "cable_wrap_guide": {
+    "display_name": "Cable Wrap Guide",
+    "description": "Spiral guide for neatly wrapping excess cable length. Mounts to desk or wall.",
+    "category": "cable_management",
+    "parameters": {
+      "spool_dia": {
+        "default": 60,
+        "min": 30,
+        "max": 100,
+        "unit": "mm",
+        "description": "Spool outer diameter"
+      },
+      "spool_width": {
+        "default": 20,
+        "min": 10,
+        "max": 40,
+        "unit": "mm",
+        "description": "Spool width"
+      },
+      "cable_slot": {
+        "default": 6,
+        "min": 3,
+        "max": 12,
+        "unit": "mm",
+        "description": "Cable slot width"
+      },
+      "wall": {
+        "default": 2,
+        "min": 1.5,
+        "max": 3,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "mount_holes": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Mounting hole diameter"
+      }
+    },
+    "scad_template": "// Cable Wrap Guide\nsd = ${spool_dia};\nsw = ${spool_width};\ncs = ${cable_slot};\nwall = ${wall};\nmh = ${mount_holes};\n\nmodule spool() {\n    difference() {\n        union() {\n            // Side walls\n            cylinder(h=wall, d=sd, $fn=50);\n            translate([0, 0, sw + wall])\n                cylinder(h=wall, d=sd, $fn=50);\n            // Hub\n            cylinder(h=sw + wall*2, d=sd/3, $fn=40);\n        }\n        // Center hole\n        translate([0, 0, -0.1])\n            cylinder(h=sw + wall*2 + 0.2, d=mh, $fn=20);\n        // Cable entry slot\n        translate([0, -cs/2, -0.1])\n            cube([sd/2+1, cs, sw + wall*2 + 0.2]);\n    }\n}\n\nspool();"
+  },
+  "clamp_pad": {
+    "display_name": "Soft Jaw Clamp Pad",
+    "description": "Protective jaw pad for bench vises \u2014 prevents marring delicate workpieces.",
+    "category": "workshop",
+    "parameters": {
+      "jaw_width": {
+        "default": 100,
+        "min": 50,
+        "max": 200,
+        "unit": "mm",
+        "description": "Vise jaw width"
+      },
+      "jaw_height": {
+        "default": 30,
+        "min": 15,
+        "max": 50,
+        "unit": "mm",
+        "description": "Pad height"
+      },
+      "depth": {
+        "default": 15,
+        "min": 8,
+        "max": 25,
+        "unit": "mm",
+        "description": "Pad depth (grip)"
+      },
+      "thickness": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Face thickness"
+      }
+    },
+    "scad_template": "// Soft Jaw Clamp Pad\njw = ${jaw_width};\njh = ${jaw_height};\nd = ${depth};\nt = ${thickness};\n\nmodule pad() {\n    // Front face\n    cube([jw, t, jh]);\n    // Wrap-around grip\n    translate([0, 0, 0])\n        cube([jw, d, t]);\n    translate([0, 0, jh-t])\n        cube([jw, d, t]);\n    // Side retainers\n    cube([t, d, jh]);\n    translate([jw-t, 0, 0])\n        cube([t, d, jh]);\n}\n\npad();"
+  },
+  "dowel_jig": {
+    "display_name": "Dowel Jig",
+    "description": "Self-centering dowel drilling jig for precise joint alignment. Multiple hole spacing options.",
+    "category": "workshop",
+    "parameters": {
+      "dowel_dia": {
+        "default": 8,
+        "min": 4,
+        "max": 12,
+        "unit": "mm",
+        "description": "Dowel hole diameter"
+      },
+      "holes": {
+        "default": 3,
+        "min": 1,
+        "max": 5,
+        "unit": "count",
+        "description": "Number of guide holes"
+      },
+      "spacing": {
+        "default": 30,
+        "min": 15,
+        "max": 50,
+        "unit": "mm",
+        "description": "Hole spacing"
+      },
+      "body_width": {
+        "default": 40,
+        "min": 25,
+        "max": 60,
+        "unit": "mm",
+        "description": "Jig body width"
+      },
+      "guide_depth": {
+        "default": 20,
+        "min": 10,
+        "max": 30,
+        "unit": "mm",
+        "description": "Guide bush depth"
+      }
+    },
+    "scad_template": "// Dowel Jig\ndd = ${dowel_dia};\nnh = ${holes};\nsp = ${spacing};\nbw = ${body_width};\ngd = ${guide_depth};\n\nbl = (nh - 1) * sp + bw;\n\nmodule jig() {\n    difference() {\n        // Main body\n        cube([bl, bw, gd]);\n        // Guide holes\n        for (i = [0:nh-1])\n            translate([bw/2 + i * sp, bw/2, -0.1])\n                cylinder(h=gd+0.2, d=dd, $fn=30);\n        // Reference edge groove\n        translate([-0.1, bw-2, gd/2])\n            cube([bl+0.2, 2.1, gd/2+0.1]);\n    }\n}\n\njig();"
+  },
+  "birdhouse_panel": {
+    "display_name": "Birdhouse Front Panel",
+    "description": "Replacement front panel for birdhouses with configurable entry hole and perch.",
+    "category": "garden",
+    "parameters": {
+      "width": {
+        "default": 120,
+        "min": 80,
+        "max": 180,
+        "unit": "mm",
+        "description": "Panel width"
+      },
+      "height": {
+        "default": 150,
+        "min": 100,
+        "max": 200,
+        "unit": "mm",
+        "description": "Panel height"
+      },
+      "entry_dia": {
+        "default": 32,
+        "min": 25,
+        "max": 50,
+        "unit": "mm",
+        "description": "Entry hole diameter"
+      },
+      "thickness": {
+        "default": 5,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Panel thickness"
+      },
+      "perch_dia": {
+        "default": 8,
+        "min": 5,
+        "max": 12,
+        "unit": "mm",
+        "description": "Perch dowel diameter"
+      }
+    },
+    "scad_template": "// Birdhouse Front Panel\nw = ${width};\nh = ${height};\ned = ${entry_dia};\nt = ${thickness};\npd = ${perch_dia};\n\nmodule panel() {\n    difference() {\n        // Panel with peaked top\n        hull() {\n            cube([w, t, h - w/4]);\n            translate([w/2, 0, h])\n                rotate([-90, 0, 0])\n                    cylinder(h=t, r=0.1, $fn=4);\n        }\n        // Entry hole\n        translate([w/2, -0.1, h*0.6])\n            rotate([-90, 0, 0])\n                cylinder(h=t+0.2, d=ed, $fn=40);\n        // Perch hole\n        translate([w/2, -0.1, h*0.6 - ed/2 - 15])\n            rotate([-90, 0, 0])\n                cylinder(h=t+0.2, d=pd+0.3, $fn=20);\n    }\n    // Perch dowel\n    translate([w/2, -15, h*0.6 - ed/2 - 15])\n        rotate([-90, 0, 0])\n            cylinder(h=15+t+10, d=pd, $fn=20);\n}\n\npanel();"
+  },
+  "gear_spur": {
+    "display_name": "Spur Gear",
+    "description": "Involute spur gear with configurable tooth count, module, and face width. For hobby robotics and mechanisms.",
+    "category": "hardware",
+    "parameters": {
+      "teeth": {
+        "default": 20,
+        "min": 8,
+        "max": 60,
+        "unit": "count",
+        "description": "Number of teeth"
+      },
+      "module_mm": {
+        "default": 2,
+        "min": 0.5,
+        "max": 5,
+        "unit": "mm",
+        "description": "Gear module (tooth size)"
+      },
+      "face_width": {
+        "default": 8,
+        "min": 3,
+        "max": 20,
+        "unit": "mm",
+        "description": "Gear face width"
+      },
+      "bore_dia": {
+        "default": 5,
+        "min": 2,
+        "max": 15,
+        "unit": "mm",
+        "description": "Center bore diameter"
+      },
+      "pressure_angle": {
+        "default": 20,
+        "min": 14.5,
+        "max": 25,
+        "unit": "degrees",
+        "description": "Pressure angle"
+      }
+    },
+    "scad_template": "// Parametric Spur Gear\nn = ${teeth};\nm = ${module_mm};\nfw = ${face_width};\nbd = ${bore_dia};\npa = ${pressure_angle};\n\npitch_r = n * m / 2;\nouter_r = pitch_r + m;\nroot_r = pitch_r - 1.25 * m;\n\nmodule tooth() {\n    tw = m * 3.14159 / 2;\n    polygon([\n        [root_r, -tw/2],\n        [outer_r - 0.2, -tw/3],\n        [outer_r, 0],\n        [outer_r - 0.2, tw/3],\n        [root_r, tw/2]\n    ]);\n}\n\nmodule gear() {\n    difference() {\n        linear_extrude(height=fw) {\n            difference() {\n                circle(r=outer_r + 0.1, $fn=n*4);\n                circle(r=root_r, $fn=n*4);\n            }\n            circle(r=root_r, $fn=n*4);\n            for (i = [0:n-1])\n                rotate([0, 0, i * 360/n])\n                    tooth();\n        }\n        // Center bore\n        translate([0, 0, -0.1])\n            cylinder(h=fw+0.2, d=bd, $fn=30);\n    }\n}\n\ngear();"
+  },
+  "pulley_gt2": {
+    "display_name": "GT2 Timing Pulley",
+    "description": "GT2 belt timing pulley for 3D printers and CNC. Configurable tooth count and bore.",
+    "category": "hardware",
+    "parameters": {
+      "teeth": {
+        "default": 20,
+        "min": 12,
+        "max": 60,
+        "unit": "count",
+        "description": "Number of teeth"
+      },
+      "bore_dia": {
+        "default": 5,
+        "min": 3,
+        "max": 10,
+        "unit": "mm",
+        "description": "Bore diameter"
+      },
+      "belt_width": {
+        "default": 6,
+        "min": 6,
+        "max": 10,
+        "unit": "mm",
+        "description": "Belt width"
+      },
+      "flange_dia": {
+        "default": 18,
+        "min": 12,
+        "max": 30,
+        "unit": "mm",
+        "description": "Flange outer diameter"
+      }
+    },
+    "scad_template": "// GT2 Timing Pulley\nnt = ${teeth};\nbd = ${bore_dia};\nbw = ${belt_width};\nfd = ${flange_dia};\n\npitch = 2; // GT2 = 2mm pitch\npr = nt * pitch / (2 * 3.14159);\nor = pr + 0.25;\nfh = 1.5; // flange height\n\nmodule pulley() {\n    difference() {\n        union() {\n            // Bottom flange\n            cylinder(h=fh, d=fd, $fn=50);\n            // Toothed section\n            translate([0, 0, fh])\n                cylinder(h=bw, r=or, $fn=nt*2);\n            // Top flange\n            translate([0, 0, fh + bw])\n                cylinder(h=fh, d=fd, $fn=50);\n        }\n        // Bore\n        translate([0, 0, -0.1])\n            cylinder(h=bw + fh*2 + 0.2, d=bd, $fn=30);\n        // Teeth grooves (simplified)\n        for (i = [0:nt-1])\n            rotate([0, 0, i * 360/nt])\n                translate([pr, 0, fh - 0.1])\n                    cylinder(h=bw+0.2, d=1, $fn=10);\n    }\n}\n\npulley();"
+  },
+  "z_axis_guide": {
+    "display_name": "Z-Axis Endstop Mount",
+    "description": "Adjustable Z-endstop mount for 3D printer frames. Slides on 2020 extrusion.",
+    "category": "3d_printing",
+    "parameters": {
+      "slot_width": {
+        "default": 6,
+        "min": 5,
+        "max": 8,
+        "unit": "mm",
+        "description": "Extrusion slot width"
+      },
+      "mount_height": {
+        "default": 30,
+        "min": 20,
+        "max": 50,
+        "unit": "mm",
+        "description": "Mount body height"
+      },
+      "switch_width": {
+        "default": 20,
+        "min": 12,
+        "max": 25,
+        "unit": "mm",
+        "description": "Endstop switch width"
+      },
+      "thickness": {
+        "default": 5,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Wall thickness"
+      }
+    },
+    "scad_template": "// Z-Axis Endstop Mount\nsw = ${slot_width};\nmh = ${mount_height};\neshw = ${switch_width};\nt = ${thickness};\n\nmodule mount() {\n    difference() {\n        union() {\n            // Clamp body\n            cube([20 + t*2, t, mh]);\n            // Switch platform\n            translate([20 + t*2, 0, 0])\n                cube([eshw + t*2, t + 12, t]);\n        }\n        // Extrusion slot\n        translate([t + (20 - sw)/2, -0.1, mh/2 - 5])\n            cube([sw, t + 0.2, 10]);\n        // Switch mounting holes\n        for (dx = [t + 4, t + eshw - 2])\n            translate([20 + t*2 + dx, t + 6, -0.1])\n                cylinder(h=t+0.2, d=2.5, $fn=15);\n    }\n}\n\nmount();"
+  },
+  "tool_holder_pegboard": {
+    "display_name": "Pegboard Tool Holder",
+    "description": "Customizable pegboard hook for holding tools, cables, or accessories. Standard 25mm pegboard spacing.",
+    "category": "workshop",
+    "parameters": {
+      "hook_length": {
+        "default": 50,
+        "min": 20,
+        "max": 100,
+        "unit": "mm",
+        "description": "Hook projection length"
+      },
+      "hook_dia": {
+        "default": 6,
+        "min": 4,
+        "max": 8,
+        "unit": "mm",
+        "description": "Hook rod diameter"
+      },
+      "peg_spacing": {
+        "default": 25,
+        "min": 25,
+        "max": 25,
+        "unit": "mm",
+        "description": "Pegboard hole spacing"
+      },
+      "pegs": {
+        "default": 2,
+        "min": 1,
+        "max": 3,
+        "unit": "count",
+        "description": "Number of pegs"
+      }
+    },
+    "scad_template": "// Pegboard Tool Holder\nhl = ${hook_length};\nhd = ${hook_dia};\nps = ${peg_spacing};\nnp = ${pegs};\n\nmodule holder() {\n    // Back pegs\n    for (i = [0:np-1])\n        translate([0, i * ps, 0]) {\n            // Peg (into board)\n            rotate([0, 90, 0])\n                cylinder(h=15, d=hd-0.5, $fn=20);\n            // Up hook\n            translate([-15, 0, 0])\n                cylinder(h=hd, d=hd, $fn=20);\n        }\n    // Connecting bar\n    translate([-15, 0, 0])\n        cube([hd, (np-1)*ps + hd, hd]);\n    // Hook arm\n    translate([-15, ((np-1)*ps)/2, 0])\n        rotate([0, -90, 0])\n            cylinder(h=hl, d=hd, $fn=20);\n    // Hook tip (upward)\n    translate([-15-hl, ((np-1)*ps)/2, 0])\n        cylinder(h=15, d=hd, $fn=20);\n}\n\nholder();"
   }
 }

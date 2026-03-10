@@ -3534,3 +3534,144 @@ def _make_test_stl(tmp_path, width: float, depth: float, height: float) -> str:
             f.write(struct.pack("<3f", *v[c]))
             f.write(struct.pack("<H", 0))
     return path
+
+
+# ---------------------------------------------------------------------------
+# AMS auto-detect (_resolve_use_ams)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveUseAms:
+    """Tests for the tri-state use_ams auto-detection logic."""
+
+    def test_bool_true_passes_through(self):
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        result = _resolve_use_ams(True, None, adapter)
+        assert result["use_ams"] is True
+        adapter.get_ams_status.assert_not_called()
+
+    def test_bool_false_passes_through(self):
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        result = _resolve_use_ams(False, None, adapter)
+        assert result["use_ams"] is False
+        adapter.get_ams_status.assert_not_called()
+
+    def test_string_true_enables(self):
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        result = _resolve_use_ams("true", None, adapter)
+        assert result["use_ams"] is True
+
+    def test_string_false_disables(self):
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        result = _resolve_use_ams("false", None, adapter)
+        assert result["use_ams"] is False
+
+    def test_auto_with_loaded_ams_enables(self):
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        adapter.get_ams_status.return_value = {
+            "units": [
+                {
+                    "unit_id": 0,
+                    "trays": [
+                        {"slot": 0, "tray_type": "PLA", "remain": 85},
+                        {"slot": 1, "tray_type": "PLA", "remain": 50},
+                    ],
+                }
+            ]
+        }
+        result = _resolve_use_ams("auto", None, adapter)
+        assert result["use_ams"] is True
+        assert result["ams_mapping"] == [0]
+
+    def test_auto_with_empty_ams_disables(self):
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        adapter.get_ams_status.return_value = {"units": []}
+        result = _resolve_use_ams("auto", None, adapter)
+        assert result["use_ams"] is False
+
+    def test_auto_with_no_loaded_trays_disables(self):
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        adapter.get_ams_status.return_value = {
+            "units": [
+                {
+                    "unit_id": 0,
+                    "trays": [
+                        {"slot": 0, "tray_type": "", "remain": 0},
+                    ],
+                }
+            ]
+        }
+        result = _resolve_use_ams("auto", None, adapter)
+        assert result["use_ams"] is False
+
+    def test_auto_no_get_ams_status_method(self):
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock(spec=[])  # no methods at all
+        result = _resolve_use_ams("auto", None, adapter)
+        assert result["use_ams"] is False
+
+    def test_auto_probe_exception_falls_back(self):
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        adapter.get_ams_status.side_effect = RuntimeError("MQTT timeout")
+        result = _resolve_use_ams("auto", None, adapter)
+        assert result["use_ams"] is False
+
+    def test_auto_respects_explicit_mapping(self):
+        """When caller provides ams_mapping, auto should not override it."""
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        adapter.get_ams_status.return_value = {
+            "units": [
+                {
+                    "unit_id": 0,
+                    "trays": [
+                        {"slot": 0, "tray_type": "PLA", "remain": 85},
+                        {"slot": 3, "tray_type": "PETG", "remain": 60},
+                    ],
+                }
+            ]
+        }
+        result = _resolve_use_ams("auto", [3, 1], adapter)
+        assert result["use_ams"] is True
+        # Should NOT override the caller's mapping
+        assert result["ams_mapping"] is None
+
+    def test_auto_selects_first_loaded_slot(self):
+        """Auto-mapping should pick the first slot with filament."""
+        from kiln.server import _resolve_use_ams
+
+        adapter = MagicMock()
+        adapter.get_ams_status.return_value = {
+            "units": [
+                {
+                    "unit_id": 0,
+                    "trays": [
+                        {"slot": 0, "tray_type": "", "remain": 0},  # empty
+                        {"slot": 1, "tray_type": "", "remain": 0},  # empty
+                        {"slot": 2, "tray_type": "ABS", "remain": 40},  # loaded
+                        {"slot": 3, "tray_type": "PLA", "remain": 90},  # loaded
+                    ],
+                }
+            ]
+        }
+        result = _resolve_use_ams("auto", None, adapter)
+        assert result["use_ams"] is True
+        assert result["ams_mapping"] == [2]

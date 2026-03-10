@@ -2139,10 +2139,80 @@ def delete_file(file_path: str) -> dict:
         return _error_dict(f"Unexpected error in delete_file: {exc}", code="INTERNAL_ERROR")
 
 
+def _resolve_use_ams(
+    use_ams: str | bool,
+    ams_mapping: list[int] | None,
+    adapter: PrinterAdapter,
+) -> dict[str, Any]:
+    """Resolve tri-state use_ams into a concrete decision.
+
+    :param use_ams: ``"auto"``, ``"true"``/``True``, or ``"false"``/``False``.
+    :param ams_mapping: Explicit AMS mapping from the caller (may be None).
+    :param adapter: Printer adapter to probe for AMS presence.
+    :returns: Dict with ``use_ams`` (bool) and optional ``ams_mapping`` (list).
+    """
+    # Normalize string/bool input
+    if isinstance(use_ams, bool):
+        return {"use_ams": use_ams, "ams_mapping": None}
+
+    val = str(use_ams).lower().strip()
+    if val in ("true", "1", "yes"):
+        return {"use_ams": True, "ams_mapping": None}
+    if val in ("false", "0", "no"):
+        return {"use_ams": False, "ams_mapping": None}
+
+    # "auto" — probe the printer for AMS
+    if val != "auto":
+        logger.warning("Unknown use_ams value %r, treating as 'auto'", use_ams)
+
+    # Check if the adapter supports AMS queries
+    if not hasattr(adapter, "get_ams_status"):
+        logger.debug("Adapter has no get_ams_status — AMS auto-detect disabled.")
+        return {"use_ams": False, "ams_mapping": None}
+
+    try:
+        ams_info = adapter.get_ams_status()
+    except Exception as exc:
+        logger.debug("AMS auto-detect probe failed: %s — defaulting to no AMS.", exc)
+        return {"use_ams": False, "ams_mapping": None}
+
+    # Check if AMS exists with loaded trays
+    units = ams_info.get("units", [])
+    if not units:
+        logger.debug("AMS auto-detect: no AMS units found — using external spool.")
+        return {"use_ams": False, "ams_mapping": None}
+
+    # Find loaded tray slots
+    loaded_slots: list[int] = []
+    for unit in units:
+        for tray in unit.get("trays", []):
+            tray_type = tray.get("tray_type", "")
+            remain = tray.get("remain", 0)
+            if tray_type and remain and remain > 0:
+                loaded_slots.append(tray.get("slot", 0))
+
+    if not loaded_slots:
+        logger.debug("AMS auto-detect: AMS present but no loaded trays — using external spool.")
+        return {"use_ams": False, "ams_mapping": None}
+
+    logger.info(
+        "AMS auto-detect: found %d loaded slot(s) %s — enabling AMS.",
+        len(loaded_slots),
+        loaded_slots,
+    )
+
+    # Auto-generate mapping only if caller didn't provide one
+    auto_mapping = None
+    if ams_mapping is None:
+        auto_mapping = [loaded_slots[0]]
+
+    return {"use_ams": True, "ams_mapping": auto_mapping}
+
+
 @mcp.tool()
 def start_print(
     file_name: str,
-    use_ams: bool = False,
+    use_ams: str = "auto",
     ams_mapping: list[int] | None = None,
     timelapse: bool = False,
     bed_leveling: bool = True,
@@ -2161,8 +2231,17 @@ def start_print(
 
     Args:
         file_name: Name or path of the file as shown by ``printer_files()``.
-        use_ams: Enable AMS filament feeding (Bambu only).  Default ``False``
-            (uses external spool).  Set ``True`` if filament is loaded in AMS.
+        use_ams: AMS filament feeding mode (Bambu only).  Tri-state:
+
+            - ``"auto"`` (default): auto-detect AMS by probing the printer.
+              If an AMS is connected with loaded trays, enables AMS
+              automatically and selects the first loaded slot if no
+              ``ams_mapping`` is provided.  Falls back to external spool
+              if no AMS is detected.
+            - ``"true"`` / ``True``: Force AMS on.  Use when you know AMS
+              is connected.
+            - ``"false"`` / ``False``: Force AMS off.  Use external spool.
+
         ams_mapping: Slot mapping per extruder (Bambu only).  Default
             ``[0]``.  Use ``[-1]`` for unused slots.  Check ``ams_status()``
             to see which slots have filament.
@@ -2249,8 +2328,13 @@ def start_print(
 
         # Build kwargs for Bambu-specific print parameters.
         print_kwargs: dict[str, Any] = {}
-        if use_ams:
+
+        # Resolve tri-state use_ams: "auto" | "true"/"false" | bool
+        _ams_decision = _resolve_use_ams(use_ams, ams_mapping, adapter)
+        if _ams_decision["use_ams"]:
             print_kwargs["use_ams"] = True
+        if _ams_decision.get("ams_mapping") is not None:
+            ams_mapping = _ams_decision["ams_mapping"]
         if ams_mapping is not None:
             print_kwargs["ams_mapping"] = ams_mapping
         if timelapse:
@@ -11001,6 +11085,371 @@ def infer_print_settings(
 
 
 @mcp.tool()
+def optimize_template_params(
+    template_id: str,
+    samples_per_param: int = 3,
+    max_variants: int = 27,
+    constraints: str = "",
+    output_dir: str = "",
+) -> dict:
+    """Find the structurally strongest version of a parametric template.
+
+    Sweeps each template parameter across its [min, max] range at
+    evenly spaced sample points, generates every combination via
+    OpenSCAD, runs structural analysis on each variant, and returns
+    the configuration with the highest structural score.
+
+    Use this when you want to **automatically** find optimal dimensions
+    for a functional part — e.g. "what wall thickness and bracket
+    height give the strongest shelf bracket?"
+
+    :param template_id: Template ID from the design template library.
+    :param samples_per_param: Sample points per parameter (default 3).
+    :param max_variants: Maximum total variants to test (default 27).
+    :param constraints: JSON string of constraints, e.g.
+           ``{"max_width_mm": 100, "max_height_mm": 50}``.
+    :param output_dir: Directory for generated STLs (temp dir if empty).
+    :returns: Dict with best_params, best_score, best_grade, best_stl_path,
+              variants_tested, all_scores, and summary.
+    """
+    _check_auth("design:optimize")
+    try:
+        import json as _json
+
+        from kiln.design_reasoning import optimize_template_params as _optimize
+
+        parsed_constraints = None
+        if constraints:
+            parsed_constraints = _json.loads(constraints)
+
+        result = _optimize(
+            template_id,
+            samples_per_param=samples_per_param,
+            max_variants=max_variants,
+            constraints=parsed_constraints,
+            output_dir=output_dir or None,
+        )
+        return {"status": "success", **result.to_dict()}
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"Template optimization failed: {exc}")
+
+
+@mcp.tool()
+def arrange_parts_on_plate(
+    file_paths: str,
+    plate_width_mm: float = 256.0,
+    plate_depth_mm: float = 256.0,
+    spacing_mm: float = 5.0,
+    copies: str = "",
+) -> dict:
+    """Pack multiple STL files onto a virtual build plate.
+
+    Uses greedy bottom-left bin-packing (largest parts first) to
+    efficiently arrange parts with configurable spacing. Reports
+    which parts fit, which overflow, and plate utilization.
+
+    Supports printing multiple copies of parts via the copies parameter.
+
+    :param file_paths: JSON array of file paths, e.g. ``["/tmp/a.stl", "/tmp/b.stl"]``.
+    :param plate_width_mm: Build plate width in mm (default 256).
+    :param plate_depth_mm: Build plate depth in mm (default 256).
+    :param spacing_mm: Minimum gap between parts in mm (default 5).
+    :param copies: Optional JSON dict of filename→count, e.g. ``{"part.stl": 3}``.
+    :returns: Dict with arranged_parts, overflow_parts, plate_utilization, summary.
+    """
+    _check_auth("design:arrange")
+    try:
+        import json as _json
+
+        from kiln.design_reasoning import arrange_on_plate
+
+        parsed_paths = _json.loads(file_paths)
+        parsed_copies = _json.loads(copies) if copies else None
+
+        result = arrange_on_plate(
+            parsed_paths,
+            plate_width_mm=plate_width_mm,
+            plate_depth_mm=plate_depth_mm,
+            spacing_mm=spacing_mm,
+            copies=parsed_copies,
+        )
+        return {"status": "success", **result.to_dict()}
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"Plate arrangement failed: {exc}")
+
+
+@mcp.tool()
+def plan_design_from_description(
+    description: str,
+    target_size_mm: float = 50.0,
+    material: str = "PLA",
+) -> dict:
+    """Convert a natural language description into a CSG composition plan.
+
+    Rule-based keyword parser (no LLM required). Scans the description
+    for shape keywords (cube, cylinder, sphere, etc.) and operation
+    keywords (hole, combine, etc.) to build a CSG primitive tree.
+
+    The output can be passed directly to ``compose_part_from_primitives``
+    to generate an STL file.
+
+    Best for simple functional parts described in plain English, e.g.:
+    - "a box with a hole" → cube + difference(cylinder)
+    - "a rod and a sphere" → cylinder + union(sphere)
+    - "a hollow cylinder" → pipe shape
+
+    :param description: Natural language description of the design.
+    :param target_size_mm: Target primary dimension in mm (default 50).
+    :param material: Material hint (informational only).
+    :returns: Dict with primitives, operations, estimated_dimensions_mm,
+              complexity, notes, and confidence.
+    """
+    _check_auth("design:plan")
+    try:
+        from kiln.design_reasoning import plan_composition_from_description
+
+        result = plan_composition_from_description(
+            description,
+            target_size_mm=target_size_mm,
+            material=material,
+        )
+        return {"status": "success", **result.to_dict()}
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"Design planning failed: {exc}")
+
+
+@mcp.tool()
+def search_design_templates(
+    query: str,
+    max_results: int = 10,
+    category_filter: str = "",
+) -> dict:
+    """Search the template library by natural-language description.
+
+    Fuzzy keyword matching against template IDs, descriptions, categories,
+    and tags.  Returns scored matches ranked by relevance.
+
+    :param query: Natural-language search string (e.g. "phone stand", "hook").
+    :param max_results: Maximum number of results (default 10).
+    :param category_filter: Optional category to limit results (e.g. "hardware").
+    :returns: Dict with matches list, each containing template_id, score,
+              description, and category.
+    """
+    _check_auth("design:search")
+    try:
+        from kiln.design_reasoning import search_templates
+
+        result = search_templates(
+            query,
+            max_results=max_results,
+            category_filter=category_filter,
+        )
+        return {"status": "success", **result.to_dict()}
+    except Exception as exc:
+        return _error_dict(f"Template search failed: {exc}")
+
+
+@mcp.tool()
+def estimate_mesh_weight(
+    file_path: str,
+    material: str = "pla",
+    infill_percent: float = 20.0,
+    wall_thickness_mm: float = 1.2,
+) -> dict:
+    """Estimate the printed weight of an STL file.
+
+    Uses the divergence theorem to compute mesh volume, then applies
+    material density, infill ratio, and shell fraction for a realistic
+    weight estimate.
+
+    :param file_path: Path to an STL file.
+    :param material: Material name (pla, abs, petg, tpu, nylon, etc.).
+    :param infill_percent: Infill percentage 0-100 (default 20).
+    :param wall_thickness_mm: Perimeter wall thickness in mm (default 1.2).
+    :returns: Dict with volume, weight estimates, bounding box.
+    """
+    _check_auth("design:analyze")
+    try:
+        from kiln.design_reasoning import estimate_weight
+
+        result = estimate_weight(
+            file_path,
+            material=material,
+            infill_percent=infill_percent,
+            wall_thickness_mm=wall_thickness_mm,
+        )
+        return {"status": "success", **result.to_dict()}
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"Weight estimation failed: {exc}")
+
+
+@mcp.tool()
+def design_to_gcode_pipeline(
+    description: str,
+    output_dir: str = "",
+    material: str = "PLA",
+    printer_model: str = "",
+    infill_percent: float = 20.0,
+) -> dict:
+    """End-to-end pipeline: description → template → STL → analysis → GCode.
+
+    One-call pipeline that:
+    1. Searches templates for best match
+    2. Generates STL via OpenSCAD
+    3. Runs structural risk analysis
+    4. Estimates weight
+    5. Slices to G-code (if slicer available)
+
+    :param description: Natural-language design description.
+    :param output_dir: Directory for output files (uses tempdir if empty).
+    :param material: Material for weight estimation and slicing.
+    :param printer_model: Printer model for slicer profile lookup.
+    :param infill_percent: Infill percentage for weight estimation.
+    :returns: Dict with paths to SCAD, STL, G-code files, weight, risks.
+    """
+    _check_auth("design:generate")
+    try:
+        from kiln.design_reasoning import design_to_gcode
+
+        result = design_to_gcode(
+            description,
+            output_dir=output_dir,
+            material=material,
+            printer_model=printer_model,
+            infill_percent=infill_percent,
+        )
+        return {"status": "success" if result.success else "partial", **result.to_dict()}
+    except Exception as exc:
+        return _error_dict(f"Design-to-gcode pipeline failed: {exc}")
+
+
+@mcp.tool()
+def merge_stl(
+    file_paths: str,
+    output_path: str,
+    positions: str = "",
+) -> dict:
+    """Merge multiple STL files into a single mesh.
+
+    Combines triangle data from multiple STL files into one output file.
+    Optionally translates each part to a specified position before merging.
+
+    :param file_paths: JSON array of STL file paths.
+    :param output_path: Where to write the merged STL.
+    :param positions: Optional JSON array of {"x", "y", "z"} offsets per file.
+    :returns: Dict with output_path, total_triangles, bounding_box.
+    """
+    _check_auth("design:merge")
+    import json as _json
+
+    try:
+        paths = _json.loads(file_paths) if isinstance(file_paths, str) else file_paths
+    except _json.JSONDecodeError:
+        return _error_dict("file_paths must be a valid JSON array.", code="INVALID_ARGS")
+
+    pos_list = None
+    if positions:
+        try:
+            pos_list = _json.loads(positions) if isinstance(positions, str) else positions
+        except _json.JSONDecodeError:
+            return _error_dict("positions must be a valid JSON array.", code="INVALID_ARGS")
+
+    try:
+        from kiln.design_reasoning import merge_stl_files
+
+        result = merge_stl_files(paths, output_path, positions=pos_list)
+        if result.errors:
+            return _error_dict("; ".join(result.errors), code="MERGE_FAILED")
+        return {"status": "success", **result.to_dict()}
+    except Exception as exc:
+        return _error_dict(f"STL merge failed: {exc}")
+
+
+@mcp.tool()
+def cross_section_view(
+    file_path: str,
+    plane: str = "z",
+    offset_ratio: float = 0.5,
+    offset_mm: str = "",
+) -> dict:
+    """Compute a 2D cross-section of a mesh at a cutting plane.
+
+    Slices the mesh perpendicular to the chosen axis and returns
+    contour polygons and cross-sectional area.  Useful for inspecting
+    internal geometry (e.g., wall thickness, hole placement).
+
+    :param file_path: Path to STL file.
+    :param plane: Axis perpendicular to the cut — "x", "y", or "z".
+    :param offset_ratio: Fractional position 0.0-1.0 (default 0.5 = midpoint).
+    :param offset_mm: If set, absolute position in mm (overrides offset_ratio).
+    :returns: Dict with contour_count, contour_points, cross_section_area_mm2.
+    """
+    _check_auth("design:analyze")
+    try:
+        from kiln.design_reasoning import cross_section_at_plane
+
+        kwargs: dict[str, Any] = {
+            "plane": plane,
+            "offset_ratio": offset_ratio,
+        }
+        if offset_mm:
+            kwargs["offset_mm"] = float(offset_mm)
+
+        result = cross_section_at_plane(file_path, **kwargs)
+        return {"status": "success", **result.to_dict()}
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_ARGS")
+    except Exception as exc:
+        return _error_dict(f"Cross-section failed: {exc}")
+
+
+@mcp.tool()
+def solve_template_constraints(
+    template_id: str,
+    constraints: str,
+) -> dict:
+    """Solve parametric constraints to find valid template parameters.
+
+    Given a template and constraints (min/max/equals/ratio), iteratively
+    adjusts parameters to satisfy all constraints while staying within
+    the template's declared parameter ranges.
+
+    :param template_id: Template identifier (e.g., "shelf_bracket").
+    :param constraints: JSON object mapping param names to constraint dicts.
+        Example: ``{"width": {"min": 20, "max": 50}, "height": {"equals": 30}}``
+        Supported keys: min, max, equals, ratio (e.g. ``{"ratio": ["width", 0.5]}``).
+    :returns: Dict with solved_params, satisfied/violated constraints.
+    """
+    _check_auth("design:optimize")
+    import json as _json
+
+    try:
+        constraint_dict = _json.loads(constraints) if isinstance(constraints, str) else constraints
+    except _json.JSONDecodeError:
+        return _error_dict("constraints must be valid JSON.", code="INVALID_ARGS")
+
+    try:
+        from kiln.design_reasoning import solve_constraints
+
+        result = solve_constraints(template_id, constraint_dict)
+        return {"status": "success", **result.to_dict()}
+    except Exception as exc:
+        return _error_dict(f"Constraint solving failed: {exc}")
+
+
+@mcp.tool()
 def center_model_on_bed(
     file_path: str,
     bed_x_mm: float = 256.0,
@@ -11608,6 +12057,7 @@ class _PrintWatcher:
         event_bus: Any | None = None,
         stall_timeout: int = 600,
         save_to_disk: bool = False,
+        cancel_at_percent: float = 0.0,
     ) -> None:
         self._watch_id = watch_id
         self._adapter = adapter
@@ -11619,6 +12069,7 @@ class _PrintWatcher:
         self._event_bus = event_bus
         self._stall_timeout = stall_timeout
         self._save_to_disk = save_to_disk
+        self._cancel_at_percent = cancel_at_percent
 
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
@@ -11629,6 +12080,7 @@ class _PrintWatcher:
         self._outcome: str = "running"
         self._start_time: float = 0.0
         self._thread: threading.Thread | None = None
+        self._prev_snapshot_hash: str | None = None
         self._save_dir: str | None = None
         if self._save_to_disk:
             self._save_dir = os.path.join(str(Path.home()), ".kiln", "timelapses", watch_id)
@@ -11742,6 +12194,41 @@ class _PrintWatcher:
                                 "completion": job.completion,
                             }
                         )
+
+                # Auto-cancel at target percentage
+                if (
+                    self._cancel_at_percent > 0
+                    and job.completion is not None
+                    and job.completion >= self._cancel_at_percent
+                ):
+                    cancel_msg = (
+                        f"Auto-cancelling print at {job.completion:.1f}% "
+                        f"(cancel_at_percent={self._cancel_at_percent}%)."
+                    )
+                    logger.info("[watch %s] %s", self._watch_id, cancel_msg)
+                    try:
+                        adapter.cancel_print()
+                    except Exception as cancel_exc:
+                        logger.warning(
+                            "[watch %s] Auto-cancel failed: %s",
+                            self._watch_id,
+                            cancel_exc,
+                        )
+                    result = {
+                        "success": True,
+                        "watch_id": self._watch_id,
+                        "outcome": "auto_cancelled",
+                        "cancel_at_percent": self._cancel_at_percent,
+                        "cancelled_at_percent": job.completion,
+                        "elapsed_seconds": round(elapsed, 1),
+                        "progress_log": list(self._progress_log[-20:]),
+                        "snapshots": list(self._snapshots),
+                        "snapshot_failures": self._snapshot_failures,
+                        "final_state": state.to_dict(),
+                        "message": cancel_msg,
+                    }
+                    self._finish(result)
+                    return
 
                 # Stall detection — check if completion has changed
                 if job.completion is not None:
@@ -11866,14 +12353,54 @@ class _PrintWatcher:
                         image_data = adapter.get_snapshot()
                         if image_data and len(image_data) > 100:
                             import base64
+                            import hashlib
 
                             phase = _detect_phase(job.completion)
+
+                            # Camera ground-truth: hash this frame and
+                            # compare to the previous snapshot.  If images
+                            # change but telemetry reports no progress,
+                            # emit a warning so agents don't trust a
+                            # broken telemetry script.
+                            img_hash = hashlib.md5(image_data).hexdigest()  # noqa: S324 — not for security
+                            camera_changed = (
+                                self._prev_snapshot_hash is not None
+                                and img_hash != self._prev_snapshot_hash
+                            )
+                            self._prev_snapshot_hash = img_hash
+
+                            telemetry_mismatch = False
+                            if (
+                                camera_changed
+                                and _last_completion is not None
+                                and job.completion is not None
+                                and abs(job.completion - _last_completion) < 0.1
+                                and (time.time() - _last_progress_time) > self._poll_interval * 3
+                            ):
+                                    telemetry_mismatch = True
+                                    logger.warning(
+                                        "[watch %s] Camera ground-truth mismatch: "
+                                        "image changed but telemetry stuck at %.1f%% "
+                                        "for %.0fs. Telemetry may be unreliable.",
+                                        self._watch_id,
+                                        job.completion,
+                                        time.time() - _last_progress_time,
+                                    )
+
                             snap = {
                                 "captured_at": now,
                                 "completion_percent": job.completion,
                                 "print_phase": phase,
                                 "image_base64": base64.b64encode(image_data).decode("ascii"),
+                                "camera_changed": camera_changed,
                             }
+                            if telemetry_mismatch:
+                                snap["telemetry_mismatch"] = True
+                                snap["telemetry_mismatch_message"] = (
+                                    f"Camera shows print bed changed but telemetry "
+                                    f"stuck at {job.completion:.1f}%. "
+                                    f"Progress data may be unreliable."
+                                )
 
                             # Persist to disk + DB when save_to_disk is enabled
                             if self._save_to_disk and self._save_dir is not None:
@@ -11974,6 +12501,7 @@ def watch_print(
     poll_interval: int = 15,
     stall_timeout: int = 600,
     save_to_disk: bool = False,
+    cancel_at_percent: float = 0.0,
 ) -> dict:
     """Start background monitoring of an in-progress print.
 
@@ -11988,6 +12516,16 @@ def watch_print(
     1. **Print terminal state** — completed, failed, cancelled, or offline.
     2. **Snapshot batch ready** — *max_snapshots* images collected.
     3. **Timeout** — the print has not finished within *timeout* seconds.
+    4. **cancel_at_percent** — if set (> 0), auto-cancels when completion
+       reaches or exceeds this percentage.  Use this for test prints,
+       calibration runs, or any case where you want to stop at a specific
+       progress point without writing a polling script.
+
+    **Camera ground-truth**: each captured snapshot is hashed and compared to
+    the previous frame.  If the camera shows the print bed changing but
+    telemetry reports zero progress, the snapshot is flagged with
+    ``telemetry_mismatch: true`` so agents can detect broken monitoring
+    scripts and fall back to visual inspection.
 
     Args:
         printer_name: Target printer.  Omit for the default printer.
@@ -12001,6 +12539,9 @@ def watch_print(
             ``~/.kiln/timelapses/<watch_id>/`` and persist metadata to the
             database.  Use ``list_snapshots`` to query saved frames after
             the print completes (default False).
+        cancel_at_percent: Auto-cancel when completion ≥ this value.
+            Set to 0 (default) to disable.  Example: ``cancel_at_percent=50``
+            cancels the print as soon as it reaches 50%.
     """
     if err := _check_auth("monitoring"):
         return err
@@ -12033,6 +12574,7 @@ def watch_print(
             event_bus=_event_bus,
             stall_timeout=stall_timeout,
             save_to_disk=save_to_disk,
+            cancel_at_percent=cancel_at_percent,
         )
         _watchers[watch_id] = watcher
         watcher.start()
@@ -12048,6 +12590,7 @@ def watch_print(
             "poll_interval": poll_interval,
             "stall_timeout": stall_timeout,
             "save_to_disk": save_to_disk,
+            "cancel_at_percent": cancel_at_percent,
             "message": (
                 f"Background watcher started (id={watch_id}). "
                 "Use watch_print_status to check progress, "

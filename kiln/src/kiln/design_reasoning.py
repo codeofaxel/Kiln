@@ -2031,3 +2031,1502 @@ _MATERIAL_DEFAULTS: dict[str, dict[str, Any]] = {
         "layer_height": 0.2,
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Parametric optimization
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class OptimizationResult:
+    """Result of parametric template optimization."""
+
+    template_id: str
+    best_params: dict[str, Any]
+    best_score: int
+    best_grade: str
+    best_stl_path: str
+    variants_tested: int
+    all_scores: list[dict[str, Any]] = field(default_factory=list)
+    summary: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "template_id": self.template_id,
+            "best_params": self.best_params,
+            "best_score": self.best_score,
+            "best_grade": self.best_grade,
+            "best_stl_path": self.best_stl_path,
+            "variants_tested": self.variants_tested,
+            "all_scores": self.all_scores,
+            "summary": self.summary,
+        }
+
+
+def optimize_template_params(
+    template_id: str,
+    *,
+    templates_path: str | None = None,
+    samples_per_param: int = 3,
+    max_variants: int = 27,
+    constraints: dict[str, Any] | None = None,
+    output_dir: str | None = None,
+) -> OptimizationResult:
+    """Sweep template parameters to find the structurally strongest variant.
+
+    Samples each parameter at ``samples_per_param`` evenly spaced points
+    within its [min, max] range, generates each variant via OpenSCAD,
+    runs structural analysis, and returns the highest-scoring configuration.
+
+    :param template_id: Template ID from design_templates.json.
+    :param templates_path: Path to templates JSON (auto-detected if None).
+    :param samples_per_param: Number of sample points per parameter (default 3).
+    :param max_variants: Maximum total variants to test (default 27).
+    :param constraints: Optional constraints like ``{"max_width_mm": 100}``.
+    :param output_dir: Directory for generated STLs (temp dir if None).
+    :returns: :class:`OptimizationResult` with best params and STL path.
+    """
+    import itertools
+    import json
+    import tempfile
+    from string import Template
+
+    # Load templates
+    if templates_path is None:
+        tpl_path = Path(__file__).parent / "data" / "design_templates.json"
+    else:
+        tpl_path = Path(templates_path)
+
+    if not tpl_path.is_file():
+        raise ValueError(f"Templates file not found: {tpl_path}")
+
+    with open(tpl_path) as fh:
+        data = json.load(fh)
+
+    tpl = data.get(template_id)
+    if not tpl or template_id.startswith("_"):
+        raise ValueError(f"Template {template_id!r} not found")
+
+    params_spec = tpl.get("parameters", {})
+    scad_template = tpl.get("scad_template", "")
+
+    if not params_spec:
+        raise ValueError(f"Template {template_id!r} has no parameters to optimize")
+
+    # Generate parameter sample points
+    param_names: list[str] = []
+    param_values: list[list[float]] = []
+
+    for name, spec in params_spec.items():
+        pmin = spec.get("min", spec.get("default", 0))
+        pmax = spec.get("max", spec.get("default", 100))
+        default = spec.get("default", (pmin + pmax) / 2)
+
+        # Sample points: min, evenly spaced midpoints, max
+        if samples_per_param <= 1:
+            points = [default]
+        elif samples_per_param == 2:
+            points = [pmin, pmax]
+        else:
+            step = (pmax - pmin) / (samples_per_param - 1)
+            points = [pmin + i * step for i in range(samples_per_param)]
+
+        # Round to reasonable precision
+        unit = spec.get("unit", "mm")
+        if unit == "degrees":
+            points = [round(p, 1) for p in points]
+        else:
+            points = [round(p, 2) for p in points]
+
+        param_names.append(name)
+        param_values.append(points)
+
+    # Generate parameter combinations (limited by max_variants)
+    all_combos = list(itertools.product(*param_values))
+    if len(all_combos) > max_variants:
+        # Sample evenly
+        step = len(all_combos) / max_variants
+        indices = [int(i * step) for i in range(max_variants)]
+        all_combos = [all_combos[i] for i in indices]
+
+    # Set up working directory
+    work_dir = output_dir or tempfile.mkdtemp(prefix="kiln_optimize_")
+    Path(work_dir).mkdir(parents=True, exist_ok=True)
+
+    # Try to find OpenSCAD
+    try:
+        from kiln.generation.openscad import _find_openscad
+
+        openscad_binary = _find_openscad()
+    except Exception as exc:
+        raise ValueError(
+            "OpenSCAD is required for template optimization but was not found. "
+            "Install from https://openscad.org/"
+        ) from exc
+
+    best_score = -1
+    best_grade = "F"
+    best_params: dict[str, Any] = {}
+    best_stl = ""
+    all_scores: list[dict[str, Any]] = []
+
+    import subprocess
+
+    for idx, combo in enumerate(all_combos):
+        params = dict(zip(param_names, combo, strict=False))
+
+        # Apply constraints
+        if constraints:
+            skip = False
+            max_width = constraints.get("max_width_mm")
+            max_depth = constraints.get("max_depth_mm")
+            max_height = constraints.get("max_height_mm")
+            # Simple heuristic: check if common dimension params exceed constraints
+            for pname, pval in params.items():
+                if max_width and "width" in pname.lower() and pval > max_width:
+                    skip = True
+                if max_depth and "depth" in pname.lower() and pval > max_depth:
+                    skip = True
+                if max_height and "height" in pname.lower() and pval > max_height:
+                    skip = True
+            if skip:
+                continue
+
+        # Generate SCAD code
+        scad_code = Template(scad_template).safe_substitute(params)
+        scad_path = str(Path(work_dir) / f"variant_{idx}.scad")
+        stl_path = str(Path(work_dir) / f"variant_{idx}.stl")
+
+        Path(scad_path).write_text(scad_code)
+
+        # Compile to STL
+        try:
+            proc = subprocess.run(
+                [openscad_binary, "-o", stl_path, scad_path],
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            if proc.returncode != 0 or not Path(stl_path).is_file():
+                continue
+            if Path(stl_path).stat().st_size < 100:
+                continue
+        except Exception:
+            continue
+
+        # Score structurally
+        try:
+            plan = generate_improvement_plan(stl_path)
+            score = plan.overall_structural_score
+            grade = plan.structural_grade
+
+            all_scores.append({
+                "params": params,
+                "score": score,
+                "grade": grade,
+                "risk_count": len(plan.risks),
+                "stl_path": stl_path,
+            })
+
+            if score > best_score:
+                best_score = score
+                best_grade = grade
+                best_params = params
+                best_stl = stl_path
+        except Exception:
+            continue
+
+    if not all_scores:
+        raise ValueError(
+            f"No valid variants could be generated for template {template_id!r}"
+        )
+
+    # Clean up non-best STLs if using temp dir
+    if output_dir is None:
+        for entry in all_scores:
+            if entry["stl_path"] != best_stl:
+                with contextlib.suppress(Exception):
+                    Path(entry["stl_path"]).unlink()
+                scad = entry["stl_path"].replace(".stl", ".scad")
+                with contextlib.suppress(Exception):
+                    Path(scad).unlink()
+
+    summary = (
+        f"Tested {len(all_scores)} variants of {tpl.get('display_name', template_id)}. "
+        f"Best score: {best_score}/100 ({best_grade}). "
+        f"Score range: {min(s['score'] for s in all_scores)}-{max(s['score'] for s in all_scores)}."
+    )
+
+    return OptimizationResult(
+        template_id=template_id,
+        best_params=best_params,
+        best_score=best_score,
+        best_grade=best_grade,
+        best_stl_path=best_stl,
+        variants_tested=len(all_scores),
+        all_scores=all_scores,
+        summary=summary,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Multi-part plate arrangement
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PlateArrangement:
+    """Result of arranging parts on a build plate."""
+
+    arranged_parts: list[dict[str, Any]] = field(default_factory=list)
+    overflow_parts: list[str] = field(default_factory=list)
+    plate_utilization: float = 0.0
+    total_parts: int = 0
+    fitted_parts: int = 0
+    plate_width_mm: float = 256.0
+    plate_depth_mm: float = 256.0
+    summary: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "arranged_parts": self.arranged_parts,
+            "overflow_parts": self.overflow_parts,
+            "plate_utilization": round(self.plate_utilization, 4),
+            "total_parts": self.total_parts,
+            "fitted_parts": self.fitted_parts,
+            "plate_width_mm": self.plate_width_mm,
+            "plate_depth_mm": self.plate_depth_mm,
+            "summary": self.summary,
+        }
+
+
+def arrange_on_plate(
+    file_paths: list[str],
+    *,
+    plate_width_mm: float = 256.0,
+    plate_depth_mm: float = 256.0,
+    spacing_mm: float = 5.0,
+    copies: dict[str, int] | None = None,
+) -> PlateArrangement:
+    """Pack multiple STL files onto a virtual build plate.
+
+    Uses a greedy bottom-left bin-packing algorithm: parts are sorted by
+    bounding-box area (largest first) and placed at the leftmost-bottommost
+    position that fits within the plate dimensions.
+
+    :param file_paths: Paths to STL files to arrange.
+    :param plate_width_mm: Build plate width (X) in mm.
+    :param plate_depth_mm: Build plate depth (Y) in mm.
+    :param spacing_mm: Minimum gap between parts in mm.
+    :param copies: Optional mapping of filename to copy count.
+    :returns: :class:`PlateArrangement` with placement results.
+    :raises ValueError: If any file path does not exist.
+    """
+    if not file_paths:
+        return PlateArrangement(
+            plate_width_mm=plate_width_mm,
+            plate_depth_mm=plate_depth_mm,
+            summary="No files provided.",
+        )
+
+    # Validate all paths exist
+    for fp in file_paths:
+        if not Path(fp).is_file():
+            msg = f"File not found: {fp}"
+            raise ValueError(msg)
+
+    import trimesh  # lazy import — after validation
+
+    # Build list of (path, width, depth, height) entries, expanding copies
+    parts: list[tuple[str, float, float, float]] = []
+    for fp in file_paths:
+        mesh = trimesh.load(fp, force="mesh")
+        extents = mesh.bounding_box.extents  # [x, y, z]
+        w, d, h = float(extents[0]), float(extents[1]), float(extents[2])
+        count = 1
+        if copies:
+            count = copies.get(Path(fp).name, copies.get(fp, 1))
+        for _ in range(max(1, count)):
+            parts.append((fp, w, d, h))
+
+    # Sort by area descending (largest first for better packing)
+    parts.sort(key=lambda p: p[1] * p[2], reverse=True)
+
+    # Greedy bottom-left bin packing
+    placed: list[dict[str, Any]] = []
+    overflow: list[str] = []
+
+    for path, pw, pd, ph in parts:
+        best_x: float | None = None
+        best_y: float | None = None
+
+        # Scan grid positions (step by spacing for efficiency)
+        step = max(1.0, spacing_mm)
+        y = 0.0
+        while y + pd <= plate_depth_mm:
+            x = 0.0
+            while x + pw <= plate_width_mm:
+                # Check overlap with all placed parts
+                fits = True
+                for p in placed:
+                    if (
+                        x < p["x"] + p["width"] + spacing_mm
+                        and x + pw + spacing_mm > p["x"]
+                        and y < p["y"] + p["depth"] + spacing_mm
+                        and y + pd + spacing_mm > p["y"]
+                    ):
+                        fits = False
+                        break
+                if fits:
+                    best_x, best_y = x, y
+                    break
+                x += step
+            if best_x is not None:
+                break
+            y += step
+
+        if best_x is not None and best_y is not None:
+            placed.append({
+                "path": path,
+                "x": round(best_x, 2),
+                "y": round(best_y, 2),
+                "width": round(pw, 2),
+                "depth": round(pd, 2),
+                "height": round(ph, 2),
+            })
+        else:
+            overflow.append(path)
+
+    plate_area = plate_width_mm * plate_depth_mm
+    used_area = sum(p["width"] * p["depth"] for p in placed)
+    utilization = used_area / plate_area if plate_area > 0 else 0.0
+
+    summary = (
+        f"Arranged {len(placed)}/{len(parts)} parts on "
+        f"{plate_width_mm}×{plate_depth_mm}mm plate. "
+        f"Utilization: {utilization:.1%}."
+    )
+    if overflow:
+        summary += f" {len(overflow)} part(s) did not fit."
+
+    return PlateArrangement(
+        arranged_parts=placed,
+        overflow_parts=overflow,
+        plate_utilization=utilization,
+        total_parts=len(parts),
+        fitted_parts=len(placed),
+        plate_width_mm=plate_width_mm,
+        plate_depth_mm=plate_depth_mm,
+        summary=summary,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Natural language → CSG composition plan
+# ---------------------------------------------------------------------------
+
+_SHAPE_KEYWORDS: dict[str, str] = {
+    "box": "cube", "cube": "cube", "block": "cube", "rectangular": "cube",
+    "square": "cube",
+    "cylinder": "cylinder", "rod": "cylinder", "shaft": "cylinder",
+    "pillar": "cylinder", "column": "cylinder",
+    "tube": "pipe", "pipe": "pipe",
+    "sphere": "sphere", "ball": "sphere", "dome": "sphere",
+    "cone": "cone", "funnel": "cone", "taper": "cone", "pyramid": "cone",
+    "torus": "torus", "donut": "torus", "ring": "torus",
+    "wedge": "wedge", "ramp": "wedge", "slope": "wedge",
+    "hexagon": "hex_prism", "hex": "hex_prism", "bolt": "hex_prism",
+    "nut": "hex_prism",
+    "text": "text", "label": "text", "letters": "text", "engraved": "text",
+    "rounded": "rounded_cube", "fillet": "rounded_cube",
+}
+
+_OP_KEYWORDS: dict[str, str] = {
+    "hole": "difference", "hollow": "difference", "cut": "difference",
+    "subtract": "difference", "minus": "difference",
+    "combine": "union", "join": "union", "merge": "union",
+    "attach": "union", "and": "union", "with": "union",
+    "overlap": "intersection", "common": "intersection",
+    "intersect": "intersection",
+}
+
+
+@dataclass
+class CompositionPlan:
+    """A CSG composition plan generated from a text description."""
+
+    description: str
+    primitives: list[dict[str, Any]] = field(default_factory=list)
+    operations: list[dict[str, Any]] = field(default_factory=list)
+    estimated_dimensions_mm: dict[str, float] = field(default_factory=dict)
+    complexity: str = "simple"
+    notes: list[str] = field(default_factory=list)
+    confidence: str = "medium"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "description": self.description,
+            "primitives": self.primitives,
+            "operations": self.operations,
+            "estimated_dimensions_mm": self.estimated_dimensions_mm,
+            "complexity": self.complexity,
+            "notes": self.notes,
+            "confidence": self.confidence,
+        }
+
+
+def plan_composition_from_description(
+    description: str,
+    *,
+    target_size_mm: float = 50.0,
+    material: str = "PLA",
+) -> CompositionPlan:
+    """Parse a text description into a CSG primitive composition plan.
+
+    Rule-based keyword parser — no LLM required. Scans the description
+    for shape and operation keywords, then builds a CSG tree that can be
+    passed directly to ``compose_part_from_primitives``.
+
+    :param description: Natural language description (e.g. "a cube with a hole").
+    :param target_size_mm: Target primary dimension in mm (default 50).
+    :param material: Material hint (informational only).
+    :returns: :class:`CompositionPlan` with primitives and operations.
+    """
+    import re
+
+    tokens = re.findall(r"[a-z]+", description.lower())
+    notes: list[str] = []
+
+    # Detect shapes
+    detected_shapes: list[str] = []
+    seen_shapes: set[str] = set()
+    for token in tokens:
+        shape = _SHAPE_KEYWORDS.get(token)
+        if shape and shape not in seen_shapes:
+            detected_shapes.append(shape)
+            seen_shapes.add(shape)
+
+    # Detect operations — phrase-level patterns first (higher priority)
+    detected_ops: list[str] = []
+    seen_ops: set[str] = set()
+    desc_lower = description.lower()
+
+    if ("with hole" in desc_lower or "with a hole" in desc_lower) and "difference" not in seen_ops:
+        detected_ops.append("difference")
+        seen_ops.add("difference")
+    if "hollow" in desc_lower and "difference" not in seen_ops:
+        detected_ops.append("difference")
+        seen_ops.add("difference")
+
+    # Single-token operation keywords (lower priority)
+    for token in tokens:
+        op = _OP_KEYWORDS.get(token)
+        if op and op not in seen_ops:
+            detected_ops.append(op)
+            seen_ops.add(op)
+
+    # Default: if no shapes detected, use cube
+    if not detected_shapes:
+        detected_shapes = ["cube"]
+        notes.append("No shape keywords detected; defaulting to cube.")
+
+    # Build primitives
+    s = target_size_mm
+    primitives: list[dict[str, Any]] = []
+
+    for i, shape in enumerate(detected_shapes):
+        scale = 1.0 if i == 0 else 0.5
+        dim = round(s * scale, 1)
+
+        prim: dict[str, Any] = {"type": "primitive", "shape": shape, "params": {}}
+
+        if shape == "cube":
+            prim["params"] = {"size": [dim, dim, dim]}
+        elif shape == "cylinder":
+            prim["params"] = {"r": round(dim / 2, 1), "h": dim}
+        elif shape == "sphere":
+            prim["params"] = {"r": round(dim / 2, 1)}
+        elif shape == "cone":
+            prim["params"] = {"r1": round(dim / 2, 1), "r2": 1, "h": dim}
+        elif shape == "torus":
+            prim["params"] = {"major_r": round(dim / 2, 1), "minor_r": round(dim / 8, 1)}
+        elif shape == "wedge":
+            prim["params"] = {"width": dim, "depth": dim, "height": dim}
+        elif shape == "hex_prism":
+            prim["params"] = {"r": round(dim / 2, 1), "h": dim}
+        elif shape == "text":
+            # Try to extract text content from description
+            text_content = "ABC"
+            for token in tokens:
+                if token not in _SHAPE_KEYWORDS and token not in _OP_KEYWORDS and len(token) > 2:
+                    text_content = token.capitalize()
+                    break
+            prim["params"] = {"text": text_content, "size": round(dim / 4, 1), "depth": round(dim / 10, 1)}
+        elif shape == "rounded_cube":
+            prim["params"] = {"size": [dim, dim, dim], "radius": round(dim / 10, 1)}
+        elif shape == "pipe":
+            prim["params"] = {"h": dim, "outer_r": round(dim / 2, 1), "inner_r": round(dim / 3, 1)}
+
+        # Position secondary shapes centered on primary
+        if i > 0:
+            prim["translate"] = [0, 0, round(s / 4, 1)]
+
+        primitives.append(prim)
+
+    # If "difference" detected, add a hole cylinder for it
+    if "difference" in seen_ops and len(detected_shapes) == 1:
+        hole_r = round(s * 0.15, 1)
+        primitives.append({
+            "type": "primitive",
+            "shape": "cylinder",
+            "params": {"r": hole_r, "h": round(s + 2, 1)},
+            "translate": [0, 0, -1],
+        })
+
+    # Build operations
+    operations: list[dict[str, Any]] = []
+    if detected_ops:
+        operations = [{"type": "operation", "op": detected_ops[0]}]
+    elif len(primitives) > 1:
+        operations = [{"type": "operation", "op": "union"}]
+
+    # Classify complexity
+    n = len(primitives)
+    complexity = "simple" if n <= 1 else ("moderate" if n <= 3 else "complex")
+
+    # Confidence based on keyword match rate
+    total_tokens = max(len(tokens), 1)
+    matched = sum(1 for t in tokens if t in _SHAPE_KEYWORDS or t in _OP_KEYWORDS)
+    ratio = matched / total_tokens
+    confidence = "high" if ratio > 0.3 else ("medium" if ratio > 0.1 else "low")
+
+    notes.append(f"Material hint: {material} (informational).")
+
+    primary_dim = s
+    return CompositionPlan(
+        description=description,
+        primitives=primitives,
+        operations=operations,
+        estimated_dimensions_mm={
+            "width": primary_dim,
+            "depth": primary_dim,
+            "height": primary_dim,
+        },
+        complexity=complexity,
+        notes=notes,
+        confidence=confidence,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Loop 14: Template search by description
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TemplateSearchResult:
+    """Result of a fuzzy template search."""
+
+    query: str = ""
+    matches: list[dict[str, Any]] = field(default_factory=list)
+    total_templates: int = 0
+    search_method: str = "keyword"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "query": self.query,
+            "matches": list(self.matches),
+            "total_templates": self.total_templates,
+            "search_method": self.search_method,
+        }
+
+
+def search_templates(
+    query: str,
+    *,
+    max_results: int = 10,
+    category_filter: str = "",
+) -> TemplateSearchResult:
+    """Search templates by natural-language description.
+
+    Uses token-overlap scoring: each query token is checked against the
+    template's ID, description, category, and tags.  Templates are ranked
+    by match ratio and returned in descending score order.
+
+    :param query: Natural-language search string.
+    :param max_results: Cap on returned matches (default 10).
+    :param category_filter: If set, only return templates in this category.
+    :returns: ``TemplateSearchResult`` with scored matches.
+    """
+    import json as _json
+
+    if not query or not query.strip():
+        return TemplateSearchResult(query=query, total_templates=0)
+
+    templates_path = Path(__file__).parent / "data" / "design_templates.json"
+    if not templates_path.exists():
+        return TemplateSearchResult(query=query, total_templates=0)
+
+    with open(templates_path) as fh:
+        data: dict[str, Any] = _json.load(fh)
+
+    # Normalised query tokens
+    q_tokens = query.lower().split()
+    if not q_tokens:
+        return TemplateSearchResult(query=query, total_templates=0)
+
+    scored: list[tuple[float, str, dict[str, Any]]] = []
+    template_keys = [k for k in data if not k.startswith("_")]
+
+    for tid in template_keys:
+        tmpl = data[tid]
+        cat = tmpl.get("category", "")
+        if category_filter and cat != category_filter:
+            continue
+
+        # Build searchable text from template metadata
+        desc = tmpl.get("description", "")
+        tags = tmpl.get("tags", [])
+        search_text = " ".join([
+            tid.replace("_", " "),
+            desc,
+            cat.replace("_", " "),
+            " ".join(tags) if isinstance(tags, list) else "",
+        ]).lower()
+
+        # Score = fraction of query tokens found in search text
+        hits = sum(1 for t in q_tokens if t in search_text)
+        score = hits / len(q_tokens)
+
+        if score > 0:
+            scored.append((score, tid, {
+                "template_id": tid,
+                "score": round(score, 3),
+                "description": desc,
+                "category": cat,
+            }))
+
+    # Sort by score descending, then alphabetically for ties
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    top = scored[:max_results]
+
+    return TemplateSearchResult(
+        query=query,
+        matches=[entry[2] for entry in top],
+        total_templates=len(template_keys),
+        search_method="keyword",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Loop 15: Mesh weight estimation
+# ---------------------------------------------------------------------------
+
+# Material densities in g/cm³
+_MATERIAL_DENSITIES: dict[str, float] = {
+    "pla": 1.24,
+    "abs": 1.04,
+    "petg": 1.27,
+    "tpu": 1.21,
+    "nylon": 1.14,
+    "asa": 1.07,
+    "pc": 1.20,
+    "pva": 1.23,
+    "hips": 1.05,
+    "wood": 1.15,
+    "carbon_fiber": 1.30,
+    "resin": 1.10,
+}
+
+
+@dataclass
+class WeightEstimate:
+    """Estimated weight of a 3D-printed part."""
+
+    file_path: str = ""
+    volume_mm3: float = 0.0
+    volume_cm3: float = 0.0
+    material: str = "pla"
+    density_g_cm3: float = 1.24
+    infill_percent: float = 20.0
+    wall_thickness_mm: float = 1.2
+    solid_weight_g: float = 0.0
+    estimated_weight_g: float = 0.0
+    bounding_box_mm: dict[str, float] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "file_path": self.file_path,
+            "volume_mm3": round(self.volume_mm3, 2),
+            "volume_cm3": round(self.volume_cm3, 4),
+            "material": self.material,
+            "density_g_cm3": self.density_g_cm3,
+            "infill_percent": self.infill_percent,
+            "wall_thickness_mm": self.wall_thickness_mm,
+            "solid_weight_g": round(self.solid_weight_g, 2),
+            "estimated_weight_g": round(self.estimated_weight_g, 2),
+            "bounding_box_mm": self.bounding_box_mm,
+            "notes": list(self.notes),
+        }
+
+
+def _signed_triangle_volume(
+    v0: tuple[float, ...],
+    v1: tuple[float, ...],
+    v2: tuple[float, ...],
+) -> float:
+    """Signed volume of the tetrahedron formed by a triangle and the origin."""
+    return (
+        v0[0] * (v1[1] * v2[2] - v2[1] * v1[2])
+        - v1[0] * (v0[1] * v2[2] - v2[1] * v0[2])
+        + v2[0] * (v0[1] * v1[2] - v1[1] * v0[2])
+    ) / 6.0
+
+
+def estimate_weight(
+    file_path: str,
+    *,
+    material: str = "pla",
+    infill_percent: float = 20.0,
+    wall_thickness_mm: float = 1.2,
+) -> WeightEstimate:
+    """Estimate the printed weight of an STL file.
+
+    Uses the divergence theorem to calculate mesh volume from triangles,
+    then applies material density and infill ratio to estimate weight.
+
+    :param file_path: Path to an STL file.
+    :param material: Material name (must be in ``_MATERIAL_DENSITIES``).
+    :param infill_percent: Infill percentage (0-100).
+    :param wall_thickness_mm: Perimeter wall thickness in mm.
+    :returns: ``WeightEstimate`` dataclass.
+    """
+    fp = Path(file_path)
+    if not fp.exists():
+        raise FileNotFoundError(f"STL file not found: {file_path}")
+
+    mat_key = material.lower().strip()
+    density = _MATERIAL_DENSITIES.get(mat_key, 1.24)
+    notes: list[str] = []
+    if mat_key not in _MATERIAL_DENSITIES:
+        notes.append(f"Unknown material '{material}', using PLA density (1.24 g/cm³).")
+
+    # Parse triangles
+    triangles, _verts = _parse_stl_for_analysis(file_path)
+    if not triangles:
+        raise ValueError(f"Could not parse triangles from {file_path}")
+
+    # Compute signed volume via divergence theorem
+    total_volume = 0.0
+    for tri in triangles:
+        total_volume += _signed_triangle_volume(tri[0], tri[1], tri[2])
+    volume_mm3 = abs(total_volume)
+    volume_cm3 = volume_mm3 / 1000.0
+
+    # Bounding box
+    bbox = _bounding_box(_verts)
+    bbox_dims = {
+        "width": round(bbox["max_x"] - bbox["min_x"], 2),
+        "depth": round(bbox["max_y"] - bbox["min_y"], 2),
+        "height": round(bbox["max_z"] - bbox["min_z"], 2),
+    }
+
+    # Weight estimation model:
+    # Outer shell is solid, interior uses infill ratio
+    # Approximate shell fraction based on wall thickness vs bounding box dims
+    min_dim = min(bbox_dims["width"], bbox_dims["depth"], bbox_dims["height"])
+    if min_dim > 0:
+        shell_fraction = min(1.0, (2 * wall_thickness_mm) / min_dim)
+    else:
+        shell_fraction = 1.0
+
+    infill_ratio = max(0.0, min(100.0, infill_percent)) / 100.0
+    effective_fill = shell_fraction + (1 - shell_fraction) * infill_ratio
+    effective_fill = min(1.0, effective_fill)
+
+    solid_weight = volume_cm3 * density
+    estimated_weight = solid_weight * effective_fill
+
+    notes.append(
+        f"Shell fraction: {shell_fraction:.1%}, "
+        f"effective fill: {effective_fill:.1%}."
+    )
+
+    return WeightEstimate(
+        file_path=file_path,
+        volume_mm3=volume_mm3,
+        volume_cm3=volume_cm3,
+        material=mat_key,
+        density_g_cm3=density,
+        infill_percent=infill_percent,
+        wall_thickness_mm=wall_thickness_mm,
+        solid_weight_g=solid_weight,
+        estimated_weight_g=estimated_weight,
+        bounding_box_mm=bbox_dims,
+        notes=notes,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Loop 16: Design-to-GCode end-to-end pipeline
+# ---------------------------------------------------------------------------
+
+@dataclass
+class DesignToGCodeResult:
+    """Result of the full design-to-gcode pipeline."""
+
+    description: str = ""
+    template_id: str = ""
+    scad_file: str = ""
+    stl_file: str = ""
+    gcode_file: str = ""
+    steps_completed: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    weight_estimate_g: float = 0.0
+    structural_risks: int = 0
+    success: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "description": self.description,
+            "template_id": self.template_id,
+            "scad_file": self.scad_file,
+            "stl_file": self.stl_file,
+            "gcode_file": self.gcode_file,
+            "steps_completed": list(self.steps_completed),
+            "errors": list(self.errors),
+            "weight_estimate_g": round(self.weight_estimate_g, 2),
+            "structural_risks": self.structural_risks,
+            "success": self.success,
+        }
+
+
+def design_to_gcode(
+    description: str,
+    *,
+    output_dir: str = "",
+    material: str = "PLA",
+    printer_model: str = "",
+    infill_percent: float = 20.0,
+) -> DesignToGCodeResult:
+    """End-to-end pipeline: description → template → STL → structural check → GCode.
+
+    Steps:
+        1. Search templates for best match
+        2. Generate STL via OpenSCAD
+        3. Run structural risk analysis
+        4. Estimate weight
+        5. Slice to G-code (if slicer available)
+
+    :param description: Natural-language design description.
+    :param output_dir: Directory for output files (uses tempdir if empty).
+    :param material: Material for weight estimation and slicing.
+    :param printer_model: Printer model for slicer profile lookup.
+    :param infill_percent: Infill percentage for weight estimation.
+    :returns: ``DesignToGCodeResult`` with paths and metadata.
+    """
+    import json as _json
+    import tempfile
+
+    result = DesignToGCodeResult(description=description)
+
+    if not description or not description.strip():
+        result.errors.append("Empty description provided.")
+        return result
+
+    out_dir = Path(output_dir) if output_dir else Path(tempfile.mkdtemp(prefix="kiln_d2g_"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Step 1: Find best matching template
+    search = search_templates(description, max_results=1)
+    if not search.matches:
+        result.errors.append("No matching template found for description.")
+        result.steps_completed.append("template_search (no match)")
+        return result
+
+    template_id = search.matches[0]["template_id"]
+    result.template_id = template_id
+    result.steps_completed.append("template_search")
+
+    # Step 2: Load template and generate SCAD → STL
+    templates_path = Path(__file__).parent / "data" / "design_templates.json"
+    with open(templates_path) as fh:
+        templates = _json.load(fh)
+
+    tmpl = templates.get(template_id)
+    if not tmpl or "scad_template" not in tmpl:
+        result.errors.append(f"Template '{template_id}' has no scad_template.")
+        return result
+
+    # Write SCAD file
+    scad_path = out_dir / f"{template_id}.scad"
+    scad_code = tmpl["scad_template"]
+    # Apply default params
+    params = tmpl.get("default_params", {})
+    for k, v in params.items():
+        if isinstance(v, (int, float)):
+            scad_code = f"{k} = {v};\n" + scad_code
+    scad_path.write_text(scad_code)
+    result.scad_file = str(scad_path)
+    result.steps_completed.append("scad_generation")
+
+    # Try to render STL via OpenSCAD
+    stl_path = out_dir / f"{template_id}.stl"
+    try:
+        from kiln.generation.openscad import OpenSCADProvider
+
+        provider = OpenSCADProvider()
+        provider.render(str(scad_path), str(stl_path))
+        result.stl_file = str(stl_path)
+        result.steps_completed.append("stl_rendering")
+    except Exception as exc:
+        result.errors.append(f"STL rendering failed: {exc}")
+        return result
+
+    # Step 3: Structural risk analysis
+    try:
+        risks = analyze_structural_risks(str(stl_path))
+        result.structural_risks = len(risks)
+        result.steps_completed.append("structural_analysis")
+    except Exception as exc:
+        result.errors.append(f"Structural analysis failed: {exc}")
+        # Non-fatal — continue
+
+    # Step 4: Weight estimation
+    try:
+        weight = estimate_weight(
+            str(stl_path),
+            material=material,
+            infill_percent=infill_percent,
+        )
+        result.weight_estimate_g = weight.estimated_weight_g
+        result.steps_completed.append("weight_estimation")
+    except Exception as exc:
+        result.errors.append(f"Weight estimation failed: {exc}")
+
+    # Step 5: Slice to G-code
+    gcode_path = out_dir / f"{template_id}.gcode"
+    try:
+        from kiln.slicer import slice_stl
+
+        slice_stl(
+            str(stl_path),
+            str(gcode_path),
+            printer_model=printer_model,
+        )
+        result.gcode_file = str(gcode_path)
+        result.steps_completed.append("slicing")
+    except ImportError:
+        result.errors.append("Slicer module not available.")
+    except Exception as exc:
+        result.errors.append(f"Slicing failed: {exc}")
+
+    result.success = bool(result.stl_file)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Loop 17: STL merge / assembly
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MergedMeshResult:
+    """Result of merging multiple STL files."""
+
+    output_path: str = ""
+    input_files: list[str] = field(default_factory=list)
+    total_triangles: int = 0
+    bounding_box_mm: dict[str, float] = field(default_factory=dict)
+    success: bool = False
+    errors: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "output_path": self.output_path,
+            "input_files": list(self.input_files),
+            "total_triangles": self.total_triangles,
+            "bounding_box_mm": self.bounding_box_mm,
+            "success": self.success,
+            "errors": list(self.errors),
+        }
+
+
+def merge_stl_files(
+    file_paths: list[str],
+    output_path: str,
+    *,
+    positions: list[dict[str, float]] | None = None,
+) -> MergedMeshResult:
+    """Merge multiple STL files into a single mesh.
+
+    Optionally repositions each part via translate offsets before merging.
+
+    :param file_paths: List of STL file paths to merge.
+    :param output_path: Where to write the combined STL.
+    :param positions: Optional list of ``{"x": ..., "y": ..., "z": ...}``
+        translate offsets for each file. Must match length of *file_paths*.
+    :returns: ``MergedMeshResult`` with combined mesh info.
+    """
+    result = MergedMeshResult(input_files=list(file_paths))
+
+    if not file_paths:
+        result.errors.append("No input files provided.")
+        return result
+
+    if positions and len(positions) != len(file_paths):
+        result.errors.append(
+            f"positions length ({len(positions)}) must match "
+            f"file_paths length ({len(file_paths)})."
+        )
+        return result
+
+    # Validate all files exist
+    for fp in file_paths:
+        if not Path(fp).exists():
+            result.errors.append(f"File not found: {fp}")
+    if result.errors:
+        return result
+
+    # Collect all triangles with optional translation
+    all_triangles: list[tuple[tuple[float, ...], ...]] = []
+    for idx, fp in enumerate(file_paths):
+        tris, _verts = _parse_stl_for_analysis(fp)
+        if not tris:
+            result.errors.append(f"Could not parse triangles from {fp}")
+            continue
+
+        if positions:
+            offset = positions[idx]
+            dx = offset.get("x", 0.0)
+            dy = offset.get("y", 0.0)
+            dz = offset.get("z", 0.0)
+            translated: list[tuple[tuple[float, ...], ...]] = []
+            for tri in tris:
+                new_tri = tuple(
+                    (v[0] + dx, v[1] + dy, v[2] + dz) for v in tri
+                )
+                translated.append(new_tri)
+            all_triangles.extend(translated)
+        else:
+            all_triangles.extend(tris)
+
+    if not all_triangles:
+        result.errors.append("No triangles parsed from any input file.")
+        return result
+
+    # Write merged binary STL
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(out, "wb") as fh:
+        # 80-byte header
+        fh.write(b"Kiln merged STL" + b"\x00" * 65)
+        # Triangle count (uint32)
+        fh.write(struct.pack("<I", len(all_triangles)))
+        for tri in all_triangles:
+            # Compute normal
+            n = _triangle_normal(tri)
+            fh.write(struct.pack("<3f", *n))
+            for v in tri:
+                fh.write(struct.pack("<3f", *v[:3]))
+            # Attribute byte count
+            fh.write(struct.pack("<H", 0))
+
+    all_verts = [v for tri in all_triangles for v in tri]
+    bbox = _bounding_box(all_verts)
+    result.output_path = str(out)
+    result.total_triangles = len(all_triangles)
+    result.bounding_box_mm = {
+        "width": round(bbox["max_x"] - bbox["min_x"], 2),
+        "depth": round(bbox["max_y"] - bbox["min_y"], 2),
+        "height": round(bbox["max_z"] - bbox["min_z"], 2),
+    }
+    result.success = True
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Loop 18: Cross-section / cutaway view
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CrossSectionResult:
+    """Result of slicing a mesh at a plane to reveal internal structure."""
+
+    file_path: str = ""
+    plane: str = "z"
+    plane_offset_mm: float = 0.0
+    contour_count: int = 0
+    contour_points: list[list[tuple[float, float]]] = field(default_factory=list)
+    bounding_box_mm: dict[str, float] = field(default_factory=dict)
+    cross_section_area_mm2: float = 0.0
+    success: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "file_path": self.file_path,
+            "plane": self.plane,
+            "plane_offset_mm": round(self.plane_offset_mm, 3),
+            "contour_count": self.contour_count,
+            "contour_points": [
+                [(round(x, 3), round(y, 3)) for x, y in contour]
+                for contour in self.contour_points
+            ],
+            "bounding_box_mm": self.bounding_box_mm,
+            "cross_section_area_mm2": round(self.cross_section_area_mm2, 3),
+            "success": self.success,
+        }
+
+
+def cross_section_at_plane(
+    file_path: str,
+    *,
+    plane: str = "z",
+    offset_ratio: float = 0.5,
+    offset_mm: float | None = None,
+) -> CrossSectionResult:
+    """Compute the 2D cross-section of a mesh at a given plane.
+
+    Slices the mesh perpendicular to the chosen axis and returns the
+    contour polygons and cross-sectional area.
+
+    :param file_path: Path to STL file.
+    :param plane: Axis perpendicular to the cut plane — "x", "y", or "z".
+    :param offset_ratio: Fractional position along the axis (0.0=min, 1.0=max).
+        Ignored if *offset_mm* is provided.
+    :param offset_mm: Absolute position along the axis in mm.
+    :returns: ``CrossSectionResult`` with contour data.
+    """
+    fp = Path(file_path)
+    if not fp.exists():
+        raise FileNotFoundError(f"STL file not found: {file_path}")
+
+    plane = plane.lower().strip()
+    if plane not in ("x", "y", "z"):
+        raise ValueError(f"plane must be 'x', 'y', or 'z', got '{plane}'")
+
+    triangles, _verts = _parse_stl_for_analysis(file_path)
+    if not triangles:
+        raise ValueError(f"Could not parse triangles from {file_path}")
+
+    bbox = _bounding_box(_verts)
+
+    # Determine axis index and compute cut position
+    axis_idx = {"x": 0, "y": 1, "z": 2}[plane]
+    axis_keys = {0: ("min_x", "max_x"), 1: ("min_y", "max_y"), 2: ("min_z", "max_z")}
+    axis_min = bbox[axis_keys[axis_idx][0]]
+    axis_max = bbox[axis_keys[axis_idx][1]]
+
+    if offset_mm is not None:
+        cut_pos = offset_mm
+    else:
+        ratio = max(0.0, min(1.0, offset_ratio))
+        cut_pos = axis_min + ratio * (axis_max - axis_min)
+
+    # Collect intersection segments
+    # For each triangle, find the intersection with the cut plane
+    segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    # Map 3D coords to 2D by dropping the cut axis
+    keep_axes = [i for i in range(3) if i != axis_idx]
+
+    for tri in triangles:
+        pts_on_plane: list[tuple[float, float]] = []
+        for i in range(3):
+            v0 = tri[i]
+            v1 = tri[(i + 1) % 3]
+            a_val = v0[axis_idx]
+            b_val = v1[axis_idx]
+            # Check if edge crosses the cut plane
+            if (a_val <= cut_pos <= b_val) or (b_val <= cut_pos <= a_val):
+                denom = b_val - a_val
+                if abs(denom) < 1e-12:
+                    # Edge lies on the plane
+                    pts_on_plane.append(
+                        (v0[keep_axes[0]], v0[keep_axes[1]])
+                    )
+                else:
+                    t = (cut_pos - a_val) / denom
+                    ix = v0[keep_axes[0]] + t * (v1[keep_axes[0]] - v0[keep_axes[0]])
+                    iy = v0[keep_axes[1]] + t * (v1[keep_axes[1]] - v0[keep_axes[1]])
+                    pts_on_plane.append((ix, iy))
+
+        if len(pts_on_plane) >= 2:
+            segments.append((pts_on_plane[0], pts_on_plane[1]))
+
+    # Build contours from segments by chaining endpoints
+    contours = _chain_segments(segments)
+
+    # Compute area of each contour using the shoelace formula
+    total_area = 0.0
+    for contour in contours:
+        total_area += abs(_shoelace_area(contour))
+
+    bbox_dims = {
+        "width": round(bbox["max_x"] - bbox["min_x"], 2),
+        "depth": round(bbox["max_y"] - bbox["min_y"], 2),
+        "height": round(bbox["max_z"] - bbox["min_z"], 2),
+    }
+
+    return CrossSectionResult(
+        file_path=file_path,
+        plane=plane,
+        plane_offset_mm=cut_pos,
+        contour_count=len(contours),
+        contour_points=contours,
+        bounding_box_mm=bbox_dims,
+        cross_section_area_mm2=total_area,
+        success=len(contours) > 0,
+    )
+
+
+def _chain_segments(
+    segments: list[tuple[tuple[float, float], tuple[float, float]]],
+) -> list[list[tuple[float, float]]]:
+    """Chain line segments into contour polylines.
+
+    Greedy nearest-endpoint chaining with tolerance for floating-point gaps.
+    """
+    if not segments:
+        return []
+
+    eps = 1e-4
+    remaining = list(segments)
+    contours: list[list[tuple[float, float]]] = []
+
+    while remaining:
+        seg = remaining.pop(0)
+        chain = [seg[0], seg[1]]
+
+        changed = True
+        while changed:
+            changed = False
+            for i, s in enumerate(remaining):
+                # Try to attach to the end of the chain
+                if _pt_dist(chain[-1], s[0]) < eps:
+                    chain.append(s[1])
+                    remaining.pop(i)
+                    changed = True
+                    break
+                if _pt_dist(chain[-1], s[1]) < eps:
+                    chain.append(s[0])
+                    remaining.pop(i)
+                    changed = True
+                    break
+                # Try to attach to the start
+                if _pt_dist(chain[0], s[1]) < eps:
+                    chain.insert(0, s[0])
+                    remaining.pop(i)
+                    changed = True
+                    break
+                if _pt_dist(chain[0], s[0]) < eps:
+                    chain.insert(0, s[1])
+                    remaining.pop(i)
+                    changed = True
+                    break
+
+        if len(chain) >= 3:
+            contours.append(chain)
+
+    return contours
+
+
+def _pt_dist(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Euclidean distance between two 2D points."""
+    return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+
+
+def _shoelace_area(points: list[tuple[float, float]]) -> float:
+    """Signed area of a polygon via the shoelace formula."""
+    n = len(points)
+    if n < 3:
+        return 0.0
+    area = 0.0
+    for i in range(n):
+        j = (i + 1) % n
+        area += points[i][0] * points[j][1]
+        area -= points[j][0] * points[i][1]
+    return area / 2.0
+
+
+# ---------------------------------------------------------------------------
+# Loop 19: Parametric constraint solver
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ConstraintSolution:
+    """Result of solving parametric constraints."""
+
+    template_id: str = ""
+    solved_params: dict[str, float] = field(default_factory=dict)
+    constraints_satisfied: list[str] = field(default_factory=list)
+    constraints_violated: list[str] = field(default_factory=list)
+    iterations: int = 0
+    success: bool = False
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "template_id": self.template_id,
+            "solved_params": dict(self.solved_params),
+            "constraints_satisfied": list(self.constraints_satisfied),
+            "constraints_violated": list(self.constraints_violated),
+            "iterations": self.iterations,
+            "success": self.success,
+            "notes": list(self.notes),
+        }
+
+
+def solve_constraints(
+    template_id: str,
+    constraints: dict[str, Any],
+) -> ConstraintSolution:
+    """Solve parametric constraints to find valid template parameters.
+
+    Given a template ID and constraints like ``{"width": {"min": 10, "max": 50},
+    "height": {"equals": 20}}``, finds parameter values that satisfy all
+    constraints while staying within the template's declared ranges.
+
+    :param template_id: Template identifier in design_templates.json.
+    :param constraints: Dict mapping param names to constraint dicts.
+        Supported constraint keys: ``min``, ``max``, ``equals``, ``ratio``
+        (``ratio`` specifies a ratio to another param, e.g. ``{"ratio": ["width", 0.5]}``).
+    :returns: ``ConstraintSolution`` with solved parameters.
+    """
+    import json as _json
+
+    result = ConstraintSolution(template_id=template_id)
+
+    templates_path = Path(__file__).parent / "data" / "design_templates.json"
+    if not templates_path.exists():
+        result.notes.append("Templates file not found.")
+        return result
+
+    with open(templates_path) as fh:
+        data = _json.load(fh)
+
+    if template_id not in data or template_id.startswith("_"):
+        result.notes.append(f"Unknown template: {template_id}")
+        return result
+
+    tmpl = data[template_id]
+    raw_params = tmpl.get("parameters", {})
+
+    if not raw_params:
+        result.notes.append("Template has no parameters.")
+        return result
+
+    # Build flat param dict from template's parameter definitions
+    solved: dict[str, Any] = {}
+    range_bounds: dict[str, dict[str, float]] = {}
+    for pname, pdef in raw_params.items():
+        if isinstance(pdef, dict):
+            solved[pname] = pdef.get("default", 0)
+            range_bounds[pname] = {
+                "min": pdef.get("min", float("-inf")),
+                "max": pdef.get("max", float("inf")),
+            }
+        else:
+            solved[pname] = pdef
+
+    # Apply constraints iteratively
+    max_iter = 10
+    for iteration in range(max_iter):
+        result.iterations = iteration + 1
+        all_satisfied = True
+
+        for param_name, constraint in constraints.items():
+            if param_name not in solved:
+                result.constraints_violated.append(
+                    f"Unknown parameter: {param_name}"
+                )
+                continue
+
+            val = solved[param_name]
+            if not isinstance(val, (int, float)):
+                continue
+
+            # Get range bounds
+            p_range = range_bounds.get(param_name, {})
+            range_min = p_range.get("min", float("-inf"))
+            range_max = p_range.get("max", float("inf"))
+
+            # Apply "equals" constraint
+            if "equals" in constraint:
+                target = float(constraint["equals"])
+                target = max(range_min, min(range_max, target))
+                solved[param_name] = target
+                if abs(val - target) > 0.01:
+                    all_satisfied = False
+                continue
+
+            # Apply "min" constraint
+            if "min" in constraint:
+                c_min = float(constraint["min"])
+                if val < c_min:
+                    solved[param_name] = max(range_min, c_min)
+                    all_satisfied = False
+
+            # Apply "max" constraint
+            if "max" in constraint:
+                c_max = float(constraint["max"])
+                if val > c_max:
+                    solved[param_name] = min(range_max, c_max)
+                    all_satisfied = False
+
+            # Apply "ratio" constraint: [other_param, ratio_value]
+            if "ratio" in constraint:
+                ratio_spec = constraint["ratio"]
+                if isinstance(ratio_spec, list) and len(ratio_spec) == 2:
+                    other_param, ratio_val = ratio_spec[0], float(ratio_spec[1])
+                    if other_param in solved:
+                        other_val = solved[other_param]
+                        if isinstance(other_val, (int, float)):
+                            target = other_val * ratio_val
+                            target = max(range_min, min(range_max, target))
+                            if abs(val - target) > 0.01:
+                                solved[param_name] = target
+                                all_satisfied = False
+
+            # Clamp to range
+            val = solved[param_name]
+            if isinstance(val, (int, float)):
+                solved[param_name] = max(range_min, min(range_max, float(val)))
+
+        if all_satisfied:
+            break
+
+    # Validate final solution
+    satisfied: list[str] = []
+    violated: list[str] = []
+    for param_name, constraint in constraints.items():
+        if param_name not in solved:
+            violated.append(f"{param_name}: not in template")
+            continue
+
+        val = solved[param_name]
+        if not isinstance(val, (int, float)):
+            continue
+
+        ok = True
+        if "equals" in constraint and abs(val - float(constraint["equals"])) > 0.01:
+            ok = False
+        if "min" in constraint and val < float(constraint["min"]) - 0.01:
+            ok = False
+        if "max" in constraint and val > float(constraint["max"]) + 0.01:
+            ok = False
+
+        if ok:
+            satisfied.append(f"{param_name}={val}")
+        else:
+            violated.append(f"{param_name}={val} (constraint: {constraint})")
+
+    result.solved_params = {
+        k: round(v, 3) if isinstance(v, float) else v
+        for k, v in solved.items()
+    }
+    result.constraints_satisfied = satisfied
+    result.constraints_violated = violated
+    result.success = len(violated) == 0
+
+    return result

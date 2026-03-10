@@ -35,6 +35,8 @@ from kiln.generation.base import (
 logger = logging.getLogger(__name__)
 
 _MACOS_APP_PATH = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD" if sys.platform == "darwin" else ""
+# Versioned installs (e.g., OpenSCAD-2021.01.app)
+_MACOS_VERSIONED_PATTERN = "/Applications/OpenSCAD-*.app/Contents/MacOS/OpenSCAD" if sys.platform == "darwin" else ""
 
 
 def _find_openscad(explicit_path: str | None = None) -> str:
@@ -65,6 +67,25 @@ def _find_openscad(explicit_path: str | None = None) -> str:
     # Check macOS application bundle.
     if _MACOS_APP_PATH and os.path.isfile(_MACOS_APP_PATH) and os.access(_MACOS_APP_PATH, os.X_OK):
         return _MACOS_APP_PATH
+
+    # Check versioned macOS app bundles (e.g., OpenSCAD-2021.01.app).
+    if _MACOS_VERSIONED_PATTERN:
+        import glob as _glob
+
+        matches = sorted(_glob.glob(_MACOS_VERSIONED_PATTERN), reverse=True)
+        for match in matches:
+            if os.path.isfile(match) and os.access(match, os.X_OK):
+                return match
+        # If versioned app exists but isn't executable, likely Gatekeeper
+        if matches:
+            app_path = matches[0].split("/Contents/")[0]
+            raise GenerationError(
+                f"OpenSCAD found at {app_path} but cannot execute.\n"
+                f"macOS Gatekeeper may be blocking it. Fix with:\n"
+                f'  xattr -dr com.apple.quarantine "{app_path}"\n'
+                f"Then retry the operation.",
+                code="OPENSCAD_QUARANTINED",
+            )
 
     raise GenerationError(
         "OpenSCAD not found. Install it:\n"
