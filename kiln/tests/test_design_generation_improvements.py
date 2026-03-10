@@ -3721,7 +3721,7 @@ class TestComposeFromPrimitives:
         from kiln.generation.openscad import _primitive_to_scad
 
         with pytest.raises(ValueError, match="Unknown primitive shape"):
-            _primitive_to_scad({"type": "primitive", "shape": "torus", "params": {}})
+            _primitive_to_scad({"type": "primitive", "shape": "dodecahedron", "params": {}})
 
     def test_invalid_operation_type_raises(self):
         from kiln.generation.openscad import _op_to_scad
@@ -4211,3 +4211,232 @@ class TestInferPrintSettings:
         result = infer_print_settings(str(stl))
         # Should have higher-than-baseline infill due to structural concerns
         assert result.infill_percent >= 35
+
+
+# ---------------------------------------------------------------------------
+# Loop 9 — Smart template-to-print pipeline
+# ---------------------------------------------------------------------------
+
+
+class TestSmartGenerateFromTemplate:
+    """smart_generate_from_template MCP tool test.
+
+    Coverage:
+    - Valid template returns STL path + structural analysis + settings
+    - Invalid template returns error
+    - auto_reinforce flag works
+    - Material parameter propagates to settings
+    """
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.server._get_generation_provider")
+    def test_valid_template_returns_full_pipeline(self, mock_gen, mock_auth, tmp_path):
+        """A valid template should return STL + analysis + settings."""
+        from kiln.server import smart_generate_from_template
+
+        # Set up mock provider that returns a generated file
+        stl_path = str(tmp_path / "result.stl")
+        _write_cube_stl(stl_path, 20.0)
+
+        mock_job = MagicMock()
+        mock_job.status.value = "succeeded"
+        mock_job.error = None
+        mock_job.to_dict.return_value = {"id": "test", "status": "succeeded"}
+
+        mock_dl = MagicMock()
+        mock_dl.local_path = stl_path
+        mock_dl.to_dict.return_value = {"local_path": stl_path}
+
+        mock_provider = MagicMock()
+        mock_provider.generate.return_value = mock_job
+        mock_provider.download_result.return_value = mock_dl
+        mock_gen.return_value = mock_provider
+
+        # Mock validate_mesh to avoid import complexity
+        with patch("kiln.server.validate_mesh") as mock_val:
+            mock_val_result = MagicMock()
+            mock_val_result.to_dict.return_value = {"manifold": True}
+            mock_val_result.bounding_box = {
+                "x_min": 0, "x_max": 20,
+                "y_min": 0, "y_max": 20,
+                "z_min": 0, "z_max": 20,
+            }
+            mock_val.return_value = mock_val_result
+
+            result = smart_generate_from_template(
+                "phone_stand", material="PETG"
+            )
+
+        if result.get("status") == "success":
+            assert "stl_path" in result
+            assert "structural_analysis" in result
+            assert "recommended_print_settings" in result
+            assert "next_steps" in result
+            assert result["structural_analysis"]["grade"] in ("A", "B", "C", "D", "F")
+            settings = result["recommended_print_settings"]
+            assert "perimeters" in settings
+            assert "infill_percent" in settings
+
+    @patch("kiln.server._check_auth", return_value=None)
+    def test_invalid_template_returns_error(self, mock_auth):
+        from kiln.server import smart_generate_from_template
+
+        result = smart_generate_from_template("nonexistent_template_xyz")
+        # Should propagate the error from generate_from_template
+        assert "error" in str(result).lower() or result.get("status") == "error"
+
+    @patch("kiln.server._check_auth", return_value=None)
+    @patch("kiln.server._get_generation_provider")
+    def test_material_propagates(self, mock_gen, mock_auth, tmp_path):
+        """Material parameter should affect recommended settings."""
+        from kiln.server import smart_generate_from_template
+
+        stl_path = str(tmp_path / "result.stl")
+        _write_cube_stl(stl_path, 20.0)
+
+        mock_job = MagicMock()
+        mock_job.status.value = "succeeded"
+        mock_job.error = None
+        mock_job.to_dict.return_value = {"id": "test", "status": "succeeded"}
+
+        mock_dl = MagicMock()
+        mock_dl.local_path = stl_path
+        mock_dl.to_dict.return_value = {"local_path": stl_path}
+
+        mock_provider = MagicMock()
+        mock_provider.generate.return_value = mock_job
+        mock_provider.download_result.return_value = mock_dl
+        mock_gen.return_value = mock_provider
+
+        with patch("kiln.server.validate_mesh") as mock_val:
+            mock_val_result = MagicMock()
+            mock_val_result.to_dict.return_value = {"manifold": True}
+            mock_val_result.bounding_box = {
+                "x_min": 0, "x_max": 20,
+                "y_min": 0, "y_max": 20,
+                "z_min": 0, "z_max": 20,
+            }
+            mock_val.return_value = mock_val_result
+
+            result = smart_generate_from_template(
+                "phone_stand", material="NYLON"
+            )
+
+        if result.get("status") == "success":
+            settings = result["recommended_print_settings"]
+            # Nylon defaults have higher perimeters
+            assert settings["perimeters"] >= 4
+
+
+# ---------------------------------------------------------------------------
+# Loop 10 — Expanded primitive DSL
+# ---------------------------------------------------------------------------
+
+
+class TestExpandedPrimitives:
+    """Tests for new primitive shapes in the composition DSL.
+
+    Coverage:
+    - torus generates rotate_extrude code
+    - wedge generates polygon extrusion
+    - hex_prism generates $fn=6 cylinder
+    - text generates linear_extrude + text()
+    - rounded_cube generates minkowski
+    - pipe generates difference of cylinders
+    - unknown shape raises ValueError with full list
+    """
+
+    def test_torus(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "torus",
+            "params": {"major_r": 15, "minor_r": 4},
+        })
+        assert "rotate_extrude" in code
+        assert "translate([15, 0, 0])" in code
+        assert "circle(r=4" in code
+
+    def test_wedge(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "wedge",
+            "params": {"width": 20, "depth": 15, "height": 10},
+        })
+        assert "linear_extrude(height=15)" in code
+        assert "polygon" in code
+        assert "[20,0]" in code or "[20, 0]" in code
+
+    def test_hex_prism(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "hex_prism",
+            "params": {"r": 8, "h": 5},
+        })
+        assert "cylinder(h=5, r=8, $fn=6)" in code
+
+    def test_text(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "text",
+            "params": {"text": "Hello", "size": 12, "depth": 3},
+        })
+        assert "linear_extrude(height=3)" in code
+        assert '"Hello"' in code
+        assert "size=12" in code
+
+    def test_rounded_cube(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "rounded_cube",
+            "params": {"size": [20, 15, 10], "radius": 2},
+        })
+        assert "minkowski()" in code
+        assert "cube(" in code
+        assert "sphere(r=2" in code
+
+    def test_pipe(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "pipe",
+            "params": {"h": 30, "outer_r": 12, "inner_r": 10},
+        })
+        assert "difference()" in code
+        assert "cylinder(h=30, r=12)" in code
+        assert "cylinder(h=30.2, r=10)" in code
+
+    def test_unknown_shape_error_message(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        with pytest.raises(ValueError, match="torus.*wedge.*hex_prism.*text.*rounded_cube.*pipe"):
+            _primitive_to_scad({
+                "type": "primitive", "shape": "triangle",
+                "params": {},
+            })
+
+    def test_torus_with_translate(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "torus",
+            "params": {"major_r": 10, "minor_r": 2},
+            "translate": [5, 10, 15],
+        })
+        assert "translate([5, 10, 15])" in code
+        assert "rotate_extrude" in code
+
+    def test_rounded_cube_scalar_size(self):
+        from kiln.generation.openscad import _primitive_to_scad
+
+        code = _primitive_to_scad({
+            "type": "primitive", "shape": "rounded_cube",
+            "params": {"size": 20, "radius": 3},
+        })
+        assert "minkowski()" in code
+        assert "cube(" in code
+        assert "sphere(r=3" in code

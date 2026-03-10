@@ -782,8 +782,70 @@ def _primitive_to_scad(op: dict[str, Any], *, indent: int = 0) -> str:
         r1 = params.get("r1", 5)
         r2 = params.get("r2", 0)
         shape_code = f"cylinder(h={h}, r1={r1}, r2={r2});"
+    elif shape == "torus":
+        # Torus via rotate_extrude of a circle
+        major_r = params.get("major_r", 10)
+        minor_r = params.get("minor_r", 3)
+        shape_code = (
+            f"rotate_extrude($fn=64) "
+            f"translate([{major_r}, 0, 0]) "
+            f"circle(r={minor_r}, $fn=32);"
+        )
+    elif shape == "wedge":
+        # Right-triangle prism (wedge/ramp shape)
+        w = params.get("width", 10)
+        d = params.get("depth", 10)
+        h = params.get("height", 10)
+        shape_code = (
+            f"linear_extrude(height={d}) "
+            f"polygon(points=[[0,0],[{w},0],[0,{h}]]);"
+        )
+    elif shape == "hex_prism":
+        # Regular hexagonal prism (for nuts, bolts, hex stock)
+        r = params.get("r", 5)
+        h = params.get("h", 5)
+        shape_code = f"cylinder(h={h}, r={r}, $fn=6);"
+    elif shape == "text":
+        # Embossed text via linear_extrude + text()
+        content = params.get("text", "Kiln")
+        size = params.get("size", 10)
+        depth = params.get("depth", 2)
+        font = params.get("font", "Liberation Sans")
+        shape_code = (
+            f"linear_extrude(height={depth}) "
+            f'text("{content}", size={size}, font="{font}", halign="center", valign="center");'
+        )
+    elif shape == "rounded_cube":
+        # Cube with rounded edges via minkowski (cube + sphere)
+        size = params.get("size", [10, 10, 10])
+        r = params.get("radius", 1)
+        if isinstance(size, (list, tuple)):
+            inner = [max(0.1, s - 2 * r) for s in size]
+            shape_code = (
+                f"minkowski() {{ cube([{inner[0]}, {inner[1]}, {inner[2]}]); "
+                f"sphere(r={r}, $fn=16); }}"
+            )
+        else:
+            inner = max(0.1, size - 2 * r)
+            shape_code = (
+                f"minkowski() {{ cube({inner}); "
+                f"sphere(r={r}, $fn=16); }}"
+            )
+    elif shape == "pipe":
+        # Hollow cylinder (pipe/tube)
+        h = params.get("h", 20)
+        outer_r = params.get("outer_r", 10)
+        inner_r = params.get("inner_r", 8)
+        shape_code = (
+            f"difference() {{ cylinder(h={h}, r={outer_r}); "
+            f"translate([0, 0, -0.1]) cylinder(h={h + 0.2}, r={inner_r}); }}"
+        )
     else:
-        raise ValueError(f"Unknown primitive shape: {shape!r}. Use 'cube', 'cylinder', 'sphere', or 'cone'.")
+        raise ValueError(
+            f"Unknown primitive shape: {shape!r}. Use 'cube', 'cylinder', "
+            f"'sphere', 'cone', 'torus', 'wedge', 'hex_prism', 'text', "
+            f"'rounded_cube', or 'pipe'."
+        )
 
     # Wrap with transformations
     lines: list[str] = []

@@ -9467,6 +9467,94 @@ def generate_from_template(
 
 
 @mcp.tool()
+def smart_generate_from_template(
+    template_id: str,
+    parameters: dict | None = None,
+    material: str = "PLA",
+    auto_reinforce: bool = False,
+) -> dict:
+    """Generate a model from a template with full structural analysis + print settings.
+
+    This is the **one-step design-to-print-ready** pipeline:
+
+    1. Generates STL from a parametric template (like ``generate_from_template``)
+    2. Runs structural risk analysis (thin necks, cantilevers, sharp corners)
+    3. Optionally auto-applies reinforcements (fillets, wall thickening, etc.)
+    4. Infers optimal slicer settings tuned to the design's structural profile
+    5. Returns the STL path + recommended settings ready for slicing
+
+    The agent can take the output and directly call ``reslice_with_overrides``
+    or ``run_reslice_and_print`` with the recommended settings.
+
+    :param template_id: Template ID from ``list_design_templates``.
+    :param parameters: Parameter overrides (e.g., ``{"phone_width": 80}``).
+    :param material: Filament type for settings inference (PLA, PETG, ABS, etc.).
+    :param auto_reinforce: If True, auto-apply structural reinforcements.
+    :returns: Dict with STL path, structural grade, reinforcements, and print settings.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        # Step 1: Generate from template
+        gen_result = generate_from_template(template_id, parameters)
+        if gen_result.get("status") == "error" or not gen_result.get("success"):
+            return gen_result  # Pass through error
+
+        stl_path = gen_result.get("result", {}).get("local_path", "")
+        if not stl_path:
+            return _error_dict("Template generated but no STL path returned")
+
+        # Step 2: Structural analysis
+        from kiln.design_reasoning import generate_improvement_plan
+        from kiln.design_reasoning import infer_print_settings as _infer_settings
+
+        plan = generate_improvement_plan(stl_path)
+
+        # Step 3: Optional auto-reinforcement
+        reinforcement_result = None
+        if auto_reinforce and plan.reinforcements:
+            from kiln.design_reasoning import apply_reinforcements
+
+            reinf = apply_reinforcements(stl_path)
+            stl_path = reinf.output_path
+            reinforcement_result = reinf.to_dict()
+
+        # Step 4: Infer slicer settings
+        settings = _infer_settings(stl_path, material=material)
+
+        return {
+            "status": "success",
+            "template": template_id,
+            "parameters_used": gen_result.get("parameters_used", {}),
+            "stl_path": stl_path,
+            "dimensions": gen_result.get("dimensions"),
+            "structural_analysis": {
+                "score": plan.overall_structural_score,
+                "grade": plan.structural_grade,
+                "risk_count": len(plan.risks),
+                "critical_count": plan.critical_count,
+                "warning_count": plan.warning_count,
+                "summary": plan.summary,
+            },
+            "reinforcement": reinforcement_result,
+            "recommended_print_settings": settings.to_dict(),
+            "next_steps": (
+                f"STL ready at {stl_path}. "
+                f"Structural grade: {plan.structural_grade}. "
+                f"Recommended: {settings.perimeters} perimeters, "
+                f"{settings.infill_percent}% {settings.infill_pattern} infill, "
+                f"{settings.layer_height_mm}mm layers"
+                + (", supports enabled" if settings.support_enabled else "")
+                + (", brim enabled" if settings.brim_enabled else "")
+                + ". Use reslice_with_overrides() or run_reslice_and_print() "
+                "with these settings."
+            ),
+        }
+    except Exception as exc:
+        return _error_dict(f"Smart template generation failed: {exc}")
+
+
+@mcp.tool()
 def analyze_mesh_geometry(file_path: str) -> dict:
     """Deep geometric and printability analysis of a 3D mesh.
 
@@ -10769,17 +10857,23 @@ def compose_part_from_primitives(
 
     **Operation format** — each item is either a primitive or boolean:
 
-    Primitive: ``{"type": "primitive", "shape": "cube|cylinder|sphere|cone",
+    Primitive: ``{"type": "primitive", "shape": "<shape>",
     "params": {...}, "translate": [x,y,z], "rotate": [rx,ry,rz]}``
 
     Boolean: ``{"type": "boolean", "operation": "union|difference|intersection",
     "children": [op1, op2, ...]}``
 
-    **Primitive params:**
-    - cube: ``{"size": [x,y,z]}``
+    **Primitive shapes and params:**
+    - cube: ``{"size": [x,y,z]}`` or ``{"size": scalar}``
     - cylinder: ``{"h": height, "r": radius}`` or ``{"h", "r1", "r2"}``
     - sphere: ``{"r": radius}``
     - cone: ``{"h": height, "r1": bottom_r, "r2": top_r}``
+    - torus: ``{"major_r": ring_radius, "minor_r": tube_radius}``
+    - wedge: ``{"width": w, "depth": d, "height": h}``
+    - hex_prism: ``{"r": radius, "h": height}``  — hexagonal (for nuts)
+    - text: ``{"text": "string", "size": 10, "depth": 2}``
+    - rounded_cube: ``{"size": [x,y,z], "radius": 1}``
+    - pipe: ``{"h": height, "outer_r": 10, "inner_r": 8}``
 
     **Example — L-bracket with mounting hole:**
     ```json
