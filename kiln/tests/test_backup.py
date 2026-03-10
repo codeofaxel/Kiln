@@ -15,9 +15,8 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import threading
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -33,7 +32,6 @@ from kiln.backup import (
     snapshot_database,
     verify_integrity,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

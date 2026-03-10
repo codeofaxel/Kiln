@@ -16,27 +16,24 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from kiln.events import EventType
 from kiln.printers.base import (
     JobProgress,
     PrinterCapabilities,
     PrinterState,
     PrinterStatus,
 )
-from kiln.queue import PrintQueue, JobStatus
-from kiln.events import EventBus, EventType
-from kiln.registry import PrinterRegistry
 from kiln.server import (
-    resource_status,
-    resource_printers,
-    resource_printer_detail,
-    resource_queue,
-    resource_job_detail,
-    resource_events,
+    _event_bus,
     _queue,
     _registry,
-    _event_bus,
+    resource_events,
+    resource_job_detail,
+    resource_printer_detail,
+    resource_printers,
+    resource_queue,
+    resource_status,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

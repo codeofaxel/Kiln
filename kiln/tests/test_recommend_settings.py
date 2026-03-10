@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -26,8 +26,8 @@ def _outcome(
     printer_name: str = "voron",
     outcome: str = "success",
     **kwargs: Any,
-) -> Dict[str, Any]:
-    base: Dict[str, Any] = {
+) -> dict[str, Any]:
+    base: dict[str, Any] = {
         "job_id": job_id,
         "printer_name": printer_name,
         "file_name": "benchy.gcode",

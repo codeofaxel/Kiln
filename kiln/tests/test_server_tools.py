@@ -11,27 +11,22 @@ Covers:
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock, PropertyMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kiln.events import EventBus
-from kiln.queue import PrintQueue
-from kiln.registry import PrinterRegistry
 from kiln.server import (
-    kiln_health,
-    register_webhook,
-    list_webhooks,
-    delete_webhook,
+    _event_bus,
+    _queue,
+    _registry,
     _scheduler,
     _webhook_mgr,
-    _registry,
-    _queue,
-    _event_bus,
-    _start_time,
+    delete_webhook,
+    kiln_health,
+    list_webhooks,
     main,
+    register_webhook,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kiln.billing import BillingLedger, FeeCalculation, FeePolicy, SpendLimits
+from kiln.billing import FeeCalculation
 from kiln.payments.base import (
     Currency,
     PaymentError,
@@ -19,7 +19,6 @@ from kiln.payments.base import (
     PaymentStatus,
 )
 from kiln.payments.manager import PaymentManager
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -34,16 +33,16 @@ class FakeProvider(PaymentProvider):
         *,
         name: str = "fake",
         rail: PaymentRail = PaymentRail.STRIPE,
-        currencies: Optional[list] = None,
-        result: Optional[PaymentResult] = None,
-        error: Optional[PaymentError] = None,
+        currencies: list | None = None,
+        result: PaymentResult | None = None,
+        error: PaymentError | None = None,
     ):
         self._name = name
         self._rail = rail
         self._currencies = currencies or [Currency.USD]
         self._result = result
         self._error = error
-        self.calls: List[PaymentRequest] = []
+        self.calls: list[PaymentRequest] = []
 
     @property
     def name(self) -> str:
@@ -95,10 +94,10 @@ class FakeDB:
     """Minimal KilnDB stand-in."""
 
     def __init__(self):
-        self.payments: List[Dict] = []
-        self.methods: List[Dict] = []
+        self.payments: list[dict] = []
+        self.methods: list[dict] = []
 
-    def save_payment(self, payment: Dict[str, Any]) -> None:
+    def save_payment(self, payment: dict[str, Any]) -> None:
         self.payments.append(payment)
 
     def update_payment_status(self, payment_id, status, tx_hash=None):
@@ -107,7 +106,7 @@ class FakeDB:
     def list_payment_methods(self, user_id: str) -> list:
         return [m for m in self.methods if m["user_id"] == user_id]
 
-    def get_default_payment_method(self, user_id: str) -> Optional[dict]:
+    def get_default_payment_method(self, user_id: str) -> dict | None:
         for m in self.methods:
             if m["user_id"] == user_id and m.get("is_default"):
                 return m
@@ -482,9 +481,9 @@ class AuthCaptureProvider(FakeProvider):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.auth_calls: List[PaymentRequest] = []
-        self.capture_calls: List[str] = []
-        self.cancel_calls: List[str] = []
+        self.auth_calls: list[PaymentRequest] = []
+        self.capture_calls: list[str] = []
+        self.cancel_calls: list[str] = []
 
     def authorize_payment(self, request: PaymentRequest) -> PaymentResult:
         self.auth_calls.append(request)

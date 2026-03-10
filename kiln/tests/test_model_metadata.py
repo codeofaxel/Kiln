@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import os
 import zipfile
-
-import pytest
 
 from kiln.model_metadata import extract_3mf_metadata
 

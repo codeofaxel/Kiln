@@ -9,15 +9,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from kiln.payments.base import (
     Currency,
     PaymentRail,
     PaymentResult,
     PaymentStatus,
 )
-
 
 # ---------------------------------------------------------------------------
 # check_payment_status

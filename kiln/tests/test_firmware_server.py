@@ -8,9 +8,7 @@ Covers:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch, PropertyMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from kiln.printers.base import (
     FirmwareComponent,
@@ -19,7 +17,6 @@ from kiln.printers.base import (
     PrinterCapabilities,
     PrinterError,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

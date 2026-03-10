@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import threading
 import time
-from unittest.mock import patch
 
 import pytest
 
@@ -33,7 +32,6 @@ from kiln.operator_discovery import (
     _validate_listing,
     get_discovery_engine,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

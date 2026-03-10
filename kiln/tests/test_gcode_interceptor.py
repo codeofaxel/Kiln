@@ -18,9 +18,7 @@ Coverage areas:
 from __future__ import annotations
 
 import threading
-import time
 import uuid
-from unittest import mock
 
 import pytest
 
@@ -50,7 +48,6 @@ from kiln.gcode_interceptor import (
     _strip_comment,
     get_interceptor,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

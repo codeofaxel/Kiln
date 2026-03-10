@@ -7,8 +7,6 @@ and edge cases.
 
 from __future__ import annotations
 
-import pytest
-
 from kiln.ambient_safety import (
     AmbientSafetyResult,
     AmbientWarning,

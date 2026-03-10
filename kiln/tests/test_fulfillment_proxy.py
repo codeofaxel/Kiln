@@ -25,7 +25,7 @@ from kiln.fulfillment.base import (
     OrderStatus,
     QuoteRequest,
 )
-from kiln.fulfillment.proxy import ProxyProvider, _DEFAULT_PROXY_URL
+from kiln.fulfillment.proxy import _DEFAULT_PROXY_URL, ProxyProvider
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -934,9 +934,8 @@ class TestProxyHTTPLayer:
             p._session,
             "request",
             side_effect=FulfillmentError("custom error", code="CUSTOM"),
-        ):
-            with pytest.raises(FulfillmentError, match="custom error") as exc_info:
-                p.list_materials()
+        ), pytest.raises(FulfillmentError, match="custom error") as exc_info:
+            p.list_materials()
         assert exc_info.value.code == "CUSTOM"
 
     @responses.activate

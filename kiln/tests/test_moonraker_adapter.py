@@ -7,9 +7,7 @@ HTTP responses so the test suite runs without a real Moonraker instance.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
-from typing import Any, Dict, Optional
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -22,7 +20,6 @@ from kiln.printers.base import (
     PrinterCapabilities,
     PrinterError,
     PrinterFile,
-    PrinterState,
     PrinterStatus,
     PrintResult,
     UploadResult,
@@ -33,7 +30,6 @@ from kiln.printers.moonraker import (
     _safe_get,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures & helpers
 # ---------------------------------------------------------------------------
@@ -43,7 +39,7 @@ HOST = "http://klipper.local:7125"
 
 def _adapter(**kwargs: Any) -> MoonrakerAdapter:
     """Create a :class:`MoonrakerAdapter` with sensible test defaults."""
-    defaults: Dict[str, Any] = {
+    defaults: dict[str, Any] = {
         "host": HOST,
         "timeout": 5,
         "retries": 1,
@@ -54,9 +50,9 @@ def _adapter(**kwargs: Any) -> MoonrakerAdapter:
 
 def _mock_response(
     status_code: int = 200,
-    json_data: Optional[Dict[str, Any]] = None,
+    json_data: dict[str, Any] | None = None,
     text: str = "",
-    ok: Optional[bool] = None,
+    ok: bool | None = None,
 ) -> mock.MagicMock:
     """Build a fake :class:`requests.Response`."""
     resp = mock.MagicMock(spec=requests.Response)
@@ -223,17 +219,15 @@ class TestHTTPLayer:
         adapter = _adapter()
         with mock.patch.object(
             adapter._session, "request", side_effect=Timeout("timed out")
-        ):
-            with pytest.raises(PrinterError, match="timed out"):
-                adapter._get_json("/printer/info")
+        ), pytest.raises(PrinterError, match="timed out"):
+            adapter._get_json("/printer/info")
 
     def test_connection_error_raises_printer_error(self) -> None:
         adapter = _adapter()
         with mock.patch.object(
             adapter._session, "request", side_effect=ReqConnectionError("refused")
-        ):
-            with pytest.raises(PrinterError, match="Could not connect"):
-                adapter._get_json("/printer/info")
+        ), pytest.raises(PrinterError, match="Could not connect"):
+            adapter._get_json("/printer/info")
 
     def test_invalid_json_raises_printer_error(self) -> None:
         adapter = _adapter()
@@ -257,9 +251,8 @@ class TestHTTPLayer:
         ok_resp = _mock_response(json_data={"result": "ok"})
         with mock.patch.object(
             adapter._session, "request", side_effect=[fail_resp, ok_resp]
-        ):
-            with mock.patch("kiln.printers.moonraker.time.sleep"):
-                result = adapter._get_json("/printer/info")
+        ), mock.patch("kiln.printers.moonraker.time.sleep"):
+            result = adapter._get_json("/printer/info")
         assert result == {"result": "ok"}
 
     def test_non_transient_request_exception_raises_immediately(self) -> None:
@@ -268,9 +261,8 @@ class TestHTTPLayer:
             adapter._session,
             "request",
             side_effect=requests.exceptions.InvalidURL("bad url"),
-        ):
-            with pytest.raises(PrinterError, match="Request error"):
-                adapter._get_json("/printer/info")
+        ), pytest.raises(PrinterError, match="Request error"):
+            adapter._get_json("/printer/info")
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +271,7 @@ class TestHTTPLayer:
 
 class TestGetState:
 
-    def _printer_info_response(self, state: str = "ready") -> Dict[str, Any]:
+    def _printer_info_response(self, state: str = "ready") -> dict[str, Any]:
         return {"result": {"state": state, "state_message": ""}}
 
     def _objects_response(
@@ -289,7 +281,7 @@ class TestGetState:
         bed_temp: float = 22.0,
         bed_target: float = 0.0,
         print_state: str = "standby",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         return {
             "result": {
                 "status": {
@@ -465,7 +457,7 @@ class TestGetJob:
         progress: float = 0.5,
         print_duration: float = 600.0,
         total_duration: float = 620.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         return {
             "result": {
                 "status": {
@@ -556,9 +548,8 @@ class TestGetJob:
             adapter._session,
             "request",
             side_effect=ReqConnectionError("down"),
-        ):
-            with pytest.raises(PrinterError):
-                adapter.get_job()
+        ), pytest.raises(PrinterError):
+            adapter.get_job()
 
 
 # ---------------------------------------------------------------------------
@@ -567,7 +558,7 @@ class TestGetJob:
 
 class TestListFiles:
 
-    def _files_response(self) -> Dict[str, Any]:
+    def _files_response(self) -> dict[str, Any]:
         return {
             "result": [
                 {
@@ -764,9 +755,8 @@ class TestCancelPrint:
         adapter = _adapter()
         resp = _mock_response(status_code=400, text="Not printing", ok=False)
 
-        with mock.patch.object(adapter._session, "request", return_value=resp):
-            with pytest.raises(PrinterError):
-                adapter.cancel_print()
+        with mock.patch.object(adapter._session, "request", return_value=resp), pytest.raises(PrinterError):
+            adapter.cancel_print()
 
 
 # ---------------------------------------------------------------------------
@@ -792,9 +782,8 @@ class TestEmergencyStop:
         adapter = _adapter()
         resp = _mock_response(status_code=500, text="Error", ok=False)
 
-        with mock.patch.object(adapter._session, "request", return_value=resp):
-            with pytest.raises(PrinterError):
-                adapter.emergency_stop()
+        with mock.patch.object(adapter._session, "request", return_value=resp), pytest.raises(PrinterError):
+            adapter.emergency_stop()
 
 
 # ---------------------------------------------------------------------------
@@ -866,9 +855,8 @@ class TestSetToolTemp:
             adapter._session,
             "request",
             side_effect=ReqConnectionError("down"),
-        ):
-            with pytest.raises(PrinterError):
-                adapter.set_tool_temp(200)
+        ), pytest.raises(PrinterError):
+            adapter.set_tool_temp(200)
 
 
 # ---------------------------------------------------------------------------
@@ -961,9 +949,8 @@ class TestSendGcodePublic:
             adapter._session,
             "request",
             side_effect=ReqConnectionError("down"),
-        ):
-            with pytest.raises(PrinterError):
-                adapter.send_gcode(["G28"])
+        ), pytest.raises(PrinterError):
+            adapter.send_gcode(["G28"])
 
 
 # ---------------------------------------------------------------------------
@@ -1000,9 +987,8 @@ class TestDeleteFile:
         adapter = _adapter()
         resp = _mock_response(status_code=404, json_data=None, text="Not Found")
 
-        with mock.patch.object(adapter._session, "request", return_value=resp):
-            with pytest.raises(PrinterError):
-                adapter.delete_file("nonexistent.gcode")
+        with mock.patch.object(adapter._session, "request", return_value=resp), pytest.raises(PrinterError):
+            adapter.delete_file("nonexistent.gcode")
 
 
 # ---------------------------------------------------------------------------

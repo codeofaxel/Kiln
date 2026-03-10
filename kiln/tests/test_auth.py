@@ -10,8 +10,7 @@ from unittest import mock
 
 import pytest
 
-from kiln.auth import ApiKey, AuthError, AuthManager, _KEY_PREFIX
-
+from kiln.auth import _KEY_PREFIX, ApiKey, AuthError, AuthManager
 
 # ---------------------------------------------------------------------------
 # 1. AuthManager disabled by default (no env vars)

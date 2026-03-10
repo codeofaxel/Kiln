@@ -8,6 +8,7 @@ from unittest import mock
 
 import pytest
 
+from kiln.agent_loop import AgentConfig
 from kiln.openrouter import (
     KNOWN_MODELS,
     OPENROUTER_BASE_URL,
@@ -17,8 +18,6 @@ from kiln.openrouter import (
     list_supported_models,
     run_openrouter,
 )
-from kiln.agent_loop import AgentConfig
-
 
 # ---------------------------------------------------------------------------
 # 1. Constants
@@ -210,7 +209,7 @@ class TestCreateOpenrouterConfig:
 class TestRunOpenrouter:
     @mock.patch("kiln.openrouter.run_agent_loop")
     def test_calls_run_agent_loop(self, mock_loop):
-        from kiln.agent_loop import AgentResult, AgentMessage
+        from kiln.agent_loop import AgentResult
 
         mock_loop.return_value = AgentResult(
             response="test",

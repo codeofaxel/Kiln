@@ -19,20 +19,18 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional
 from unittest import mock
 
 import pytest
 
 from kiln.emergency import (
+    _FDM_EMERGENCY_ACTIONS,
+    _FDM_EMERGENCY_GCODE,
     EmergencyCoordinator,
     EmergencyReason,
     EmergencyRecord,
     SafetyInterlock,
-    _FDM_EMERGENCY_ACTIONS,
-    _FDM_EMERGENCY_GCODE,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -60,7 +58,7 @@ class _FakeAdapter:
         *,
         estop_success: bool = True,
         estop_raises: bool = False,
-        gcode_raises_on: Optional[set[str]] = None,
+        gcode_raises_on: set[str] | None = None,
     ) -> None:
         self._estop_success = estop_success
         self._estop_raises = estop_raises

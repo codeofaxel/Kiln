@@ -9,21 +9,16 @@ Covers:
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any
 from unittest import mock
 
 import pytest
 import requests
 
 from kiln.printers.base import (
-    FirmwareComponent,
-    FirmwareStatus,
-    FirmwareUpdateResult,
     PrinterError,
-    PrinterStatus,
 )
 from kiln.printers.moonraker import MoonrakerAdapter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -33,16 +28,16 @@ HOST = "http://klipper.local:7125"
 
 
 def _adapter(**kwargs: Any) -> MoonrakerAdapter:
-    defaults: Dict[str, Any] = {"host": HOST, "timeout": 5, "retries": 1}
+    defaults: dict[str, Any] = {"host": HOST, "timeout": 5, "retries": 1}
     defaults.update(kwargs)
     return MoonrakerAdapter(**defaults)
 
 
 def _mock_response(
     status_code: int = 200,
-    json_data: Optional[Dict[str, Any]] = None,
+    json_data: dict[str, Any] | None = None,
     text: str = "",
-    ok: Optional[bool] = None,
+    ok: bool | None = None,
 ) -> mock.MagicMock:
     resp = mock.MagicMock(spec=requests.Response)
     resp.status_code = status_code
@@ -275,9 +270,8 @@ class TestMoonrakerUpdateFirmware:
         with mock.patch.object(
             adapter._session, "request",
             side_effect=[info_resp, obj_resp],
-        ):
-            with pytest.raises(PrinterError, match="Cannot update firmware while printing"):
-                adapter.update_firmware()
+        ), pytest.raises(PrinterError, match="Cannot update firmware while printing"):
+            adapter.update_firmware()
 
     def test_http_failure_raises_printer_error(self) -> None:
         adapter = _adapter()
@@ -291,9 +285,8 @@ class TestMoonrakerUpdateFirmware:
         with mock.patch.object(
             adapter._session, "request",
             side_effect=[info_resp, obj_resp, requests.exceptions.ConnectionError("fail")],
-        ):
-            with pytest.raises(PrinterError):
-                adapter.update_firmware()
+        ), pytest.raises(PrinterError):
+            adapter.update_firmware()
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +318,5 @@ class TestMoonrakerRollbackFirmware:
         with mock.patch.object(
             adapter._session, "request",
             side_effect=requests.exceptions.ConnectionError("fail"),
-        ):
-            with pytest.raises(PrinterError):
-                adapter.rollback_firmware("klipper")
+        ), pytest.raises(PrinterError):
+            adapter.rollback_firmware("klipper")

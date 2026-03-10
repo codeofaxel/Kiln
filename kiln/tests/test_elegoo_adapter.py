@@ -23,42 +23,29 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 import tempfile
 import time
-from typing import Any, Dict
+from typing import Any
 from unittest import mock
 
 import pytest
 
 from kiln.printers.base import (
-    JobProgress,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,
-    PrinterFile,
-    PrinterState,
     PrinterStatus,
-    PrintResult,
-    UploadResult,
 )
 from kiln.printers.elegoo import (
-    ElegooAdapter,
-    _BackoffState,
-    _CMD_CANCEL_PRINT,
-    _CMD_DELETE_FILE,
-    _CMD_GET_ATTRIBUTES,
     _CMD_LIST_FILES,
-    _CMD_PAUSE_PRINT,
-    _CMD_RESUME_PRINT,
     _CMD_START_PRINT,
     _CMD_STATUS_REQUEST,
-    _CMD_UPLOAD_FILE,
     _PRINT_STATUS_MAP,
+    ElegooAdapter,
+    _BackoffState,
     _safe_float,
     _safe_int,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures & helpers
@@ -70,7 +57,7 @@ MAINBOARD_ID = "ABCD1234ABCD1234"
 
 def _adapter(**kwargs: Any) -> ElegooAdapter:
     """Create an :class:`ElegooAdapter` with sensible test defaults."""
-    defaults: Dict[str, Any] = {
+    defaults: dict[str, Any] = {
         "host": HOST,
         "mainboard_id": MAINBOARD_ID,
         "timeout": 2,
@@ -264,10 +251,9 @@ class TestGetState:
 
     def test_returns_idle_when_no_status(self) -> None:
         adapter = _adapter()
-        with mock.patch.object(adapter, "_ensure_ws"):
-            with mock.patch.object(adapter, "_send_command"):
-                adapter._connected = True
-                state = adapter.get_state()
+        with mock.patch.object(adapter, "_ensure_ws"), mock.patch.object(adapter, "_send_command"):
+            adapter._connected = True
+            state = adapter.get_state()
         assert state.state == PrinterStatus.IDLE
 
     def test_returns_cached_state_during_backoff(self) -> None:
@@ -369,9 +355,8 @@ class TestListFiles:
             adapter_with_ws,
             "_send_command_checked",
             side_effect=PrinterError("fail"),
-        ):
-            with pytest.raises(PrinterError):
-                adapter_with_ws.list_files()
+        ), pytest.raises(PrinterError):
+            adapter_with_ws.list_files()
 
 
 # ---------------------------------------------------------------------------
@@ -464,9 +449,8 @@ class TestPrintControl:
             adapter_with_ws,
             "_send_command_checked",
             side_effect=PrinterError("fail"),
-        ):
-            with pytest.raises(PrinterError):
-                adapter_with_ws.start_print("test.gcode")
+        ), pytest.raises(PrinterError):
+            adapter_with_ws.start_print("test.gcode")
 
 
 # ---------------------------------------------------------------------------
@@ -525,9 +509,8 @@ class TestSendGcode:
             adapter_with_ws,
             "_send_command",
             side_effect=PrinterError("fail"),
-        ):
-            with pytest.raises(PrinterError):
-                adapter_with_ws.send_gcode(["G28"])
+        ), pytest.raises(PrinterError):
+            adapter_with_ws.send_gcode(["G28"])
 
 
 # ---------------------------------------------------------------------------
@@ -554,9 +537,8 @@ class TestDeleteFile:
             adapter_with_ws,
             "_send_command_checked",
             side_effect=PrinterError("fail"),
-        ):
-            with pytest.raises(PrinterError):
-                adapter_with_ws.delete_file("test.gcode")
+        ), pytest.raises(PrinterError):
+            adapter_with_ws.delete_file("test.gcode")
 
 
 # ---------------------------------------------------------------------------
@@ -711,9 +693,8 @@ class TestSendCommand:
             adapter_with_ws,
             "_send_command",
             return_value={"Data": {"Ack": 1}},
-        ):
-            with pytest.raises(PrinterError, match="failed with ack code"):
-                adapter_with_ws._send_command_checked(_CMD_START_PRINT)
+        ), pytest.raises(PrinterError, match="failed with ack code"):
+            adapter_with_ws._send_command_checked(_CMD_START_PRINT)
 
     def test_send_command_checked_success(self, adapter_with_ws: ElegooAdapter) -> None:
         with mock.patch.object(
@@ -737,7 +718,7 @@ class TestDiscovery:
         with mock.patch("socket.socket") as mock_socket_cls:
             mock_sock = mock.MagicMock()
             mock_socket_cls.return_value = mock_sock
-            mock_sock.recvfrom.side_effect = socket.timeout()
+            mock_sock.recvfrom.side_effect = TimeoutError()
             results = ElegooAdapter.discover(timeout=0.1)
         assert results == []
 
@@ -755,7 +736,7 @@ class TestDiscovery:
             # First recvfrom returns data, second times out.
             mock_sock.recvfrom.side_effect = [
                 (response_data, ("192.168.1.50", 3000)),
-                socket.timeout(),
+                TimeoutError(),
             ]
             results = ElegooAdapter.discover(timeout=0.1)
 

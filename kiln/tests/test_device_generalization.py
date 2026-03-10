@@ -5,18 +5,17 @@ and optional CNC/laser methods on PrinterAdapter.
 """
 
 from __future__ import annotations
-from unittest import mock
+
 import pytest
 
 from kiln.printers import DeviceAdapter, DeviceType
 from kiln.printers.base import (
+    JobProgress,
     PrinterAdapter,
     PrinterCapabilities,
     PrinterError,
     PrinterState,
     PrinterStatus,
-    JobProgress,
-    PrinterFile,
     PrintResult,
     UploadResult,
 )

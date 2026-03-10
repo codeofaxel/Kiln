@@ -5,9 +5,7 @@ from __future__ import annotations
 import logging
 import os
 
-import pytest
-
-from kiln.log_config import ScrubFilter, configure_logging, _scrub
+from kiln.log_config import ScrubFilter, _scrub, configure_logging
 
 
 class TestScrubFilter:

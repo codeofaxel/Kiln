@@ -25,6 +25,7 @@ import time
 import pytest
 
 from kiln.reputation import (
+    _TIER_ORDER,
     DuplicateOperatorError,
     OperatorNotFoundError,
     OperatorProfile,
@@ -32,10 +33,8 @@ from kiln.reputation import (
     ReputationEngine,
     ReputationEvent,
     ReputationValidationError,
-    _TIER_ORDER,
     get_reputation_engine,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -238,7 +237,7 @@ class TestReputationEvent:
             "verification_granted",
             "verification_revoked",
         }
-        assert ReputationEvent._VALID_TYPES == expected
+        assert expected == ReputationEvent._VALID_TYPES
 
 
 # ===========================================================================

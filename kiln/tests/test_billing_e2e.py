@@ -12,11 +12,11 @@ Covers the critical paths where real money is involved:
 from __future__ import annotations
 
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pytest
 
-from kiln.billing import BillingLedger, FeeCalculation, FeePolicy, SpendLimits
+from kiln.billing import BillingLedger, FeeCalculation, FeePolicy
 from kiln.payments.base import (
     Currency,
     PaymentError,
@@ -27,7 +27,6 @@ from kiln.payments.base import (
     PaymentStatus,
 )
 from kiln.payments.manager import PaymentManager
-
 
 # ---------------------------------------------------------------------------
 # Test doubles
@@ -94,10 +93,10 @@ class FakeDB:
     """Minimal KilnDB stand-in matching test_payment_manager pattern."""
 
     def __init__(self):
-        self.payments: List[Dict] = []
-        self.methods: List[Dict] = []
+        self.payments: list[dict] = []
+        self.methods: list[dict] = []
 
-    def save_payment(self, payment: Dict[str, Any]) -> None:
+    def save_payment(self, payment: dict[str, Any]) -> None:
         self.payments.append(payment)
 
     def update_payment_status(self, payment_id, status, tx_hash=None):
@@ -106,7 +105,7 @@ class FakeDB:
     def list_payment_methods(self, user_id: str) -> list:
         return [m for m in self.methods if m["user_id"] == user_id]
 
-    def get_default_payment_method(self, user_id: str) -> Optional[dict]:
+    def get_default_payment_method(self, user_id: str) -> dict | None:
         for m in self.methods:
             if m["user_id"] == user_id and m.get("is_default"):
                 return m
@@ -134,8 +133,8 @@ class FakeDB:
 def _make_manager(
     *,
     fail_payment: bool = False,
-    fee_policy: Optional[FeePolicy] = None,
-    spend_limits: Optional[Dict[str, float]] = None,
+    fee_policy: FeePolicy | None = None,
+    spend_limits: dict[str, float] | None = None,
 ) -> tuple[PaymentManager, BillingLedger, FakeProvider, FakeDB]:
     """Create a test PaymentManager with in-memory billing.
 
@@ -146,7 +145,7 @@ def _make_manager(
     ledger = BillingLedger(fee_policy=fee_policy or FeePolicy(free_tier_jobs=0))
     provider = FakeProvider(fail=fail_payment)
 
-    config: Dict[str, Any] = {"default_rail": "fake"}
+    config: dict[str, Any] = {"default_rail": "fake"}
     if spend_limits:
         config["spend_limits"] = spend_limits
 
@@ -596,7 +595,6 @@ class TestAuthCaptureE2E:
     """Tests for the authorize -> capture -> ledger record flow."""
 
     def test_authorize_then_capture_records_charge(self):
-        from kiln.payments.base import PaymentProvider as _PP
 
         class AuthProvider(FakeProvider):
             def __init__(self, **kwargs):

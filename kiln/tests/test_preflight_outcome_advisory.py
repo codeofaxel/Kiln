@@ -1,8 +1,8 @@
 """Tests for outcome-aware advisory checks in preflight_check."""
 
 from __future__ import annotations
+
 from unittest.mock import MagicMock, patch
-import pytest
 
 
 def _make_state(connected=True, idle=True):

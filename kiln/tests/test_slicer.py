@@ -10,14 +10,13 @@ import pytest
 
 from kiln.slicer import (
     SlicerError,
-    SlicerNotFoundError,
     SliceResult,
     SlicerInfo,
+    SlicerNotFoundError,
+    _get_version,
     find_slicer,
     slice_file,
-    _get_version,
 )
-
 
 # ---------------------------------------------------------------------------
 # find_slicer
@@ -55,11 +54,10 @@ class TestFindSlicer:
 
     def test_auto_detect_nothing_found(self):
         """When nothing is on PATH and no macOS apps, raise."""
-        with patch("shutil.which", return_value=None):
-            with patch("os.path.isfile", return_value=False):
-                with patch.dict(os.environ, {}, clear=True):
-                    with pytest.raises(SlicerNotFoundError):
-                        find_slicer()
+        with patch("shutil.which", return_value=None), patch("os.path.isfile", return_value=False):
+            with patch.dict(os.environ, {}, clear=True):
+                with pytest.raises(SlicerNotFoundError):
+                    find_slicer()
 
     def test_env_var_fallback(self, tmp_path):
         """KILN_SLICER_PATH env var is used as fallback."""
@@ -67,11 +65,10 @@ class TestFindSlicer:
         slicer.write_text("#!/bin/sh\necho test")
         slicer.chmod(0o755)
 
-        with patch("shutil.which", return_value=None):
-            with patch("kiln.slicer._MACOS_PATHS", []):
-                with patch.dict(os.environ, {"KILN_SLICER_PATH": str(slicer)}):
-                    with patch("kiln.slicer._get_version", return_value=None):
-                        info = find_slicer()
+        with patch("shutil.which", return_value=None), patch("kiln.slicer._MACOS_PATHS", []):
+            with patch.dict(os.environ, {"KILN_SLICER_PATH": str(slicer)}):
+                with patch("kiln.slicer._get_version", return_value=None):
+                    info = find_slicer()
 
         assert info.path == str(slicer)
 

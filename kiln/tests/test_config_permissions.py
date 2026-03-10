@@ -11,9 +11,6 @@ from __future__ import annotations
 import logging
 import stat
 from pathlib import Path
-from typing import Any, Dict
-
-import pytest
 
 from kiln.cli.config import (
     _check_file_permissions,

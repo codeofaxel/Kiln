@@ -14,9 +14,8 @@ Covers:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 import responses
 
 from kiln.printers.base import (
@@ -25,10 +24,9 @@ from kiln.printers.base import (
     PrinterState,
     PrinterStatus,
 )
-from kiln.printers.octoprint import OctoPrintAdapter
 from kiln.printers.moonraker import MoonrakerAdapter
+from kiln.printers.octoprint import OctoPrintAdapter
 from kiln.server import preflight_check
-
 
 OCTOPRINT_HOST = "http://octopi.local"
 OCTOPRINT_API_KEY = "TESTAPIKEY123"

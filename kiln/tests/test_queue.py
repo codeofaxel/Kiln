@@ -23,7 +23,6 @@ import pytest
 
 from kiln.queue import InvalidStateTransition, JobNotFoundError, JobStatus, PrintJob, PrintQueue
 
-
 # ---------------------------------------------------------------------------
 # PrintJob dataclass
 # ---------------------------------------------------------------------------

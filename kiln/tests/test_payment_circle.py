@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,11 +16,9 @@ from kiln.payments.base import (
     PaymentProvider,
     PaymentRail,
     PaymentRequest,
-    PaymentResult,
     PaymentStatus,
 )
 from kiln.payments.circle_provider import CircleProvider
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -29,7 +27,7 @@ from kiln.payments.circle_provider import CircleProvider
 
 def _mock_response(
     status_code: int = 200,
-    json_data: Optional[Dict[str, Any]] = None,
+    json_data: dict[str, Any] | None = None,
     ok: bool = True,
 ) -> MagicMock:
     """Create a mock requests.Response."""
@@ -43,7 +41,7 @@ def _mock_response(
 
 def _provider(**kwargs) -> CircleProvider:
     """Create a CircleProvider with sensible defaults for the W3S API."""
-    defaults: Dict[str, Any] = {
+    defaults: dict[str, Any] = {
         "api_key": "test-circle-key",
         "entity_secret": "a" * 64,
         "wallet_id": "test-wallet-uuid",
@@ -54,7 +52,7 @@ def _provider(**kwargs) -> CircleProvider:
 
 def _payment_request(**kwargs) -> PaymentRequest:
     """Create a PaymentRequest with sensible defaults."""
-    defaults: Dict[str, Any] = {
+    defaults: dict[str, Any] = {
         "amount": 25.00,
         "currency": Currency.USDC,
         "rail": PaymentRail.SOLANA,
@@ -699,10 +697,9 @@ class TestRefundPayment:
             patch.object(p, "_get_entity_secret_ciphertext", return_value="fake-ciphertext"),
             patch.object(
                 p._session, "request", side_effect=[original_resp, error_resp]
-            ),
+            ),pytest.raises(PaymentError, match="HTTP 500")
         ):
-            with pytest.raises(PaymentError, match="HTTP 500"):
-                p.refund_payment("tx-orig-3")
+            p.refund_payment("tx-orig-3")
 
     def test_refund_missing_source_address_raises(self):
         """Cannot refund if original tx has no source address."""
@@ -735,9 +732,8 @@ class TestHTTPErrors:
         p = _provider()
         with patch.object(
             p._session, "request", side_effect=requests.exceptions.Timeout()
-        ):
-            with pytest.raises(PaymentError, match="timeout") as exc_info:
-                p.get_payment_status("tx-000")
+        ), pytest.raises(PaymentError, match="timeout") as exc_info:
+            p.get_payment_status("tx-000")
         assert exc_info.value.code == "TIMEOUT"
 
     def test_connection_error(self):

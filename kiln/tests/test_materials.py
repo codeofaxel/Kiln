@@ -11,7 +11,6 @@ import pytest
 from kiln.materials import LoadedMaterial, MaterialTracker, MaterialWarning, Spool
 from kiln.persistence import KilnDB
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

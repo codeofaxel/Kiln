@@ -14,14 +14,10 @@ Covers:
 from __future__ import annotations
 
 import threading
-import time
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-import pytest
-
 from kiln.billing import BillingLedger, FeeCalculation, FeePolicy
-
 
 # ---------------------------------------------------------------------------
 # FeePolicy dataclass

@@ -20,7 +20,6 @@ from kiln.agent_loop import (
     run_agent_loop,
 )
 
-
 # ---------------------------------------------------------------------------
 # 1. AgentConfig
 # ---------------------------------------------------------------------------
@@ -333,7 +332,6 @@ class TestExecuteTool:
         # but we can verify it gets past the cache check.
         # Let's mock the mcp server call too.
         with mock.patch("kiln.agent_loop._get_mcp_server") as mock_server:
-            import asyncio
             mock_mcp = mock.MagicMock()
 
             # call_tool is async, make it return a mock result

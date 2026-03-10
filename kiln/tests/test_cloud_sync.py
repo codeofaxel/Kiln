@@ -6,14 +6,13 @@ import hashlib
 import hmac
 import json
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import responses
 
 from kiln.cloud_sync import CloudSyncManager, SyncConfig, SyncStatus, _compute_signature
 from kiln.persistence import KilnDB
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -40,23 +39,18 @@ from kiln.fulfillment.base import (
     FulfillmentError,
     FulfillmentProvider,
     Material,
-    OrderRequest,
     OrderResult,
     OrderStatus,
     Quote,
-    QuoteRequest,
-    ShippingOption,
 )
 from kiln.fulfillment.intelligence import (
     BatchQuote,
     BatchQuoteItem,
     BatchQuoteResult,
     HealthMonitor,
-    InsuranceOption,
     InsuranceTier,
     MaterialFilter,
     OrderHistory,
-    OrderRecord,
     ProviderHealth,
     ProviderQuote,
     ProviderStatus,
@@ -70,7 +64,6 @@ from kiln.fulfillment.intelligence import (
     get_order_history,
     place_order_with_retry,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures — reset module-level singletons between tests
@@ -97,7 +90,7 @@ def _make_quote(
     quote_id: str = "q-1",
     provider: str = "test",
     total_price: float = 10.0,
-    lead_time_days: Optional[int] = 5,
+    lead_time_days: int | None = 5,
 ) -> Quote:
     """Create a Quote with sensible defaults for testing."""
     return Quote(
@@ -130,10 +123,10 @@ def _mock_provider(
     *,
     name: str = "prov-a",
     display_name: str = "Provider A",
-    quote: Optional[Quote] = None,
-    order_result: Optional[OrderResult] = None,
-    quote_error: Optional[Exception] = None,
-    order_error: Optional[Exception] = None,
+    quote: Quote | None = None,
+    order_result: OrderResult | None = None,
+    quote_error: Exception | None = None,
+    order_error: Exception | None = None,
 ) -> MagicMock:
     """Create a mock FulfillmentProvider."""
     mock = MagicMock(spec=FulfillmentProvider)
@@ -165,8 +158,8 @@ def _make_material(
     technology: str = "FDM",
     color: str = "white",
     finish: str = "raw",
-    price_per_cm3: Optional[float] = 0.05,
-    min_wall_mm: Optional[float] = 0.8,
+    price_per_cm3: float | None = 0.05,
+    min_wall_mm: float | None = 0.8,
 ) -> Material:
     """Create a Material with sensible defaults."""
     return Material(
@@ -900,7 +893,7 @@ class TestMaterialFilter:
     """filter_materials + MaterialFilter: technology, color, finish, price,
     min_wall_mm, search text, combined filters, edge cases, to_dict."""
 
-    def _sample_materials(self) -> List[Material]:
+    def _sample_materials(self) -> list[Material]:
         return [
             _make_material(id="pla-white", name="PLA White", technology="FDM", color="white", finish="raw", price_per_cm3=0.05, min_wall_mm=0.8),
             _make_material(id="abs-black", name="ABS Black", technology="FDM", color="black", finish="polished", price_per_cm3=0.07, min_wall_mm=1.0),

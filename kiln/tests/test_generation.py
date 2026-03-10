@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import struct
 import subprocess
-from typing import List, Tuple
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,13 +22,11 @@ from kiln.generation.base import (
     GenerationValidationError,
     MeshValidationResult,
 )
-from kiln.generation.meshy import MeshyProvider, _BASE_URL
+from kiln.generation.meshy import _BASE_URL, MeshyProvider
 from kiln.generation.openscad import OpenSCADProvider, _find_openscad
 from kiln.generation.validation import (
-    _MAX_DIMENSION_MM,
-    _MIN_DIMENSION_MM,
-    _STL_HEADER_SIZE,
     _STL_COUNT_SIZE,
+    _STL_HEADER_SIZE,
     _STL_TRIANGLE_SIZE,
     _WARN_TRIANGLES,
     _write_binary_stl,
@@ -37,13 +34,12 @@ from kiln.generation.validation import (
     validate_mesh,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def make_binary_stl(triangles: List[Tuple]) -> bytes:
+def make_binary_stl(triangles: list[tuple]) -> bytes:
     """Create a minimal binary STL file bytes from a list of triangle vertex tuples.
 
     Each triangle is ((v1x,v1y,v1z), (v2x,v2y,v2z), (v3x,v3y,v3z)).
@@ -59,7 +55,7 @@ def make_binary_stl(triangles: List[Tuple]) -> bytes:
     return header + count + body
 
 
-def cube_triangles() -> List[Tuple]:
+def cube_triangles() -> list[tuple]:
     """12 triangles forming a unit cube [0,10] x [0,10] x [0,10]."""
     verts = [
         (0, 0, 0),
@@ -446,11 +442,14 @@ class TestOpenSCADProvider:
         assert p._binary == str(fake_bin)
 
     def test_constructor_missing_binary_raises(self):
-        with patch("kiln.generation.openscad.shutil.which", return_value=None):
-            with patch("kiln.generation.openscad.os.path.isfile", return_value=False):
-                with pytest.raises(GenerationError, match="not found") as exc_info:
-                    OpenSCADProvider()
-                assert exc_info.value.code == "OPENSCAD_NOT_FOUND"
+        with (
+            patch("kiln.generation.openscad.shutil.which", return_value=None),
+            patch("kiln.generation.openscad.os.path.isfile", return_value=False),
+            patch("kiln.generation.openscad._MACOS_VERSIONED_PATTERN", ""),
+            pytest.raises(GenerationError, match="not found") as exc_info,
+        ):
+            OpenSCADProvider()
+        assert exc_info.value.code == "OPENSCAD_NOT_FOUND"
 
     def test_generate_success(self, tmp_path):
         fake_bin = tmp_path / "openscad"
@@ -1153,9 +1152,8 @@ class TestMeshyRetry:
             )
 
         p = MeshyProvider(api_key="test-key")
-        with patch("kiln.generation.meshy.time.sleep"):
-            with pytest.raises(GenerationError, match="rate limit"):
-                p.generate("a vase")
+        with patch("kiln.generation.meshy.time.sleep"), pytest.raises(GenerationError, match="rate limit"):
+            p.generate("a vase")
 
     @responses.activate
     def test_non_retryable_status_not_retried(self):

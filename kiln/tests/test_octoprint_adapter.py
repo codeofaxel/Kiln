@@ -788,9 +788,8 @@ class TestRetryLogic:
                 json={"error": "Bad Gateway"},
                 status=502,
             )
-        with patch("kiln.printers.octoprint.time.sleep"):
-            with pytest.raises(PrinterError, match="502"):
-                adapter_with_retries.get_state()
+        with patch("kiln.printers.octoprint.time.sleep"), pytest.raises(PrinterError, match="502"):
+            adapter_with_retries.get_state()
         assert len(responses.calls) == 3
 
     @responses.activate

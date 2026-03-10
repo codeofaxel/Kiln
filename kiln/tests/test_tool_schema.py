@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import types
-import typing
-from typing import Dict, List, Optional, Union
-from unittest import mock
+from typing import Optional, Union
 
 import pytest
 
@@ -15,7 +12,6 @@ from kiln.tool_schema import (
     _python_type_to_json_schema,
     get_all_tool_schemas,
 )
-
 
 # ---------------------------------------------------------------------------
 # 1. _python_type_to_json_schema
@@ -71,17 +67,17 @@ class TestPythonTypeToJsonSchema:
         assert optional is True
 
     def test_list_str(self):
-        schema, optional = _python_type_to_json_schema(List[str])
+        schema, optional = _python_type_to_json_schema(list[str])
         assert schema == {"type": "array", "items": {"type": "string"}}
         assert optional is False
 
     def test_list_int(self):
-        schema, optional = _python_type_to_json_schema(List[int])
+        schema, optional = _python_type_to_json_schema(list[int])
         assert schema == {"type": "array", "items": {"type": "integer"}}
         assert optional is False
 
     def test_dict_typed(self):
-        schema, optional = _python_type_to_json_schema(Dict[str, int])
+        schema, optional = _python_type_to_json_schema(dict[str, int])
         assert schema == {"type": "object"}
         assert optional is False
 
@@ -240,7 +236,7 @@ class TestBuildSchemaFromFunction:
         assert "port" not in schema["function"]["parameters"].get("required", [])
 
     def test_optional_param(self):
-        def my_tool(name: str, tag: Optional[str] = None):
+        def my_tool(name: str, tag: str | None = None):
             """A tool."""
             pass
 
@@ -288,7 +284,7 @@ class TestSchemaIntegration:
         assert schema["function"]["description"] == ""
 
     def test_list_param(self):
-        def multi(items: List[str]):
+        def multi(items: list[str]):
             """Process items."""
             pass
 

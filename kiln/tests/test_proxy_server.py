@@ -15,7 +15,6 @@ Covers:
 from __future__ import annotations
 
 import time
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -33,7 +32,6 @@ from kiln.fulfillment.base import (
 from kiln.fulfillment.proxy_server import ProxyOrchestrator, get_orchestrator
 from kiln.licensing import LicenseInfo, LicenseTier
 from kiln.payments.base import PaymentError
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -245,9 +243,8 @@ class TestHandleMaterials:
         with patch(
             "kiln.fulfillment.proxy_server.get_fulfillment_provider",
             return_value=mock_provider,
-        ):
-            with pytest.raises(FulfillmentError, match="API down"):
-                orch.handle_materials("craftcloud")
+        ), pytest.raises(FulfillmentError, match="API down"):
+            orch.handle_materials("craftcloud")
 
 
 # ---------------------------------------------------------------------------
@@ -269,14 +266,13 @@ class TestHandleQuote:
         with patch(
             "kiln.fulfillment.proxy_server.get_fulfillment_provider",
             return_value=mock_provider,
-        ):
-            with patch.object(orch._ledger, "calculate_fee", return_value=fee):
-                result = orch.handle_quote(
-                    "craftcloud",
-                    "/tmp/model.stl",
-                    QuoteRequest(file_path="/tmp/model.stl", material_id="pla"),
-                    user_email="user@test.com",
-                )
+        ), patch.object(orch._ledger, "calculate_fee", return_value=fee):
+            result = orch.handle_quote(
+                "craftcloud",
+                "/tmp/model.stl",
+                QuoteRequest(file_path="/tmp/model.stl", material_id="pla"),
+                user_email="user@test.com",
+            )
 
         assert result["quote"]["quote_id"] == "q-123"
         assert result["kiln_fee"]["fee_amount"] == 6.0
@@ -296,14 +292,13 @@ class TestHandleQuote:
         with patch(
             "kiln.fulfillment.proxy_server.get_fulfillment_provider",
             return_value=mock_provider,
-        ):
-            with patch.object(orch._ledger, "calculate_fee", return_value=fee):
-                result = orch.handle_quote(
-                    "craftcloud",
-                    "/tmp/model.stl",
-                    QuoteRequest(file_path="/tmp/model.stl", material_id="pla"),
-                    user_email="user@test.com",
-                )
+        ), patch.object(orch._ledger, "calculate_fee", return_value=fee):
+            result = orch.handle_quote(
+                "craftcloud",
+                "/tmp/model.stl",
+                QuoteRequest(file_path="/tmp/model.stl", material_id="pla"),
+                user_email="user@test.com",
+            )
 
         token = result["quote_token"]
         assert token in orch._quote_cache
@@ -323,14 +318,13 @@ class TestHandleQuote:
         with patch(
             "kiln.fulfillment.proxy_server.get_fulfillment_provider",
             return_value=mock_provider,
-        ):
-            with pytest.raises(FulfillmentError, match="no quotes"):
-                orch.handle_quote(
-                    "craftcloud",
-                    "/tmp/model.stl",
-                    QuoteRequest(file_path="/tmp/model.stl", material_id="pla"),
-                    user_email="user@test.com",
-                )
+        ), pytest.raises(FulfillmentError, match="no quotes"):
+            orch.handle_quote(
+                "craftcloud",
+                "/tmp/model.stl",
+                QuoteRequest(file_path="/tmp/model.stl", material_id="pla"),
+                user_email="user@test.com",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -391,24 +385,21 @@ class TestHandleOrder:
         mock_provider.place_order.return_value = _order_result()
         fee = _fee_calc()
 
-        with patch.object(orch._ledger, "calculate_fee", return_value=fee):
-            with patch.object(
-                orch._ledger,
-                "calculate_and_record_fee",
-                return_value=(fee, "charge-1"),
-            ):
-                with patch.object(orch, "_tag_charge_with_user"):
-                    with patch(
-                        "kiln.fulfillment.proxy_server.get_fulfillment_provider",
-                        return_value=mock_provider,
-                    ):
-                        orch.handle_order(
-                            "craftcloud",
-                            OrderRequest(quote_id="q-123"),
-                            user_email="user@test.com",
-                            user_tier=LicenseTier.BUSINESS,
-                            quote_token=token,
-                        )
+        with patch.object(orch._ledger, "calculate_fee", return_value=fee), patch.object(
+            orch._ledger,
+            "calculate_and_record_fee",
+            return_value=(fee, "charge-1"),
+        ), patch.object(orch, "_tag_charge_with_user"), patch(
+            "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+            return_value=mock_provider,
+        ):
+            orch.handle_order(
+                "craftcloud",
+                OrderRequest(quote_id="q-123"),
+                user_email="user@test.com",
+                user_tier=LicenseTier.BUSINESS,
+                quote_token=token,
+            )
 
         # Second use should fail — token is consumed
         with pytest.raises(FulfillmentError, match="Quote not found"):
@@ -472,24 +463,21 @@ class TestHandleOrder:
         mock_provider.place_order.return_value = _order_result()
         fee = _fee_calc()
 
-        with patch.object(orch._ledger, "calculate_fee", return_value=fee):
-            with patch.object(
-                orch._ledger,
-                "calculate_and_record_fee",
-                return_value=(fee, "charge-1"),
-            ):
-                with patch.object(orch, "_tag_charge_with_user"):
-                    with patch(
-                        "kiln.fulfillment.proxy_server.get_fulfillment_provider",
-                        return_value=mock_provider,
-                    ):
-                        result = orch.handle_order(
-                            "craftcloud",
-                            OrderRequest(quote_id="q-123"),
-                            user_email="user@test.com",
-                            user_tier=LicenseTier.BUSINESS,
-                            quote_token=token,
-                        )
+        with patch.object(orch._ledger, "calculate_fee", return_value=fee), patch.object(
+            orch._ledger,
+            "calculate_and_record_fee",
+            return_value=(fee, "charge-1"),
+        ), patch.object(orch, "_tag_charge_with_user"), patch(
+            "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+            return_value=mock_provider,
+        ):
+            result = orch.handle_order(
+                "craftcloud",
+                OrderRequest(quote_id="q-123"),
+                user_email="user@test.com",
+                user_tier=LicenseTier.BUSINESS,
+                quote_token=token,
+            )
 
         assert result["order"]["success"] is True
 
@@ -508,18 +496,17 @@ class TestHandleOrder:
         payment_result.payment_id = "pay-789"
         mock_payment_mgr.charge_fee.return_value = payment_result
 
-        with patch.object(orch._ledger, "calculate_fee", return_value=fee):
-            with patch(
-                "kiln.fulfillment.proxy_server.get_fulfillment_provider",
-                return_value=mock_provider,
-            ):
-                result = orch.handle_order(
-                    "craftcloud",
-                    OrderRequest(quote_id="q-123"),
-                    user_email="user@test.com",
-                    user_tier=LicenseTier.BUSINESS,
-                    quote_token=token,
-                )
+        with patch.object(orch._ledger, "calculate_fee", return_value=fee), patch(
+            "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+            return_value=mock_provider,
+        ):
+            result = orch.handle_order(
+                "craftcloud",
+                OrderRequest(quote_id="q-123"),
+                user_email="user@test.com",
+                user_tier=LicenseTier.BUSINESS,
+                quote_token=token,
+            )
 
         mock_payment_mgr.charge_fee.assert_called_once_with("q-123", fee)
         assert result["order"]["order_id"] == "o-456"
@@ -561,19 +548,17 @@ class TestHandleOrder:
 
         mock_provider.place_order.side_effect = FulfillmentError("vendor unavailable")
 
-        with patch.object(orch._ledger, "calculate_fee", return_value=fee):
-            with patch(
-                "kiln.fulfillment.proxy_server.get_fulfillment_provider",
-                return_value=mock_provider,
-            ):
-                with pytest.raises(FulfillmentError, match="vendor unavailable"):
-                    orch.handle_order(
-                        "craftcloud",
-                        OrderRequest(quote_id="q-123"),
-                        user_email="user@test.com",
-                        user_tier=LicenseTier.BUSINESS,
-                        quote_token=token,
-                    )
+        with patch.object(orch._ledger, "calculate_fee", return_value=fee), patch(
+            "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+            return_value=mock_provider,
+        ), pytest.raises(FulfillmentError, match="vendor unavailable"):
+            orch.handle_order(
+                "craftcloud",
+                OrderRequest(quote_id="q-123"),
+                user_email="user@test.com",
+                user_tier=LicenseTier.BUSINESS,
+                quote_token=token,
+            )
 
         mock_payment_mgr.cancel_fee.assert_called_once_with("pay-789")
 
@@ -594,19 +579,17 @@ class TestHandleOrder:
 
         mock_provider.place_order.side_effect = FulfillmentError("vendor unavailable")
 
-        with patch.object(orch._ledger, "calculate_fee", return_value=fee):
-            with patch(
-                "kiln.fulfillment.proxy_server.get_fulfillment_provider",
-                return_value=mock_provider,
-            ):
-                with pytest.raises(FulfillmentError, match="vendor unavailable"):
-                    orch.handle_order(
-                        "craftcloud",
-                        OrderRequest(quote_id="q-123"),
-                        user_email="user@test.com",
-                        user_tier=LicenseTier.BUSINESS,
-                        quote_token=token,
-                    )
+        with patch.object(orch._ledger, "calculate_fee", return_value=fee), patch(
+            "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+            return_value=mock_provider,
+        ), pytest.raises(FulfillmentError, match="vendor unavailable"):
+            orch.handle_order(
+                "craftcloud",
+                OrderRequest(quote_id="q-123"),
+                user_email="user@test.com",
+                user_tier=LicenseTier.BUSINESS,
+                quote_token=token,
+            )
 
     def test_no_payment_manager_records_fee(
         self,
@@ -617,24 +600,21 @@ class TestHandleOrder:
         mock_provider.place_order.return_value = _order_result()
         fee = _fee_calc()
 
-        with patch.object(orch._ledger, "calculate_fee", return_value=fee):
-            with patch.object(
-                orch._ledger,
-                "calculate_and_record_fee",
-                return_value=(fee, "charge-abc"),
-            ) as mock_record:
-                with patch.object(orch, "_tag_charge_with_user") as mock_tag:
-                    with patch(
-                        "kiln.fulfillment.proxy_server.get_fulfillment_provider",
-                        return_value=mock_provider,
-                    ):
-                        result = orch.handle_order(
-                            "craftcloud",
-                            OrderRequest(quote_id="q-123"),
-                            user_email="user@test.com",
-                            user_tier=LicenseTier.BUSINESS,
-                            quote_token=token,
-                        )
+        with patch.object(orch._ledger, "calculate_fee", return_value=fee), patch.object(
+            orch._ledger,
+            "calculate_and_record_fee",
+            return_value=(fee, "charge-abc"),
+        ) as mock_record, patch.object(orch, "_tag_charge_with_user") as mock_tag, patch(
+            "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+            return_value=mock_provider,
+        ):
+            result = orch.handle_order(
+                "craftcloud",
+                OrderRequest(quote_id="q-123"),
+                user_email="user@test.com",
+                user_tier=LicenseTier.BUSINESS,
+                quote_token=token,
+            )
 
         mock_record.assert_called_once_with("q-123", 100.0, currency="USD")
         mock_tag.assert_called_once_with("charge-abc", "user@test.com")
@@ -649,25 +629,21 @@ class TestHandleOrder:
         mock_provider.place_order.side_effect = FulfillmentError("order failed")
         fee = _fee_calc()
 
-        with patch.object(orch._ledger, "calculate_fee", return_value=fee):
-            with patch.object(
-                orch._ledger,
-                "calculate_and_record_fee",
-                return_value=(fee, "charge-abc"),
-            ):
-                with patch.object(orch, "_tag_charge_with_user"):
-                    with patch(
-                        "kiln.fulfillment.proxy_server.get_fulfillment_provider",
-                        return_value=mock_provider,
-                    ):
-                        with pytest.raises(FulfillmentError, match="order failed"):
-                            orch.handle_order(
-                                "craftcloud",
-                                OrderRequest(quote_id="q-123"),
-                                user_email="user@test.com",
-                                user_tier=LicenseTier.BUSINESS,
-                                quote_token=token,
-                            )
+        with patch.object(orch._ledger, "calculate_fee", return_value=fee), patch.object(
+            orch._ledger,
+            "calculate_and_record_fee",
+            return_value=(fee, "charge-abc"),
+        ), patch.object(orch, "_tag_charge_with_user"), patch(
+            "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+            return_value=mock_provider,
+        ), pytest.raises(FulfillmentError, match="order failed"):
+            orch.handle_order(
+                "craftcloud",
+                OrderRequest(quote_id="q-123"),
+                user_email="user@test.com",
+                user_tier=LicenseTier.BUSINESS,
+                quote_token=token,
+            )
 
     def test_pro_tier_subject_to_limit(self, orch: ProxyOrchestrator):
         token = _seed_quote_cache(orch, "token-pro")
@@ -692,24 +668,21 @@ class TestHandleOrder:
         mock_provider.place_order.return_value = _order_result()
         fee = _fee_calc(job_cost=200.0, fee_amount=10.0, total_cost=210.0)
 
-        with patch.object(orch._ledger, "calculate_fee", return_value=fee) as mock_calc:
-            with patch.object(
-                orch._ledger,
-                "calculate_and_record_fee",
-                return_value=(fee, "charge-1"),
-            ):
-                with patch.object(orch, "_tag_charge_with_user"):
-                    with patch(
-                        "kiln.fulfillment.proxy_server.get_fulfillment_provider",
-                        return_value=mock_provider,
-                    ):
-                        orch.handle_order(
-                            "craftcloud",
-                            OrderRequest(quote_id="q-123"),
-                            user_email="user@test.com",
-                            user_tier=LicenseTier.BUSINESS,
-                            quote_token=token,
-                        )
+        with patch.object(orch._ledger, "calculate_fee", return_value=fee) as mock_calc, patch.object(
+            orch._ledger,
+            "calculate_and_record_fee",
+            return_value=(fee, "charge-1"),
+        ), patch.object(orch, "_tag_charge_with_user"), patch(
+            "kiln.fulfillment.proxy_server.get_fulfillment_provider",
+            return_value=mock_provider,
+        ):
+            orch.handle_order(
+                "craftcloud",
+                OrderRequest(quote_id="q-123"),
+                user_email="user@test.com",
+                user_tier=LicenseTier.BUSINESS,
+                quote_token=token,
+            )
 
         # Fee must be calculated from the cached 200.0, not any client value
         mock_calc.assert_called_once_with(200.0, currency="EUR")
@@ -752,13 +725,12 @@ class TestHandleCancel:
         with patch(
             "kiln.fulfillment.proxy_server.get_fulfillment_provider",
             return_value=mock_provider,
-        ):
-            with pytest.raises(FulfillmentError, match="cannot cancel shipped"):
-                orch.handle_cancel(
-                    "craftcloud",
-                    "o-456",
-                    user_tier=LicenseTier.FREE,
-                )
+        ), pytest.raises(FulfillmentError, match="cannot cancel shipped"):
+            orch.handle_cancel(
+                "craftcloud",
+                "o-456",
+                user_tier=LicenseTier.FREE,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -794,9 +766,8 @@ class TestHandleStatus:
         with patch(
             "kiln.fulfillment.proxy_server.get_fulfillment_provider",
             return_value=mock_provider,
-        ):
-            with pytest.raises(FulfillmentError, match="order not found"):
-                orch.handle_status("craftcloud", "o-456")
+        ), pytest.raises(FulfillmentError, match="order not found"):
+            orch.handle_status("craftcloud", "o-456")
 
 
 # ---------------------------------------------------------------------------
@@ -825,9 +796,8 @@ class TestRegisterUser:
         with patch(
             "kiln.fulfillment.proxy_server.generate_license_key_v2",
             side_effect=ValueError("No signing key configured"),
-        ):
-            with pytest.raises(ValueError, match="signing key"):
-                orch.register_user("user@test.com")
+        ), pytest.raises(ValueError, match="signing key"):
+            orch.register_user("user@test.com")
 
 
 # ---------------------------------------------------------------------------

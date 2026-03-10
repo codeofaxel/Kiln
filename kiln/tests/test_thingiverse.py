@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import requests
@@ -16,12 +15,12 @@ from kiln.thingiverse import (
     Category,
     ThingDetail,
     ThingFile,
-    ThingSummary,
     ThingiverseAuthError,
     ThingiverseClient,
     ThingiverseError,
     ThingiverseNotFoundError,
     ThingiverseRateLimitError,
+    ThingSummary,
 )
 
 # ---------------------------------------------------------------------------

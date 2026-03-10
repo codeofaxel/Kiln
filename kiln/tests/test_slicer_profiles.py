@@ -24,14 +24,12 @@ from pathlib import Path
 import pytest
 
 from kiln.slicer_profiles import (
-    SlicerProfile,
+    _DATA_FILE,
     get_slicer_profile,
     list_slicer_profiles,
     resolve_slicer_profile,
     slicer_profile_to_dict,
-    _DATA_FILE,
 )
-
 
 # ===================================================================
 # Fixtures

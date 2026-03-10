@@ -31,12 +31,10 @@ from kiln.credential_store import (
     CredentialStoreError,
     CredentialType,
     EncryptedCredential,
-    _DEFAULT_MASTER_KEY_PATH,
     get_credential_store,
     retrieve_credential,
     store_credential,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

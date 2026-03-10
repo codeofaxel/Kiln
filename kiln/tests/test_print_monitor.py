@@ -13,13 +13,20 @@ Coverage areas:
 from __future__ import annotations
 
 import os
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 from unittest import mock
 
-import pytest
 import yaml
 
+from kiln.events import EventType
+from kiln.print_monitor import (
+    _MIN_SNAPSHOT_BYTES,
+    FirstLayerMonitor,
+    MonitorPolicy,
+    MonitorResult,
+    analyze_snapshot_basic,
+    load_monitor_policy,
+)
 from kiln.printers.base import (
     JobProgress,
     PrinterCapabilities,
@@ -27,16 +34,6 @@ from kiln.printers.base import (
     PrinterState,
     PrinterStatus,
 )
-from kiln.events import EventType
-from kiln.print_monitor import (
-    FirstLayerMonitor,
-    MonitorPolicy,
-    MonitorResult,
-    analyze_snapshot_basic,
-    load_monitor_policy,
-    _MIN_SNAPSHOT_BYTES,
-)
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -57,7 +54,7 @@ def _make_mock_adapter(
     can_snapshot: bool = True,
     state: PrinterStatus = PrinterStatus.PRINTING,
     completion: float = 5.0,
-    snapshot_data: Optional[bytes] = None,
+    snapshot_data: bytes | None = None,
 ) -> mock.MagicMock:
     """Build a mock PrinterAdapter with sensible defaults."""
     adapter = mock.MagicMock()
@@ -618,16 +615,15 @@ class TestLoadMonitorPolicy:
 
     def test_default_no_config(self) -> None:
         """No config file or env vars -> default policy."""
-        with mock.patch.dict(os.environ, {}, clear=True):
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch(
+            "kiln.print_monitor.load_monitor_policy",
+            wraps=load_monitor_policy,
+        ):
+            # Patch config loading to avoid file system
             with mock.patch(
-                "kiln.print_monitor.load_monitor_policy",
-                wraps=load_monitor_policy,
+                "kiln.cli.config._read_config_file", return_value={}
             ):
-                # Patch config loading to avoid file system
-                with mock.patch(
-                    "kiln.cli.config._read_config_file", return_value={}
-                ):
-                    policy = load_monitor_policy()
+                policy = load_monitor_policy()
         assert policy.first_layer_delay_seconds == 120
         assert policy.first_layer_check_count == 3
         assert policy.auto_pause_on_failure is True
@@ -635,41 +631,37 @@ class TestLoadMonitorPolicy:
     def test_env_var_delay(self) -> None:
         """KILN_MONITOR_FIRST_LAYER_DELAY overrides default."""
         env = {"KILN_MONITOR_FIRST_LAYER_DELAY": "30"}
-        with mock.patch.dict(os.environ, env, clear=False):
-            with mock.patch(
-                "kiln.cli.config._read_config_file", return_value={}
-            ):
-                policy = load_monitor_policy()
+        with mock.patch.dict(os.environ, env, clear=False), mock.patch(
+            "kiln.cli.config._read_config_file", return_value={}
+        ):
+            policy = load_monitor_policy()
         assert policy.first_layer_delay_seconds == 30
 
     def test_env_var_checks(self) -> None:
         """KILN_MONITOR_FIRST_LAYER_CHECKS overrides default."""
         env = {"KILN_MONITOR_FIRST_LAYER_CHECKS": "5"}
-        with mock.patch.dict(os.environ, env, clear=False):
-            with mock.patch(
-                "kiln.cli.config._read_config_file", return_value={}
-            ):
-                policy = load_monitor_policy()
+        with mock.patch.dict(os.environ, env, clear=False), mock.patch(
+            "kiln.cli.config._read_config_file", return_value={}
+        ):
+            policy = load_monitor_policy()
         assert policy.first_layer_check_count == 5
 
     def test_env_var_auto_pause(self) -> None:
         """KILN_MONITOR_AUTO_PAUSE=false disables auto-pause."""
         env = {"KILN_MONITOR_AUTO_PAUSE": "false"}
-        with mock.patch.dict(os.environ, env, clear=False):
-            with mock.patch(
-                "kiln.cli.config._read_config_file", return_value={}
-            ):
-                policy = load_monitor_policy()
+        with mock.patch.dict(os.environ, env, clear=False), mock.patch(
+            "kiln.cli.config._read_config_file", return_value={}
+        ):
+            policy = load_monitor_policy()
         assert policy.auto_pause_on_failure is False
 
     def test_env_var_require_camera(self) -> None:
         """KILN_MONITOR_REQUIRE_CAMERA=true enables camera requirement."""
         env = {"KILN_MONITOR_REQUIRE_CAMERA": "true"}
-        with mock.patch.dict(os.environ, env, clear=False):
-            with mock.patch(
-                "kiln.cli.config._read_config_file", return_value={}
-            ):
-                policy = load_monitor_policy()
+        with mock.patch.dict(os.environ, env, clear=False), mock.patch(
+            "kiln.cli.config._read_config_file", return_value={}
+        ):
+            policy = load_monitor_policy()
         assert policy.require_camera is True
 
     def test_config_file(self, tmp_path: Any) -> None:
@@ -693,11 +685,10 @@ class TestLoadMonitorPolicy:
             for k, v in os.environ.items()
             if not k.startswith("KILN_MONITOR_")
         }
-        with mock.patch.dict(os.environ, env_clear, clear=True):
-            with mock.patch(
-                "kiln.cli.config.get_config_path", return_value=config_path
-            ):
-                policy = load_monitor_policy()
+        with mock.patch.dict(os.environ, env_clear, clear=True), mock.patch(
+            "kiln.cli.config.get_config_path", return_value=config_path
+        ):
+            policy = load_monitor_policy()
         assert policy.first_layer_delay_seconds == 45
         assert policy.first_layer_check_count == 6
         assert policy.first_layer_interval_seconds == 30
@@ -727,7 +718,7 @@ class TestAutonomyFirstLayerConstraint:
         assert d["require_first_layer_check"] is True
 
     def test_constraint_from_env_var(self) -> None:
-        from kiln.autonomy import AutonomyConstraints, load_autonomy_config
+        from kiln.autonomy import load_autonomy_config
 
         env = {
             "KILN_AUTONOMY_LEVEL": "1",
@@ -757,11 +748,10 @@ class TestAutonomyFirstLayerConstraint:
             for k, v in os.environ.items()
             if k not in ("KILN_AUTONOMY_LEVEL", "KILN_MONITOR_REQUIRE_FIRST_LAYER")
         }
-        with mock.patch.dict(os.environ, env_clear, clear=True):
-            with mock.patch(
-                "kiln.cli.config.get_config_path", return_value=config_path
-            ):
-                config = load_autonomy_config()
+        with mock.patch.dict(os.environ, env_clear, clear=True), mock.patch(
+            "kiln.cli.config.get_config_path", return_value=config_path
+        ):
+            config = load_autonomy_config()
         assert config.constraints.require_first_layer_check is True
 
     def test_check_autonomy_includes_requirement(self) -> None:

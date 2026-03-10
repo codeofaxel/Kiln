@@ -14,12 +14,9 @@ Covers:
 
 from __future__ import annotations
 
-import concurrent.futures
-import socket
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 import requests
 import responses
 
@@ -32,7 +29,6 @@ from kiln.discovery import (
     discover_printers,
     probe_host,
 )
-
 
 # ---------------------------------------------------------------------------
 # DiscoveredPrinter dataclass

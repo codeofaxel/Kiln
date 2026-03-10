@@ -10,14 +10,11 @@ Uses temporary SQLite databases for full isolation.
 
 from __future__ import annotations
 
-import json
-import tempfile
 import time
 
 import pytest
 
 from kiln.persistence import KilnDB
-
 
 # ===================================================================
 # Fixtures

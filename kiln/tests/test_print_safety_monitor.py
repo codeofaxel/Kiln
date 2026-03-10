@@ -5,9 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from kiln.print_safety_monitor import (
     Alert,
@@ -22,7 +20,6 @@ from kiln.printers.base import (
     PrinterState,
     PrinterStatus,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

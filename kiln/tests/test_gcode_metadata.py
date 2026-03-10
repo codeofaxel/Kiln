@@ -17,14 +17,13 @@ import pytest
 
 from kiln.gcode_metadata import (
     GCodeMetadata,
+    _normalize_material,
+    _parse_time_string,
+    enrich_printer_file,
     extract_metadata,
     extract_metadata_from_content,
-    enrich_printer_file,
-    _parse_time_string,
-    _normalize_material,
 )
 from kiln.printers.base import PrinterFile
-
 
 # ===================================================================
 # GCodeMetadata dataclass

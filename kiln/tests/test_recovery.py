@@ -25,6 +25,8 @@ from unittest import mock
 import pytest
 
 from kiln.recovery import (
+    _PRINT_COMPROMISED_FAILURES,
+    _SAFETY_CRITICAL_FAILURES,
     CheckpointData,
     FailureType,
     RecoveryCheckpoint,
@@ -33,13 +35,10 @@ from kiln.recovery import (
     RecoveryRecommendation,
     RecoveryResult,
     RecoveryStrategy,
-    _PRINT_COMPROMISED_FAILURES,
-    _SAFETY_CRITICAL_FAILURES,
     get_recovery_manager,
     plan_recovery,
     save_checkpoint,
 )
-
 
 # ---------------------------------------------------------------------------
 # 1. CheckpointData
@@ -881,17 +880,17 @@ class TestSafetyClassification:
             assert mgr.is_print_compromised(ft) is False, f"{ft} should not be print compromised"
 
     def test_safety_critical_frozenset_contents(self):
-        assert _SAFETY_CRITICAL_FAILURES == frozenset({
+        assert frozenset({
             FailureType.THERMAL_RUNAWAY,
             FailureType.BED_ADHESION_FAILURE,
-        })
+        }) == _SAFETY_CRITICAL_FAILURES
 
     def test_print_compromised_frozenset_contents(self):
-        assert _PRINT_COMPROMISED_FAILURES == frozenset({
+        assert frozenset({
             FailureType.LAYER_SHIFT,
             FailureType.BED_ADHESION_FAILURE,
             FailureType.FIRST_LAYER_FAILURE,
-        })
+        }) == _PRINT_COMPROMISED_FAILURES
 
 
 # ---------------------------------------------------------------------------

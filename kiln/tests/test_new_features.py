@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import time
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -19,7 +18,6 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -50,7 +48,7 @@ def _mock_adapter(**overrides):
         "print",
         PrintResult(success=True, message="Started."),
     )
-    adapter.get_snapshot.return_value = overrides.get("snapshot", None)
+    adapter.get_snapshot.return_value = overrides.get("snapshot")
     return adapter
 
 

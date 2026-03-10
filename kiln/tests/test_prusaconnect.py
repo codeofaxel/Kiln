@@ -3,21 +3,20 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
-from kiln.printers.prusaconnect import (
-    PrusaConnectAdapter,
-    _safe_get,
-)
 from kiln.printers.base import (
     PrinterError,
     PrinterStatus,
 )
-
+from kiln.printers.prusaconnect import (
+    PrusaConnectAdapter,
+    _safe_get,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -26,7 +25,7 @@ from kiln.printers.base import (
 
 def _mock_response(
     status_code: int = 200,
-    json_data: Optional[Dict[str, Any]] = None,
+    json_data: dict[str, Any] | None = None,
     content: bytes = b"",
     ok: bool = True,
 ) -> MagicMock:

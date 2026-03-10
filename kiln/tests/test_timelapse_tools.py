@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from kiln.printers.base import PrinterStatus
 from kiln.registry import PrinterNotFoundError
 
@@ -164,7 +162,7 @@ class TestWatchPrintSaveToDisk:
     @patch("kiln.server._check_auth", return_value=None)
     @patch("kiln.server._get_adapter")
     def test_save_to_disk_returns_save_dir(self, mock_get_adapter, mock_auth):
-        from kiln.server import watch_print, _watchers
+        from kiln.server import watch_print
 
         mock_adapter = MagicMock()
         mock_state = MagicMock()

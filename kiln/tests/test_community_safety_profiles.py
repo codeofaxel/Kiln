@@ -13,28 +13,24 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict
-from unittest.mock import patch
+from typing import Any
 
 import pytest
 
 from kiln.safety_profiles import (
-    SafetyProfile,
     add_community_profile,
     export_profile,
     get_profile,
     list_community_profiles,
     list_profiles,
-    profile_to_dict,
     validate_safety_profile,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
-def _valid_profile() -> Dict[str, Any]:
+def _valid_profile() -> dict[str, Any]:
     """Return a minimal valid community profile dict."""
     return {
         "display_name": "Test Printer XL",

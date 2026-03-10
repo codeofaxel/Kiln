@@ -13,19 +13,11 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import time
 
 import pytest
 
-from kiln.persistence import KilnDB
 from kiln.material_inventory import (
-    ConsumptionForecast,
-    ConsumptionRecord,
-    FleetAssignment,
-    FleetMaterialSummary,
-    MaterialCheck,
-    RestockSuggestion,
     check_material_sufficiency,
     find_printers_with_material,
     forecast_consumption,
@@ -35,7 +27,7 @@ from kiln.material_inventory import (
     optimize_fleet_assignment,
     suggest_spool_swaps,
 )
-
+from kiln.persistence import KilnDB
 
 # ---------------------------------------------------------------------------
 # Fixtures

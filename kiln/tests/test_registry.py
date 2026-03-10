@@ -21,7 +21,6 @@ import pytest
 from kiln.printers.base import PrinterAdapter, PrinterCapabilities, PrinterState, PrinterStatus
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

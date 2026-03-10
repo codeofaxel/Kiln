@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
@@ -29,9 +29,9 @@ def _outcome(
     printer_name: str = "voron",
     outcome: str = "success",
     **kwargs: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Helper to build an outcome dict with sensible defaults."""
-    base: Dict[str, Any] = {
+    base: dict[str, Any] = {
         "job_id": job_id,
         "printer_name": printer_name,
         "file_name": "benchy.gcode",
@@ -293,8 +293,9 @@ class TestSafetyValidationInServerLayer:
     """Test MCP tool safety enforcement for record_print_outcome."""
 
     def test_negative_temp_rejected(self) -> None:
-        from kiln.plugins.learning_tools import record_print_outcome
         from unittest.mock import patch
+
+        from kiln.plugins.learning_tools import record_print_outcome
 
         with patch("kiln.persistence.get_db") as mock_db, \
              patch("kiln.server._check_auth", return_value=None):
@@ -305,8 +306,9 @@ class TestSafetyValidationInServerLayer:
         assert result.get("error", {}).get("code") == "SAFETY_VIOLATION"
 
     def test_zero_temp_accepted(self) -> None:
+        from unittest.mock import MagicMock, patch
+
         from kiln.plugins.learning_tools import record_print_outcome
-        from unittest.mock import patch, MagicMock
 
         mock_db_instance = MagicMock()
         mock_db_instance.get_print_record.return_value = None
@@ -321,8 +323,9 @@ class TestSafetyValidationInServerLayer:
         assert result.get("success") is True
 
     def test_non_numeric_temp_returns_validation_error(self) -> None:
-        from kiln.plugins.learning_tools import record_print_outcome
         from unittest.mock import patch
+
+        from kiln.plugins.learning_tools import record_print_outcome
 
         with patch("kiln.persistence.get_db"), \
              patch("kiln.server._check_auth", return_value=None):
@@ -333,8 +336,9 @@ class TestSafetyValidationInServerLayer:
         assert result.get("error", {}).get("code") == "VALIDATION_ERROR"
 
     def test_negative_speed_rejected(self) -> None:
-        from kiln.plugins.learning_tools import record_print_outcome
         from unittest.mock import patch
+
+        from kiln.plugins.learning_tools import record_print_outcome
 
         with patch("kiln.persistence.get_db"), \
              patch("kiln.server._check_auth", return_value=None):

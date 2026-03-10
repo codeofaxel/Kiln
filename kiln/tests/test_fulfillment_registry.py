@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 
 from kiln.fulfillment.base import FulfillmentProvider
@@ -16,7 +14,6 @@ from kiln.fulfillment.registry import (
     register,
 )
 from kiln.fulfillment.sculpteo import SculpteoProvider
-
 
 # ---------------------------------------------------------------------------
 # list_providers
@@ -120,7 +117,6 @@ class TestGetProvider:
         assert isinstance(provider, SculpteoProvider)
 
     def test_no_provider_configured_defaults_to_proxy(self, monkeypatch, tmp_path):
-        from unittest.mock import patch
 
         from kiln.fulfillment.proxy import ProxyProvider
 

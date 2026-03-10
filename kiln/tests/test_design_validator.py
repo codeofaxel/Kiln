@@ -32,7 +32,6 @@ from kiln.design_validator import (
     validation_to_feedback,
 )
 
-
 # ---------------------------------------------------------------------------
 # STL helpers (same pattern as test_printability.py)
 # ---------------------------------------------------------------------------

@@ -28,9 +28,8 @@ from kiln.pipelines import (
     PipelineExecution,
     PipelineState,
     PipelineStep,
-    PipelineResult,
-    _StepDef,
     _executions,
+    _StepDef,
     get_execution,
     list_executions,
 )

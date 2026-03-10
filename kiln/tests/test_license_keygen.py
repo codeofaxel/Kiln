@@ -47,9 +47,8 @@ class TestGenerateLicenseKey:
         assert len(parts) == 4
 
     def test_missing_signing_key_raises(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(ValueError, match="[Ss]igning key"):
-                generate_license_key(LicenseTier.PRO, "user@example.com")
+        with mock.patch.dict(os.environ, {}, clear=True), pytest.raises(ValueError, match="[Ss]igning key"):
+            generate_license_key(LicenseTier.PRO, "user@example.com")
 
     def test_roundtrip_pro(self, tmp_path):
         key = generate_license_key(

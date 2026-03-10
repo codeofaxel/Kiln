@@ -8,9 +8,8 @@ import time
 from pathlib import Path
 from unittest import mock
 
-import pytest
-
 from kiln.licensing import (
+    _KEY_PREFIX_PRO,
     FEATURE_TIERS,
     FREE_TIER_MAX_PRINTERS,
     FREE_TIER_MAX_QUEUED_JOBS,
@@ -19,8 +18,6 @@ from kiln.licensing import (
     LicenseManager,
     LicenseTier,
     TierRequiredError,
-    _KEY_PREFIX_BUSINESS,
-    _KEY_PREFIX_PRO,
     check_tier,
     generate_license_key,
     get_license_manager,

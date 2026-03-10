@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch, PropertyMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from kiln.plugins import (
     KilnPlugin,
@@ -13,7 +11,6 @@ from kiln.plugins import (
     PluginInfo,
     PluginManager,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test plugin implementations

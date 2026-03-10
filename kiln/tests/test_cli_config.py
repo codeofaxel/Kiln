@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -18,7 +17,6 @@ from kiln.cli.config import (
     set_active_printer,
     validate_printer_config,
 )
-
 
 # ---------------------------------------------------------------------------
 # _normalize_host

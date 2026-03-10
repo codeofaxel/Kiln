@@ -32,7 +32,6 @@ import pytest
 from kiln.events import Event, EventBus, EventType
 from kiln.webhooks import DeliveryRecord, WebhookEndpoint, WebhookManager, _mask_secret, _validate_webhook_url
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

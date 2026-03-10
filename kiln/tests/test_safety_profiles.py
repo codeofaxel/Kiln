@@ -19,22 +19,18 @@ Covers:
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
+from kiln.gcode import GCodeValidationResult, validate_gcode_for_printer
 from kiln.safety_profiles import (
+    _DATA_FILE,
     SafetyProfile,
+    get_all_profiles,
     get_profile,
     list_profiles,
-    get_all_profiles,
     profile_to_dict,
-    _DATA_FILE,
-    _cache,
-    _loaded,
 )
-from kiln.gcode import validate_gcode_for_printer, GCodeValidationResult
-
 
 # ===================================================================
 # Fixtures

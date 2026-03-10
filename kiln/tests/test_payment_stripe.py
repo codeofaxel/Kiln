@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from typing import Any, Dict, Optional
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,10 +14,8 @@ from kiln.payments.base import (
     PaymentProvider,
     PaymentRail,
     PaymentRequest,
-    PaymentResult,
     PaymentStatus,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -39,8 +37,8 @@ def _build_mock_stripe() -> MagicMock:
 
 def _make_provider(
     secret_key: str = "sk_test_abc123",
-    customer_id: Optional[str] = "cus_test",
-    payment_method_id: Optional[str] = "pm_test",
+    customer_id: str | None = "cus_test",
+    payment_method_id: str | None = "pm_test",
 ) -> Any:
     """Create a StripeProvider without hitting real Stripe."""
     from kiln.payments.stripe_provider import StripeProvider
@@ -54,7 +52,7 @@ def _make_provider(
 
 def _payment_request(**overrides: Any) -> PaymentRequest:
     """Build a PaymentRequest with sensible defaults."""
-    defaults: Dict[str, Any] = {
+    defaults: dict[str, Any] = {
         "amount": 25.50,
         "currency": Currency.USD,
         "rail": PaymentRail.STRIPE,
@@ -743,9 +741,8 @@ class TestAuthorizePayment:
     def test_no_payment_method_raises(self):
         provider = _make_provider(customer_id=None, payment_method_id=None)
         mock_stripe = _build_mock_stripe()
-        with patch.dict(sys.modules, {"stripe": mock_stripe}):
-            with pytest.raises(PaymentError, match="must be set"):
-                provider.authorize_payment(_payment_request())
+        with patch.dict(sys.modules, {"stripe": mock_stripe}), pytest.raises(PaymentError, match="must be set"):
+            provider.authorize_payment(_payment_request())
 
 
 class TestCapturePayment:
@@ -770,9 +767,8 @@ class TestCapturePayment:
         mock_stripe = _build_mock_stripe()
         mock_stripe.PaymentIntent.capture.side_effect = mock_stripe.error.StripeError("expired")
         provider = _make_provider()
-        with patch.dict(sys.modules, {"stripe": mock_stripe}):
-            with pytest.raises(PaymentError, match="capture"):
-                provider.capture_payment("pi_expired")
+        with patch.dict(sys.modules, {"stripe": mock_stripe}), pytest.raises(PaymentError, match="capture"):
+            provider.capture_payment("pi_expired")
 
 
 class TestCancelPayment:
@@ -797,6 +793,5 @@ class TestCancelPayment:
         mock_stripe = _build_mock_stripe()
         mock_stripe.PaymentIntent.cancel.side_effect = mock_stripe.error.StripeError("already captured")
         provider = _make_provider()
-        with patch.dict(sys.modules, {"stripe": mock_stripe}):
-            with pytest.raises(PaymentError, match="cancel"):
-                provider.cancel_payment("pi_already_captured")
+        with patch.dict(sys.modules, {"stripe": mock_stripe}), pytest.raises(PaymentError, match="cancel"):
+            provider.cancel_payment("pi_already_captured")

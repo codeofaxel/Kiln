@@ -13,6 +13,13 @@ import requests
 import responses
 from responses import matchers
 
+from kiln.marketplaces import (
+    MarketplaceHealth,
+    MarketplaceHealthMonitor,
+    MarketplaceRegistry,
+    MarketplaceSearchResults,
+    MarketplaceStatus,
+)
 from kiln.marketplaces.base import (
     MarketplaceAdapter,
     MarketplaceAuthError,
@@ -23,28 +30,23 @@ from kiln.marketplaces.base import (
     ModelFile,
     ModelSummary,
 )
-from kiln.marketplaces.thingiverse import ThingiverseAdapter, _wrap_error
-from kiln.marketplaces.myminifactory import MyMiniFactoryAdapter
 from kiln.marketplaces.cults3d import Cults3DAdapter
-from kiln.marketplaces import (
-    MarketplaceHealth,
-    MarketplaceHealthMonitor,
-    MarketplaceRegistry,
-    MarketplaceSearchResults,
-    MarketplaceStatus,
-)
-
+from kiln.marketplaces.myminifactory import MyMiniFactoryAdapter
+from kiln.marketplaces.thingiverse import ThingiverseAdapter, _wrap_error
 from kiln.thingiverse import (
     ThingDetail,
-    ThingFile as TvThingFile,
-    ThingSummary as TvThingSummary,
     ThingiverseAuthError,
     ThingiverseClient,
     ThingiverseError,
     ThingiverseNotFoundError,
     ThingiverseRateLimitError,
 )
-
+from kiln.thingiverse import (
+    ThingFile as TvThingFile,
+)
+from kiln.thingiverse import (
+    ThingSummary as TvThingSummary,
+)
 
 # ---------------------------------------------------------------------------
 # Constants

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from kiln.bed_leveling import BedLevelManager, LevelingPolicy, LevelingStatus
 from kiln.persistence import KilnDB
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

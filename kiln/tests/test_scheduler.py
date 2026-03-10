@@ -36,9 +36,8 @@ from kiln.printers.base import (
     PrintResult,
 )
 from kiln.queue import JobStatus, PrintQueue
-from kiln.registry import PrinterNotFoundError, PrinterRegistry
+from kiln.registry import PrinterRegistry
 from kiln.scheduler import JobScheduler
-
 
 # ---------------------------------------------------------------------------
 # Helpers -- mock adapter factory
@@ -997,7 +996,7 @@ class TestSmartPrinterRouting:
     def test_rank_printers_no_persistence(self, queue, registry, event_bus):
         """Without persistence, _rank_printers returns list unchanged."""
         scheduler = JobScheduler(queue, registry, event_bus, persistence=None)
-        from kiln.queue import PrintJob, JobStatus
+        from kiln.queue import JobStatus, PrintJob
         job = PrintJob(
             id="j1", file_name="test.gcode", printer_name=None,
             status=JobStatus.QUEUED, submitted_by="test",
@@ -1010,7 +1009,7 @@ class TestSmartPrinterRouting:
         """Without file_hash/material_type in metadata, returns list unchanged."""
         mock_persistence = MagicMock()
         scheduler = JobScheduler(queue, registry, event_bus, persistence=mock_persistence)
-        from kiln.queue import PrintJob, JobStatus
+        from kiln.queue import JobStatus, PrintJob
         job = PrintJob(
             id="j1", file_name="test.gcode", printer_name=None,
             status=JobStatus.QUEUED, submitted_by="test",
@@ -1028,7 +1027,7 @@ class TestSmartPrinterRouting:
             {"printer_name": "printer-a", "total_prints": 10, "successes": 5, "success_rate": 0.5},
         ]
         scheduler = JobScheduler(queue, registry, event_bus, persistence=mock_persistence)
-        from kiln.queue import PrintJob, JobStatus
+        from kiln.queue import JobStatus, PrintJob
         job = PrintJob(
             id="j1", file_name="test.gcode", printer_name=None,
             status=JobStatus.QUEUED, submitted_by="test",
@@ -1044,7 +1043,7 @@ class TestSmartPrinterRouting:
             {"printer_name": "printer-b", "total_prints": 5, "successes": 4, "success_rate": 0.8},
         ]
         scheduler = JobScheduler(queue, registry, event_bus, persistence=mock_persistence)
-        from kiln.queue import PrintJob, JobStatus
+        from kiln.queue import JobStatus, PrintJob
         job = PrintJob(
             id="j1", file_name="test.gcode", printer_name=None,
             status=JobStatus.QUEUED, submitted_by="test",
@@ -1059,7 +1058,7 @@ class TestSmartPrinterRouting:
         mock_persistence = MagicMock()
         mock_persistence.suggest_printer_for_outcome.return_value = []
         scheduler = JobScheduler(queue, registry, event_bus, persistence=mock_persistence)
-        from kiln.queue import PrintJob, JobStatus
+        from kiln.queue import JobStatus, PrintJob
         job = PrintJob(
             id="j1", file_name="test.gcode", printer_name=None,
             status=JobStatus.QUEUED, submitted_by="test",

@@ -22,22 +22,19 @@ from __future__ import annotations
 
 import json
 from dataclasses import FrozenInstanceError
-from pathlib import Path
 
 import pytest
 
 from kiln.printer_intelligence import (
-    MaterialProfile,
-    FailureMode,
-    PrinterIntel,
-    get_printer_intel,
-    list_intel_profiles,
-    get_material_settings,
-    diagnose_issue,
-    intel_to_dict,
     _DATA_FILE,
+    FailureMode,
+    MaterialProfile,
+    diagnose_issue,
+    get_material_settings,
+    get_printer_intel,
+    intel_to_dict,
+    list_intel_profiles,
 )
-
 
 # ===================================================================
 # Fixtures

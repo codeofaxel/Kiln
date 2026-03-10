@@ -28,11 +28,11 @@ from kiln.cross_printer_learning import (
     MaterialInsight,
     PrinterModelInsight,
     PrintOutcome,
-    get_learning_engine,
     _mean,
     _median,
     _std_dev,
     _validate_outcome,
+    get_learning_engine,
 )
 
 # ---------------------------------------------------------------------------

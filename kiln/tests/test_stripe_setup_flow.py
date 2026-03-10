@@ -3,13 +3,8 @@
 from __future__ import annotations
 
 import sys
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import MagicMock, patch
-
-import pytest
-
-from kiln.payments.base import PaymentError
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -28,8 +23,8 @@ def _build_mock_stripe() -> MagicMock:
 
 def _make_provider(
     secret_key: str = "sk_test_abc123",
-    customer_id: Optional[str] = "cus_test",
-    payment_method_id: Optional[str] = None,
+    customer_id: str | None = "cus_test",
+    payment_method_id: str | None = None,
 ) -> Any:
     """Create a StripeProvider without hitting real Stripe."""
     from kiln.payments.stripe_provider import StripeProvider

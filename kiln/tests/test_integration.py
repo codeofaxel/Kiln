@@ -18,19 +18,16 @@ verify the modules compose correctly across subsystem boundaries.
 from __future__ import annotations
 
 import json
-import os
-import threading
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
 from click.testing import CliRunner
 
-from kiln.billing import BillingLedger, FeeCalculation, FeePolicy
+from kiln.billing import BillingLedger, FeePolicy
 from kiln.cli.main import cli
 from kiln.events import Event, EventBus, EventType
 from kiln.gcode import validate_gcode, validate_gcode_for_printer
@@ -47,7 +44,6 @@ from kiln.queue import JobStatus, PrintQueue
 from kiln.registry import PrinterRegistry
 from kiln.scheduler import JobScheduler
 from kiln.webhooks import WebhookManager
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -494,7 +490,7 @@ class TestQueueSchedulerPrinterFlow:
         )
 
         # Track events
-        received_events: List[Event] = []
+        received_events: list[Event] = []
         event_bus.subscribe(None, lambda e: received_events.append(e))
 
         # Submit a job
@@ -670,7 +666,7 @@ class TestBillingFulfillmentRefundSaga:
 
     def test_charge_then_job_failure_records_refund_event(self, event_bus):
         """Create a charge, simulate failure, verify refund event is published."""
-        received_events: List[Event] = []
+        received_events: list[Event] = []
         event_bus.subscribe(None, lambda e: received_events.append(e))
 
         # Set up billing with a policy that charges fees (exhaust free tier)
@@ -792,7 +788,7 @@ class TestEventBusWebhookDelivery:
 
     def test_subscriber_receives_event_with_correct_payload(self, event_bus):
         """Subscribe to an event type, publish, verify callback payload."""
-        received: List[Event] = []
+        received: list[Event] = []
 
         def handler(event: Event) -> None:
             received.append(event)
@@ -814,7 +810,7 @@ class TestEventBusWebhookDelivery:
 
     def test_wildcard_subscriber_receives_all_events(self, event_bus):
         """A wildcard subscriber (event_type=None) receives every event."""
-        received: List[Event] = []
+        received: list[Event] = []
         event_bus.subscribe(None, lambda e: received.append(e))
 
         event_bus.publish(Event(type=EventType.JOB_SUBMITTED, data={"a": 1}))
@@ -825,7 +821,7 @@ class TestEventBusWebhookDelivery:
 
     def test_subscriber_only_receives_matching_events(self, event_bus):
         """A typed subscriber should not receive events of other types."""
-        received: List[Event] = []
+        received: list[Event] = []
         event_bus.subscribe(EventType.JOB_FAILED, lambda e: received.append(e))
 
         event_bus.publish(Event(type=EventType.JOB_COMPLETED, data={}))
@@ -836,7 +832,7 @@ class TestEventBusWebhookDelivery:
 
     def test_handler_exception_does_not_block_other_handlers(self, event_bus):
         """If one handler raises, other handlers should still execute."""
-        results: List[str] = []
+        results: list[str] = []
 
         def bad_handler(event: Event) -> None:
             raise RuntimeError("handler exploded")
@@ -874,7 +870,7 @@ class TestEventBusWebhookDelivery:
     def test_webhook_manager_enqueues_matching_events(self, event_bus):
         """WebhookManager should enqueue deliveries for matching events."""
         # Use a custom send function to capture deliveries without HTTP
-        delivered: List[Dict[str, Any]] = []
+        delivered: list[dict[str, Any]] = []
 
         def mock_send(url, payload, headers, timeout):
             delivered.append({
@@ -929,8 +925,8 @@ class TestEventBusWebhookDelivery:
         import hashlib
         import hmac as hmac_mod
 
-        delivered_headers: List[Dict[str, str]] = []
-        delivered_payloads: List[str] = []
+        delivered_headers: list[dict[str, str]] = []
+        delivered_payloads: list[str] = []
 
         def capture_send(url, payload, headers, timeout):
             delivered_headers.append(headers)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,12 +12,10 @@ import requests
 from kiln.fulfillment.base import (
     FulfillmentError,
     OrderRequest,
-    OrderResult,
     OrderStatus,
     QuoteRequest,
 )
 from kiln.fulfillment.sculpteo import SculpteoProvider
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -26,7 +24,7 @@ from kiln.fulfillment.sculpteo import SculpteoProvider
 
 def _mock_response(
     status_code: int = 200,
-    json_data: Optional[Dict[str, Any]] = None,
+    json_data: dict[str, Any] | None = None,
     ok: bool = True,
 ) -> MagicMock:
     """Create a mock requests.Response."""

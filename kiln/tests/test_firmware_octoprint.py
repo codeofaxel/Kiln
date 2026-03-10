@@ -8,21 +8,16 @@ Covers:
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any
 from unittest import mock
 
 import pytest
 import requests
 
 from kiln.printers.base import (
-    FirmwareComponent,
-    FirmwareStatus,
-    FirmwareUpdateResult,
     PrinterError,
-    PrinterStatus,
 )
 from kiln.printers.octoprint import OctoPrintAdapter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -33,7 +28,7 @@ API_KEY = "test-api-key"
 
 
 def _adapter(**kwargs: Any) -> OctoPrintAdapter:
-    defaults: Dict[str, Any] = {
+    defaults: dict[str, Any] = {
         "host": HOST,
         "api_key": API_KEY,
         "timeout": 5,
@@ -45,9 +40,9 @@ def _adapter(**kwargs: Any) -> OctoPrintAdapter:
 
 def _mock_response(
     status_code: int = 200,
-    json_data: Optional[Dict[str, Any]] = None,
+    json_data: dict[str, Any] | None = None,
     text: str = "",
-    ok: Optional[bool] = None,
+    ok: bool | None = None,
 ) -> mock.MagicMock:
     resp = mock.MagicMock(spec=requests.Response)
     resp.status_code = status_code
@@ -275,9 +270,8 @@ class TestOctoPrintUpdateFirmware:
         with mock.patch.object(
             adapter._session, "request",
             side_effect=[state_resp, requests.exceptions.ConnectionError("fail")],
-        ):
-            with pytest.raises(PrinterError):
-                adapter.update_firmware(component="octoprint")
+        ), pytest.raises(PrinterError):
+            adapter.update_firmware(component="octoprint")
 
     def test_plugin_unavailable_raises(self) -> None:
         """When get_firmware_status returns None, update_firmware raises."""
@@ -289,6 +283,5 @@ class TestOctoPrintUpdateFirmware:
         with mock.patch.object(
             adapter._session, "request",
             side_effect=[state_resp, requests.exceptions.ConnectionError("no plugin")],
-        ):
-            with pytest.raises(PrinterError):
-                adapter.update_firmware()
+        ), pytest.raises(PrinterError):
+            adapter.update_firmware()

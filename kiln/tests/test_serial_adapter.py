@@ -38,7 +38,6 @@ import os
 import sys
 import tempfile
 import threading
-import time
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
@@ -55,7 +54,6 @@ from kiln.printers.base import (
     PrintResult,
     UploadResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers for mocking pyserial
@@ -679,9 +677,8 @@ class TestListFiles:
         with patch.object(
             adapter, "_send_command",
             side_effect=PrinterError("error: no SD card"),
-        ):
-            with pytest.raises(PrinterError, match="No SD card"):
-                adapter.list_files()
+        ), pytest.raises(PrinterError, match="No SD card"):
+            adapter.list_files()
 
     def test_parse_file_list_static(self):
         from kiln.printers.serial_adapter import SerialPrinterAdapter
@@ -705,9 +702,8 @@ class TestListFiles:
         with patch.object(
             adapter, "_send_command",
             side_effect=PrinterError("generic error"),
-        ):
-            with pytest.raises(PrinterError, match="generic error"):
-                adapter.list_files()
+        ), pytest.raises(PrinterError, match="generic error"):
+            adapter.list_files()
 
 
 # ---------------------------------------------------------------------------
@@ -797,9 +793,8 @@ class TestDeleteFile:
         with patch.object(
             adapter, "_send_command",
             side_effect=PrinterError("M30 failed"),
-        ):
-            with pytest.raises(PrinterError, match="M30 failed"):
-                adapter.delete_file("BENCHY.GCO")
+        ), pytest.raises(PrinterError, match="M30 failed"):
+            adapter.delete_file("BENCHY.GCO")
 
 
 # ---------------------------------------------------------------------------
@@ -829,9 +824,8 @@ class TestStartPrint:
         with patch.object(
             adapter, "_send_command",
             side_effect=PrinterError("File not found"),
-        ):
-            with pytest.raises(PrinterError, match="File not found"):
-                adapter.start_print("NOFILE.GCO")
+        ), pytest.raises(PrinterError, match="File not found"):
+            adapter.start_print("NOFILE.GCO")
 
 
 # ---------------------------------------------------------------------------

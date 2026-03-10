@@ -13,16 +13,13 @@ from __future__ import annotations
 
 import pytest
 
-from kiln.billing import BillingLedger, FeeCalculation, FeePolicy
+from kiln.billing import BillingLedger, FeePolicy
 from kiln.tax import (
     TaxCalculator,
-    TaxJurisdiction,
     TaxResult,
     TaxType,
-    _TAX_ID_PATTERNS,
     _validate_tax_id_format,
 )
-
 
 # ---------------------------------------------------------------------------
 # TestTaxCalculator — core calculation

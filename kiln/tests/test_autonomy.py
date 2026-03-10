@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -29,13 +29,12 @@ from kiln.autonomy import (
     save_autonomy_config,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _write_config(tmp_path: Path, data: Dict[str, Any]) -> Path:
+def _write_config(tmp_path: Path, data: dict[str, Any]) -> Path:
     """Write a YAML config file and return the path."""
     config_path = tmp_path / "config.yaml"
     with config_path.open("w") as fh:

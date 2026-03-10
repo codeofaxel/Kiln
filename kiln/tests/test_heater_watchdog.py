@@ -11,16 +11,11 @@ Covers:
 
 from __future__ import annotations
 
-import threading
 import time
 from dataclasses import dataclass
-from typing import List, Optional
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from kiln.heater_watchdog import HeaterWatchdog
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -29,8 +24,8 @@ from kiln.heater_watchdog import HeaterWatchdog
 @dataclass
 class FakeState:
     """Minimal printer state for testing."""
-    tool_temp_target: Optional[float] = 0
-    bed_temp_target: Optional[float] = 0
+    tool_temp_target: float | None = 0
+    bed_temp_target: float | None = 0
 
 
 class FakeAdapter:
@@ -45,8 +40,8 @@ class FakeAdapter:
             tool_temp_target=tool_target,
             bed_temp_target=bed_target,
         )
-        self.set_tool_calls: List[float] = []
-        self.set_bed_calls: List[float] = []
+        self.set_tool_calls: list[float] = []
+        self.set_bed_calls: list[float] = []
 
     def get_state(self):
         return self.state
@@ -63,7 +58,7 @@ class FakeAdapter:
 
 
 def _make_watchdog(
-    adapter: Optional[FakeAdapter] = None,
+    adapter: FakeAdapter | None = None,
     timeout_minutes: float = 0.01,  # very short for tests (~0.6s)
     poll_interval: float = 0.1,
     event_bus=None,
