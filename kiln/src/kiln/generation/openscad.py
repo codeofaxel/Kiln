@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 from kiln.generation.base import (
@@ -277,6 +278,107 @@ class OpenSCADProvider(GenerationProvider):
             file_size_bytes=os.path.getsize(path),
             prompt=prompt,
         )
+
+    def render_preview(
+        self,
+        file_path: str,
+        *,
+        output_path: str | None = None,
+        width: int = 800,
+        height: int = 600,
+    ) -> str:
+        """Render a PNG preview of an STL or SCAD file.
+
+        For STL files, wraps in an ``import()`` statement and renders.
+        For SCAD files, renders directly.
+
+        Args:
+            file_path: Path to .stl or .scad file.
+            output_path: Output PNG path.  Auto-generated if omitted.
+            width: Image width in pixels.
+            height: Image height in pixels.
+
+        Returns:
+            Path to the rendered PNG file.
+
+        Raises:
+            GenerationError: If rendering fails or format is unsupported.
+        """
+        p = Path(file_path)
+        ext = p.suffix.lower()
+        if ext not in (".stl", ".scad"):
+            raise GenerationError(
+                f"Cannot render preview for {ext!r} — only .stl and .scad supported.",
+                code="UNSUPPORTED_FORMAT",
+            )
+
+        if output_path is None:
+            output_path = os.path.join(
+                tempfile.gettempdir(), "kiln_previews", f"{p.stem}_preview.png"
+            )
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        if ext == ".stl":
+            # Wrap STL in a minimal SCAD import (safe — we control the path)
+            scad_code = f'import("{file_path}");'
+            return self._render_scad_to_png(scad_code, output_path, width, height)
+        else:
+            with open(file_path) as fh:
+                scad_code = fh.read()
+            return self._render_scad_to_png(scad_code, output_path, width, height)
+
+    def _render_scad_to_png(
+        self,
+        scad_code: str,
+        output_path: str,
+        width: int,
+        height: int,
+    ) -> str:
+        """Render OpenSCAD code to PNG."""
+        scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_preview_")
+        try:
+            with os.fdopen(scad_fd, "w") as fh:
+                fh.write(scad_code)
+
+            cmd = [
+                self._binary,
+                "-o", output_path,
+                "--render",
+                f"--imgsize={width},{height}",
+                "--autocenter",
+                "--viewall",
+                scad_path,
+            ]
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=self._timeout,
+                )
+            except subprocess.TimeoutExpired:
+                raise GenerationError(
+                    f"OpenSCAD render timed out after {self._timeout}s.",
+                    code="RENDER_TIMEOUT",
+                )
+
+            if result.returncode != 0:
+                stderr = (result.stderr or "").strip()[:500]
+                raise GenerationError(
+                    f"OpenSCAD render failed (code {result.returncode}): {stderr}",
+                    code="RENDER_ERROR",
+                )
+
+            if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+                raise GenerationError(
+                    "OpenSCAD render produced no output.",
+                    code="RENDER_EMPTY",
+                )
+
+            return output_path
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(scad_path)
 
     def list_styles(self) -> list[str]:
         return []

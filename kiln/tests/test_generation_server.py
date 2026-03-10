@@ -115,7 +115,8 @@ class TestGenerateModel:
 
     @_AUTH_PATCH
     @patch("kiln.server._get_generation_provider")
-    def test_success(self, mock_get_provider, _auth):
+    @patch("kiln.generation_feedback.enhance_prompt_with_design_intelligence", side_effect=Exception("skip"))
+    def test_success(self, _enrich, mock_get_provider, _auth):
         provider = MagicMock()
         provider.display_name = "Meshy"
         provider.generate.return_value = _make_job()
@@ -231,7 +232,7 @@ class TestDownloadGeneratedModel:
     @patch("kiln.server._get_generation_provider")
     def test_success_non_stl_skips_validation(self, mock_get_provider, mock_validate, _auth):
         provider = MagicMock()
-        provider.download_result.return_value = _make_result(fmt="glb")
+        provider.download_result.return_value = _make_result(fmt="fbx")
         mock_get_provider.return_value = provider
 
         result = download_generated_model("test-job-123")
@@ -663,7 +664,7 @@ class TestDownloadDimensions:
     def test_dimensions_none_for_non_stl(self, mock_get_provider, mock_validate, _auth):
         """GLB format should have no dimensions (no validation)."""
         provider = MagicMock()
-        provider.download_result.return_value = _make_result(fmt="glb")
+        provider.download_result.return_value = _make_result(fmt="fbx")
         mock_get_provider.return_value = provider
 
         result = download_generated_model("test-job-123")

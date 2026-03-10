@@ -163,6 +163,8 @@ READ_ONLY_TOOLS: Set[str] = {
     "validate_print_quality",
     "list_generation_providers",
     "validate_generated_mesh",
+    "render_model_preview",
+    "get_feedback_loop_status",
 
     # Onboarding / help (no side effects)
     "get_started",

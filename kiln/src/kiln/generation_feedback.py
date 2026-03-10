@@ -26,6 +26,29 @@ logger = logging.getLogger(__name__)
 # Maximum prompt length for Meshy API.
 _MAX_PROMPT_LENGTH = 600
 
+# Per-provider prompt length limits (characters).
+_PROVIDER_PROMPT_LIMITS: dict[str, int] = {
+    "meshy": 600,
+    "gemini": 10_000,
+    "tripo3d": 5_000,
+    "stability": 5_000,
+    "openscad": 100_000,
+}
+
+
+def get_provider_prompt_limit(provider: str | None = None) -> int:
+    """Return the maximum prompt length for a provider.
+
+    Args:
+        provider: Provider name.  Defaults to Meshy's limit.
+
+    Returns:
+        Maximum prompt length in characters.
+    """
+    if provider is None:
+        return _MAX_PROMPT_LENGTH
+    return _PROVIDER_PROMPT_LIMITS.get(provider, _MAX_PROMPT_LENGTH)
+
 
 def _dimensions_from_bbox(bbox: dict[str, Any]) -> dict[str, float] | None:
     """Derive width/depth/height dimensions from a bounding-box-like dict."""
@@ -439,18 +462,23 @@ def generate_improved_prompt(
     feedback: list[PrintFeedback],
     *,
     iteration: int = 1,
+    provider: str | None = None,
+    max_length: int | None = None,
 ) -> ImprovedPrompt:
     """Construct an improved prompt incorporating feedback constraints.
 
     Adds physical constraints to the end of the original prompt without
-    modifying the creative intent. Keeps the total prompt under
-    :data:`_MAX_PROMPT_LENGTH` characters (Meshy limit).
+    modifying the creative intent.
 
     :param original_prompt: The original generation prompt.
     :param feedback: List of :class:`PrintFeedback` items to apply.
     :param iteration: Which retry iteration this is (default 1).
+    :param provider: Provider name for provider-aware length limits.
+    :param max_length: Explicit max length override.
     :returns: An :class:`ImprovedPrompt` with the improved text.
     """
+    limit = max_length or get_provider_prompt_limit(provider)
+
     # Collect unique constraints from all feedback
     all_constraints: list[str] = []
     expected_improvements: list[str] = []
@@ -466,12 +494,10 @@ def generate_improved_prompt(
     if all_constraints:
         requirements = ". ".join(all_constraints)
         suffix = f" Requirements: {requirements}."
-        # Trim original prompt if needed to fit within limit
-        max_original_len = _MAX_PROMPT_LENGTH - len(suffix)
+        max_original_len = limit - len(suffix)
         if max_original_len < 20:
-            # Constraints too long — prioritize the most important ones
             suffix = f" Requirements: {'. '.join(all_constraints[:3])}."
-            max_original_len = _MAX_PROMPT_LENGTH - len(suffix)
+            max_original_len = limit - len(suffix)
 
         trimmed_prompt = original_prompt[:max_original_len].rstrip()
         improved = trimmed_prompt + suffix
@@ -479,8 +505,8 @@ def generate_improved_prompt(
         improved = original_prompt
 
     # Final length enforcement
-    if len(improved) > _MAX_PROMPT_LENGTH:
-        improved = improved[: _MAX_PROMPT_LENGTH - 3] + "..."
+    if len(improved) > limit:
+        improved = improved[: limit - 3] + "..."
 
     return ImprovedPrompt(
         original_prompt=original_prompt,
@@ -657,37 +683,66 @@ def enhance_prompt_with_design_intelligence(
     # Extract the most impactful constraints from the brief
     constraints: list[str] = []
 
-    # Material design limits
+    # Material design limits — use actual per-material values, not hardcoded
     rules = brief.combined_rules
-    if rules.get("min_wall_thickness_mm"):
-        constraints.append(f"minimum wall thickness {rules['min_wall_thickness_mm']}mm")
+    mat = brief.recommended_material
+    mat_limits: dict[str, Any] = {}
+    if mat and mat.material and hasattr(mat.material, "design_limits"):
+        mat_limits = mat.material.design_limits or {}
+
+    # Wall thickness — prefer material-specific recommended value
+    rec_wall = mat_limits.get("recommended_wall_thickness_mm") or rules.get("min_wall_thickness_mm")
+    if rec_wall:
+        constraints.append(f"minimum wall thickness {rec_wall}mm")
+
     if rules.get("infill_min_pct"):
-        constraints.append("solid, thick structural elements")
+        constraints.append(f"solid infill, minimum {rules['infill_min_pct']}% density")
     if rules.get("gussets_required"):
         constraints.append("triangular gussets at load-bearing joints")
     if rules.get("fillets_required"):
-        constraints.append("rounded fillets at all corners and joints")
+        radius = rules.get("fillet_min_radius_mm", 1)
+        constraints.append(f"rounded fillets (min {radius}mm radius) at corners and joints")
 
     # Material suitability
-    mat = brief.recommended_material
     if mat and mat.material:
         constraints.append(f"designed for {mat.material.display_name} material")
 
+    # Printer build volume
     if printer_profile:
         build = printer_profile.build_volume_mm
         constraints.append(
             f"fit within {build['x']} x {build['y']} x {build['z']} mm build volume"
         )
 
-    # Pattern-specific constraints
-    for pattern in brief.applicable_patterns[:2]:  # limit to top 2
-        if pattern.print_orientation:
-            constraints.append(pattern.print_orientation_reason)
+    # Material-specific overhang/bridge limits
+    overhang_limit = mat_limits.get("max_unsupported_overhang_deg", 50)
+    constraints.append(f"no overhangs greater than {overhang_limit} degrees")
+
+    bridge_limit = mat_limits.get("max_bridge_length_mm")
+    if bridge_limit:
+        constraints.append(f"minimize bridges, max {bridge_limit}mm unsupported spans")
+
+    cantilever_limit = mat_limits.get("max_cantilever_length_mm")
+    if cantilever_limit:
+        constraints.append(f"max cantilever length {cantilever_limit}mm")
 
     # Printability basics
     constraints.append("flat bottom for bed adhesion")
-    constraints.append("no overhangs greater than 50 degrees")
     constraints.append("single solid body, no floating parts")
+
+    # Pattern-specific design rules (not just orientation)
+    max_constraint_count = 8 if max_length <= 600 else 15
+    for pattern in brief.applicable_patterns[:2]:
+        if pattern.print_orientation:
+            constraints.append(pattern.print_orientation_reason)
+
+    # Include combined_guidance expert rules when prompt budget allows
+    if max_length > 800:
+        guidance = getattr(brief, "combined_guidance", [])
+        if isinstance(guidance, list):
+            for g in guidance[:3]:
+                if isinstance(g, str) and g not in constraints:
+                    constraints.append(g)
 
     if not constraints:
         return ImprovedPrompt(
@@ -700,7 +755,7 @@ def enhance_prompt_with_design_intelligence(
         )
 
     # Build the enhanced prompt
-    requirements = ". ".join(constraints[:8])  # cap at 8 constraints
+    requirements = ". ".join(constraints[:max_constraint_count])
     suffix = f" Requirements: {requirements}."
 
     max_original = max_length - len(suffix)

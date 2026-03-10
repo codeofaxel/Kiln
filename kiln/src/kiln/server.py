@@ -8554,8 +8554,34 @@ def generate_model(
         return err
     try:
         gen = _get_generation_provider(provider)
+
+        # Auto-enrich prompts with design intelligence (skip for OpenSCAD
+        # which takes raw code, not natural language).
+        enrichment_info: dict[str, Any] | None = None
+        if provider != "openscad":
+            try:
+                from kiln.generation_feedback import (
+                    enhance_prompt_with_design_intelligence,
+                    get_provider_prompt_limit,
+                )
+
+                max_len = get_provider_prompt_limit(provider)
+                improved = enhance_prompt_with_design_intelligence(
+                    prompt,
+                    printer_model=_PRINTER_MODEL or None,
+                    max_length=max_len,
+                )
+                if improved.constraints_added:
+                    enrichment_info = {
+                        "constraints_applied": len(improved.constraints_added),
+                        "constraints": improved.constraints_added,
+                    }
+                    prompt = improved.improved_prompt
+            except Exception:
+                logger.debug("Design intelligence enrichment unavailable", exc_info=True)
+
         job = gen.generate(prompt, format=format, style=style)
-        return {
+        result_dict: dict[str, Any] = {
             "success": True,
             "job": job.to_dict(),
             "experimental": True,
@@ -8567,6 +8593,9 @@ def generate_model(
             ),
             "message": f"Generation job submitted to {gen.display_name}.",
         }
+        if enrichment_info:
+            result_dict["design_intelligence"] = enrichment_info
+        return result_dict
     except GenerationAuthError as exc:
         return _error_dict(
             f"Failed to generate model (auth): {exc}. Check your provider API key is set (KILN_MESHY_API_KEY, KILN_GEMINI_API_KEY).", code="AUTH_ERROR"
@@ -8632,8 +8661,8 @@ def download_generated_model(
         gen = _get_generation_provider(provider)
         result = gen.download_result(job_id, output_dir=output_dir)
 
-        # Auto-convert OBJ to STL for maximum slicer compatibility.
-        if result.format == "obj":
+        # Auto-convert OBJ/GLB to STL for maximum slicer compatibility.
+        if result.format in ("obj", "glb"):
             try:
                 stl_path = convert_to_stl(result.local_path)
                 result = GenerationResult(
@@ -8644,9 +8673,9 @@ def download_generated_model(
                     file_size_bytes=os.path.getsize(stl_path),
                     prompt=result.prompt,
                 )
-                logger.info("Auto-converted OBJ to STL: %s", stl_path)
+                logger.info("Auto-converted %s to STL: %s", result.format.upper(), stl_path)
             except Exception as exc:
-                logger.warning("OBJ→STL conversion failed, keeping OBJ: %s", exc)
+                logger.warning("%s→STL conversion failed, keeping original: %s", result.format.upper(), exc)
 
         # Validate the mesh if it's an STL or OBJ.
         validation = None
@@ -9008,6 +9037,152 @@ def validate_generated_mesh(file_path: str) -> dict:
     except Exception as exc:
         logger.exception("Unexpected error in validate_generated_mesh")
         return _error_dict(f"Unexpected error in validate_generated_mesh: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def generate_model_from_image(
+    image_url: str,
+    provider: str = "meshy",
+    style: str | None = None,
+) -> dict:
+    """Generate a 3D model from a reference image or sketch.
+
+    Submits an image-to-3D generation job.  The image URL must be
+    publicly accessible (HTTPS).  Currently supported by Meshy only.
+
+    **Use cases:**
+    - Convert a photo of an object into a printable 3D model
+    - Turn a hand-drawn sketch into geometry
+    - Create a 3D model from a product reference image
+
+    Args:
+        image_url: Public URL of the reference image (JPEG/PNG).
+        provider: Generation backend (``"meshy"``).
+        style: Optional style (``"realistic"`` or ``"sculpture"``).
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        gen = _get_generation_provider(provider)
+        job = gen.generate("", format="stl", style=style, image_url=image_url)
+        return {
+            "success": True,
+            "job": job.to_dict(),
+            "experimental": True,
+            "message": f"Image-to-3D job submitted to {gen.display_name}.",
+        }
+    except GenerationAuthError as exc:
+        return _error_dict(f"Image-to-3D auth error: {exc}", code="AUTH_ERROR")
+    except GenerationError as exc:
+        return _error_dict(f"Image-to-3D failed: {exc}", code=exc.code or "GENERATION_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in generate_model_from_image")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def render_model_preview(
+    file_path: str,
+    width: int = 800,
+    height: int = 600,
+) -> dict:
+    """Render a PNG preview of a 3D model for visual inspection.
+
+    Uses OpenSCAD to render an STL or SCAD file to a PNG image.
+    Useful for visually inspecting generated geometry before printing.
+
+    Args:
+        file_path: Path to an STL or SCAD file.
+        width: Image width in pixels (default 800).
+        height: Image height in pixels (default 600).
+    """
+    try:
+        from kiln.generation.openscad import OpenSCADProvider
+
+        provider = OpenSCADProvider()
+        png_path = provider.render_preview(file_path, width=width, height=height)
+        return {
+            "success": True,
+            "preview_path": png_path,
+            "dimensions": f"{width}x{height}",
+            "message": f"Preview rendered to {png_path}.",
+        }
+    except GenerationError as exc:
+        return _error_dict(f"Render failed: {exc}", code=exc.code or "RENDER_ERROR")
+    except Exception as exc:
+        logger.exception("Unexpected error in render_model_preview")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def rescale_model(
+    file_path: str,
+    target_height_mm: float | None = None,
+    scale_factor: float | None = None,
+    max_dimension_mm: float | None = None,
+) -> dict:
+    """Rescale an STL model to meet dimensional targets.
+
+    Useful when a generated model is the wrong size for the printer's
+    build volume or doesn't match the desired dimensions.
+
+    Provide exactly ONE of the three scaling options:
+    - ``target_height_mm``: Scale so Z-axis equals this value.
+    - ``scale_factor``: Uniform multiplier (2.0 = double size).
+    - ``max_dimension_mm``: Scale down so largest axis fits this limit.
+
+    Args:
+        file_path: Path to the STL file to rescale (modified in-place).
+        target_height_mm: Desired Z-axis height in mm.
+        scale_factor: Uniform scale multiplier.
+        max_dimension_mm: Maximum dimension on any axis.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import rescale_stl
+
+        result = rescale_stl(
+            file_path,
+            target_height_mm=target_height_mm,
+            scale_factor=scale_factor,
+            max_dimension_mm=max_dimension_mm,
+        )
+        return {
+            "success": True,
+            **result,
+            "message": f"Model rescaled by {result['scale_applied']}x.",
+        }
+    except ValueError as exc:
+        return _error_dict(str(exc), code="INVALID_INPUT")
+    except Exception as exc:
+        logger.exception("Unexpected error in rescale_model")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def get_feedback_loop_status(model_id: str) -> dict:
+    """Get the feedback loop history for a generated model.
+
+    Returns iteration data, whether the design was resolved, and
+    which iteration produced the best result.
+
+    Args:
+        model_id: Model/job ID from a generation job.
+    """
+    try:
+        from kiln.generation_feedback import get_feedback_loop
+
+        loop = get_feedback_loop(model_id)
+        if loop is None:
+            return _error_dict(f"No feedback loop found for {model_id!r}.", code="NOT_FOUND")
+        return {
+            "success": True,
+            "feedback_loop": loop.to_dict(),
+        }
+    except Exception as exc:
+        logger.exception("Unexpected error in get_feedback_loop_status")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
 # ---------------------------------------------------------------------------
