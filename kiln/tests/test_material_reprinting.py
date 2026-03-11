@@ -436,3 +436,163 @@ class TestReprintWithMaterial:
 
         # Should propagate the failure
         assert result["success"] is False
+
+
+# ---------------------------------------------------------------------------
+# TestNewMaterialProfiles
+# ---------------------------------------------------------------------------
+
+class TestNewMaterialProfiles:
+    """Tests for the 5 new material profiles (pla_matte, petg_hf, pla_tough,
+    tpu_95a, tpu_85a) — verify they load and have sane data."""
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_pla_matte_profile(self, _auth):
+        from kiln.server import get_material_properties
+
+        result = get_material_properties("pla_matte")
+        assert result["success"] is True
+        thermal = result["material"]["thermal"]
+        assert thermal["print_temp_range_c"][0] >= 190
+        assert thermal["print_temp_range_c"][1] <= 230
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_petg_hf_profile(self, _auth):
+        from kiln.server import get_material_properties
+
+        result = get_material_properties("petg_hf")
+        assert result["success"] is True
+        thermal = result["material"]["thermal"]
+        # PETG-HF prints hotter
+        assert thermal["print_temp_range_c"][0] >= 230
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_pla_tough_profile(self, _auth):
+        from kiln.server import get_material_properties
+
+        result = get_material_properties("pla_tough")
+        assert result["success"] is True
+        mech = result["material"]["mechanical"]
+        assert mech.get("tensile_strength_mpa", 0) >= 40
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_tpu_95a_profile(self, _auth):
+        from kiln.server import get_material_properties
+
+        result = get_material_properties("tpu_95a")
+        assert result["success"] is True
+        mech = result["material"]["mechanical"]
+        # Should have high elongation like TPU
+        assert mech.get("elongation_at_break_pct", 0) >= 300
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_tpu_85a_profile(self, _auth):
+        from kiln.server import get_material_properties
+
+        result = get_material_properties("tpu_85a")
+        assert result["success"] is True
+        mech = result["material"]["mechanical"]
+        # 85A is softer, even higher elongation
+        assert mech.get("elongation_at_break_pct", 0) >= 400
+
+
+# ---------------------------------------------------------------------------
+# TestNewMaterialOverrides
+# ---------------------------------------------------------------------------
+
+class TestNewMaterialOverrides:
+    """Tests for build_material_overrides with new material families."""
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_petg_hf_uses_petg_family_speeds(self, _auth):
+        from kiln.server import build_material_overrides
+
+        result = build_material_overrides("petg_hf")
+        assert result["success"] is True
+        ov = result["overrides"]
+        assert int(ov["perimeter_speed"]) == 40
+        assert float(ov["retract_length"]) == 4.0
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_tpu_95a_uses_tpu_family_speeds(self, _auth):
+        from kiln.server import build_material_overrides
+
+        result = build_material_overrides("tpu_95a")
+        assert result["success"] is True
+        ov = result["overrides"]
+        assert int(ov["perimeter_speed"]) == 20
+        assert float(ov["retract_length"]) == 1.0
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_tpu_85a_slower_than_standard_tpu(self, _auth):
+        from kiln.server import build_material_overrides
+
+        result = build_material_overrides("tpu_85a")
+        assert result["success"] is True
+        ov = result["overrides"]
+        # 85A needs even slower speeds
+        assert int(ov["perimeter_speed"]) <= 15
+        assert float(ov["retract_length"]) <= 1.0
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_pla_matte_no_special_speed_overrides(self, _auth):
+        from kiln.server import build_material_overrides
+
+        result = build_material_overrides("pla_matte")
+        assert result["success"] is True
+        ov = result["overrides"]
+        # PLA family doesn't set special speed overrides
+        assert "temperature" in ov
+        assert "perimeter_speed" not in ov
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_pla_tough_no_special_speed_overrides(self, _auth):
+        from kiln.server import build_material_overrides
+
+        result = build_material_overrides("pla_tough")
+        assert result["success"] is True
+        ov = result["overrides"]
+        assert "temperature" in ov
+        assert "perimeter_speed" not in ov
+
+
+# ---------------------------------------------------------------------------
+# TestNewMaterialCompatibility
+# ---------------------------------------------------------------------------
+
+class TestNewMaterialCompatibility:
+    """Tests for printer compatibility data for new materials."""
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_bambu_a1_pla_matte_compatible(self, _auth):
+        from kiln.server import check_printer_material_support
+
+        result = check_printer_material_support("bambu_a1", "pla_matte")
+        assert result["success"] is True
+        assert result["materials"]["pla_matte"]["status"] == "compatible"
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_bambu_a1_petg_hf_compatible(self, _auth):
+        from kiln.server import check_printer_material_support
+
+        result = check_printer_material_support("bambu_a1", "petg_hf")
+        assert result["success"] is True
+        assert result["materials"]["petg_hf"]["status"] == "compatible"
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_bambu_a1_tpu_95a_compatible(self, _auth):
+        from kiln.server import check_printer_material_support
+
+        result = check_printer_material_support("bambu_a1", "tpu_95a")
+        assert result["success"] is True
+        assert result["materials"]["tpu_95a"]["status"] == "compatible"
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_all_new_materials_have_entries(self, _auth):
+        from kiln.server import check_printer_material_support
+
+        new_mats = ["pla_matte", "petg_hf", "pla_tough", "tpu_95a", "tpu_85a"]
+        result = check_printer_material_support("bambu_a1")
+        assert result["success"] is True
+        for mat in new_mats:
+            assert mat in result["materials"], f"{mat} missing from bambu_a1"

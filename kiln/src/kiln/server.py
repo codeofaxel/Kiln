@@ -14489,11 +14489,17 @@ def build_material_overrides(
 
         # Material-specific speed/retraction adjustments
         mat_lower = material_id.lower()
-        if mat_lower in ("petg", "cf_petg", "petg_cf", "pet_cf"):
+        if mat_lower in ("petg", "cf_petg", "petg_cf", "pet_cf", "petg_hf"):
             overrides.setdefault("perimeter_speed", "40")
             overrides.setdefault("retract_length", "4.0")
             overrides.setdefault("retract_speed", "30")
-        elif mat_lower in ("tpu",):
+        elif mat_lower == "tpu_85a":
+            # Ultra-soft TPU — even slower than standard TPU
+            overrides.setdefault("perimeter_speed", "15")
+            overrides.setdefault("infill_speed", "15")
+            overrides.setdefault("retract_length", "0.8")
+            overrides.setdefault("retract_speed", "15")
+        elif mat_lower in ("tpu", "tpu_95a"):
             overrides.setdefault("perimeter_speed", "20")
             overrides.setdefault("infill_speed", "20")
             overrides.setdefault("retract_length", "1.0")

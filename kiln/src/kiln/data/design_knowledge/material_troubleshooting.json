@@ -11,10 +11,22 @@
         "severity": "minor",
         "root_cause": "PLA has low viscosity when melted, allowing thin threads to draw between travel moves, especially at higher nozzle temperatures.",
         "fixes": [
-          {"action": "Lower nozzle temperature by 5-10C (try 195-200C)", "priority": 1},
-          {"action": "Increase retraction distance to 5-6mm at 40-45mm/s for Bowden, 1-2mm at 30mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.03-0.05mm3 in slicer", "priority": 3},
-          {"action": "Increase travel speed to 150-200mm/s", "priority": 4}
+          {
+            "action": "Lower nozzle temperature by 5-10C (try 195-200C)",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction distance to 5-6mm at 40-45mm/s for Bowden, 1-2mm at 30mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.03-0.05mm3 in slicer",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 150-200mm/s",
+            "priority": 4
+          }
         ],
         "prevention": "Store filament in a sealed container with desiccant. Print a temperature tower to find your optimal temp."
       },
@@ -23,10 +35,22 @@
         "severity": "minor",
         "root_cause": "First layer squish combined with heat from the bed causes PLA to bulge outward at the base, creating a wider-than-expected footprint.",
         "fixes": [
-          {"action": "Reduce bed temperature to 50-55C after the first 3 layers", "priority": 1},
-          {"action": "Raise Z-offset by 0.02-0.05mm to reduce first layer squish", "priority": 2},
-          {"action": "Enable elephant's foot compensation of 0.1-0.2mm in slicer", "priority": 3},
-          {"action": "Reduce first layer flow rate to 95%", "priority": 4}
+          {
+            "action": "Reduce bed temperature to 50-55C after the first 3 layers",
+            "priority": 1
+          },
+          {
+            "action": "Raise Z-offset by 0.02-0.05mm to reduce first layer squish",
+            "priority": 2
+          },
+          {
+            "action": "Enable elephant's foot compensation of 0.1-0.2mm in slicer",
+            "priority": 3
+          },
+          {
+            "action": "Reduce first layer flow rate to 95%",
+            "priority": 4
+          }
         ],
         "prevention": "Calibrate Z-offset with a single-layer test print. Use 55C bed temp instead of 60C."
       },
@@ -35,10 +59,22 @@
         "severity": "major",
         "root_cause": "PLA has a low glass transition temperature (~60C). Heat traveling up the heatbreak softens filament above the melt zone, causing jams in the cold end.",
         "fixes": [
-          {"action": "Ensure hotend fan is running at 100% and not obstructed", "priority": 1},
-          {"action": "Lower nozzle temperature by 5-10C to reduce heat conducted upward", "priority": 2},
-          {"action": "Reduce retraction distance to 2mm max for direct drive to avoid pulling molten PLA into the cold zone", "priority": 3},
-          {"action": "Add a 0.5-1 second retraction extra prime amount of 0.02mm3 to compensate", "priority": 4}
+          {
+            "action": "Ensure hotend fan is running at 100% and not obstructed",
+            "priority": 1
+          },
+          {
+            "action": "Lower nozzle temperature by 5-10C to reduce heat conducted upward",
+            "priority": 2
+          },
+          {
+            "action": "Reduce retraction distance to 2mm max for direct drive to avoid pulling molten PLA into the cold zone",
+            "priority": 3
+          },
+          {
+            "action": "Add a 0.5-1 second retraction extra prime amount of 0.02mm3 to compensate",
+            "priority": 4
+          }
         ],
         "prevention": "Keep hotend cooling fan clean and unobstructed. Avoid printing PLA in ambient temps above 30C."
       },
@@ -47,10 +83,22 @@
         "severity": "moderate",
         "root_cause": "Insufficient nozzle temperature or excessive part cooling prevents layers from bonding properly.",
         "fixes": [
-          {"action": "Increase nozzle temperature by 5-10C (try 210-215C)", "priority": 1},
-          {"action": "Reduce part cooling fan to 50-70% for first 10 layers", "priority": 2},
-          {"action": "Increase line width to 110-120% of nozzle diameter for more contact area", "priority": 3},
-          {"action": "Reduce layer height to 75% of nozzle diameter max (0.3mm for 0.4mm nozzle)", "priority": 4}
+          {
+            "action": "Increase nozzle temperature by 5-10C (try 210-215C)",
+            "priority": 1
+          },
+          {
+            "action": "Reduce part cooling fan to 50-70% for first 10 layers",
+            "priority": 2
+          },
+          {
+            "action": "Increase line width to 110-120% of nozzle diameter for more contact area",
+            "priority": 3
+          },
+          {
+            "action": "Reduce layer height to 75% of nozzle diameter max (0.3mm for 0.4mm nozzle)",
+            "priority": 4
+          }
         ],
         "prevention": "Run a temperature tower to find the sweet spot between adhesion and stringing."
       },
@@ -59,10 +107,22 @@
         "severity": "moderate",
         "root_cause": "Moisture-contaminated PLA or degraded filament results in weak inter-layer bonds and micro-voids that concentrate stress.",
         "fixes": [
-          {"action": "Dry filament at 45C for 4-6 hours before printing", "priority": 1},
-          {"action": "Increase nozzle temperature by 5C to improve flow and bonding", "priority": 2},
-          {"action": "Increase infill to 25-40% with grid or gyroid pattern", "priority": 3},
-          {"action": "Increase wall count to 4-5 perimeters for structural prints", "priority": 4}
+          {
+            "action": "Dry filament at 45C for 4-6 hours before printing",
+            "priority": 1
+          },
+          {
+            "action": "Increase nozzle temperature by 5C to improve flow and bonding",
+            "priority": 2
+          },
+          {
+            "action": "Increase infill to 25-40% with grid or gyroid pattern",
+            "priority": 3
+          },
+          {
+            "action": "Increase wall count to 4-5 perimeters for structural prints",
+            "priority": 4
+          }
         ],
         "prevention": "Store filament sealed with desiccant. Replace filament older than 12 months if stored improperly."
       },
@@ -71,10 +131,22 @@
         "severity": "moderate",
         "root_cause": "Differential cooling across large flat surfaces causes internal stresses that pull corners upward, even with PLA's relatively low shrinkage rate.",
         "fixes": [
-          {"action": "Apply glue stick or hairspray to build plate for additional adhesion", "priority": 1},
-          {"action": "Increase bed temperature to 60C and keep room draft-free", "priority": 2},
-          {"action": "Add a brim of 8-10mm width in slicer", "priority": 3},
-          {"action": "Reduce part cooling fan to 60-80% for first 15 layers", "priority": 4}
+          {
+            "action": "Apply glue stick or hairspray to build plate for additional adhesion",
+            "priority": 1
+          },
+          {
+            "action": "Increase bed temperature to 60C and keep room draft-free",
+            "priority": 2
+          },
+          {
+            "action": "Add a brim of 8-10mm width in slicer",
+            "priority": 3
+          },
+          {
+            "action": "Reduce part cooling fan to 60-80% for first 15 layers",
+            "priority": 4
+          }
         ],
         "prevention": "Use a PEI or textured build surface. Orient large flat surfaces away from the bed when possible."
       },
@@ -83,10 +155,22 @@
         "severity": "minor",
         "root_cause": "PLA sags under gravity on steep overhangs when part cooling is insufficient or print speed is too fast.",
         "fixes": [
-          {"action": "Increase part cooling fan to 100% for overhangs beyond 45 degrees", "priority": 1},
-          {"action": "Reduce overhang print speed to 15-20mm/s", "priority": 2},
-          {"action": "Lower nozzle temperature by 5C to solidify faster", "priority": 3},
-          {"action": "Reduce layer height to 0.12-0.16mm for better overhang quality", "priority": 4}
+          {
+            "action": "Increase part cooling fan to 100% for overhangs beyond 45 degrees",
+            "priority": 1
+          },
+          {
+            "action": "Reduce overhang print speed to 15-20mm/s",
+            "priority": 2
+          },
+          {
+            "action": "Lower nozzle temperature by 5C to solidify faster",
+            "priority": 3
+          },
+          {
+            "action": "Reduce layer height to 0.12-0.16mm for better overhang quality",
+            "priority": 4
+          }
         ],
         "prevention": "Orient model to minimize unsupported overhangs. Use supports for angles beyond 60 degrees."
       }
@@ -100,7 +184,7 @@
     },
     "break_in_tips": [
       "Start with a nozzle temperature of 200-210C and bed at 55-60C. Most PLAs print well in this range.",
-      "Level your bed carefully — PLA is forgiving but a good first layer matters. Aim for slight squish with no gaps.",
+      "Level your bed carefully \u2014 PLA is forgiving but a good first layer matters. Aim for slight squish with no gaps.",
       "Use 100% part cooling fan after the first 2-3 layers. PLA loves cooling.",
       "Print a temperature tower (190-220C in 5C steps) to find the best temp for your specific brand.",
       "Start at 50mm/s print speed and increase from there once you're getting good results."
@@ -113,10 +197,22 @@
         "severity": "minor",
         "root_cause": "PLA+ additives slightly increase melt fluidity compared to standard PLA, causing thin threads on travel moves.",
         "fixes": [
-          {"action": "Lower nozzle temperature by 5C (try 200-205C)", "priority": 1},
-          {"action": "Increase retraction distance to 5-6mm at 40mm/s for Bowden, 1.5-2mm at 30mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.03-0.05mm3", "priority": 3},
-          {"action": "Increase travel speed to 150-200mm/s", "priority": 4}
+          {
+            "action": "Lower nozzle temperature by 5C (try 200-205C)",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction distance to 5-6mm at 40mm/s for Bowden, 1.5-2mm at 30mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.03-0.05mm3",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 150-200mm/s",
+            "priority": 4
+          }
         ],
         "prevention": "Dial in retraction with a retraction tower test. Keep filament dry."
       },
@@ -125,10 +221,22 @@
         "severity": "minor",
         "root_cause": "First layer compression combined with bed heat causes the base to bulge outward. PLA+ is slightly softer than PLA when warm.",
         "fixes": [
-          {"action": "Reduce bed temperature to 50-55C after the first 3 layers", "priority": 1},
-          {"action": "Raise Z-offset by 0.02-0.05mm", "priority": 2},
-          {"action": "Enable elephant's foot compensation of 0.1-0.2mm in slicer", "priority": 3},
-          {"action": "Reduce first layer flow to 95%", "priority": 4}
+          {
+            "action": "Reduce bed temperature to 50-55C after the first 3 layers",
+            "priority": 1
+          },
+          {
+            "action": "Raise Z-offset by 0.02-0.05mm",
+            "priority": 2
+          },
+          {
+            "action": "Enable elephant's foot compensation of 0.1-0.2mm in slicer",
+            "priority": 3
+          },
+          {
+            "action": "Reduce first layer flow to 95%",
+            "priority": 4
+          }
         ],
         "prevention": "Calibrate Z-offset with a first-layer test print. Use 55C bed temp."
       },
@@ -137,10 +245,22 @@
         "severity": "major",
         "root_cause": "PLA+ has a similar glass transition to PLA (~58-62C). Heat traveling up the heatbreak softens filament prematurely.",
         "fixes": [
-          {"action": "Ensure hotend cooling fan runs at 100% and check for dust buildup", "priority": 1},
-          {"action": "Lower nozzle temperature by 5-10C", "priority": 2},
-          {"action": "Reduce retraction to 1.5mm max for direct drive", "priority": 3},
-          {"action": "Increase minimum layer time to 10-15 seconds to avoid heat buildup in small parts", "priority": 4}
+          {
+            "action": "Ensure hotend cooling fan runs at 100% and check for dust buildup",
+            "priority": 1
+          },
+          {
+            "action": "Lower nozzle temperature by 5-10C",
+            "priority": 2
+          },
+          {
+            "action": "Reduce retraction to 1.5mm max for direct drive",
+            "priority": 3
+          },
+          {
+            "action": "Increase minimum layer time to 10-15 seconds to avoid heat buildup in small parts",
+            "priority": 4
+          }
         ],
         "prevention": "Clean hotend fan regularly. Avoid prolonged pauses mid-print."
       },
@@ -149,10 +269,22 @@
         "severity": "minor",
         "root_cause": "Pressure buildup in the nozzle at seam points and travel start positions causes small blobs of excess material.",
         "fixes": [
-          {"action": "Set seam position to sharpest corner or rear in slicer", "priority": 1},
-          {"action": "Enable linear advance/pressure advance at K=0.04-0.06 for direct drive", "priority": 2},
-          {"action": "Reduce retraction prime speed to 20-25mm/s", "priority": 3},
-          {"action": "Enable wipe distance of 2-3mm in slicer", "priority": 4}
+          {
+            "action": "Set seam position to sharpest corner or rear in slicer",
+            "priority": 1
+          },
+          {
+            "action": "Enable linear advance/pressure advance at K=0.04-0.06 for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Reduce retraction prime speed to 20-25mm/s",
+            "priority": 3
+          },
+          {
+            "action": "Enable wipe distance of 2-3mm in slicer",
+            "priority": 4
+          }
         ],
         "prevention": "Tune pressure advance/linear advance for your specific extruder."
       },
@@ -161,10 +293,22 @@
         "severity": "minor",
         "root_cause": "PLA+ is slightly more flexible than PLA, causing overhangs to sag more before cooling.",
         "fixes": [
-          {"action": "Increase part cooling fan to 100% for overhangs", "priority": 1},
-          {"action": "Reduce overhang speed to 15-20mm/s", "priority": 2},
-          {"action": "Lower nozzle temperature by 5C", "priority": 3},
-          {"action": "Reduce layer height to 0.12-0.16mm for steep overhangs", "priority": 4}
+          {
+            "action": "Increase part cooling fan to 100% for overhangs",
+            "priority": 1
+          },
+          {
+            "action": "Reduce overhang speed to 15-20mm/s",
+            "priority": 2
+          },
+          {
+            "action": "Lower nozzle temperature by 5C",
+            "priority": 3
+          },
+          {
+            "action": "Reduce layer height to 0.12-0.16mm for steep overhangs",
+            "priority": 4
+          }
         ],
         "prevention": "Use supports for overhangs beyond 55-60 degrees."
       },
@@ -173,10 +317,22 @@
         "severity": "moderate",
         "root_cause": "Differential cooling across large surfaces creates internal stresses that curl edges upward.",
         "fixes": [
-          {"action": "Add a brim of 8-10mm width", "priority": 1},
-          {"action": "Increase bed temperature to 60C", "priority": 2},
-          {"action": "Apply glue stick to build surface", "priority": 3},
-          {"action": "Reduce part cooling to 70% for the first 10 layers", "priority": 4}
+          {
+            "action": "Add a brim of 8-10mm width",
+            "priority": 1
+          },
+          {
+            "action": "Increase bed temperature to 60C",
+            "priority": 2
+          },
+          {
+            "action": "Apply glue stick to build surface",
+            "priority": 3
+          },
+          {
+            "action": "Reduce part cooling to 70% for the first 10 layers",
+            "priority": 4
+          }
         ],
         "prevention": "Print in a draft-free environment. Use PEI build surface."
       }
@@ -190,9 +346,9 @@
     },
     "break_in_tips": [
       "PLA+ prints 5-10C hotter than standard PLA. Start at 205-215C nozzle, 55-60C bed.",
-      "PLA+ is tougher and less brittle than standard PLA — great for functional parts that need some flex.",
+      "PLA+ is tougher and less brittle than standard PLA \u2014 great for functional parts that need some flex.",
       "Part cooling at 100% works well. PLA+ responds to cooling similarly to PLA.",
-      "Expect slightly better layer adhesion than PLA — you can push speed slightly higher (60mm/s) once dialed in.",
+      "Expect slightly better layer adhesion than PLA \u2014 you can push speed slightly higher (60mm/s) once dialed in.",
       "If you have PLA settings already, increase nozzle temp by 5C and you're likely good to go."
     ]
   },
@@ -203,11 +359,26 @@
         "severity": "moderate",
         "root_cause": "Silk additives (mineral powders, waxes) significantly reduce viscosity and increase flow, making stringing much worse than standard PLA.",
         "fixes": [
-          {"action": "Lower nozzle temperature to 195-200C (10-15C below typical PLA)", "priority": 1},
-          {"action": "Increase retraction distance to 6-7mm at 45mm/s for Bowden, 2-3mm at 35mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.06-0.08mm3", "priority": 3},
-          {"action": "Increase travel speed to 180-200mm/s", "priority": 4},
-          {"action": "Enable wipe distance of 3-5mm at nozzle travel moves", "priority": 5}
+          {
+            "action": "Lower nozzle temperature to 195-200C (10-15C below typical PLA)",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction distance to 6-7mm at 45mm/s for Bowden, 2-3mm at 35mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.06-0.08mm3",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 180-200mm/s",
+            "priority": 4
+          },
+          {
+            "action": "Enable wipe distance of 3-5mm at nozzle travel moves",
+            "priority": 5
+          }
         ],
         "prevention": "Print a retraction tower specifically for silk PLA. Keep nozzle temp as low as possible while maintaining adhesion."
       },
@@ -216,10 +387,22 @@
         "severity": "moderate",
         "root_cause": "The silk additives reduce the structural integrity of the filament, causing it to sag more on unsupported overhangs before cooling.",
         "fixes": [
-          {"action": "Increase part cooling fan to 100%", "priority": 1},
-          {"action": "Reduce overhang print speed to 12-15mm/s", "priority": 2},
-          {"action": "Lower nozzle temperature to 195C", "priority": 3},
-          {"action": "Use supports for any overhang beyond 45 degrees", "priority": 4}
+          {
+            "action": "Increase part cooling fan to 100%",
+            "priority": 1
+          },
+          {
+            "action": "Reduce overhang print speed to 12-15mm/s",
+            "priority": 2
+          },
+          {
+            "action": "Lower nozzle temperature to 195C",
+            "priority": 3
+          },
+          {
+            "action": "Use supports for any overhang beyond 45 degrees",
+            "priority": 4
+          }
         ],
         "prevention": "Design parts to minimize overhangs when using silk PLA. Accept that overhang quality will be lower than standard PLA."
       },
@@ -228,10 +411,22 @@
         "severity": "moderate",
         "root_cause": "Silk additives reduce inter-layer bond strength by 20-40% compared to standard PLA, making prints more fragile.",
         "fixes": [
-          {"action": "Increase wall count to 5-6 perimeters", "priority": 1},
-          {"action": "Increase infill to 30-50% with gyroid or cubic pattern", "priority": 2},
-          {"action": "Increase nozzle temperature to 210-215C for better layer bonding", "priority": 3},
-          {"action": "Reduce print speed to 35-40mm/s for better layer adhesion", "priority": 4}
+          {
+            "action": "Increase wall count to 5-6 perimeters",
+            "priority": 1
+          },
+          {
+            "action": "Increase infill to 30-50% with gyroid or cubic pattern",
+            "priority": 2
+          },
+          {
+            "action": "Increase nozzle temperature to 210-215C for better layer bonding",
+            "priority": 3
+          },
+          {
+            "action": "Reduce print speed to 35-40mm/s for better layer adhesion",
+            "priority": 4
+          }
         ],
         "prevention": "Silk PLA is cosmetic, not structural. Use standard PLA or PLA+ for load-bearing parts."
       },
@@ -240,9 +435,18 @@
         "severity": "minor",
         "root_cause": "Temperature variations across the print cause the silk effect to appear differently. Fan speed changes also alter the surface finish.",
         "fixes": [
-          {"action": "Set a consistent fan speed of 60-80% throughout the print", "priority": 1},
-          {"action": "Maintain nozzle temperature at exactly 205C with no fluctuation", "priority": 2},
-          {"action": "Print at a consistent speed of 40-50mm/s without acceleration-induced changes", "priority": 3}
+          {
+            "action": "Set a consistent fan speed of 60-80% throughout the print",
+            "priority": 1
+          },
+          {
+            "action": "Maintain nozzle temperature at exactly 205C with no fluctuation",
+            "priority": 2
+          },
+          {
+            "action": "Print at a consistent speed of 40-50mm/s without acceleration-induced changes",
+            "priority": 3
+          }
         ],
         "prevention": "Consistent temperature and fan speed are key. Avoid rapid speed or fan changes mid-print."
       },
@@ -251,9 +455,18 @@
         "severity": "minor",
         "root_cause": "Silk additives make PLA softer at bed temperatures, causing more base deformation under the weight of upper layers.",
         "fixes": [
-          {"action": "Reduce bed temperature to 50C", "priority": 1},
-          {"action": "Raise Z-offset by 0.03-0.06mm", "priority": 2},
-          {"action": "Enable elephant's foot compensation of 0.15-0.25mm", "priority": 3}
+          {
+            "action": "Reduce bed temperature to 50C",
+            "priority": 1
+          },
+          {
+            "action": "Raise Z-offset by 0.03-0.06mm",
+            "priority": 2
+          },
+          {
+            "action": "Enable elephant's foot compensation of 0.15-0.25mm",
+            "priority": 3
+          }
         ],
         "prevention": "Use lower bed temperature from the start. Calibrate Z-offset specifically for silk PLA."
       },
@@ -262,10 +475,22 @@
         "severity": "minor",
         "root_cause": "Low viscosity of silk PLA causes more oozing at retraction and seam points, leaving visible blobs that disrupt the silk finish.",
         "fixes": [
-          {"action": "Set seam position to rear or inside corner", "priority": 1},
-          {"action": "Enable wipe distance of 3-5mm", "priority": 2},
-          {"action": "Reduce retraction prime extra amount by 0.02-0.04mm3", "priority": 3},
-          {"action": "Enable coasting at 0.05-0.07mm3", "priority": 4}
+          {
+            "action": "Set seam position to rear or inside corner",
+            "priority": 1
+          },
+          {
+            "action": "Enable wipe distance of 3-5mm",
+            "priority": 2
+          },
+          {
+            "action": "Reduce retraction prime extra amount by 0.02-0.04mm3",
+            "priority": 3
+          },
+          {
+            "action": "Enable coasting at 0.05-0.07mm3",
+            "priority": 4
+          }
         ],
         "prevention": "Seam placement is critical for silk PLA. Align seams to least-visible surfaces."
       }
@@ -280,7 +505,7 @@
     "break_in_tips": [
       "Silk PLA is about aesthetics, not strength. Use it for display pieces, vases, and decorative items.",
       "Start at 200-210C nozzle, 50-55C bed. The silk effect looks best at moderate temperatures.",
-      "Expect more stringing than standard PLA — budget extra time for post-processing or dial retraction carefully.",
+      "Expect more stringing than standard PLA \u2014 budget extra time for post-processing or dial retraction carefully.",
       "Print slower than normal PLA (40-50mm/s) for the best surface finish.",
       "The silk effect is most visible on curved surfaces and large flat areas. Test with a simple vase first."
     ]
@@ -292,10 +517,22 @@
         "severity": "major",
         "root_cause": "Wood fibers accumulate and char inside the nozzle, especially at temperatures above 210C or when filament sits molten for too long.",
         "fixes": [
-          {"action": "Use a 0.5mm or 0.6mm nozzle — never use 0.4mm or smaller", "priority": 1},
-          {"action": "Lower nozzle temperature to 190-200C to prevent fiber charring", "priority": 2},
-          {"action": "Perform cold pulls with standard PLA between wood PLA sessions to clear buildup", "priority": 3},
-          {"action": "Reduce retraction distance to 3-4mm to prevent fiber compaction in the cold zone", "priority": 4}
+          {
+            "action": "Use a 0.5mm or 0.6mm nozzle \u2014 never use 0.4mm or smaller",
+            "priority": 1
+          },
+          {
+            "action": "Lower nozzle temperature to 190-200C to prevent fiber charring",
+            "priority": 2
+          },
+          {
+            "action": "Perform cold pulls with standard PLA between wood PLA sessions to clear buildup",
+            "priority": 3
+          },
+          {
+            "action": "Reduce retraction distance to 3-4mm to prevent fiber compaction in the cold zone",
+            "priority": 4
+          }
         ],
         "prevention": "Never leave wood PLA sitting hot in the nozzle. Unload immediately after printing. Use 0.5mm+ nozzle exclusively."
       },
@@ -304,22 +541,46 @@
         "severity": "moderate",
         "root_cause": "Wood fiber distribution varies along the filament, and fibers can partially block the nozzle opening, causing intermittent under-extrusion.",
         "fixes": [
-          {"action": "Use a 0.6mm nozzle to reduce blockage frequency", "priority": 1},
-          {"action": "Increase extrusion multiplier/flow to 105-110%", "priority": 2},
-          {"action": "Reduce print speed to 30-40mm/s for consistent flow", "priority": 3},
-          {"action": "Increase nozzle temperature by 5C if under-extruding (but stay below 210C)", "priority": 4}
+          {
+            "action": "Use a 0.6mm nozzle to reduce blockage frequency",
+            "priority": 1
+          },
+          {
+            "action": "Increase extrusion multiplier/flow to 105-110%",
+            "priority": 2
+          },
+          {
+            "action": "Reduce print speed to 30-40mm/s for consistent flow",
+            "priority": 3
+          },
+          {
+            "action": "Increase nozzle temperature by 5C if under-extruding (but stay below 210C)",
+            "priority": 4
+          }
         ],
-        "prevention": "Accept some surface variation — it adds to the wood aesthetic. Use larger nozzles for best results."
+        "prevention": "Accept some surface variation \u2014 it adds to the wood aesthetic. Use larger nozzles for best results."
       },
       {
         "symptom": "Stringing between features",
         "severity": "moderate",
         "root_cause": "Wood PLA has lower viscosity than standard PLA due to the fiber additives disrupting the polymer matrix.",
         "fixes": [
-          {"action": "Lower nozzle temperature to 190-195C", "priority": 1},
-          {"action": "Increase retraction to 5-6mm at 35mm/s for Bowden, 2mm at 25mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.04-0.06mm3", "priority": 3},
-          {"action": "Increase travel speed to 150mm/s", "priority": 4}
+          {
+            "action": "Lower nozzle temperature to 190-195C",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction to 5-6mm at 35mm/s for Bowden, 2mm at 25mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.04-0.06mm3",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 150mm/s",
+            "priority": 4
+          }
         ],
         "prevention": "Keep nozzle temperature as low as possible while maintaining flow."
       },
@@ -328,9 +589,18 @@
         "severity": "moderate",
         "root_cause": "Wood fibers are mildly abrasive and gradually enlarge the nozzle bore of brass nozzles, degrading print quality over extended use.",
         "fixes": [
-          {"action": "Switch to a hardened steel or ruby-tipped nozzle (0.5mm+)", "priority": 1},
-          {"action": "Check nozzle diameter every 50-100 hours of wood PLA printing", "priority": 2},
-          {"action": "Replace brass nozzle after 100+ hours of wood filament use", "priority": 3}
+          {
+            "action": "Switch to a hardened steel or ruby-tipped nozzle (0.5mm+)",
+            "priority": 1
+          },
+          {
+            "action": "Check nozzle diameter every 50-100 hours of wood PLA printing",
+            "priority": 2
+          },
+          {
+            "action": "Replace brass nozzle after 100+ hours of wood filament use",
+            "priority": 3
+          }
         ],
         "prevention": "Invest in a hardened steel nozzle before starting with wood PLA. The cost saves multiple brass nozzle replacements."
       },
@@ -339,10 +609,22 @@
         "severity": "moderate",
         "root_cause": "Wood fibers interrupt the polymer chain bonding between layers, reducing adhesion strength compared to pure PLA.",
         "fixes": [
-          {"action": "Increase nozzle temperature to 200-205C (but not above 210C)", "priority": 1},
-          {"action": "Reduce part cooling fan to 50-70%", "priority": 2},
-          {"action": "Increase line width to 120-130% of nozzle diameter", "priority": 3},
-          {"action": "Reduce layer height to 0.2mm max for better inter-layer bonding", "priority": 4}
+          {
+            "action": "Increase nozzle temperature to 200-205C (but not above 210C)",
+            "priority": 1
+          },
+          {
+            "action": "Reduce part cooling fan to 50-70%",
+            "priority": 2
+          },
+          {
+            "action": "Increase line width to 120-130% of nozzle diameter",
+            "priority": 3
+          },
+          {
+            "action": "Reduce layer height to 0.2mm max for better inter-layer bonding",
+            "priority": 4
+          }
         ],
         "prevention": "Wood PLA is for decorative prints, not structural parts. Design for aesthetics, not load bearing."
       },
@@ -351,11 +633,20 @@
         "severity": "minor",
         "root_cause": "Wood fibers char at temperatures above 210-215C, leaving dark streaks and inconsistent color in the print.",
         "fixes": [
-          {"action": "Lower nozzle temperature to 190-200C", "priority": 1},
-          {"action": "Reduce print time per layer to avoid prolonged heat exposure", "priority": 2},
-          {"action": "Purge filament if a clog caused extended residence time at temperature", "priority": 3}
+          {
+            "action": "Lower nozzle temperature to 190-200C",
+            "priority": 1
+          },
+          {
+            "action": "Reduce print time per layer to avoid prolonged heat exposure",
+            "priority": 2
+          },
+          {
+            "action": "Purge filament if a clog caused extended residence time at temperature",
+            "priority": 3
+          }
         ],
-        "prevention": "Never exceed 210C with wood PLA. The wood-grain color variation comes from temperature — slight changes are intentional, charring is not."
+        "prevention": "Never exceed 210C with wood PLA. The wood-grain color variation comes from temperature \u2014 slight changes are intentional, charring is not."
       }
     ],
     "storage_requirements": {
@@ -366,10 +657,10 @@
       "drying_time_hours": 4
     },
     "break_in_tips": [
-      "Use a 0.5mm or 0.6mm nozzle — this is non-negotiable. A 0.4mm WILL clog. Never use 0.25mm.",
+      "Use a 0.5mm or 0.6mm nozzle \u2014 this is non-negotiable. A 0.4mm WILL clog. Never use 0.25mm.",
       "Start at 190-200C nozzle, 50-55C bed. Higher temps cause charring, not better prints.",
       "Print at 30-40mm/s for consistent extrusion. Wood PLA does not like speed.",
-      "Temperature changes create wood-grain effects — some slicers can vary temp per layer for a realistic look.",
+      "Temperature changes create wood-grain effects \u2014 some slicers can vary temp per layer for a realistic look.",
       "Sand and stain finished prints just like real wood. The fiber content takes stain beautifully."
     ]
   },
@@ -380,23 +671,50 @@
         "severity": "moderate",
         "root_cause": "PETG is naturally stringy due to its high viscosity and tendency to remain fluid over a wider temperature range than PLA.",
         "fixes": [
-          {"action": "Lower nozzle temperature to 225-230C (minimum that maintains adhesion)", "priority": 1},
-          {"action": "Increase retraction distance to 5-7mm at 40mm/s for Bowden, 2-4mm at 25mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.06-0.10mm3", "priority": 3},
-          {"action": "Increase travel speed to 180-200mm/s", "priority": 4},
-          {"action": "Enable wipe distance of 3-5mm", "priority": 5}
+          {
+            "action": "Lower nozzle temperature to 225-230C (minimum that maintains adhesion)",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction distance to 5-7mm at 40mm/s for Bowden, 2-4mm at 25mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.06-0.10mm3",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 180-200mm/s",
+            "priority": 4
+          },
+          {
+            "action": "Enable wipe distance of 3-5mm",
+            "priority": 5
+          }
         ],
         "prevention": "PETG will always string more than PLA. Accept minor stringing and remove with a heat gun at 200C for 2-3 seconds per area."
       },
       {
-        "symptom": "Bed adhesion too strong — tears build surface on removal",
+        "symptom": "Bed adhesion too strong \u2014 tears build surface on removal",
         "severity": "major",
         "root_cause": "PETG bonds chemically to glass and some PEI surfaces at bed temperatures, creating adhesion so strong it damages the surface.",
         "fixes": [
-          {"action": "Apply a thin layer of glue stick as a release agent before printing", "priority": 1},
-          {"action": "Increase Z-offset by 0.02-0.05mm to reduce first layer squish", "priority": 2},
-          {"action": "Reduce bed temperature to 70C (from typical 80C)", "priority": 3},
-          {"action": "Let the bed cool completely to room temperature before removal", "priority": 4}
+          {
+            "action": "Apply a thin layer of glue stick as a release agent before printing",
+            "priority": 1
+          },
+          {
+            "action": "Increase Z-offset by 0.02-0.05mm to reduce first layer squish",
+            "priority": 2
+          },
+          {
+            "action": "Reduce bed temperature to 70C (from typical 80C)",
+            "priority": 3
+          },
+          {
+            "action": "Let the bed cool completely to room temperature before removal",
+            "priority": 4
+          }
         ],
         "prevention": "Always use glue stick on glass/PEI beds. PETG will permanently bond to bare glass."
       },
@@ -405,10 +723,22 @@
         "severity": "minor",
         "root_cause": "PETG oozes at retraction points due to its high viscosity and slow solidification, leaving excess material at seams and travel start positions.",
         "fixes": [
-          {"action": "Enable linear advance/pressure advance at K=0.05-0.08 for direct drive", "priority": 1},
-          {"action": "Set seam position to sharpest corner in slicer", "priority": 2},
-          {"action": "Enable wipe distance of 3-5mm and coasting of 0.05-0.08mm3", "priority": 3},
-          {"action": "Reduce retraction prime speed to 15-20mm/s", "priority": 4}
+          {
+            "action": "Enable linear advance/pressure advance at K=0.05-0.08 for direct drive",
+            "priority": 1
+          },
+          {
+            "action": "Set seam position to sharpest corner in slicer",
+            "priority": 2
+          },
+          {
+            "action": "Enable wipe distance of 3-5mm and coasting of 0.05-0.08mm3",
+            "priority": 3
+          },
+          {
+            "action": "Reduce retraction prime speed to 15-20mm/s",
+            "priority": 4
+          }
         ],
         "prevention": "Tune pressure advance carefully for PETG. It needs higher K values than PLA."
       },
@@ -417,9 +747,18 @@
         "severity": "moderate",
         "root_cause": "PETG readily absorbs atmospheric moisture. Water trapped in the filament vaporizes at the nozzle, creating steam bubbles that disrupt extrusion.",
         "fixes": [
-          {"action": "Dry filament at 65C for 4-6 hours", "priority": 1},
-          {"action": "Print from a dry box with inline desiccant", "priority": 2},
-          {"action": "Listen for popping/crackling sounds — if present, filament is wet", "priority": 3}
+          {
+            "action": "Dry filament at 65C for 4-6 hours",
+            "priority": 1
+          },
+          {
+            "action": "Print from a dry box with inline desiccant",
+            "priority": 2
+          },
+          {
+            "action": "Listen for popping/crackling sounds \u2014 if present, filament is wet",
+            "priority": 3
+          }
         ],
         "prevention": "Store PETG sealed with desiccant. Dry before every use if stored in open air for more than a week."
       },
@@ -428,10 +767,22 @@
         "severity": "moderate",
         "root_cause": "PETG remains fluid longer than PLA, causing unsupported spans to droop significantly before cooling enough to hold shape.",
         "fixes": [
-          {"action": "Increase part cooling fan to 80-100% during bridges", "priority": 1},
-          {"action": "Reduce bridge flow rate to 80-90%", "priority": 2},
-          {"action": "Increase bridge speed to 25-30mm/s to stretch the filament thinner", "priority": 3},
-          {"action": "Lower nozzle temperature by 5-10C for bridge layers", "priority": 4}
+          {
+            "action": "Increase part cooling fan to 80-100% during bridges",
+            "priority": 1
+          },
+          {
+            "action": "Reduce bridge flow rate to 80-90%",
+            "priority": 2
+          },
+          {
+            "action": "Increase bridge speed to 25-30mm/s to stretch the filament thinner",
+            "priority": 3
+          },
+          {
+            "action": "Lower nozzle temperature by 5-10C for bridge layers",
+            "priority": 4
+          }
         ],
         "prevention": "Design bridges under 40mm when possible. Use supports for longer spans."
       },
@@ -440,10 +791,22 @@
         "severity": "moderate",
         "root_cause": "PETG curls when cooled too quickly on overhangs, causing the nozzle to catch on curled edges and dislodge layers.",
         "fixes": [
-          {"action": "Reduce part cooling fan to 50% on overhangs (PETG needs less cooling than PLA)", "priority": 1},
-          {"action": "Lower nozzle temperature by 5C to reduce curling tendency", "priority": 2},
-          {"action": "Reduce overhang speed to 20-25mm/s", "priority": 3},
-          {"action": "Enable Z-hop of 0.2-0.4mm during travel to avoid catching curled edges", "priority": 4}
+          {
+            "action": "Reduce part cooling fan to 50% on overhangs (PETG needs less cooling than PLA)",
+            "priority": 1
+          },
+          {
+            "action": "Lower nozzle temperature by 5C to reduce curling tendency",
+            "priority": 2
+          },
+          {
+            "action": "Reduce overhang speed to 20-25mm/s",
+            "priority": 3
+          },
+          {
+            "action": "Enable Z-hop of 0.2-0.4mm during travel to avoid catching curled edges",
+            "priority": 4
+          }
         ],
         "prevention": "PETG overhangs work best with moderate cooling (40-60% fan), not maximum."
       },
@@ -452,10 +815,22 @@
         "severity": "moderate",
         "root_cause": "PETG sometimes does not stick well to textured PEI at lower bed temperatures or with incorrect Z-offset.",
         "fixes": [
-          {"action": "Increase bed temperature to 80-85C", "priority": 1},
-          {"action": "Lower Z-offset by 0.02-0.04mm for more first layer squish", "priority": 2},
-          {"action": "Reduce first layer speed to 15-20mm/s", "priority": 3},
-          {"action": "Clean bed with isopropyl alcohol (90%+) and avoid touching the surface", "priority": 4}
+          {
+            "action": "Increase bed temperature to 80-85C",
+            "priority": 1
+          },
+          {
+            "action": "Lower Z-offset by 0.02-0.04mm for more first layer squish",
+            "priority": 2
+          },
+          {
+            "action": "Reduce first layer speed to 15-20mm/s",
+            "priority": 3
+          },
+          {
+            "action": "Clean bed with isopropyl alcohol (90%+) and avoid touching the surface",
+            "priority": 4
+          }
         ],
         "prevention": "Clean bed before every PETG print. Oils from skin prevent adhesion."
       }
@@ -469,9 +844,9 @@
     },
     "break_in_tips": [
       "Start at 230-240C nozzle, 75-80C bed. PETG needs higher temps than PLA.",
-      "Always use glue stick on glass or smooth PEI beds — PETG will bond permanently otherwise.",
+      "Always use glue stick on glass or smooth PEI beds \u2014 PETG will bond permanently otherwise.",
       "Expect stringing. It's normal for PETG. A heat gun at 200C cleans strings in seconds.",
-      "Reduce part cooling to 50-70% — PETG does not like maximum cooling like PLA does.",
+      "Reduce part cooling to 50-70% \u2014 PETG does not like maximum cooling like PLA does.",
       "PETG is food-safe after printing (when using food-safe colorant). Great for kitchen items and containers."
     ]
   },
@@ -482,9 +857,18 @@
         "severity": "major",
         "root_cause": "Carbon fibers are highly abrasive and will enlarge a brass nozzle bore within hours of printing, degrading quality rapidly.",
         "fixes": [
-          {"action": "Use a hardened steel, ruby, or tungsten carbide nozzle exclusively", "priority": 1},
-          {"action": "Check nozzle diameter with a drill bit gauge every 20 hours of CF printing", "priority": 2},
-          {"action": "Never use a brass nozzle — even a single print can damage it", "priority": 3}
+          {
+            "action": "Use a hardened steel, ruby, or tungsten carbide nozzle exclusively",
+            "priority": 1
+          },
+          {
+            "action": "Check nozzle diameter with a drill bit gauge every 20 hours of CF printing",
+            "priority": 2
+          },
+          {
+            "action": "Never use a brass nozzle \u2014 even a single print can damage it",
+            "priority": 3
+          }
         ],
         "prevention": "Invest in a hardened steel nozzle (0.4mm+) before your first CF PETG print."
       },
@@ -493,10 +877,22 @@
         "severity": "major",
         "root_cause": "Carbon fiber strands are 50-100 microns and can bridge across nozzle openings below 0.4mm, causing partial or full blockage.",
         "fixes": [
-          {"action": "Use a 0.4mm nozzle minimum — 0.5-0.6mm preferred", "priority": 1},
-          {"action": "Increase nozzle temperature by 5-10C to improve flow around fibers", "priority": 2},
-          {"action": "Perform cold pulls with standard PETG to clear partial clogs", "priority": 3},
-          {"action": "Reduce retraction distance to 2-3mm to avoid fiber compaction in heatbreak", "priority": 4}
+          {
+            "action": "Use a 0.4mm nozzle minimum \u2014 0.5-0.6mm preferred",
+            "priority": 1
+          },
+          {
+            "action": "Increase nozzle temperature by 5-10C to improve flow around fibers",
+            "priority": 2
+          },
+          {
+            "action": "Perform cold pulls with standard PETG to clear partial clogs",
+            "priority": 3
+          },
+          {
+            "action": "Reduce retraction distance to 2-3mm to avoid fiber compaction in heatbreak",
+            "priority": 4
+          }
         ],
         "prevention": "Never use a nozzle smaller than 0.4mm. 0.5mm is the sweet spot for CF filaments."
       },
@@ -505,10 +901,22 @@
         "severity": "moderate",
         "root_cause": "Carbon fibers interrupt polymer chain bonding between layers, reducing inter-layer strength by 15-30% compared to unfilled PETG.",
         "fixes": [
-          {"action": "Increase nozzle temperature by 5-10C above standard PETG (240-250C)", "priority": 1},
-          {"action": "Reduce part cooling fan to 30-50%", "priority": 2},
-          {"action": "Increase line width to 120-140% of nozzle diameter", "priority": 3},
-          {"action": "Reduce print speed to 30-40mm/s for better bonding time", "priority": 4}
+          {
+            "action": "Increase nozzle temperature by 5-10C above standard PETG (240-250C)",
+            "priority": 1
+          },
+          {
+            "action": "Reduce part cooling fan to 30-50%",
+            "priority": 2
+          },
+          {
+            "action": "Increase line width to 120-140% of nozzle diameter",
+            "priority": 3
+          },
+          {
+            "action": "Reduce print speed to 30-40mm/s for better bonding time",
+            "priority": 4
+          }
         ],
         "prevention": "CF PETG is strong in-plane but weak between layers. Orient parts so load is along the XY plane, not Z."
       },
@@ -517,21 +925,42 @@
         "severity": "moderate",
         "root_cause": "Inherits PETG's stringing tendency, made slightly worse by fibers increasing effective viscosity at some points and reducing it at others.",
         "fixes": [
-          {"action": "Lower nozzle temperature to minimum that maintains adhesion (235-240C)", "priority": 1},
-          {"action": "Increase retraction to 5-6mm at 35mm/s for Bowden, 2-3mm at 25mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.06-0.08mm3", "priority": 3},
-          {"action": "Increase travel speed to 150-180mm/s", "priority": 4}
+          {
+            "action": "Lower nozzle temperature to minimum that maintains adhesion (235-240C)",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction to 5-6mm at 35mm/s for Bowden, 2-3mm at 25mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.06-0.08mm3",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 150-180mm/s",
+            "priority": 4
+          }
         ],
-        "prevention": "Dial retraction specifically for CF PETG — settings differ from plain PETG."
+        "prevention": "Dial retraction specifically for CF PETG \u2014 settings differ from plain PETG."
       },
       {
         "symptom": "Rough matte surface with visible fiber texture",
         "severity": "minor",
         "root_cause": "Carbon fibers protrude slightly from the surface of each layer, creating a naturally rough matte finish that differs from smooth PETG.",
         "fixes": [
-          {"action": "Reduce layer height to 0.12-0.16mm for smoother appearance", "priority": 1},
-          {"action": "Increase flow rate by 2-3% to better encapsulate fibers", "priority": 2},
-          {"action": "Print at slower speeds (30-40mm/s) for more consistent fiber embedding", "priority": 3}
+          {
+            "action": "Reduce layer height to 0.12-0.16mm for smoother appearance",
+            "priority": 1
+          },
+          {
+            "action": "Increase flow rate by 2-3% to better encapsulate fibers",
+            "priority": 2
+          },
+          {
+            "action": "Print at slower speeds (30-40mm/s) for more consistent fiber embedding",
+            "priority": 3
+          }
         ],
         "prevention": "The matte finish is inherent to CF filaments. Sand with 400-800 grit for a smoother look."
       },
@@ -540,9 +969,18 @@
         "severity": "moderate",
         "root_cause": "CF PETG absorbs moisture slightly faster than plain PETG due to fibers creating micro-channels for water infiltration.",
         "fixes": [
-          {"action": "Dry filament at 65C for 4-6 hours before printing", "priority": 1},
-          {"action": "Print from a dry box to prevent moisture re-absorption during long prints", "priority": 2},
-          {"action": "Listen for popping sounds — any crackling means wet filament", "priority": 3}
+          {
+            "action": "Dry filament at 65C for 4-6 hours before printing",
+            "priority": 1
+          },
+          {
+            "action": "Print from a dry box to prevent moisture re-absorption during long prints",
+            "priority": 2
+          },
+          {
+            "action": "Listen for popping sounds \u2014 any crackling means wet filament",
+            "priority": 3
+          }
         ],
         "prevention": "Store sealed with desiccant. Dry before every print session if ambient humidity exceeds 40%."
       }
@@ -569,9 +1007,18 @@
         "severity": "major",
         "root_cause": "Carbon fibers are highly abrasive and will destroy a brass nozzle within hours, enlarging the bore and degrading dimensional accuracy.",
         "fixes": [
-          {"action": "Use a hardened steel, ruby, or tungsten carbide nozzle exclusively", "priority": 1},
-          {"action": "Inspect nozzle diameter every 20-30 hours of CF printing", "priority": 2},
-          {"action": "Never use a brass nozzle with any carbon fiber filament", "priority": 3}
+          {
+            "action": "Use a hardened steel, ruby, or tungsten carbide nozzle exclusively",
+            "priority": 1
+          },
+          {
+            "action": "Inspect nozzle diameter every 20-30 hours of CF printing",
+            "priority": 2
+          },
+          {
+            "action": "Never use a brass nozzle with any carbon fiber filament",
+            "priority": 3
+          }
         ],
         "prevention": "A hardened nozzle is mandatory before printing any carbon fiber filament."
       },
@@ -580,10 +1027,22 @@
         "severity": "major",
         "root_cause": "Carbon fiber strands bridge across small nozzle openings, causing partial or complete blockage that stops extrusion.",
         "fixes": [
-          {"action": "Use a 0.5mm nozzle minimum — 0.6mm preferred for reliability", "priority": 1},
-          {"action": "Increase nozzle temperature by 5-10C to improve flow around fibers", "priority": 2},
-          {"action": "Perform cold pulls with standard PETG to clear partial clogs", "priority": 3},
-          {"action": "Reduce retraction distance to 2-3mm to prevent fiber compaction in heatbreak", "priority": 4}
+          {
+            "action": "Use a 0.5mm nozzle minimum \u2014 0.6mm preferred for reliability",
+            "priority": 1
+          },
+          {
+            "action": "Increase nozzle temperature by 5-10C to improve flow around fibers",
+            "priority": 2
+          },
+          {
+            "action": "Perform cold pulls with standard PETG to clear partial clogs",
+            "priority": 3
+          },
+          {
+            "action": "Reduce retraction distance to 2-3mm to prevent fiber compaction in heatbreak",
+            "priority": 4
+          }
         ],
         "prevention": "Never attempt to print CF PETG through a nozzle smaller than 0.4mm."
       },
@@ -592,9 +1051,18 @@
         "severity": "moderate",
         "root_cause": "Carbon fibers increase stiffness dramatically but reduce the ductility and flexibility that standard PETG offers, making parts more prone to brittle failure under impact.",
         "fixes": [
-          {"action": "Increase wall count to 5-6 perimeters for impact-prone areas", "priority": 1},
-          {"action": "Use gyroid infill at 25-35% for better energy absorption", "priority": 2},
-          {"action": "Orient parts so impact loads are distributed across the XY plane", "priority": 3}
+          {
+            "action": "Increase wall count to 5-6 perimeters for impact-prone areas",
+            "priority": 1
+          },
+          {
+            "action": "Use gyroid infill at 25-35% for better energy absorption",
+            "priority": 2
+          },
+          {
+            "action": "Orient parts so impact loads are distributed across the XY plane",
+            "priority": 3
+          }
         ],
         "prevention": "CF PETG is for stiffness, not flexibility. Use standard PETG for parts needing impact resistance or flex."
       },
@@ -603,10 +1071,22 @@
         "severity": "moderate",
         "root_cause": "Inherits PETG's tendency to string, with carbon fibers slightly altering flow dynamics but not reducing oozing.",
         "fixes": [
-          {"action": "Lower nozzle temperature to 235-240C", "priority": 1},
-          {"action": "Increase retraction to 5-6mm at 35mm/s for Bowden, 2-3mm at 25mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.06-0.08mm3", "priority": 3},
-          {"action": "Increase travel speed to 150-180mm/s", "priority": 4}
+          {
+            "action": "Lower nozzle temperature to 235-240C",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction to 5-6mm at 35mm/s for Bowden, 2-3mm at 25mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.06-0.08mm3",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 150-180mm/s",
+            "priority": 4
+          }
         ],
         "prevention": "PETG-based filaments always string. Post-process with a heat gun at 200C."
       },
@@ -615,10 +1095,22 @@
         "severity": "moderate",
         "root_cause": "Carbon fibers interrupt polymer chain bonding between layers, reducing Z-axis strength by 15-30% compared to unfilled PETG.",
         "fixes": [
-          {"action": "Increase nozzle temperature to 240-250C for better fusion", "priority": 1},
-          {"action": "Reduce part cooling fan to 30-50%", "priority": 2},
-          {"action": "Increase line width to 120-140% of nozzle diameter", "priority": 3},
-          {"action": "Reduce print speed to 30-40mm/s for better bonding", "priority": 4}
+          {
+            "action": "Increase nozzle temperature to 240-250C for better fusion",
+            "priority": 1
+          },
+          {
+            "action": "Reduce part cooling fan to 30-50%",
+            "priority": 2
+          },
+          {
+            "action": "Increase line width to 120-140% of nozzle diameter",
+            "priority": 3
+          },
+          {
+            "action": "Reduce print speed to 30-40mm/s for better bonding",
+            "priority": 4
+          }
         ],
         "prevention": "Orient parts so primary loads are in-plane (XY), not cross-layer (Z)."
       },
@@ -627,9 +1119,18 @@
         "severity": "moderate",
         "root_cause": "PETG base absorbs atmospheric moisture, and carbon fibers create micro-channels that accelerate water absorption throughout the filament.",
         "fixes": [
-          {"action": "Dry filament at 65C for 4-6 hours before printing", "priority": 1},
-          {"action": "Print from a dry box for prints longer than 2 hours", "priority": 2},
-          {"action": "Listen for popping or crackling sounds — indicates wet filament", "priority": 3}
+          {
+            "action": "Dry filament at 65C for 4-6 hours before printing",
+            "priority": 1
+          },
+          {
+            "action": "Print from a dry box for prints longer than 2 hours",
+            "priority": 2
+          },
+          {
+            "action": "Listen for popping or crackling sounds \u2014 indicates wet filament",
+            "priority": 3
+          }
         ],
         "prevention": "Store sealed with desiccant. Dry before every print session if ambient humidity exceeds 40%."
       }
@@ -656,11 +1157,26 @@
         "severity": "major",
         "root_cause": "ABS has high thermal shrinkage (~0.8%). As layers cool, they contract and pull corners upward. This is ABS's signature failure mode.",
         "fixes": [
-          {"action": "Use an enclosure to maintain ambient temperature of 40-50C", "priority": 1},
-          {"action": "Increase bed temperature to 100-110C", "priority": 2},
-          {"action": "Apply ABS slurry (ABS dissolved in acetone) or glue stick to the bed", "priority": 3},
-          {"action": "Add a brim of 10-15mm width", "priority": 4},
-          {"action": "Disable part cooling fan entirely or keep at 0-10%", "priority": 5}
+          {
+            "action": "Use an enclosure to maintain ambient temperature of 40-50C",
+            "priority": 1
+          },
+          {
+            "action": "Increase bed temperature to 100-110C",
+            "priority": 2
+          },
+          {
+            "action": "Apply ABS slurry (ABS dissolved in acetone) or glue stick to the bed",
+            "priority": 3
+          },
+          {
+            "action": "Add a brim of 10-15mm width",
+            "priority": 4
+          },
+          {
+            "action": "Disable part cooling fan entirely or keep at 0-10%",
+            "priority": 5
+          }
         ],
         "prevention": "An enclosure is virtually mandatory for ABS. Even a cardboard box helps. Eliminate all drafts."
       },
@@ -669,10 +1185,22 @@
         "severity": "major",
         "root_cause": "Rapid cooling between layers causes thermal stress that exceeds the inter-layer bond strength, resulting in visible cracks between layers.",
         "fixes": [
-          {"action": "Ensure enclosure is sealed and maintaining 40-50C ambient", "priority": 1},
-          {"action": "Increase nozzle temperature to 240-250C for better layer bonding", "priority": 2},
-          {"action": "Reduce part cooling fan to 0% — ABS should not be actively cooled", "priority": 3},
-          {"action": "Reduce print speed to 40-50mm/s for better heat transfer between layers", "priority": 4}
+          {
+            "action": "Ensure enclosure is sealed and maintaining 40-50C ambient",
+            "priority": 1
+          },
+          {
+            "action": "Increase nozzle temperature to 240-250C for better layer bonding",
+            "priority": 2
+          },
+          {
+            "action": "Reduce part cooling fan to 0% \u2014 ABS should not be actively cooled",
+            "priority": 3
+          },
+          {
+            "action": "Reduce print speed to 40-50mm/s for better heat transfer between layers",
+            "priority": 4
+          }
         ],
         "prevention": "Never print ABS without an enclosure. Layer cracking is almost entirely a temperature management problem."
       },
@@ -681,10 +1209,22 @@
         "severity": "moderate",
         "root_cause": "ABS releases styrene vapors when heated, which are irritating and potentially harmful with prolonged exposure in enclosed spaces.",
         "fixes": [
-          {"action": "Use a printer enclosure with an activated carbon filter", "priority": 1},
-          {"action": "Ventilate the room — run an exhaust fan or open windows", "priority": 2},
-          {"action": "Lower nozzle temperature to minimum effective range (230-240C)", "priority": 3},
-          {"action": "Consider switching to ASA for outdoor parts (lower fumes, UV resistant)", "priority": 4}
+          {
+            "action": "Use a printer enclosure with an activated carbon filter",
+            "priority": 1
+          },
+          {
+            "action": "Ventilate the room \u2014 run an exhaust fan or open windows",
+            "priority": 2
+          },
+          {
+            "action": "Lower nozzle temperature to minimum effective range (230-240C)",
+            "priority": 3
+          },
+          {
+            "action": "Consider switching to ASA for outdoor parts (lower fumes, UV resistant)",
+            "priority": 4
+          }
         ],
         "prevention": "Always print ABS in a ventilated area or with filtration. Never print in a bedroom or small unventilated space."
       },
@@ -693,10 +1233,22 @@
         "severity": "minor",
         "root_cause": "High bed temperature (100C+) combined with first-layer squish causes ABS to deform at the base, spreading wider than designed.",
         "fixes": [
-          {"action": "Enable elephant's foot compensation of 0.2-0.3mm in slicer", "priority": 1},
-          {"action": "Raise Z-offset by 0.03-0.06mm", "priority": 2},
-          {"action": "Reduce first layer flow to 93-95%", "priority": 3},
-          {"action": "Reduce bed temperature to 95C (balance adhesion vs. deformation)", "priority": 4}
+          {
+            "action": "Enable elephant's foot compensation of 0.2-0.3mm in slicer",
+            "priority": 1
+          },
+          {
+            "action": "Raise Z-offset by 0.03-0.06mm",
+            "priority": 2
+          },
+          {
+            "action": "Reduce first layer flow to 93-95%",
+            "priority": 3
+          },
+          {
+            "action": "Reduce bed temperature to 95C (balance adhesion vs. deformation)",
+            "priority": 4
+          }
         ],
         "prevention": "Calibrate first layer height specifically for ABS at your bed temperature."
       },
@@ -705,22 +1257,46 @@
         "severity": "major",
         "root_cause": "Cumulative thermal contraction over many layers creates enough force to peel the print from the bed, starting at corners and edges.",
         "fixes": [
-          {"action": "Seal enclosure to maintain consistent 45-55C ambient", "priority": 1},
-          {"action": "Apply ABS slurry (dissolve ABS scraps in acetone) to bed surface", "priority": 2},
-          {"action": "Add mouse-ear pads (small discs) at corners in the model", "priority": 3},
-          {"action": "Increase brim to 15-20mm for tall prints over 100mm", "priority": 4},
-          {"action": "Reduce bed temp difference — use 95C bed with 50C enclosure", "priority": 5}
+          {
+            "action": "Seal enclosure to maintain consistent 45-55C ambient",
+            "priority": 1
+          },
+          {
+            "action": "Apply ABS slurry (dissolve ABS scraps in acetone) to bed surface",
+            "priority": 2
+          },
+          {
+            "action": "Add mouse-ear pads (small discs) at corners in the model",
+            "priority": 3
+          },
+          {
+            "action": "Increase brim to 15-20mm for tall prints over 100mm",
+            "priority": 4
+          },
+          {
+            "action": "Reduce bed temp difference \u2014 use 95C bed with 50C enclosure",
+            "priority": 5
+          }
         ],
         "prevention": "For tall prints, ABS slurry + enclosure + brim is the reliable combination."
       },
       {
-        "symptom": "Surface quality issues — rough or blistered surface",
+        "symptom": "Surface quality issues \u2014 rough or blistered surface",
         "severity": "minor",
         "root_cause": "Moisture in ABS filament vaporizes at the nozzle, creating micro-bubbles that erupt on the surface as rough patches or blisters.",
         "fixes": [
-          {"action": "Dry filament at 80C for 4-6 hours", "priority": 1},
-          {"action": "Print from dry box for long prints", "priority": 2},
-          {"action": "Check for popping sounds during extrusion — indicates moisture", "priority": 3}
+          {
+            "action": "Dry filament at 80C for 4-6 hours",
+            "priority": 1
+          },
+          {
+            "action": "Print from dry box for long prints",
+            "priority": 2
+          },
+          {
+            "action": "Check for popping sounds during extrusion \u2014 indicates moisture",
+            "priority": 3
+          }
         ],
         "prevention": "ABS absorbs moisture moderately. Dry before printing if left in open air for more than 3-5 days."
       }
@@ -735,7 +1311,7 @@
     "break_in_tips": [
       "An enclosure is not optional for ABS. Even a large cardboard box over the printer reduces warping dramatically.",
       "Start at 240-250C nozzle, 100-110C bed. ABS needs high temperatures everywhere.",
-      "Turn the part cooling fan OFF. ABS hates cooling — it's the opposite of PLA.",
+      "Turn the part cooling fan OFF. ABS hates cooling \u2014 it's the opposite of PLA.",
       "Apply ABS slurry (ABS dissolved in acetone) to the bed for the best adhesion. Glue stick is the next best option.",
       "ABS can be vapor-smoothed with acetone for a glossy, injection-molded finish. Research the technique before attempting."
     ]
@@ -747,11 +1323,26 @@
         "severity": "moderate",
         "root_cause": "ASA has similar thermal shrinkage to ABS (~0.7%), though slightly less. Without an enclosure, corners will still lift.",
         "fixes": [
-          {"action": "Use an enclosure to maintain 40-50C ambient temperature", "priority": 1},
-          {"action": "Increase bed temperature to 95-105C", "priority": 2},
-          {"action": "Add a brim of 8-12mm width", "priority": 3},
-          {"action": "Apply glue stick or ASA slurry to bed surface", "priority": 4},
-          {"action": "Disable part cooling fan or keep at 0-10%", "priority": 5}
+          {
+            "action": "Use an enclosure to maintain 40-50C ambient temperature",
+            "priority": 1
+          },
+          {
+            "action": "Increase bed temperature to 95-105C",
+            "priority": 2
+          },
+          {
+            "action": "Add a brim of 8-12mm width",
+            "priority": 3
+          },
+          {
+            "action": "Apply glue stick or ASA slurry to bed surface",
+            "priority": 4
+          },
+          {
+            "action": "Disable part cooling fan or keep at 0-10%",
+            "priority": 5
+          }
         ],
         "prevention": "Enclosure is strongly recommended for ASA, though warping is less severe than ABS."
       },
@@ -760,10 +1351,22 @@
         "severity": "moderate",
         "root_cause": "Temperature differential between layers causes stress that can exceed the inter-layer bond. Less severe than ABS but still present.",
         "fixes": [
-          {"action": "Ensure enclosure is at 40-50C ambient", "priority": 1},
-          {"action": "Increase nozzle temperature to 245-255C", "priority": 2},
-          {"action": "Reduce print speed to 40-50mm/s for better bonding", "priority": 3},
-          {"action": "Reduce or eliminate part cooling fan", "priority": 4}
+          {
+            "action": "Ensure enclosure is at 40-50C ambient",
+            "priority": 1
+          },
+          {
+            "action": "Increase nozzle temperature to 245-255C",
+            "priority": 2
+          },
+          {
+            "action": "Reduce print speed to 40-50mm/s for better bonding",
+            "priority": 3
+          },
+          {
+            "action": "Reduce or eliminate part cooling fan",
+            "priority": 4
+          }
         ],
         "prevention": "Keep ambient temps consistent. Avoid opening the enclosure mid-print."
       },
@@ -772,10 +1375,22 @@
         "severity": "moderate",
         "root_cause": "ASA has moderate viscosity and remains fluid over a wide temperature range, producing strings similar to ABS.",
         "fixes": [
-          {"action": "Lower nozzle temperature to 235-240C", "priority": 1},
-          {"action": "Increase retraction to 5-6mm at 40mm/s for Bowden, 2-3mm at 30mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.05-0.07mm3", "priority": 3},
-          {"action": "Increase travel speed to 150-180mm/s", "priority": 4}
+          {
+            "action": "Lower nozzle temperature to 235-240C",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction to 5-6mm at 40mm/s for Bowden, 2-3mm at 30mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.05-0.07mm3",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 150-180mm/s",
+            "priority": 4
+          }
         ],
         "prevention": "Print a retraction tower to find the sweet spot for your specific ASA brand."
       },
@@ -784,9 +1399,18 @@
         "severity": "moderate",
         "root_cause": "ASA emits styrene-based fumes similar to ABS, though generally slightly less intense. Still requires ventilation.",
         "fixes": [
-          {"action": "Use a printer enclosure with activated carbon filtration", "priority": 1},
-          {"action": "Ventilate the room during and after printing", "priority": 2},
-          {"action": "Keep nozzle temperature at lowest effective range (235-245C)", "priority": 3}
+          {
+            "action": "Use a printer enclosure with activated carbon filtration",
+            "priority": 1
+          },
+          {
+            "action": "Ventilate the room during and after printing",
+            "priority": 2
+          },
+          {
+            "action": "Keep nozzle temperature at lowest effective range (235-245C)",
+            "priority": 3
+          }
         ],
         "prevention": "Print in a ventilated space. An enclosure with a carbon filter is ideal."
       },
@@ -795,10 +1419,22 @@
         "severity": "moderate",
         "root_cause": "ASA can struggle to adhere to smooth PEI or glass beds without an adhesion aid, especially at lower bed temperatures.",
         "fixes": [
-          {"action": "Increase bed temperature to 100-105C", "priority": 1},
-          {"action": "Apply glue stick or ASA/ABS slurry to the bed", "priority": 2},
-          {"action": "Reduce first layer speed to 15-20mm/s", "priority": 3},
-          {"action": "Increase first layer line width to 150% of nozzle diameter", "priority": 4}
+          {
+            "action": "Increase bed temperature to 100-105C",
+            "priority": 1
+          },
+          {
+            "action": "Apply glue stick or ASA/ABS slurry to the bed",
+            "priority": 2
+          },
+          {
+            "action": "Reduce first layer speed to 15-20mm/s",
+            "priority": 3
+          },
+          {
+            "action": "Increase first layer line width to 150% of nozzle diameter",
+            "priority": 4
+          }
         ],
         "prevention": "Glue stick on a heated bed at 100C provides reliable adhesion."
       },
@@ -807,8 +1443,14 @@
         "severity": "minor",
         "root_cause": "While ASA is UV-resistant, prolonged multi-year exposure can cause slight yellowing or color shift in lighter colors.",
         "fixes": [
-          {"action": "Use darker ASA colors (black, gray) for best long-term UV stability", "priority": 1},
-          {"action": "Apply UV-protective clear coat for light-colored parts", "priority": 2}
+          {
+            "action": "Use darker ASA colors (black, gray) for best long-term UV stability",
+            "priority": 1
+          },
+          {
+            "action": "Apply UV-protective clear coat for light-colored parts",
+            "priority": 2
+          }
         ],
         "prevention": "ASA is significantly more UV-stable than ABS. Light colors may shift slightly after 2-3 years of direct sun."
       }
@@ -824,7 +1466,7 @@
       "ASA is ABS's outdoor-friendly cousin. Use it for anything that sees sun, rain, or heat.",
       "Start at 240-250C nozzle, 95-105C bed. Settings are nearly identical to ABS.",
       "An enclosure reduces warping significantly, though ASA warps less than ABS.",
-      "Part cooling fan should be at 0-10% — like ABS, ASA dislikes active cooling.",
+      "Part cooling fan should be at 0-10% \u2014 like ABS, ASA dislikes active cooling.",
       "ASA is the go-to material for outdoor enclosures, garden fixtures, and automotive trim."
     ]
   },
@@ -835,10 +1477,22 @@
         "severity": "moderate",
         "root_cause": "ASA+ has improved warping resistance over standard ASA through additive modification, but still exhibits some thermal contraction on large parts.",
         "fixes": [
-          {"action": "Use an enclosure at 40-45C ambient", "priority": 1},
-          {"action": "Increase bed temperature to 95-100C", "priority": 2},
-          {"action": "Add a brim of 6-10mm width", "priority": 3},
-          {"action": "Apply glue stick to bed", "priority": 4}
+          {
+            "action": "Use an enclosure at 40-45C ambient",
+            "priority": 1
+          },
+          {
+            "action": "Increase bed temperature to 95-100C",
+            "priority": 2
+          },
+          {
+            "action": "Add a brim of 6-10mm width",
+            "priority": 3
+          },
+          {
+            "action": "Apply glue stick to bed",
+            "priority": 4
+          }
         ],
         "prevention": "Enclosure recommended for prints wider than 100mm. Smaller parts may print without one."
       },
@@ -847,22 +1501,46 @@
         "severity": "moderate",
         "root_cause": "Similar viscosity profile to standard ASA, producing strings on travel moves.",
         "fixes": [
-          {"action": "Lower nozzle temperature to 235-240C", "priority": 1},
-          {"action": "Increase retraction to 5-6mm at 40mm/s for Bowden, 2-3mm at 30mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.05-0.07mm3", "priority": 3},
-          {"action": "Increase travel speed to 150-180mm/s", "priority": 4}
+          {
+            "action": "Lower nozzle temperature to 235-240C",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction to 5-6mm at 40mm/s for Bowden, 2-3mm at 30mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.05-0.07mm3",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 150-180mm/s",
+            "priority": 4
+          }
         ],
-        "prevention": "Dial retraction settings specifically for ASA+ — they differ slightly from standard ASA."
+        "prevention": "Dial retraction settings specifically for ASA+ \u2014 they differ slightly from standard ASA."
       },
       {
         "symptom": "Layer adhesion failure on tall prints",
         "severity": "moderate",
         "root_cause": "While improved over standard ASA, temperature differentials on tall prints can still cause inter-layer bond failure without controlled ambient temperature.",
         "fixes": [
-          {"action": "Use enclosure at 40-50C ambient", "priority": 1},
-          {"action": "Increase nozzle temperature to 245-250C", "priority": 2},
-          {"action": "Reduce print speed to 40-50mm/s", "priority": 3},
-          {"action": "Disable part cooling fan", "priority": 4}
+          {
+            "action": "Use enclosure at 40-50C ambient",
+            "priority": 1
+          },
+          {
+            "action": "Increase nozzle temperature to 245-250C",
+            "priority": 2
+          },
+          {
+            "action": "Reduce print speed to 40-50mm/s",
+            "priority": 3
+          },
+          {
+            "action": "Disable part cooling fan",
+            "priority": 4
+          }
         ],
         "prevention": "Keep enclosure closed throughout the print. Avoid temperature shocks."
       },
@@ -871,9 +1549,18 @@
         "severity": "moderate",
         "root_cause": "Like standard ASA, ASA+ emits styrene-based vapors during printing that require adequate ventilation.",
         "fixes": [
-          {"action": "Use enclosure with carbon filter", "priority": 1},
-          {"action": "Ventilate the room", "priority": 2},
-          {"action": "Keep nozzle temp at lowest effective range (235-245C)", "priority": 3}
+          {
+            "action": "Use enclosure with carbon filter",
+            "priority": 1
+          },
+          {
+            "action": "Ventilate the room",
+            "priority": 2
+          },
+          {
+            "action": "Keep nozzle temp at lowest effective range (235-245C)",
+            "priority": 3
+          }
         ],
         "prevention": "Always print in a ventilated space or with filtration."
       },
@@ -882,9 +1569,18 @@
         "severity": "minor",
         "root_cause": "High bed temperature causes the soft first layer to spread under the weight of subsequent layers.",
         "fixes": [
-          {"action": "Enable elephant's foot compensation of 0.15-0.25mm", "priority": 1},
-          {"action": "Raise Z-offset by 0.03-0.05mm", "priority": 2},
-          {"action": "Reduce first layer flow to 95%", "priority": 3}
+          {
+            "action": "Enable elephant's foot compensation of 0.15-0.25mm",
+            "priority": 1
+          },
+          {
+            "action": "Raise Z-offset by 0.03-0.05mm",
+            "priority": 2
+          },
+          {
+            "action": "Reduce first layer flow to 95%",
+            "priority": 3
+          }
         ],
         "prevention": "Calibrate first layer specifically at your ASA+ bed temperature."
       },
@@ -893,9 +1589,18 @@
         "severity": "minor",
         "root_cause": "Moisture absorption or insufficient top layers can cause uneven top surfaces. ASA+ additives can also cause slight surface texture differences.",
         "fixes": [
-          {"action": "Increase top layers to 5-6 (or 1.2mm minimum top thickness)", "priority": 1},
-          {"action": "Dry filament at 80C for 4 hours if surface is bubbly", "priority": 2},
-          {"action": "Enable ironing at 10% flow, 200mm/s for smooth top surfaces", "priority": 3}
+          {
+            "action": "Increase top layers to 5-6 (or 1.2mm minimum top thickness)",
+            "priority": 1
+          },
+          {
+            "action": "Dry filament at 80C for 4 hours if surface is bubbly",
+            "priority": 2
+          },
+          {
+            "action": "Enable ironing at 10% flow, 200mm/s for smooth top surfaces",
+            "priority": 3
+          }
         ],
         "prevention": "Keep filament dry and use adequate top layers."
       }
@@ -908,7 +1613,7 @@
       "drying_time_hours": 4
     },
     "break_in_tips": [
-      "ASA+ is an improved ASA with better layer adhesion and reduced warping. Same use case — outdoor and UV-exposed parts.",
+      "ASA+ is an improved ASA with better layer adhesion and reduced warping. Same use case \u2014 outdoor and UV-exposed parts.",
       "Start at 240-250C nozzle, 95-100C bed. Settings are almost identical to standard ASA.",
       "You may be able to print smaller parts without an enclosure, but keep one handy for anything over 100mm.",
       "Part cooling fan at 0-10%. Same thermal management as ABS and ASA.",
@@ -922,11 +1627,26 @@
         "severity": "moderate",
         "root_cause": "TPU is inherently elastic and has very low viscosity when melted, causing severe stringing that is difficult to eliminate completely.",
         "fixes": [
-          {"action": "Lower nozzle temperature to 215-225C (minimum that maintains good adhesion)", "priority": 1},
-          {"action": "Reduce retraction to 1-3mm at 20mm/s for direct drive. Disable retraction entirely for Bowden setups.", "priority": 2},
-          {"action": "Increase travel speed to 150-180mm/s", "priority": 3},
-          {"action": "Enable coasting at 0.03-0.05mm3", "priority": 4},
-          {"action": "Enable wipe distance of 2-4mm", "priority": 5}
+          {
+            "action": "Lower nozzle temperature to 215-225C (minimum that maintains good adhesion)",
+            "priority": 1
+          },
+          {
+            "action": "Reduce retraction to 1-3mm at 20mm/s for direct drive. Disable retraction entirely for Bowden setups.",
+            "priority": 2
+          },
+          {
+            "action": "Increase travel speed to 150-180mm/s",
+            "priority": 3
+          },
+          {
+            "action": "Enable coasting at 0.03-0.05mm3",
+            "priority": 4
+          },
+          {
+            "action": "Enable wipe distance of 2-4mm",
+            "priority": 5
+          }
         ],
         "prevention": "TPU will always string. Direct drive extruders handle TPU far better than Bowden. Accept minor strings and trim with scissors."
       },
@@ -935,10 +1655,22 @@
         "severity": "major",
         "root_cause": "TPU's flexibility allows it to bend and buckle in the filament path, especially in Bowden setups where the tube provides space for the filament to compress and jam.",
         "fixes": [
-          {"action": "Use a direct drive extruder — Bowden setups are extremely difficult with TPU", "priority": 1},
-          {"action": "Reduce print speed to 20-30mm/s to lower extrusion force", "priority": 2},
-          {"action": "Reduce retraction distance to 1-2mm max (direct drive) or 0mm (Bowden)", "priority": 3},
-          {"action": "Ensure extruder gears are tight with no gap where filament can escape sideways", "priority": 4}
+          {
+            "action": "Use a direct drive extruder \u2014 Bowden setups are extremely difficult with TPU",
+            "priority": 1
+          },
+          {
+            "action": "Reduce print speed to 20-30mm/s to lower extrusion force",
+            "priority": 2
+          },
+          {
+            "action": "Reduce retraction distance to 1-2mm max (direct drive) or 0mm (Bowden)",
+            "priority": 3
+          },
+          {
+            "action": "Ensure extruder gears are tight with no gap where filament can escape sideways",
+            "priority": 4
+          }
         ],
         "prevention": "Direct drive is strongly recommended for TPU. If using Bowden, use the shortest tube possible and print very slowly."
       },
@@ -947,10 +1679,22 @@
         "severity": "moderate",
         "root_cause": "The flexible nature of TPU absorbs extrusion force, causing inconsistent pressure at the nozzle and resulting in gaps and thin spots.",
         "fixes": [
-          {"action": "Reduce print speed to 20-30mm/s", "priority": 1},
-          {"action": "Increase flow rate to 105-110%", "priority": 2},
-          {"action": "Increase nozzle temperature by 5-10C for better flow", "priority": 3},
-          {"action": "Reduce acceleration to 500-800mm/s2 to prevent filament compression spikes", "priority": 4}
+          {
+            "action": "Reduce print speed to 20-30mm/s",
+            "priority": 1
+          },
+          {
+            "action": "Increase flow rate to 105-110%",
+            "priority": 2
+          },
+          {
+            "action": "Increase nozzle temperature by 5-10C for better flow",
+            "priority": 3
+          },
+          {
+            "action": "Reduce acceleration to 500-800mm/s2 to prevent filament compression spikes",
+            "priority": 4
+          }
         ],
         "prevention": "Slow and steady is the key to TPU. Never rush TPU prints."
       },
@@ -959,22 +1703,46 @@
         "severity": "moderate",
         "root_cause": "TPU requires adequate temperature for the polymer chains to fuse between layers. Below 220C, adhesion drops significantly.",
         "fixes": [
-          {"action": "Increase nozzle temperature to 225-235C", "priority": 1},
-          {"action": "Reduce part cooling fan to 30-50%", "priority": 2},
-          {"action": "Reduce print speed to 20-25mm/s for better heat transfer", "priority": 3},
-          {"action": "Increase line width to 120% of nozzle diameter", "priority": 4}
+          {
+            "action": "Increase nozzle temperature to 225-235C",
+            "priority": 1
+          },
+          {
+            "action": "Reduce part cooling fan to 30-50%",
+            "priority": 2
+          },
+          {
+            "action": "Reduce print speed to 20-25mm/s for better heat transfer",
+            "priority": 3
+          },
+          {
+            "action": "Increase line width to 120% of nozzle diameter",
+            "priority": 4
+          }
         ],
-        "prevention": "TPU needs moderate temperatures. Don't under-heat it to combat stringing — find the balance."
+        "prevention": "TPU needs moderate temperatures. Don't under-heat it to combat stringing \u2014 find the balance."
       },
       {
         "symptom": "First layer not sticking to bed",
         "severity": "moderate",
         "root_cause": "TPU can struggle to adhere to certain bed surfaces, especially at lower bed temperatures or with incorrect Z-offset.",
         "fixes": [
-          {"action": "Increase bed temperature to 55-65C", "priority": 1},
-          {"action": "Apply glue stick to the build surface", "priority": 2},
-          {"action": "Reduce first layer speed to 10-15mm/s", "priority": 3},
-          {"action": "Lower Z-offset for more first layer squish (-0.02 to -0.05mm)", "priority": 4}
+          {
+            "action": "Increase bed temperature to 55-65C",
+            "priority": 1
+          },
+          {
+            "action": "Apply glue stick to the build surface",
+            "priority": 2
+          },
+          {
+            "action": "Reduce first layer speed to 10-15mm/s",
+            "priority": 3
+          },
+          {
+            "action": "Lower Z-offset for more first layer squish (-0.02 to -0.05mm)",
+            "priority": 4
+          }
         ],
         "prevention": "PEI beds work well with TPU. Blue painter's tape is also reliable."
       },
@@ -983,21 +1751,42 @@
         "severity": "minor",
         "root_cause": "TPU's flexibility means the first layers deform easily under weight, and the material continues to flex slightly after printing affecting dimensions.",
         "fixes": [
-          {"action": "Enable elephant's foot compensation of 0.1-0.2mm", "priority": 1},
-          {"action": "Reduce bed temperature to 50C after first 3 layers", "priority": 2},
-          {"action": "Account for 1-2% dimensional variance in design", "priority": 3}
+          {
+            "action": "Enable elephant's foot compensation of 0.1-0.2mm",
+            "priority": 1
+          },
+          {
+            "action": "Reduce bed temperature to 50C after first 3 layers",
+            "priority": 2
+          },
+          {
+            "action": "Account for 1-2% dimensional variance in design",
+            "priority": 3
+          }
         ],
         "prevention": "TPU parts will always have looser tolerances than rigid materials. Design with 0.3-0.5mm clearance for mating parts."
       },
       {
         "symptom": "Blobs at seam and retraction points",
         "severity": "minor",
-        "root_cause": "TPU's elasticity causes delayed pressure response — material continues to ooze after retraction and over-extrudes when pressure is re-applied.",
+        "root_cause": "TPU's elasticity causes delayed pressure response \u2014 material continues to ooze after retraction and over-extrudes when pressure is re-applied.",
         "fixes": [
-          {"action": "Reduce retraction prime amount by 0.05-0.1mm3", "priority": 1},
-          {"action": "Enable coasting at 0.03-0.05mm3", "priority": 2},
-          {"action": "Set seam position to least-visible location", "priority": 3},
-          {"action": "Enable wipe distance of 2-3mm", "priority": 4}
+          {
+            "action": "Reduce retraction prime amount by 0.05-0.1mm3",
+            "priority": 1
+          },
+          {
+            "action": "Enable coasting at 0.03-0.05mm3",
+            "priority": 2
+          },
+          {
+            "action": "Set seam position to least-visible location",
+            "priority": 3
+          },
+          {
+            "action": "Enable wipe distance of 2-3mm",
+            "priority": 4
+          }
         ],
         "prevention": "TPU seam quality improves with pressure advance/linear advance tuning (K=0.1-0.2 for direct drive)."
       }
@@ -1011,7 +1800,7 @@
     },
     "break_in_tips": [
       "Direct drive extruder is strongly recommended. Bowden setups will cause constant headaches with TPU.",
-      "Start at 220-230C nozzle, 55-60C bed. Print SLOWLY — 20-30mm/s is typical for TPU.",
+      "Start at 220-230C nozzle, 55-60C bed. Print SLOWLY \u2014 20-30mm/s is typical for TPU.",
       "Disable or minimize retraction (0-2mm direct drive, 0mm Bowden). TPU hates retraction.",
       "Use 95A shore hardness TPU for your first flexible print. Softer (85A) is much harder to print.",
       "TPU is perfect for phone cases, gaskets, vibration dampeners, and anything that needs to flex or absorb impact."
@@ -1024,23 +1813,50 @@
         "severity": "major",
         "root_cause": "Nylon has very high thermal shrinkage (~1.5-2%) and crystallizes as it cools, generating powerful internal stresses that pull prints off the bed.",
         "fixes": [
-          {"action": "Use a fully sealed enclosure at 50-60C ambient temperature", "priority": 1},
-          {"action": "Increase bed temperature to 90-100C", "priority": 2},
-          {"action": "Apply Magigoo PA or PVA-based adhesive to the bed", "priority": 3},
-          {"action": "Add a brim of 15-20mm width", "priority": 4},
-          {"action": "Use a garolite (G10/FR4) build surface — nylon bonds to it extremely well", "priority": 5}
+          {
+            "action": "Use a fully sealed enclosure at 50-60C ambient temperature",
+            "priority": 1
+          },
+          {
+            "action": "Increase bed temperature to 90-100C",
+            "priority": 2
+          },
+          {
+            "action": "Apply Magigoo PA or PVA-based adhesive to the bed",
+            "priority": 3
+          },
+          {
+            "action": "Add a brim of 15-20mm width",
+            "priority": 4
+          },
+          {
+            "action": "Use a garolite (G10/FR4) build surface \u2014 nylon bonds to it extremely well",
+            "priority": 5
+          }
         ],
         "prevention": "Garolite bed + enclosure + Magigoo PA is the gold standard for nylon adhesion."
       },
       {
         "symptom": "Moisture absorption destroying print quality",
         "severity": "major",
-        "root_cause": "Nylon is EXTREMELY hygroscopic — it absorbs up to 9% of its weight in water from ambient air. Wet nylon produces bubbles, rough surfaces, and drastically weakened parts.",
+        "root_cause": "Nylon is EXTREMELY hygroscopic \u2014 it absorbs up to 9% of its weight in water from ambient air. Wet nylon produces bubbles, rough surfaces, and drastically weakened parts.",
         "fixes": [
-          {"action": "Dry filament at 70C for 12+ hours before printing", "priority": 1},
-          {"action": "Print directly from an active dry box with inline desiccant", "priority": 2},
-          {"action": "Never leave nylon in open air — reseal within 30 minutes of use", "priority": 3},
-          {"action": "Listen for popping/crackling during extrusion — any noise means wet filament", "priority": 4}
+          {
+            "action": "Dry filament at 70C for 12+ hours before printing",
+            "priority": 1
+          },
+          {
+            "action": "Print directly from an active dry box with inline desiccant",
+            "priority": 2
+          },
+          {
+            "action": "Never leave nylon in open air \u2014 reseal within 30 minutes of use",
+            "priority": 3
+          },
+          {
+            "action": "Listen for popping/crackling during extrusion \u2014 any noise means wet filament",
+            "priority": 4
+          }
         ],
         "prevention": "Store in a sealed container with 50g+ fresh desiccant. Replace desiccant monthly. Print from dry box."
       },
@@ -1049,10 +1865,22 @@
         "severity": "major",
         "root_cause": "Nylon does not adhere well to standard PEI, glass, or metal build surfaces without specialized adhesives or surface treatments.",
         "fixes": [
-          {"action": "Use garolite (G10/FR4) build plate — nylon chemically bonds to it", "priority": 1},
-          {"action": "Apply Magigoo PA nylon-specific adhesive to the bed", "priority": 2},
-          {"action": "Reduce first layer speed to 10-15mm/s with 130% line width", "priority": 3},
-          {"action": "Increase bed temperature to 95-100C", "priority": 4}
+          {
+            "action": "Use garolite (G10/FR4) build plate \u2014 nylon chemically bonds to it",
+            "priority": 1
+          },
+          {
+            "action": "Apply Magigoo PA nylon-specific adhesive to the bed",
+            "priority": 2
+          },
+          {
+            "action": "Reduce first layer speed to 10-15mm/s with 130% line width",
+            "priority": 3
+          },
+          {
+            "action": "Increase bed temperature to 95-100C",
+            "priority": 4
+          }
         ],
         "prevention": "Invest in a garolite build plate if you print nylon regularly. Nothing else is as reliable."
       },
@@ -1061,10 +1889,22 @@
         "severity": "moderate",
         "root_cause": "Nylon has low viscosity at printing temperatures and remains fluid over a wide temperature range.",
         "fixes": [
-          {"action": "Lower nozzle temperature to minimum effective range (240-250C for most nylons)", "priority": 1},
-          {"action": "Increase retraction to 4-6mm at 40mm/s for Bowden, 2-3mm at 30mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.04-0.06mm3", "priority": 3},
-          {"action": "Increase travel speed to 160-200mm/s", "priority": 4}
+          {
+            "action": "Lower nozzle temperature to minimum effective range (240-250C for most nylons)",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction to 4-6mm at 40mm/s for Bowden, 2-3mm at 30mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.04-0.06mm3",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 160-200mm/s",
+            "priority": 4
+          }
         ],
         "prevention": "Dry filament reduces stringing. Wet nylon strings significantly more than dry nylon."
       },
@@ -1073,20 +1913,38 @@
         "severity": "minor",
         "root_cause": "Nylon oxidizes at high temperatures, especially when exposed to oxygen. Prolonged heat in the nozzle causes yellowing of natural/white nylon.",
         "fixes": [
-          {"action": "Reduce nozzle temperature to the minimum for good adhesion", "priority": 1},
-          {"action": "Avoid prolonged pauses or slow prints where filament sits hot in the nozzle", "priority": 2},
-          {"action": "Use nitrogen purge in enclosure for critical color-sensitive parts (advanced)", "priority": 3}
+          {
+            "action": "Reduce nozzle temperature to the minimum for good adhesion",
+            "priority": 1
+          },
+          {
+            "action": "Avoid prolonged pauses or slow prints where filament sits hot in the nozzle",
+            "priority": 2
+          },
+          {
+            "action": "Use nitrogen purge in enclosure for critical color-sensitive parts (advanced)",
+            "priority": 3
+          }
         ],
-        "prevention": "Print at the lowest effective temperature. Natural nylon will always yellow slightly — it's cosmetic only."
+        "prevention": "Print at the lowest effective temperature. Natural nylon will always yellow slightly \u2014 it's cosmetic only."
       },
       {
         "symptom": "Poor dimensional accuracy due to shrinkage",
         "severity": "moderate",
         "root_cause": "Nylon shrinks 1.5-2% as it cools and crystallizes. Parts will be smaller than designed, especially in XY dimensions.",
         "fixes": [
-          {"action": "Scale model up by 1.5-2% in slicer to compensate for shrinkage", "priority": 1},
-          {"action": "Use slow cooling (no fan, high enclosure temp) for more uniform shrinkage", "priority": 2},
-          {"action": "Print a calibration cube to measure exact shrinkage for your specific nylon brand", "priority": 3}
+          {
+            "action": "Scale model up by 1.5-2% in slicer to compensate for shrinkage",
+            "priority": 1
+          },
+          {
+            "action": "Use slow cooling (no fan, high enclosure temp) for more uniform shrinkage",
+            "priority": 2
+          },
+          {
+            "action": "Print a calibration cube to measure exact shrinkage for your specific nylon brand",
+            "priority": 3
+          }
         ],
         "prevention": "Always print a test piece first to measure shrinkage for your specific nylon and settings."
       }
@@ -1099,7 +1957,7 @@
       "drying_time_hours": 12
     },
     "break_in_tips": [
-      "Dry your nylon for 12+ hours at 70C before your first print. This is non-negotiable — wet nylon produces terrible results.",
+      "Dry your nylon for 12+ hours at 70C before your first print. This is non-negotiable \u2014 wet nylon produces terrible results.",
       "Start at 245-260C nozzle, 90-100C bed, inside an enclosure. Nylon demands controlled temperatures.",
       "Garolite (G10/FR4) build plate is the best nylon adhesion surface. PEI with Magigoo PA is the backup.",
       "Print from a dry box. Nylon absorbs enough moisture from the air during a 4-hour print to degrade quality.",
@@ -1113,9 +1971,18 @@
         "severity": "major",
         "root_cause": "Carbon fibers are extremely abrasive. A brass nozzle can be destroyed in under 2 hours of CF nylon printing, losing dimensional accuracy.",
         "fixes": [
-          {"action": "Use a hardened steel, ruby, or tungsten carbide nozzle — this is mandatory", "priority": 1},
-          {"action": "Inspect nozzle every 20-30 hours of CF printing with a drill bit gauge", "priority": 2},
-          {"action": "Never use brass nozzles with any carbon fiber filament", "priority": 3}
+          {
+            "action": "Use a hardened steel, ruby, or tungsten carbide nozzle \u2014 this is mandatory",
+            "priority": 1
+          },
+          {
+            "action": "Inspect nozzle every 20-30 hours of CF printing with a drill bit gauge",
+            "priority": 2
+          },
+          {
+            "action": "Never use brass nozzles with any carbon fiber filament",
+            "priority": 3
+          }
         ],
         "prevention": "Budget for a hardened nozzle before buying CF nylon. This is not optional."
       },
@@ -1124,10 +1991,22 @@
         "severity": "major",
         "root_cause": "Carbon fibers can accumulate and jam at the nozzle tip, especially with nozzle diameters below 0.5mm or when retraction pulls fiber bundles into the cold zone.",
         "fixes": [
-          {"action": "Use a 0.5mm or 0.6mm nozzle minimum", "priority": 1},
-          {"action": "Reduce retraction distance to 1-2mm for direct drive, 3-4mm for Bowden", "priority": 2},
-          {"action": "Increase nozzle temperature by 5-10C to improve fiber flow", "priority": 3},
-          {"action": "Perform cold pulls with standard nylon to clear partial clogs", "priority": 4}
+          {
+            "action": "Use a 0.5mm or 0.6mm nozzle minimum",
+            "priority": 1
+          },
+          {
+            "action": "Reduce retraction distance to 1-2mm for direct drive, 3-4mm for Bowden",
+            "priority": 2
+          },
+          {
+            "action": "Increase nozzle temperature by 5-10C to improve fiber flow",
+            "priority": 3
+          },
+          {
+            "action": "Perform cold pulls with standard nylon to clear partial clogs",
+            "priority": 4
+          }
         ],
         "prevention": "0.5mm+ hardened nozzle is the minimum viable setup for CF nylon."
       },
@@ -1136,9 +2015,18 @@
         "severity": "major",
         "root_cause": "CF nylon absorbs moisture as aggressively as standard nylon. Fibers create micro-channels that accelerate water absorption throughout the filament.",
         "fixes": [
-          {"action": "Dry at 70C for 12+ hours before printing", "priority": 1},
-          {"action": "Print from an active dry box — never from open spool", "priority": 2},
-          {"action": "Store in vacuum-sealed bags with desiccant when not in use", "priority": 3}
+          {
+            "action": "Dry at 70C for 12+ hours before printing",
+            "priority": 1
+          },
+          {
+            "action": "Print from an active dry box \u2014 never from open spool",
+            "priority": 2
+          },
+          {
+            "action": "Store in vacuum-sealed bags with desiccant when not in use",
+            "priority": 3
+          }
         ],
         "prevention": "Treat moisture management as the #1 priority for CF nylon. Wet CF nylon prints are worthless."
       },
@@ -1147,10 +2035,22 @@
         "severity": "moderate",
         "root_cause": "Carbon fibers align along the print direction but do not bridge between layers. Cross-layer (Z-axis) strength is 40-60% lower than in-plane strength.",
         "fixes": [
-          {"action": "Increase nozzle temperature to 260-275C for maximum inter-layer fusion", "priority": 1},
-          {"action": "Reduce part cooling fan to 0-10%", "priority": 2},
-          {"action": "Increase line width to 130-150% of nozzle diameter for better overlap", "priority": 3},
-          {"action": "Reduce layer height to 0.15-0.2mm for more inter-layer contact", "priority": 4}
+          {
+            "action": "Increase nozzle temperature to 260-275C for maximum inter-layer fusion",
+            "priority": 1
+          },
+          {
+            "action": "Reduce part cooling fan to 0-10%",
+            "priority": 2
+          },
+          {
+            "action": "Increase line width to 130-150% of nozzle diameter for better overlap",
+            "priority": 3
+          },
+          {
+            "action": "Reduce layer height to 0.15-0.2mm for more inter-layer contact",
+            "priority": 4
+          }
         ],
         "prevention": "Orient parts so primary loads are in-plane (XY), not cross-layer (Z)."
       },
@@ -1159,10 +2059,22 @@
         "severity": "moderate",
         "root_cause": "Carbon fibers reduce but do not eliminate nylon's warping tendency. Shrinkage is lower than pure nylon but still significant.",
         "fixes": [
-          {"action": "Use enclosure at 50-60C ambient", "priority": 1},
-          {"action": "Use garolite build plate with Magigoo PA adhesive", "priority": 2},
-          {"action": "Add brim of 10-15mm width", "priority": 3},
-          {"action": "Bed temperature at 90-100C", "priority": 4}
+          {
+            "action": "Use enclosure at 50-60C ambient",
+            "priority": 1
+          },
+          {
+            "action": "Use garolite build plate with Magigoo PA adhesive",
+            "priority": 2
+          },
+          {
+            "action": "Add brim of 10-15mm width",
+            "priority": 3
+          },
+          {
+            "action": "Bed temperature at 90-100C",
+            "priority": 4
+          }
         ],
         "prevention": "Enclosure is required for CF nylon. The carbon fibers help but don't solve warping on their own."
       },
@@ -1171,12 +2083,24 @@
         "severity": "moderate",
         "root_cause": "Carbon fibers make the material very stiff and strong in-plane, but the lack of fiber bridging between layers makes Z-axis failures brittle rather than ductile.",
         "fixes": [
-          {"action": "Orient model so load paths align with XY print direction", "priority": 1},
-          {"action": "Increase wall count to 5-6 perimeters", "priority": 2},
-          {"action": "Use concentric infill pattern for cylindrical parts", "priority": 3},
-          {"action": "Increase nozzle temperature to maximize layer bonding", "priority": 4}
+          {
+            "action": "Orient model so load paths align with XY print direction",
+            "priority": 1
+          },
+          {
+            "action": "Increase wall count to 5-6 perimeters",
+            "priority": 2
+          },
+          {
+            "action": "Use concentric infill pattern for cylindrical parts",
+            "priority": 3
+          },
+          {
+            "action": "Increase nozzle temperature to maximize layer bonding",
+            "priority": 4
+          }
         ],
-        "prevention": "Design for anisotropy — CF nylon is like wood grain. Strong along the grain, weak across it."
+        "prevention": "Design for anisotropy \u2014 CF nylon is like wood grain. Strong along the grain, weak across it."
       }
     ],
     "storage_requirements": {
@@ -1201,9 +2125,18 @@
         "severity": "major",
         "root_cause": "Carbon fibers are abrasive and will rapidly enlarge the bore of brass nozzles, degrading print quality within a single spool.",
         "fixes": [
-          {"action": "Use a hardened steel nozzle (0.4mm minimum, 0.5mm preferred)", "priority": 1},
-          {"action": "Inspect nozzle every 30-50 hours of CF printing", "priority": 2},
-          {"action": "Never use brass nozzles with carbon fiber filaments", "priority": 3}
+          {
+            "action": "Use a hardened steel nozzle (0.4mm minimum, 0.5mm preferred)",
+            "priority": 1
+          },
+          {
+            "action": "Inspect nozzle every 30-50 hours of CF printing",
+            "priority": 2
+          },
+          {
+            "action": "Never use brass nozzles with carbon fiber filaments",
+            "priority": 3
+          }
         ],
         "prevention": "A hardened steel nozzle costs less than the filament. Get one before printing."
       },
@@ -1212,10 +2145,22 @@
         "severity": "major",
         "root_cause": "Carbon fibers can bridge across small nozzle openings, causing partial or complete blockage.",
         "fixes": [
-          {"action": "Use a 0.4mm nozzle minimum — 0.5mm preferred for reliability", "priority": 1},
-          {"action": "Increase nozzle temperature by 5C to improve flow around fibers", "priority": 2},
-          {"action": "Perform cold pulls with standard PLA to clear partial clogs", "priority": 3},
-          {"action": "Reduce retraction to 3-4mm to prevent fiber compaction in heatbreak", "priority": 4}
+          {
+            "action": "Use a 0.4mm nozzle minimum \u2014 0.5mm preferred for reliability",
+            "priority": 1
+          },
+          {
+            "action": "Increase nozzle temperature by 5C to improve flow around fibers",
+            "priority": 2
+          },
+          {
+            "action": "Perform cold pulls with standard PLA to clear partial clogs",
+            "priority": 3
+          },
+          {
+            "action": "Reduce retraction to 3-4mm to prevent fiber compaction in heatbreak",
+            "priority": 4
+          }
         ],
         "prevention": "Never attempt to print CF PLA through a 0.25mm nozzle."
       },
@@ -1224,10 +2169,22 @@
         "severity": "moderate",
         "root_cause": "Carbon fibers interrupt the polymer matrix between layers, reducing inter-layer bond strength by 20-35% compared to standard PLA.",
         "fixes": [
-          {"action": "Increase nozzle temperature by 5-10C (try 210-220C)", "priority": 1},
-          {"action": "Reduce part cooling fan to 50-70%", "priority": 2},
-          {"action": "Increase line width to 120-140% of nozzle diameter", "priority": 3},
-          {"action": "Reduce print speed to 35-45mm/s for better layer bonding", "priority": 4}
+          {
+            "action": "Increase nozzle temperature by 5-10C (try 210-220C)",
+            "priority": 1
+          },
+          {
+            "action": "Reduce part cooling fan to 50-70%",
+            "priority": 2
+          },
+          {
+            "action": "Increase line width to 120-140% of nozzle diameter",
+            "priority": 3
+          },
+          {
+            "action": "Reduce print speed to 35-45mm/s for better layer bonding",
+            "priority": 4
+          }
         ],
         "prevention": "Orient parts so loads are in-plane (XY). CF PLA is stiff but weak between layers."
       },
@@ -1236,10 +2193,22 @@
         "severity": "moderate",
         "root_cause": "Carbon fibers stiffen the material significantly but create a failure mode where parts snap cleanly between layers under cross-layer stress.",
         "fixes": [
-          {"action": "Orient model to align load paths with XY direction", "priority": 1},
-          {"action": "Increase wall count to 4-6 perimeters", "priority": 2},
-          {"action": "Reduce layer height to 0.16-0.2mm for more inter-layer contact", "priority": 3},
-          {"action": "Increase infill to 30-50% with gyroid pattern", "priority": 4}
+          {
+            "action": "Orient model to align load paths with XY direction",
+            "priority": 1
+          },
+          {
+            "action": "Increase wall count to 4-6 perimeters",
+            "priority": 2
+          },
+          {
+            "action": "Reduce layer height to 0.16-0.2mm for more inter-layer contact",
+            "priority": 3
+          },
+          {
+            "action": "Increase infill to 30-50% with gyroid pattern",
+            "priority": 4
+          }
         ],
         "prevention": "CF PLA is for stiffness, not toughness. Use standard PLA or PLA+ for parts that need impact resistance."
       },
@@ -1248,9 +2217,18 @@
         "severity": "minor",
         "root_cause": "Fibers alter the flow characteristics slightly, and CF PLA strings at a similar rate to standard PLA.",
         "fixes": [
-          {"action": "Lower nozzle temperature by 5C", "priority": 1},
-          {"action": "Increase retraction to 5-6mm at 40mm/s for Bowden, 1.5-2mm at 30mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.04-0.06mm3", "priority": 3}
+          {
+            "action": "Lower nozzle temperature by 5C",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction to 5-6mm at 40mm/s for Bowden, 1.5-2mm at 30mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.04-0.06mm3",
+            "priority": 3
+          }
         ],
         "prevention": "Standard PLA retraction settings usually work well for CF PLA."
       },
@@ -1259,9 +2237,18 @@
         "severity": "minor",
         "root_cause": "Carbon fibers protrude slightly from the printed surface, creating an inherently rough, matte appearance.",
         "fixes": [
-          {"action": "Reduce layer height to 0.12-0.16mm for smoother appearance", "priority": 1},
-          {"action": "Increase flow by 2-3% to better encapsulate fibers on the surface", "priority": 2},
-          {"action": "Sand with 400-800 grit for a smoother finish", "priority": 3}
+          {
+            "action": "Reduce layer height to 0.12-0.16mm for smoother appearance",
+            "priority": 1
+          },
+          {
+            "action": "Increase flow by 2-3% to better encapsulate fibers on the surface",
+            "priority": 2
+          },
+          {
+            "action": "Sand with 400-800 grit for a smoother finish",
+            "priority": 3
+          }
         ],
         "prevention": "The matte finish is a characteristic of CF filaments. Many users prefer the look."
       }
@@ -1278,7 +2265,7 @@
       "Start at 210-220C nozzle, 55-60C bed. Similar to standard PLA but 5-10C hotter.",
       "CF PLA is much stiffer than standard PLA but more brittle. Great for drone arms, camera mounts, and structural brackets.",
       "Use 0.4mm nozzle minimum. 0.5mm is more reliable and reduces clogging risk.",
-      "Part cooling can be 60-80% — less than standard PLA but still significant."
+      "Part cooling can be 60-80% \u2014 less than standard PLA but still significant."
     ]
   },
   "pet_cf": {
@@ -1288,9 +2275,18 @@
         "severity": "major",
         "root_cause": "Carbon fibers are highly abrasive and destroy brass nozzles within hours. PET-CF requires hardened nozzles.",
         "fixes": [
-          {"action": "Use a hardened steel, ruby, or tungsten carbide nozzle", "priority": 1},
-          {"action": "Inspect nozzle every 20-30 hours of CF printing", "priority": 2},
-          {"action": "Never use brass nozzles", "priority": 3}
+          {
+            "action": "Use a hardened steel, ruby, or tungsten carbide nozzle",
+            "priority": 1
+          },
+          {
+            "action": "Inspect nozzle every 20-30 hours of CF printing",
+            "priority": 2
+          },
+          {
+            "action": "Never use brass nozzles",
+            "priority": 3
+          }
         ],
         "prevention": "Hardened nozzle is mandatory. No exceptions."
       },
@@ -1299,10 +2295,22 @@
         "severity": "moderate",
         "root_cause": "Carbon fibers align along print direction and do not bridge between layers, making Z-axis strength 30-50% lower than in-plane strength.",
         "fixes": [
-          {"action": "Orient parts so loads are in XY plane", "priority": 1},
-          {"action": "Increase nozzle temperature to 260-275C for better layer fusion", "priority": 2},
-          {"action": "Increase wall count to 5-6 perimeters", "priority": 3},
-          {"action": "Reduce part cooling fan to 20-40%", "priority": 4}
+          {
+            "action": "Orient parts so loads are in XY plane",
+            "priority": 1
+          },
+          {
+            "action": "Increase nozzle temperature to 260-275C for better layer fusion",
+            "priority": 2
+          },
+          {
+            "action": "Increase wall count to 5-6 perimeters",
+            "priority": 3
+          },
+          {
+            "action": "Reduce part cooling fan to 20-40%",
+            "priority": 4
+          }
         ],
         "prevention": "Design for anisotropy. PET-CF is strong along layers but brittle across them."
       },
@@ -1311,10 +2319,22 @@
         "severity": "moderate",
         "root_cause": "PET base material is naturally stringy, similar to PETG. Carbon fibers do not significantly reduce this tendency.",
         "fixes": [
-          {"action": "Lower nozzle temperature to minimum effective range (250-260C)", "priority": 1},
-          {"action": "Increase retraction to 5-6mm at 35mm/s for Bowden, 2-3mm at 25mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.06-0.08mm3", "priority": 3},
-          {"action": "Increase travel speed to 150-180mm/s", "priority": 4}
+          {
+            "action": "Lower nozzle temperature to minimum effective range (250-260C)",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction to 5-6mm at 35mm/s for Bowden, 2-3mm at 25mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.06-0.08mm3",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 150-180mm/s",
+            "priority": 4
+          }
         ],
         "prevention": "Accept some stringing with PET-CF. Post-process with a heat gun at 200C."
       },
@@ -1323,9 +2343,18 @@
         "severity": "moderate",
         "root_cause": "PET absorbs moisture moderately, and carbon fibers create micro-channels that accelerate absorption.",
         "fixes": [
-          {"action": "Dry filament at 65C for 6 hours before printing", "priority": 1},
-          {"action": "Print from a dry box for multi-hour prints", "priority": 2},
-          {"action": "Listen for popping sounds — indicates wet filament", "priority": 3}
+          {
+            "action": "Dry filament at 65C for 6 hours before printing",
+            "priority": 1
+          },
+          {
+            "action": "Print from a dry box for multi-hour prints",
+            "priority": 2
+          },
+          {
+            "action": "Listen for popping sounds \u2014 indicates wet filament",
+            "priority": 3
+          }
         ],
         "prevention": "Store sealed with desiccant. Dry before every print session."
       },
@@ -1334,10 +2363,22 @@
         "severity": "major",
         "root_cause": "Carbon fibers accumulate at nozzle restrictions below 0.4mm, causing partial or full blockage.",
         "fixes": [
-          {"action": "Use 0.5mm nozzle minimum for reliable extrusion", "priority": 1},
-          {"action": "Increase temperature by 5-10C if clogging persists", "priority": 2},
-          {"action": "Reduce retraction to 2-3mm to prevent fiber compaction", "priority": 3},
-          {"action": "Cold pull with standard PET/PETG to clear clogs", "priority": 4}
+          {
+            "action": "Use 0.5mm nozzle minimum for reliable extrusion",
+            "priority": 1
+          },
+          {
+            "action": "Increase temperature by 5-10C if clogging persists",
+            "priority": 2
+          },
+          {
+            "action": "Reduce retraction to 2-3mm to prevent fiber compaction",
+            "priority": 3
+          },
+          {
+            "action": "Cold pull with standard PET/PETG to clear clogs",
+            "priority": 4
+          }
         ],
         "prevention": "0.5mm+ hardened nozzle is the reliable configuration for PET-CF."
       },
@@ -1346,10 +2387,22 @@
         "severity": "moderate",
         "root_cause": "PET-CF has moderate thermal shrinkage. Carbon fibers reduce warping compared to unfilled PET but do not eliminate it.",
         "fixes": [
-          {"action": "Use enclosure at 40-50C ambient", "priority": 1},
-          {"action": "Increase bed temperature to 80-90C", "priority": 2},
-          {"action": "Add brim of 8-12mm width", "priority": 3},
-          {"action": "Apply glue stick to bed surface", "priority": 4}
+          {
+            "action": "Use enclosure at 40-50C ambient",
+            "priority": 1
+          },
+          {
+            "action": "Increase bed temperature to 80-90C",
+            "priority": 2
+          },
+          {
+            "action": "Add brim of 8-12mm width",
+            "priority": 3
+          },
+          {
+            "action": "Apply glue stick to bed surface",
+            "priority": 4
+          }
         ],
         "prevention": "Enclosure recommended for prints wider than 80mm."
       }
@@ -1364,7 +2417,7 @@
     "break_in_tips": [
       "Hardened nozzle is mandatory. 0.5mm+ is ideal for reliable CF filament flow.",
       "Start at 260-275C nozzle, 80-90C bed. PET-CF prints hotter than PETG-CF.",
-      "Dry the filament before first use — 65C for 6 hours minimum.",
+      "Dry the filament before first use \u2014 65C for 6 hours minimum.",
       "PET-CF has excellent stiffness and heat resistance. Great for under-hood automotive parts and structural components.",
       "Part cooling at 20-40%. Less cooling than PETG but more than nylon."
     ]
@@ -1376,9 +2429,18 @@
         "severity": "major",
         "root_cause": "Glass fibers are harder and more abrasive than carbon fibers. PA6-GF destroys brass nozzles faster than any CF filament.",
         "fixes": [
-          {"action": "Use a ruby-tipped or tungsten carbide nozzle — hardened steel wears faster with glass fiber than with carbon", "priority": 1},
-          {"action": "Inspect nozzle every 15-20 hours of GF printing", "priority": 2},
-          {"action": "Never use brass nozzles. Even hardened steel has limited life with glass fiber.", "priority": 3}
+          {
+            "action": "Use a ruby-tipped or tungsten carbide nozzle \u2014 hardened steel wears faster with glass fiber than with carbon",
+            "priority": 1
+          },
+          {
+            "action": "Inspect nozzle every 15-20 hours of GF printing",
+            "priority": 2
+          },
+          {
+            "action": "Never use brass nozzles. Even hardened steel has limited life with glass fiber.",
+            "priority": 3
+          }
         ],
         "prevention": "Ruby or tungsten carbide nozzles are the best investment for glass-filled filaments."
       },
@@ -1387,10 +2449,22 @@
         "severity": "major",
         "root_cause": "PA6 nylon base is extremely hygroscopic. Glass fibers add micro-channels for faster moisture wicking. Wet PA6-GF produces catastrophic print failures.",
         "fixes": [
-          {"action": "Dry at 80C for 12+ hours before printing", "priority": 1},
-          {"action": "Print exclusively from an active dry box", "priority": 2},
-          {"action": "Store in vacuum-sealed bags with fresh desiccant", "priority": 3},
-          {"action": "Re-dry after any exposure to ambient air exceeding 2 hours", "priority": 4}
+          {
+            "action": "Dry at 80C for 12+ hours before printing",
+            "priority": 1
+          },
+          {
+            "action": "Print exclusively from an active dry box",
+            "priority": 2
+          },
+          {
+            "action": "Store in vacuum-sealed bags with fresh desiccant",
+            "priority": 3
+          },
+          {
+            "action": "Re-dry after any exposure to ambient air exceeding 2 hours",
+            "priority": 4
+          }
         ],
         "prevention": "PA6-GF is one of the most moisture-sensitive filaments. Treat drying as mandatory, not optional."
       },
@@ -1399,11 +2473,26 @@
         "severity": "major",
         "root_cause": "PA6 nylon has extreme thermal shrinkage. Glass fibers reduce it somewhat but the material still warps aggressively on parts wider than 50mm.",
         "fixes": [
-          {"action": "Use a fully sealed enclosure at 55-65C ambient", "priority": 1},
-          {"action": "Use garolite (G10/FR4) build plate with Magigoo PA adhesive", "priority": 2},
-          {"action": "Increase bed temperature to 100-110C", "priority": 3},
-          {"action": "Add brim of 15-20mm width", "priority": 4},
-          {"action": "Disable part cooling fan entirely", "priority": 5}
+          {
+            "action": "Use a fully sealed enclosure at 55-65C ambient",
+            "priority": 1
+          },
+          {
+            "action": "Use garolite (G10/FR4) build plate with Magigoo PA adhesive",
+            "priority": 2
+          },
+          {
+            "action": "Increase bed temperature to 100-110C",
+            "priority": 3
+          },
+          {
+            "action": "Add brim of 15-20mm width",
+            "priority": 4
+          },
+          {
+            "action": "Disable part cooling fan entirely",
+            "priority": 5
+          }
         ],
         "prevention": "Garolite bed + sealed enclosure + Magigoo PA is the minimum viable setup."
       },
@@ -1412,10 +2501,22 @@
         "severity": "major",
         "root_cause": "Glass fibers are stiffer than carbon fibers and can jam inside the nozzle, especially at lower temperatures or with small bore nozzles.",
         "fixes": [
-          {"action": "Use 0.5mm nozzle minimum — 0.6mm is ideal", "priority": 1},
-          {"action": "Increase nozzle temperature to 270-290C for best flow", "priority": 2},
-          {"action": "Reduce retraction to 1-2mm for direct drive", "priority": 3},
-          {"action": "Perform cold pulls with standard nylon to clear blockages", "priority": 4}
+          {
+            "action": "Use 0.5mm nozzle minimum \u2014 0.6mm is ideal",
+            "priority": 1
+          },
+          {
+            "action": "Increase nozzle temperature to 270-290C for best flow",
+            "priority": 2
+          },
+          {
+            "action": "Reduce retraction to 1-2mm for direct drive",
+            "priority": 3
+          },
+          {
+            "action": "Perform cold pulls with standard nylon to clear blockages",
+            "priority": 4
+          }
         ],
         "prevention": "High temperature + large nozzle = reliable PA6-GF printing."
       },
@@ -1424,10 +2525,22 @@
         "severity": "moderate",
         "root_cause": "Glass fibers severely interrupt inter-layer bonding. Z-axis strength can be 50-70% lower than in-plane strength.",
         "fixes": [
-          {"action": "Increase nozzle temperature to 280-295C", "priority": 1},
-          {"action": "Disable part cooling fan completely", "priority": 2},
-          {"action": "Increase line width to 140-160% of nozzle diameter", "priority": 3},
-          {"action": "Reduce print speed to 30-40mm/s", "priority": 4}
+          {
+            "action": "Increase nozzle temperature to 280-295C",
+            "priority": 1
+          },
+          {
+            "action": "Disable part cooling fan completely",
+            "priority": 2
+          },
+          {
+            "action": "Increase line width to 140-160% of nozzle diameter",
+            "priority": 3
+          },
+          {
+            "action": "Reduce print speed to 30-40mm/s",
+            "priority": 4
+          }
         ],
         "prevention": "PA6-GF has extreme anisotropy. Always orient parts for in-plane loading."
       },
@@ -1436,11 +2549,20 @@
         "severity": "moderate",
         "root_cause": "PA6 nylon melts at 220C and glass fibers increase viscosity, requiring nozzle temperatures of 270-300C for proper flow.",
         "fixes": [
-          {"action": "Verify hotend can reach 300C safely (all-metal heatbreak required)", "priority": 1},
-          {"action": "Use high-temp thermal paste on heatbreak threads", "priority": 2},
-          {"action": "Print at 275-295C nozzle temperature", "priority": 3}
+          {
+            "action": "Verify hotend can reach 300C safely (all-metal heatbreak required)",
+            "priority": 1
+          },
+          {
+            "action": "Use high-temp thermal paste on heatbreak threads",
+            "priority": 2
+          },
+          {
+            "action": "Print at 275-295C nozzle temperature",
+            "priority": 3
+          }
         ],
-        "prevention": "Ensure your printer can safely sustain 290-300C. PTFE-lined hotends are NOT compatible — they degrade above 260C."
+        "prevention": "Ensure your printer can safely sustain 290-300C. PTFE-lined hotends are NOT compatible \u2014 they degrade above 260C."
       }
     ],
     "storage_requirements": {
@@ -1465,10 +2587,22 @@
         "severity": "moderate",
         "root_cause": "HIPS has thermal shrinkage similar to ABS (~0.5-0.7%), causing corners to lift on unenclosed printers.",
         "fixes": [
-          {"action": "Use an enclosure to maintain 40-50C ambient temperature", "priority": 1},
-          {"action": "Increase bed temperature to 95-105C", "priority": 2},
-          {"action": "Add brim of 8-12mm width", "priority": 3},
-          {"action": "Apply glue stick to bed surface", "priority": 4}
+          {
+            "action": "Use an enclosure to maintain 40-50C ambient temperature",
+            "priority": 1
+          },
+          {
+            "action": "Increase bed temperature to 95-105C",
+            "priority": 2
+          },
+          {
+            "action": "Add brim of 8-12mm width",
+            "priority": 3
+          },
+          {
+            "action": "Apply glue stick to bed surface",
+            "priority": 4
+          }
         ],
         "prevention": "Treat HIPS like ABS for warping prevention. Enclosure makes the biggest difference."
       },
@@ -1477,10 +2611,22 @@
         "severity": "moderate",
         "root_cause": "HIPS has moderate viscosity and strings at a similar rate to ABS when hot.",
         "fixes": [
-          {"action": "Lower nozzle temperature to 225-235C", "priority": 1},
-          {"action": "Increase retraction to 5-6mm at 40mm/s for Bowden, 2-3mm at 30mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.04-0.06mm3", "priority": 3},
-          {"action": "Increase travel speed to 150-180mm/s", "priority": 4}
+          {
+            "action": "Lower nozzle temperature to 225-235C",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction to 5-6mm at 40mm/s for Bowden, 2-3mm at 30mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.04-0.06mm3",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 150-180mm/s",
+            "priority": 4
+          }
         ],
         "prevention": "HIPS strings less than PETG but more than PLA. Standard retraction tuning applies."
       },
@@ -1489,10 +2635,22 @@
         "severity": "moderate",
         "root_cause": "HIPS can struggle to adhere to untreated glass or PEI surfaces at lower bed temperatures.",
         "fixes": [
-          {"action": "Increase bed temperature to 100-105C", "priority": 1},
-          {"action": "Apply glue stick or ABS/HIPS slurry to bed", "priority": 2},
-          {"action": "Reduce first layer speed to 15-20mm/s", "priority": 3},
-          {"action": "Increase first layer width to 150% of nozzle diameter", "priority": 4}
+          {
+            "action": "Increase bed temperature to 100-105C",
+            "priority": 1
+          },
+          {
+            "action": "Apply glue stick or ABS/HIPS slurry to bed",
+            "priority": 2
+          },
+          {
+            "action": "Reduce first layer speed to 15-20mm/s",
+            "priority": 3
+          },
+          {
+            "action": "Increase first layer width to 150% of nozzle diameter",
+            "priority": 4
+          }
         ],
         "prevention": "100C bed + glue stick provides reliable HIPS adhesion."
       },
@@ -1501,9 +2659,18 @@
         "severity": "moderate",
         "root_cause": "HIPS releases styrene vapors when heated, similar to ABS though generally less intense.",
         "fixes": [
-          {"action": "Use enclosure with carbon filter", "priority": 1},
-          {"action": "Ventilate the room during printing", "priority": 2},
-          {"action": "Keep nozzle temp at lowest effective range (225-235C)", "priority": 3}
+          {
+            "action": "Use enclosure with carbon filter",
+            "priority": 1
+          },
+          {
+            "action": "Ventilate the room during printing",
+            "priority": 2
+          },
+          {
+            "action": "Keep nozzle temp at lowest effective range (225-235C)",
+            "priority": 3
+          }
         ],
         "prevention": "Print in a ventilated space. Same precautions as ABS."
       },
@@ -1512,10 +2679,22 @@
         "severity": "moderate",
         "root_cause": "HIPS dissolves in D-Limonene but the process is slow (6-24 hours). Thick support structures or insufficient agitation leave residue.",
         "fixes": [
-          {"action": "Use warm D-Limonene (35-40C) to speed dissolution", "priority": 1},
-          {"action": "Use an ultrasonic cleaner with D-Limonene for best results", "priority": 2},
-          {"action": "Reduce support density to 15-20% for faster dissolution", "priority": 3},
-          {"action": "Allow 12-24 hours soak time for thick support sections", "priority": 4}
+          {
+            "action": "Use warm D-Limonene (35-40C) to speed dissolution",
+            "priority": 1
+          },
+          {
+            "action": "Use an ultrasonic cleaner with D-Limonene for best results",
+            "priority": 2
+          },
+          {
+            "action": "Reduce support density to 15-20% for faster dissolution",
+            "priority": 3
+          },
+          {
+            "action": "Allow 12-24 hours soak time for thick support sections",
+            "priority": 4
+          }
         ],
         "prevention": "Design support structures to be sparse (15-20% density) with good surface access for the solvent."
       },
@@ -1524,12 +2703,24 @@
         "severity": "moderate",
         "root_cause": "HIPS has moderate inter-layer bonding. Without an enclosure, rapid cooling between layers weakens the bond.",
         "fixes": [
-          {"action": "Use enclosure at 40-50C ambient", "priority": 1},
-          {"action": "Increase nozzle temperature to 235-245C", "priority": 2},
-          {"action": "Disable part cooling fan or keep at 0-10%", "priority": 3},
-          {"action": "Reduce print speed to 40-50mm/s", "priority": 4}
+          {
+            "action": "Use enclosure at 40-50C ambient",
+            "priority": 1
+          },
+          {
+            "action": "Increase nozzle temperature to 235-245C",
+            "priority": 2
+          },
+          {
+            "action": "Disable part cooling fan or keep at 0-10%",
+            "priority": 3
+          },
+          {
+            "action": "Reduce print speed to 40-50mm/s",
+            "priority": 4
+          }
         ],
-        "prevention": "HIPS structural prints require the same environment as ABS — enclosed and warm."
+        "prevention": "HIPS structural prints require the same environment as ABS \u2014 enclosed and warm."
       }
     ],
     "storage_requirements": {
@@ -1540,10 +2731,10 @@
       "drying_time_hours": 4
     },
     "break_in_tips": [
-      "HIPS is primarily used as a soluble support material for ABS — dissolved in D-Limonene (citrus-based solvent).",
+      "HIPS is primarily used as a soluble support material for ABS \u2014 dissolved in D-Limonene (citrus-based solvent).",
       "Start at 230-240C nozzle, 95-105C bed. Print settings are very similar to ABS.",
       "When using as support for ABS: set HIPS interface Z distance to 0.1mm for easy removal.",
-      "HIPS can also be used as a standalone print material — it's slightly less strong than ABS but easier to print.",
+      "HIPS can also be used as a standalone print material \u2014 it's slightly less strong than ABS but easier to print.",
       "D-Limonene is the solvent for HIPS. Available online or at hardware stores. Use in a well-ventilated area."
     ]
   },
@@ -1554,10 +2745,22 @@
         "severity": "major",
         "root_cause": "PVA is the most hygroscopic 3D printing filament. It actively absorbs atmospheric moisture and can become unprintable within 2-4 hours of open-air exposure.",
         "fixes": [
-          {"action": "Store PVA in an active dry box with fresh desiccant at all times", "priority": 1},
-          {"action": "Dry at 45C for 8-12 hours before use (never exceed 50C — PVA degrades)", "priority": 2},
-          {"action": "Print directly from dry box — never from an open spool holder", "priority": 3},
-          {"action": "Replace desiccant weekly when regularly opening the dry box", "priority": 4}
+          {
+            "action": "Store PVA in an active dry box with fresh desiccant at all times",
+            "priority": 1
+          },
+          {
+            "action": "Dry at 45C for 8-12 hours before use (never exceed 50C \u2014 PVA degrades)",
+            "priority": 2
+          },
+          {
+            "action": "Print directly from dry box \u2014 never from an open spool holder",
+            "priority": 3
+          },
+          {
+            "action": "Replace desiccant weekly when regularly opening the dry box",
+            "priority": 4
+          }
         ],
         "prevention": "PVA must live in a dry box 100% of the time. Treat any air exposure as contamination."
       },
@@ -1566,22 +2769,46 @@
         "severity": "major",
         "root_cause": "Wet PVA creates steam bubbles that leave charred residue inside the nozzle. PVA also degrades at temperatures above 210C, carbonizing and blocking flow.",
         "fixes": [
-          {"action": "Dry filament thoroughly before use (45C for 8-12 hours)", "priority": 1},
-          {"action": "Keep nozzle temperature at 185-200C — never exceed 210C", "priority": 2},
-          {"action": "Perform cold pulls with PLA to clear PVA residue", "priority": 3},
-          {"action": "Reduce retraction distance to 2-3mm to prevent PVA from accumulating in the cold zone", "priority": 4}
+          {
+            "action": "Dry filament thoroughly before use (45C for 8-12 hours)",
+            "priority": 1
+          },
+          {
+            "action": "Keep nozzle temperature at 185-200C \u2014 never exceed 210C",
+            "priority": 2
+          },
+          {
+            "action": "Perform cold pulls with PLA to clear PVA residue",
+            "priority": 3
+          },
+          {
+            "action": "Reduce retraction distance to 2-3mm to prevent PVA from accumulating in the cold zone",
+            "priority": 4
+          }
         ],
         "prevention": "Keep PVA dry and print at low temperatures. PVA clogs are almost always a moisture or temperature problem."
       },
       {
-        "symptom": "Poor print quality — rough surface, bubbling, stringing",
+        "symptom": "Poor print quality \u2014 rough surface, bubbling, stringing",
         "severity": "moderate",
         "root_cause": "Moisture in PVA causes micro-explosions at the nozzle, disrupting smooth extrusion and creating rough, bubbly support surfaces.",
         "fixes": [
-          {"action": "Dry filament at 45C for 8-12 hours", "priority": 1},
-          {"action": "Print from active dry box", "priority": 2},
-          {"action": "Reduce nozzle temperature to 185-195C", "priority": 3},
-          {"action": "Reduce print speed to 20-30mm/s", "priority": 4}
+          {
+            "action": "Dry filament at 45C for 8-12 hours",
+            "priority": 1
+          },
+          {
+            "action": "Print from active dry box",
+            "priority": 2
+          },
+          {
+            "action": "Reduce nozzle temperature to 185-195C",
+            "priority": 3
+          },
+          {
+            "action": "Reduce print speed to 20-30mm/s",
+            "priority": 4
+          }
         ],
         "prevention": "If PVA sounds crackly or produces rough output, it's wet. Stop and dry before continuing."
       },
@@ -1590,10 +2817,22 @@
         "severity": "moderate",
         "root_cause": "Degraded or overheated PVA forms cross-linked polymer chains that resist water dissolution. Aged PVA also dissolves more slowly.",
         "fixes": [
-          {"action": "Use warm water (40-60C) to accelerate dissolution", "priority": 1},
-          {"action": "Add gentle agitation — ultrasonic cleaner or periodic stirring", "priority": 2},
-          {"action": "Allow 6-24 hours soak time depending on support thickness", "priority": 3},
-          {"action": "Replace PVA if it's more than 6-12 months old, even if stored dry", "priority": 4}
+          {
+            "action": "Use warm water (40-60C) to accelerate dissolution",
+            "priority": 1
+          },
+          {
+            "action": "Add gentle agitation \u2014 ultrasonic cleaner or periodic stirring",
+            "priority": 2
+          },
+          {
+            "action": "Allow 6-24 hours soak time depending on support thickness",
+            "priority": 3
+          },
+          {
+            "action": "Replace PVA if it's more than 6-12 months old, even if stored dry",
+            "priority": 4
+          }
         ],
         "prevention": "Use fresh PVA and print at low temperatures (185-200C) for best water solubility."
       },
@@ -1602,9 +2841,18 @@
         "severity": "major",
         "root_cause": "Moisture-saturated PVA becomes brittle as water disrupts the polymer chains. The filament snaps during feeding or at the spool.",
         "fixes": [
-          {"action": "Dry filament at 45C for 12 hours (extended drying for severely wet PVA)", "priority": 1},
-          {"action": "Use a filament guide to reduce bending stress during feeding", "priority": 2},
-          {"action": "If filament snaps repeatedly after drying, discard the spool — it's degraded beyond recovery", "priority": 3}
+          {
+            "action": "Dry filament at 45C for 12 hours (extended drying for severely wet PVA)",
+            "priority": 1
+          },
+          {
+            "action": "Use a filament guide to reduce bending stress during feeding",
+            "priority": 2
+          },
+          {
+            "action": "If filament snaps repeatedly after drying, discard the spool \u2014 it's degraded beyond recovery",
+            "priority": 3
+          }
         ],
         "prevention": "Brittle PVA is often unrecoverable. Prevent moisture absorption to avoid this entirely."
       },
@@ -1613,10 +2861,22 @@
         "severity": "moderate",
         "root_cause": "PVA needs to interface cleanly with the main material (usually PLA or PETG). Temperature or flow mismatches cause poor bonding or gaps.",
         "fixes": [
-          {"action": "Set PVA interface Z distance to 0.1-0.15mm", "priority": 1},
-          {"action": "Print PVA at 190-200C for best adhesion to PLA", "priority": 2},
-          {"action": "Use 2-3 interface layers for reliable support-to-model contact", "priority": 3},
-          {"action": "Increase support density to 20-30% for heavy overhangs", "priority": 4}
+          {
+            "action": "Set PVA interface Z distance to 0.1-0.15mm",
+            "priority": 1
+          },
+          {
+            "action": "Print PVA at 190-200C for best adhesion to PLA",
+            "priority": 2
+          },
+          {
+            "action": "Use 2-3 interface layers for reliable support-to-model contact",
+            "priority": 3
+          },
+          {
+            "action": "Increase support density to 20-30% for heavy overhangs",
+            "priority": 4
+          }
         ],
         "prevention": "PVA works best with PLA. PETG requires more tuning of interface settings."
       }
@@ -1624,14 +2884,14 @@
     "storage_requirements": {
       "humidity_sensitive": true,
       "max_humidity_pct": 10,
-      "storage_method": "Active dry box with fresh desiccant. MUST be sealed during printing — feed through a sealed port. Never store PVA outside a dry box, even overnight.",
+      "storage_method": "Active dry box with fresh desiccant. MUST be sealed during printing \u2014 feed through a sealed port. Never store PVA outside a dry box, even overnight.",
       "drying_temp_c": 45,
       "drying_time_hours": 8
     },
     "break_in_tips": [
-      "PVA is a soluble support material for PLA and PETG. It dissolves in plain water — no special solvents needed.",
+      "PVA is a soluble support material for PLA and PETG. It dissolves in plain water \u2014 no special solvents needed.",
       "Moisture is PVA's mortal enemy. It must live in a dry box at ALL times, including during printing.",
-      "Start at 190-200C nozzle, 50-55C bed. Never exceed 210C — PVA degrades and clogs.",
+      "Start at 190-200C nozzle, 50-55C bed. Never exceed 210C \u2014 PVA degrades and clogs.",
       "PVA is expensive. Use it only for support interfaces (2-3 layers) and print the bulk of supports in the main material.",
       "Dissolve PVA supports in warm water (40-60C) with gentle agitation. Expect 6-24 hours for complete dissolution."
     ]
@@ -1643,11 +2903,26 @@
         "severity": "major",
         "root_cause": "Polycarbonate has very high thermal shrinkage and is printed at extreme temperatures (260-310C), creating massive internal stresses as it cools.",
         "fixes": [
-          {"action": "Use a fully sealed enclosure at 60-80C ambient temperature", "priority": 1},
-          {"action": "Increase bed temperature to 110-120C", "priority": 2},
-          {"action": "Apply PC-specific adhesive (Magigoo PC or Nano Polymer adhesive) to bed", "priority": 3},
-          {"action": "Add brim of 15-20mm width", "priority": 4},
-          {"action": "Disable part cooling fan entirely", "priority": 5}
+          {
+            "action": "Use a fully sealed enclosure at 60-80C ambient temperature",
+            "priority": 1
+          },
+          {
+            "action": "Increase bed temperature to 110-120C",
+            "priority": 2
+          },
+          {
+            "action": "Apply PC-specific adhesive (Magigoo PC or Nano Polymer adhesive) to bed",
+            "priority": 3
+          },
+          {
+            "action": "Add brim of 15-20mm width",
+            "priority": 4
+          },
+          {
+            "action": "Disable part cooling fan entirely",
+            "priority": 5
+          }
         ],
         "prevention": "A high-temperature enclosure is absolutely mandatory. PC warps more aggressively than ABS."
       },
@@ -1656,11 +2931,26 @@
         "severity": "major",
         "root_cause": "Temperature differential between the newly extruded layer and the previously cooled layer exceeds the inter-layer bond strength, causing visible cracks.",
         "fixes": [
-          {"action": "Maintain enclosure temperature at 60-80C — higher than ABS requirements", "priority": 1},
-          {"action": "Increase nozzle temperature to 280-310C", "priority": 2},
-          {"action": "Disable all active cooling — 0% fan speed", "priority": 3},
-          {"action": "Reduce print speed to 30-40mm/s for better bonding", "priority": 4},
-          {"action": "Increase line width to 120-130% of nozzle diameter", "priority": 5}
+          {
+            "action": "Maintain enclosure temperature at 60-80C \u2014 higher than ABS requirements",
+            "priority": 1
+          },
+          {
+            "action": "Increase nozzle temperature to 280-310C",
+            "priority": 2
+          },
+          {
+            "action": "Disable all active cooling \u2014 0% fan speed",
+            "priority": 3
+          },
+          {
+            "action": "Reduce print speed to 30-40mm/s for better bonding",
+            "priority": 4
+          },
+          {
+            "action": "Increase line width to 120-130% of nozzle diameter",
+            "priority": 5
+          }
         ],
         "prevention": "PC cannot be printed reliably without a heated chamber. Even 50C is often not enough for large parts."
       },
@@ -1669,9 +2959,18 @@
         "severity": "major",
         "root_cause": "PC absorbs moisture which vaporizes at the extreme printing temperatures, creating steam bubbles that weaken layers and roughen surfaces.",
         "fixes": [
-          {"action": "Dry at 80C for 8-12 hours before printing", "priority": 1},
-          {"action": "Print from active dry box", "priority": 2},
-          {"action": "Store in vacuum-sealed bags with desiccant", "priority": 3}
+          {
+            "action": "Dry at 80C for 8-12 hours before printing",
+            "priority": 1
+          },
+          {
+            "action": "Print from active dry box",
+            "priority": 2
+          },
+          {
+            "action": "Store in vacuum-sealed bags with desiccant",
+            "priority": 3
+          }
         ],
         "prevention": "Always dry PC before printing. At 280-310C nozzle temps, even small amounts of moisture cause major defects."
       },
@@ -1680,10 +2979,22 @@
         "severity": "major",
         "root_cause": "PC requires 260-310C nozzle temperature and 110-120C bed temperature. Many consumer printers cannot safely sustain these temperatures.",
         "fixes": [
-          {"action": "Verify printer has an all-metal heatbreak — PTFE-lined hotends degrade above 260C and release toxic fumes", "priority": 1},
-          {"action": "Confirm bed can maintain 110-120C reliably for the entire print duration", "priority": 2},
-          {"action": "Use high-temp silicone bed mounts and heat-resistant wiring", "priority": 3},
-          {"action": "Consider PC-blend filaments (PC-ABS, PC-PETG) that print at lower temperatures", "priority": 4}
+          {
+            "action": "Verify printer has an all-metal heatbreak \u2014 PTFE-lined hotends degrade above 260C and release toxic fumes",
+            "priority": 1
+          },
+          {
+            "action": "Confirm bed can maintain 110-120C reliably for the entire print duration",
+            "priority": 2
+          },
+          {
+            "action": "Use high-temp silicone bed mounts and heat-resistant wiring",
+            "priority": 3
+          },
+          {
+            "action": "Consider PC-blend filaments (PC-ABS, PC-PETG) that print at lower temperatures",
+            "priority": 4
+          }
         ],
         "prevention": "Audit your printer hardware before buying PC filament. PTFE hotends are a hard NO."
       },
@@ -1692,10 +3003,22 @@
         "severity": "moderate",
         "root_cause": "PC does not adhere well to standard PEI or glass surfaces at any temperature without specialized adhesives.",
         "fixes": [
-          {"action": "Apply Magigoo PC or Nano Polymer adhesive to the bed", "priority": 1},
-          {"action": "Use a garolite (G10) build surface", "priority": 2},
-          {"action": "Increase bed temperature to 115-120C", "priority": 3},
-          {"action": "Reduce first layer speed to 10-15mm/s at 150% line width", "priority": 4}
+          {
+            "action": "Apply Magigoo PC or Nano Polymer adhesive to the bed",
+            "priority": 1
+          },
+          {
+            "action": "Use a garolite (G10) build surface",
+            "priority": 2
+          },
+          {
+            "action": "Increase bed temperature to 115-120C",
+            "priority": 3
+          },
+          {
+            "action": "Reduce first layer speed to 10-15mm/s at 150% line width",
+            "priority": 4
+          }
         ],
         "prevention": "PC-specific bed adhesive is not optional. Standard glue stick is insufficient."
       },
@@ -1704,10 +3027,22 @@
         "severity": "minor",
         "root_cause": "At 280-310C, PC is very fluid and oozes significantly during travel moves.",
         "fixes": [
-          {"action": "Increase retraction to 4-6mm at 40mm/s for Bowden, 2-3mm at 30mm/s for direct drive", "priority": 1},
-          {"action": "Enable coasting at 0.06-0.10mm3", "priority": 2},
-          {"action": "Increase travel speed to 180-200mm/s", "priority": 3},
-          {"action": "Enable wipe distance of 3-5mm", "priority": 4}
+          {
+            "action": "Increase retraction to 4-6mm at 40mm/s for Bowden, 2-3mm at 30mm/s for direct drive",
+            "priority": 1
+          },
+          {
+            "action": "Enable coasting at 0.06-0.10mm3",
+            "priority": 2
+          },
+          {
+            "action": "Increase travel speed to 180-200mm/s",
+            "priority": 3
+          },
+          {
+            "action": "Enable wipe distance of 3-5mm",
+            "priority": 4
+          }
         ],
         "prevention": "Some stringing is inevitable at PC temperatures. Post-process strings with a heat gun."
       }
@@ -1734,11 +3069,26 @@
         "severity": "major",
         "root_cause": "PC-ABS has high thermal shrinkage, less than pure PC but more than pure ABS. Parts wider than 80mm will warp without an enclosure.",
         "fixes": [
-          {"action": "Use an enclosure at 50-65C ambient temperature", "priority": 1},
-          {"action": "Increase bed temperature to 100-110C", "priority": 2},
-          {"action": "Apply ABS slurry or Magigoo PC adhesive to bed", "priority": 3},
-          {"action": "Add brim of 12-15mm width", "priority": 4},
-          {"action": "Disable part cooling fan", "priority": 5}
+          {
+            "action": "Use an enclosure at 50-65C ambient temperature",
+            "priority": 1
+          },
+          {
+            "action": "Increase bed temperature to 100-110C",
+            "priority": 2
+          },
+          {
+            "action": "Apply ABS slurry or Magigoo PC adhesive to bed",
+            "priority": 3
+          },
+          {
+            "action": "Add brim of 12-15mm width",
+            "priority": 4
+          },
+          {
+            "action": "Disable part cooling fan",
+            "priority": 5
+          }
         ],
         "prevention": "Enclosure is mandatory for PC-ABS. Warping is the primary failure mode."
       },
@@ -1747,10 +3097,22 @@
         "severity": "moderate",
         "root_cause": "PC-ABS needs higher temperatures than pure ABS for proper layer fusion. Printing at ABS temperatures results in weak inter-layer bonds.",
         "fixes": [
-          {"action": "Increase nozzle temperature to 255-270C (higher than ABS range)", "priority": 1},
-          {"action": "Ensure enclosure is at 50-60C ambient", "priority": 2},
-          {"action": "Disable part cooling fan completely", "priority": 3},
-          {"action": "Reduce print speed to 35-45mm/s", "priority": 4}
+          {
+            "action": "Increase nozzle temperature to 255-270C (higher than ABS range)",
+            "priority": 1
+          },
+          {
+            "action": "Ensure enclosure is at 50-60C ambient",
+            "priority": 2
+          },
+          {
+            "action": "Disable part cooling fan completely",
+            "priority": 3
+          },
+          {
+            "action": "Reduce print speed to 35-45mm/s",
+            "priority": 4
+          }
         ],
         "prevention": "Don't use ABS profiles for PC-ABS. It needs 10-20C higher nozzle temperature."
       },
@@ -1759,9 +3121,18 @@
         "severity": "moderate",
         "root_cause": "PC component absorbs moisture which creates steam bubbles at the high print temperatures required for PC-ABS.",
         "fixes": [
-          {"action": "Dry at 80C for 6 hours before printing", "priority": 1},
-          {"action": "Print from dry box for multi-hour prints", "priority": 2},
-          {"action": "Store sealed with desiccant", "priority": 3}
+          {
+            "action": "Dry at 80C for 6 hours before printing",
+            "priority": 1
+          },
+          {
+            "action": "Print from dry box for multi-hour prints",
+            "priority": 2
+          },
+          {
+            "action": "Store sealed with desiccant",
+            "priority": 3
+          }
         ],
         "prevention": "Dry before every print session. PC-ABS is more moisture-sensitive than pure ABS."
       },
@@ -1770,10 +3141,22 @@
         "severity": "moderate",
         "root_cause": "At 255-270C, PC-ABS is fluid and oozes during travel moves, creating strings.",
         "fixes": [
-          {"action": "Lower nozzle temperature to minimum effective range (250-260C)", "priority": 1},
-          {"action": "Increase retraction to 5-6mm at 40mm/s for Bowden, 2-3mm at 30mm/s for direct drive", "priority": 2},
-          {"action": "Enable coasting at 0.05-0.08mm3", "priority": 3},
-          {"action": "Increase travel speed to 160-180mm/s", "priority": 4}
+          {
+            "action": "Lower nozzle temperature to minimum effective range (250-260C)",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction to 5-6mm at 40mm/s for Bowden, 2-3mm at 30mm/s for direct drive",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.05-0.08mm3",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 160-180mm/s",
+            "priority": 4
+          }
         ],
         "prevention": "Retraction tuning specific to PC-ABS is needed. Don't reuse ABS retraction settings."
       },
@@ -1782,9 +3165,18 @@
         "severity": "moderate",
         "root_cause": "Both PC and ABS components release fumes when heated. PC-ABS fumes are comparable to ABS but at higher temperatures.",
         "fixes": [
-          {"action": "Use enclosure with activated carbon filter", "priority": 1},
-          {"action": "Ventilate the room", "priority": 2},
-          {"action": "Keep nozzle temp at lowest effective range", "priority": 3}
+          {
+            "action": "Use enclosure with activated carbon filter",
+            "priority": 1
+          },
+          {
+            "action": "Ventilate the room",
+            "priority": 2
+          },
+          {
+            "action": "Keep nozzle temp at lowest effective range",
+            "priority": 3
+          }
         ],
         "prevention": "Always print in a ventilated space or with filtration. Same precautions as ABS."
       },
@@ -1793,10 +3185,22 @@
         "severity": "moderate",
         "root_cause": "PC-ABS does not adhere reliably to standard glass or PEI surfaces without adhesion aids.",
         "fixes": [
-          {"action": "Apply ABS slurry or Magigoo PC adhesive to bed", "priority": 1},
-          {"action": "Increase bed temperature to 105-110C", "priority": 2},
-          {"action": "Reduce first layer speed to 15-20mm/s", "priority": 3},
-          {"action": "Increase first layer width to 150% of nozzle diameter", "priority": 4}
+          {
+            "action": "Apply ABS slurry or Magigoo PC adhesive to bed",
+            "priority": 1
+          },
+          {
+            "action": "Increase bed temperature to 105-110C",
+            "priority": 2
+          },
+          {
+            "action": "Reduce first layer speed to 15-20mm/s",
+            "priority": 3
+          },
+          {
+            "action": "Increase first layer width to 150% of nozzle diameter",
+            "priority": 4
+          }
         ],
         "prevention": "ABS slurry or Magigoo PC provides reliable adhesion for PC-ABS."
       }
@@ -1814,6 +3218,717 @@
       "An all-metal heatbreak is strongly recommended for the 260C+ temperatures PC-ABS needs.",
       "Enclosure is mandatory. PC-ABS warps less than PC but more than ABS.",
       "PC-ABS is excellent for automotive trim, electronic housings, and parts that need heat resistance + impact strength."
+    ]
+  },
+  "pla_matte": {
+    "common_issues": [
+      {
+        "symptom": "Matte finish appears glossy or inconsistent",
+        "severity": "minor",
+        "root_cause": "Over-extrusion fills micro-texture created by the matte additive, producing shiny patches. Excessive nozzle temperature also melts the surface texture.",
+        "fixes": [
+          {
+            "action": "Calibrate E-steps and reduce flow rate to 95-98%",
+            "priority": 1
+          },
+          {
+            "action": "Lower nozzle temperature by 5-10C (try 195-205C)",
+            "priority": 2
+          },
+          {
+            "action": "Increase part cooling fan to 100% to solidify matte texture quickly",
+            "priority": 3
+          },
+          {
+            "action": "Reduce line width to 100% of nozzle diameter (avoid wide extrusion that pools)",
+            "priority": 4
+          }
+        ],
+        "prevention": "Run a flow calibration cube before production prints. Over-extrusion is the #1 killer of matte finish quality."
+      },
+      {
+        "symptom": "Z-seam artifacts more visible than on standard PLA",
+        "severity": "moderate",
+        "root_cause": "Matte surfaces scatter light uniformly, so any surface imperfection \u2014 especially the z-seam \u2014 creates visible contrast that glossy surfaces would hide through specular reflection.",
+        "fixes": [
+          {
+            "action": "Set seam position to sharpest corner in slicer to hide it in geometry",
+            "priority": 1
+          },
+          {
+            "action": "Enable wipe distance of 2-5mm at seam start to reduce blob",
+            "priority": 2
+          },
+          {
+            "action": "Tune pressure advance/linear advance (K=0.03-0.05 for direct drive)",
+            "priority": 3
+          },
+          {
+            "action": "Reduce retraction prime speed to 20mm/s to prevent pressure spike",
+            "priority": 4
+          }
+        ],
+        "prevention": "Always configure seam placement before slicing matte prints. Random seam creates scattered artifacts over the entire surface."
+      },
+      {
+        "symptom": "Weak layer adhesion and delamination",
+        "severity": "moderate",
+        "root_cause": "The matte additive (typically a mineral filler like calcium carbonate or silica) slightly reduces inter-layer bonding compared to standard PLA by disrupting polymer chain entanglement between layers.",
+        "fixes": [
+          {
+            "action": "Reduce part cooling fan to 60-80% (instead of 100% used for standard PLA) to allow better inter-layer fusion",
+            "priority": 1
+          },
+          {
+            "action": "Increase nozzle temperature by 5C to improve polymer flow at layer boundaries",
+            "priority": 2
+          },
+          {
+            "action": "Increase line width to 110-115% of nozzle diameter for greater layer contact area",
+            "priority": 3
+          },
+          {
+            "action": "Reduce print speed by 10-15% to allow more heat transfer between layers",
+            "priority": 4
+          }
+        ],
+        "prevention": "For structural matte PLA prints, increase wall count to 4-5 perimeters and use 20-30% infill to compensate for slightly lower per-layer strength."
+      },
+      {
+        "symptom": "Stringing and surface blemishes",
+        "severity": "minor",
+        "root_cause": "Matte PLA has similar melt viscosity to standard PLA. Strings and blobs are more visible on matte surfaces because the uniform light scattering highlights any surface irregularity.",
+        "fixes": [
+          {
+            "action": "Increase retraction distance to 5-6mm at 40mm/s for Bowden, 1-2mm at 30mm/s for direct drive",
+            "priority": 1
+          },
+          {
+            "action": "Lower nozzle temperature by 5C to reduce oozing",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.03-0.05mm3 in slicer",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 150-200mm/s to minimize ooze time",
+            "priority": 4
+          }
+        ],
+        "prevention": "Print a retraction tower to dial in settings. Strings that are barely visible on glossy PLA become obvious on matte."
+      },
+      {
+        "symptom": "Rough overhangs that ruin matte appearance",
+        "severity": "minor",
+        "root_cause": "Overhangs sag slightly before cooling. On matte filament, the drooped material has a different surface texture than properly laid layers, making overhang quality issues more obvious.",
+        "fixes": [
+          {
+            "action": "Reduce overhang print speed to 15-20mm/s",
+            "priority": 1
+          },
+          {
+            "action": "Keep part cooling fan at 80-100% for overhangs (balance with adhesion needs)",
+            "priority": 2
+          },
+          {
+            "action": "Reduce layer height to 0.12-0.16mm for steep overhangs",
+            "priority": 3
+          },
+          {
+            "action": "Use supports for overhangs beyond 50 degrees (stricter than standard PLA's 60 degrees)",
+            "priority": 4
+          }
+        ],
+        "prevention": "Orient models to minimize overhangs. Matte filament is less forgiving of overhang artifacts than glossy PLA."
+      }
+    ],
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 25,
+      "storage_method": "Sealed container with desiccant or resealable vacuum bag. Same storage as standard PLA.",
+      "drying_temp_c": 45,
+      "drying_time_hours": 4
+    },
+    "break_in_tips": [
+      "Start at 195-210C nozzle, 55-60C bed. Matte PLA prints at similar temps to standard PLA, but slightly lower nozzle temp preserves matte texture.",
+      "Reduce part cooling fan to 60-80% instead of the 100% used for standard PLA \u2014 this improves layer adhesion without ruining the matte finish.",
+      "Calibrate flow rate precisely. Over-extrusion is the most common cause of lost matte appearance. Aim for 95-98% flow.",
+      "Configure z-seam placement carefully before every print. Seam artifacts are 2-3x more visible on matte surfaces.",
+      "Avoid post-processing with heat (heat guns, flame polishing) \u2014 it destroys the matte texture and creates glossy spots."
+    ]
+  },
+  "petg_hf": {
+    "common_issues": [
+      {
+        "symptom": "Excessive stringing at high print speeds",
+        "severity": "moderate",
+        "root_cause": "High-flow PETG has a lower melt viscosity than standard PETG to enable faster extrusion. This reduced viscosity causes more oozing and stringing, especially at the higher speeds (100-200mm/s) the material is designed for.",
+        "fixes": [
+          {
+            "action": "Increase retraction distance by 1-2mm over standard PETG settings (try 6-7mm Bowden, 2-3mm direct drive)",
+            "priority": 1
+          },
+          {
+            "action": "Increase retraction speed to 45-50mm/s",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.05-0.08mm3 \u2014 slightly more than standard PETG",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 200-250mm/s to reduce ooze window",
+            "priority": 4
+          },
+          {
+            "action": "Lower nozzle temperature by 5C if stringing persists (but not below manufacturer minimum)",
+            "priority": 5
+          }
+        ],
+        "prevention": "Print a retraction tower at your target speed. HF PETG retraction needs are different from standard PETG \u2014 don't copy settings directly."
+      },
+      {
+        "symptom": "Oozing and blobs during travel moves",
+        "severity": "moderate",
+        "root_cause": "The high-flow formulation maintains lower viscosity in the melt zone for faster throughput. This means the material continues to flow out of the nozzle during non-printing moves more readily than standard PETG.",
+        "fixes": [
+          {
+            "action": "Enable pressure advance/linear advance and tune K value (start at 0.04-0.06 for direct drive, 0.5-0.8 for Bowden)",
+            "priority": 1
+          },
+          {
+            "action": "Enable wipe distance of 3-5mm to depressurize nozzle before travel",
+            "priority": 2
+          },
+          {
+            "action": "Reduce nozzle temperature by 5C to increase viscosity slightly",
+            "priority": 3
+          },
+          {
+            "action": "Reduce retraction prime amount by 10-15% to prevent pressure spike at restart",
+            "priority": 4
+          }
+        ],
+        "prevention": "Pressure advance is essential for HF PETG. Run a PA tuning tower before production prints."
+      },
+      {
+        "symptom": "Poor surface quality at very high speeds (150+ mm/s)",
+        "severity": "moderate",
+        "root_cause": "At extreme speeds the extruder may not maintain consistent pressure, and vibrations from rapid direction changes cause ringing artifacts. The higher flow rates also require more heater power to maintain temperature.",
+        "fixes": [
+          {
+            "action": "Increase nozzle temperature by 5-10C to ensure full melt at high throughput",
+            "priority": 1
+          },
+          {
+            "action": "Reduce acceleration to 2000-3000mm/s2 to minimize ringing",
+            "priority": 2
+          },
+          {
+            "action": "Ensure hotend can deliver sufficient wattage \u2014 high-flow at 150mm/s requires 40W+ heaters",
+            "priority": 3
+          },
+          {
+            "action": "Reduce speed for external perimeters to 60-80% of infill speed for better surface finish",
+            "priority": 4
+          }
+        ],
+        "prevention": "Start at the manufacturer's recommended speed and increase in 10% increments. Many printers are mechanically limited before the filament is."
+      },
+      {
+        "symptom": "Layer adhesion issues at high speeds",
+        "severity": "major",
+        "root_cause": "At very high print speeds, each layer has less time to bond to the previous one. The rapid cooling from fast movement combined with reduced contact time weakens inter-layer fusion.",
+        "fixes": [
+          {
+            "action": "Increase nozzle temperature by 10-15C above standard PETG settings (try 245-260C)",
+            "priority": 1
+          },
+          {
+            "action": "Reduce part cooling fan to 30-50% to keep layers warm longer",
+            "priority": 2
+          },
+          {
+            "action": "Increase line width to 120% of nozzle diameter",
+            "priority": 3
+          },
+          {
+            "action": "Reduce speed for structural perimeters to 60-80mm/s even if infill runs faster",
+            "priority": 4
+          }
+        ],
+        "prevention": "For structural parts, prioritize layer adhesion over speed. Slow perimeters with fast infill is the right tradeoff."
+      },
+      {
+        "symptom": "Moisture-related popping and bubbling",
+        "severity": "moderate",
+        "root_cause": "HF PETG is slightly more hygroscopic than standard PETG due to its modified polymer chain structure. Absorbed moisture boils at extrusion temperatures, creating steam bubbles that pop and leave surface defects.",
+        "fixes": [
+          {
+            "action": "Dry filament at 65C for 4-6 hours before printing",
+            "priority": 1
+          },
+          {
+            "action": "Use a filament dryer during printing for long prints",
+            "priority": 2
+          },
+          {
+            "action": "If popping is mild, increase nozzle temp by 5C to help moisture escape more evenly",
+            "priority": 3
+          },
+          {
+            "action": "Replace filament if drying does not resolve \u2014 some rolls are too far gone",
+            "priority": 4
+          }
+        ],
+        "prevention": "Store in a sealed container with desiccant immediately after opening. HF PETG absorbs moisture faster than standard PETG."
+      }
+    ],
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 12,
+      "storage_method": "Sealed container with desiccant or active dry box. More hygroscopic than standard PETG \u2014 do not leave exposed to air.",
+      "drying_temp_c": 65,
+      "drying_time_hours": 5
+    },
+    "break_in_tips": [
+      "Start at the manufacturer's recommended speed, not max speed. Work up in 10% increments after confirming quality at each step.",
+      "Retraction tuning is critical \u2014 HF PETG strings more than standard PETG. Print a retraction tower at your target speed before committing to a big print.",
+      "Use 240-255C nozzle temperature and 75-85C bed. HF PETG generally needs 5-10C more nozzle heat than standard PETG at high speeds.",
+      "Pressure advance/linear advance is not optional with HF PETG. Tune it first \u2014 it eliminates most oozing and blob issues.",
+      "Apply glue stick on smooth PEI or glass beds. HF PETG bonds aggressively at high bed temps and can damage surfaces on removal."
+    ]
+  },
+  "pla_tough": {
+    "common_issues": [
+      {
+        "symptom": "Warping on large flat surfaces",
+        "severity": "moderate",
+        "root_cause": "Impact-modifying additives in tough PLA increase internal stress during cooling compared to standard PLA. Large flat areas accumulate enough differential stress to lift corners from the bed.",
+        "fixes": [
+          {
+            "action": "Apply glue stick or hairspray to build plate before printing",
+            "priority": 1
+          },
+          {
+            "action": "Increase bed temperature to 60-65C (5C higher than standard PLA)",
+            "priority": 2
+          },
+          {
+            "action": "Add a brim of 8-12mm width in slicer",
+            "priority": 3
+          },
+          {
+            "action": "Reduce part cooling fan to 60-80% for the first 10-15 layers",
+            "priority": 4
+          },
+          {
+            "action": "Enclose the printer or block drafts to maintain even ambient temperature",
+            "priority": 5
+          }
+        ],
+        "prevention": "Always use bed adhesive (glue stick) for tough PLA prints larger than 80mm in any dimension. Orient parts to minimize flat contact area."
+      },
+      {
+        "symptom": "Stringing between features",
+        "severity": "minor",
+        "root_cause": "Impact-modifying additives (typically a rubber-phase polymer) increase melt elasticity, causing the material to stretch into thin strings during travel moves rather than breaking cleanly.",
+        "fixes": [
+          {
+            "action": "Increase retraction distance by 0.5-1mm over standard PLA settings (try 6-7mm Bowden, 1.5-2.5mm direct drive)",
+            "priority": 1
+          },
+          {
+            "action": "Lower nozzle temperature by 5C (try 200-210C)",
+            "priority": 2
+          },
+          {
+            "action": "Increase retraction speed to 40-45mm/s",
+            "priority": 3
+          },
+          {
+            "action": "Increase travel speed to 150-200mm/s",
+            "priority": 4
+          }
+        ],
+        "prevention": "Tough PLA tends to string slightly more than standard PLA. Accept minor stringing or post-process with a heat gun at 200C."
+      },
+      {
+        "symptom": "Poor bed adhesion on first layer",
+        "severity": "moderate",
+        "root_cause": "The rubber-phase impact modifiers reduce the surface energy of the first layer, making it less likely to bond to the build surface compared to standard PLA.",
+        "fixes": [
+          {
+            "action": "Apply PVA glue stick generously on the build surface",
+            "priority": 1
+          },
+          {
+            "action": "Increase bed temperature to 60-65C",
+            "priority": 2
+          },
+          {
+            "action": "Increase first layer flow rate to 105-110%",
+            "priority": 3
+          },
+          {
+            "action": "Reduce first layer speed to 15-20mm/s for maximum adhesion",
+            "priority": 4
+          },
+          {
+            "action": "Increase first layer line width to 120-140% of nozzle diameter",
+            "priority": 5
+          }
+        ],
+        "prevention": "Always use a bed adhesive with tough PLA. Clean the build surface with IPA before applying glue stick."
+      },
+      {
+        "symptom": "Inconsistent surface finish with mottled texture",
+        "severity": "minor",
+        "root_cause": "The blend of standard PLA and impact modifier can produce uneven melt behavior, leading to slight surface texture variations that are not present in standard PLA.",
+        "fixes": [
+          {
+            "action": "Increase nozzle temperature by 5C to improve melt homogeneity",
+            "priority": 1
+          },
+          {
+            "action": "Reduce print speed to 40-50mm/s for external perimeters",
+            "priority": 2
+          },
+          {
+            "action": "Ensure filament is dry \u2014 moisture amplifies surface texture issues",
+            "priority": 3
+          },
+          {
+            "action": "Calibrate flow rate precisely (run a flow calibration cube)",
+            "priority": 4
+          }
+        ],
+        "prevention": "Dry filament before printing if roll has been open more than a week. Store sealed with desiccant."
+      },
+      {
+        "symptom": "Heat creep causing intermittent clogs",
+        "severity": "major",
+        "root_cause": "Tough PLA has a glass transition temperature similar to standard PLA (~58-62C). The impact-modifier additives can make the softened filament stickier in the cold zone, increasing clog risk during heat creep.",
+        "fixes": [
+          {
+            "action": "Ensure hotend cooling fan runs at 100% and is clean",
+            "priority": 1
+          },
+          {
+            "action": "Lower nozzle temperature by 5-10C to reduce heat conducted upward",
+            "priority": 2
+          },
+          {
+            "action": "Reduce retraction distance to 2mm max for direct drive to avoid dragging softened filament into the cold zone",
+            "priority": 3
+          },
+          {
+            "action": "Increase minimum layer time to 10-15 seconds to prevent heat accumulation on small parts",
+            "priority": 4
+          }
+        ],
+        "prevention": "Keep hotend fan clean. Avoid printing small enclosed sections without minimum layer time settings."
+      }
+    ],
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 20,
+      "storage_method": "Sealed container with desiccant. Slightly more moisture-sensitive than standard PLA due to impact-modifier additives.",
+      "drying_temp_c": 45,
+      "drying_time_hours": 5
+    },
+    "break_in_tips": [
+      "Print at 205-215C nozzle, 60-65C bed. Tough PLA runs 5C hotter on the bed than standard PLA for reliable adhesion.",
+      "Always use bed adhesive (glue stick on PEI or glass). First layer adhesion is tougher PLA's biggest quirk compared to standard PLA.",
+      "Expect 4-5x the impact resistance of standard PLA \u2014 great for tool handles, enclosures, and mechanical parts that need to survive drops.",
+      "Part cooling at 70-90% works best. Slightly less cooling than standard PLA improves layer adhesion without significant quality loss.",
+      "Tough PLA can be annealed at 80C for 1-2 hours to further improve impact resistance, but expect 2-5% dimensional shrinkage."
+    ]
+  },
+  "tpu_95a": {
+    "common_issues": [
+      {
+        "symptom": "Severe stringing between features",
+        "severity": "moderate",
+        "root_cause": "TPU 95A has high melt elasticity \u2014 the material stretches rather than breaks during travel moves. Its moderate flexibility means it resists clean retraction, and the melt pressure is hard to control precisely.",
+        "fixes": [
+          {
+            "action": "Minimize retraction to 0.5-1.5mm at 20-25mm/s for direct drive. For Bowden, disable retraction entirely \u2014 it causes more problems than it solves",
+            "priority": 1
+          },
+          {
+            "action": "Increase travel speed to 150-200mm/s to snap strings rather than draw them",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.05-0.1mm3 to depressurize nozzle before travel",
+            "priority": 3
+          },
+          {
+            "action": "Lower nozzle temperature by 5C (try 220-225C) to increase viscosity",
+            "priority": 4
+          }
+        ],
+        "prevention": "Accept some stringing with TPU 95A. Post-process by briefly hitting strings with a heat gun or trimming with flush cutters."
+      },
+      {
+        "symptom": "Filament buckling and jamming in extruder",
+        "severity": "major",
+        "root_cause": "At Shore 95A hardness, the filament is flexible enough to buckle between the drive gear and the hot end entrance, especially in Bowden setups. Excessive feed pressure, high print speeds, or retraction compress the filament rather than pushing it forward.",
+        "fixes": [
+          {
+            "action": "Use direct drive extruder \u2014 this is the single most impactful fix for TPU 95A",
+            "priority": 1
+          },
+          {
+            "action": "Reduce print speed to 20-30mm/s to lower feed pressure",
+            "priority": 2
+          },
+          {
+            "action": "Reduce retraction to 0.5-1mm for direct drive, 0mm for Bowden",
+            "priority": 3
+          },
+          {
+            "action": "Loosen extruder idler tension until the gear just grips without deforming the filament",
+            "priority": 4
+          },
+          {
+            "action": "Check for gaps between the drive gear and PTFE tube \u2014 any gap is a buckling point",
+            "priority": 5
+          }
+        ],
+        "prevention": "Direct drive is strongly recommended for 95A TPU. Bowden setups can work but require very careful tuning and very slow speeds (15-20mm/s)."
+      },
+      {
+        "symptom": "Under-extrusion and inconsistent flow",
+        "severity": "moderate",
+        "root_cause": "The flexible filament compresses in the feed path, absorbing extruder movements like a spring. This causes delayed response to extrusion commands and inconsistent material output, especially during speed changes.",
+        "fixes": [
+          {
+            "action": "Reduce print speed to 20-30mm/s for consistent pressure",
+            "priority": 1
+          },
+          {
+            "action": "Increase flow rate to 105-110% to compensate for compression losses",
+            "priority": 2
+          },
+          {
+            "action": "Use a constrained filament path with no gaps between drive gear, PTFE tube, and nozzle",
+            "priority": 3
+          },
+          {
+            "action": "Increase nozzle temperature by 5C to reduce extrusion resistance",
+            "priority": 4
+          }
+        ],
+        "prevention": "Keep the filament path as short and constrained as possible. Any loose section becomes a compression buffer."
+      },
+      {
+        "symptom": "First layer not sticking to bed",
+        "severity": "moderate",
+        "root_cause": "TPU 95A has moderate surface energy and low stiffness. The first layer can lift or curl because the material flexes rather than bonding rigidly to the surface.",
+        "fixes": [
+          {
+            "action": "Use a bed surface that bonds well with TPU: PEI, blue painter's tape, or glass with glue stick",
+            "priority": 1
+          },
+          {
+            "action": "Set bed temperature to 55-65C",
+            "priority": 2
+          },
+          {
+            "action": "Increase first layer line width to 150% of nozzle diameter for maximum contact",
+            "priority": 3
+          },
+          {
+            "action": "Print first layer at 15mm/s with 110% flow to press material firmly into bed texture",
+            "priority": 4
+          }
+        ],
+        "prevention": "Blue painter's tape with a light glue stick application is the most reliable bed surface for TPU 95A."
+      },
+      {
+        "symptom": "Poor dimensional accuracy on thin walls",
+        "severity": "minor",
+        "root_cause": "TPU 95A is flexible after printing \u2014 thin walls and narrow features deform under the forces of the print head moving nearby. The material also swells slightly during extrusion due to die swell effects.",
+        "fixes": [
+          {
+            "action": "Increase wall thickness to at least 2mm (5 perimeters at 0.4mm nozzle)",
+            "priority": 1
+          },
+          {
+            "action": "Reduce print speed to 20mm/s to minimize nozzle drag forces on recently printed walls",
+            "priority": 2
+          },
+          {
+            "action": "Calibrate flow rate precisely \u2014 over-extrusion causes walls to be thicker than designed",
+            "priority": 3
+          },
+          {
+            "action": "Account for 1-3% dimensional expansion in your design tolerances",
+            "priority": 4
+          }
+        ],
+        "prevention": "Design TPU parts with thicker walls than you would for rigid materials. Minimum 1.5-2mm wall thickness for consistent results."
+      }
+    ],
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 10,
+      "storage_method": "Sealed container with desiccant or active dry box. TPU 95A is very hygroscopic and absorbs moisture within hours of air exposure.",
+      "drying_temp_c": 50,
+      "drying_time_hours": 6
+    },
+    "break_in_tips": [
+      "Direct drive extruder is strongly recommended. Bowden setups work but require very slow speeds (15-20mm/s) and zero retraction.",
+      "Start at 220-235C nozzle, 55-65C bed, 20-30mm/s print speed. Speed is the most critical parameter \u2014 too fast causes jams.",
+      "Minimize retraction: 0.5-1.5mm at 20mm/s for direct drive, 0mm for Bowden. TPU hates retraction more than almost any other material.",
+      "Loosen extruder idler tension until the drive gear just barely grips the filament. Over-tightening deforms the soft filament and causes jams.",
+      "TPU 95A is ideal for phone cases, shoe insoles, vibration dampeners, seals, and parts that need moderate flexibility with good durability."
+    ]
+  },
+  "tpu_85a": {
+    "common_issues": [
+      {
+        "symptom": "Filament buckling and jamming in extruder \u2014 near-constant issue",
+        "severity": "major",
+        "root_cause": "At Shore 85A, the filament is extremely soft and buckles under minimal compression. Any gap in the feed path, excessive idler tension, or speeds above 20mm/s will cause the filament to compress and jam rather than feed into the hot end.",
+        "fixes": [
+          {
+            "action": "Use direct drive extruder \u2014 this is MANDATORY for 85A TPU. Bowden setups will not work reliably.",
+            "priority": 1
+          },
+          {
+            "action": "Reduce print speed to 15-20mm/s maximum",
+            "priority": 2
+          },
+          {
+            "action": "Reduce extruder idler tension to minimum that still grips \u2014 the filament should deform less than 0.1mm under the gear",
+            "priority": 3
+          },
+          {
+            "action": "Ensure zero gaps between drive gear, PTFE liner, and nozzle. Use a constrained filament path with continuous support",
+            "priority": 4
+          },
+          {
+            "action": "If using a BMG-style extruder, consider a custom filament guide insert to prevent the soft filament from wrapping around the drive gear",
+            "priority": 5
+          }
+        ],
+        "prevention": "Direct drive is mandatory, not recommended. Many printers require a filament path modification or custom guide for reliable 85A printing."
+      },
+      {
+        "symptom": "Extreme stringing that cannot be eliminated",
+        "severity": "moderate",
+        "root_cause": "TPU 85A has very high melt elasticity. Retraction is nearly useless because the soft filament compresses in the feed path rather than pulling material back from the nozzle. The material stretches into extremely thin strings during any travel move.",
+        "fixes": [
+          {
+            "action": "Disable retraction entirely \u2014 it causes more jams than stringing it prevents at this shore hardness",
+            "priority": 1
+          },
+          {
+            "action": "Maximize travel speed (200mm/s+) to snap strings thin",
+            "priority": 2
+          },
+          {
+            "action": "Enable coasting at 0.1-0.15mm3 to bleed nozzle pressure before travel",
+            "priority": 3
+          },
+          {
+            "action": "Lower nozzle temperature to the minimum that still produces good flow (try 210-220C)",
+            "priority": 4
+          }
+        ],
+        "prevention": "Accept stringing as inevitable with 85A TPU. Post-process with a heat gun at 200C for 2-3 seconds per area to clean up strings."
+      },
+      {
+        "symptom": "Under-extrusion and gaps in walls",
+        "severity": "major",
+        "root_cause": "The extremely soft filament acts as a spring in the feed path, absorbing and delaying extruder movements. At 85A, this compression effect is severe enough that small extrusion commands (thin walls, small infill) may produce no material output at all.",
+        "fixes": [
+          {
+            "action": "Reduce print speed to 15mm/s to minimize feed pressure fluctuations",
+            "priority": 1
+          },
+          {
+            "action": "Increase flow rate to 110-115% to compensate for compression losses",
+            "priority": 2
+          },
+          {
+            "action": "Increase minimum extrusion length to 1mm in slicer to avoid tiny move segments that get absorbed by filament compression",
+            "priority": 3
+          },
+          {
+            "action": "Use a larger nozzle (0.5-0.6mm) to reduce back-pressure and improve flow consistency",
+            "priority": 4
+          }
+        ],
+        "prevention": "Avoid designs with thin walls (under 2mm) or fine detail when using 85A TPU. The material cannot reproduce small features reliably."
+      },
+      {
+        "symptom": "Print warping and lifting off bed",
+        "severity": "moderate",
+        "root_cause": "Ultra-soft TPU has enough flexibility that internal stresses from cooling can pull the part away from the bed surface. The low surface energy of the very soft material also reduces bed adhesion compared to harder TPUs.",
+        "fixes": [
+          {
+            "action": "Use blue painter's tape with a thin layer of glue stick \u2014 the most reliable bed surface for ultra-soft TPU",
+            "priority": 1
+          },
+          {
+            "action": "Set bed temperature to 60-70C",
+            "priority": 2
+          },
+          {
+            "action": "Add a brim of 10-15mm for parts wider than 50mm",
+            "priority": 3
+          },
+          {
+            "action": "Increase first layer flow to 110-115% and reduce first layer speed to 10-15mm/s",
+            "priority": 4
+          }
+        ],
+        "prevention": "Always use a brim with 85A TPU. The extra adhesion area is necessary for reliable bed adhesion."
+      },
+      {
+        "symptom": "Extruder grinding through filament",
+        "severity": "major",
+        "root_cause": "When the soft filament encounters any resistance (partial clog, too-fast speed, excessive retraction), the drive gear grinds through the material rather than stalling. This creates a flat spot that prevents further feeding.",
+        "fixes": [
+          {
+            "action": "Reduce extruder idler tension significantly \u2014 use the minimum that still feeds reliably",
+            "priority": 1
+          },
+          {
+            "action": "Reduce print speed to 15mm/s to lower feed resistance",
+            "priority": 2
+          },
+          {
+            "action": "Check for and clear any partial clog in nozzle \u2014 resistance at the nozzle amplifies grinding",
+            "priority": 3
+          },
+          {
+            "action": "If grinding occurs, cut the damaged section and re-load. Do not try to continue printing with ground filament",
+            "priority": 4
+          }
+        ],
+        "prevention": "Set extruder current/tension lower than for any other material. The soft filament requires a gentle touch."
+      }
+    ],
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 10,
+      "storage_method": "Sealed container with desiccant or active dry box. Ultra-soft TPU is very hygroscopic \u2014 store immediately after use.",
+      "drying_temp_c": 50,
+      "drying_time_hours": 6
+    },
+    "break_in_tips": [
+      "Direct drive extruder is MANDATORY for 85A TPU. Do not attempt with Bowden setups \u2014 it will jam constantly and waste filament.",
+      "Print at 210-225C nozzle, 60-70C bed, 15-20mm/s. Speed is the most critical parameter \u2014 never exceed 20mm/s until you have confirmed reliable feeding.",
+      "Disable retraction entirely. 85A TPU is too soft to retract effectively \u2014 the filament compresses in the feed path instead of pulling back.",
+      "Reduce extruder idler tension to the absolute minimum that still grips. Over-tightening will deform and grind through the ultra-soft filament.",
+      "85A TPU is ideal for ultra-flexible gaskets, wearable padding, soft-grip handles, and components that need rubber-like flexibility. Not suitable for structural or load-bearing parts.",
+      "Expect significant stringing \u2014 this is normal at 85A hardness. Post-process with a heat gun or accept it as a characteristic of the material."
     ]
   }
 }
