@@ -13243,6 +13243,8 @@ def run_reslice_and_print(
     overrides: str | None = None,
     profile_path: str | None = None,
     slicer_path: str | None = None,
+    use_ams: bool | None = None,
+    ams_mapping: str | None = None,
 ) -> dict:
     """Reslice a 3D model with custom parameter overrides and immediately print it.
 
@@ -13271,6 +13273,10 @@ def run_reslice_and_print(
         overrides: JSON string of PrusaSlicer INI key-value pairs to override.
         profile_path: Explicit slicer profile. Overrides printer_id auto-selection.
         slicer_path: Explicit path to the slicer binary.
+        use_ams: Enable AMS filament feeding (Bambu printers). If omitted,
+            auto-detected from 3MF metadata.
+        ams_mapping: JSON string of AMS slot indices (e.g. ``"[0, 2]"``).
+            Maps each extruder/filament to an AMS tray position.
     """
     if err := _check_auth("print"):
         return err
@@ -13292,6 +13298,24 @@ def run_reslice_and_print(
                     code="VALIDATION_ERROR",
                 )
 
+        # Parse ams_mapping JSON if provided
+        parsed_ams_mapping: list[int] | None = None
+        if ams_mapping:
+            import json as _json_ams
+
+            try:
+                parsed_ams_mapping = _json_ams.loads(ams_mapping)
+                if not isinstance(parsed_ams_mapping, list):
+                    return _error_dict(
+                        "ams_mapping must be a JSON array of integers (e.g. [0, 2])",
+                        code="VALIDATION_ERROR",
+                    )
+            except _json_ams.JSONDecodeError as exc:
+                return _error_dict(
+                    f"Invalid JSON in ams_mapping: {exc}",
+                    code="VALIDATION_ERROR",
+                )
+
         result = _pipeline_reslice_and_print(
             model_path=model_path,
             printer_name=printer_name,
@@ -13299,6 +13323,8 @@ def run_reslice_and_print(
             overrides=parsed_overrides,
             profile_path=profile_path,
             slicer_path=slicer_path,
+            use_ams=use_ams,
+            ams_mapping=parsed_ams_mapping,
         )
         return {"success": result.success, **result.to_dict()}
     except Exception as exc:
@@ -14564,6 +14590,8 @@ def reprint_with_material(
     printer_name: str | None = None,
     printer_id: str | None = None,
     extra_overrides: str | None = None,
+    use_ams: bool | None = None,
+    ams_mapping: str | None = None,
 ) -> dict:
     """Reprint a model with a different material — auto-adjusts temperatures,
     speeds, and retraction for the new material.
@@ -14584,6 +14612,8 @@ def reprint_with_material(
             material_id="petg",
             printer_name="my_bambu",
             printer_id="bambu_a1",
+            use_ams=True,
+            ams_mapping="[1]",  # PETG is in AMS slot 1
         )
 
     Requires PrusaSlicer or OrcaSlicer installed locally.
@@ -14598,6 +14628,9 @@ def reprint_with_material(
         extra_overrides: Optional JSON string of additional slicer
             overrides to merge on top of the material defaults
             (e.g. ``'{"fill_density": "30%"}'``).
+        use_ams: Enable AMS filament feeding (Bambu printers).
+        ams_mapping: JSON string of AMS slot indices (e.g. ``"[1]"``).
+            Maps each extruder/filament to an AMS tray position.
     """
     if err := _check_auth("print"):
         return err
@@ -14629,6 +14662,8 @@ def reprint_with_material(
             printer_name=printer_name,
             printer_id=printer_id,
             overrides=_json.dumps(overrides),
+            use_ams=use_ams,
+            ams_mapping=ams_mapping,
         )
 
         # Enrich the result with material context
@@ -14645,6 +14680,538 @@ def reprint_with_material(
         logger.exception("Error in reprint_with_material")
         return _error_dict(
             f"Failed to reprint with material: {exc}",
+            code="INTERNAL_ERROR",
+        )
+
+
+@mcp.tool()
+def smart_reprint(
+    file_name: str,
+    material_id: str,
+    printer_name: str | None = None,
+    printer_id: str | None = None,
+    search_dirs: str | None = None,
+    extra_overrides: str | None = None,
+    auto_ams: bool = True,
+) -> dict:
+    """Smart one-shot material-switch reprint — finds the model, detects the
+    right AMS slot, adjusts slicer settings, and prints.
+
+    This is the highest-level reprinting tool. Give it a file name (or
+    partial name) and a target material, and it handles everything:
+
+    1. **Find the model**: Searches print history for the file name, then
+       searches common local directories for the source STL/3MF/STEP file.
+    2. **Check AMS**: Reads AMS tray status to find which slot has the
+       target material loaded. Auto-selects the matching slot.
+    3. **Build overrides**: Generates material-specific slicer overrides
+       (temperature, speed, retraction) for the target material.
+    4. **Reslice + print**: Reslices the model with new settings and
+       starts the print with the correct AMS mapping.
+
+    Example: "Reprint my grip extension in PETG"::
+
+        smart_reprint(
+            file_name="grip_extension",
+            material_id="petg",
+            printer_name="my_bambu",
+            printer_id="bambu_a1",
+        )
+
+    The tool will find ``grip_extension.stl`` on disk, detect that PETG
+    is loaded in AMS slot 1, adjust temps/speeds for PETG, reslice, and
+    start printing — all in one call.
+
+    Args:
+        file_name: Full or partial file name to search for (e.g.
+            ``"grip_extension"`` or ``"grip_extension.stl"``).
+            Searched in print history first, then in local directories.
+        material_id: Target material (e.g. ``"petg"``, ``"tpu"``).
+        printer_name: Registered printer name in fleet.
+        printer_id: Printer model ID for profile selection.
+        search_dirs: Optional JSON array of extra directories to search
+            for the model file (e.g. ``'["/home/user/models"]'``).
+        extra_overrides: Optional JSON string of additional slicer
+            overrides (e.g. ``'{"fill_density": "30%"}'``).
+        auto_ams: If ``True`` (default), automatically detect AMS slot
+            for the target material. Set to ``False`` to skip AMS
+            detection (useful for non-Bambu printers).
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        import glob as _glob
+        import json as _json
+        import os as _os
+
+        steps_log: list[dict[str, Any]] = []
+
+        # ---------------------------------------------------------------
+        # Step 1: Find the source model file
+        # ---------------------------------------------------------------
+        model_extensions = (".stl", ".3mf", ".step", ".stp", ".obj")
+        found_path: str | None = None
+
+        # 1a. Check if file_name is already an absolute path that exists
+        if _os.path.isfile(file_name):
+            found_path = file_name
+            steps_log.append({
+                "step": "find_model",
+                "method": "direct_path",
+                "path": found_path,
+            })
+        else:
+            # 1b. Search common directories
+            default_dirs = [
+                _os.path.expanduser("~/Downloads"),
+                _os.path.expanduser("~/Documents"),
+                _os.path.expanduser("~/Desktop"),
+                _os.path.expanduser("~/models"),
+                _os.path.expanduser("~/3d_prints"),
+                "/tmp",
+            ]
+            if search_dirs:
+                try:
+                    extra_dirs = _json.loads(search_dirs)
+                    if isinstance(extra_dirs, list):
+                        default_dirs = [str(d) for d in extra_dirs] + default_dirs
+                except _json.JSONDecodeError:
+                    pass
+
+            # Strip extension from search name for flexible matching
+            base_name = file_name
+            for ext in model_extensions:
+                if base_name.lower().endswith(ext):
+                    base_name = base_name[: -len(ext)]
+                    break
+
+            candidates: list[tuple[str, float]] = []
+            for search_dir in default_dirs:
+                if not _os.path.isdir(search_dir):
+                    continue
+                for ext in model_extensions:
+                    # Exact match
+                    exact = _os.path.join(search_dir, f"{base_name}{ext}")
+                    if _os.path.isfile(exact):
+                        candidates.append((exact, _os.path.getmtime(exact)))
+                    # Case-insensitive glob
+                    for match in _glob.glob(
+                        _os.path.join(search_dir, f"*{base_name}*{ext}"),
+                    ):
+                        if _os.path.isfile(match):
+                            candidates.append((match, _os.path.getmtime(match)))
+
+            if candidates:
+                # Pick the most recently modified match
+                candidates.sort(key=lambda x: x[1], reverse=True)
+                found_path = candidates[0][0]
+                steps_log.append({
+                    "step": "find_model",
+                    "method": "directory_search",
+                    "path": found_path,
+                    "candidates_found": len(candidates),
+                })
+            else:
+                # 1c. Check print history for file name hints
+                try:
+                    history = print_history(status="completed", limit=50)
+                    if history.get("success") and history.get("records"):
+                        for rec in history["records"]:
+                            rec_name = rec.get("file_name", "")
+                            if base_name.lower() in rec_name.lower():
+                                steps_log.append({
+                                    "step": "find_model",
+                                    "method": "history_match",
+                                    "history_file": rec_name,
+                                    "note": "Found in history but source model not on disk",
+                                })
+                                break
+                except Exception:
+                    pass
+
+        if found_path is None:
+            searched = ", ".join(d for d in default_dirs if _os.path.isdir(d))
+            return _error_dict(
+                f"Could not find model file matching '{file_name}'. "
+                f"Searched directories: {searched}. "
+                f"Provide the full path or add search_dirs.",
+                code="NOT_FOUND",
+            )
+
+        # ---------------------------------------------------------------
+        # Step 2: AMS slot detection (Bambu printers)
+        # ---------------------------------------------------------------
+        detected_ams_mapping: str | None = None
+        detected_use_ams: bool | None = None
+        ams_slot_info: dict[str, Any] | None = None
+
+        if auto_ams:
+            try:
+                ams_result = ams_status()
+                if ams_result.get("status") == "success":
+                    mat_lower = material_id.lower()
+                    # Map common material IDs to AMS tray_type strings
+                    mat_aliases: dict[str, list[str]] = {
+                        "pla": ["PLA"],
+                        "pla_plus": ["PLA", "PLA+", "PLA-S"],
+                        "pla_matte": ["PLA", "PLA-S"],
+                        "pla_tough": ["PLA", "PLA-S"],
+                        "silk_pla": ["PLA", "Silk PLA"],
+                        "wood_pla": ["PLA", "Wood PLA"],
+                        "cf_pla": ["PLA-CF", "PLA"],
+                        "petg": ["PETG"],
+                        "petg_hf": ["PETG", "PETG-HF"],
+                        "cf_petg": ["PETG-CF", "PETG"],
+                        "petg_cf": ["PETG-CF", "PETG"],
+                        "abs": ["ABS"],
+                        "asa": ["ASA"],
+                        "asa_plus": ["ASA"],
+                        "tpu": ["TPU"],
+                        "tpu_95a": ["TPU"],
+                        "tpu_85a": ["TPU"],
+                        "nylon": ["PA", "Nylon"],
+                        "cf_nylon": ["PA-CF", "PA"],
+                        "pa6_gf": ["PA6-GF", "PA"],
+                        "polycarbonate": ["PC"],
+                        "pc_abs": ["PC", "PC-ABS"],
+                        "hips": ["HIPS"],
+                        "pva": ["PVA"],
+                        "pet_cf": ["PET-CF"],
+                    }
+                    expected_types = mat_aliases.get(mat_lower, [mat_lower.upper()])
+
+                    # Scan AMS trays for a matching material
+                    best_slot: int | None = None
+                    best_remain: int = -1
+                    for unit in ams_result.get("units", []):
+                        for tray in unit.get("trays", []):
+                            tray_type = (tray.get("tray_type") or "").strip()
+                            if tray_type in expected_types:
+                                remain = tray.get("remain", 0)
+                                if remain > best_remain:
+                                    best_remain = remain
+                                    best_slot = tray.get("slot", 0)
+                                    ams_slot_info = {
+                                        "slot": best_slot,
+                                        "tray_type": tray_type,
+                                        "color": tray.get("tray_color", ""),
+                                        "remain_pct": remain,
+                                    }
+
+                    if best_slot is not None:
+                        detected_ams_mapping = _json.dumps([best_slot])
+                        detected_use_ams = True
+                        steps_log.append({
+                            "step": "ams_detection",
+                            "found": True,
+                            "slot": best_slot,
+                            "tray_type": ams_slot_info["tray_type"] if ams_slot_info else "",
+                            "remain_pct": best_remain,
+                        })
+                    else:
+                        steps_log.append({
+                            "step": "ams_detection",
+                            "found": False,
+                            "note": (
+                                f"No AMS tray with {material_id.upper()} found. "
+                                "Printing without AMS mapping — load the material "
+                                "in an AMS slot or use the external spool holder."
+                            ),
+                        })
+            except Exception:
+                steps_log.append({
+                    "step": "ams_detection",
+                    "found": False,
+                    "note": "AMS query failed (non-Bambu printer or not connected)",
+                })
+
+        # ---------------------------------------------------------------
+        # Step 3: Delegate to reprint_with_material
+        # ---------------------------------------------------------------
+        result = reprint_with_material(
+            file_path=found_path,
+            material_id=material_id,
+            printer_name=printer_name,
+            printer_id=printer_id,
+            extra_overrides=extra_overrides,
+            use_ams=detected_use_ams,
+            ams_mapping=detected_ams_mapping,
+        )
+
+        # Enrich result with smart_reprint context
+        if isinstance(result, dict):
+            result["smart_reprint_steps"] = steps_log
+            result["model_path"] = found_path
+            if ams_slot_info:
+                result["ams_slot_selected"] = ams_slot_info
+
+        return result
+    except Exception as exc:
+        logger.exception("Error in smart_reprint")
+        return _error_dict(
+            f"Failed in smart_reprint: {exc}",
+            code="INTERNAL_ERROR",
+        )
+
+
+@mcp.tool()
+def multi_material_print(
+    objects_json: str,
+    printer_name: str | None = None,
+    printer_id: str | None = None,
+    auto_ams: bool = True,
+    extra_overrides: str | None = None,
+    slicer_path: str | None = None,
+) -> dict:
+    """Print multiple objects in different materials/colors on one build plate.
+
+    Takes a JSON array of objects, each with a model file and material
+    assignment. Builds a multi-material 3MF file with per-object filament
+    assignments, slices it, auto-maps materials to AMS slots, and prints.
+
+    This is how you print "object A in red PLA, object B in black PETG"
+    in a single print job.
+
+    Example: Print a bracket in PETG and a cover in PLA::
+
+        multi_material_print(
+            objects_json='[
+                {"file_path": "/path/to/bracket.stl", "material_id": "petg"},
+                {"file_path": "/path/to/cover.stl", "material_id": "pla"}
+            ]',
+            printer_name="my_bambu",
+            printer_id="bambu_a1",
+        )
+
+    Each object in the JSON array supports:
+        - ``file_path`` (required): Path to STL/OBJ mesh file.
+        - ``material_id`` (required): Material identifier (e.g. ``"petg"``).
+        - ``name`` (optional): Display name for the object.
+        - ``color`` (optional): Hex color override (e.g. ``"#FF0000"``).
+
+    The tool automatically:
+        1. Looks up each material's properties (temps, colors)
+        2. Builds a multi-object 3MF with per-object material assignments
+        3. Generates merged slicer overrides (uses the highest-temp material)
+        4. Checks AMS slots for matching materials
+        5. Slices and prints with correct AMS mapping
+
+    Requires PrusaSlicer or OrcaSlicer installed locally.
+
+    Args:
+        objects_json: JSON array of objects with ``file_path`` and
+            ``material_id`` keys (see example above).
+        printer_name: Registered printer name in fleet.
+        printer_id: Printer model ID for profile selection.
+        auto_ams: Auto-detect AMS slot mapping (default ``True``).
+        extra_overrides: Additional slicer overrides JSON.
+        slicer_path: Explicit path to slicer binary.
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        import json as _json
+        import os as _os
+        import tempfile
+
+        # Parse input
+        try:
+            objects = _json.loads(objects_json)
+            if not isinstance(objects, list) or not objects:
+                return _error_dict(
+                    "objects_json must be a non-empty JSON array.",
+                    code="VALIDATION_ERROR",
+                )
+        except _json.JSONDecodeError as exc:
+            return _error_dict(
+                f"Invalid JSON in objects_json: {exc}",
+                code="VALIDATION_ERROR",
+            )
+
+        # Validate each object
+        for i, obj in enumerate(objects):
+            if not isinstance(obj, dict):
+                return _error_dict(
+                    f"Object at index {i} must be a JSON object.",
+                    code="VALIDATION_ERROR",
+                )
+            if "file_path" not in obj:
+                return _error_dict(
+                    f"Object at index {i} missing 'file_path'.",
+                    code="VALIDATION_ERROR",
+                )
+            if "material_id" not in obj:
+                return _error_dict(
+                    f"Object at index {i} missing 'material_id'.",
+                    code="VALIDATION_ERROR",
+                )
+            if not _os.path.isfile(obj["file_path"]):
+                return _error_dict(
+                    f"File not found: {obj['file_path']}",
+                    code="NOT_FOUND",
+                )
+
+        # Step 1: Look up material properties for each object
+        from kiln.design_intelligence import get_material_profile
+
+        unique_materials: dict[str, int] = {}  # material_id → filament_index
+        filament_idx = 0
+        build_objects: list[dict[str, Any]] = []
+
+        for obj in objects:
+            mat_id = obj["material_id"].lower()
+            profile = get_material_profile(mat_id)
+            if profile is None:
+                return _error_dict(
+                    f"Unknown material '{obj['material_id']}'.",
+                    code="NOT_FOUND",
+                )
+
+            if mat_id not in unique_materials:
+                unique_materials[mat_id] = filament_idx
+                filament_idx += 1
+
+            # Resolve color — prefer user-specified, then material default
+            color = obj.get("color")
+            if not color:
+                # Use a distinct default color per filament index
+                default_colors = [
+                    "#FFFFFFFF", "#FF0000FF", "#0000FFFF", "#00FF00FF",
+                    "#000000FF", "#FFFF00FF", "#FF00FFFF", "#00FFFFFF",
+                ]
+                color = default_colors[unique_materials[mat_id] % len(default_colors)]
+
+            build_objects.append({
+                "file_path": obj["file_path"],
+                "filament_index": unique_materials[mat_id],
+                "name": obj.get("name", _os.path.basename(obj["file_path"])),
+                "color": color,
+                "material_name": profile.display_name,
+            })
+
+        # Step 2: Build multi-material 3MF
+        from kiln.generation.validation import build_multi_material_3mf
+
+        output_3mf = _os.path.join(tempfile.gettempdir(), "kiln_multi_material.3mf")
+        try:
+            build_multi_material_3mf(build_objects, output_path=output_3mf)
+        except Exception as exc:
+            return _error_dict(
+                f"Failed to build multi-material 3MF: {exc}",
+                code="INTERNAL_ERROR",
+            )
+
+        # Step 3: Build merged overrides (use highest-temp material)
+        max_temp = 0
+        max_bed = 0
+        dominant_mat: str | None = None
+        for mat_id in unique_materials:
+            mat_result = build_material_overrides(mat_id, printer_id)
+            if mat_result.get("success"):
+                ov = mat_result["overrides"]
+                temp = int(ov.get("temperature", "0"))
+                bed = int(ov.get("bed_temperature", "0"))
+                if temp > max_temp:
+                    max_temp = temp
+                    dominant_mat = mat_id
+                if bed > max_bed:
+                    max_bed = bed
+
+        # Use the dominant (highest temp) material's full overrides
+        merged_overrides: dict[str, str] = {}
+        if dominant_mat:
+            dom_result = build_material_overrides(dominant_mat, printer_id)
+            if dom_result.get("success"):
+                merged_overrides = dict(dom_result["overrides"])
+                # Override bed temp with the max across all materials
+                merged_overrides["bed_temperature"] = str(max_bed)
+
+        # Merge extra overrides
+        if extra_overrides:
+            try:
+                extra = _json.loads(extra_overrides)
+                if isinstance(extra, dict):
+                    merged_overrides.update(extra)
+            except _json.JSONDecodeError:
+                pass
+
+        # Step 4: AMS slot mapping
+        ams_mapping_list: list[int] | None = None
+        use_ams_flag: bool | None = None
+        ams_info: list[dict[str, Any]] = []
+
+        if auto_ams:
+            try:
+                ams_result = ams_status()
+                if ams_result.get("status") == "success":
+                    mat_type_map = {
+                        "pla": ["PLA"], "pla_plus": ["PLA", "PLA+"],
+                        "pla_matte": ["PLA"], "pla_tough": ["PLA"],
+                        "petg": ["PETG"], "petg_hf": ["PETG", "PETG-HF"],
+                        "cf_petg": ["PETG-CF"], "abs": ["ABS"],
+                        "asa": ["ASA"], "tpu": ["TPU"],
+                        "tpu_95a": ["TPU"], "tpu_85a": ["TPU"],
+                        "nylon": ["PA", "Nylon"],
+                    }
+
+                    mapping = []
+                    all_found = True
+                    for mat_id in sorted(unique_materials, key=lambda m: unique_materials[m]):
+                        expected = mat_type_map.get(mat_id, [mat_id.upper()])
+                        found_slot: int | None = None
+                        for unit in ams_result.get("units", []):
+                            for tray in unit.get("trays", []):
+                                ttype = (tray.get("tray_type") or "").strip()
+                                if ttype in expected and tray.get("slot") not in mapping:
+                                    found_slot = tray.get("slot", 0)
+                                    ams_info.append({
+                                        "material": mat_id,
+                                        "slot": found_slot,
+                                        "tray_type": ttype,
+                                    })
+                                    break
+                            if found_slot is not None:
+                                break
+                        if found_slot is not None:
+                            mapping.append(found_slot)
+                        else:
+                            all_found = False
+                            break
+
+                    if all_found and mapping:
+                        ams_mapping_list = mapping
+                        use_ams_flag = True
+            except Exception:
+                pass
+
+        # Step 5: Slice and print
+        result = run_reslice_and_print(
+            model_path=output_3mf,
+            printer_name=printer_name,
+            printer_id=printer_id,
+            overrides=_json.dumps(merged_overrides) if merged_overrides else None,
+            slicer_path=slicer_path,
+            use_ams=use_ams_flag,
+            ams_mapping=_json.dumps(ams_mapping_list) if ams_mapping_list else None,
+        )
+
+        # Enrich result
+        if isinstance(result, dict):
+            result["multi_material"] = True
+            result["objects"] = [
+                {"name": o["name"], "material": o["material_name"], "filament_index": o["filament_index"]}
+                for o in build_objects
+            ]
+            result["materials_used"] = list(unique_materials.keys())
+            result["dominant_material"] = dominant_mat
+            result["ams_mapping"] = ams_info if ams_info else None
+            result["multi_material_3mf"] = output_3mf
+
+        return result
+    except Exception as exc:
+        logger.exception("Error in multi_material_print")
+        return _error_dict(
+            f"Failed in multi_material_print: {exc}",
             code="INTERNAL_ERROR",
         )
 

@@ -1091,6 +1091,189 @@ def export_3mf(
     return output_path
 
 
+def build_multi_material_3mf(
+    objects: list[dict[str, Any]],
+    *,
+    output_path: str | None = None,
+) -> str:
+    """Build a 3MF file with multiple objects and per-object filament assignments.
+
+    Each object dict has:
+        ``file_path`` (str): Path to STL/OBJ/GLB mesh file.
+        ``filament_index`` (int): 0-based filament/material index.
+        ``name`` (str, optional): Display name for the object.
+        ``color`` (str, optional): Hex color for the material (e.g. ``"#FF0000"``).
+        ``material_name`` (str, optional): Material name (e.g. ``"PETG"``).
+
+    The resulting 3MF assigns each object to its filament_index via the 3MF
+    ``pid``/``pindex`` mechanism, which PrusaSlicer, OrcaSlicer, and Bambu
+    Studio all understand for multi-material prints.
+
+    Args:
+        objects: List of object dicts with mesh paths and filament assignments.
+        output_path: Output 3MF path. Auto-generated if omitted.
+
+    Returns:
+        Path to the written multi-material 3MF file.
+    """
+    if not objects:
+        raise ValueError("At least one object is required.")
+
+    if output_path is None:
+        output_path = str(
+            Path(objects[0]["file_path"]).parent / "multi_material_print.3mf"
+        )
+
+    # Collect unique filament indices and build material list
+    filament_set: dict[int, dict[str, str]] = {}
+    for obj in objects:
+        fidx = obj.get("filament_index", 0)
+        if fidx not in filament_set:
+            filament_set[fidx] = {
+                "name": obj.get("material_name", f"Material_{fidx}"),
+                "color": obj.get("color", _DEFAULT_COLORS[fidx % len(_DEFAULT_COLORS)]),
+            }
+
+    # Sort by index for deterministic output
+    sorted_filaments = sorted(filament_set.items())
+
+    # Build basematerials XML
+    base_mat_lines = []
+    for _idx, mat in sorted_filaments:
+        color_hex = mat["color"].lstrip("#")
+        if len(color_hex) == 6:
+            color_hex += "FF"
+        base_mat_lines.append(
+            f'      <base name="{mat["name"]}" displaycolor="#{color_hex}" />'
+        )
+
+    # Build per-object mesh XML blocks
+    object_blocks: list[str] = []
+    build_items: list[str] = []
+    obj_id = 1
+
+    for obj in objects:
+        fp = obj["file_path"]
+        if not Path(fp).is_file():
+            raise ValueError(f"Mesh file not found: {fp}")
+        ext = Path(fp).suffix.lower()
+        errors: list[str] = []
+
+        if ext == ".stl":
+            triangles, _verts = _parse_stl(Path(fp), errors)
+        elif ext == ".obj":
+            triangles, _verts = _parse_obj(Path(fp), errors)
+        elif ext == ".glb":
+            triangles, _verts = _parse_glb(Path(fp), errors)
+        else:
+            raise ValueError(f"Unsupported format for multi-material: {ext}")
+
+        if errors:
+            raise ValueError(f"Failed to parse {fp}: {'; '.join(errors)}")
+        if not triangles:
+            raise ValueError(f"File {fp} contains no geometry.")
+
+        # Build indexed vertex list
+        vert_map: dict[tuple[float, ...], int] = {}
+        indexed_verts: list[tuple[float, ...]] = []
+        indexed_tris: list[tuple[int, int, int]] = []
+
+        for tri in triangles:
+            indices = []
+            for v in tri:
+                if v not in vert_map:
+                    vert_map[v] = len(indexed_verts)
+                    indexed_verts.append(v)
+                indices.append(vert_map[v])
+            indexed_tris.append((indices[0], indices[1], indices[2]))
+
+        name = obj.get("name", Path(fp).stem)
+        fidx = obj.get("filament_index", 0)
+
+        # Find the position of this filament_index in sorted_filaments
+        pindex = next(
+            i for i, (idx, _) in enumerate(sorted_filaments) if idx == fidx
+        )
+
+        vert_xml = "\n".join(
+            f'          <vertex x="{v[0]}" y="{v[1]}" z="{v[2]}" />'
+            for v in indexed_verts
+        )
+        tri_xml = "\n".join(
+            f'          <triangle v1="{t[0]}" v2="{t[1]}" v3="{t[2]}" />'
+            for t in indexed_tris
+        )
+
+        object_blocks.append(
+            f'    <object id="{obj_id}" type="model" name="{name}" pid="1" pindex="{pindex}">\n'
+            f"      <mesh>\n"
+            f"        <vertices>\n{vert_xml}\n        </vertices>\n"
+            f"        <triangles>\n{tri_xml}\n        </triangles>\n"
+            f"      </mesh>\n"
+            f"    </object>"
+        )
+        build_items.append(f'    <item objectid="{obj_id}" />')
+        obj_id += 1
+
+    # Assemble full model XML
+    model_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<model unit="millimeter" xml:lang="en-US"\n'
+        '       xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n'
+        "  <resources>\n"
+        '    <basematerials id="1">\n'
+        + "\n".join(base_mat_lines)
+        + "\n"
+        "    </basematerials>\n"
+        + "\n".join(object_blocks)
+        + "\n"
+        "  </resources>\n"
+        "  <build>\n"
+        + "\n".join(build_items)
+        + "\n"
+        "  </build>\n"
+        "</model>"
+    )
+
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
+        '  <Default Extension="model" '
+        'ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml" />\n'
+        '  <Default Extension="rels" '
+        'ContentType="application/vnd.openxmlformats-package.relationships+xml" />\n'
+        "</Types>"
+    )
+
+    rels = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n'
+        '  <Relationship Target="/3D/3dmodel.model" Id="rel0"\n'
+        '                 Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" />\n'
+        "</Relationships>"
+    )
+
+    with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", rels)
+        zf.writestr("3D/3dmodel.model", model_xml)
+
+    return output_path
+
+
+# Default colors for filament indices when no color is specified
+_DEFAULT_COLORS = [
+    "#FFFFFFFF",  # White
+    "#FF0000FF",  # Red
+    "#0000FFFF",  # Blue
+    "#00FF00FF",  # Green
+    "#FFFF00FF",  # Yellow
+    "#FF00FFFF",  # Magenta
+    "#00FFFFFF",  # Cyan
+    "#000000FF",  # Black
+]
+
+
 # ---------------------------------------------------------------------------
 # Connected component analysis
 # ---------------------------------------------------------------------------

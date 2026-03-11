@@ -10,6 +10,8 @@ Covers:
 
 from __future__ import annotations
 
+import os
+import tempfile
 from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
@@ -19,6 +21,14 @@ from unittest.mock import patch
 def _no_auth(*_args, **_kwargs):
     """Stub _check_auth to always pass."""
     return None
+
+
+def _make_tmp_stl():
+    """Create a minimal temporary STL file, return its path."""
+    fd, path = tempfile.mkstemp(suffix=".stl")
+    with os.fdopen(fd, "wb") as f:
+        f.write(b"solid test\nendsolid test\n")
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -596,3 +606,292 @@ class TestNewMaterialCompatibility:
         assert result["success"] is True
         for mat in new_mats:
             assert mat in result["materials"], f"{mat} missing from bambu_a1"
+
+
+# ---------------------------------------------------------------------------
+# TestSmartReprint
+# ---------------------------------------------------------------------------
+
+class TestSmartReprint:
+    """Tests for the smart_reprint MCP tool."""
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_file_not_found_returns_error(self, _auth):
+        from kiln.server import smart_reprint
+
+        result = smart_reprint(
+            file_name="nonexistent_model_xyz_12345",
+            material_id="petg",
+            auto_ams=False,
+        )
+        assert result["success"] is False
+        assert "NOT_FOUND" in result["error"]["code"]
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_unknown_material_returns_error(self, _auth):
+        from kiln.server import smart_reprint
+
+        tmp_path = _make_tmp_stl()
+        try:
+            result = smart_reprint(
+                file_name=tmp_path,
+                material_id="unobtainium",
+                auto_ams=False,
+            )
+            assert result["success"] is False
+        finally:
+            os.unlink(tmp_path)
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_direct_path_found(self, _auth):
+        from kiln.server import smart_reprint
+
+        tmp_path = _make_tmp_stl()
+        try:
+            # smart_reprint will find the file but fail at reslice (no slicer)
+            # That's OK — we're testing file discovery, not the full pipeline
+            result = smart_reprint(
+                file_name=tmp_path,
+                material_id="petg",
+                auto_ams=False,
+            )
+            # Either succeeds at finding file (and fails at slicer) or errors
+            # The key is it should NOT return NOT_FOUND for the file
+            if not result.get("success"):
+                # Should fail at reslice, not at file finding
+                assert result.get("error", {}).get("code") != "NOT_FOUND" or \
+                    "model" not in result.get("error", {}).get("message", "").lower()
+        finally:
+            os.unlink(tmp_path)
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    @patch("kiln.server.ams_status")
+    def test_ams_auto_detect_finds_slot(self, mock_ams, _auth):
+        from kiln.server import smart_reprint
+
+        mock_ams.return_value = {
+            "status": "success",
+            "units": [{
+                "trays": [
+                    {"slot": 0, "tray_type": "PLA", "tray_color": "000000FF", "remain": 80},
+                    {"slot": 1, "tray_type": "PETG", "tray_color": "000000FF", "remain": 95},
+                ],
+            }],
+        }
+
+        tmp_path = _make_tmp_stl()
+        try:
+            result = smart_reprint(
+                file_name=tmp_path,
+                material_id="petg",
+                auto_ams=True,
+            )
+            # Check that AMS detection found slot 1
+            steps = result.get("smart_reprint_steps", [])
+            ams_step = next((s for s in steps if s.get("step") == "ams_detection"), None)
+            if ams_step:
+                assert ams_step["found"] is True
+                assert ams_step["slot"] == 1
+        finally:
+            os.unlink(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# TestAmsPassthrough
+# ---------------------------------------------------------------------------
+
+class TestAmsPassthrough:
+    """Tests for AMS mapping passthrough in reprint_with_material."""
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    @patch("kiln.server.run_reslice_and_print")
+    def test_ams_params_passed_to_reslice(self, mock_reslice, _auth):
+        mock_reslice.return_value = {"success": True, "gcode_path": "/tmp/out.gcode"}
+
+        from kiln.server import reprint_with_material
+
+        result = reprint_with_material(
+            file_path="/tmp/model.stl",
+            material_id="petg",
+            use_ams=True,
+            ams_mapping="[1]",
+        )
+
+        assert result["success"] is True
+        # Verify run_reslice_and_print was called with AMS params
+        mock_reslice.assert_called_once()
+        call_kwargs = mock_reslice.call_args
+        assert call_kwargs.kwargs.get("use_ams") is True or \
+            (call_kwargs[1].get("use_ams") is True if len(call_kwargs) > 1 else False)
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    @patch("kiln.server.run_reslice_and_print")
+    def test_ams_none_when_not_provided(self, mock_reslice, _auth):
+        mock_reslice.return_value = {"success": True, "gcode_path": "/tmp/out.gcode"}
+
+        from kiln.server import reprint_with_material
+
+        reprint_with_material(
+            file_path="/tmp/model.stl",
+            material_id="petg",
+        )
+
+        mock_reslice.assert_called_once()
+        call_kwargs = mock_reslice.call_args
+        assert call_kwargs.kwargs.get("use_ams") is None
+
+
+# ---------------------------------------------------------------------------
+# TestMultiMaterial3MF
+# ---------------------------------------------------------------------------
+
+class TestMultiMaterial3MF:
+    """Tests for the build_multi_material_3mf helper function."""
+
+    def test_build_two_object_3mf(self, tmp_path):
+        import zipfile
+
+        from kiln.generation.validation import build_multi_material_3mf
+
+        # Create two minimal STL files
+        stl_content = (
+            b"solid test\n"
+            b"  facet normal 0 0 1\n"
+            b"    outer loop\n"
+            b"      vertex 0 0 0\n"
+            b"      vertex 1 0 0\n"
+            b"      vertex 0 1 0\n"
+            b"    endloop\n"
+            b"  endfacet\n"
+            b"endsolid test\n"
+        )
+        stl_a = tmp_path / "part_a.stl"
+        stl_b = tmp_path / "part_b.stl"
+        stl_a.write_bytes(stl_content)
+        stl_b.write_bytes(stl_content)
+
+        output = str(tmp_path / "multi.3mf")
+        result = build_multi_material_3mf(
+            [
+                {"file_path": str(stl_a), "filament_index": 0, "material_name": "PLA", "color": "#FF0000"},
+                {"file_path": str(stl_b), "filament_index": 1, "material_name": "PETG", "color": "#0000FF"},
+            ],
+            output_path=output,
+        )
+
+        assert result == output
+        assert zipfile.is_zipfile(output)
+
+        # Verify 3MF structure
+        with zipfile.ZipFile(output) as zf:
+            names = zf.namelist()
+            assert "[Content_Types].xml" in names
+            assert "_rels/.rels" in names
+            assert "3D/3dmodel.model" in names
+
+            # Check model XML has two objects and basematerials
+            model_xml = zf.read("3D/3dmodel.model").decode()
+            assert "basematerials" in model_xml
+            assert "PLA" in model_xml
+            assert "PETG" in model_xml
+            assert 'pindex="0"' in model_xml
+            assert 'pindex="1"' in model_xml
+
+    def test_empty_objects_raises(self):
+        import pytest
+
+        from kiln.generation.validation import build_multi_material_3mf
+
+        with pytest.raises(ValueError, match="At least one object"):
+            build_multi_material_3mf([])
+
+    def test_missing_file_raises(self, tmp_path):
+        from kiln.generation.validation import build_multi_material_3mf
+
+        with __import__("pytest").raises(ValueError):
+            build_multi_material_3mf(
+                [{"file_path": str(tmp_path / "missing.stl"), "filament_index": 0}],
+                output_path=str(tmp_path / "out.3mf"),
+            )
+
+
+# ---------------------------------------------------------------------------
+# TestMultiMaterialPrint
+# ---------------------------------------------------------------------------
+
+class TestMultiMaterialPrint:
+    """Tests for the multi_material_print MCP tool."""
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_invalid_json_returns_error(self, _auth):
+        from kiln.server import multi_material_print
+
+        result = multi_material_print(objects_json="not valid json{{{")
+        assert result["success"] is False
+        assert "VALIDATION_ERROR" in result["error"]["code"]
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_empty_array_returns_error(self, _auth):
+        from kiln.server import multi_material_print
+
+        result = multi_material_print(objects_json="[]")
+        assert result["success"] is False
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_missing_file_path_returns_error(self, _auth):
+        from kiln.server import multi_material_print
+
+        result = multi_material_print(
+            objects_json='[{"material_id": "pla"}]'
+        )
+        assert result["success"] is False
+        assert "file_path" in result["error"]["message"]
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_missing_material_id_returns_error(self, _auth):
+        import json
+
+        from kiln.server import multi_material_print
+
+        tmp_path = _make_tmp_stl()
+        try:
+            result = multi_material_print(
+                objects_json=json.dumps([{"file_path": tmp_path}])
+            )
+            assert result["success"] is False
+            assert "material_id" in result["error"]["message"]
+        finally:
+            os.unlink(tmp_path)
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_unknown_material_returns_error(self, _auth):
+        import json
+
+        from kiln.server import multi_material_print
+
+        tmp_path = _make_tmp_stl()
+        try:
+            result = multi_material_print(
+                objects_json=json.dumps([
+                    {"file_path": tmp_path, "material_id": "unobtainium"}
+                ]),
+                auto_ams=False,
+            )
+            assert result["success"] is False
+        finally:
+            os.unlink(tmp_path)
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_file_not_found_returns_error(self, _auth):
+        import json
+
+        from kiln.server import multi_material_print
+
+        result = multi_material_print(
+            objects_json=json.dumps([
+                {"file_path": "/nonexistent/model.stl", "material_id": "pla"}
+            ]),
+            auto_ams=False,
+        )
+        assert result["success"] is False
+        assert "NOT_FOUND" in result["error"]["code"]

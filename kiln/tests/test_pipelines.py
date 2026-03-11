@@ -882,6 +882,8 @@ class TestRunResliceAndPrintTool:
             overrides={"brim_width": "8", "fill_density": "25%"},
             profile_path=None,
             slicer_path=None,
+            use_ams=None,
+            ams_mapping=None,
         )
 
     @patch("kiln.server._check_auth", return_value=None)
@@ -926,4 +928,6 @@ class TestRunResliceAndPrintTool:
             overrides=None,
             profile_path=None,
             slicer_path=None,
+            use_ams=None,
+            ams_mapping=None,
         )

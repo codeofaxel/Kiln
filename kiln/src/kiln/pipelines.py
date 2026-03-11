@@ -605,6 +605,8 @@ def reslice_and_print(
     slicer_path: str | None = None,
     extra_args: list[str] | None = None,
     pause_after_step: int | None = None,
+    use_ams: bool | None = None,
+    ams_mapping: list[int] | None = None,
 ) -> PipelineResult:
     """Reslice a model with parameter overrides, then upload and print.
 
@@ -841,6 +843,12 @@ def reslice_and_print(
             local_3mf = ctx.get("local_3mf_path")
             if local_3mf:
                 start_kwargs["local_file_path"] = local_3mf
+
+            # Pass AMS parameters if provided by the caller.
+            if use_ams is not None:
+                start_kwargs["use_ams"] = use_ams
+            if ams_mapping is not None:
+                start_kwargs["ams_mapping"] = ams_mapping
 
             adapter.start_print(remote_name, **start_kwargs)
             return PipelineStep(
