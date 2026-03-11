@@ -14504,7 +14504,7 @@ def build_material_overrides(
             overrides.setdefault("infill_speed", "20")
             overrides.setdefault("retract_length", "1.0")
             overrides.setdefault("retract_speed", "20")
-        elif mat_lower in ("abs", "asa", "asa_plus"):
+        elif mat_lower in ("abs", "asa", "asa_plus", "hips"):
             overrides.setdefault("perimeter_speed", "40")
             overrides.setdefault("retract_length", "3.5")
         elif mat_lower in ("nylon", "cf_nylon", "pa6_gf"):
@@ -14533,7 +14533,7 @@ def build_material_overrides(
                     overrides["temperature"] = str(mp.hotend)
                     overrides["first_layer_temperature"] = str(mp.hotend + 5)
                     overrides["bed_temperature"] = str(mp.bed)
-            except (KeyError, Exception):
+            except (KeyError, ValueError, TypeError):
                 pass  # Fall back to material database defaults
 
         return {
