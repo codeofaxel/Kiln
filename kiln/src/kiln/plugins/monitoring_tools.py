@@ -149,7 +149,7 @@ class _PrintWatcher:
         """Return current watcher state (thread-safe snapshot)."""
         with self._lock:
             elapsed = round(time.time() - self._start_time, 1)
-            return {
+            data: dict[str, Any] = {
                 "watch_id": self._watch_id,
                 "printer_name": self._printer_name,
                 "outcome": self._outcome,
@@ -161,6 +161,23 @@ class _PrintWatcher:
                 "finished": self._result is not None,
                 "result": self._result,
             }
+
+        # Cost estimate (outside lock — calls adapter)
+        try:
+            job = self._adapter.get_job()
+            jd = job.to_dict()
+            import kiln.server as _srv
+
+            cost_info = _srv._estimate_print_cost(
+                jd.get("print_time_seconds"),
+                jd.get("print_time_left_seconds"),
+            )
+            if cost_info is not None:
+                data["cost_estimate"] = cost_info
+        except Exception:
+            pass  # Cost is best-effort — don't break status on failure
+
+        return data
 
     # -- internal ----------------------------------------------------------
 
@@ -502,14 +519,13 @@ class _MonitoringToolsPlugin:
             failure_confidence: float | None = None,
             auto_pause: bool | None = None,
         ) -> dict:
-            """Capture a snapshot and printer state for visual inspection of an in-progress print.
+            """Snapshot + structured data for AI visual inspection of an in-progress print.
 
-            Returns the webcam image alongside structured metadata (temperatures,
-            progress, print phase, failure hints) so the agent can visually assess
-            print quality and decide whether to intervene.
-
-            This is the *during-print* counterpart to ``validate_print_quality``
-            (which runs after a print finishes).
+            Use when analyzing camera images for print failures. Returns webcam image
+            (base64 or saved file) alongside structured metadata (temps, progress,
+            phase, cost estimate, failure hints). Can auto-pause on detected issues.
+            For a quick text status report, use ``monitor_print`` instead.
+            For persistent background monitoring, use ``watch_print``.
 
             Args:
                 printer_name: Target printer.  Omit for the default printer.
@@ -635,6 +651,15 @@ class _MonitoringToolsPlugin:
                                 printer_name or "default",
                             )
 
+                # -- Cost estimate -----------------------------------------
+                jd = job.to_dict()
+                cost_info = _srv._estimate_print_cost(
+                    jd.get("print_time_seconds"),
+                    jd.get("print_time_left_seconds"),
+                )
+                if cost_info is not None:
+                    result["cost_estimate"] = cost_info
+
                 # Publish vision check event
                 _srv._event_bus.publish(
                     EventType.VISION_CHECK,
@@ -687,13 +712,16 @@ class _MonitoringToolsPlugin:
             stall_timeout: int = 600,
             save_to_disk: bool = False,
         ) -> dict:
-            """Start background monitoring of an in-progress print.
+            """Start persistent background monitoring thread for long unattended prints.
+
+            Returns immediately with a ``watch_id`` — monitoring runs in background.
+            Use ``watch_print_status`` to check progress, ``stop_watch_print`` to cancel.
+            For one-shot status, use ``monitor_print``. For AI vision inspection,
+            use ``monitor_print_vision``.
 
             Launches a background thread that polls the printer state every
             *poll_interval* seconds and captures webcam snapshots every
-            *snapshot_interval* seconds.  Returns immediately with a
-            ``watch_id`` that can be used with ``watch_print_status`` and
-            ``stop_watch_print``.
+            *snapshot_interval* seconds.
 
             The watcher finishes automatically when:
 

@@ -1583,15 +1583,16 @@ except Exception:
 
 @mcp.tool()
 def printer_status() -> dict:
-    """Get the current printer state, temperatures, and active job progress.
+    """Get full printer state, temperatures, job progress, and capabilities (detailed).
 
-    Returns a JSON object with:
+    Returns a comprehensive JSON object with:
     - ``printer``: connection status, operational state, tool/bed temperatures
     - ``job``: current file name, completion percentage, elapsed and remaining time
     - ``capabilities``: what this printer backend supports
 
-    Use this as the first call to understand what the printer is doing before
-    taking any action.
+    Use this as the first call to understand what the printer is doing.
+    For lightweight polling during prints, use ``print_status_lite`` instead
+    (fewer tokens, accepts printer name).
     """
     try:
         adapter = _get_adapter()
@@ -1735,12 +1736,13 @@ def monitor_print(
     printer_name: str | None = None,
     include_snapshot: bool = True,
 ) -> str:
-    """Monitor a print job with a standardized status report.
+    """One-shot print status report (human-readable text: progress, temps, speed, cost, ETA).
 
-    Returns a fixed-format human-readable report with print progress,
-    temperatures, speed, errors, camera snapshot, and health commentary.
-    Use this tool whenever monitoring a print — it ensures consistent
-    output format across all agents.
+    Use for quick status checks. Returns a fixed-format text report with
+    progress, temps, speed, errors, cost estimate, camera snapshot, and
+    health commentary. For structured data + AI vision inspection, use
+    ``monitor_print_vision``. For persistent background monitoring, use
+    ``watch_print``.
 
     :param printer_name: Target printer name.  Omit for the default printer.
     :param include_snapshot: Whether to capture and save a camera snapshot.
@@ -2223,11 +2225,12 @@ def start_print(
     bed_type: str = "auto",
     plate_number: int = 1,
 ) -> dict:
-    """Start printing a file that already exists on the printer.
+    """Start printing a file already uploaded to the printer (file must exist on printer).
 
-    Automatically runs pre-flight safety checks before starting.  If any
-    check fails the print is blocked and the check results are returned
-    so the agent can diagnose and fix the issue.
+    Use ``upload_file`` first, or use ``slice_and_print`` / ``run_quick_print``
+    to slice + upload + print in one step. Automatically runs pre-flight safety
+    checks before starting.  If any check fails the print is blocked and the
+    check results are returned so the agent can diagnose and fix the issue.
 
     Args:
         file_name: Name or path of the file as shown by ``printer_files()``.
@@ -2400,13 +2403,12 @@ def cancel_print() -> dict:
 
 @mcp.tool()
 def run_calibration(options: list[str] | None = None) -> dict:
-    """Run printer calibration (bed leveling, Z offset, vibration compensation).
+    """Send calibration commands directly to the printer (adapter-level, specific options).
 
-    Sends calibration commands via MQTT (Bambu) or G-code
-    (OctoPrint/Moonraker) automatically.
-
-    Triggers calibration routines on the connected printer.  The printer
-    must be idle -- calibration cannot run during a print.
+    For a full guided calibration pipeline (home + bed level + intelligence
+    guidance), use ``run_calibrate`` instead. Sends calibration commands via
+    MQTT (Bambu) or G-code (OctoPrint/Moonraker) automatically. The printer
+    must be idle — calibration cannot run during a print.
 
     Available options (printer-specific -- not all printers support all):
     - ``"bed_leveling"``: Auto bed mesh probing and Z offset calibration
@@ -3769,7 +3771,10 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
 
 @mcp.tool()
 def validate_gcode(commands: str) -> dict:
-    """Validate G-code commands without sending them to the printer.
+    """Validate G-code syntax and basic safety (generic, no printer-specific limits).
+
+    For printer-specific safety validation (PTFE temp caps, speed limits),
+    use ``validate_gcode_safe`` with a ``printer_id`` instead.
 
     Args:
         commands: One or more G-code commands separated by newlines.
@@ -4026,8 +4031,10 @@ def safety_status() -> dict:
 @mcp.tool()
 @requires_tier(LicenseTier.PRO)
 def fleet_status() -> dict:
-    """Get the status of all registered printers in the fleet.
+    """Get live status of all fleet printers (state, temps, connection — current snapshot).
 
+    For historical analytics (success rates, throughput), use ``fleet_analytics``.
+    For grouping by physical location, use ``fleet_status_by_site``.
     Returns a list of printer snapshots including name, backend type,
     connection status, operational state, and temperatures.  Printers
     that fail to respond are reported as offline rather than raising.
@@ -4088,8 +4095,9 @@ def fleet_status() -> dict:
 @mcp.tool()
 @requires_tier(LicenseTier.PRO)
 def fleet_analytics() -> dict:
-    """Get fleet-wide analytics: per-printer success rates, utilization, and job throughput.
+    """Get fleet historical analytics: per-printer success rates, utilization, job throughput.
 
+    For live printer status (current state/temps), use ``fleet_status``.
     Returns statistics for every registered printer including total prints,
     success rate, average print duration, and total print hours.  Also
     includes fleet-wide aggregate metrics.
@@ -6529,8 +6537,10 @@ def slice_and_print(
     printer_id: str | None = None,
     material: str | None = None,
 ) -> dict:
-    """Slice a 3D model and immediately upload + print it in one step.
+    """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
 
+    For a more comprehensive pipeline with validation and profile auto-detection,
+    use ``run_quick_print``. For custom slicer overrides, use ``run_reslice_and_print``.
     Automatically analyzes bed adhesion and adds brim/raft when needed
     based on model geometry, material warp tendency, and printer type.
     This adhesion intelligence only activates when no custom profile is
@@ -6822,10 +6832,11 @@ def estimate_cost(
 
 @mcp.tool()
 def list_materials() -> dict:
-    """List available filament material profiles.
+    """List built-in filament material profiles (density, cost, temps).
 
-    Returns built-in profiles for common materials including density,
-    cost per kg, and recommended temperatures.
+    Returns Kiln's bundled material database — NOT what is physically loaded.
+    For loaded material, use ``get_material`` (software tracker) or
+    ``get_active_material`` (live AMS hardware query).
     """
     materials = _cost_estimator.materials
     return {
@@ -6874,7 +6885,10 @@ def set_material(
 
 @mcp.tool()
 def get_material(printer_name: str | None = None) -> dict:
-    """Get the material loaded in a printer.
+    """Get material loaded in a printer (from Kiln's software tracker).
+
+    Returns what the user/agent told Kiln is loaded via ``set_material``.
+    For live AMS hardware reading (Bambu Lab), use ``get_active_material``.
 
     Args:
         printer_name: Target printer.  Omit for the default printer.
@@ -8717,7 +8731,12 @@ def generate_model(
     format: str = "stl",
     style: str | None = None,
 ) -> dict:
-    """Generate a 3D model from a text description.
+    """Generate a 3D model from a text prompt via external AI API (Meshy/etc).
+
+    Start here if user has no template/image — just a text description.
+    For image-based generation, use ``generate_model_from_image``.
+    For parametric templates (local, no AI API needed), use ``generate_from_template``.
+    To also slice + upload in one step, use ``generate_and_print``.
 
     **EXPERIMENTAL:** AI-generated 3D models are experimental and may not
     be suitable for printing without manual review.  Generated geometry
@@ -9469,8 +9488,10 @@ def generate_from_template(
     template_id: str,
     parameters: dict | None = None,
 ) -> dict:
-    """Generate a 3D model from a parametric design template.
+    """Generate a 3D model from a parametric template with explicit parameters (local, no AI API).
 
+    Use when you know which template and parameter values to use. For AI-assisted
+    parameter inference + structural analysis, use ``smart_generate_from_template``.
     Renders the template's OpenSCAD code with custom parameter values
     into a printable STL.  Use ``list_design_templates`` to see
     available templates and their parameters.
@@ -9557,9 +9578,10 @@ def smart_generate_from_template(
     material: str = "PLA",
     auto_reinforce: bool = False,
 ) -> dict:
-    """Generate a model from a template with full structural analysis + print settings.
+    """Generate from template + structural analysis + print settings (recommended for functional parts).
 
-    This is the **one-step design-to-print-ready** pipeline:
+    Higher-level than ``generate_from_template`` — adds structural risk analysis
+    and auto-reinforcement. This is the **one-step design-to-print-ready** pipeline:
 
     1. Generates STL from a parametric template (like ``generate_from_template``)
     2. Runs structural risk analysis (thin necks, cantilevers, sharp corners)
@@ -9664,10 +9686,12 @@ def analyze_mesh_geometry(file_path: str) -> dict:
 
 @mcp.tool()
 def repair_mesh(file_path: str, output_path: str = "") -> dict:
-    """Repair common mesh issues: degenerate triangles, bad normals.
+    """Basic mesh repair: fix degenerate triangles and bad normals (fast, safe).
 
-    Removes zero-area triangles and recomputes face normals.  Use
-    this on meshes from AI generation providers before slicing.
+    For deeper repair with hole closing and boundary edge fixes, use
+    ``repair_mesh_advanced``. Removes zero-area triangles and recomputes
+    face normals.  Use this on meshes from AI generation providers before
+    slicing.
 
     :param file_path: Path to the STL file to repair.
     :param output_path: Output path.  Defaults to overwriting the input.
@@ -10017,10 +10041,12 @@ def repair_mesh_advanced(
     output_path: str = "",
     close_holes: bool = True,
 ) -> dict:
-    """Advanced mesh repair: degenerate removal + hole closing.
+    """Deep mesh repair: degenerate removal + hole closing + boundary edge fixes.
 
-    Goes beyond basic repair by finding boundary edges (edges shared
-    by only one triangle) and closing small holes via fan triangulation.
+    Use when ``repair_mesh`` (basic) is not enough — e.g. mesh has open
+    holes or boundary edges.  Goes beyond basic repair by finding boundary
+    edges (edges shared by only one triangle) and closing small holes via
+    fan triangulation.
 
     :param file_path: Path to the STL file.
     :param output_path: Output path.  Defaults to overwriting the input.
@@ -10135,7 +10161,7 @@ def generate_template_variations(
 
 @mcp.tool()
 def design_advisor(prompt: str, printer_model: str = "") -> dict:
-    """Recommend the best approach for creating a 3D printable design.
+    """Ask which generation method to use for a design idea (triage tool — call FIRST).
 
     Analyzes the design prompt and recommends:
     - Which generation approach to use (template, OpenSCAD, or AI)
@@ -11188,7 +11214,7 @@ def plan_design_from_description(
     target_size_mm: float = 50.0,
     material: str = "PLA",
 ) -> dict:
-    """Convert a natural language description into a CSG composition plan.
+    """Convert a natural language description into a CSG composition plan (planning only, no STL output).
 
     Rule-based keyword parser (no LLM required). Scans the description
     for shape keywords (cube, cylinder, sphere, etc.) and operation
@@ -11339,8 +11365,10 @@ def merge_stl(
     output_path: str,
     positions: str = "",
 ) -> dict:
-    """Merge multiple STL files into a single mesh.
+    """Merge multiple STL files into a single mesh (supports positional offsets).
 
+    Use this when you need to position parts relative to each other.
+    For simple concatenation without positioning, ``merge_mesh_files`` also works.
     Combines triangle data from multiple STL files into one output file.
     Optionally translates each part to a specified position before merging.
 
@@ -11545,8 +11573,9 @@ def merge_mesh_files(
     file_paths: list[str],
     output_path: str,
 ) -> dict:
-    """Combine multiple STL files into a single mesh file.
+    """Combine multiple STL files into a single mesh file (simple concatenation).
 
+    For positioning parts with x/y/z offsets, use ``merge_stl`` instead.
     Useful for composing multi-part designs into one printable file.
 
     :param file_paths: List of STL file paths to merge.
@@ -11629,10 +11658,12 @@ def estimate_mesh_print_time(
 
 @mcp.tool()
 def firmware_status() -> dict:
-    """Check for available firmware updates on the printer.
+    """Check firmware updates on the default/connected printer (adapter-level, no name needed).
 
-    Returns a list of firmware components (e.g. Klipper, Moonraker,
-    OctoPrint) with their current and available versions, plus whether
+    For fleet setups where you need to check a specific printer by name,
+    use ``check_firmware_status`` instead.  Returns a list of firmware
+    components (e.g. Klipper, Moonraker, OctoPrint) with current and
+    available versions, plus whether
     an update is available.
 
     Not all printer backends support firmware updates.  Bambu and
@@ -11674,8 +11705,10 @@ def firmware_status() -> dict:
 
 @mcp.tool()
 def update_firmware(component: str | None = None) -> dict:
-    """Start a firmware update on the printer.
+    """Start a firmware update on the default/connected printer (adapter-level, by component).
 
+    For fleet setups where you need to update a specific printer by name
+    or pin a target version, use ``update_printer_firmware`` instead.
     For Moonraker printers, this triggers the Klipper update manager.
     For OctoPrint printers, this uses the Software Update plugin.
 
@@ -11711,8 +11744,10 @@ def update_firmware(component: str | None = None) -> dict:
 
 @mcp.tool()
 def rollback_firmware(component: str) -> dict:
-    """Roll back a firmware component to its previous version.
+    """Roll back firmware on the default/connected printer (adapter-level, by component).
 
+    For fleet setups where you need to rollback a specific printer by name
+    or target a specific version, use ``rollback_printer_firmware`` instead.
     Only supported on Moonraker printers.  The component must have a
     known rollback version (check ``firmware_status``).
 
@@ -11869,14 +11904,13 @@ def monitor_print_vision(
     failure_confidence: float | None = None,
     auto_pause: bool | None = None,
 ) -> dict:
-    """Capture a snapshot and printer state for visual inspection of an in-progress print.
+    """Snapshot + structured data for AI visual inspection of an in-progress print.
 
-    Returns the webcam image alongside structured metadata (temperatures,
-    progress, print phase, failure hints) so the agent can visually assess
-    print quality and decide whether to intervene.
-
-    This is the *during-print* counterpart to ``validate_print_quality``
-    (which runs after a print finishes).
+    Use when analyzing camera images for print failures. Returns webcam image
+    (base64 or saved file) alongside structured metadata (temps, progress,
+    phase, cost estimate, failure hints). Can auto-pause on detected issues.
+    For a quick text status report, use ``monitor_print`` instead.
+    For persistent background monitoring, use ``watch_print``.
 
     Args:
         printer_name: Target printer.  Omit for the default printer.
@@ -11989,6 +12023,15 @@ def monitor_print_vision(
                         pause_exc,
                         printer_name or "default",
                     )
+
+        # -- Cost estimate -------------------------------------------------
+        jd = job.to_dict()
+        cost_info = _estimate_print_cost(
+            jd.get("print_time_seconds"),
+            jd.get("print_time_left_seconds"),
+        )
+        if cost_info is not None:
+            result["cost_estimate"] = cost_info
 
         # Publish vision check event
         _event_bus.publish(
@@ -12939,11 +12982,11 @@ def validate_gcode_safe(
     commands: str,
     printer_id: str = "",
 ) -> dict:
-    """Validate G-code commands with optional printer-specific safety limits.
+    """Validate G-code with printer-specific safety limits (PTFE temp caps, speed limits).
 
-    When *printer_id* is provided, uses that printer's safety profile
-    (tighter limits for PTFE hotends, higher limits for high-speed
-    printers, etc.).  Without a printer_id, uses conservative defaults.
+    Preferred over ``validate_gcode`` when you know the target printer — uses
+    that printer's safety profile for accurate limits.  Without a printer_id,
+    falls back to conservative generic defaults.
 
     Args:
         commands: G-code commands separated by newlines.
@@ -13100,10 +13143,11 @@ def get_material_recommendation(
     printer_id: str,
     material: str,
 ) -> dict:
-    """Get recommended print settings for a specific material on a specific printer.
+    """Get printer-specific slicer settings for a material you have already chosen.
 
-    Returns hotend temperature, bed temperature, fan speed, and
-    material-specific tips.
+    Use AFTER selecting a material — returns hotend/bed temps, fan speed, and
+    tips tuned to a specific printer model. For help choosing which material
+    to use, see ``recommend_material`` or ``recommend_design_material``.
 
     Args:
         printer_id: Printer model identifier.
@@ -13203,9 +13247,11 @@ def run_quick_print(
     printer_id: str | None = None,
     profile_path: str | None = None,
 ) -> dict:
-    """Slice → validate → upload → print in one shot.
+    """Full print pipeline: slice + validate + upload + print (recommended one-shot tool).
 
-    The full quick-print pipeline:
+    Preferred over ``slice_and_print`` — adds G-code validation and auto-detects
+    bundled slicer profiles. For custom slicer parameter overrides, use
+    ``run_reslice_and_print`` instead. The full quick-print pipeline:
     1. Resolve slicer profile (bundled, by printer_id)
     2. Slice the model to G-code
     3. Safety-validate the G-code against printer limits
@@ -13246,11 +13292,12 @@ def run_reslice_and_print(
     use_ams: bool | None = None,
     ams_mapping: str | None = None,
 ) -> dict:
-    """Reslice a 3D model with custom parameter overrides and immediately print it.
+    """Reslice with custom slicer overrides + print (use for retries with adjusted settings).
 
+    Use this when you need to tweak slicer parameters (speed, brim, infill, temps).
+    For standard prints without overrides, use ``run_quick_print`` instead.
     One-shot pipeline: resolve profile with overrides → slice → safety check →
-    upload to printer → start print. Use this when a previous print failed and
-    you need to retry with adjusted settings (e.g., stronger brim, lower speed).
+    upload to printer → start print.
 
     The overrides parameter is a JSON string of PrusaSlicer INI key-value pairs:
       {"brim_width": "8", "perimeter_speed": "30", "fill_density": "25%"}
@@ -13475,11 +13522,12 @@ def run_calibrate(
     printer_name: str | None = None,
     printer_id: str | None = None,
 ) -> dict:
-    """Run a printer calibration sequence: home → bed level → guidance.
+    """Full calibration pipeline: home + bed level + printer-specific guidance (recommended).
 
-    Performs physical calibration steps (homing, auto bed leveling) and
-    returns printer-specific calibration guidance from the intelligence
-    database.
+    Higher-level than ``run_calibration`` — orchestrates the full sequence and
+    returns intelligence-based calibration tips. Performs physical calibration
+    steps (homing, auto bed leveling) and returns printer-specific calibration
+    guidance from the intelligence database.
 
     Args:
         printer_name: Registered printer name.
@@ -14189,10 +14237,11 @@ def find_material_substitute(
     reason: str | None = None,
     min_score: float = 0.5,
 ) -> dict:
-    """Find substitute filament materials when your preferred material is unavailable.
+    """Find substitute filament materials when your preferred material is unavailable (returns ranked list).
 
     Checks a built-in knowledge base of FDM filament compatibility and returns
-    ranked alternatives with trade-off descriptions.
+    ranked alternatives with trade-off descriptions.  For a single best match,
+    use ``get_best_material_substitute`` instead.
 
     Args:
         material: The original filament material (e.g. "PLA", "PETG", "ABS").
@@ -14230,7 +14279,10 @@ def find_material_substitute(
 
 @mcp.tool()
 def get_best_material_substitute(material: str) -> dict:
-    """Get the single best substitute for a filament material.
+    """Get the single best substitute for a filament material (quick shortcut).
+
+    Returns one top-ranked alternative. For a full ranked list with trade-off
+    details and filtering, use ``find_material_substitute`` instead.
 
     Args:
         material: The original filament material (e.g. "PLA", "PETG").
@@ -15685,9 +15737,10 @@ def fleet_job_status(job_id: str) -> dict:
 
 @mcp.tool()
 def fleet_utilization() -> dict:
-    """Get fleet utilization metrics across all registered printers.
+    """Get fleet utilization metrics — busy/idle/offline counts and utilization %.
 
-    Returns busy/idle/offline counts and utilization percentage.
+    Lightweight overview of fleet capacity. For full printer details, use
+    ``fleet_status``. For historical analytics, use ``fleet_analytics``.
     """
     try:
         from kiln.fleet_orchestrator import get_fleet_orchestrator
@@ -15957,7 +16010,10 @@ def get_fulfillment_quote_cached(
 
 @mcp.tool()
 def check_firmware_status(printer_name: str) -> dict:
-    """Check firmware version and update availability for a printer.
+    """Check firmware version for a specific printer by name (fleet-level, firmware manager).
+
+    Use this in multi-printer setups. For single-printer setups where you
+    don't need to specify a name, use ``firmware_status`` instead.
 
     Args:
         printer_name: Printer to check.
@@ -15979,7 +16035,9 @@ def update_printer_firmware(
     *,
     target_version: str | None = None,
 ) -> dict:
-    """Start a firmware update on a printer.
+    """Start a firmware update on a specific printer by name (fleet-level, supports version pinning).
+
+    Use this in multi-printer setups. For single-printer setups, use ``update_firmware`` instead.
 
     Args:
         printer_name: Printer to update.
@@ -16005,7 +16063,9 @@ def rollback_printer_firmware(
     *,
     target_version: str | None = None,
 ) -> dict:
-    """Rollback printer firmware to a previous version.
+    """Rollback firmware on a specific printer by name (fleet-level, supports version pinning).
+
+    Use this in multi-printer setups. For single-printer setups, use ``rollback_firmware`` instead.
 
     Args:
         printer_name: Printer to rollback.
@@ -16032,12 +16092,13 @@ def rollback_printer_firmware(
 
 @mcp.tool()
 def print_status_lite(printer_name: str | None = None) -> dict:
-    """Lightweight print status for efficient agent polling.
+    """Lightweight print status — minimal fields for efficient agent polling.
 
-    Returns only the essential fields an agent needs to monitor a print:
-    state, completion percentage, and estimated time remaining.  Use this
-    instead of ``get_printer_status`` when polling frequently to minimise
-    token cost.
+    Returns only state, completion %, file name, ETA, and temps.
+    Use this for frequent polling during prints. For full detail
+    (capabilities, all flags, full job data), use ``printer_status``.
+    For a formatted text report with cost estimate and health commentary,
+    use ``monitor_print``.
 
     Args:
         printer_name: Target printer.  Omit for the default printer.

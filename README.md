@@ -61,7 +61,7 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 ### Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link. Manage a mixed fleet from one place.
-- **AI-native** — 411 MCP tools built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — 405 MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
 - **Search → Slice → Print** — Search and download 3D models from Thingiverse, MyMiniFactory, and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
 - **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
@@ -460,7 +460,7 @@ pip install kiln3d[rest]
 
 When binding REST to non-localhost addresses (for hosted deployments), set `KILN_API_AUTH_TOKEN` or pass `--auth-token`.
 
-Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 411 tools are available via MCP (`kiln serve`).
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 405 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -479,7 +479,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **411 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **405 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
 
 | Tool | Description |
 |------|-------------|
@@ -606,12 +606,6 @@ The Kiln MCP server (`kiln serve`) exposes **411 tools** to agents. Key tools ar
 | `find_provider_capacity` | Search connected provider capacity by material/location *(as integrations launch)* |
 | `submit_provider_job` | Submit a print job through a connected provider integration *(as integrations launch)* |
 | `provider_job_status` | Check status of a provider-managed job *(as integrations launch)* |
-| `network_register_printer` | Legacy compatibility alias for `connect_provider_account` *(deprecated v0.2.0; remove v0.4.0)* |
-| `network_update_printer` | Legacy compatibility alias for `sync_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
-| `network_list_printers` | Legacy compatibility alias for `list_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
-| `network_find_printers` | Legacy compatibility alias for `find_provider_capacity` *(deprecated v0.2.0; remove v0.4.0)* |
-| `network_submit_job` | Legacy compatibility alias for `submit_provider_job` *(deprecated v0.2.0; remove v0.4.0)* |
-| `network_job_status` | Legacy compatibility alias for `provider_job_status` *(deprecated v0.2.0; remove v0.4.0)* |
 | `billing_status` | Get billing status, fee policy, and payment methods |
 | `billing_summary` | Aggregated billing summary |
 | `billing_history` | Recent billing charges and payment outcomes |

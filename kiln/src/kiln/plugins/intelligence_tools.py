@@ -412,7 +412,11 @@ class _IntelligenceToolsPlugin:
             has_heated_bed: bool = True,
             budget_usd: float | None = None,
         ) -> dict:
-            """Recommend a 3D printing material based on user intent.
+            """Recommend material from intent + printer capabilities (considers enclosure, bed, budget).
+
+            Uses printer DNA + historical data. For non-technical consumer use cases,
+            use the consumer plugin's ``recommend_material``. For engineering/functional
+            parts, use ``recommend_design_material``.
 
             Translates natural language intent (e.g. ``"make it strong"``,
             ``"make it pretty"``, ``"make it cheap"``) into an optimal

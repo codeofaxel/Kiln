@@ -38,7 +38,11 @@ class _MaterialToolsPlugin:
         def get_active_material(
             printer_name: str | None = None,
         ) -> dict:
-            """Return the filament currently loaded and active on the printer.
+            """Get the filament physically active in the AMS hardware right now (Bambu Lab).
+
+            Reads live tray data from the AMS hardware. For the software-tracked
+            material (what was told to Kiln via ``set_material``), use
+            ``get_material`` instead.
 
             For Bambu Lab printers with an AMS, reads the active tray and
             returns its type, colour, remaining percentage, and temperature

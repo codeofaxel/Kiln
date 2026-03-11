@@ -38,12 +38,15 @@ class _MeshDiagnosticToolsPlugin:
         def diagnose_mesh(
             file_path: str,
         ) -> dict:
-            """Run advanced mesh diagnostics to detect defects that basic validation misses.
+            """Deep mesh defect analysis — self-intersections, holes, normals, fragments (defect-focused).
 
-            Analyzes a 3D mesh file for: self-intersections, inverted/inconsistent
-            normals, degenerate (zero-area) faces, floating fragments (disconnected
-            components), detailed hole reporting (count, size, location), and polygon
-            count assessment for FDM printing.
+            Goes deeper than ``analyze_mesh_geometry`` (which focuses on printability
+            scoring and overhang detection). Use this when you suspect mesh defects
+            or when ``repair_mesh`` didn't fix the issue.
+
+            Analyzes: self-intersections, inverted/inconsistent normals, degenerate
+            (zero-area) faces, floating fragments, detailed hole reporting (count,
+            size, location), and polygon count assessment for FDM printing.
 
             Returns a structured report with severity level, defect list, and
             actionable fix recommendations (specific MeshLab/Blender steps).

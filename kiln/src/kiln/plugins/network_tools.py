@@ -9,11 +9,7 @@ Canonical tools are provider-oriented and integration-scoped:
 - ``submit_provider_job``
 - ``provider_job_status``
 
-Legacy ``network_*`` tool names remain available as compatibility aliases.
-They return explicit deprecation metadata:
-
-- Deprecated in: ``v0.2.0``
-- Removal target: ``v0.4.0``
+Legacy ``network_*`` aliases were removed in v0.4.1 (deprecated since v0.2.0).
 """
 
 from __future__ import annotations
@@ -34,18 +30,7 @@ class _NetworkToolsPlugin:
         - find_provider_capacity
         - submit_provider_job
         - provider_job_status
-
-    Legacy aliases:
-        - network_register_printer
-        - network_update_printer
-        - network_list_printers
-        - network_find_printers
-        - network_submit_job
-        - network_job_status
     """
-
-    _DEPRECATION_VERSION = "v0.2.0"
-    _REMOVAL_TARGET = "v0.4.0"
 
     @property
     def name(self) -> str:
@@ -53,31 +38,10 @@ class _NetworkToolsPlugin:
 
     @property
     def description(self) -> str:
-        return "Partner-provider integration tools (with legacy network_* aliases)"
+        return "Partner-provider integration tools (3DOS-backed)"
 
     def register(self, mcp: Any) -> None:
         """Register provider integration tools with the MCP server."""
-
-        def _deprecated_alias(
-            result: dict,
-            *,
-            old_name: str,
-            new_name: str,
-        ) -> dict:
-            """Attach deprecation metadata for legacy network_* aliases."""
-            out = dict(result)
-            out["deprecated"] = {
-                "tool": old_name,
-                "replacement": new_name,
-                "deprecated_in": self._DEPRECATION_VERSION,
-                "removal_target": self._REMOVAL_TARGET,
-                "message": (
-                    f"{old_name} is deprecated; use {new_name}. "
-                    f"Deprecated in {self._DEPRECATION_VERSION}, "
-                    f"removal target {self._REMOVAL_TARGET}."
-                ),
-            }
-            return out
 
         @mcp.tool()
         def connect_provider_account(
@@ -278,79 +242,7 @@ class _NetworkToolsPlugin:
                 _logger.exception("Unexpected error in provider_job_status")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
-        # -------------------------------------------------------------------
-        # Legacy network_* aliases (deprecated; compatibility window only)
-        # -------------------------------------------------------------------
-
-        @mcp.tool()
-        def network_register_printer(
-            name: str,
-            location: str,
-            capabilities: dict[str, Any] | None = None,
-            price_per_gram: float | None = None,
-        ) -> dict:
-            return _deprecated_alias(
-                connect_provider_account(
-                    name=name,
-                    location=location,
-                    capabilities=capabilities,
-                    price_per_gram=price_per_gram,
-                ),
-                old_name="network_register_printer",
-                new_name="connect_provider_account",
-            )
-
-        @mcp.tool()
-        def network_update_printer(printer_id: str, available: bool) -> dict:
-            return _deprecated_alias(
-                sync_provider_capacity(printer_id=printer_id, available=available),
-                old_name="network_update_printer",
-                new_name="sync_provider_capacity",
-            )
-
-        @mcp.tool()
-        def network_list_printers() -> dict:
-            return _deprecated_alias(
-                list_provider_capacity(),
-                old_name="network_list_printers",
-                new_name="list_provider_capacity",
-            )
-
-        @mcp.tool()
-        def network_find_printers(material: str, location: str | None = None) -> dict:
-            return _deprecated_alias(
-                find_provider_capacity(material=material, location=location),
-                old_name="network_find_printers",
-                new_name="find_provider_capacity",
-            )
-
-        @mcp.tool()
-        def network_submit_job(
-            file_url: str,
-            material: str,
-            printer_id: str | None = None,
-        ) -> dict:
-            return _deprecated_alias(
-                submit_provider_job(
-                    file_url=file_url,
-                    material=material,
-                    printer_id=printer_id,
-                ),
-                old_name="network_submit_job",
-                new_name="submit_provider_job",
-            )
-
-        @mcp.tool()
-        def network_job_status(job_id: str) -> dict:
-            return _deprecated_alias(
-                provider_job_status(job_id=job_id),
-                old_name="network_job_status",
-                new_name="provider_job_status",
-            )
-
-        _logger.debug(
-            "Registered provider integration tools with legacy network_* aliases"
-        )
+        _logger.debug("Registered provider integration tools")
 
 
 plugin = _NetworkToolsPlugin()

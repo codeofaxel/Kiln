@@ -303,7 +303,10 @@ class _DesignToolsPlugin:
             printer_has_direct_drive: bool = True,
             max_hotend_temp_c: int = 300,
         ) -> dict:
-            """Recommend the best material for a design task.
+            """Recommend material for engineering/functional parts (strength, heat, environment).
+
+            Use this for design briefs and functional requirements. For non-technical
+            consumer use cases, use the consumer plugin's ``recommend_material``.
 
             Analyzes functional requirements and recommends the optimal
             material considering mechanical needs, environmental exposure,

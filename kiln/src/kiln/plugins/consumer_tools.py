@@ -222,7 +222,12 @@ class _ConsumerToolsPlugin:
             need_high_detail: bool = False,
             need_high_strength: bool = False,
         ) -> dict:
-            """Recommend the best 3D printing material for a consumer use case.
+            """Recommend material for non-technical users (considers ease-of-use, safety, finish).
+
+            Use this when the user doesn't have deep 3D printing knowledge.
+            For engineering/functional part material selection, use ``recommend_design_material``.
+            For intent-based recommendation with printer DNA data, use the intelligence
+            plugin's ``recommend_material``.
 
             Args:
                 use_case: What the part is for. Options: decorative, functional,
