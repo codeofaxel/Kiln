@@ -14222,6 +14222,428 @@ def get_best_material_substitute(material: str) -> dict:
 
 
 @mcp.tool()
+def get_material_properties(material_id: str) -> dict:
+    """Get full material property sheet — thermal specs, mechanical strength,
+    chemical resistance, design limits, and agent guidance.
+
+    Returns print temperature ranges, bed temperature ranges, tensile/flexural
+    strength, overhang limits, minimum wall thickness, warping tendency,
+    food safety, UV resistance, and more. Use this before printing with an
+    unfamiliar material or when switching materials (e.g. PLA → PETG).
+
+    Supported materials: pla, pla_plus, petg, abs, tpu, asa, nylon,
+    polycarbonate, cf_pla, cf_petg, cf_nylon, pet_cf, silk_pla, wood_pla,
+    hips, pva, pc_abs, asa_plus, petg_cf, pa6_gf.
+
+    Args:
+        material_id: Material key (e.g. ``"petg"``, ``"tpu"``, ``"cf_pla"``).
+            Case-insensitive.
+    """
+    if err := _check_auth("intel"):
+        return err
+    try:
+        from kiln.design_intelligence import get_material_profile
+
+        profile = get_material_profile(material_id)
+        if profile is None:
+            from kiln.design_intelligence import list_material_profiles
+
+            available = [p.material_id for p in list_material_profiles()]
+            return _error_dict(
+                f"Unknown material '{material_id}'. "
+                f"Available: {', '.join(available)}",
+                code="NOT_FOUND",
+            )
+        return {"success": True, "material": profile.to_dict()}
+    except Exception as exc:
+        logger.exception("Error in get_material_properties")
+        return _error_dict(
+            f"Failed to get material properties: {exc}",
+            code="INTERNAL_ERROR",
+        )
+
+
+@mcp.tool()
+def check_printer_material_support(
+    printer_id: str,
+    material_id: str | None = None,
+) -> dict:
+    """Check if a printer supports a specific material, or list all
+    compatible materials for a printer.
+
+    Returns compatibility status (``"compatible"`` or ``"needs_upgrade"``),
+    required hardware upgrades (enclosure, hardened nozzle, dry box, etc.),
+    and material-specific notes for the printer.
+
+    If ``material_id`` is omitted, returns the full compatibility matrix
+    for the printer — useful for seeing everything you can print on it.
+
+    Args:
+        printer_id: Printer model identifier (e.g. ``"bambu_a1"``,
+            ``"ender3"``, ``"prusa_mk4"``).
+        material_id: Optional material to check (e.g. ``"petg"``).
+            If omitted, returns all materials.
+    """
+    if err := _check_auth("intel"):
+        return err
+    try:
+        from kiln.design_intelligence import (
+            check_printer_material_compatibility,
+            list_compatibility_printers,
+        )
+
+        report = check_printer_material_compatibility(printer_id, material_id)
+        if report is None:
+            available = list_compatibility_printers()
+            return _error_dict(
+                f"No compatibility data for '{printer_id}'. "
+                f"Available printers: {', '.join(available)}",
+                code="NOT_FOUND",
+            )
+        result: dict[str, Any] = {
+            "success": True,
+            "printer_id": report.printer_id,
+            "materials": report.materials,
+        }
+        if material_id:
+            mat_lower = material_id.lower()
+            if mat_lower in report.materials:
+                mat_info = report.materials[mat_lower]
+                result["summary"] = (
+                    f"{material_id.upper()} is {mat_info.get('status', 'unknown')} "
+                    f"on {printer_id}"
+                )
+                if mat_info.get("upgrades_needed"):
+                    result["summary"] += (
+                        f" (needs: {', '.join(mat_info['upgrades_needed'])})"
+                    )
+            else:
+                result["summary"] = (
+                    f"No compatibility data for '{material_id}' on {printer_id}"
+                )
+        return result
+    except Exception as exc:
+        logger.exception("Error in check_printer_material_support")
+        return _error_dict(
+            f"Failed to check printer material support: {exc}",
+            code="INTERNAL_ERROR",
+        )
+
+
+@mcp.tool()
+def compare_material_properties(
+    material_a: str,
+    material_b: str,
+) -> dict:
+    """Side-by-side comparison of two materials — thermal, mechanical,
+    design limits, and practical guidance.
+
+    Use this when deciding between materials for a project (e.g. PLA vs PETG
+    for an outdoor bracket) or when switching materials for a reprint.
+    Highlights which material is stronger, more heat-resistant, easier to
+    print, and what settings change.
+
+    Args:
+        material_a: First material (e.g. ``"pla"``).
+        material_b: Second material (e.g. ``"petg"``).
+    """
+    if err := _check_auth("intel"):
+        return err
+    try:
+        from kiln.design_intelligence import get_material_profile
+
+        prof_a = get_material_profile(material_a)
+        prof_b = get_material_profile(material_b)
+        if prof_a is None or prof_b is None:
+            missing = material_a if prof_a is None else material_b
+            return _error_dict(
+                f"Unknown material '{missing}'.",
+                code="NOT_FOUND",
+            )
+
+        def _thermal_diff(a: dict, b: dict) -> dict:
+            keys = [
+                "print_temp_range_c", "bed_temp_range_c",
+                "glass_transition_c", "heat_deflection_c",
+                "max_service_temp_c", "warping_tendency",
+            ]
+            return {k: {material_a: a.get(k), material_b: b.get(k)} for k in keys}
+
+        def _mech_diff(a: dict, b: dict) -> dict:
+            keys = [
+                "tensile_strength_mpa", "flexural_strength_mpa",
+                "elongation_at_break_pct", "impact_resistance",
+                "layer_adhesion", "creep_resistance",
+            ]
+            return {k: {material_a: a.get(k), material_b: b.get(k)} for k in keys}
+
+        def _design_diff(a: dict, b: dict) -> dict:
+            keys = [
+                "min_wall_mm", "max_overhang_deg",
+                "max_bridge_mm", "min_hole_diameter_mm",
+            ]
+            return {k: {material_a: a.get(k), material_b: b.get(k)} for k in keys}
+
+        # Build practical summary
+        ta = prof_a.thermal
+        tb = prof_b.thermal
+        summary_lines: list[str] = []
+        temp_a = ta.get("print_temp_range_c", [0, 0])
+        temp_b = tb.get("print_temp_range_c", [0, 0])
+        if temp_a[0] != temp_b[0]:
+            summary_lines.append(
+                f"Print temp: {prof_a.display_name} {temp_a[0]}-{temp_a[1]}C "
+                f"vs {prof_b.display_name} {temp_b[0]}-{temp_b[1]}C"
+            )
+        bed_a = ta.get("bed_temp_range_c", [0, 0])
+        bed_b = tb.get("bed_temp_range_c", [0, 0])
+        if bed_a[0] != bed_b[0]:
+            summary_lines.append(
+                f"Bed temp: {prof_a.display_name} {bed_a[0]}-{bed_a[1]}C "
+                f"vs {prof_b.display_name} {bed_b[0]}-{bed_b[1]}C"
+            )
+        warp_a = ta.get("warping_tendency", "unknown")
+        warp_b = tb.get("warping_tendency", "unknown")
+        if warp_a != warp_b:
+            summary_lines.append(
+                f"Warping: {prof_a.display_name} {warp_a} "
+                f"vs {prof_b.display_name} {warp_b}"
+            )
+
+        return {
+            "success": True,
+            "materials": [material_a, material_b],
+            "thermal": _thermal_diff(ta, tb),
+            "mechanical": _mech_diff(prof_a.mechanical, prof_b.mechanical),
+            "design_limits": _design_diff(prof_a.design_limits, prof_b.design_limits),
+            "summary": summary_lines,
+            "guidance": {
+                material_a: prof_a.agent_guidance,
+                material_b: prof_b.agent_guidance,
+            },
+        }
+    except Exception as exc:
+        logger.exception("Error in compare_material_properties")
+        return _error_dict(
+            f"Failed to compare materials: {exc}",
+            code="INTERNAL_ERROR",
+        )
+
+
+@mcp.tool()
+def build_material_overrides(
+    material_id: str,
+    printer_id: str | None = None,
+) -> dict:
+    """Auto-generate slicer override dict for a specific material.
+
+    Combines material thermal data (from the material database) with
+    printer-specific tuning (from printer intelligence) to produce a
+    ready-to-use JSON override dict for ``reslice_with_overrides`` or
+    ``run_reslice_and_print``.
+
+    This is the key tool for material switching — call it to get the
+    correct temperatures, speeds, and retraction settings when changing
+    from one material to another.
+
+    Example workflow::
+
+        # 1. Get overrides for PETG on your printer
+        overrides = build_material_overrides("petg", "bambu_a1")
+        # 2. Reslice and print with those overrides
+        run_reslice_and_print(model_path, overrides=json.dumps(overrides["overrides"]))
+
+    Args:
+        material_id: Target material (e.g. ``"petg"``, ``"tpu"``).
+        printer_id: Optional printer model for printer-specific tuning.
+            If omitted, uses material database defaults.
+    """
+    if err := _check_auth("slicer"):
+        return err
+    try:
+        from kiln.design_intelligence import get_material_profile
+
+        profile = get_material_profile(material_id)
+        if profile is None:
+            return _error_dict(
+                f"Unknown material '{material_id}'.",
+                code="NOT_FOUND",
+            )
+
+        thermal = profile.thermal
+        overrides: dict[str, str] = {}
+
+        # Temperature overrides from material database
+        temp_range = thermal.get("print_temp_range_c", [])
+        if len(temp_range) >= 2:
+            # Use midpoint of the recommended range
+            mid_temp = (temp_range[0] + temp_range[1]) // 2
+            overrides["temperature"] = str(mid_temp)
+            # First layer slightly hotter for adhesion
+            overrides["first_layer_temperature"] = str(mid_temp + 5)
+
+        bed_range = thermal.get("bed_temp_range_c", [])
+        if len(bed_range) >= 2:
+            overrides["bed_temperature"] = str((bed_range[0] + bed_range[1]) // 2)
+            overrides["first_layer_bed_temperature"] = str(bed_range[1])
+
+        # Material-specific speed/retraction adjustments
+        mat_lower = material_id.lower()
+        if mat_lower in ("petg", "cf_petg", "petg_cf", "pet_cf"):
+            overrides.setdefault("perimeter_speed", "40")
+            overrides.setdefault("retract_length", "4.0")
+            overrides.setdefault("retract_speed", "30")
+        elif mat_lower in ("tpu",):
+            overrides.setdefault("perimeter_speed", "20")
+            overrides.setdefault("infill_speed", "20")
+            overrides.setdefault("retract_length", "1.0")
+            overrides.setdefault("retract_speed", "20")
+        elif mat_lower in ("abs", "asa", "asa_plus"):
+            overrides.setdefault("perimeter_speed", "40")
+            overrides.setdefault("retract_length", "3.5")
+        elif mat_lower in ("nylon", "cf_nylon", "pa6_gf"):
+            overrides.setdefault("perimeter_speed", "35")
+            overrides.setdefault("retract_length", "4.0")
+            overrides.setdefault("retract_speed", "25")
+        elif mat_lower in ("polycarbonate", "pc_abs"):
+            overrides.setdefault("perimeter_speed", "35")
+            overrides.setdefault("retract_length", "3.5")
+
+        # Printer-specific tuning (overrides material defaults if available)
+        printer_tuning: dict[str, Any] | None = None
+        if printer_id:
+            try:
+                from kiln.printer_intelligence import get_material_settings
+
+                mp = get_material_settings(printer_id, material_id)
+                if mp is not None:
+                    printer_tuning = {
+                        "hotend_temp": mp.hotend,
+                        "bed_temp": mp.bed,
+                        "fan_speed": mp.fan,
+                        "notes": mp.notes,
+                    }
+                    # Printer-specific temps override material defaults
+                    overrides["temperature"] = str(mp.hotend)
+                    overrides["first_layer_temperature"] = str(mp.hotend + 5)
+                    overrides["bed_temperature"] = str(mp.bed)
+            except (KeyError, Exception):
+                pass  # Fall back to material database defaults
+
+        return {
+            "success": True,
+            "material": material_id,
+            "printer_id": printer_id,
+            "overrides": overrides,
+            "printer_tuning": printer_tuning,
+            "notes": (
+                f"Slicer overrides for {profile.display_name}"
+                + (f" on {printer_id}" if printer_id else "")
+                + ". Pass this as the 'overrides' parameter to "
+                "reslice_with_overrides or run_reslice_and_print."
+            ),
+        }
+    except Exception as exc:
+        logger.exception("Error in build_material_overrides")
+        return _error_dict(
+            f"Failed to build material overrides: {exc}",
+            code="INTERNAL_ERROR",
+        )
+
+
+@mcp.tool()
+def reprint_with_material(
+    file_path: str,
+    material_id: str,
+    printer_name: str | None = None,
+    printer_id: str | None = None,
+    extra_overrides: str | None = None,
+) -> dict:
+    """Reprint a model with a different material — auto-adjusts temperatures,
+    speeds, and retraction for the new material.
+
+    One-shot convenience tool: looks up the target material's optimal slicer
+    settings, merges any extra overrides you provide, reslices the model,
+    runs a safety check, uploads to the printer, and starts the print.
+
+    Use this when you want to reprint an existing model in a different
+    material (e.g. PLA → PETG for outdoor durability, or PLA → TPU for
+    flexibility). The tool handles all the slicer parameter changes
+    automatically.
+
+    Example: "Reprint my grip extension in PETG instead of PLA"::
+
+        reprint_with_material(
+            file_path="/path/to/grip_extension.stl",
+            material_id="petg",
+            printer_name="my_bambu",
+            printer_id="bambu_a1",
+        )
+
+    Requires PrusaSlicer or OrcaSlicer installed locally.
+
+    Args:
+        file_path: Path to the model file (STL, 3MF, STEP, OBJ).
+        material_id: Target material (e.g. ``"petg"``, ``"tpu"``).
+        printer_name: Registered printer name in fleet. If omitted,
+            uses the default printer.
+        printer_id: Printer model ID for profile selection
+            (e.g. ``"bambu_a1"``, ``"ender3"``).
+        extra_overrides: Optional JSON string of additional slicer
+            overrides to merge on top of the material defaults
+            (e.g. ``'{"fill_density": "30%"}'``).
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        import json as _json
+
+        # Step 1: Build material-specific overrides
+        mat_result = build_material_overrides(material_id, printer_id)
+        if not mat_result.get("success"):
+            return mat_result
+
+        overrides = dict(mat_result["overrides"])
+
+        # Step 2: Merge extra overrides if provided
+        if extra_overrides:
+            try:
+                extra = _json.loads(extra_overrides)
+                if isinstance(extra, dict):
+                    overrides.update(extra)
+            except _json.JSONDecodeError as exc:
+                return _error_dict(
+                    f"Invalid JSON in extra_overrides: {exc}",
+                    code="VALIDATION_ERROR",
+                )
+
+        # Step 3: Delegate to run_reslice_and_print
+        result = run_reslice_and_print(
+            model_path=file_path,
+            printer_name=printer_name,
+            printer_id=printer_id,
+            overrides=_json.dumps(overrides),
+        )
+
+        # Enrich the result with material context
+        if isinstance(result, dict) and result.get("success"):
+            result["material"] = material_id
+            result["material_overrides_applied"] = overrides
+            result["notes"] = (
+                f"Resliced and printing with {material_id.upper()} settings. "
+                f"Overrides applied: {', '.join(f'{k}={v}' for k, v in overrides.items())}"
+            )
+
+        return result
+    except Exception as exc:
+        logger.exception("Error in reprint_with_material")
+        return _error_dict(
+            f"Failed to reprint with material: {exc}",
+            code="INTERNAL_ERROR",
+        )
+
+
+@mcp.tool()
 def extract_file_metadata(file_path: str) -> dict:
     """Extract metadata from a 3D printing file (.gcode, .3mf, .stl, .ufp).
 
