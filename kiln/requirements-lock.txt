@@ -20,7 +20,7 @@ packaging==26.0
 paho-mqtt==2.1.0
 pluggy==1.6.0
 pydantic==2.12.5
-pydantic_core==2.41.5
+pydantic_core==2.42.0
 pydantic-settings==2.12.0
 Pygments==2.19.2
 pytest==9.0.2
