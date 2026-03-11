@@ -1138,13 +1138,16 @@ def build_multi_material_3mf(
     sorted_filaments = sorted(filament_set.items())
 
     # Build basematerials XML
+    from xml.sax.saxutils import escape as _xml_escape
+
     base_mat_lines = []
     for _idx, mat in sorted_filaments:
         color_hex = mat["color"].lstrip("#")
         if len(color_hex) == 6:
             color_hex += "FF"
+        safe_name = _xml_escape(mat["name"], {'"': "&quot;"})
         base_mat_lines.append(
-            f'      <base name="{mat["name"]}" displaycolor="#{color_hex}" />'
+            f'      <base name="{safe_name}" displaycolor="#{color_hex}" />'
         )
 
     # Build per-object mesh XML blocks
@@ -1187,7 +1190,8 @@ def build_multi_material_3mf(
                 indices.append(vert_map[v])
             indexed_tris.append((indices[0], indices[1], indices[2]))
 
-        name = obj.get("name", Path(fp).stem)
+        raw_name = obj.get("name", Path(fp).stem)
+        name = _xml_escape(raw_name, {'"': "&quot;"})
         fidx = obj.get("filament_index", 0)
 
         # Find the position of this filament_index in sorted_filaments

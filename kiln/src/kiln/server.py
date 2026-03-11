@@ -15089,6 +15089,53 @@ def multi_material_print(
                 "material_name": profile.display_name,
             })
 
+        # Step 1b: Thermal compatibility check across all materials
+        # A single-nozzle printer uses ONE temperature for all materials.
+        # If materials have incompatible thermal ranges, refuse the print.
+        mat_profiles: dict[str, Any] = {}
+        for mat_id in unique_materials:
+            prof = get_material_profile(mat_id)
+            if prof is not None:
+                mat_profiles[mat_id] = prof
+
+        if len(mat_profiles) > 1:
+            nozzle_ranges = []
+            bed_ranges = []
+            for mid, prof in mat_profiles.items():
+                thermal = prof.thermal if hasattr(prof, "thermal") else {}
+                temp_range = thermal.get("print_temp_range_c", [190, 220])
+                bed_range = thermal.get("bed_temp_range_c", [50, 70])
+                nozzle_ranges.append((mid, temp_range))
+                bed_ranges.append((mid, bed_range))
+
+            # Check nozzle overlap: all materials must have overlapping ranges
+            combined_low = max(r[0] for _, r in nozzle_ranges)
+            combined_high = min(r[1] for _, r in nozzle_ranges)
+            if combined_low > combined_high:
+                names = [f"{mid} ({r[0]}-{r[1]}C)" for mid, r in nozzle_ranges]
+                return _error_dict(
+                    f"Incompatible nozzle temperatures — no overlapping range: "
+                    f"{', '.join(names)}. A single-nozzle printer cannot print "
+                    f"materials with non-overlapping temperature ranges in one job. "
+                    f"Consider printing these objects separately.",
+                    code="MATERIAL_INCOMPATIBLE",
+                )
+
+            # Check bed temp gap: >25C difference is risky
+            all_bed_temps = [
+                t for _, r in bed_ranges for t in r
+            ]
+            bed_spread = max(all_bed_temps) - min(all_bed_temps)
+            if bed_spread > 40:
+                names = [f"{mid} ({r[0]}-{r[1]}C)" for mid, r in bed_ranges]
+                return _error_dict(
+                    f"Risky bed temperature spread ({bed_spread}C) across materials: "
+                    f"{', '.join(names)}. Low-temp materials may warp or deform on "
+                    f"a bed optimized for high-temp materials. Consider printing "
+                    f"objects with similar bed temperature requirements together.",
+                    code="MATERIAL_INCOMPATIBLE",
+                )
+
         # Step 2: Build multi-material 3MF
         from kiln.generation.validation import build_multi_material_3mf
 
@@ -15181,8 +15228,8 @@ def multi_material_print(
                     if all_found and mapping:
                         ams_mapping_list = mapping
                         use_ams_flag = True
-            except Exception:
-                pass
+            except Exception as _ams_exc:
+                logger.debug("AMS query failed in multi_material_print: %s", _ams_exc)
 
         # Step 5: Slice and print
         result = run_reslice_and_print(
@@ -15206,6 +15253,14 @@ def multi_material_print(
             result["dominant_material"] = dominant_mat
             result["ams_mapping"] = ams_info if ams_info else None
             result["multi_material_3mf"] = output_3mf
+            # Warn when AMS mapping was not established
+            if len(unique_materials) > 1 and not ams_info:
+                result["ams_warning"] = (
+                    "No AMS slot mapping was established. Multi-material per-object "
+                    "assignment requires a Bambu printer with AMS, or a multi-extruder "
+                    "setup (e.g. Prusa XL tool changer). On single-extruder printers "
+                    "without AMS, all objects will print with the same filament."
+                )
 
         return result
     except Exception as exc:

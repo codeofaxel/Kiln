@@ -814,6 +814,45 @@ class TestMultiMaterial3MF:
                 output_path=str(tmp_path / "out.3mf"),
             )
 
+    def test_xml_escaping_special_chars(self, tmp_path):
+        """Material/object names with XML special chars are properly escaped."""
+        import zipfile
+
+        from kiln.generation.validation import build_multi_material_3mf
+
+        stl_content = (
+            b"solid test\n"
+            b"  facet normal 0 0 1\n"
+            b"    outer loop\n"
+            b"      vertex 0 0 0\n"
+            b"      vertex 1 0 0\n"
+            b"      vertex 0 1 0\n"
+            b"    endloop\n"
+            b"  endfacet\n"
+            b"endsolid test\n"
+        )
+        stl_path = tmp_path / "part.stl"
+        stl_path.write_bytes(stl_content)
+        out = str(tmp_path / "escaped.3mf")
+        build_multi_material_3mf(
+            [{
+                "file_path": str(stl_path),
+                "filament_index": 0,
+                "name": 'Part "A" <test>',
+                "material_name": 'PLA & "Silk"',
+                "color": "#FF0000",
+            }],
+            output_path=out,
+        )
+        with zipfile.ZipFile(out) as zf:
+            model_xml = zf.read("3D/3dmodel.model").decode()
+        # Special chars must be escaped
+        assert "&amp;" in model_xml
+        assert "&quot;" in model_xml
+        assert "&lt;" in model_xml
+        # Raw unescaped chars must NOT appear in attribute values
+        assert 'name="PLA & "' not in model_xml
+
 
 # ---------------------------------------------------------------------------
 # TestMultiMaterialPrint
@@ -895,3 +934,51 @@ class TestMultiMaterialPrint:
         )
         assert result["success"] is False
         assert "NOT_FOUND" in result["error"]["code"]
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_incompatible_nozzle_temps_rejected(self, _auth):
+        """PLA (190-220) + polycarbonate (270-310) have no nozzle overlap → rejected."""
+        import json
+
+        from kiln.server import multi_material_print
+
+        paths = [_make_tmp_stl(), _make_tmp_stl()]
+        try:
+            result = multi_material_print(
+                objects_json=json.dumps([
+                    {"file_path": paths[0], "material_id": "pla"},
+                    {"file_path": paths[1], "material_id": "polycarbonate"},
+                ]),
+                auto_ams=False,
+            )
+            assert result["success"] is False
+            assert "MATERIAL_INCOMPATIBLE" in result["error"]["code"]
+            assert "nozzle" in result["error"]["message"].lower()
+        finally:
+            for p in paths:
+                os.unlink(p)
+
+    @patch("kiln.server._check_auth", side_effect=_no_auth)
+    def test_compatible_materials_allowed(self, _auth):
+        """PLA + PLA Matte have overlapping temps → allowed past compat check."""
+        import json
+
+        from kiln.server import multi_material_print
+
+        paths = [_make_tmp_stl(), _make_tmp_stl()]
+        try:
+            # Should get past the compatibility check (may fail later at slicing)
+            result = multi_material_print(
+                objects_json=json.dumps([
+                    {"file_path": paths[0], "material_id": "pla"},
+                    {"file_path": paths[1], "material_id": "pla_matte"},
+                ]),
+                auto_ams=False,
+            )
+            # It will fail at slicing (no slicer available in tests) but should
+            # NOT fail with MATERIAL_INCOMPATIBLE
+            if not result.get("success"):
+                assert result["error"]["code"] != "MATERIAL_INCOMPATIBLE"
+        finally:
+            for p in paths:
+                os.unlink(p)
