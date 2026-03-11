@@ -15152,6 +15152,7 @@ def multi_material_print(
         max_temp = 0
         max_bed = 0
         dominant_mat: str | None = None
+        dominant_overrides: dict[str, str] = {}
         for mat_id in unique_materials:
             mat_result = build_material_overrides(mat_id, printer_id)
             if mat_result.get("success"):
@@ -15161,17 +15162,16 @@ def multi_material_print(
                 if temp > max_temp:
                     max_temp = temp
                     dominant_mat = mat_id
+                    dominant_overrides = dict(ov)
                 if bed > max_bed:
                     max_bed = bed
 
         # Use the dominant (highest temp) material's full overrides
         merged_overrides: dict[str, str] = {}
         if dominant_mat:
-            dom_result = build_material_overrides(dominant_mat, printer_id)
-            if dom_result.get("success"):
-                merged_overrides = dict(dom_result["overrides"])
-                # Override bed temp with the max across all materials
-                merged_overrides["bed_temperature"] = str(max_bed)
+            merged_overrides = dominant_overrides
+            # Override bed temp with the max across all materials
+            merged_overrides["bed_temperature"] = str(max_bed)
 
         # Merge extra overrides
         if extra_overrides:

@@ -351,7 +351,12 @@ def _parse_obj(
                     indices = []
                     for p in parts:
                         try:
-                            idx = int(p.split("/")[0]) - 1
+                            raw_idx = int(p.split("/")[0])
+                            # OBJ supports negative indices as back-references
+                            if raw_idx < 0:
+                                idx = len(vertices) + raw_idx
+                            else:
+                                idx = raw_idx - 1
                             indices.append(idx)
                         except (ValueError, IndexError):
                             pass
