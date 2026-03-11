@@ -278,7 +278,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **404 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **411 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
 
 #### Printer Control
 
@@ -374,6 +374,18 @@ Kiln exposes **404 MCP tools** in total. The most commonly used tools are docume
 | `list_spools` | — | Spool inventory |
 | `add_spool` | `material`, `color`, `brand`, `weight`, `cost` | Spool details |
 | `remove_spool` | `spool_id` | Confirmation |
+
+#### Material Intelligence
+
+| Tool | Input | Output |
+|---|---|---|
+| `get_material_properties` | `material` | Full property sheet: thermal, mechanical, chemical, design limits |
+| `compare_materials` | `material_a`, `material_b` | Side-by-side comparison across all properties |
+| `suggest_material` | `requirements` (strength, flexibility, heat_resistance, etc.) | Ranked material recommendations with reasoning |
+| `build_material_overrides` | `material`, `printer_model` | Slicer override dict for material+printer combination |
+| `reprint_with_material` | `file_path`, `material`, `printer_name` | Re-slice and print with auto-generated material overrides |
+| `smart_reprint` | `file_path`, `material`, `printer_name` | Find file, detect AMS slot, switch material, and print |
+| `multi_material_print` | `objects` (file_path + material pairs), `printer_name` | Print multiple objects in different materials/colors on one plate |
 
 #### Bed Leveling
 
@@ -948,7 +960,7 @@ pip install -e "./octoprint-cli[dev]"
 ### Running Tests
 
 ```bash
-cd kiln && python3 -m pytest tests/ -v    # 7,936 tests
+cd kiln && python3 -m pytest tests/ -v    # 8,000+ tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 

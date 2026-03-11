@@ -61,7 +61,7 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 ### Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link. Manage a mixed fleet from one place.
-- **AI-native** — 404 MCP tools built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — 411 MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
 - **Search → Slice → Print** — Search and download 3D models from Thingiverse, MyMiniFactory, and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
 - **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
@@ -460,7 +460,7 @@ pip install kiln3d[rest]
 
 When binding REST to non-localhost addresses (for hosted deployments), set `KILN_API_AUTH_TOKEN` or pass `--auth-token`.
 
-Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 404 tools are available via MCP (`kiln serve`).
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 411 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -479,7 +479,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **404 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **411 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
 
 | Tool | Description |
 |------|-------------|
@@ -546,6 +546,13 @@ The Kiln MCP server (`kiln serve`) exposes **404 tools** to agents. Key tools ar
 | `list_spools` | List spool inventory |
 | `add_spool` | Add a spool to inventory |
 | `remove_spool` | Remove a spool from inventory |
+| `get_material_properties` | Get full material property sheet (thermal, mechanical, chemical, design limits) |
+| `compare_materials` | Side-by-side comparison of two materials across all properties |
+| `suggest_material` | Recommend materials based on requirements (strength, flexibility, heat resistance, etc.) |
+| `build_material_overrides` | Generate slicer overrides for a material+printer combination |
+| `reprint_with_material` | Reprint an existing model in a different material with auto-generated overrides |
+| `smart_reprint` | Intelligent reprint: finds file, detects AMS slot, switches material, and prints |
+| `multi_material_print` | Print multiple objects in different materials/colors on one build plate |
 | `bed_level_status` | Get bed leveling status for a printer |
 | `trigger_bed_level` | Trigger bed leveling on a printer |
 | `set_leveling_policy` | Configure auto-leveling policy |
@@ -985,8 +992,8 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (8,175 total)
-cd kiln && python3 -m pytest tests/ -v        # 7,936 tests
+# Run tests (8,000+ total)
+cd kiln && python3 -m pytest tests/ -v        # 8,000+ tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
