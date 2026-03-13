@@ -41,21 +41,60 @@ class _FulfillmentToolsPlugin:
         """Register fulfillment tools with the MCP server."""
 
         @mcp.tool()
-        def fulfillment_materials() -> dict:
+        def fulfillment_materials(
+            search: str | None = None,
+            technology: str | None = None,
+            limit: int = 50,
+        ) -> dict:
             """List available materials from external manufacturing services.
 
             Returns materials with technology (FDM, SLA, SLS, etc.), color,
             finish, and pricing.  Use the material ``id`` when requesting a quote
             with ``fulfillment_quote``.
 
+            The full catalog contains 2000+ materials.  Use the optional filter
+            parameters to narrow results so agents can find the right material
+            without overwhelming context windows.
+
+            Args:
+                search: Filter materials whose name contains this term
+                    (word-boundary match, case-insensitive).  E.g. ``"nylon"``
+                    matches "Nylon 12" and "Glass-filled Nylon" but not
+                    "Carbonylon".
+                technology: Filter by manufacturing technology (word-boundary
+                    match, case-insensitive).  Common values: ``"SLS"``,
+                    ``"FDM"``, ``"SLA"``, ``"MJF"``, ``"DMLS"``.  Matches
+                    against both the technology field and the material name.
+                limit: Maximum number of materials to return (default 50).
+
             Requires ``KILN_CRAFTCLOUD_API_KEY`` to be set.
             """
+            import re
+
             import kiln.server as _srv
             from kiln.fulfillment import FulfillmentError
 
             try:
                 provider = _srv._get_fulfillment()
                 materials = provider.list_materials()
+
+                if search:
+                    pat = re.compile(
+                        r'(?<![a-z])' + re.escape(search.lower()) + r'(?![a-z])',
+                        re.IGNORECASE,
+                    )
+                    materials = [m for m in materials if pat.search(m.name)]
+                if technology:
+                    tech_pat = re.compile(
+                        r'(?<![a-z])' + re.escape(technology.lower()) + r'(?![a-z])',
+                        re.IGNORECASE,
+                    )
+                    materials = [
+                        m for m in materials
+                        if tech_pat.search(m.technology or '') or tech_pat.search(m.name)
+                    ]
+                materials = materials[:limit]
+
                 return {
                     "success": True,
                     "provider": provider.name,

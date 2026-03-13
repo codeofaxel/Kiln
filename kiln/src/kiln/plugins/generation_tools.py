@@ -21,11 +21,12 @@ _logger = logging.getLogger(__name__)
 
 
 class _GenerationToolsPlugin:
-    """Text-to-3D model generation tools.
+    """Text-to-3D and image-to-3D model generation tools.
 
     Tools:
         - list_generation_providers
         - generate_model
+        - generate_model_from_image
         - generate_original_design
         - generation_status
         - download_generated_model
@@ -41,9 +42,9 @@ class _GenerationToolsPlugin:
     @property
     def description(self) -> str:
         return (
-            "Text-to-3D model generation tools "
+            "Text-to-3D and image-to-3D model generation tools "
             "(Meshy, Gemini, OpenSCAD, Tripo3D, Stability), including "
-            "closed-loop original design generation"
+            "image-to-3D via Gemini and closed-loop original design generation"
         )
 
     def register(self, mcp: Any) -> None:  # noqa: PLR0915
@@ -64,7 +65,7 @@ class _GenerationToolsPlugin:
         @mcp.tool()
         def generate_model(
             prompt: str,
-            provider: str = "meshy",
+            provider: str = "gemini",
             format: str = "stl",
             style: str | None = None,
         ) -> dict:
@@ -84,25 +85,30 @@ class _GenerationToolsPlugin:
             job ID for status tracking.  Use ``generation_status`` to poll for
             completion, then ``download_generated_model`` to retrieve the file.
 
-            **Prompt tips for Meshy (text-to-3D AI):**
+            **Prompt tips for Gemini (default, text-to-3D AI):**
             - Describe the physical object clearly: shape, size, purpose.
-            - Include material cues: "wooden", "metallic", "smooth plastic".
+            - Include approximate dimensions (e.g. "100 mm tall").
+            - Mention the intended material ("PLA plastic", "resin").
             - Specify printability: "solid base", "no overhangs", "flat bottom".
-            - Keep prompts under 200 words for best results (max 600 chars).
             - Good example: "A phone stand with a curved cradle, flat rectangular
-              base, and angled back support. Smooth plastic surface."
+              base 80x50 mm, and angled back support. Smooth plastic, 4 mm walls."
             - Bad example: "make me something cool" (too vague).
+
+            **Prompt tips for Meshy:**
+            - Include material cues: "wooden", "metallic", "smooth plastic".
+            - Keep prompts under 200 words for best results (max 600 chars).
 
             **For OpenSCAD**, the prompt must be valid OpenSCAD code.  The job
             completes synchronously and the result is immediately available.
 
             Args:
                 prompt: Text description (or OpenSCAD code for ``openscad``).
-                provider: Generation backend — ``"meshy"`` (cloud AI) or
-                    ``"openscad"`` (local parametric).  Default: ``"meshy"``.
+                provider: Generation backend — ``"gemini"`` (default, cloud AI),
+                    ``"meshy"``, ``"tripo3d"``, ``"stability"``, or
+                    ``"openscad"`` (local parametric).  Default: ``"gemini"``.
                 format: Desired output format (``"stl"``).  Default: ``"stl"``.
                 style: Optional style hint (``"realistic"`` or ``"sculpture"``
-                    for Meshy).  Ignored by OpenSCAD.
+                    for Meshy).  Ignored by OpenSCAD and Gemini.
             """
             import kiln.server as _srv
             from kiln.generation import GenerationAuthError, GenerationError
@@ -137,6 +143,96 @@ class _GenerationToolsPlugin:
                 _logger.exception("Unexpected error in generate_model")
                 return _srv._error_dict(
                     f"Unexpected error in generate_model: {exc}", code="INTERNAL_ERROR"
+                )
+
+        @mcp.tool()
+        def generate_model_from_image(
+            image_path: str,
+            prompt: str = "",
+            provider: str = "gemini",
+            format: str = "stl",
+        ) -> dict:
+            """Generate a 3D model from a reference image (photo or sketch).
+
+            **Image-to-3D generation** — converts a photograph, sketch, or
+            rendering into a printable 3D model.  Currently only the Gemini
+            provider supports image-to-3D; other providers will produce a
+            warning and fall back to text-only generation.
+
+            Accepts common image formats: PNG, JPEG, WebP, BMP.  The image
+            should clearly depict the object from one or more angles.  Photos
+            of real-world objects, hand-drawn sketches, and CAD renderings
+            all work well.
+
+            **EXPERIMENTAL:** AI-generated 3D models are experimental and may
+            not be suitable for printing without manual review.  Always
+            validate the generated mesh before printing.
+
+            Args:
+                image_path: Absolute path to the reference image file.
+                prompt: Optional text prompt to guide generation (e.g.
+                    "Create a 3D-printable version of this object, 100mm
+                    tall").  If omitted a default prompt is used.
+                provider: Generation backend.  Default: ``"gemini"`` (the
+                    only provider that supports image-to-3D).
+                format: Desired output format (``"stl"``).  Default: ``"stl"``.
+            """
+            import kiln.server as _srv
+            from kiln.generation import GenerationAuthError, GenerationError
+
+            if err := _srv._check_auth("generate"):
+                return err
+
+            if not os.path.isfile(image_path):
+                return _srv._error_dict(
+                    f"Image file not found: {image_path}",
+                    code="FILE_NOT_FOUND",
+                )
+
+            if provider != "gemini":
+                _logger.warning(
+                    "Provider %r does not support image-to-3D; only Gemini "
+                    "supports this feature.  Proceeding anyway but results "
+                    "may be text-only.",
+                    provider,
+                )
+
+            try:
+                gen = _srv._get_generation_provider(provider)
+                job = gen.generate(
+                    prompt or "Create a 3D model from this image",
+                    format=format,
+                    style=None,
+                    image_path=image_path,
+                )
+                return {
+                    "success": True,
+                    "job": job.to_dict(),
+                    "experimental": True,
+                    "safety_notice": (
+                        "AI-generated models are experimental. Always validate "
+                        "the mesh with validate_generated_mesh and review "
+                        "dimensions before printing. Generated models may require "
+                        "manual refinement."
+                    ),
+                    "message": f"Image-to-3D generation job submitted to {gen.display_name}.",
+                }
+            except GenerationAuthError as exc:
+                return _srv._error_dict(
+                    f"Failed to generate model from image (auth): {exc}. "
+                    "Check that the provider API key is set.",
+                    code="AUTH_ERROR",
+                )
+            except GenerationError as exc:
+                return _srv._error_dict(
+                    f"Failed to generate model from image: {exc}",
+                    code=exc.code or "GENERATION_ERROR",
+                )
+            except Exception as exc:
+                _logger.exception("Unexpected error in generate_model_from_image")
+                return _srv._error_dict(
+                    f"Unexpected error in generate_model_from_image: {exc}",
+                    code="INTERNAL_ERROR",
                 )
 
         @mcp.tool()
@@ -465,7 +561,7 @@ class _GenerationToolsPlugin:
         @mcp.tool()
         def generate_and_print(
             prompt: str,
-            provider: str = "meshy",
+            provider: str = "gemini",
             style: str | None = None,
             printer_name: str | None = None,
             profile: str | None = None,
@@ -483,9 +579,17 @@ class _GenerationToolsPlugin:
             When possible, prefer downloading proven models from marketplaces
             (Thingiverse, MyMiniFactory) instead of generating new ones.
 
+            **Prompt tips for Gemini (default provider):**
+            - Describe the physical object: shape, size, purpose.
+            - Include approximate dimensions (e.g. "100 mm tall").
+            - Mention the intended material ("PLA plastic", "resin").
+            - Specify printability: "solid base", "no overhangs", "flat bottom".
+
             Args:
                 prompt: Text description of the 3D model to generate.
-                provider: Generation provider (``"meshy"`` or ``"openscad"``).
+                provider: Generation provider.  Default: ``"gemini"``.
+                    Also supports ``"meshy"``, ``"tripo3d"``, ``"stability"``,
+                    ``"openscad"``.
                 style: Optional style hint for cloud providers.
                 printer_name: Target printer.  Omit for the default printer.
                 profile: Slicer profile path.

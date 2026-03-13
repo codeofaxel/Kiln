@@ -1,0 +1,32 @@
+services:
+  proxy:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.proxy
+    expose:
+      - "8000"
+    environment:
+      - KILN_SUPABASE_URL=${KILN_SUPABASE_URL}
+      - KILN_SUPABASE_SERVICE_KEY=${KILN_SUPABASE_SERVICE_KEY}
+      - KILN_CRAFTCLOUD_API_KEY=${KILN_CRAFTCLOUD_API_KEY}
+      - KILN_API_AUTH_TOKEN=${KILN_API_AUTH_TOKEN}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - KILN_PROXY_MODE=true
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_certs:/config
+    restart: unless-stopped
+    depends_on:
+      - proxy
+
+volumes:
+  caddy_data:
+  caddy_certs:
