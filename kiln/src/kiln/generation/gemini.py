@@ -1,22 +1,37 @@
 """Google Gemini Deep Think 3D generation provider.
 
 Uses Google's Gemini API with extended thinking to generate printable
-3D models from text or napkin-sketch descriptions.  Gemini reasons
-deeply about the geometry ("deep think") and produces OpenSCAD code,
-which is then compiled locally to STL.
+3D models from text descriptions or images (photos, sketches, napkin
+drawings).  Gemini reasons deeply about the geometry ("deep think") and
+produces OpenSCAD code, which is then compiled locally to STL.
 
-This two-stage pipeline (AI reasoning → local compilation) produces
+This two-stage pipeline (AI reasoning -> local compilation) produces
 precise, parametric, watertight meshes ideal for 3D printing.
+
+Supported input modes
+---------------------
+- **Text-to-3D**: Natural language description -> OpenSCAD -> STL
+- **Image-to-3D**: Photo/sketch/napkin drawing + optional text -> OpenSCAD -> STL
 
 Authentication
 --------------
 Set ``KILN_GEMINI_API_KEY`` or pass ``api_key`` to the constructor.
+
+Model selection
+---------------
+Defaults to ``gemini-2.5-flash`` (works on free tier with Deep Think).
+Set ``KILN_GEMINI_MODEL=gemini-2.5-pro`` for deeper reasoning (requires
+paid plan).  If the configured model hits rate limits, automatically
+falls back to ``gemini-2.5-flash``.  Supports the full Gemini model
+family including 3.x series.
 """
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import logging
+import mimetypes
 import os
 import re
 import shutil
@@ -42,27 +57,59 @@ logger = logging.getLogger(__name__)
 
 _GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 _DEFAULT_MODEL = os.environ.get("KILN_GEMINI_MODEL", "").strip() or "gemini-2.5-flash"
-_REQUEST_TIMEOUT = 120
+_FALLBACK_MODEL = "gemini-2.5-flash"  # Always available on free tier
+_REQUEST_TIMEOUT = 180  # Thinking models need more time than standard models
 _MACOS_APP_PATH = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD" if sys.platform == "darwin" else ""
 
 _MAX_RETRIES = 3
 _RETRY_BACKOFF_BASE = 2.0  # seconds: 2, 4, 8
 
-# System prompt that instructs Gemini to produce OpenSCAD code
-_SYSTEM_PROMPT = """You are a 3D modeling expert. Given a text description or napkin-sketch description of a 3D object, generate valid OpenSCAD code that creates that object.
+# System prompt — instructs Gemini to leverage deep thinking for geometry
+_SYSTEM_PROMPT = """\
+You are an expert 3D modeling engineer specializing in creating precise, \
+printable 3D models using OpenSCAD.
+
+When given a text description, image, sketch, or napkin drawing of a 3D object, \
+generate valid OpenSCAD code that faithfully recreates the described or depicted object.
+
+Think step-by-step about the geometry:
+1. Decompose the object into primitive shapes and boolean operations
+2. Reason about exact dimensions, proportions, and spatial relationships
+3. Consider symmetry, repetition, and structural patterns
+4. Plan the construction order (what gets unioned, differenced, intersected)
+5. Verify the result will be watertight and printable
 
 Requirements:
-- Output ONLY valid OpenSCAD code, no explanations or markdown
-- The model must be watertight (manifold) for 3D printing
+- Output ONLY valid OpenSCAD code — no explanations, no markdown fences, no prose
+- The model MUST be watertight (manifold) for 3D printing
 - Use millimeters as the unit
-- Keep polygon count reasonable (avoid extremely fine $fn values)
 - Center the model at the origin when practical
-- Make the model a practical size for 3D printing (typically 20-200mm)
+- Provide a flat bottom surface for stable printing
+- Target practical 3D printing size (typically 20-200mm)
+- Use $fn between 32-64 for curves (balance quality vs render time)
 - Use difference(), union(), intersection() for complex shapes
+- Use hull() and minkowski() for organic or rounded shapes
+- Use linear_extrude() and rotate_extrude() for 2D-to-3D operations
 - Do NOT use import(), surface(), include, or use statements
-- Think deeply about the geometry — consider all faces, edges, and proportions
-- For organic shapes, use hull() and smooth approximations
-- Aim for printability: flat bottom surface, no extreme overhangs when possible"""
+- Minimize extreme overhangs (>60 degrees) where possible
+- For mechanical parts: ensure tolerances (0.2-0.4mm clearance for fits)
+- For decorative parts: add fillets/chamfers where aesthetically appropriate
+
+If given an image or sketch:
+- Identify the object(s) depicted and their spatial relationships
+- Estimate proportions from the image even if dimensions aren't labeled
+- Reproduce the essential geometry — prioritize structural accuracy over ornament
+- Note if the sketch is ambiguous and choose the most printable interpretation"""
+
+# Supported image MIME types for multimodal input
+_SUPPORTED_IMAGE_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+}
 
 
 def _find_openscad(explicit_path: str | None = None) -> str:
@@ -139,15 +186,79 @@ _DANGEROUS_PATTERNS = [
 ]
 
 
-class GeminiDeepThinkProvider(GenerationProvider):
-    """Google Gemini Deep Think text-to-3D generation.
+def _check_scad_safety(code: str) -> str | None:
+    """Check OpenSCAD code for dangerous filesystem operations.
 
-    Uses Gemini's reasoning capabilities to generate OpenSCAD code from
-    natural language descriptions, then compiles it locally to STL.
+    :param code: OpenSCAD source code to validate.
+    :returns: Error message if dangerous patterns found, else ``None``.
+    """
+    for pattern in _DANGEROUS_PATTERNS:
+        if re.search(pattern, code, re.IGNORECASE):
+            return "Generated code contains blocked file I/O operations (import/surface/include/use)."
+    return None
+
+
+def _get_thinking_config(model: str) -> dict[str, Any]:
+    """Return the appropriate thinking configuration for the model family.
+
+    Gemini 3.x uses ``thinkingLevel`` ("minimal", "low", "medium", "high").
+    Gemini 2.5 uses ``thinkingBudget`` (integer token count, max 24576).
+
+    :param model: The Gemini model ID string.
+    :returns: Dict to merge into ``generationConfig.thinkingConfig``.
+    """
+    if model.startswith("gemini-3"):
+        # Gemini 3.x family — use thinkingLevel for best results
+        return {"thinkingLevel": "high"}
+
+    # Gemini 2.5 family — use thinkingBudget (max = 24576 tokens)
+    # High budget enables deepest geometric reasoning
+    return {"thinkingBudget": 24576}
+
+
+def _encode_image_file(path: str) -> dict[str, Any]:
+    """Read and base64-encode a local image file for the Gemini API.
+
+    :param path: Absolute or relative path to the image file.
+    :returns: A Gemini ``inlineData`` part dict.
+    :raises GenerationError: If the file doesn't exist or has an
+        unsupported format.
+    """
+    if not os.path.isfile(path):
+        raise GenerationError(
+            f"Image file not found: {path}",
+            code="IMAGE_NOT_FOUND",
+        )
+
+    ext = os.path.splitext(path)[1].lower()
+    mime_type = _SUPPORTED_IMAGE_TYPES.get(ext)
+    if not mime_type:
+        # Fall back to mimetypes stdlib
+        mime_type = mimetypes.guess_type(path)[0]
+    if not mime_type or not mime_type.startswith("image/"):
+        supported = ", ".join(sorted(_SUPPORTED_IMAGE_TYPES.keys()))
+        raise GenerationError(
+            f"Unsupported image format {ext!r}. Supported: {supported}",
+            code="UNSUPPORTED_IMAGE_FORMAT",
+        )
+
+    with open(path, "rb") as fh:
+        data = base64.standard_b64encode(fh.read()).decode("ascii")
+
+    return {"inlineData": {"mimeType": mime_type, "data": data}}
+
+
+class GeminiDeepThinkProvider(GenerationProvider):
+    """Google Gemini Deep Think text-to-3D and image-to-3D generation.
+
+    Uses Gemini's extended thinking capabilities to generate OpenSCAD code
+    from natural language descriptions or images (photos, sketches, napkin
+    drawings), then compiles it locally to STL.
 
     :param api_key: Google Gemini API key.  Falls back to
         ``KILN_GEMINI_API_KEY`` env var.
-    :param model: Gemini model to use (default: ``gemini-2.0-flash``).
+    :param model: Gemini model to use (default: ``gemini-2.5-flash``).
+        Override with ``KILN_GEMINI_MODEL`` env var.
     :param openscad_path: Explicit path to the ``openscad`` binary.
     :param compile_timeout: Max OpenSCAD compilation time in seconds.
     """
@@ -191,17 +302,22 @@ class GeminiDeepThinkProvider(GenerationProvider):
         style: str | None = None,
         **kwargs: Any,
     ) -> GenerationJob:
-        """Generate a 3D model from a text description via Gemini + OpenSCAD.
+        """Generate a 3D model from text or image via Gemini + OpenSCAD.
 
-        Stage 1: Gemini reasons about the geometry and produces OpenSCAD code.
-        Stage 2: OpenSCAD compiles the code to STL.
+        Stage 1: Gemini reasons deeply about the geometry and produces
+        OpenSCAD code.  When an image is provided, Gemini uses multimodal
+        understanding to interpret the visual and generate matching geometry.
+        Stage 2: OpenSCAD compiles the code to STL locally.
 
-        :param prompt: Natural language description of the desired 3D model,
-            or a description of a napkin sketch.
+        :param prompt: Natural language description of the desired 3D model.
         :param format: Output format (only ``"stl"`` supported).
         :param style: Optional style hint (``"organic"``, ``"mechanical"``,
             ``"decorative"``).
-        :returns: :class:`GenerationJob` with ``SUCCEEDED`` or ``FAILED`` status.
+        :param image_path: (kwarg) Path to a local image file (photo, sketch,
+            napkin drawing) for image-to-3D generation.
+        :param output_dir: (kwarg) Directory for output files.
+        :returns: :class:`GenerationJob` with ``SUCCEEDED`` or ``FAILED``
+            status.
         """
         if format != "stl":
             raise GenerationError(
@@ -217,7 +333,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{job_id}.stl")
 
-        # Stage 1: Call Gemini API to generate OpenSCAD code
+        # Build the user prompt with optional style hint
         style_hint = ""
         if style:
             style_hint = f"\nStyle preference: {style}."
@@ -228,8 +344,26 @@ class GeminiDeepThinkProvider(GenerationProvider):
             f"Output valid OpenSCAD code only."
         )
 
+        # Prepare optional image input for multimodal generation
+        image_parts: list[dict[str, Any]] = []
+        image_path = kwargs.get("image_path")
+        if image_path:
+            try:
+                image_part = _encode_image_file(image_path)
+                image_parts.append(image_part)
+                logger.info(
+                    "Gemini Deep Think: including image input from %s",
+                    image_path,
+                )
+            except GenerationError:
+                raise
+            except Exception as exc:
+                logger.warning("Failed to encode image %s: %s", image_path, exc)
+                # Continue without image — text-only fallback
+
+        # ---- Stage 1: Call Gemini API to generate OpenSCAD code ----
         try:
-            scad_code = self._call_gemini(user_prompt)
+            raw_response = self._call_gemini(user_prompt, image_parts=image_parts)
         except GenerationError:
             raise
         except Exception as exc:
@@ -246,25 +380,11 @@ class GeminiDeepThinkProvider(GenerationProvider):
             self._jobs[job_id] = job
             return job
 
-        # Safety check: block dangerous operations in the raw response
-        # (before extraction, which could strip dangerous lines)
-        for pattern in _DANGEROUS_PATTERNS:
-            if re.search(pattern, scad_code, re.IGNORECASE):
-                job = GenerationJob(
-                    id=job_id,
-                    provider=self.name,
-                    prompt=prompt,
-                    status=GenerationStatus.FAILED,
-                    progress=0,
-                    created_at=time.time(),
-                    format=format,
-                    error="Generated code contains blocked file I/O operations.",
-                )
-                self._jobs[job_id] = job
-                return job
-
-        # Extract and validate OpenSCAD code
-        scad_code = _extract_openscad_code(scad_code)
+        # Extract OpenSCAD code from the response
+        # NOTE: Safety check runs ONLY on extracted code, not the raw response.
+        # The raw response may contain explanatory text with words like "import"
+        # that would cause false-positive safety rejections.
+        scad_code = _extract_openscad_code(raw_response)
 
         if not scad_code.strip():
             job = GenerationJob(
@@ -280,25 +400,25 @@ class GeminiDeepThinkProvider(GenerationProvider):
             self._jobs[job_id] = job
             return job
 
-        # Double-check extracted code for safety
-        for pattern in _DANGEROUS_PATTERNS:
-            if re.search(pattern, scad_code, re.IGNORECASE):
-                job = GenerationJob(
-                    id=job_id,
-                    provider=self.name,
-                    prompt=prompt,
-                    status=GenerationStatus.FAILED,
-                    progress=0,
-                    created_at=time.time(),
-                    format=format,
-                    error="Generated code contains blocked file I/O operations.",
-                )
-                self._jobs[job_id] = job
-                return job
+        # Safety check on the extracted code only
+        safety_error = _check_scad_safety(scad_code)
+        if safety_error:
+            job = GenerationJob(
+                id=job_id,
+                provider=self.name,
+                prompt=prompt,
+                status=GenerationStatus.FAILED,
+                progress=0,
+                created_at=time.time(),
+                format=format,
+                error=safety_error,
+            )
+            self._jobs[job_id] = job
+            return job
 
         self._scad_code[job_id] = scad_code
 
-        # Stage 2: Compile OpenSCAD code to STL (with self-healing retry)
+        # ---- Stage 2: Compile OpenSCAD code to STL (with self-healing) ----
         max_compile_retries = 2  # up to 2 retries = 3 total attempts
         compile_result = self._compile_scad(scad_code, out_path, job_id, prompt, format)
 
@@ -306,10 +426,11 @@ class GeminiDeepThinkProvider(GenerationProvider):
             if compile_result.status != GenerationStatus.FAILED:
                 break
             if not compile_result.error or "compilation failed" not in compile_result.error.lower():
-                break  # Only retry on compilation errors, not timeouts or missing binaries
+                break  # Only retry on compilation errors, not timeouts
 
             logger.info(
-                "Gemini Deep Think: OpenSCAD compile failed (attempt %d/%d), retrying with error feedback...",
+                "Gemini Deep Think: OpenSCAD compile failed (attempt %d/%d), "
+                "retrying with error feedback...",
                 attempt,
                 max_compile_retries + 1,
             )
@@ -324,34 +445,20 @@ class GeminiDeepThinkProvider(GenerationProvider):
             )
 
             try:
-                scad_code = self._call_gemini(retry_prompt)
-            except (GenerationError, Exception) as exc:
+                retry_response = self._call_gemini(retry_prompt)
+            except Exception as exc:
                 logger.warning("Gemini retry call failed: %s", exc)
                 break
 
-            # Safety check on retried code
-            safe = True
-            for pattern in _DANGEROUS_PATTERNS:
-                if re.search(pattern, scad_code, re.IGNORECASE):
-                    safe = False
-                    break
-            if not safe:
-                logger.warning("Retried code contains dangerous patterns, aborting retry.")
-                break
-
-            scad_code = _extract_openscad_code(scad_code)
+            # Extract and validate the retried code
+            scad_code = _extract_openscad_code(retry_response)
             if not scad_code.strip():
                 logger.warning("Retried code was empty, aborting retry.")
                 break
 
-            # Safety check on extracted code
-            safe = True
-            for pattern in _DANGEROUS_PATTERNS:
-                if re.search(pattern, scad_code, re.IGNORECASE):
-                    safe = False
-                    break
-            if not safe:
-                logger.warning("Retried extracted code contains dangerous patterns, aborting retry.")
+            safety_error = _check_scad_safety(scad_code)
+            if safety_error:
+                logger.warning("Retried code failed safety check, aborting retry.")
                 break
 
             self._scad_code[job_id] = scad_code
@@ -421,28 +528,100 @@ class GeminiDeepThinkProvider(GenerationProvider):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _call_gemini(self, prompt: str) -> str:
-        """Call the Gemini API to generate OpenSCAD code."""
-        url = f"{_GEMINI_API_URL}/{self._model}:generateContent"
-        params = {"key": self._api_key}
+    def _call_gemini(
+        self,
+        prompt: str,
+        *,
+        image_parts: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Call the Gemini API with thinking enabled.
 
-        body: dict[str, Any] = {
-            "contents": [
-                {
-                    "parts": [{"text": prompt}],
-                }
-            ],
-            "systemInstruction": {
-                "parts": [{"text": _SYSTEM_PROMPT}],
-            },
-            "generationConfig": {
-                "temperature": 0.7,
-                "maxOutputTokens": 8192,
-            },
-        }
+        If the configured model returns a quota/rate error and a fallback
+        model is available, automatically retries with the fallback.
 
-        resp = self._request("POST", url, json_body=body, params=params)
-        data = resp.json()
+        :param prompt: The text prompt to send.
+        :param image_parts: Optional list of image ``inlineData`` dicts
+            for multimodal (image-to-3D) generation.
+        :returns: The text content from Gemini's response (thinking parts
+            filtered out).
+        :raises GenerationError: On API errors or empty responses.
+        """
+        # Build content parts: images first (if any), then text prompt
+        content_parts: list[dict[str, Any]] = []
+        if image_parts:
+            content_parts.extend(image_parts)
+        content_parts.append({"text": prompt})
+
+        # Try configured model, then fallback if quota exceeded
+        models_to_try = [self._model]
+        if self._model != _FALLBACK_MODEL:
+            models_to_try.append(_FALLBACK_MODEL)
+
+        last_error: Exception | None = None
+        for model in models_to_try:
+            thinking_config = _get_thinking_config(model)
+            url = f"{_GEMINI_API_URL}/{model}:generateContent"
+            params = {"key": self._api_key}
+
+            body: dict[str, Any] = {
+                "contents": [
+                    {
+                        "parts": content_parts,
+                    }
+                ],
+                "systemInstruction": {
+                    "parts": [{"text": _SYSTEM_PROMPT}],
+                },
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": 16384,
+                    "thinkingConfig": thinking_config,
+                },
+            }
+
+            logger.info(
+                "Gemini Deep Think: calling %s with thinking config %s",
+                model,
+                thinking_config,
+            )
+
+            try:
+                resp = self._request("POST", url, json_body=body, params=params)
+            except GenerationError as exc:
+                if "rate limit" in str(exc).lower() and model != models_to_try[-1]:
+                    logger.warning(
+                        "Gemini model %s hit rate limit, falling back to %s",
+                        model,
+                        _FALLBACK_MODEL,
+                    )
+                    last_error = exc
+                    continue
+                raise
+
+            data = resp.json()
+
+            # Check for quota errors in the response body (some come as 200 with error)
+            if "error" in data and not data.get("candidates"):
+                error_msg = data["error"].get("message", "")
+                if ("quota" in error_msg.lower() or "rate" in error_msg.lower()) and model != models_to_try[-1]:
+                    logger.warning(
+                        "Gemini model %s quota exceeded, falling back to %s",
+                        model,
+                        _FALLBACK_MODEL,
+                    )
+                    last_error = GenerationError(error_msg, code="RATE_LIMITED")
+                    continue
+
+            # Success — break out of model loop
+            break
+        else:
+            # All models exhausted
+            if last_error:
+                raise last_error
+            raise GenerationError(
+                "All Gemini models failed.",
+                code="ALL_MODELS_FAILED",
+            )
 
         # Extract text from Gemini response
         candidates = data.get("candidates", [])
@@ -461,14 +640,46 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 code="EMPTY_RESPONSE",
             )
 
-        text = parts[0].get("text", "")
-        if not text:
+        # Filter out thinking/thought parts — only collect text output.
+        # Thinking models return parts with "thought": true for their
+        # internal reasoning; we want only the final code output.
+        text_segments: list[str] = []
+        thought_tokens = 0
+        for part in parts:
+            if part.get("thought"):
+                # This is an internal thinking part — skip but log
+                thought_text = part.get("text", "")
+                thought_tokens += len(thought_text)
+                continue
+            text = part.get("text", "")
+            if text:
+                text_segments.append(text)
+
+        if thought_tokens > 0:
+            logger.info(
+                "Gemini Deep Think: model used ~%d chars of internal reasoning",
+                thought_tokens,
+            )
+
+        combined_text = "\n".join(text_segments).strip()
+        if not combined_text:
             raise GenerationError(
-                "Gemini returned empty text.",
+                "Gemini returned empty text (thinking completed but no code output).",
                 code="EMPTY_RESPONSE",
             )
 
-        return text
+        # Log usage metadata if available
+        usage = data.get("usageMetadata", {})
+        if usage:
+            logger.info(
+                "Gemini Deep Think usage: prompt=%s, candidates=%s, thoughts=%s, total=%s",
+                usage.get("promptTokenCount", "?"),
+                usage.get("candidatesTokenCount", "?"),
+                usage.get("thoughtsTokenCount", "?"),
+                usage.get("totalTokenCount", "?"),
+            )
+
+        return combined_text
 
     def _compile_scad(
         self,
@@ -549,6 +760,13 @@ class GeminiDeepThinkProvider(GenerationProvider):
 
             self._paths[job_id] = out_path
             self._prompts[job_id] = prompt
+
+            file_size = os.path.getsize(out_path)
+            logger.info(
+                "Gemini Deep Think: compiled successfully -> %s (%.1f KB)",
+                out_path,
+                file_size / 1024,
+            )
 
             job = GenerationJob(
                 id=job_id,

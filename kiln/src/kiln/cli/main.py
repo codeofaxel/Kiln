@@ -223,6 +223,52 @@ def _resolve_support_style(support_mode: str, input_file: str) -> tuple[str | No
     return None, None
 
 
+def _resolve_generation_provider(provider: str) -> "GenerationProvider":  # noqa: F821
+    """Resolve a generation provider by name.
+
+    Handles openscad and meshy as direct imports, and routes all other
+    providers through the registry (auto-discovers from env vars).
+    Gives an actionable error when the API key is missing.
+    """
+    from kiln.generation import MeshyProvider, OpenSCADProvider
+    from kiln.generation.registry import GenerationRegistry, _ENV_PROVIDER_MAP
+
+    if provider == "openscad":
+        return OpenSCADProvider()
+    if provider == "meshy":
+        return MeshyProvider()
+    if provider == "gemini":
+        from kiln.generation.gemini import GeminiDeepThinkProvider
+
+        return GeminiDeepThinkProvider()
+
+    registry = GenerationRegistry()
+    registry.auto_discover()
+
+    try:
+        return registry.get(provider)
+    except Exception:
+        # Give a helpful hint about which env var is needed
+        env_hints = {v[1]: k for k, v in _ENV_PROVIDER_MAP.items()}
+        # Map provider name to class name pattern
+        hint_map = {
+            "tripo3d": "KILN_TRIPO3D_API_KEY",
+            "stability": "KILN_STABILITY_API_KEY",
+        }
+        env_var = hint_map.get(provider)
+        if env_var:
+            import os
+
+            if not os.environ.get(env_var, "").strip():
+                from kiln.generation.base import GenerationError
+
+                raise GenerationError(
+                    f"Provider {provider!r} requires {env_var} to be set.",
+                    code="AUTH_ERROR",
+                )
+        raise
+
+
 def _resolve_slice_plan(
     ctx: click.Context,
     *,
@@ -2619,6 +2665,8 @@ def remove(name: str) -> None:
     help="Support strategy: off, auto, minimal (buildplate-only), or aggressive.",
 )
 @click.option("--print-after", is_flag=True, help="Upload and start printing after slicing.")
+@click.option("--copies", "-c", default=1, type=click.IntRange(1, 20), help="Number of copies to arrange on the plate (1-20, default 1).")
+@click.option("--spacing", default=10.0, type=float, help="Gap between copies in mm (default 10).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def slice(
@@ -2632,12 +2680,18 @@ def slice(
     material: str | None,
     support_mode: str,
     print_after: bool,
+    copies: int,
+    spacing: float,
     json_mode: bool,
 ) -> None:
     """Slice a 3D model (STL/3MF/STEP) to G-code.
 
     Uses PrusaSlicer or OrcaSlicer CLI.  The slicer binary is auto-detected
     on PATH or can be specified with --slicer.
+
+    \b
+    With --copies N, arranges N copies on one build plate using
+    PrusaSlicer's --duplicate flag (or STL mesh duplication as fallback).
 
     With --print-after, the sliced G-code is uploaded and printing starts
     immediately.
@@ -2654,13 +2708,38 @@ def slice(
             support_mode=support_mode,
         )
 
+        extra_args = plan["extra_args"] or []
+
+        # Multi-copy: use PrusaSlicer --duplicate or STL mesh duplication
+        actual_input = input_file
+        copy_strategy = None
+        if copies > 1:
+            from kiln.slicer import find_slicer
+
+            slicer_info = find_slicer(slicer)
+            slicer_name = slicer_info.name.lower()
+
+            if "prusaslicer" in slicer_name or "prusa" in slicer_name:
+                extra_args.extend(["--duplicate", str(copies), "--duplicate-distance", str(spacing)])
+                copy_strategy = "prusaslicer_duplicate"
+            else:
+                # Fallback: STL mesh duplication for OrcaSlicer etc.
+                from kiln.auto_orient import duplicate_stl_on_plate
+
+                actual_input = duplicate_stl_on_plate(
+                    input_file,
+                    copies,
+                    spacing_mm=spacing,
+                )
+                copy_strategy = "stl_mesh_duplication"
+
         result = slice_file(
-            input_file,
+            actual_input,
             output_dir=output_dir,
             output_name=output_name,
             profile=plan["profile_path"],
             slicer_path=slicer,
-            extra_args=plan["extra_args"] or None,
+            extra_args=extra_args or None,
         )
 
         if not print_after:
@@ -2678,11 +2757,17 @@ def slice(
                     payload["support_style"] = plan["support_style"]
                 if plan["support_reason"]:
                     payload["support_reason"] = plan["support_reason"]
+                if copies > 1:
+                    payload["copies"] = copies
+                    payload["spacing_mm"] = spacing
+                    payload["copy_strategy"] = copy_strategy
                 click.echo(_json.dumps({"status": "success", "data": payload}, indent=2))
             else:
                 click.echo(result.message)
                 click.echo(f"Output: {result.output_path}")
                 click.echo(f"Material: {plan['material']}")
+                if copies > 1:
+                    click.echo(f"Copies: {copies} (strategy: {copy_strategy}, spacing: {spacing}mm)")
                 if plan["printer_id"]:
                     click.echo(f"Profile: {plan['printer_id']}")
                 if plan["support_style"]:
@@ -4871,6 +4956,12 @@ def cost(
 @click.option("--electricity-rate", default=0.12, type=float, help="USD per kWh.")
 @click.option("--printer-wattage", default=200.0, type=float, help="Printer watts.")
 @click.option("--country", default="US", help="Shipping country code.")
+@click.option(
+    "--provider",
+    default=None,
+    type=click.Choice(["craftcloud", "sculpteo", "proxy"]),
+    help="Fulfillment provider (default: auto-detect, falls back to craftcloud).",
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def compare_cost(
     file_path: str,
@@ -4880,6 +4971,7 @@ def compare_cost(
     electricity_rate: float,
     printer_wattage: float,
     country: str,
+    provider: str | None,
     json_mode: bool,
 ) -> None:
     """Compare local printing cost vs. outsourced manufacturing."""
@@ -4910,8 +5002,19 @@ def compare_cost(
             from kiln.fulfillment import QuoteRequest as QR
             from kiln.fulfillment import get_provider
 
-            provider = get_provider()
-            quote = provider.get_quote(
+            # Use explicit provider, or auto-detect, or fall back to
+            # craftcloud (which works without any API key for quotes).
+            fulfillment_provider = None
+            try:
+                fulfillment_provider = get_provider(provider)
+            except Exception:
+                # Proxy unreachable or no env vars — fall back to Craftcloud direct
+                if provider is None:
+                    fulfillment_provider = get_provider("craftcloud")
+                else:
+                    raise
+
+            quote = fulfillment_provider.get_quote(
                 QR(
                     file_path=file_path,
                     material_id=fulfillment_material,
@@ -5099,13 +5202,13 @@ def material_show(ctx: click.Context, json_mode: bool, live: bool) -> None:
                         )
 
         if ams_data and ams_data.get("units"):
-            tray_now = ams_data.get("tray_now", "255")
+            tray_now = str(ams_data.get("tray_now", "255"))
             slots: list[dict] = []
             for unit in ams_data["units"]:
-                unit_id = unit.get("unit_id", 0)
+                unit_id = int(unit.get("unit_id", 0))
                 humidity = unit.get("humidity")
                 for tray in unit.get("trays", []):
-                    slot_num = unit_id * 4 + tray.get("slot", 0) + 1  # 1-indexed
+                    slot_num = unit_id * 4 + int(tray.get("slot", 0)) + 1  # 1-indexed
                     color_hex = tray.get("tray_color", "")
                     # Convert RRGGBBAA hex to readable color name or short hex.
                     color_display = f"#{color_hex[:6]}" if len(color_hex) >= 6 else color_hex
@@ -6414,11 +6517,13 @@ def agent(model: str, tier: str | None, base_url: str) -> None:
 @click.option(
     "--provider",
     "-p",
-    default="meshy",
-    type=click.Choice(["meshy", "openscad", "gemini", "tripo3d", "stability"]),
-    help="Generation provider (default: meshy).",
+    default="gemini",
+    type=click.Choice(["gemini", "openscad", "meshy", "tripo3d", "stability"]),
+    help="Generation provider (default: gemini). Gemini supports text and image input.",
 )
 @click.option("--style", "-s", default=None, help="Style hint (e.g. realistic, sculpture).")
+@click.option("--image", "-i", default=None, type=click.Path(exists=True),
+              help="Image file (photo/sketch/napkin drawing) for image-to-3D generation (Gemini only).")
 @click.option("--output-dir", "-o", default=None, help="Output directory for generated model.")
 @click.option(
     "--wait/--no-wait", "wait_for", default=False, help="Wait for generation to complete (default: return immediately)."
@@ -6430,21 +6535,24 @@ def generate(
     prompt: str,
     provider: str,
     style: str | None,
+    image: str | None,
     output_dir: str | None,
     wait_for: bool,
     timeout: int,
     preview_enabled: bool,
     json_mode: bool,
 ) -> None:
-    """Generate a 3D model from a text description.
+    """Generate a 3D model from a text description or image.
 
-    PROMPT is the text description (for Meshy) or OpenSCAD code (for openscad).
+    PROMPT is the text description (for Meshy/Gemini) or OpenSCAD code (for openscad).
+    Use --image to provide a photo, sketch, or napkin drawing for image-to-3D (Gemini).
 
     \b
     Examples:
-        kiln generate "a phone stand with cable slot" --provider meshy
+        kiln generate "a phone stand with cable slot" --provider gemini
         kiln generate "cube([20,20,10]);" --provider openscad
-        kiln generate "a gear with 24 teeth" --wait --json
+        kiln generate "a gear with 24 teeth" --provider gemini --wait --json
+        kiln generate "recreate this object" --provider gemini --image sketch.png
     """
     import time as _time
 
@@ -6458,17 +6566,23 @@ def generate(
     )
     from kiln.generation.registry import GenerationRegistry
 
-    try:
-        if provider == "openscad":
-            gen = OpenSCADProvider()
-        elif provider == "meshy":
-            gen = MeshyProvider()
-        else:
-            registry = GenerationRegistry()
-            registry.auto_discover()
-            gen = registry.get(provider)
+    if image and provider != "gemini":
+        click.echo(
+            click.style(
+                f"Warning: --image is only supported by the gemini provider (got --provider {provider}). "
+                f"Image will be ignored.",
+                fg="yellow",
+            )
+        )
 
-        job = gen.generate(prompt, format="stl", style=style)
+    try:
+        gen = _resolve_generation_provider(provider)
+
+        gen_kwargs: dict[str, Any] = {"format": "stl", "style": style}
+        if image and provider == "gemini":
+            gen_kwargs["image_path"] = os.path.abspath(image)
+
+        job = gen.generate(prompt, **gen_kwargs)
 
         # If not waiting or already done (OpenSCAD), return job info.
         if not wait_for or job.status == GenerationStatus.SUCCEEDED:
@@ -6641,7 +6755,7 @@ def generate(
 @cli.command("generate-status")
 @click.argument("job_id")
 @click.option(
-    "--provider", "-p", default="meshy", type=click.Choice(["meshy", "openscad", "gemini", "tripo3d", "stability"]), help="Generation provider."
+    "--provider", "-p", default="gemini", type=click.Choice(["gemini", "openscad", "meshy", "tripo3d", "stability"]), help="Generation provider."
 )
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
@@ -6658,14 +6772,7 @@ def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
     from kiln.generation.registry import GenerationRegistry
 
     try:
-        if provider == "openscad":
-            gen = OpenSCADProvider()
-        elif provider == "meshy":
-            gen = MeshyProvider()
-        else:
-            registry = GenerationRegistry()
-            registry.auto_discover()
-            gen = registry.get(provider)
+        gen = _resolve_generation_provider(provider)
 
         job = gen.get_job_status(job_id)
 
@@ -6702,7 +6809,7 @@ def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
 @cli.command("generate-download")
 @click.argument("job_id")
 @click.option(
-    "--provider", "-p", default="meshy", type=click.Choice(["meshy", "openscad", "gemini", "tripo3d", "stability"]), help="Generation provider."
+    "--provider", "-p", default="gemini", type=click.Choice(["gemini", "openscad", "meshy", "tripo3d", "stability"]), help="Generation provider."
 )
 @click.option(
     "--output-dir", "-o", default=os.path.join(tempfile.gettempdir(), "kiln_generated"), help="Output directory."
@@ -6730,14 +6837,7 @@ def generate_download(
     from kiln.generation.registry import GenerationRegistry
 
     try:
-        if provider == "openscad":
-            gen = OpenSCADProvider()
-        elif provider == "meshy":
-            gen = MeshyProvider()
-        else:
-            registry = GenerationRegistry()
-            registry.auto_discover()
-            gen = registry.get(provider)
+        gen = _resolve_generation_provider(provider)
 
         result = gen.download_result(job_id, output_dir=output_dir)
 
@@ -6779,9 +6879,9 @@ def generate_download(
 @click.option(
     "--provider",
     "-p",
-    default="meshy",
-    type=click.Choice(["meshy", "openscad", "gemini", "tripo3d", "stability"]),
-    help="Generation provider (default: meshy).",
+    default="gemini",
+    type=click.Choice(["gemini", "openscad", "meshy", "tripo3d", "stability"]),
+    help="Generation provider (default: gemini).",
 )
 @click.option("--style", "-s", default=None, help="Style hint.")
 @click.option("--printer-id", default=None, help="Printer model ID for slicer profile.")
@@ -6843,14 +6943,7 @@ def generate_and_print_cmd(
 
     try:
         # --- Step 1: Generate ---
-        if provider == "openscad":
-            gen = OpenSCADProvider()
-        elif provider == "meshy":
-            gen = MeshyProvider()
-        else:
-            registry = GenerationRegistry()
-            registry.auto_discover()
-            gen = registry.get(provider)
+        gen = _resolve_generation_provider(provider)
 
         if not json_mode:
             click.echo(f"Generating model with {gen.display_name}...")
