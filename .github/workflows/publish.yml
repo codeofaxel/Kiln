@@ -154,6 +154,79 @@ jobs:
       - name: Publish kiln3d-octoprint to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
+  # Publish redirect packages (kiln-print, kiln-printer) that point to kiln3d
+  build-redirects:
+    needs: [test]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build kiln-print
+        run: cd redirects/kiln-print && python -m build
+
+      - name: Build kiln-printer
+        run: cd redirects/kiln-printer && python -m build
+
+      - name: Upload kiln-print artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-kiln-print
+          path: redirects/kiln-print/dist/
+
+      - name: Upload kiln-printer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-kiln-printer
+          path: redirects/kiln-printer/dist/
+
+  publish-kiln-print:
+    needs: [build-redirects, publish-kiln]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download kiln-print artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-kiln-print
+          path: dist/
+
+      - name: Publish kiln-print to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+  publish-kiln-printer:
+    needs: [build-redirects, publish-kiln]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download kiln-printer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-kiln-printer
+          path: dist/
+
+      - name: Publish kiln-printer to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
   # Publish to the official MCP Registry after PyPI is live
   publish-mcp-registry:
     needs: publish-kiln
