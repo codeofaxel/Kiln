@@ -3,10 +3,12 @@
 
 <div class="hero">
   <div class="container">
+    <img src="/assets/kiln-logo-dark-notext.svg" alt="Kiln" class="hero-logo" width="200" height="200">
     <h1><span class="brand">Kiln 3D</span> lets AI agents <span class="accent">safely</span><br>control 3D printers</h1>
     <p class="subtitle">
-      Open-source infrastructure and MCP server for AI-powered 3D printing. Any AI agent can discover, slice,
-      print, and monitor real hardware with built-in safety limits that cannot be bypassed.
+      Open-source 3D printing infrastructure for AI agents.
+      Design new objects, discover existing models, slice, print, monitor,
+      and recover from failures — with safety limits that can't be bypassed.
     </p>
 
     <div class="install-block">
@@ -47,6 +49,12 @@
   .hero {
     padding: 100px 0 80px;
     text-align: center;
+  }
+  .hero-logo {
+    width: clamp(120px, 15vw, 200px);
+    height: auto;
+    border-radius: 32px;
+    margin-bottom: 32px;
   }
   .hero h1 {
     font-size: clamp(32px, 5vw, 56px);
