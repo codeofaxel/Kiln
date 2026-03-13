@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kiln-print"
+version = "1.0.0"
+description = "This package redirects to kiln3d — the open-source MCP server for AI-controlled 3D printers. Install with: pip install kiln3d"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Adam Arreola" }]
+keywords = ["kiln", "kiln3d", "3d-printing", "mcp"]
+classifiers = [
+    "Development Status :: 7 - Inactive",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = ["kiln3d"]
+
+[project.urls]
+Homepage = "https://kiln3d.com"
+Repository = "https://github.com/codeofaxel/Kiln"
