@@ -5014,14 +5014,47 @@ def compare_cost(
                 else:
                     raise
 
-            quote = fulfillment_provider.get_quote(
-                QR(
-                    file_path=file_path,
-                    material_id=fulfillment_material,
-                    quantity=quantity,
-                    shipping_country=country,
-                )
-            )
+            # Resolve simple material names (PLA, Nylon, etc.) to provider IDs
+            resolved_material = fulfillment_material
+            if len(fulfillment_material) < 20 or "-" not in fulfillment_material:
+                # Looks like a simple name, not a UUID — resolve it
+                try:
+                    resolved_material = _resolve_fulfillment_material(
+                        fulfillment_material, provider_name=provider
+                    )
+                    if not json_mode:
+                        click.echo(f"  Resolved material {fulfillment_material!r} → {resolved_material}")
+                except click.ClickException:
+                    # Fall through with the original name; provider may accept it
+                    pass
+
+            # Get quote, falling back to Craftcloud if provider fails
+            def _get_quote_with_fallback() -> Any:
+                try:
+                    return fulfillment_provider.get_quote(
+                        QR(
+                            file_path=file_path,
+                            material_id=resolved_material,
+                            quantity=quantity,
+                            shipping_country=country,
+                        )
+                    )
+                except Exception:
+                    if provider is None and fulfillment_provider.name != "craftcloud":
+                        if not json_mode:
+                            click.echo(f"  {fulfillment_provider.name} unavailable, falling back to craftcloud...")
+                        cc = get_provider("craftcloud")
+                        return cc.get_quote(
+                            QR(
+                                file_path=file_path,
+                                material_id=resolved_material,
+                                quantity=quantity,
+                                shipping_country=country,
+                            )
+                        )
+                    raise
+
+            quote = _get_quote_with_fallback()
             result["fulfillment"] = {"available": True, "quote": quote.to_dict()}
         except FulfillmentError as exc:
             result["fulfillment"] = {"available": False, "error": str(exc)}
@@ -5057,6 +5090,247 @@ def compare_cost(
                 click.echo(f"  Shipping:   {so['name']} — ${so['price']:.2f} ({so.get('estimated_days', '?')} days)")
         else:
             click.echo(f"  {result['fulfillment'].get('error', 'unavailable')}")
+
+
+# ---------------------------------------------------------------------------
+# Fulfillment material lookup
+# ---------------------------------------------------------------------------
+
+# Common material name aliases → search terms for the Craftcloud catalog
+_MATERIAL_ALIASES: dict[str, list[str]] = {
+    "pla": ["PLA"],
+    "petg": ["PETG"],
+    "abs": ["ABS"],
+    "tpu": ["TPU"],
+    "asa": ["ASA"],
+    "nylon": ["Nylon", "PA12", "PA11"],
+    "pa12": ["PA12", "Nylon"],
+    "pa11": ["PA11", "Nylon"],
+    "resin": ["Resin", "SLA"],
+    "metal": ["Steel", "Aluminum", "Titanium"],
+    "steel": ["Steel", "Stainless"],
+    "aluminum": ["Aluminum"],
+    "titanium": ["Titanium"],
+    "copper": ["Copper"],
+    "carbon": ["Carbon"],
+    "wood": ["Wood"],
+    "flex": ["Flex", "TPU"],
+}
+
+
+def _resolve_fulfillment_material(
+    simple_name: str,
+    provider_name: str | None = None,
+) -> str:
+    """Resolve a simple material name (PLA, PETG, etc.) to a provider material ID.
+
+    Fetches the provider's material catalog, searches for matches by name,
+    and returns the best matching material config ID.
+
+    :param simple_name: Simple material name like "PLA", "Nylon", etc.
+    :param provider_name: Fulfillment provider name (default: auto-detect).
+    :returns: The material config ID string (e.g., a UUID for Craftcloud).
+    :raises click.ClickException: If no matching material is found.
+    """
+    from kiln.fulfillment import get_provider
+    from kiln.fulfillment.base import FulfillmentError
+
+    try:
+        prov = get_provider(provider_name)
+    except Exception:
+        if provider_name is None:
+            prov = get_provider("craftcloud")
+        else:
+            raise
+
+    try:
+        materials = prov.list_materials()
+    except Exception:
+        if provider_name is None and prov.name != "craftcloud":
+            prov = get_provider("craftcloud")
+            materials = prov.list_materials()
+        else:
+            raise
+
+    if not materials:
+        raise click.ClickException("No materials available from the fulfillment provider.")
+
+    import re as _re
+
+    query = simple_name.strip().lower()
+    search_terms = _MATERIAL_ALIASES.get(query, [simple_name])
+
+    # Score each material by how well it matches (word-boundary matching)
+    scored: list[tuple[int, Any]] = []
+    for mat in materials:
+        name_lower = mat.name.lower()
+        tech_lower = mat.technology.lower()
+        score = 0
+        for term in search_terms:
+            term_l = term.lower()
+            pattern = r"(?<![a-z])" + _re.escape(term_l) + r"(?![a-z])"
+            if _re.search(pattern, name_lower):
+                score += 10
+            if _re.search(pattern, tech_lower):
+                score += 3
+        # Bonus for "Standard" finish (most common)
+        if "standard" in mat.finish.lower():
+            score += 2
+        # Bonus for FDM technology (matches PLA/PETG/ABS expectations)
+        if query in ("pla", "petg", "abs", "tpu", "asa") and "fdm" in tech_lower:
+            score += 5
+        if score > 0:
+            scored.append((score, mat))
+
+    if not scored:
+        # If the name looks like a UUID already, pass it through
+        if len(simple_name) > 20 and "-" in simple_name:
+            return simple_name
+        raise click.ClickException(
+            f"No matching material found for {simple_name!r}. "
+            f"Run 'kiln fulfillment-materials' to see available materials."
+        )
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    best = scored[0][1]
+    return best.id
+
+
+@cli.command("fulfillment-materials")
+@click.option("--search", "-s", default=None, help="Search/filter materials by name (e.g. PLA, Nylon, Resin).")
+@click.option(
+    "--provider",
+    default=None,
+    type=click.Choice(["craftcloud", "sculpteo", "proxy"]),
+    help="Fulfillment provider (default: auto-detect).",
+)
+@click.option("--technology", "-t", default=None, help="Filter by technology (FDM, SLA, SLS, MJF, etc.).")
+@click.option("--limit", "-n", default=25, type=int, help="Max materials to show (default 25).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def fulfillment_materials(
+    search: str | None,
+    provider: str | None,
+    technology: str | None,
+    limit: int,
+    json_mode: bool,
+) -> None:
+    """List available materials from fulfillment providers.
+
+    Shows material IDs, names, technologies, colors, and finishes.
+    Use --search to find specific materials (e.g. PLA, Nylon, Resin).
+    Use the material ID with compare-cost --fulfillment-material.
+
+    \b
+    Examples:
+        kiln fulfillment-materials
+        kiln fulfillment-materials --search PLA
+        kiln fulfillment-materials --technology SLS --limit 50
+        kiln fulfillment-materials --search Nylon --json
+    """
+    import json
+
+    from kiln.fulfillment import get_provider
+    from kiln.fulfillment.base import FulfillmentError
+
+    try:
+        try:
+            prov = get_provider(provider)
+        except Exception:
+            if provider is None:
+                prov = get_provider("craftcloud")
+            else:
+                raise
+
+        if not json_mode:
+            click.echo(f"Fetching materials from {prov.name}...")
+
+        try:
+            materials = prov.list_materials()
+        except Exception:
+            # If auto-detected provider fails (e.g., proxy unreachable),
+            # fall back to Craftcloud which works without API key.
+            if provider is None and prov.name != "craftcloud":
+                if not json_mode:
+                    click.echo(f"  {prov.name} unavailable, falling back to craftcloud...")
+                prov = get_provider("craftcloud")
+                materials = prov.list_materials()
+            else:
+                raise
+
+        if not materials:
+            click.echo(format_error("No materials returned by provider.", json_mode=json_mode))
+            return
+
+        # Filter by search term (word-boundary matching to avoid
+        # false positives like "PLA" matching "electroplated")
+        if search:
+            import re as _re
+
+            query = search.strip().lower()
+            search_terms = _MATERIAL_ALIASES.get(query, [search])
+            filtered = []
+            for mat in materials:
+                text = f"{mat.name} {mat.technology} {mat.color} {mat.finish}".lower()
+                for term in search_terms:
+                    # Word boundary match: PLA must not be part of a larger word
+                    if _re.search(r"(?<![a-z])" + _re.escape(term.lower()) + r"(?![a-z])", text):
+                        filtered.append(mat)
+                        break
+            materials = filtered
+
+        # Filter by technology (check both the technology field and material name,
+        # since some providers like Craftcloud use "3d_printing" as technology
+        # and embed the actual tech (SLS, FDM, SLA, etc.) in the name)
+        if technology:
+            import re as _re2
+
+            tech_q = technology.strip().lower()
+            tech_pattern = r"(?<![a-z])" + _re2.escape(tech_q) + r"(?![a-z])"
+            materials = [
+                m
+                for m in materials
+                if m.technology.lower() == tech_q
+                or _re2.search(tech_pattern, m.name.lower())
+                or _re2.search(tech_pattern, m.technology.lower())
+            ]
+
+        total_count = len(materials)
+        materials = materials[:limit]
+
+        if json_mode:
+            click.echo(
+                json.dumps(
+                    {
+                        "status": "success",
+                        "data": {
+                            "provider": prov.name,
+                            "total_count": total_count,
+                            "shown": len(materials),
+                            "materials": [m.to_dict() for m in materials],
+                        },
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            click.echo(f"\nFound {total_count} materials" + (f" (showing first {limit})" if total_count > limit else ""))
+            click.echo(f"{'ID':<40} {'Technology':<8} {'Name':<50} {'Color':<12} {'Finish'}")
+            click.echo("─" * 130)
+            for mat in materials:
+                name_display = mat.name[:48] + ".." if len(mat.name) > 50 else mat.name
+                click.echo(
+                    f"{mat.id:<40} {mat.technology:<8} {name_display:<50} {mat.color:<12} {mat.finish}"
+                )
+            if total_count > limit:
+                click.echo(f"\n… {total_count - limit} more. Use --limit {total_count} to see all.")
+            click.echo(f"\nUse material ID with: kiln compare-cost model.stl --fulfillment-material <ID>")
+
+    except FulfillmentError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -6884,6 +7158,8 @@ def generate_download(
     help="Generation provider (default: gemini).",
 )
 @click.option("--style", "-s", default=None, help="Style hint.")
+@click.option("--image", "-i", default=None, type=click.Path(exists=True),
+              help="Image file (photo/sketch/napkin drawing) for image-to-3D generation (Gemini only).")
 @click.option("--printer-id", default=None, help="Printer model ID for slicer profile.")
 @click.option(
     "--material",
@@ -6911,6 +7187,7 @@ def generate_and_print_cmd(
     prompt: str,
     provider: str,
     style: str | None,
+    image: str | None,
     printer_id: str | None,
     material: str | None,
     support_mode: str,
@@ -6919,14 +7196,15 @@ def generate_and_print_cmd(
     preview_enabled: bool,
     json_mode: bool,
 ) -> None:
-    """Generate a 3D model, slice it, and upload to the printer.
+    """Generate a 3D model from text or image, slice it, and upload to the printer.
 
-    One-command pipeline from text description to print-ready.
+    One-command pipeline from description to print-ready.
 
     \b
     Examples:
         kiln generate-and-print "a phone stand" --provider gemini --material PLA
         kiln generate-and-print "a gear" --provider openscad --auto-print
+        kiln generate-and-print "recreate this" --image sketch.png --material PETG
     """
     import time as _time
 
@@ -6941,6 +7219,15 @@ def generate_and_print_cmd(
     from kiln.generation.registry import GenerationRegistry
     from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
 
+    if image and provider != "gemini":
+        click.echo(
+            click.style(
+                f"Warning: --image is only supported by the gemini provider (got --provider {provider}). "
+                f"Image will be ignored.",
+                fg="yellow",
+            )
+        )
+
     try:
         # --- Step 1: Generate ---
         gen = _resolve_generation_provider(provider)
@@ -6948,7 +7235,11 @@ def generate_and_print_cmd(
         if not json_mode:
             click.echo(f"Generating model with {gen.display_name}...")
 
-        job = gen.generate(prompt, format="stl", style=style)
+        gen_kwargs: dict[str, Any] = {"format": "stl", "style": style}
+        if image and provider == "gemini":
+            gen_kwargs["image_path"] = os.path.abspath(image)
+
+        job = gen.generate(prompt, **gen_kwargs)
 
         # Wait for async providers
         if job.status not in (GenerationStatus.SUCCEEDED, GenerationStatus.FAILED):
