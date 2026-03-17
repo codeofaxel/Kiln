@@ -4,7 +4,7 @@
 //
 // Modules:
 //   external_thread(diameter=10, length=20, pitch=1.5, starts=1)
-//     Printable external (male) thread using hulled segments.
+//     Printable external (male) thread using simple rotated segments.
 //     - diameter : nominal outer diameter (mm)
 //     - length   : thread length along Z (mm)
 //     - pitch    : axial distance per revolution (mm)
@@ -29,34 +29,27 @@
 // ============================================================================
 
 // Printable external thread (coarse pitch, suitable for FDM)
-// Parameters: diameter, length, pitch, starts (for multi-start)
+// Uses simple rotated cylinders (no hull) for fast compilation.
 module external_thread(diameter=10, length=20, pitch=1.5, starts=1) {
     r = diameter / 2;
     tooth_h = pitch * 0.6;  // Thread depth (60% of pitch for printability)
     turns = length / pitch;
-    steps = max(36, floor(turns * 36));
+    // 12 steps per turn is plenty for FDM resolution (0.2mm layers).
+    // Cap at 200 total steps to keep compile time under 15 seconds.
+    steps = min(200, max(12, floor(turns * 12)));
 
-    difference() {
-        union() {
-            // Core cylinder
-            cylinder(h=length, r=r - tooth_h, $fn=36);
-            // Thread helix (simplified as stacked rotated profiles)
-            for (s = [0:starts-1]) {
-                for (i = [0:steps-1]) {
-                    z = i * length / steps;
-                    angle = i * 360 * turns / steps + s * 360 / starts;
-                    hull() {
-                        translate([0, 0, z])
-                        rotate([0, 0, angle])
-                        translate([r - tooth_h, 0, 0])
-                        cylinder(h=length/steps, r=tooth_h*0.7, $fn=6);
-
-                        translate([0, 0, z + length/steps])
-                        rotate([0, 0, angle + 360*turns/steps])
-                        translate([r - tooth_h, 0, 0])
-                        cylinder(h=0.01, r=tooth_h*0.7, $fn=6);
-                    }
-                }
+    union() {
+        // Core cylinder
+        cylinder(h=length, r=r - tooth_h, $fn=36);
+        // Thread helix — simple rotated cylinders along the helix path
+        for (s = [0:starts-1]) {
+            for (i = [0:steps-1]) {
+                z = i * length / steps;
+                angle = i * 360 * turns / steps + s * 360 / starts;
+                translate([0, 0, z])
+                rotate([0, 0, angle])
+                translate([r - tooth_h, 0, 0])
+                cylinder(h=length/steps + 0.1, r=tooth_h*0.7, $fn=6);
             }
         }
     }

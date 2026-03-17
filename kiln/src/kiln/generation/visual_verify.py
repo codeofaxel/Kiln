@@ -212,7 +212,7 @@ class VisualVerifier:
         printability.
 
         :param stl_path: Path to the STL file.
-        :returns: List of 4 PNG paths (caller is responsible for cleanup).
+        :returns: List of 5 PNG paths (caller is responsible for cleanup).
         :raises GenerationError: If OpenSCAD cannot render any image.
         """
         if not os.path.isfile(stl_path):
