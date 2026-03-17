@@ -341,6 +341,8 @@ class GeminiDeepThinkProvider(GenerationProvider):
         self._prompts: dict[str, str] = {}
         self._scad_code: dict[str, str] = {}
         self._verification_scores: dict[str, VerificationResult] = {}
+        self._request_count = 0  # Track Gemini API calls this session
+        self._first_request_time: float | None = None
 
     @property
     def name(self) -> str:
@@ -1093,6 +1095,9 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 continue
 
             self._handle_http_error(resp)
+            self._request_count += 1
+            if self._first_request_time is None:
+                self._first_request_time = time.time()
             return resp
 
         raise GenerationError(
@@ -1111,8 +1116,18 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 code="AUTH_INVALID",
             )
         if resp.status_code == 429:
+            elapsed = ""
+            if self._first_request_time:
+                mins = (time.time() - self._first_request_time) / 60
+                elapsed = f" ({self._request_count} requests in {mins:.0f} min)"
             raise GenerationError(
-                "Gemini API rate limit exceeded.  Try again later.",
+                f"Gemini API rate limit exceeded{elapsed}.\n"
+                "Free tier limits: 15 requests/min, 1500 requests/day.\n"
+                "  • If you just ran multiple generations, wait 60 seconds.\n"
+                "  • If you've been generating all session, the daily quota may be exhausted.\n"
+                "    Daily quota resets at midnight Pacific time.\n"
+                "  • Check usage at: https://aistudio.google.com/apikey\n"
+                "  • To increase limits, add billing at https://ai.google.dev/pricing",
                 code="RATE_LIMITED",
             )
 
