@@ -1113,6 +1113,14 @@ def _run_prusa_diagnostics(cfg: dict[str, Any]) -> dict[str, Any]:
 @click.pass_context
 def cli(ctx: click.Context, printer: str | None) -> None:
     """Kiln — agent-friendly 3D printer control."""
+    # Load environment variables so API keys (KILN_GEMINI_API_KEY, etc.) are
+    # available to all subcommands, not just the server.
+    with contextlib.suppress(ImportError):
+        from dotenv import load_dotenv
+
+        load_dotenv()  # .env in cwd
+        load_dotenv(Path.home() / ".kiln" / ".env")  # ~/.kiln/.env
+
     ctx.ensure_object(dict)
     ctx.obj["printer"] = printer
 
@@ -6804,6 +6812,7 @@ def agent(model: str, tier: str | None, base_url: str) -> None:
 )
 @click.option("--timeout", "-t", default=600, type=int, help="Max wait time in seconds (default 600).")
 @click.option("--preview/--no-preview", "preview_enabled", default=True, help="Render a 3-view preview after generation.")
+@click.option("--verify/--no-verify", "verify_enabled", default=True, help="Run visual verification after generation (Gemini only).")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def generate(
     prompt: str,
@@ -6814,6 +6823,7 @@ def generate(
     wait_for: bool,
     timeout: int,
     preview_enabled: bool,
+    verify_enabled: bool,
     json_mode: bool,
 ) -> None:
     """Generate a 3D model from a text description or image.
@@ -6852,7 +6862,7 @@ def generate(
     try:
         gen = _resolve_generation_provider(provider)
 
-        gen_kwargs: dict[str, Any] = {"format": "stl", "style": style}
+        gen_kwargs: dict[str, Any] = {"format": "stl", "style": style, "verify": verify_enabled}
         if image and provider == "gemini":
             gen_kwargs["image_path"] = os.path.abspath(image)
 

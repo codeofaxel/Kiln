@@ -96,4 +96,4 @@ ignore = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-kiln = ["data/*.json", "py.typed"]
+kiln = ["data/*.json", "py.typed", "generation/scad_library/*.scad"]

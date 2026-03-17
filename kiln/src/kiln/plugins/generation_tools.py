@@ -32,6 +32,7 @@ class _GenerationToolsPlugin:
         - download_generated_model
         - await_generation
         - generate_and_print
+        - preview_generated_model
         - validate_generated_mesh
     """
 
@@ -117,7 +118,10 @@ class _GenerationToolsPlugin:
                 return err
             try:
                 gen = _srv._get_generation_provider(provider)
-                job = gen.generate(prompt, format=format, style=style)
+                # Skip Gemini self-verify when called via MCP — the calling
+                # agent should use preview_generated_model to evaluate the
+                # result itself (avoids self-grading bias).
+                job = gen.generate(prompt, format=format, style=style, verify=False)
                 return {
                     "success": True,
                     "job": job.to_dict(),
@@ -126,7 +130,8 @@ class _GenerationToolsPlugin:
                         "AI-generated models are experimental. Always validate "
                         "the mesh with validate_generated_mesh and review "
                         "dimensions before printing. Generated models may require "
-                        "manual refinement."
+                        "manual refinement.  Use preview_generated_model to "
+                        "render a visual preview and verify quality."
                     ),
                     "message": f"Generation job submitted to {gen.display_name}.",
                 }
@@ -199,10 +204,13 @@ class _GenerationToolsPlugin:
 
             try:
                 gen = _srv._get_generation_provider(provider)
+                # Skip Gemini self-verify via MCP — agent verifies via
+                # preview_generated_model instead.
                 job = gen.generate(
                     prompt or "Create a 3D model from this image",
                     format=format,
                     style=None,
+                    verify=False,
                     image_path=image_path,
                 )
                 return {
@@ -791,6 +799,59 @@ class _GenerationToolsPlugin:
                 _logger.exception("Unexpected error in generate_and_print")
                 return _srv._error_dict(
                     f"Unexpected error in generate_and_print: {exc}", code="INTERNAL_ERROR"
+                )
+
+        @mcp.tool()
+        def preview_generated_model(file_path: str) -> dict:
+            """Render a 3D model to a PNG preview image for visual inspection.
+
+            Use this after ``generate_model`` or ``generate_model_from_image``
+            to see what the generated model looks like *before* printing.  The
+            rendered PNG is returned as a file path that you can view to
+            evaluate quality, proportions, and correctness.
+
+            **Recommended workflow:**
+            1. Call ``generate_model`` or ``generate_model_from_image``
+            2. Call ``preview_generated_model`` with the resulting STL path
+            3. View the preview and decide if it matches the user's intent
+            4. If unsatisfied, regenerate with a refined prompt
+            5. When satisfied, call ``validate_generated_mesh`` then print
+
+            Args:
+                file_path: Path to an STL file to render.
+            """
+            import kiln.server as _srv
+
+            if not os.path.isfile(file_path):
+                return _srv._error_dict(
+                    f"STL file not found: {file_path}",
+                    code="FILE_NOT_FOUND",
+                )
+
+            try:
+                from kiln.generation.visual_verify import VisualVerifier
+
+                verifier = VisualVerifier(
+                    api_key="unused",  # Not needed for rendering
+                    model="unused",
+                )
+                png_path = verifier.render_stl_to_png(file_path)
+                file_size = os.path.getsize(png_path)
+
+                return {
+                    "success": True,
+                    "preview_path": png_path,
+                    "file_size_bytes": file_size,
+                    "message": (
+                        f"Preview rendered to {png_path} ({file_size / 1024:.1f} KB). "
+                        "View the image to evaluate the generated model before printing."
+                    ),
+                }
+            except Exception as exc:
+                _logger.exception("Failed to render preview")
+                return _srv._error_dict(
+                    f"Failed to render preview: {exc}",
+                    code="RENDER_ERROR",
                 )
 
         @mcp.tool()

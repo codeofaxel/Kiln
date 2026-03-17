@@ -52,6 +52,7 @@ from kiln.generation.base import (
     GenerationResult,
     GenerationStatus,
 )
+from kiln.generation.visual_verify import VerificationResult, VisualVerifier
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,61 @@ If given an image or sketch:
 - Identify the object(s) depicted and their spatial relationships
 - Estimate proportions from the image even if dimensions aren't labeled
 - Reproduce the essential geometry — prioritize structural accuracy over ornament
-- Note if the sketch is ambiguous and choose the most printable interpretation"""
+- Note if the sketch is ambiguous and choose the most printable interpretation
+
+You have access to the following pre-defined OpenSCAD modules. Use them instead of \
+implementing complex geometry from scratch:
+
+HONEYCOMB & PATTERNS:
+  honeycomb_wall(width, height, thickness, cell_size, wall_thickness=1.2)
+    - Flat honeycomb panel with hex cutouts
+  honeycomb_cylinder(od, height, cell_size, wall_thickness=1.2, base_height=3)
+    - Cylindrical honeycomb (e.g., pencil holder with hex pattern)
+
+LATTICE:
+  lattice_cylinder(od, id, height, strut_width=1.5, strut_count=12, ring_count=6)
+  lattice_box(width, depth, height, strut_width=1.5, cell_size=10)
+  grid_pattern(width, height, rows, cols, bar_width=1.2)
+
+MECHANICAL:
+  snap_fit_clip(width, thickness, cantilever_length, gap=0.3, deflection=0.8)
+  threaded_hole(diameter, pitch, depth, starts=1)
+  knurl(diameter, height, pitch=1.5, depth=0.5)
+  dovetail(width, height, depth, angle=15)
+  living_hinge(length, width, n_cuts=10, kerf=0.8, bridge=2)
+
+DECORATIVE:
+  rounded_box(width, depth, height, radius=2)
+  shell(width, depth, height, wall=1.6, radius=2)
+  fillet_base(width, depth, height, fillet_r=3)
+  text_emboss(text_str, size=10, depth=1, font="Liberation Sans")
+  star(points=5, outer_r=20, inner_r=10, height=5)
+
+VORONOI:
+  voronoi_panel(width, height, thickness, n_seeds=20, seed=42)
+
+These modules are automatically available — do NOT use `use` or `include` to load them. \
+Simply call them directly in your code.
+
+IMPORTANT: You MUST use these library modules whenever the user's request matches their \
+purpose. Before writing any code, scan the prompt for keywords that match library modules:
+- "honeycomb", "hex pattern", "hexagonal" → use honeycomb_wall() or honeycomb_cylinder()
+- "lattice", "strut", "cage" → use lattice_cylinder() or lattice_box()
+- "snap fit", "clip", "cantilever" → use snap_fit_clip()
+- "thread", "screw", "bolt" → use threaded_hole()
+- "knurl", "grip", "textured surface" → use knurl()
+- "dovetail", "joint" → use dovetail()
+- "living hinge", "hinge", "flexible", "fold" → use living_hinge()
+- "rounded box", "rounded edges", "fillet" → use rounded_box() or fillet_base()
+- "shell", "hollow", "container" → use shell()
+- "voronoi", "organic pattern" → use voronoi_panel()
+- "star", "star shape" → use star()
+- "text", "emboss", "engrave", "label" → use text_emboss()
+
+Do NOT simplify or skip complex features. If the user asks for a honeycomb pattern, \
+you MUST produce visible honeycomb cells. If they ask for a living hinge, you MUST \
+include the slit pattern. A plain box is NEVER acceptable when a patterned feature \
+was requested. These library modules are tested and guaranteed to produce manifold output."""
 
 # Supported image MIME types for multimodal input
 _SUPPORTED_IMAGE_TYPES = {
@@ -285,6 +340,7 @@ class GeminiDeepThinkProvider(GenerationProvider):
         self._paths: dict[str, str] = {}
         self._prompts: dict[str, str] = {}
         self._scad_code: dict[str, str] = {}
+        self._verification_scores: dict[str, VerificationResult] = {}
 
     @property
     def name(self) -> str:
@@ -294,12 +350,17 @@ class GeminiDeepThinkProvider(GenerationProvider):
     def display_name(self) -> str:
         return "Gemini Deep Think"
 
+    def get_verification_result(self, job_id: str) -> VerificationResult | None:
+        """Return the visual verification result for a job, if available."""
+        return self._verification_scores.get(job_id)
+
     def generate(
         self,
         prompt: str,
         *,
         format: str = "stl",
         style: str | None = None,
+        verify: bool = True,
         **kwargs: Any,
     ) -> GenerationJob:
         """Generate a 3D model from text or image via Gemini + OpenSCAD.
@@ -308,11 +369,16 @@ class GeminiDeepThinkProvider(GenerationProvider):
         OpenSCAD code.  When an image is provided, Gemini uses multimodal
         understanding to interpret the visual and generate matching geometry.
         Stage 2: OpenSCAD compiles the code to STL locally.
+        Stage 3 (optional): Visual verification via Gemini Vision scores how
+        well the result matches the original prompt.  If the score is below
+        the threshold, regenerates with feedback (up to 2 retries).
 
         :param prompt: Natural language description of the desired 3D model.
         :param format: Output format (only ``"stl"`` supported).
         :param style: Optional style hint (``"organic"``, ``"mechanical"``,
             ``"decorative"``).
+        :param verify: Whether to run visual verification after generation
+            (default ``True``).  Set to ``False`` to skip (``--no-verify``).
         :param image_path: (kwarg) Path to a local image file (photo, sketch,
             napkin drawing) for image-to-3D generation.
         :param output_dir: (kwarg) Directory for output files.
@@ -441,7 +507,15 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 f"```openscad\n{scad_code}\n```\n\n"
                 f"Compiler error:\n{compile_result.error}\n\n"
                 f"Please fix the OpenSCAD code so it compiles successfully. "
-                f"Output only the corrected OpenSCAD code."
+                f"Output only the corrected OpenSCAD code.\n\n"
+                f"Remember: you have access to pre-defined library modules "
+                f"(honeycomb_wall, honeycomb_cylinder, lattice_cylinder, "
+                f"lattice_box, grid_pattern, snap_fit_clip, threaded_hole, "
+                f"knurl, dovetail, living_hinge, rounded_box, shell, "
+                f"fillet_base, text_emboss, star, voronoi_panel). "
+                f"Use them instead of implementing complex geometry from scratch "
+                f"if they match what you're trying to build — they are tested "
+                f"and guaranteed to produce manifold output."
             )
 
             try:
@@ -469,6 +543,18 @@ class GeminiDeepThinkProvider(GenerationProvider):
                     os.unlink(out_path)
 
             compile_result = self._compile_scad(scad_code, out_path, job_id, prompt, format)
+
+        # ---- Stage 3: Visual verification (optional) ----
+        if verify and compile_result.status == GenerationStatus.SUCCEEDED:
+            compile_result = self._run_visual_verification(
+                compile_result,
+                out_path=out_path,
+                job_id=job_id,
+                prompt=prompt,
+                format=format,
+                style=style,
+                image_parts=image_parts,
+            )
 
         return compile_result
 
@@ -527,6 +613,166 @@ class GeminiDeepThinkProvider(GenerationProvider):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    _MAX_VERIFY_RETRIES = 2  # Up to 2 regeneration attempts based on visual feedback
+
+    def _run_visual_verification(
+        self,
+        compile_result: GenerationJob,
+        *,
+        out_path: str,
+        job_id: str,
+        prompt: str,
+        format: str,
+        style: str | None,
+        image_parts: list[dict[str, Any]] | None,
+    ) -> GenerationJob:
+        """Run visual verification and optionally regenerate on low scores.
+
+        Renders the STL to a PNG preview, sends it to Gemini Vision, and
+        checks the score.  If the score is below the threshold, regenerates
+        with the feedback as additional context (up to
+        ``_MAX_VERIFY_RETRIES`` times).
+
+        If verification itself fails (e.g. OpenSCAD can't render PNG,
+        API error), the error is logged and the original result is returned
+        unchanged -- verification failures never crash the pipeline.
+        """
+        try:
+            verifier = VisualVerifier(
+                api_key=self._api_key,
+                model=self._model,
+                session=self._session,
+                openscad_path=self._openscad,
+            )
+        except Exception as exc:
+            logger.warning("Visual verify: failed to initialise verifier: %s", exc)
+            return compile_result
+
+        for verify_attempt in range(self._MAX_VERIFY_RETRIES + 1):
+            try:
+                vr = verifier.verify(out_path, prompt)
+            except Exception as exc:
+                logger.warning(
+                    "Visual verify: verification failed (attempt %d), skipping: %s",
+                    verify_attempt + 1,
+                    exc,
+                )
+                # Can't verify -- return what we have
+                return compile_result
+
+            self._verification_scores[job_id] = vr
+            logger.info(
+                "Visual verify: score=%.1f passed=%s (attempt %d/%d)",
+                vr.score,
+                vr.passed,
+                verify_attempt + 1,
+                self._MAX_VERIFY_RETRIES + 1,
+            )
+
+            if vr.passed:
+                # Score is good enough -- return the result
+                return compile_result
+
+            # Score too low -- try to regenerate if we have retries left
+            if verify_attempt >= self._MAX_VERIFY_RETRIES:
+                logger.info(
+                    "Visual verify: score %.1f below threshold after %d attempts, "
+                    "returning best result.",
+                    vr.score,
+                    self._MAX_VERIFY_RETRIES + 1,
+                )
+                return compile_result
+
+            logger.info(
+                "Visual verify: score %.1f below threshold (%.1f), regenerating "
+                "with feedback (retry %d/%d)...",
+                vr.score,
+                VisualVerifier.SCORE_THRESHOLD,
+                verify_attempt + 1,
+                self._MAX_VERIFY_RETRIES,
+            )
+
+            # Build a retry prompt incorporating the visual feedback
+            style_hint = ""
+            if style:
+                style_hint = f"\nStyle preference: {style}."
+
+            current_scad = self._scad_code.get(job_id, "")
+            retry_prompt = (
+                f"Create a 3D printable model of: {prompt}{style_hint}\n\n"
+                f"A previous attempt was made but scored {vr.score:.1f}/10 in "
+                f"visual verification.\n"
+                f"Feedback: {vr.feedback}\n"
+                f"Suggestion: {vr.suggestion}\n\n"
+                f"Previous OpenSCAD code:\n```openscad\n{current_scad}\n```\n\n"
+                f"Please generate improved OpenSCAD code that better matches the "
+                f"original prompt. Address the feedback above. "
+                f"Output valid OpenSCAD code only."
+            )
+
+            try:
+                retry_response = self._call_gemini(
+                    retry_prompt, image_parts=image_parts
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Visual verify: Gemini retry call failed: %s", exc
+                )
+                return compile_result
+
+            scad_code = _extract_openscad_code(retry_response)
+            if not scad_code.strip():
+                logger.warning("Visual verify: retried code was empty, aborting.")
+                return compile_result
+
+            safety_error = _check_scad_safety(scad_code)
+            if safety_error:
+                logger.warning(
+                    "Visual verify: retried code failed safety check, aborting."
+                )
+                return compile_result
+
+            self._scad_code[job_id] = scad_code
+
+            # Save original STL in case regen fails — we'll fall back to it
+            backup_path = out_path + ".backup"
+            if os.path.isfile(out_path):
+                with contextlib.suppress(OSError):
+                    os.rename(out_path, backup_path)
+
+            compile_result = self._compile_scad(
+                scad_code, out_path, job_id, prompt, format
+            )
+
+            if compile_result.status != GenerationStatus.SUCCEEDED:
+                logger.warning(
+                    "Visual verify: recompilation failed, falling back to original model."
+                )
+                # Restore original STL and return success
+                if os.path.isfile(backup_path):
+                    with contextlib.suppress(OSError):
+                        os.rename(backup_path, out_path)
+                    self._paths[job_id] = out_path
+                    return GenerationJob(
+                        id=job_id,
+                        provider=self.name,
+                        prompt=prompt,
+                        status=GenerationStatus.SUCCEEDED,
+                        progress=100,
+                        created_at=time.time(),
+                        format=format,
+                    )
+                return compile_result
+
+            # Regen succeeded — clean up backup
+            with contextlib.suppress(OSError):
+                if os.path.isfile(backup_path):
+                    os.unlink(backup_path)
+
+            # Loop back to verify the new result
+
+        return compile_result
 
     def _call_gemini(
         self,
@@ -690,10 +936,21 @@ class GeminiDeepThinkProvider(GenerationProvider):
         format: str,
     ) -> GenerationJob:
         """Compile OpenSCAD code to STL."""
+        # Prepend library modules so generated code can call them directly
+        full_code = scad_code
+        try:
+            from kiln.generation.scad_library import get_library_source
+
+            library_code = get_library_source()
+            if library_code:
+                full_code = library_code + "\n\n// === USER-GENERATED CODE ===\n\n" + scad_code
+        except ImportError:
+            logger.debug("scad_library not available, compiling without library modules")
+
         scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_gemini_")
         try:
             with os.fdopen(scad_fd, "w") as fh:
-                fh.write(scad_code)
+                fh.write(full_code)
 
             cmd = [self._openscad, "-o", out_path, scad_path]
             logger.info("Gemini Deep Think: compiling OpenSCAD: %s", " ".join(cmd))
