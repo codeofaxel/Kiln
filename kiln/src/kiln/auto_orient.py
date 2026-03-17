@@ -732,6 +732,230 @@ def duplicate_stl_on_plate(
 
 
 # ---------------------------------------------------------------------------
+# Multi-color plate — 3MF with per-object extruder assignments
+# ---------------------------------------------------------------------------
+
+
+def build_multicolor_plate_3mf(
+    file_path: str,
+    count: int,
+    *,
+    spacing_mm: float = 10.0,
+    bed_width_mm: float = 256.0,
+    bed_depth_mm: float = 256.0,
+    output_path: str | None = None,
+) -> str:
+    """Build a multi-body 3MF from an STL with per-object extruder assignments.
+
+    Creates a 3MF where each copy is a separate ``<object>`` assigned to
+    a different extruder (1-based).  When sliced with a multi-material
+    slicer config, this produces gcode with tool changes — enabling each
+    copy to print in a different color via AMS.
+
+    :param file_path: Path to the source STL/OBJ file.
+    :param count: Number of copies (2–20, each gets a different extruder).
+    :param spacing_mm: Gap between copies in mm.
+    :param bed_width_mm: Build plate width (X) in mm.
+    :param bed_depth_mm: Build plate depth (Y) in mm.
+    :param output_path: Output 3MF path.  If ``None``, a temp file is created.
+    :returns: Path to the output 3MF file.
+    :raises ValueError: If copies don't fit on the bed or file is invalid.
+    """
+    if count < 2:
+        raise ValueError(f"count must be >= 2, got {count}")
+    if count > 20:
+        raise ValueError(f"count must be <= 20, got {count}")
+
+    # Parse mesh
+    triangles, _vertices = _parse_mesh(file_path)
+    triangles = _translate_to_bed(triangles)
+
+    # Compute bounding box
+    all_verts: list[tuple[float, ...]] = [v for tri in triangles for v in tri]
+    xs = [v[0] for v in all_verts]
+    ys = [v[1] for v in all_verts]
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+    model_width = x_max - x_min
+    model_depth = y_max - y_min
+
+    if model_width <= 0 or model_depth <= 0:
+        raise ValueError("Model has zero width or depth.")
+
+    # Center mesh at origin
+    center_x = (x_min + x_max) / 2.0
+    center_y = (y_min + y_max) / 2.0
+    centered: list[tuple[tuple[float, ...], ...]] = []
+    for tri in triangles:
+        tv = tuple((v[0] - center_x, v[1] - center_y, v[2]) for v in tri)
+        centered.append(tv)
+
+    # Grid layout (same logic as duplicate_stl_on_plate)
+    cell_w = model_width + spacing_mm
+    cell_d = model_depth + spacing_mm
+    cols = int(bed_width_mm // cell_w)
+    rows = int(bed_depth_mm // cell_d)
+
+    if cols < 1 or rows < 1:
+        raise ValueError(
+            f"Model ({model_width:.1f} x {model_depth:.1f} mm) is too large "
+            f"for the build plate ({bed_width_mm} x {bed_depth_mm} mm)."
+        )
+    if count > cols * rows:
+        raise ValueError(
+            f"Cannot fit {count} copies on {bed_width_mm}x{bed_depth_mm} mm bed. "
+            f"Max {cols * rows} copies ({cols} cols x {rows} rows) with "
+            f"{spacing_mm} mm spacing."
+        )
+
+    actual_cols = min(count, cols)
+    actual_rows = math.ceil(count / actual_cols)
+    grid_width = actual_cols * cell_w - spacing_mm
+    grid_depth = actual_rows * cell_d - spacing_mm
+    start_x = (bed_width_mm - grid_width) / 2.0 + model_width / 2.0
+    start_y = (bed_depth_mm - grid_depth) / 2.0 + model_depth / 2.0
+
+    # Deduplicate vertices for 3MF mesh (shared by all copies)
+    vertex_map: dict[tuple[float, float, float], int] = {}
+    indexed_verts: list[tuple[float, float, float]] = []
+    indexed_tris: list[tuple[int, int, int]] = []
+    for tri in centered:
+        tri_idx: list[int] = []
+        for v in tri:
+            key = (round(v[0], 4), round(v[1], 4), round(v[2], 4))
+            if key not in vertex_map:
+                vertex_map[key] = len(indexed_verts)
+                indexed_verts.append(key)
+            tri_idx.append(vertex_map[key])
+        indexed_tris.append((tri_idx[0], tri_idx[1], tri_idx[2]))
+
+    # Build 3MF XML mesh block
+    vert_lines = [
+        f'          <vertex x="{v[0]}" y="{v[1]}" z="{v[2]}"/>'
+        for v in indexed_verts
+    ]
+    tri_lines = [
+        f'          <triangle v1="{t[0]}" v2="{t[1]}" v3="{t[2]}"/>'
+        for t in indexed_tris
+    ]
+    mesh_block = (
+        "      <mesh>\n"
+        "        <vertices>\n"
+        + "\n".join(vert_lines) + "\n"
+        "        </vertices>\n"
+        "        <triangles>\n"
+        + "\n".join(tri_lines) + "\n"
+        "        </triangles>\n"
+        "      </mesh>"
+    )
+
+    # Build basematerials for pid/pindex (3MF standard mechanism)
+    # Default colors per filament index
+    default_colors = [
+        "#FFFFFFFF", "#FF0000FF", "#0000FFFF", "#00FF00FF",
+        "#000000FF", "#FFFF00FF", "#FF00FFFF", "#00FFFFFF",
+        "#FF8800FF", "#8800FFFF", "#888888FF", "#FF4444FF",
+    ]
+    base_mat_lines = [
+        f'      <base name="Color_{i + 1}" '
+        f'displaycolor="{default_colors[i % len(default_colors)]}" />'
+        for i in range(count)
+    ]
+
+    # Build objects, items, and slicer config entries
+    objects_parts: list[str] = []
+    items_parts: list[str] = []
+    config_parts: list[str] = []
+
+    placed = 0
+    for row in range(actual_rows):
+        for col in range(actual_cols):
+            if placed >= count:
+                break
+            obj_id = placed + 1
+            # +1 because basematerials resource is id="1", objects start at id="2"
+            real_obj_id = placed + 2
+            tx = start_x + col * cell_w
+            ty = start_y + row * cell_d
+
+            # pid="1" references basematerials, pindex selects which base
+            objects_parts.append(
+                f'    <object id="{real_obj_id}" type="model" '
+                f'pid="1" pindex="{placed}">\n'
+                f"{mesh_block}\n"
+                f"    </object>"
+            )
+            items_parts.append(
+                f'    <item objectid="{real_obj_id}" '
+                f'transform="1 0 0 0 1 0 0 0 1 {tx:.4f} {ty:.4f} 0" '
+                f'printable="1"/>'
+            )
+            # PrusaSlicer per-object extruder assignment (1-based)
+            config_parts.append(
+                f'  <object id="{real_obj_id}">\n'
+                f'    <metadata type="object" key="name" value="copy_{obj_id}"/>\n'
+                f'    <metadata type="object" key="extruder" value="{obj_id}"/>\n'
+                f"  </object>"
+            )
+            placed += 1
+
+    model_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<model unit="millimeter" '
+        'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n'
+        "  <resources>\n"
+        '    <basematerials id="1">\n'
+        + "\n".join(base_mat_lines) + "\n"
+        "    </basematerials>\n"
+        + "\n".join(objects_parts) + "\n"
+        "  </resources>\n"
+        "  <build>\n"
+        + "\n".join(items_parts) + "\n"
+        "  </build>\n"
+        "</model>"
+    )
+
+    slic3r_config = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        "<config>\n"
+        + "\n".join(config_parts) + "\n"
+        "</config>"
+    )
+
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
+        '  <Default Extension="model" ContentType='
+        '"application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>\n'
+        '  <Default Extension="config" ContentType="text/xml"/>\n'
+        "</Types>"
+    )
+
+    rels = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n'
+        '  <Relationship Target="/3D/3dmodel.model" Id="rel-1" '
+        'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>\n'
+        "</Relationships>"
+    )
+
+    # Write 3MF archive
+    if output_path is None:
+        import tempfile as _tempfile
+
+        fd, output_path = _tempfile.mkstemp(suffix="_multicolor.3mf")
+        os.close(fd)
+
+    with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", rels)
+        zf.writestr("3D/3dmodel.model", model_xml)
+        zf.writestr("Metadata/Slic3r_PE_model.config", slic3r_config)
+
+    return output_path
+
+
+# ---------------------------------------------------------------------------
 # File-level rotation — STL
 # ---------------------------------------------------------------------------
 

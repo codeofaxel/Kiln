@@ -62,6 +62,9 @@ class BambuPrintSettings:
 
     All temperatures are in degrees Celsius.  Defaults are for PLA on
     the Bambu A1 with a 0.4 mm nozzle.
+
+    For multi-color prints, set ``num_filaments`` > 1 and provide
+    ``filament_colors`` / ``filament_types`` lists with that many entries.
     """
 
     hotend_temp: int = 220
@@ -72,9 +75,26 @@ class BambuPrintSettings:
     layer_height: float = 0.2
     bed_type: str = "textured_plate"
     model_name: str = "model"
+    # Multi-filament (set num_filaments > 1 for multi-color)
+    num_filaments: int = 1
+    filament_colors: list[str] | None = None
+    filament_types: list[str] | None = None
+
+    def get_filament_colors(self) -> list[str]:
+        """Return the filament color list, generating from defaults if needed."""
+        if self.filament_colors and len(self.filament_colors) >= self.num_filaments:
+            return self.filament_colors[: self.num_filaments]
+        # Default: repeat the single color
+        return [self.filament_color] * self.num_filaments
+
+    def get_filament_types(self) -> list[str]:
+        """Return the filament type list, generating from defaults if needed."""
+        if self.filament_types and len(self.filament_types) >= self.num_filaments:
+            return self.filament_types[: self.num_filaments]
+        return [self.filament_type] * self.num_filaments
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "hotend_temp": self.hotend_temp,
             "bed_temp": self.bed_temp,
             "filament_type": self.filament_type,
@@ -84,6 +104,11 @@ class BambuPrintSettings:
             "bed_type": self.bed_type,
             "model_name": self.model_name,
         }
+        if self.num_filaments > 1:
+            d["num_filaments"] = self.num_filaments
+            d["filament_colors"] = self.get_filament_colors()
+            d["filament_types"] = self.get_filament_types()
+        return d
 
 
 @dataclass
@@ -293,6 +318,69 @@ def _postprocess_prusa_body(
 # ---------------------------------------------------------------------------
 
 
+def _wrap_tool_changes(
+    gcode: str,
+    *,
+    hotend_temp: int = 220,
+    filament_type: str = "PLA",
+) -> str:
+    """Wrap PrusaSlicer ``T`` commands in Bambu M620/M621 AMS load blocks.
+
+    PrusaSlicer multi-material gcode uses bare ``T0``, ``T1``, etc. to
+    switch tools.  Bambu firmware requires these to be wrapped in
+    ``M620 S{n}A`` / ``M621 S{n}A`` blocks for the AMS to load the
+    correct filament.
+
+    Only wraps T0–T15 (real extruder indices).  Leaves T255 (retract)
+    and T1000 (virtual tool) untouched.
+    """
+    lines = gcode.split("\n")
+    result: list[str] = []
+    # Track the initial T0 from start gcode — don't double-wrap it
+    saw_m620 = False
+
+    for line in lines:
+        stripped = line.strip()
+        # Track if we're inside an M620/M621 block already
+        if stripped.startswith("M620 "):
+            saw_m620 = True
+            result.append(line)
+            continue
+        if stripped.startswith("M621 "):
+            saw_m620 = False
+            result.append(line)
+            continue
+
+        # Match standalone T commands (T0, T1, ..., T15)
+        m = re.match(r"^T(\d+)$", stripped)
+        if m and not saw_m620:
+            n = int(m.group(1))
+            if 0 <= n < 16:
+                flush_temp = min(hotend_temp + 30, 260)
+                result.append(f"M620 S{n}A   ; AMS switch to filament {n}")
+                result.append(f"    M1002 gcode_claim_action : 4")
+                result.append(f"    M400")
+                result.append(f"    M1002 set_filament_type:UNKNOWN")
+                result.append(f"    M109 S{hotend_temp}")
+                result.append(f"    M104 S{flush_temp}")
+                result.append(f"    M400")
+                result.append(f"    T{n}")
+                result.append(f"    G1 X-48.2 F3000")
+                result.append(f"    M400")
+                result.append(f"    M620.1 E F299.339 T{flush_temp}")
+                result.append(f"    M109 S{flush_temp}")
+                result.append(f"    M106 P1 S0")
+                result.append(f"    G92 E0")
+                result.append(f"    G1 E50 F200")
+                result.append(f"    M400")
+                result.append(f"    M1002 set_filament_type:{filament_type}")
+                result.append(f"M621 S{n}A")
+                continue
+        result.append(line)
+
+    return "\n".join(result)
+
+
 def _build_gcode_header(
     *,
     total_layers: int,
@@ -302,11 +390,16 @@ def _build_gcode_header(
     nozzle_diameter: float = 0.4,
     hotend_temp: int = 220,
     bed_temp: int = 65,
+    num_filaments: int = 1,
+    filament_types: list[str] | None = None,
 ) -> str:
     """Build the Bambu-compatible gcode header block."""
     est_h = est_print_time_sec // 3600
     est_m = (est_print_time_sec % 3600) // 60
     est_s = est_print_time_sec % 60
+
+    types = filament_types or [filament_type] * num_filaments
+    type_str = ";".join(types)
 
     return (
         f"; HEADER_BLOCK_START\n"
@@ -317,11 +410,11 @@ def _build_gcode_header(
         f"; filament_density: 1.24\n"
         f"; filament_diameter: 1.75\n"
         f"; max_z_height: {max_z:.2f}\n"
-        f"; filament: 1\n"
+        f"; filament: {num_filaments}\n"
         f"; HEADER_BLOCK_END\n"
         f"\n"
         f"; CONFIG_BLOCK_START\n"
-        f"; filament_type = {filament_type}\n"
+        f"; filament_type = {type_str}\n"
         f"; nozzle_diameter = {nozzle_diameter}\n"
         f"; bed_temperature = {bed_temp}\n"
         f"; temperature = {hotend_temp}\n"
@@ -344,8 +437,40 @@ def _build_slice_info(
     nozzle_diameter: float = 0.4,
     model_name: str = "model",
     first_layer_time: float = 60.0,
+    num_filaments: int = 1,
+    filament_colors: list[str] | None = None,
+    filament_types: list[str] | None = None,
 ) -> str:
-    """Build the ``slice_info.config`` XML for the 3MF."""
+    """Build the ``slice_info.config`` XML for the 3MF.
+
+    Supports multi-filament: set ``num_filaments`` > 1 and provide
+    ``filament_colors`` / ``filament_types`` lists.
+    """
+    colors = filament_colors or [filament_color] * num_filaments
+    types = filament_types or [filament_type] * num_filaments
+
+    # Build filament entries
+    filament_entries: list[str] = []
+    for i in range(num_filaments):
+        ftype = types[i] if i < len(types) else filament_type
+        fcolor = colors[i] if i < len(colors) else filament_color
+        filament_entries.append(
+            f'    <filament id="{i + 1}" tray_info_idx="GFL99" type="{ftype}" '
+            f'color="{fcolor}" used_m="0.00" used_g="0.00" '
+            f'used_for_object="true" used_for_support="false" group_id="0" '
+            f'nozzle_diameter="{nozzle_diameter:.2f}" volume_type="Standard"/>'
+        )
+
+    # Build object entries (one per filament for multi-color copies)
+    object_entries: list[str] = []
+    for i in range(num_filaments):
+        obj_name = model_name if num_filaments == 1 else f"{model_name}_{i + 1}"
+        object_entries.append(
+            f'    <object identify_id="{i + 1}" name="{obj_name}" skipped="false" />'
+        )
+
+    filament_map_val = ";".join(str(i) for i in range(num_filaments))
+
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         "<config>\n"
@@ -366,13 +491,10 @@ def _build_slice_info(
         '    <metadata key="outside" value="false"/>\n'
         '    <metadata key="support_used" value="false"/>\n'
         '    <metadata key="label_object_enabled" value="false"/>\n'
-        '    <metadata key="filament_maps" value="1"/>\n'
+        f'    <metadata key="filament_maps" value="{filament_map_val}"/>\n'
         '    <metadata key="limit_filament_maps" value="0"/>\n'
-        f'    <object identify_id="1" name="{model_name}" skipped="false" />\n'
-        f'    <filament id="1" tray_info_idx="GFL99" type="{filament_type}" '
-        f'color="{filament_color}" used_m="0.00" used_g="0.00" '
-        f'used_for_object="true" used_for_support="false" group_id="0" '
-        f'nozzle_diameter="{nozzle_diameter:.2f}" volume_type="Standard"/>\n'
+        + "\n".join(object_entries) + "\n"
+        + "\n".join(filament_entries) + "\n"
         "    <layer_filament_lists>\n"
         f'      <layer_filament_list filament_list="0" '
         f'layer_ranges="0 {total_layers - 1}" />\n'
@@ -388,14 +510,23 @@ def _build_plate_json(
     nozzle_diameter: float = 0.4,
     bed_type: str = "textured_plate",
     first_layer_time: float = 60.0,
+    num_filaments: int = 1,
+    filament_colors: list[str] | None = None,
 ) -> str:
-    """Build the ``plate_1.json`` metadata."""
+    """Build the ``plate_1.json`` metadata.
+
+    Supports multi-filament: set ``num_filaments`` > 1 and provide
+    ``filament_colors`` list.
+    """
+    colors = filament_colors or [filament_color] * num_filaments
+    ids = list(range(num_filaments))
+
     data = {
         "bbox_all": [78, 78, 178, 178],
         "bbox_objects": [],
         "bed_type": bed_type,
-        "filament_colors": [filament_color],
-        "filament_ids": [0],
+        "filament_colors": colors[:num_filaments],
+        "filament_ids": ids,
         "first_extruder": 0,
         "first_layer_time": first_layer_time,
         "is_seq_print": False,
@@ -548,6 +679,14 @@ def build_bambu_3mf(
         est_time_sec=est_time_sec,
     )
 
+    # Multi-filament: wrap T commands in M620/M621 AMS blocks
+    if settings.num_filaments > 1:
+        processed_body = _wrap_tool_changes(
+            processed_body,
+            hotend_temp=settings.hotend_temp,
+            filament_type=settings.filament_type,
+        )
+
     # Build the header.
     header = _build_gcode_header(
         total_layers=total_layers,
@@ -557,6 +696,8 @@ def build_bambu_3mf(
         nozzle_diameter=settings.nozzle_diameter,
         hotend_temp=settings.hotend_temp,
         bed_temp=settings.bed_temp,
+        num_filaments=settings.num_filaments,
+        filament_types=settings.get_filament_types(),
     )
 
     # Assemble complete gcode.
@@ -566,6 +707,9 @@ def build_bambu_3mf(
     gcode_bytes = complete_gcode.encode("utf-8")
     gcode_md5 = hashlib.md5(gcode_bytes).hexdigest()  # noqa: S324
 
+    f_colors = settings.get_filament_colors()
+    f_types = settings.get_filament_types()
+
     slice_info = _build_slice_info(
         total_layers=total_layers,
         est_print_time_sec=est_time_sec,
@@ -573,11 +717,16 @@ def build_bambu_3mf(
         filament_color=settings.filament_color,
         nozzle_diameter=settings.nozzle_diameter,
         model_name=settings.model_name,
+        num_filaments=settings.num_filaments,
+        filament_colors=f_colors,
+        filament_types=f_types,
     )
     plate_json = _build_plate_json(
         filament_color=settings.filament_color,
         nozzle_diameter=settings.nozzle_diameter,
         bed_type=settings.bed_type,
+        num_filaments=settings.num_filaments,
+        filament_colors=f_colors,
     )
     model_settings = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -622,8 +771,10 @@ def build_bambu_3mf(
             "Metadata/cut_information.xml",
             '<?xml version="1.0" encoding="UTF-8"?>\n<cut_information/>',
         )
+        filament_seq = list(range(settings.num_filaments))
         zf.writestr(
-            "Metadata/filament_sequence.json", '{"filament_sequence": [0]}'
+            "Metadata/filament_sequence.json",
+            json.dumps({"filament_sequence": filament_seq}),
         )
         zf.writestr("Metadata/project_settings.config", "{}")
         for name, data in thumbnails.items():

@@ -2675,6 +2675,17 @@ def remove(name: str) -> None:
 @click.option("--print-after", is_flag=True, help="Upload and start printing after slicing.")
 @click.option("--copies", "-c", default=1, type=click.IntRange(1, 20), help="Number of copies to arrange on the plate (1-20, default 1).")
 @click.option("--spacing", default=10.0, type=float, help="Gap between copies in mm (default 10).")
+@click.option("--use-ams/--no-ams", default=None, help="Enable AMS filament feeding (Bambu). Default: auto-detect.")
+@click.option(
+    "--ams-mapping",
+    type=str,
+    default=None,
+    help=(
+        "AMS slot mapping per copy, comma-separated (e.g. '0,1,2'). "
+        "When --copies matches the number of AMS slots, each copy prints "
+        "in a different color. Implies --use-ams."
+    ),
+)
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def slice(
@@ -2690,6 +2701,8 @@ def slice(
     print_after: bool,
     copies: int,
     spacing: float,
+    use_ams: bool | None,
+    ams_mapping: str | None,
     json_mode: bool,
 ) -> None:
     """Slice a 3D model (STL/3MF/STEP) to G-code.
@@ -2700,6 +2713,11 @@ def slice(
     \b
     With --copies N, arranges N copies on one build plate using
     PrusaSlicer's --duplicate flag (or STL mesh duplication as fallback).
+
+    \b
+    With --copies N --ams-mapping A,B,C (N values), each copy prints in a
+    different AMS color.  Kiln builds a multi-body 3MF, slices with multi-
+    material settings, and wraps tool changes for Bambu AMS compatibility.
 
     With --print-after, the sliced G-code is uploaded and printing starts
     immediately.
@@ -2718,10 +2736,78 @@ def slice(
 
         extra_args = plan["extra_args"] or []
 
+        # Parse --ams-mapping if provided
+        parsed_ams_mapping: list[int] | None = None
+        if ams_mapping is not None:
+            try:
+                parsed_ams_mapping = [int(x.strip()) for x in ams_mapping.split(",") if x.strip()]
+            except ValueError:
+                click.echo(
+                    format_error(
+                        f"Invalid --ams-mapping value: {ams_mapping!r}. "
+                        "Expected comma-separated integers (e.g. '0,1,2').",
+                        code="INVALID_AMS_MAPPING",
+                        json_mode=json_mode,
+                    )
+                )
+                sys.exit(1)
+
+        # Detect multicolor mode: copies > 1 AND ams_mapping has same count
+        multicolor_mode = (
+            copies > 1
+            and parsed_ams_mapping is not None
+            and len(parsed_ams_mapping) == copies
+        )
+
         # Multi-copy: use PrusaSlicer --duplicate or STL mesh duplication
         actual_input = input_file
         copy_strategy = None
-        if copies > 1:
+        multicolor_config_path: str | None = None
+
+        if multicolor_mode:
+            # Multi-color copies: build multi-body 3MF with per-object extruder assignments
+            from kiln.auto_orient import build_multicolor_plate_3mf
+
+            if not json_mode:
+                click.echo(f"Building multi-color plate: {copies} copies, each a different AMS color...")
+
+            actual_input = build_multicolor_plate_3mf(
+                input_file,
+                copies,
+                spacing_mm=spacing,
+            )
+            copy_strategy = "multicolor_3mf"
+
+            # Create temp multi-material slicer config
+            import tempfile as _tempfile
+
+            mat = plan.get("material", "PLA") or "PLA"
+            types_str = ";".join([mat] * copies)
+            temps_str = ";".join(["220"] * copies)
+            bed_str = ";".join(["65"] * copies)
+            mm_config = (
+                "# Auto-generated multi-material config for Kiln\n"
+                f"single_extruder_multi_material = 1\n"
+                f"extruders_count = {copies}\n"
+                "wipe_tower = 1\n"
+                "wipe_tower_x = 170\n"
+                "wipe_tower_y = 225\n"
+                "wipe_tower_width = 60\n"
+                "wipe_tower_bridging = 10\n"
+                f"filament_type = {types_str}\n"
+                f"temperature = {temps_str}\n"
+                f"first_layer_temperature = {temps_str}\n"
+                f"bed_temperature = {bed_str}\n"
+                f"first_layer_bed_temperature = {bed_str}\n"
+                "retract_length_toolchange = 2\n"
+                "retract_restart_extra_toolchange = 0\n"
+            )
+            fd, multicolor_config_path = _tempfile.mkstemp(suffix="_multimaterial.ini")
+            with os.fdopen(fd, "w") as f:
+                f.write(mm_config)
+            extra_args.extend(["--load", multicolor_config_path])
+
+        elif copies > 1:
             from kiln.slicer import find_slicer
 
             slicer_info = find_slicer(slicer)
@@ -2783,13 +2869,54 @@ def slice(
                     click.echo(f"Supports: {plan['support_style']}{note}")
             return
 
-        # --print-after: upload and start
+        # Clean up temp multi-material config
+        if multicolor_config_path:
+            try:
+                os.unlink(multicolor_config_path)
+            except OSError:
+                pass
+
+        # --print-after: wrap for Bambu if needed, upload, and start
         adapter = _get_adapter_from_ctx(ctx)
         if not json_mode:
             click.echo(result.message)
-            click.echo(f"Uploading {result.output_path}...")
 
-        upload_result = adapter.upload_file(result.output_path)
+        # Bambu printers need gcode wrapped in a 3MF with proprietary
+        # start/end sequences.  For multi-color, this also wraps T commands
+        # in M620/M621 AMS load blocks.
+        upload_path = result.output_path
+        from kiln.printers.bambu import BambuAdapter
+
+        if isinstance(adapter, BambuAdapter) and upload_path.endswith(".gcode"):
+            try:
+                wrap_kwargs: dict[str, Any] = {}
+                if multicolor_mode and parsed_ams_mapping:
+                    wrap_kwargs["num_filaments"] = copies
+                    # We don't know actual AMS colors, so use distinct defaults
+                    default_colors = [
+                        "#FF0000", "#00FF00", "#0000FF", "#FFFF00",
+                        "#FF00FF", "#00FFFF", "#FF8800", "#8800FF",
+                        "#FFFFFF", "#808080", "#000000", "#FF4444",
+                        "#44FF44", "#4444FF", "#FFAA00", "#AA00FF",
+                    ]
+                    wrap_kwargs["filament_colors"] = default_colors[:copies]
+                if not json_mode:
+                    if multicolor_mode:
+                        click.echo("Wrapping gcode as multi-color Bambu 3MF...")
+                    else:
+                        click.echo("Wrapping gcode as Bambu 3MF...")
+                upload_path = adapter.wrap_gcode_as_3mf(upload_path, **wrap_kwargs)
+                if not json_mode:
+                    click.echo(f"Bambu 3MF: {upload_path}")
+            except Exception as exc:
+                logger.warning("Bambu 3MF wrapping failed: %s", exc)
+                if not json_mode:
+                    click.echo(f"Warning: Bambu 3MF wrapping failed ({exc}), uploading raw gcode")
+
+        if not json_mode:
+            click.echo(f"Uploading {upload_path}...")
+
+        upload_result = adapter.upload_file(upload_path)
         if not upload_result.success:
             click.echo(
                 format_error(
@@ -2800,10 +2927,18 @@ def slice(
             )
             sys.exit(1)
 
-        import os
+        file_name = upload_result.file_name or os.path.basename(upload_path)
 
-        file_name = upload_result.file_name or os.path.basename(result.output_path)
-        print_result = adapter.start_print(file_name)
+        # Build print kwargs (AMS mapping, etc.)
+        print_kwargs: dict[str, Any] = {}
+        if isinstance(adapter, BambuAdapter):
+            if parsed_ams_mapping:
+                print_kwargs["ams_mapping"] = parsed_ams_mapping
+                print_kwargs["use_ams"] = True
+            elif use_ams is not None:
+                print_kwargs["use_ams"] = use_ams
+
+        print_result = adapter.start_print(file_name, **print_kwargs)
 
         if json_mode:
             import json as _json

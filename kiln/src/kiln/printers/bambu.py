@@ -1510,6 +1510,9 @@ class BambuAdapter(PrinterAdapter):
         bed_temp: int = 65,
         filament_type: str = "PLA",
         source_3mf_path: str | None = None,
+        num_filaments: int = 1,
+        filament_colors: list[str] | None = None,
+        filament_types: list[str] | None = None,
     ) -> str:
         """Wrap PrusaSlicer gcode in a Bambu-compatible 3MF.
 
@@ -1518,12 +1521,20 @@ class BambuAdapter(PrinterAdapter):
         for the extruder to function.  This method wraps raw PrusaSlicer
         output with those sequences and packages everything as a 3MF.
 
+        For multi-color prints, set ``num_filaments`` > 1 and provide
+        ``filament_colors`` / ``filament_types`` lists.  Tool change
+        ``T`` commands in the gcode will be wrapped in M620/M621 AMS
+        load sequences automatically.
+
         :param gcode_path: Path to PrusaSlicer ``.gcode`` output (must be
             sliced with ``--use-relative-e-distances`` and empty start/end).
         :param hotend_temp: Hotend temperature in °C (default 220 for PLA).
         :param bed_temp: Bed temperature in °C (default 65 for PLA).
         :param filament_type: Filament type string (PLA, PETG, ABS, etc.).
         :param source_3mf_path: Optional source 3MF for thumbnails/geometry.
+        :param num_filaments: Number of filaments (>1 for multi-color).
+        :param filament_colors: List of hex color strings per filament.
+        :param filament_types: List of filament type strings per filament.
         :returns: Path to the output 3MF file.
         :raises FileNotFoundError: If the gcode file doesn't exist.
         :raises ValueError: If the gcode has no layer changes.
@@ -1543,6 +1554,9 @@ class BambuAdapter(PrinterAdapter):
             bed_temp=bed_temp,
             filament_type=filament_type,
             model_name=stem,
+            num_filaments=num_filaments,
+            filament_colors=filament_colors,
+            filament_types=filament_types,
         )
 
         result = build_bambu_3mf(
