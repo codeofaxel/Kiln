@@ -194,6 +194,110 @@ class VisualVerifier:
             except OSError:
                 pass
 
+    # Camera angles for multi-angle rendering: (label, --camera value)
+    _ANGLES: list[tuple[str, str]] = [
+        ("isometric", "--camera=0,0,0,55,0,25,200"),
+        ("front", "--camera=0,0,0,0,0,0,200"),
+        ("right_side", "--camera=0,0,0,0,0,90,200"),
+        ("top", "--camera=0,0,0,90,0,0,200"),
+        ("bottom", "--camera=0,0,0,-90,0,0,200"),
+    ]
+
+    def render_multi_angle(self, stl_path: str) -> list[str]:
+        """Render an STL file from 5 different camera angles.
+
+        Produces isometric (3/4 view), front, right-side, top-down, and
+        bottom-up PNG previews using OpenSCAD.  The bottom view is
+        critical for verifying bed adhesion surface and first-layer
+        printability.
+
+        :param stl_path: Path to the STL file.
+        :returns: List of 4 PNG paths (caller is responsible for cleanup).
+        :raises GenerationError: If OpenSCAD cannot render any image.
+        """
+        if not os.path.isfile(stl_path):
+            raise GenerationError(
+                f"STL file not found: {stl_path}",
+                code="STL_NOT_FOUND",
+            )
+
+        # Build a temporary .scad wrapper once and reuse for all angles.
+        scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_verify_")
+        try:
+            with os.fdopen(scad_fd, "w") as fh:
+                escaped = stl_path.replace("\\", "\\\\").replace('"', '\\"')
+                fh.write(f'import("{escaped}");\n')
+
+            png_paths: list[str] = []
+            for label, camera_arg in self._ANGLES:
+                fd, png_path = tempfile.mkstemp(
+                    suffix=f"_{label}.png", prefix="kiln_verify_"
+                )
+                os.close(fd)
+
+                cmd = [
+                    self._openscad,
+                    "--render",
+                    "-o", png_path,
+                    "--imgsize=800,600",
+                    camera_arg,
+                    scad_path,
+                ]
+
+                logger.debug(
+                    "Visual verify [%s]: rendering STL preview: %s",
+                    label,
+                    " ".join(cmd),
+                )
+
+                try:
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                    )
+                except FileNotFoundError:
+                    raise GenerationError(
+                        "OpenSCAD binary not found for PNG rendering.",
+                        code="OPENSCAD_NOT_FOUND",
+                    )
+                except subprocess.TimeoutExpired:
+                    raise GenerationError(
+                        f"OpenSCAD PNG rendering timed out ({label} view).",
+                        code="RENDER_TIMEOUT",
+                    )
+
+                if result.returncode != 0:
+                    stderr = (result.stderr or "").strip()[:300]
+                    raise GenerationError(
+                        f"OpenSCAD PNG render failed for {label} view "
+                        f"(exit {result.returncode}): {stderr}",
+                        code="RENDER_FAILED",
+                    )
+
+                if not os.path.isfile(png_path) or os.path.getsize(png_path) == 0:
+                    raise GenerationError(
+                        f"OpenSCAD produced no PNG output for {label} view.",
+                        code="RENDER_EMPTY",
+                    )
+
+                logger.info(
+                    "Visual verify [%s]: rendered preview -> %s (%.1f KB)",
+                    label,
+                    png_path,
+                    os.path.getsize(png_path) / 1024,
+                )
+                png_paths.append(png_path)
+
+            return png_paths
+
+        finally:
+            try:
+                os.unlink(scad_path)
+            except OSError:
+                pass
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

@@ -127,11 +127,14 @@ class _GenerationToolsPlugin:
                     "job": job.to_dict(),
                     "experimental": True,
                     "safety_notice": (
-                        "AI-generated models are experimental. Always validate "
-                        "the mesh with validate_generated_mesh and review "
-                        "dimensions before printing. Generated models may require "
-                        "manual refinement.  Use preview_generated_model to "
-                        "render a visual preview and verify quality."
+                        "AI-generated models are experimental. You MUST call "
+                        "preview_generated_model to visually inspect the result from "
+                        "multiple angles BEFORE printing. Never send a model to the "
+                        "printer without previewing it first. Also call "
+                        "validate_generated_mesh to check for manifold errors. "
+                        "Use recommend_material and get_design_constraints from "
+                        "Kiln's design intelligence for material selection and "
+                        "printability guidance."
                     ),
                     "message": f"Generation job submitted to {gen.display_name}.",
                 }
@@ -218,10 +221,14 @@ class _GenerationToolsPlugin:
                     "job": job.to_dict(),
                     "experimental": True,
                     "safety_notice": (
-                        "AI-generated models are experimental. Always validate "
-                        "the mesh with validate_generated_mesh and review "
-                        "dimensions before printing. Generated models may require "
-                        "manual refinement."
+                        "AI-generated models are experimental. You MUST call "
+                        "preview_generated_model to visually inspect the result from "
+                        "multiple angles BEFORE printing. Never send a model to the "
+                        "printer without previewing it first. Also call "
+                        "validate_generated_mesh to check for manifold errors. "
+                        "Use recommend_material and get_design_constraints from "
+                        "Kiln's design intelligence for material selection and "
+                        "printability guidance."
                     ),
                     "message": f"Image-to-3D generation job submitted to {gen.display_name}.",
                 }
@@ -578,6 +585,10 @@ class _GenerationToolsPlugin:
         ) -> dict:
             """Full pipeline: generate a model, validate, slice, and upload (preview).
 
+            **IMPORTANT: Prefer calling generate_model + preview_generated_model +
+            validate_generated_mesh separately.** This pipeline skips visual preview.
+            Use it only when you have already verified a similar prompt produces good results.
+
             **EXPERIMENTAL:** This generates a 3D model, validates it, slices it,
             and uploads it to the printer — but does NOT start printing.  3D
             printers are delicate hardware and AI-generated models are not
@@ -803,19 +814,26 @@ class _GenerationToolsPlugin:
 
         @mcp.tool()
         def preview_generated_model(file_path: str) -> dict:
-            """Render a 3D model to a PNG preview image for visual inspection.
+            """Render a 3D model to multi-angle PNG previews for visual inspection.
 
-            Use this after ``generate_model`` or ``generate_model_from_image``
-            to see what the generated model looks like *before* printing.  The
-            rendered PNG is returned as a file path that you can view to
-            evaluate quality, proportions, and correctness.
+            **REQUIRED** before printing any generated model.  You MUST call this
+            tool after generating a model and BEFORE printing.  View ALL rendered
+            angles to check for:
+            - Missing or simplified features (e.g., plain box instead of pattern)
+            - Incorrect proportions or dimensions
+            - Floating/disconnected geometry
+            - Thin walls that won't print
+            - Overhangs that need supports
+            - Non-manifold artifacts
+            - Bottom surface not flat (check bottom view for bed adhesion)
+            - Elephant's foot risk on first layer
 
-            **Recommended workflow:**
+            **Required workflow:**
             1. Call ``generate_model`` or ``generate_model_from_image``
-            2. Call ``preview_generated_model`` with the resulting STL path
-            3. View the preview and decide if it matches the user's intent
-            4. If unsatisfied, regenerate with a refined prompt
-            5. When satisfied, call ``validate_generated_mesh`` then print
+            2. **MUST** call ``preview_generated_model`` — view ALL angles
+            3. If the model doesn't match the request, regenerate with refined prompt
+            4. Call ``validate_generated_mesh`` for structural checks
+            5. Only then proceed to print
 
             Args:
                 file_path: Path to an STL file to render.
@@ -835,16 +853,25 @@ class _GenerationToolsPlugin:
                     api_key="unused",  # Not needed for rendering
                     model="unused",
                 )
-                png_path = verifier.render_stl_to_png(file_path)
-                file_size = os.path.getsize(png_path)
+                paths = verifier.render_multi_angle(file_path)
 
                 return {
                     "success": True,
-                    "preview_path": png_path,
-                    "file_size_bytes": file_size,
+                    "previews": [
+                        {"angle": "isometric", "path": paths[0]},
+                        {"angle": "front", "path": paths[1]},
+                        {"angle": "right_side", "path": paths[2]},
+                        {"angle": "top", "path": paths[3]},
+                        {"angle": "bottom", "path": paths[4]},
+                    ],
                     "message": (
-                        f"Preview rendered to {png_path} ({file_size / 1024:.1f} KB). "
-                        "View the image to evaluate the generated model before printing."
+                        "Rendered 5 preview angles (iso, front, side, top, bottom). "
+                        "View ALL angles to evaluate the model before printing. "
+                        "Check the BOTTOM view to verify flat bed adhesion surface. "
+                        "Check for: thin walls, floating geometry, missing features, "
+                        "incorrect proportions, and overhangs needing supports. "
+                        "Use recommend_material and get_design_constraints from the "
+                        "intelligence tools for material and printability guidance."
                     ),
                 }
             except Exception as exc:

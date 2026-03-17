@@ -133,6 +133,52 @@ DECORATIVE:
 VORONOI:
   voronoi_panel(width, height, thickness, n_seeds=20, seed=42)
 
+GEARS:
+  spur_gear(teeth=20, mod=2, pressure_angle=20, thickness=5, bore=0)
+    - Parametric involute spur gear
+  herringbone_gear(teeth=20, mod=2, pressure_angle=20, thickness=10, bore=0, helix_angle=30)
+    - Double-helical gear, stronger and self-aligning
+  gear_profile_2d(teeth=20, mod=2, pressure_angle=20)
+    - 2D gear profile helper
+  rack_gear(length=50, mod=2, height=10, thickness=5)
+    - Linear rack gear for rack-and-pinion assemblies
+
+THREADS:
+  external_thread(diameter=10, length=20, pitch=1.5, starts=1)
+    - Printable external (male) thread
+  internal_thread(diameter=10, length=20, pitch=1.5, wall=3)
+    - Printable internal (female) thread
+  bottle_thread(outer_diameter=30, height=10, pitch=3, wall=2)
+    - Wide-pitch bottle-cap style thread
+
+PRACTICAL (everyday useful shapes):
+  cable_clip(diameter=6, wall=2, base_width=12, base_height=3, screw_hole=3)
+    - Cable management clip with screw mount
+  wall_hook(width=20, depth=30, height=40, thickness=4, hook_depth=15, hook_gap=8, screw_hole=4)
+    - Wall-mountable hook / hanger with reinforcement
+  phone_stand(width=75, depth=60, height=80, thickness=4, angle=65, slot_width=12)
+    - Angled phone / tablet stand with device slot
+  shelf_bracket(width=20, depth=80, height=80, thickness=4, gussets=2)
+    - L-shaped shelf bracket with reinforcing gussets
+  pipe_clamp(od=25, wall=3, gap=3, ear_width=12, bolt_hole=4)
+    - Two-ear pipe / tube clamp with bolt holes
+  pegboard_hook(hole_spacing=25.4, peg_d=5, hook_length=40, hook_drop=25, width=8, thickness=4)
+    - Hook for standard pegboard (25.4mm hole spacing)
+  funnel(top_d=60, bottom_d=12, height=50, wall=1.5, spout_h=15)
+    - Conical funnel with tubular spout and rim
+
+CONTAINERS:
+  box_with_lid(width=60, depth=40, height=30, wall=2, lid_height=8, tolerance=0.3)
+    - Parametric box with snap-on lid, side-by-side for printing
+  rounded_box_simple(w, d, h, wall, r=2)
+    - Helper: hollow box with Minkowski-rounded edges
+  screw_container(outer_d=40, height=50, wall=2, thread_pitch=3)
+    - Cylindrical container with external thread collar
+  divider_grid(width=100, depth=80, height=30, rows=2, cols=3, wall=1.5)
+    - Rectangular organizer grid / divider tray
+  stackable_bin(width=80, depth=60, height=40, wall=2, stack_lip=3)
+    - Stackable storage bin with interlocking lip
+
 These modules are automatically available — do NOT use `use` or `include` to load them. \
 Simply call them directly in your code.
 
@@ -150,6 +196,18 @@ purpose. Before writing any code, scan the prompt for keywords that match librar
 - "voronoi", "organic pattern" → use voronoi_panel()
 - "star", "star shape" → use star()
 - "text", "emboss", "engrave", "label" → use text_emboss()
+- "gear", "spur gear", "cog", "pinion" → use spur_gear() or herringbone_gear()
+- "thread", "screw", "bolt thread", "bottle cap" → use external_thread() or bottle_thread()
+- "cable clip", "cable holder", "cord organizer" → use cable_clip()
+- "hook", "wall hook", "hanger", "coat hook" → use wall_hook()
+- "phone stand", "tablet stand", "device holder" → use phone_stand()
+- "shelf bracket", "bracket", "L bracket" → use shelf_bracket()
+- "pipe clamp", "tube clamp", "hose clamp" → use pipe_clamp()
+- "pegboard", "pegboard hook", "tool holder" → use pegboard_hook()
+- "funnel", "pour spout" → use funnel()
+- "box with lid", "container", "storage box" → use box_with_lid() or screw_container()
+- "divider", "organizer", "grid compartment" → use divider_grid()
+- "stackable", "stacking bin" → use stackable_bin()
 
 Do NOT simplify or skip complex features. If the user asks for a honeycomb pattern, \
 you MUST produce visible honeycomb cells. If they ask for a living hinge, you MUST \
@@ -514,7 +572,12 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 f"(honeycomb_wall, honeycomb_cylinder, lattice_cylinder, "
                 f"lattice_box, grid_pattern, snap_fit_clip, threaded_hole, "
                 f"knurl, dovetail, living_hinge, rounded_box, shell, "
-                f"fillet_base, text_emboss, star, voronoi_panel). "
+                f"fillet_base, text_emboss, star, voronoi_panel, "
+                f"spur_gear, herringbone_gear, rack_gear, "
+                f"external_thread, internal_thread, bottle_thread, "
+                f"cable_clip, wall_hook, phone_stand, shelf_bracket, "
+                f"pipe_clamp, pegboard_hook, funnel, "
+                f"box_with_lid, screw_container, divider_grid, stackable_bin). "
                 f"Use them instead of implementing complex geometry from scratch "
                 f"if they match what you're trying to build — they are tested "
                 f"and guaranteed to produce manifold output."
