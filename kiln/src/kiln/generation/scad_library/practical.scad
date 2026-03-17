@@ -83,32 +83,33 @@ module cable_clip(diameter=6, wall=2, base_width=12, base_height=3, screw_hole=3
     clip_r = r + wall;
     gap_angle = 50;  // Opening angle in degrees
 
-    // Base plate
-    translate([-base_width/2, -clip_r, 0])
-    cube([base_width, clip_r, base_height]);
-
-    // Clip arc (270 degrees, leaving gap at top for snap-in)
-    translate([0, 0, base_height])
     difference() {
-        cylinder(h=base_width, r=clip_r, $fn=36);
-        // Inner bore
-        translate([0, 0, -0.1])
-        cylinder(h=base_width+0.2, r=r, $fn=36);
-        // Gap opening at top
-        rotate([0, 0, 90 - gap_angle/2])
-        translate([0, 0, -0.1])
-        linear_extrude(height=base_width+0.2)
-        polygon([[0,0], [clip_r*2, 0],
-                 [clip_r*2 * cos(gap_angle), clip_r*2 * sin(gap_angle)]]);
-        // Cut bottom half that overlaps base
-        translate([-clip_r-1, -clip_r*2-1, -0.1])
-        cube([clip_r*2+2, clip_r+1, base_width+0.2]);
-    }
+        union() {
+            // Base plate
+            translate([-base_width/2, -clip_r, 0])
+            cube([base_width, clip_r, base_height]);
 
-    // Screw hole in base
-    if (screw_hole > 0) {
-        difference() {
-            children();
+            // Clip arc (270 degrees, leaving gap at top for snap-in)
+            translate([0, 0, base_height])
+            difference() {
+                cylinder(h=base_width, r=clip_r, $fn=36);
+                // Inner bore
+                translate([0, 0, -0.1])
+                cylinder(h=base_width+0.2, r=r, $fn=36);
+                // Gap opening at top
+                rotate([0, 0, 90 - gap_angle/2])
+                translate([0, 0, -0.1])
+                linear_extrude(height=base_width+0.2)
+                polygon([[0,0], [clip_r*2, 0],
+                         [clip_r*2 * cos(gap_angle), clip_r*2 * sin(gap_angle)]]);
+                // Cut bottom half that overlaps base
+                translate([-clip_r-1, -clip_r*2-1, -0.1])
+                cube([clip_r*2+2, clip_r+1, base_width+0.2]);
+            }
+        }
+
+        // Screw hole in base (only if it fits within the base)
+        if (screw_hole > 0 && screw_hole < clip_r - 0.5) {
             translate([0, -clip_r/2, -0.1])
             cylinder(h=base_height+0.2, r=screw_hole/2, $fn=24);
         }
@@ -117,32 +118,35 @@ module cable_clip(diameter=6, wall=2, base_width=12, base_height=3, screw_hole=3
 
 // Wall-mountable hook
 module wall_hook(width=20, depth=30, height=40, thickness=4, hook_depth=15, hook_gap=8, screw_hole=4) {
-    // Back plate (vertical, against wall)
-    cube([width, thickness, height]);
+    difference() {
+        union() {
+            // Back plate (vertical, against wall)
+            cube([width, thickness, height]);
 
-    // Hook arm (horizontal, protruding from wall)
-    translate([0, 0, height - thickness])
-    cube([width, hook_depth, thickness]);
+            // Hook arm (horizontal, protruding from wall)
+            translate([0, 0, height - thickness])
+            cube([width, hook_depth, thickness]);
 
-    // Hook lip (curving down)
-    translate([0, hook_depth - thickness, height - hook_gap - thickness])
-    cube([width, thickness, hook_gap + thickness]);
+            // Hook lip (curving down)
+            translate([0, hook_depth - thickness, height - hook_gap - thickness])
+            cube([width, thickness, hook_gap + thickness]);
 
-    // Hook tip (small upward lip to prevent items sliding off)
-    translate([0, hook_depth - thickness*2, height - hook_gap - thickness])
-    cube([width, thickness, thickness]);
+            // Hook tip (small upward lip to prevent items sliding off)
+            translate([0, hook_depth - thickness*2, height - hook_gap - thickness])
+            cube([width, thickness, thickness]);
 
-    // Reinforcing triangle
-    translate([0, thickness, 0])
-    linear_extrude(height=width)
-    rotate([0, 0, 0])
-    polygon([[0, 0], [0, height*0.4], [hook_depth*0.4, 0]]);
+            // Reinforcing triangle
+            translate([0, thickness, 0])
+            linear_extrude(height=width)
+            polygon([[0, 0], [0, height*0.4], [hook_depth*0.4, 0]]);
+        }
 
-    // Screw hole
-    if (screw_hole > 0) {
-        translate([width/2, -0.1, height*0.3])
-        rotate([-90, 0, 0])
-        cylinder(h=thickness+0.2, r=screw_hole/2, $fn=24);
+        // Screw hole
+        if (screw_hole > 0) {
+            translate([width/2, -0.1, height*0.3])
+            rotate([-90, 0, 0])
+            cylinder(h=thickness+0.2, r=screw_hole/2, $fn=24);
+        }
     }
 }
 
@@ -151,8 +155,8 @@ module phone_stand(width=75, depth=60, height=80, thickness=4, angle=65, slot_wi
     // Base plate
     cube([width, depth, thickness]);
 
-    // Back support (angled)
-    translate([0, thickness, thickness])
+    // Back support (angled, shifted down slightly to overlap with base)
+    translate([0, thickness, thickness - 0.1])
     rotate([90-angle, 0, 0])
     cube([width, height, thickness]);
 
@@ -169,7 +173,7 @@ module phone_stand(width=75, depth=60, height=80, thickness=4, angle=65, slot_wi
     for (x = [0, width - thickness]) {
         translate([x, 0, thickness])
         linear_extrude(height=thickness)
-        polygon([[0, 0], [0, depth*0.6], [0, 0]]);
+        polygon([[0, 0], [0, depth*0.6], [depth*0.3, 0]]);
     }
 }
 
@@ -208,13 +212,13 @@ module pipe_clamp(od=25, wall=3, gap=3, ear_width=12, bolt_hole=4) {
                 cube([gap, outer_r+1, clamp_h+0.2]);
             }
 
-            // Left ear
-            translate([-outer_r - ear_width, -wall/2, 0])
-            cube([ear_width, wall, clamp_h]);
+            // Left ear (overlaps into ring to avoid coincident faces)
+            translate([-outer_r - ear_width + 1, -wall/2, 0])
+            cube([ear_width + 1, wall, clamp_h]);
 
-            // Right ear
-            translate([outer_r, -wall/2, 0])
-            cube([ear_width, wall, clamp_h]);
+            // Right ear (overlaps into ring to avoid coincident faces)
+            translate([outer_r - 1, -wall/2, 0])
+            cube([ear_width + 1, wall, clamp_h]);
         }
 
         // Bolt holes in ears

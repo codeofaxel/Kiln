@@ -105,6 +105,38 @@ If given an image or sketch:
 You have access to the following pre-defined OpenSCAD modules. Use them instead of \
 implementing complex geometry from scratch:
 
+PRIMITIVES (fundamental shapes beyond OpenSCAD built-ins):
+  cone(r=10, h=20, center=false)
+    - Solid cone
+  pyramid(base=20, h=15, sides=4, center=false)
+    - Regular n-sided pyramid (4=square, 3=triangular, 6=hex)
+  torus(R=15, r=5)
+    - Donut / ring shape (R=major radius, r=tube radius)
+  tube(od=20, id=14, h=30)
+    - Hollow cylinder / pipe
+  hemisphere(r=15, solid=true)
+    - Half sphere, flat side down (solid=false for dome shell)
+  capsule(r=5, h=20)
+    - Pill / capsule — cylinder with hemispherical ends
+  wedge(width=20, depth=30, height=15)
+    - Right-angle wedge / ramp
+  chamfered_box(width=30, depth=20, height=15, chamfer=2)
+    - Box with 45-degree chamfered edges
+  countersunk_hole(d=5, depth=10, head_d=10, head_angle=90)
+    - Countersunk screw hole (use with difference)
+  standoff(od=8, id=3, h=10, base_d=12, base_h=2)
+    - Mounting standoff / spacer with optional base flange
+  washer(od=12, id=6, h=2)
+    - Flat washer / ring
+  hex_nut(af=10, h=5, bore=5)
+    - Hexagonal nut shape (across-flats dimension)
+  arrow_2d(length=30, head_width=15, head_length=10, shaft_width=6)
+    - 2D arrow shape (linear_extrude to 3D)
+  u_channel(width=20, height=15, length=50, wall=2)
+    - U-shaped channel / track
+  l_bracket(width=20, height=30, depth=30, thickness=3)
+    - Simple L-shaped bracket
+
 HONEYCOMB & PATTERNS:
   honeycomb_wall(width, height, thickness, cell_size, wall_thickness=1.2)
     - Flat honeycomb panel with hex cutouts
@@ -184,6 +216,20 @@ Simply call them directly in your code.
 
 IMPORTANT: You MUST use these library modules whenever the user's request matches their \
 purpose. Before writing any code, scan the prompt for keywords that match library modules:
+- "cone", "conical" → use cone()
+- "pyramid" → use pyramid()
+- "torus", "donut", "ring shape" → use torus()
+- "tube", "pipe", "hollow cylinder" → use tube()
+- "hemisphere", "half sphere", "dome" → use hemisphere()
+- "capsule", "pill", "rounded cylinder" → use capsule()
+- "wedge", "ramp", "incline" → use wedge()
+- "chamfered box", "chamfer" → use chamfered_box()
+- "countersunk", "counterbore", "screw recess" → use countersunk_hole()
+- "standoff", "spacer", "mounting post" → use standoff()
+- "washer", "flat ring" → use washer()
+- "hex nut", "hexagonal nut", "nut shape" → use hex_nut()
+- "arrow", "pointer", "direction indicator" → use arrow_2d() with linear_extrude
+- "channel", "U channel", "track", "rail" → use u_channel()
 - "honeycomb", "hex pattern", "hexagonal" → use honeycomb_wall() or honeycomb_cylinder()
 - "lattice", "strut", "cage" → use lattice_cylinder() or lattice_box()
 - "snap fit", "clip", "cantilever" → use snap_fit_clip()
@@ -573,6 +619,9 @@ class GeminiDeepThinkProvider(GenerationProvider):
                 f"lattice_box, grid_pattern, snap_fit_clip, threaded_hole, "
                 f"knurl, dovetail, living_hinge, rounded_box, shell, "
                 f"fillet_base, text_emboss, star, voronoi_panel, "
+                f"cone, pyramid, torus, tube, hemisphere, capsule, wedge, "
+                f"chamfered_box, countersunk_hole, standoff, washer, hex_nut, "
+                f"u_channel, arrow_2d, l_bracket, "
                 f"spur_gear, herringbone_gear, rack_gear, "
                 f"external_thread, internal_thread, bottle_thread, "
                 f"cable_clip, wall_hook, phone_stand, shelf_bracket, "

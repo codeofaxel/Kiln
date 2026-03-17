@@ -74,41 +74,24 @@ module shell(width, depth, height, wall = 1.6, radius = 2) {
 }
 
 // Box with concave fillet around the base.
+// Implemented as a hull of the main box and a wider, thin base plate so the
+// transition is a smooth chamfer.  This is fully manifold by construction.
 module fillet_base(width, depth, height, fillet_r = 3) {
     fr = fillet_r;
 
-    // Main body
-    cube([width, depth, height]);
+    // Main body above the fillet zone
+    translate([0, 0, fr])
+        cube([width, depth, height - fr]);
 
-    // Fillet along each bottom edge using difference of a cube and a cylinder
-    // to create a concave quarter-round.
-    _fillet_edge_x(width, fr, [0, 0, 0]);           // front
-    _fillet_edge_x(width, fr, [0, depth, 0]);        // back
-    _fillet_edge_y(depth, fr, [0, 0, 0]);            // left
-    _fillet_edge_y(depth, fr, [width, 0, 0]);        // right
-}
-
-// Internal helper: concave fillet along X axis at given position.
-module _fillet_edge_x(length, r, pos) {
-    translate(pos)
-    difference() {
-        translate([0, -r, 0])
-            cube([length, r * 2, r]);
-        translate([- 0.5, 0, r])
-        rotate([0, 90, 0])
-            cylinder(r = r, h = length + 1, $fn = 32);
-    }
-}
-
-// Internal helper: concave fillet along Y axis at given position.
-module _fillet_edge_y(length, r, pos) {
-    translate(pos)
-    difference() {
-        translate([-r, 0, 0])
-            cube([r * 2, length, r]);
-        translate([0, -0.5, r])
-        rotate([-90, 0, 0])
-            cylinder(r = r, h = length + 1, $fn = 32);
+    // Fillet transition: hull between the footprint at Z=0 (with extra skirt)
+    // and the body footprint at Z=fr.
+    hull() {
+        // Wide base at Z = 0 (thin slab)
+        translate([-fr, -fr, 0])
+            cube([width + 2 * fr, depth + 2 * fr, 0.01]);
+        // Body footprint at Z = fr (thin slab)
+        translate([0, 0, fr])
+            cube([width, depth, 0.01]);
     }
 }
 
