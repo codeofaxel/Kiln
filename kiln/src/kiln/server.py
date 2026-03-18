@@ -455,10 +455,17 @@ def _build_instructions() -> str:
 
     # --- Design intelligence ---
     parts.append(
-        "DESIGN INTELLIGENCE: Kiln has a comprehensive material/design knowledge "
-        "system. Use `recommend_material` for material selection and "
-        "`get_design_constraints` for printability guidance. Use "
-        "`get_skill_manifest()` on first connection for the full capability map."
+        "DESIGN INTELLIGENCE: Kiln has a comprehensive design knowledge system "
+        "(83+ materials, 37+ patterns). Key tools:\n"
+        "  - `get_design_brief(requirements)` — functional analysis BEFORE designing\n"
+        "  - `recommend_design_material(use_case)` — intelligent material selection\n"
+        "  - `find_design_patterns(use_case)` — proven design patterns\n"
+        "  - `get_material_design_profile(material)` — material-specific rules\n"
+        "  - `estimate_structural_load(...)` — load capacity analysis\n"
+        "  - `validate_design_for_requirements(...)` — design verification\n"
+        "  - `troubleshoot_print_issue(...)` — issue diagnosis\n"
+        "  - `get_post_processing_guide(material)` — finishing guidance\n"
+        "Call `get_skill_manifest()` for the full capability map."
     )
 
     # --- Generation workflow ---
@@ -467,7 +474,25 @@ def _build_instructions() -> str:
             "GENERATION WORKFLOW: After generating a model, you MUST call "
             "`preview_generated_model` to render multi-angle previews (including "
             "bottom view for bed adhesion) BEFORE printing. Show the preview "
-            "images to the user and check for issues. Never skip preview."
+            "images to the user and check for issues. Never skip preview.\n"
+            "Use `get_design_brief()` BEFORE generation for better results.\n"
+            "Use `build_generation_prompt()` to enhance prompts with design intelligence."
+        )
+
+    # --- Recovery ---
+    parts.append(
+        "FAILURE RECOVERY: If a print fails, use `analyze_print_failure_smart()` "
+        "for root cause analysis, then `get_recovery_plan()` for options. "
+        "Use `retry_print_with_fix()` to re-slice with corrections applied."
+    )
+
+    # --- Multi-color ---
+    if has_printer:
+        parts.append(
+            "MULTI-COLOR: Use `ams_status()` to check loaded AMS filaments. "
+            "Use `multi_material_print()` for different objects in different materials, "
+            "or `kiln slice model.stl --copies N --ams-mapping 0,1,2 --print-after` "
+            "for same-object multi-color copies."
         )
 
     # --- Natural language guidance ---

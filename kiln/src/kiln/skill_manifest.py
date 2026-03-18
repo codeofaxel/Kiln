@@ -38,6 +38,11 @@ class SkillManifest:
             "KILN_HEATER_TIMEOUT",
             "KILN_CRAFTCLOUD_API_KEY",
             "KILN_SCULPTEO_API_KEY",
+            "GEMINI_API_KEY",
+            "KILN_MESHY_API_KEY",
+            "KILN_TRIPO3D_API_KEY",
+            "KILN_STABILITY_API_KEY",
+            "KILN_THIRDOS_API_KEY",
         ]
     )
 
@@ -65,40 +70,65 @@ class SkillManifest:
             "ALWAYS display the full monitoring report — never summarize or omit fields like cost estimate.",
             "After generating a model, ALWAYS call preview_generated_model() to render multi-angle previews BEFORE printing.",
             "Check the bottom view in previews for bed adhesion issues (elephant's foot, insufficient contact).",
-            "Use recommend_material() for material selection and get_design_constraints() for printability guidance.",
+            "Use get_design_brief() as the FIRST step for any new design — returns material, pattern, and constraint guidance.",
+            "Use recommend_design_material() for material selection and find_design_patterns() for proven patterns.",
             "Run preflight_check() before every print job.",
             "Never guess on physical operations — ask the user when uncertain.",
+            "For print failures: analyze_print_failure_smart() → get_recovery_plan() → retry_print_with_fix().",
+            "Use build_generation_prompt() to enhance generation prompts with design intelligence before calling generate_model().",
+            "Use ams_status() to check loaded AMS filaments before multi-color prints.",
         ]
     )
 
     # Common workflows agents should know
     workflows: dict[str, list[str]] = field(
         default_factory=lambda: {
-            "generate_and_print": [
-                "generate_model(description) — create 3D model from text",
-                "preview_generated_model(model_id) — render multi-angle previews, show to user",
-                "validate_model(model_id) — check printability",
+            "design_and_generate": [
+                "get_design_brief(requirements) — functional analysis before designing",
+                "build_generation_prompt(brief) — enhance prompt with design intelligence",
+                "generate_model(prompt) — create 3D model via Gemini/Meshy/Tripo3D",
+                "preview_generated_model(model_id) — multi-angle visual check (MANDATORY)",
+                "validate_generated_mesh(model_id) — printability safety check",
                 "slice_model(file_path) — slice to gcode",
                 "preflight_check() — verify printer ready",
                 "start_print(file) — begin printing",
                 "monitor_print() — track progress, show snapshots and cost",
             ],
             "monitor_active_print": [
-                "monitor_print() — get full report with progress, temps, cost, snapshot",
-                "Read the snapshot image and display it inline",
-                "Show ALL report fields including cost estimate",
+                "monitor_print() — full report with progress, temps, cost, snapshot",
+                "Read the snapshot image file and display it inline to user",
+                "Show ALL report fields — never omit cost estimate or temps",
             ],
             "multi_color_print": [
-                "Generate or locate STL model",
-                "Use 'kiln slice model.stl --copies N --ams-mapping 0,1,2 --print-after'",
-                "Each copy prints in a different AMS filament color",
-                "Or use multi_material_print() MCP tool for different objects in different materials",
+                "ams_status() — check what colors are loaded in AMS",
+                "For same-object multi-color copies: kiln slice model.stl --copies N --ams-mapping 0,1,2 --print-after",
+                "For different-object multi-material: multi_material_print(objects_json, ...)",
+                "check_multi_material_pairing() — verify material/color compatibility",
             ],
             "find_and_print": [
                 "search_all_models(query) — find models on Thingiverse etc.",
                 "download_and_upload(url) — download and send to printer",
                 "preflight_check() — verify printer ready",
                 "start_print(file) — begin printing",
+            ],
+            "failure_recovery": [
+                "analyze_print_failure_smart(description) — automated root cause analysis",
+                "get_recovery_plan(failure_id) — recovery options",
+                "retry_print_with_fix(file, fixes) — re-slice with corrections",
+                "troubleshoot_print_issue(issue) — design intelligence diagnosis",
+            ],
+            "design_intelligence": [
+                "get_design_brief(requirements) — functional requirements analysis",
+                "get_material_design_profile(material) — material-specific design rules",
+                "find_design_patterns(use_case) — proven design patterns (37+ patterns)",
+                "estimate_structural_load(geometry, material) — load capacity analysis",
+                "validate_design_for_requirements(design, reqs) — verification",
+                "get_post_processing_guide(material) — finishing guidance",
+            ],
+            "fleet_management": [
+                "fleet_status() — all printers overview",
+                "route_print_job(file, requirements) — intelligent job routing",
+                "fleet_job_status(job_id) — track distributed jobs",
             ],
         }
     )
@@ -108,14 +138,26 @@ class SkillManifest:
         default_factory=lambda: {
             "printer_status": "printer_status() — current state, temps, progress",
             "monitoring": "monitor_print() — full report with snapshot and cost",
-            "material_help": "recommend_material(use_case) — intelligent material selection",
-            "design_help": "get_design_constraints(material, feature) — printability rules",
-            "generation": "generate_model(description) — text-to-3D via Gemini",
-            "preview": "preview_generated_model(model_id) — multi-angle visual check",
+            "design_brief": "get_design_brief(requirements) — start here for any new design",
+            "design_patterns": "find_design_patterns(use_case) — proven patterns (37+ in library)",
+            "material_selection": "recommend_design_material(use_case) — intelligent material pick",
+            "material_rules": "get_material_design_profile(material) — constraints and rules",
+            "load_analysis": "estimate_structural_load(geometry, material) — strength validation",
+            "generation": "generate_model(description) — text-to-3D (Gemini, Meshy, Tripo3D, Stability)",
+            "generation_enhance": "build_generation_prompt(brief) — enhance with design intelligence",
+            "preview": "preview_generated_model(model_id) — multi-angle visual check (mandatory)",
             "slicing": "slice_model(file_path) — STL/3MF to gcode",
+            "adaptive_slicing": "generate_adaptive_slicing_plan(file) — quality/time tradeoff",
             "printing": "start_print(file) — begin a print job",
             "safety": "preflight_check() — pre-print safety verification",
             "ams_colors": "ams_status() — check loaded AMS filaments and colors",
+            "multi_material": "multi_material_print(objects_json) — different objects in different materials",
+            "failure_analysis": "analyze_print_failure_smart(description) — root cause analysis",
+            "recovery": "retry_print_with_fix(file, fixes) — re-slice with corrections",
+            "troubleshooting": "troubleshoot_print_issue(issue) — design intelligence diagnosis",
+            "post_processing": "get_post_processing_guide(material) — finishing techniques",
+            "fleet": "fleet_status() — fleet overview and job routing",
+            "cost_estimate": "estimate_cost(file) — print cost estimation",
         }
     )
 
