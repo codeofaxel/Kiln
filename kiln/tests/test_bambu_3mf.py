@@ -743,7 +743,7 @@ class TestBuildBambu3mf:
         assert result.max_z == 0.4
         assert result.file_size > 0
         assert len(result.md5) == 32  # MD5 hex digest
-        assert result.est_print_time_sec == 60  # 2 layers * 30s
+        assert result.est_print_time_sec == 12  # 2 layers * 6s (fallback when no slicer estimate)
 
     def test_result_file_md5_matches(self, tmp_path):
         out = str(tmp_path / "test.3mf")

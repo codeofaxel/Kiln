@@ -875,6 +875,7 @@ def build_multicolor_plate_3mf(
             obj_id = placed + 1
             # +1 because basematerials resource is id="1", objects start at id="2"
             real_obj_id = placed + 2
+            # PrusaSlicer bed origin is at corner (0,0) — use bed-absolute coords
             tx = start_x + col * cell_w
             ty = start_y + row * cell_d
 
@@ -890,11 +891,17 @@ def build_multicolor_plate_3mf(
                 f'transform="1 0 0 0 1 0 0 0 1 {tx:.4f} {ty:.4f} 0" '
                 f'printable="1"/>'
             )
-            # PrusaSlicer per-object extruder assignment (1-based)
+            # PrusaSlicer per-object extruder + volume entries (required
+            # for PrusaSlicer to parse mesh geometry in project 3MFs)
+            last_tri = len(indexed_tris) - 1
             config_parts.append(
                 f'  <object id="{real_obj_id}">\n'
                 f'    <metadata type="object" key="name" value="copy_{obj_id}"/>\n'
                 f'    <metadata type="object" key="extruder" value="{obj_id}"/>\n'
+                f'    <volume firstid="0" lastid="{last_tri}">\n'
+                f'      <metadata type="volume" key="name" value="copy_{obj_id}"/>\n'
+                f'      <metadata type="volume" key="extruder" value="{obj_id}"/>\n'
+                f'    </volume>\n'
                 f"  </object>"
             )
             placed += 1

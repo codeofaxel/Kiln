@@ -421,3 +421,223 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
             estimates["filament_cost"] = float(cost.group(1))
 
     return estimates
+
+
+# ---------------------------------------------------------------------------
+# Multi-color multi-copy slicing
+# ---------------------------------------------------------------------------
+
+
+def slice_multicolor_copies(
+    input_path: str,
+    count: int,
+    *,
+    spacing_mm: float = 10.0,
+    bed_width_mm: float = 256.0,
+    bed_depth_mm: float = 256.0,
+    slicer_path: str | None = None,
+    profile: str | None = None,
+    extra_args: list[str] | None = None,
+    output_dir: str | None = None,
+    timeout: int = 300,
+) -> SliceResult:
+    """Slice an STL into *count* copies, each assigned a different tool (T0, T1, ...).
+
+    The approach: position each copy on a grid, slice each individually, then
+    merge the gcode bodies with ``T`` commands between copies.  This avoids
+    the need for a multi-extruder PrusaSlicer printer profile.
+
+    The merged gcode will contain ``T0`` before copy 1's layers, ``T1`` before
+    copy 2's layers, etc.  Downstream Bambu 3MF wrapping will convert these
+    to M620/M621 AMS load sequences.
+
+    :param input_path: Path to the source STL file.
+    :param count: Number of copies (each gets a different tool).
+    :param spacing_mm: Gap between copies in mm.
+    :param bed_width_mm: Build plate width (X) in mm.
+    :param bed_depth_mm: Build plate depth (Y) in mm.
+    :param slicer_path: Explicit slicer binary path.
+    :param profile: Path to a slicer profile/config file.
+    :param extra_args: Additional CLI arguments for the slicer.
+    :param output_dir: Directory for output files.
+    :param timeout: Slicing timeout per copy in seconds.
+    :returns: A :class:`SliceResult` with the merged gcode path.
+    :raises SlicerError: If slicing any copy fails.
+    :raises ValueError: If copies don't fit on the bed.
+    """
+    import math
+    import tempfile as _tempfile
+
+    from kiln.auto_orient import _parse_mesh, _translate_to_bed, _write_binary_stl
+
+    if count < 2:
+        raise ValueError(f"count must be >= 2, got {count}")
+
+    # Parse mesh and compute bounding box
+    triangles, _vertices = _parse_mesh(input_path)
+    triangles = _translate_to_bed(triangles)
+
+    all_verts = [v for tri in triangles for v in tri]
+    xs = [v[0] for v in all_verts]
+    ys = [v[1] for v in all_verts]
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+    model_width = x_max - x_min
+    model_depth = y_max - y_min
+
+    if model_width <= 0 or model_depth <= 0:
+        raise ValueError("Model has zero width or depth.")
+
+    # Center mesh at origin
+    center_x = (x_min + x_max) / 2.0
+    center_y = (y_min + y_max) / 2.0
+    centered = []
+    for tri in triangles:
+        tv = tuple((v[0] - center_x, v[1] - center_y, v[2]) for v in tri)
+        centered.append(tv)
+
+    # Grid layout
+    cell_w = model_width + spacing_mm
+    cell_d = model_depth + spacing_mm
+    cols = int(bed_width_mm // cell_w)
+    rows = int(bed_depth_mm // cell_d)
+
+    if cols < 1 or rows < 1:
+        raise ValueError(
+            f"Model ({model_width:.1f} x {model_depth:.1f} mm) is too large "
+            f"for the build plate ({bed_width_mm} x {bed_depth_mm} mm)."
+        )
+    if count > cols * rows:
+        raise ValueError(
+            f"Cannot fit {count} copies on {bed_width_mm}x{bed_depth_mm} mm bed."
+        )
+
+    actual_cols = min(count, cols)
+    actual_rows = math.ceil(count / actual_cols)
+    grid_width = actual_cols * cell_w - spacing_mm
+    grid_depth = actual_rows * cell_d - spacing_mm
+    start_x = (bed_width_mm - grid_width) / 2.0 + model_width / 2.0
+    start_y = (bed_depth_mm - grid_depth) / 2.0 + model_depth / 2.0
+
+    # Create positioned STL copies and slice each
+    work_dir = _tempfile.mkdtemp(prefix="kiln_multicolor_")
+    gcode_bodies: list[str] = []
+    slicer_name: str | None = None
+
+    placed = 0
+    for row in range(actual_rows):
+        for col in range(actual_cols):
+            if placed >= count:
+                break
+            offset_x = start_x + col * cell_w
+            offset_y = start_y + row * cell_d
+
+            # Translate centered mesh to this grid position
+            positioned = []
+            for tri in centered:
+                tv = tuple((v[0] + offset_x, v[1] + offset_y, v[2]) for v in tri)
+                positioned.append(tv)
+
+            # Write positioned copy as STL
+            copy_stl = os.path.join(work_dir, f"copy_{placed}.stl")
+            _write_binary_stl(positioned, copy_stl)
+
+            # Slice it
+            copy_out_dir = os.path.join(work_dir, f"slice_{placed}")
+            os.makedirs(copy_out_dir, exist_ok=True)
+
+            result = slice_file(
+                copy_stl,
+                output_dir=copy_out_dir,
+                profile=profile,
+                slicer_path=slicer_path,
+                extra_args=list(extra_args) if extra_args else None,
+                timeout=timeout,
+            )
+            if not result.success or not result.output_path:
+                raise SlicerError(f"Slicing copy {placed} failed: {result.message}")
+
+            slicer_name = result.slicer
+
+            # Read the gcode body
+            with open(result.output_path, errors="replace") as fh:
+                gcode_bodies.append(fh.read())
+
+            placed += 1
+
+    # Merge gcode bodies with T commands between copies
+    merged = _merge_multicolor_gcode(gcode_bodies)
+
+    # Write merged gcode
+    out_dir = output_dir or _DEFAULT_OUTPUT_DIR
+    os.makedirs(out_dir, mode=0o700, exist_ok=True)
+    stem = Path(input_path).stem
+    merged_path = os.path.join(out_dir, f"{stem}_multicolor.gcode")
+    with open(merged_path, "w") as fh:
+        fh.write(merged)
+
+    return SliceResult(
+        success=True,
+        output_path=merged_path,
+        slicer=slicer_name,
+        message=f"Sliced {count} multi-color copies of {Path(input_path).name}",
+    )
+
+
+def _merge_multicolor_gcode(gcode_bodies: list[str]) -> str:
+    """Merge multiple single-filament gcode bodies into one with T commands.
+
+    Takes the first copy's gcode as the base (with headers/comments intact),
+    then for subsequent copies, extracts only the layer gcode (stripping
+    slicer headers and init commands) and inserts T commands before each.
+
+    The merged gcode uses the first copy's header, all layer bodies merged
+    sequentially, with tool changes at the transition between copies.
+    """
+    if not gcode_bodies:
+        raise ValueError("No gcode bodies to merge")
+    if len(gcode_bodies) == 1:
+        return gcode_bodies[0]
+
+    def _extract_body(gcode: str) -> str:
+        """Extract gcode body starting from the first layer change marker."""
+        lines = gcode.split("\n")
+        body_start = 0
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith((";BEFORE_LAYER_CHANGE", ";LAYER_CHANGE")):
+                body_start = i
+                break
+        return "\n".join(lines[body_start:])
+
+    def _extract_header(gcode: str) -> str:
+        """Extract gcode header before the first layer change."""
+        lines = gcode.split("\n")
+        header_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith((";BEFORE_LAYER_CHANGE", ";LAYER_CHANGE")):
+                break
+            header_lines.append(line)
+        return "\n".join(header_lines)
+
+    # Build merged gcode:
+    # 1. Header from copy 0
+    # 2. T0 + body from copy 0
+    # 3. T1 + body from copy 1
+    # ...
+    parts: list[str] = []
+
+    # Header from first copy
+    parts.append(_extract_header(gcode_bodies[0]))
+    parts.append("")
+
+    for i, gcode in enumerate(gcode_bodies):
+        body = _extract_body(gcode)
+        # Insert tool change command before each copy's layers
+        parts.append(f"; --- Copy {i + 1} (Tool {i}) ---")
+        parts.append(f"T{i}")
+        parts.append(body)
+        parts.append("")
+
+    return "\n".join(parts)

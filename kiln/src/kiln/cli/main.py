@@ -1389,6 +1389,42 @@ def status(ctx: click.Context, json_mode: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
+# Material cost per kg — matches server.py _MATERIAL_COST_PER_KG
+_CLI_COST_PER_KG: dict[str, float] = {
+    "pla": 20.0, "pla+": 22.0, "petg": 22.0, "abs": 18.0,
+    "tpu": 30.0, "asa": 25.0, "nylon": 35.0, "pc": 40.0,
+}
+_CLI_AVG_G_PER_HOUR: float = 7.5
+
+
+def _estimate_print_cost_cli(
+    elapsed_s: int | float | None,
+    remaining_s: int | float | None,
+    material: str | None = None,
+) -> dict[str, Any] | None:
+    """Estimate filament cost from total print time (CLI version).
+
+    Mirrors ``_estimate_print_cost`` in ``server.py`` so that
+    ``kiln report`` matches the ``monitor_print`` MCP tool output.
+    """
+    elapsed = elapsed_s if elapsed_s is not None and elapsed_s >= 0 else 0
+    remaining = remaining_s if remaining_s is not None and remaining_s >= 0 else 0
+    total_s = elapsed + remaining
+    if total_s <= 0:
+        return None
+    mat_key = (material or "pla").lower().strip()
+    cost_per_kg = _CLI_COST_PER_KG.get(mat_key, _CLI_COST_PER_KG["pla"])
+    total_hours = total_s / 3600.0
+    estimated_weight_g = total_hours * _CLI_AVG_G_PER_HOUR
+    estimated_cost = (estimated_weight_g / 1000.0) * cost_per_kg
+    return {
+        "material": mat_key.upper(),
+        "estimated_weight_g": round(estimated_weight_g, 1),
+        "estimated_cost_usd": round(estimated_cost, 2),
+        "cost_per_kg_usd": cost_per_kg,
+    }
+
+
 def _format_duration_cli(seconds: int | float | None) -> str:
     """Format seconds as a human-readable duration string."""
     if seconds is None or seconds < 0:
@@ -1583,6 +1619,18 @@ def report(
                 lines.extend([
                     f"- Speed: {speed_str}",
                     f"- Errors: {error_str}",
+                ])
+
+                # Cost estimate (matches monitor_print MCP tool output)
+                cost_info = _estimate_print_cost_cli(elapsed_s, remaining_s)
+                if cost_info is not None:
+                    lines.append(
+                        f"- Estimated filament cost: ~${cost_info['estimated_cost_usd']:.2f} "
+                        f"({cost_info['material']} @ ${cost_info['cost_per_kg_usd']:.0f}/kg, "
+                        f"~{cost_info['estimated_weight_g']:.0f}g)"
+                    )
+
+                lines.extend([
                     f"Camera: {snapshot_line}",
                     f"Comments: {comment}",
                 ])
@@ -2762,50 +2810,24 @@ def slice(
         # Multi-copy: use PrusaSlicer --duplicate or STL mesh duplication
         actual_input = input_file
         copy_strategy = None
-        multicolor_config_path: str | None = None
 
         if multicolor_mode:
-            # Multi-color copies: build multi-body 3MF with per-object extruder assignments
-            from kiln.auto_orient import build_multicolor_plate_3mf
+            # Multi-color copies: slice each copy individually and merge with T commands
+            from kiln.slicer import slice_multicolor_copies
 
             if not json_mode:
-                click.echo(f"Building multi-color plate: {copies} copies, each a different AMS color...")
+                click.echo(f"Slicing multi-color plate: {copies} copies, each a different AMS color...")
 
-            actual_input = build_multicolor_plate_3mf(
+            result = slice_multicolor_copies(
                 input_file,
                 copies,
                 spacing_mm=spacing,
+                slicer_path=slicer,
+                profile=plan["profile_path"],
+                extra_args=extra_args or None,
+                output_dir=output_dir,
             )
-            copy_strategy = "multicolor_3mf"
-
-            # Create temp multi-material slicer config
-            import tempfile as _tempfile
-
-            mat = plan.get("material", "PLA") or "PLA"
-            types_str = ";".join([mat] * copies)
-            temps_str = ";".join(["220"] * copies)
-            bed_str = ";".join(["65"] * copies)
-            mm_config = (
-                "# Auto-generated multi-material config for Kiln\n"
-                f"single_extruder_multi_material = 1\n"
-                f"extruders_count = {copies}\n"
-                "wipe_tower = 1\n"
-                "wipe_tower_x = 170\n"
-                "wipe_tower_y = 225\n"
-                "wipe_tower_width = 60\n"
-                "wipe_tower_bridging = 10\n"
-                f"filament_type = {types_str}\n"
-                f"temperature = {temps_str}\n"
-                f"first_layer_temperature = {temps_str}\n"
-                f"bed_temperature = {bed_str}\n"
-                f"first_layer_bed_temperature = {bed_str}\n"
-                "retract_length_toolchange = 2\n"
-                "retract_restart_extra_toolchange = 0\n"
-            )
-            fd, multicolor_config_path = _tempfile.mkstemp(suffix="_multimaterial.ini")
-            with os.fdopen(fd, "w") as f:
-                f.write(mm_config)
-            extra_args.extend(["--load", multicolor_config_path])
+            copy_strategy = "multicolor_merge"
 
         elif copies > 1:
             from kiln.slicer import find_slicer
@@ -2827,14 +2849,15 @@ def slice(
                 )
                 copy_strategy = "stl_mesh_duplication"
 
-        result = slice_file(
-            actual_input,
-            output_dir=output_dir,
-            output_name=output_name,
-            profile=plan["profile_path"],
-            slicer_path=slicer,
-            extra_args=extra_args or None,
-        )
+        if not multicolor_mode:
+            result = slice_file(
+                actual_input,
+                output_dir=output_dir,
+                output_name=output_name,
+                profile=plan["profile_path"],
+                slicer_path=slicer,
+                extra_args=extra_args or None,
+            )
 
         if not print_after:
             if json_mode:
@@ -2868,13 +2891,6 @@ def slice(
                     note = f" ({plan['support_reason']})" if plan["support_reason"] else ""
                     click.echo(f"Supports: {plan['support_style']}{note}")
             return
-
-        # Clean up temp multi-material config
-        if multicolor_config_path:
-            try:
-                os.unlink(multicolor_config_path)
-            except OSError:
-                pass
 
         # --print-after: wrap for Bambu if needed, upload, and start
         adapter = _get_adapter_from_ctx(ctx)
