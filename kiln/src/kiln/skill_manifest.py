@@ -57,6 +57,68 @@ class SkillManifest:
     setup_command: str = "kiln verify"
     health_command: str = "kiln status --json"
 
+    # Agent behavioral guidance — how to use Kiln well
+    agent_rules: list[str] = field(
+        default_factory=lambda: [
+            "ALWAYS use MCP tools instead of CLI commands (e.g. monitor_print() not 'kiln status').",
+            "When monitor_print() returns a snapshot path, READ the image file and show it inline to the user.",
+            "ALWAYS display the full monitoring report — never summarize or omit fields like cost estimate.",
+            "After generating a model, ALWAYS call preview_generated_model() to render multi-angle previews BEFORE printing.",
+            "Check the bottom view in previews for bed adhesion issues (elephant's foot, insufficient contact).",
+            "Use recommend_material() for material selection and get_design_constraints() for printability guidance.",
+            "Run preflight_check() before every print job.",
+            "Never guess on physical operations — ask the user when uncertain.",
+        ]
+    )
+
+    # Common workflows agents should know
+    workflows: dict[str, list[str]] = field(
+        default_factory=lambda: {
+            "generate_and_print": [
+                "generate_model(description) — create 3D model from text",
+                "preview_generated_model(model_id) — render multi-angle previews, show to user",
+                "validate_model(model_id) — check printability",
+                "slice_model(file_path) — slice to gcode",
+                "preflight_check() — verify printer ready",
+                "start_print(file) — begin printing",
+                "monitor_print() — track progress, show snapshots and cost",
+            ],
+            "monitor_active_print": [
+                "monitor_print() — get full report with progress, temps, cost, snapshot",
+                "Read the snapshot image and display it inline",
+                "Show ALL report fields including cost estimate",
+            ],
+            "multi_color_print": [
+                "Generate or locate STL model",
+                "Use 'kiln slice model.stl --copies N --ams-mapping 0,1,2 --print-after'",
+                "Each copy prints in a different AMS filament color",
+                "Or use multi_material_print() MCP tool for different objects in different materials",
+            ],
+            "find_and_print": [
+                "search_all_models(query) — find models on Thingiverse etc.",
+                "download_and_upload(url) — download and send to printer",
+                "preflight_check() — verify printer ready",
+                "start_print(file) — begin printing",
+            ],
+        }
+    )
+
+    # Tools agents should reach for by use case
+    tool_recommendations: dict[str, str] = field(
+        default_factory=lambda: {
+            "printer_status": "printer_status() — current state, temps, progress",
+            "monitoring": "monitor_print() — full report with snapshot and cost",
+            "material_help": "recommend_material(use_case) — intelligent material selection",
+            "design_help": "get_design_constraints(material, feature) — printability rules",
+            "generation": "generate_model(description) — text-to-3D via Gemini",
+            "preview": "preview_generated_model(model_id) — multi-angle visual check",
+            "slicing": "slice_model(file_path) — STL/3MF to gcode",
+            "printing": "start_print(file) — begin a print job",
+            "safety": "preflight_check() — pre-print safety verification",
+            "ams_colors": "ams_status() — check loaded AMS filaments and colors",
+        }
+    )
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict (enum-safe)."""
         return asdict(self)

@@ -441,6 +441,35 @@ def _build_instructions() -> str:
         + ". Use `safety_settings` to review."
     )
 
+    # --- Monitoring & reporting ---
+    parts.append(
+        "MONITORING: During print jobs, use `monitor_print()` for status — "
+        "NOT CLI commands. It returns progress, temperatures, time remaining, "
+        "cost estimate, and a camera snapshot path. You MUST:\n"
+        "  1. Display the FULL report text to the user — never summarize or omit fields.\n"
+        "  2. Read the snapshot image file and show it inline — "
+        "never just print a file path.\n"
+        "  3. Always include the estimated cost line.\n"
+        "  4. Prefer MCP tools over CLI for ALL Kiln operations."
+    )
+
+    # --- Design intelligence ---
+    parts.append(
+        "DESIGN INTELLIGENCE: Kiln has a comprehensive material/design knowledge "
+        "system. Use `recommend_material` for material selection and "
+        "`get_design_constraints` for printability guidance. Use "
+        "`get_skill_manifest()` on first connection for the full capability map."
+    )
+
+    # --- Generation workflow ---
+    if gen_providers:
+        parts.append(
+            "GENERATION WORKFLOW: After generating a model, you MUST call "
+            "`preview_generated_model` to render multi-angle previews (including "
+            "bottom view for bed adhesion) BEFORE printing. Show the preview "
+            "images to the user and check for issues. Never skip preview."
+        )
+
     # --- Natural language guidance ---
     parts.append(
         "The user may ask in plain language (e.g. \"what's my printer doing?\", "
