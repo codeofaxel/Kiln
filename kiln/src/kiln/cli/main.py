@@ -1101,7 +1101,40 @@ def _run_prusa_diagnostics(cfg: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@click.group()
+class _DidYouMeanGroup(click.Group):
+    """Click group subclass that suggests close matches for mistyped commands.
+
+    When a user (or agent) types ``kiln printer status`` instead of
+    ``kiln status``, Click normally prints a bare "No such command" error.
+    This subclass uses :func:`difflib.get_close_matches` to suggest the
+    closest valid command, reducing friction for agents and humans alike.
+    """
+
+    def resolve_command(self, ctx: click.Context, args: list[str]) -> tuple:
+        try:
+            return super().resolve_command(ctx, args)
+        except click.UsageError as exc:
+            import difflib
+
+            cmd_name = args[0] if args else ""
+            available = self.list_commands(ctx)
+            matches = difflib.get_close_matches(cmd_name, available, n=3, cutoff=0.5)
+
+            if matches:
+                suggestions = ", ".join(f"'{m}'" for m in matches)
+                hint = f"\n\nDid you mean: {suggestions}?"
+                # Also check if any subword matches (e.g. "printer status" → "status")
+                for word in cmd_name.split():
+                    word_matches = difflib.get_close_matches(
+                        word, available, n=1, cutoff=0.6
+                    )
+                    if word_matches and word_matches[0] not in matches:
+                        hint += f"\n  (Hint: try 'kiln {word_matches[0]}')"
+                raise click.UsageError(str(exc) + hint) from None
+            raise
+
+
+@click.group(cls=_DidYouMeanGroup)
 @click.option(
     "--printer",
     "-p",

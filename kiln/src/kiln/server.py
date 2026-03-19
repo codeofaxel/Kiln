@@ -503,6 +503,46 @@ def _build_instructions() -> str:
         "physical operations."
     )
 
+    # --- Agent rules & tool reference (from skill manifest) ---
+    # Pull directly from the skill manifest so we have one source of truth.
+    # This ensures agents see the rules and tool map on first connect without
+    # having to discover or call get_skill_manifest() themselves.
+    try:
+        from kiln.skill_manifest import generate_manifest
+
+        manifest = generate_manifest()
+
+        # Agent behavioral rules
+        if manifest.agent_rules:
+            rules_str = "\n".join(
+                f"  {i}. {rule}" for i, rule in enumerate(manifest.agent_rules, 1)
+            )
+            parts.append(f"AGENT RULES (MUST FOLLOW):\n{rules_str}")
+
+        # Tool quick-reference by use case
+        if manifest.tool_recommendations:
+            recs_str = "\n".join(
+                f"  {use_case}: {tool}"
+                for use_case, tool in manifest.tool_recommendations.items()
+            )
+            parts.append(f"TOOL QUICK-REFERENCE:\n{recs_str}")
+
+        # Key workflows
+        if manifest.workflows:
+            workflow_lines: list[str] = []
+            for wf_name, steps in manifest.workflows.items():
+                step_str = " → ".join(
+                    s.split(" — ")[0] for s in steps  # just the function names
+                )
+                workflow_lines.append(f"  {wf_name}: {step_str}")
+            parts.append(f"WORKFLOWS:\n" + "\n".join(workflow_lines))
+    except Exception:
+        # Manifest not available — fall back to minimal guidance.
+        parts.append(
+            "AGENT RULES: Always use MCP tools (not CLI commands). "
+            "Call get_skill_manifest() for the full capability map."
+        )
+
     return "\n\n".join(parts)
 
 
