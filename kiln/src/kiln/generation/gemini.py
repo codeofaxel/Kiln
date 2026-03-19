@@ -322,7 +322,7 @@ def _extract_openscad_code(text: str) -> str:
         stripped = line.strip()
         # Detect start of OpenSCAD code
         if not in_code and re.match(
-            r"^(//|/\*|\$|cube|sphere|cylinder|translate|rotate|scale|union|difference|intersection|module|linear_extrude|rotate_extrude|polygon|circle|square|hull|minkowski|color|mirror|resize|offset|text|polyhedron|for|if|let|function|echo)",
+            r"^(//|/\*|\$|cube|sphere|cylinder|translate|rotate|scale|union|difference|intersection|module|linear_extrude|rotate_extrude|polygon|circle|square|hull|minkowski|color|mirror|resize|offset|text|polyhedron|for|if|let|function|echo|import|surface|include|use)",
             stripped,
         ):
             in_code = True

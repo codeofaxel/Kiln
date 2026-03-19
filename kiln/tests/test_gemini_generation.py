@@ -349,7 +349,7 @@ class TestGeminiDeepThinkProviderGenerate:
                 {
                     "content": {
                         "parts": [
-                            {"text": 'import("evil.stl");\ncube([10,10,10]);'}
+                            {"text": '```openscad\nimport("evil.stl");\ncube([10,10,10]);\n```'}
                         ]
                     }
                 }
