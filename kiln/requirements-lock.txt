@@ -30,7 +30,7 @@ python-dotenv==1.2.1
 PyYAML==6.0.3
 requests==2.32.5
 responses==0.25.8
-rich==14.3.2
+rich==14.3.3
 sse-starlette==3.2.0
 starlette==0.52.1
 typing-inspection==0.4.2
