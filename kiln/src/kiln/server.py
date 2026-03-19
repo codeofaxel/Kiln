@@ -535,7 +535,7 @@ def _build_instructions() -> str:
                     s.split(" — ")[0] for s in steps  # just the function names
                 )
                 workflow_lines.append(f"  {wf_name}: {step_str}")
-            parts.append(f"WORKFLOWS:\n" + "\n".join(workflow_lines))
+            parts.append("WORKFLOWS:\n" + "\n".join(workflow_lines))
     except Exception:
         # Manifest not available — fall back to minimal guidance.
         parts.append(

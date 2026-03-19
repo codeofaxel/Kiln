@@ -5,6 +5,35 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-03-18
+
+### Added
+- SDCP V3 HTTP push upload for Elegoo Centauri Carbon with V2 fallback — thanks [@bobbyhiddn](https://github.com/bobbyhiddn)
+- Multi-color multi-copy printing (each copy a different AMS color)
+- Parametric design template library (10 OpenSCAD modules: gears, threads, containers, lattice, etc.)
+- Three-layer generation system (parametric library, compile-fix loop, visual verification)
+- MCP session greeting — agents see full capability map on connect without discovery
+- did-you-mean CLI suggestions for mistyped commands
+- 3MF cost estimation from Bambu/OrcaSlicer slice metadata
+- Improved upon Image-to-3D support via Gemini Deep Think provider
+- Fulfillment materials command and smart material resolver
+
+### Fixed
+- Heatup false-positive temp drift alerts during cold starts (reached-target gating)
+- Elegoo CLI adapter missing from `_make_adapter()` (silently fell through to Moonraker)
+- Elegoo WebSocket deadlock (`Lock` to `RLock`)
+- Elegoo SDCP V3 `CurrentStatus` returned as list instead of int
+- `mcp.instructions` read-only property crash on FastMCP 1.9+
+- Phantom MCP tool references in agent guidance
+- External thread compile time 2min to 17sec
+- Stale skill manifest test
+
+### Dependencies
+- certifi 2026.1.4 to 2026.2.25
+- rich 14.3.2 to 14.3.3
+- pydantic-settings 2.12.0 to 2.13.1
+- GitHub Actions: upload-artifact v4 to v7, download-artifact v4 to v8
+
 ### Added
 - 25 mesh analysis and transformation MCP tools (pure Python, no external mesh libraries):
   - Geometry analysis: `analyze_mesh_geometry`, `mesh_quality_scorecard`, `analyze_non_manifold_edges`, `diagnose_mesh`
