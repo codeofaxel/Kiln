@@ -223,7 +223,7 @@ def _resolve_support_style(support_mode: str, input_file: str) -> tuple[str | No
     return None, None
 
 
-def _resolve_generation_provider(provider: str) -> "GenerationProvider":  # noqa: F821
+def _resolve_generation_provider(provider: str) -> GenerationProvider:  # noqa: F821
     """Resolve a generation provider by name.
 
     Handles openscad and meshy as direct imports, and routes all other
@@ -231,7 +231,7 @@ def _resolve_generation_provider(provider: str) -> "GenerationProvider":  # noqa
     Gives an actionable error when the API key is missing.
     """
     from kiln.generation import MeshyProvider, OpenSCADProvider
-    from kiln.generation.registry import GenerationRegistry, _ENV_PROVIDER_MAP
+    from kiln.generation.registry import GenerationRegistry
 
     if provider == "openscad":
         return OpenSCADProvider()
@@ -247,10 +247,8 @@ def _resolve_generation_provider(provider: str) -> "GenerationProvider":  # noqa
 
     try:
         return registry.get(provider)
-    except Exception:
+    except Exception as exc:
         # Give a helpful hint about which env var is needed
-        env_hints = {v[1]: k for k, v in _ENV_PROVIDER_MAP.items()}
-        # Map provider name to class name pattern
         hint_map = {
             "tripo3d": "KILN_TRIPO3D_API_KEY",
             "stability": "KILN_STABILITY_API_KEY",
@@ -265,7 +263,7 @@ def _resolve_generation_provider(provider: str) -> "GenerationProvider":  # noqa
                 raise GenerationError(
                     f"Provider {provider!r} requires {env_var} to be set.",
                     code="AUTH_ERROR",
-                )
+                ) from exc
         raise
 
 
@@ -5333,7 +5331,6 @@ def _resolve_fulfillment_material(
     :raises click.ClickException: If no matching material is found.
     """
     from kiln.fulfillment import get_provider
-    from kiln.fulfillment.base import FulfillmentError
 
     try:
         prov = get_provider(provider_name)
@@ -5523,7 +5520,7 @@ def fulfillment_materials(
                 )
             if total_count > limit:
                 click.echo(f"\n… {total_count - limit} more. Use --limit {total_count} to see all.")
-            click.echo(f"\nUse material ID with: kiln compare-cost model.stl --fulfillment-material <ID>")
+            click.echo("\nUse material ID with: kiln compare-cost model.stl --fulfillment-material <ID>")
 
     except FulfillmentError as exc:
         click.echo(format_error(str(exc), json_mode=json_mode))
@@ -7036,11 +7033,8 @@ def generate(
         GenerationAuthError,
         GenerationError,
         GenerationStatus,
-        MeshyProvider,
-        OpenSCADProvider,
         validate_mesh,
     )
-    from kiln.generation.registry import GenerationRegistry
 
     if image and provider != "gemini":
         click.echo(
@@ -7242,10 +7236,7 @@ def generate_status(job_id: str, provider: str, json_mode: bool) -> None:
     from kiln.generation import (
         GenerationAuthError,
         GenerationError,
-        MeshyProvider,
-        OpenSCADProvider,
     )
-    from kiln.generation.registry import GenerationRegistry
 
     try:
         gen = _resolve_generation_provider(provider)
@@ -7306,11 +7297,8 @@ def generate_download(
     from kiln.generation import (
         GenerationAuthError,
         GenerationError,
-        MeshyProvider,
-        OpenSCADProvider,
         validate_mesh,
     )
-    from kiln.generation.registry import GenerationRegistry
 
     try:
         gen = _resolve_generation_provider(provider)
@@ -7414,11 +7402,8 @@ def generate_and_print_cmd(
         GenerationAuthError,
         GenerationError,
         GenerationStatus,
-        MeshyProvider,
-        OpenSCADProvider,
         validate_mesh,
     )
-    from kiln.generation.registry import GenerationRegistry
     from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
 
     if image and provider != "gemini":

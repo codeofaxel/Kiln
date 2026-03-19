@@ -7,6 +7,7 @@ on configurable material profiles and electricity rates.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import os
 import re
@@ -375,10 +376,8 @@ class CostEstimator:
         est_time: int | None = None
         prediction = meta.get("prediction")
         if prediction:
-            try:
+            with contextlib.suppress(ValueError):
                 est_time = int(prediction)
-            except ValueError:
-                pass
 
         # Electricity cost.
         electricity_cost = 0.0

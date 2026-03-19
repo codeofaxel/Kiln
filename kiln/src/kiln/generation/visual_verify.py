@@ -9,11 +9,12 @@ configurable threshold the caller can use the feedback to regenerate.
 from __future__ import annotations
 
 import base64
+import contextlib
 import logging
 import os
 import re
-import subprocess
 import shutil
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -100,10 +101,8 @@ class VisualVerifier:
             return self._score_image(png_path, original_prompt)
         finally:
             # Clean up the temporary preview image
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(png_path)
-            except OSError:
-                pass
 
     def render_stl_to_png(self, stl_path: str) -> str:
         """Render an STL file to a PNG preview using OpenSCAD.
@@ -157,16 +156,16 @@ class VisualVerifier:
                     text=True,
                     timeout=60,
                 )
-            except FileNotFoundError:
+            except FileNotFoundError as exc:
                 raise GenerationError(
                     "OpenSCAD binary not found for PNG rendering.",
                     code="OPENSCAD_NOT_FOUND",
-                )
-            except subprocess.TimeoutExpired:
+                ) from exc
+            except subprocess.TimeoutExpired as exc:
                 raise GenerationError(
                     "OpenSCAD PNG rendering timed out.",
                     code="RENDER_TIMEOUT",
-                )
+                ) from exc
 
             if result.returncode != 0:
                 stderr = (result.stderr or "").strip()[:300]
@@ -189,10 +188,8 @@ class VisualVerifier:
             return png_path
 
         finally:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(scad_path)
-            except OSError:
-                pass
 
     # Camera angles for multi-angle rendering: (label, --camera value)
     _ANGLES: list[tuple[str, str]] = [
@@ -257,16 +254,16 @@ class VisualVerifier:
                         text=True,
                         timeout=60,
                     )
-                except FileNotFoundError:
+                except FileNotFoundError as exc:
                     raise GenerationError(
                         "OpenSCAD binary not found for PNG rendering.",
                         code="OPENSCAD_NOT_FOUND",
-                    )
-                except subprocess.TimeoutExpired:
+                    ) from exc
+                except subprocess.TimeoutExpired as exc:
                     raise GenerationError(
                         f"OpenSCAD PNG rendering timed out ({label} view).",
                         code="RENDER_TIMEOUT",
-                    )
+                    ) from exc
 
                 if result.returncode != 0:
                     stderr = (result.stderr or "").strip()[:300]
@@ -293,10 +290,8 @@ class VisualVerifier:
             return png_paths
 
         finally:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(scad_path)
-            except OSError:
-                pass
 
     # ------------------------------------------------------------------
     # Internal helpers

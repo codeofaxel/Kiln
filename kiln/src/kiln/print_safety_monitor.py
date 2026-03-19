@@ -481,9 +481,8 @@ class PrintSafetyMonitor:
         if state.tool_temp_actual is not None and state.tool_temp_target is not None:
             if state.tool_temp_target > 0:
                 drift = abs(state.tool_temp_actual - state.tool_temp_target)
-                if not self._hotend_reached_target:
-                    if drift <= 15.0:
-                        self._hotend_reached_target = True
+                if not self._hotend_reached_target and drift <= 15.0:
+                    self._hotend_reached_target = True
                 if self._hotend_reached_target:
                     if drift > 15.0:
                         if self._hotend_drift_since is None:
@@ -511,9 +510,8 @@ class PrintSafetyMonitor:
         if state.bed_temp_actual is not None and state.bed_temp_target is not None:
             if state.bed_temp_target > 0:
                 drift = abs(state.bed_temp_actual - state.bed_temp_target)
-                if not self._bed_reached_target:
-                    if drift <= 10.0:
-                        self._bed_reached_target = True
+                if not self._bed_reached_target and drift <= 10.0:
+                    self._bed_reached_target = True
                 if self._bed_reached_target:
                     if drift > 10.0:
                         if self._bed_drift_since is None:
