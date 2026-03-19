@@ -1,4 +1,4 @@
-name: Publish to PyPI + MCP Registry
+name: Publish to PyPI + MCP Registry + ClawHub
 
 on:
   release:
@@ -254,3 +254,33 @@ jobs:
 
       - name: Publish to MCP Registry
         run: ./mcp-publisher publish
+
+  # Publish to ClawHub (OpenClaw skill registry) after PyPI is live
+  publish-clawhub:
+    needs: publish-kiln
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install ClawHub CLI
+        run: npm install -g clawhub
+
+      - name: Prepare minimal publish folder
+        run: |
+          mkdir -p /tmp/kiln-clawhub
+          cp SKILL.md server.json README.md LICENSE /tmp/kiln-clawhub/
+
+      - name: Publish to ClawHub
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          VERSION="${VERSION#v}"
+          clawhub publish /tmp/kiln-clawhub \
+            --slug kiln \
+            --name "Kiln" \
+            --version "$VERSION" \
+            --changelog "v${VERSION} — see https://github.com/codeofaxel/Kiln/releases/tag/${GITHUB_REF#refs/tags/}" \
+            --tags "latest,3d-printing,mcp,ai-agent,bambu,moonraker,octoprint,prusa,klipper,elegoo"

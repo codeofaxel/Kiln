@@ -1,0 +1,22 @@
+# Only publish essential files — skip large dirs
+.claude/
+.git/
+.github/
+.dev/
+docs/site/
+tests/
+octoprint-cli/
+redirects/
+*.3mf
+*.gcode
+*.stl
+__pycache__/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+*.pem
+*.key
+node_modules/
