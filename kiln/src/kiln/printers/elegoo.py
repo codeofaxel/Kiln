@@ -40,6 +40,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+import requests
+
 from kiln.printers.base import (
     JobProgress,
     PrinterAdapter,
@@ -243,7 +245,7 @@ class ElegooAdapter(PrinterAdapter):
 
         # WebSocket state.
         self._ws: Any = None  # websocket.WebSocket instance
-        self._ws_lock = threading.Lock()
+        self._ws_lock = threading.RLock()  # RLock: _ensure_ws can be called from _send_command
         self._listener_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
@@ -570,6 +572,9 @@ class ElegooAdapter(PrinterAdapter):
     def _build_state_from_cache(self, status: dict[str, Any]) -> PrinterState:
         """Convert cached SDCP status to :class:`PrinterState`."""
         print_status = status.get("CurrentStatus", status.get("Status", 0))
+        # SDCP V3 (e.g. Centauri Carbon) returns CurrentStatus as a list.
+        if isinstance(print_status, list):
+            print_status = print_status[0] if print_status else 0
         if isinstance(print_status, str):
             try:
                 print_status = int(print_status)
@@ -669,18 +674,35 @@ class ElegooAdapter(PrinterAdapter):
     # PrinterAdapter -- file management
     # ------------------------------------------------------------------
 
+    # SDCP V3 upload constants
+    _SDCP_V3_UPLOAD_PORT = 3030
+    _SDCP_V3_UPLOAD_PATH = "/uploadFile/upload"
+    _SDCP_V3_CHUNK_SIZE = 1024 * 1024  # 1 MB per SDCP V3 spec
+
     def upload_file(self, file_path: str) -> UploadResult:
         """Upload a file to the printer.
 
-        SDCP upload works by having the printer download from a URL.
-        This method starts a temporary HTTP server on the local machine,
-        tells the printer to fetch the file, and waits for the download.
+        Supports two upload protocols depending on the SDCP version:
+
+        **SDCP V3 — HTTP POST push (tried first)**
+            Used by newer Elegoo printers (e.g. Centauri Carbon).  The file
+            is split into 1 MB chunks and POSTed directly to the printer.
+            Falls back to V2 if the endpoint is unreachable.
+
+        **SDCP V2 — WebSocket command + pull (fallback)**
+            Used by older Elegoo printers (Saturn, Mars series).  Kiln
+            starts a temporary HTTP server and tells the printer to fetch
+            the file via SDCP command 256.
 
         Args:
             file_path: Absolute or relative path to the local file.
 
+        Returns:
+            :class:`~kiln.printers.base.UploadResult` indicating success
+            or failure.
+
         Raises:
-            PrinterError: If upload fails.
+            PrinterError: If the upload fails at the protocol level.
             FileNotFoundError: If *file_path* does not exist locally.
         """
         abs_path = os.path.abspath(file_path)
@@ -690,14 +712,132 @@ class ElegooAdapter(PrinterAdapter):
         filename = os.path.basename(abs_path)
         file_size = os.path.getsize(abs_path)
 
-        # Compute MD5 for integrity check.
+        # Compute MD5 once — used by both upload paths.
         md5_hash = hashlib.md5()  # noqa: S324
         with open(abs_path, "rb") as fh:
             for chunk in iter(lambda: fh.read(65536), b""):
                 md5_hash.update(chunk)
         md5_hex = md5_hash.hexdigest()
 
-        # Start temporary HTTP server.
+        # Try SDCP V3 HTTP POST push first.
+        v3_result = self._upload_file_v3(abs_path, filename, file_size, md5_hex)
+        if v3_result is not None:
+            return v3_result
+        logger.info(
+            "SDCP V3 HTTP upload not available on %s; falling back to V2 pull method.",
+            self._host,
+        )
+
+        # Fallback: SDCP V2 — start local HTTP server, tell printer to pull.
+        return self._upload_file_v2(abs_path, filename, file_size, md5_hex)
+
+    def _upload_file_v3(
+        self,
+        abs_path: str,
+        filename: str,
+        file_size: int,
+        md5_hex: str,
+    ) -> UploadResult | None:
+        """Upload via SDCP V3 HTTP POST push (Centauri Carbon / SDCP V3+).
+
+        Returns an :class:`UploadResult` on success or definitive failure,
+        or ``None`` if the printer's HTTP upload endpoint is not reachable
+        (caller should fall back to the V2 pull method).
+        """
+        upload_url = f"http://{self._host}:{self._SDCP_V3_UPLOAD_PORT}{self._SDCP_V3_UPLOAD_PATH}"
+        file_uuid = uuid.uuid4().hex
+        chunk_size = self._SDCP_V3_CHUNK_SIZE
+
+        logger.debug(
+            "SDCP V3 upload: %s → %s  (size=%d, md5=%s, uuid=%s)",
+            filename, upload_url, file_size, md5_hex, file_uuid,
+        )
+
+        try:
+            with open(abs_path, "rb") as fh:
+                offset = 0
+                chunk_num = 0
+                while offset < file_size:
+                    chunk_data = fh.read(chunk_size)
+                    if not chunk_data:
+                        break
+                    chunk_num += 1
+
+                    files = {
+                        "File": (filename, chunk_data, "application/octet-stream"),
+                    }
+                    data = {
+                        "S-File-MD5": md5_hex,
+                        "Check": "1",
+                        "Offset": str(offset),
+                        "Uuid": file_uuid,
+                        "TotalSize": str(file_size),
+                    }
+
+                    try:
+                        resp = requests.post(
+                            upload_url, data=data, files=files, timeout=60,
+                        )
+                    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+                        if chunk_num == 1:
+                            # Endpoint not available — signal fallback to V2.
+                            logger.debug("SDCP V3 endpoint not reachable: %s", exc)
+                            return None
+                        # Mid-upload failure — report as a real error.
+                        return UploadResult(
+                            success=False,
+                            file_name=filename,
+                            message=f"SDCP V3 upload lost connection at chunk {chunk_num} "
+                                    f"(offset {offset}): {exc}",
+                        )
+
+                    try:
+                        resp_json = resp.json()
+                    except Exception:
+                        return UploadResult(
+                            success=False,
+                            file_name=filename,
+                            message=f"SDCP V3 upload: unexpected response at chunk {chunk_num}: {resp.text!r}",
+                        )
+
+                    if not resp_json.get("success", False):
+                        messages = resp_json.get("messages", [])
+                        detail = "; ".join(
+                            f"{m.get('field', '?')}: {m.get('message', '?')}"
+                            for m in messages
+                        )
+                        return UploadResult(
+                            success=False,
+                            file_name=filename,
+                            message=f"SDCP V3 upload rejected at chunk {chunk_num} "
+                                    f"(offset {offset}): {detail or resp.text}",
+                        )
+
+                    offset += len(chunk_data)
+                    pct = min(100, int(offset / file_size * 100))
+                    logger.debug("SDCP V3 upload: chunk %d OK  (%d%%)", chunk_num, pct)
+
+        except OSError as exc:
+            raise PrinterError(f"SDCP V3 upload I/O error: {exc}", cause=exc) from exc
+
+        logger.info("SDCP V3 upload complete: %s", filename)
+        return UploadResult(
+            success=True,
+            file_name=filename,
+            message=f"Uploaded {filename} to Elegoo printer via SDCP V3 HTTP push.",
+        )
+
+    def _upload_file_v2(
+        self,
+        abs_path: str,
+        filename: str,
+        file_size: int,
+        md5_hex: str,
+    ) -> UploadResult:
+        """Upload via SDCP V2 — start a local HTTP server, tell the printer to pull.
+
+        Legacy method for older Elegoo SDCP printers (Saturn, Mars series).
+        """
         local_ip = _get_local_ip(self._host)
         _UploadHTTPHandler._file_path = abs_path
         _UploadHTTPHandler._file_name = filename
@@ -742,7 +882,7 @@ class ElegooAdapter(PrinterAdapter):
             return UploadResult(
                 success=True,
                 file_name=filename,
-                message=f"Uploaded {filename} to Elegoo printer via SDCP.",
+                message=f"Uploaded {filename} to Elegoo printer via SDCP V2 pull.",
             )
         except PrinterError:
             raise

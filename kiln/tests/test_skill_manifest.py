@@ -77,6 +77,7 @@ class TestSkillManifest:
             "required_env", "optional_env",
             "interfaces", "tool_count", "safety_levels",
             "setup_command", "health_command",
+            "agent_rules", "tool_recommendations", "workflows",
         }
         assert set(d.keys()) == expected_keys
 
