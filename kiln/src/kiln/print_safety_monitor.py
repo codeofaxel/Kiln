@@ -181,6 +181,13 @@ class PrintSafetyMonitor:
         self._hotend_drift_since: float | None = None
         self._bed_drift_since: float | None = None
 
+        # Reached-target flags: suppress drift alerts during initial heatup.
+        # A heater must reach within threshold of its target at least once
+        # before drift detection activates.  This prevents false positives
+        # when the printer is warming from a cold start.
+        self._hotend_reached_target: bool = False
+        self._bed_reached_target: bool = False
+
         # Alerts.
         self._alerts: list[Alert] = []
         self._last_alert_by_rule: dict[str, float] = {}
@@ -469,46 +476,63 @@ class PrintSafetyMonitor:
         now = time.time()
 
         # Rule: temp_drift — hotend sustained ±15°C for >60s
+        # Drift detection only activates after the hotend has first reached
+        # its target temperature, preventing false positives during heatup.
         if state.tool_temp_actual is not None and state.tool_temp_target is not None:
             if state.tool_temp_target > 0:
                 drift = abs(state.tool_temp_actual - state.tool_temp_target)
-                if drift > 15.0:
-                    if self._hotend_drift_since is None:
-                        self._hotend_drift_since = now
-                    elif (now - self._hotend_drift_since) > 60.0:
-                        return Alert(
-                            now, "critical", "temp_drift",
-                            f"Hotend {state.tool_temp_actual:.1f}°C vs target "
-                            f"{state.tool_temp_target:.0f}°C for "
-                            f"{now - self._hotend_drift_since:.0f}s",
-                            "pause",
-                        )
+                if not self._hotend_reached_target:
+                    if drift <= 15.0:
+                        self._hotend_reached_target = True
+                if self._hotend_reached_target:
+                    if drift > 15.0:
+                        if self._hotend_drift_since is None:
+                            self._hotend_drift_since = now
+                        elif (now - self._hotend_drift_since) > 60.0:
+                            return Alert(
+                                now, "critical", "temp_drift",
+                                f"Hotend {state.tool_temp_actual:.1f}°C vs target "
+                                f"{state.tool_temp_target:.0f}°C for "
+                                f"{now - self._hotend_drift_since:.0f}s",
+                                "pause",
+                            )
+                    else:
+                        self._hotend_drift_since = None
                 else:
                     self._hotend_drift_since = None
             else:
                 self._hotend_drift_since = None
+                self._hotend_reached_target = False
         else:
             self._hotend_drift_since = None
 
         # Rule: temp_drift_bed — bed sustained ±10°C for >60s
+        # Same reached-target gate as hotend above.
         if state.bed_temp_actual is not None and state.bed_temp_target is not None:
             if state.bed_temp_target > 0:
                 drift = abs(state.bed_temp_actual - state.bed_temp_target)
-                if drift > 10.0:
-                    if self._bed_drift_since is None:
-                        self._bed_drift_since = now
-                    elif (now - self._bed_drift_since) > 60.0:
-                        return Alert(
-                            now, "critical", "temp_drift_bed",
-                            f"Bed {state.bed_temp_actual:.1f}°C vs target "
-                            f"{state.bed_temp_target:.0f}°C for "
-                            f"{now - self._bed_drift_since:.0f}s",
-                            "pause",
-                        )
+                if not self._bed_reached_target:
+                    if drift <= 10.0:
+                        self._bed_reached_target = True
+                if self._bed_reached_target:
+                    if drift > 10.0:
+                        if self._bed_drift_since is None:
+                            self._bed_drift_since = now
+                        elif (now - self._bed_drift_since) > 60.0:
+                            return Alert(
+                                now, "critical", "temp_drift_bed",
+                                f"Bed {state.bed_temp_actual:.1f}°C vs target "
+                                f"{state.bed_temp_target:.0f}°C for "
+                                f"{now - self._bed_drift_since:.0f}s",
+                                "pause",
+                            )
+                    else:
+                        self._bed_drift_since = None
                 else:
                     self._bed_drift_since = None
             else:
                 self._bed_drift_since = None
+                self._bed_reached_target = False
         else:
             self._bed_drift_since = None
 

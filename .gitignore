@@ -32,6 +32,7 @@ tools/
 .DS_Store
 CLAUDE.md
 .claude/
+.mcp.json
 .pre-commit-config.yaml
 
 # Deployment / infrastructure (operator-private)

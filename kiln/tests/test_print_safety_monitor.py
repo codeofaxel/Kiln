@@ -192,6 +192,8 @@ class TestTier2Critical:
     def test_temp_drift_sustained_60s(self):
         adapter = _make_adapter(tool_temp_actual=236.0, tool_temp_target=220.0)
         mon = _make_monitor(adapter)
+        # Simulate that hotend had previously reached target.
+        mon._hotend_reached_target = True
         state = adapter.get_state()
         job = adapter.get_job()
 
@@ -210,6 +212,8 @@ class TestTier2Critical:
     def test_temp_drift_resets_on_recovery(self):
         adapter = _make_adapter(tool_temp_actual=236.0, tool_temp_target=220.0)
         mon = _make_monitor(adapter)
+        # Simulate that hotend had previously reached target.
+        mon._hotend_reached_target = True
         state = adapter.get_state()
         job = adapter.get_job()
 
@@ -225,6 +229,57 @@ class TestTier2Critical:
         state2 = adapter.get_state()
         mon._check_tier2_critical(state2, job)
         assert mon._hotend_drift_since is None
+
+    def test_temp_drift_suppressed_during_heatup(self):
+        """Cold-start heatup should not trigger drift alerts."""
+        # Hotend at 90°C heading toward 220°C — large drift but heating up.
+        adapter = _make_adapter(
+            tool_temp_actual=90.0, tool_temp_target=220.0,
+            bed_temp_actual=30.0, bed_temp_target=65.0,
+        )
+        mon = _make_monitor(adapter)
+        state = adapter.get_state()
+        job = adapter.get_job()
+
+        # Even after >60s, no alert because target was never reached.
+        mon._check_tier2_critical(state, job)
+        mon._hotend_drift_since = time.time() - 120  # Force as if 2 min elapsed
+        mon._bed_drift_since = time.time() - 120
+        alert = mon._check_tier2_critical(state, job)
+        assert alert is None
+        assert not mon._hotend_reached_target
+        assert not mon._bed_reached_target
+
+    def test_reached_target_flag_activates_drift_detection(self):
+        """Once temp reaches target, drift detection activates normally."""
+        adapter = _make_adapter(
+            tool_temp_actual=220.0, tool_temp_target=220.0,
+            bed_temp_actual=65.0, bed_temp_target=65.0,
+        )
+        mon = _make_monitor(adapter)
+        state = adapter.get_state()
+        job = adapter.get_job()
+
+        # First check — at target, sets reached flag.
+        mon._check_tier2_critical(state, job)
+        assert mon._hotend_reached_target
+        assert mon._bed_reached_target
+
+        # Now simulate drift after reaching target.
+        adapter.get_state.return_value = PrinterState(
+            connected=True, state=PrinterStatus.PRINTING,
+            tool_temp_actual=236.0, tool_temp_target=220.0,
+            bed_temp_actual=65.0, bed_temp_target=65.0,
+        )
+        state2 = adapter.get_state()
+        mon._check_tier2_critical(state2, job)
+        assert mon._hotend_drift_since is not None
+
+        # After 61s, alert fires.
+        mon._hotend_drift_since = time.time() - 61
+        alert = mon._check_tier2_critical(state2, job)
+        assert alert is not None
+        assert alert.rule == "temp_drift"
 
     def test_stall_detected_after_10min(self):
         adapter = _make_adapter(completion=42.0)

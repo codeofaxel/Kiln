@@ -200,9 +200,25 @@ class CostEstimator:
         electricity_rate: float = 0.12,
         printer_wattage: float = 200.0,
     ) -> CostEstimate:
-        """Estimate cost from a G-code file on disk."""
+        """Estimate cost from a G-code or 3MF file on disk.
+
+        For ``.3mf`` files (including Bambu ``.gcode.3mf``), the slicer
+        metadata inside the archive is used when available, which is more
+        reliable than parsing the proprietary gcode within.
+        """
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"G-code file not found: {file_path}")
+
+        # Try 3MF metadata extraction first for .3mf files.
+        if file_path.lower().endswith(".3mf"):
+            result = self._estimate_from_3mf_metadata(
+                file_path,
+                material=material,
+                electricity_rate=electricity_rate,
+                printer_wattage=printer_wattage,
+            )
+            if result is not None:
+                return result
 
         with open(file_path, errors="replace") as f:
             lines = f.readlines()
@@ -271,6 +287,113 @@ class CostEstimator:
             material=profile.name,
             filament_length_meters=round(filament_length_m, 3),
             filament_weight_grams=round(weight_g, 2),
+            filament_cost_usd=round(filament_cost, 4),
+            estimated_time_seconds=est_time,
+            electricity_cost_usd=round(electricity_cost, 4),
+            electricity_rate_kwh=electricity_rate,
+            printer_wattage=printer_wattage,
+            total_cost_usd=round(total_cost, 2),
+            warnings=warnings,
+        )
+
+    def _estimate_from_3mf_metadata(
+        self,
+        file_path: str,
+        material: str = "PLA",
+        electricity_rate: float = 0.12,
+        printer_wattage: float = 200.0,
+    ) -> CostEstimate | None:
+        """Extract cost data from 3MF slicer metadata (slice_info.config).
+
+        Returns ``None`` if the archive doesn't contain usable metadata,
+        allowing the caller to fall back to gcode line parsing.
+
+        Bambu Studio, OrcaSlicer, and compatible slicers embed a
+        ``Metadata/slice_info.config`` XML file with per-plate estimates
+        including filament weight (g), length (m), print time (s), and
+        material type.
+        """
+        import xml.etree.ElementTree as ET
+        import zipfile
+
+        try:
+            with zipfile.ZipFile(file_path, "r") as zf:
+                if "Metadata/slice_info.config" not in zf.namelist():
+                    return None
+                xml_data = zf.read("Metadata/slice_info.config").decode("utf-8")
+        except (zipfile.BadZipFile, OSError, KeyError):
+            return None
+
+        try:
+            root = ET.fromstring(xml_data)
+        except ET.ParseError:
+            return None
+
+        plate = root.find("plate")
+        if plate is None:
+            return None
+
+        # Extract plate-level metadata.
+        meta: dict[str, str] = {}
+        for md in plate.findall("metadata"):
+            key = md.get("key", "")
+            val = md.get("value", "")
+            if key and val:
+                meta[key] = val
+
+        # Aggregate filament usage across all filament entries on this plate.
+        total_weight_g = 0.0
+        total_length_m = 0.0
+        detected_material: str | None = None
+        for fil in plate.findall("filament"):
+            used_g = fil.get("used_g", "0")
+            used_m = fil.get("used_m", "0")
+            try:
+                total_weight_g += float(used_g)
+                total_length_m += float(used_m)
+            except ValueError:
+                continue
+            if detected_material is None:
+                detected_material = fil.get("type")
+
+        # If we got no usable weight/length data, fall back.
+        if total_weight_g <= 0 and total_length_m <= 0:
+            return None
+
+        # Use detected material from the 3MF, fall back to caller's choice.
+        mat_name = (detected_material or material).upper()
+        profile = self.get_material(mat_name)
+        warnings: list[str] = []
+        if profile is None:
+            warnings.append(f"Unknown material '{mat_name}', using PLA defaults")
+            profile = BUILTIN_MATERIALS["PLA"]
+
+        # Filament cost from weight.
+        filament_cost = (total_weight_g / 1000.0) * profile.cost_per_kg_usd
+
+        # Print time from prediction metadata.
+        est_time: int | None = None
+        prediction = meta.get("prediction")
+        if prediction:
+            try:
+                est_time = int(prediction)
+            except ValueError:
+                pass
+
+        # Electricity cost.
+        electricity_cost = 0.0
+        if est_time and est_time > 0:
+            hours = est_time / 3600.0
+            kwh = (printer_wattage / 1000.0) * hours
+            electricity_cost = kwh * electricity_rate
+
+        total_cost = filament_cost + electricity_cost
+
+        return CostEstimate(
+            file_name=os.path.basename(file_path),
+            material=profile.name,
+            filament_length_meters=round(total_length_m, 3),
+            filament_weight_grams=round(total_weight_g, 2),
             filament_cost_usd=round(filament_cost, 4),
             estimated_time_seconds=est_time,
             electricity_cost_usd=round(electricity_cost, 4),

@@ -401,6 +401,96 @@ class TestEstimateFromFile:
 
 
 # -----------------------------------------------------------------------
+# 3MF metadata extraction
+# -----------------------------------------------------------------------
+
+
+class TestEstimateFrom3MF:
+    def _make_3mf(self, tmp_path, slice_info_xml, filename="test.gcode.3mf"):
+        """Create a minimal 3MF zip with the given slice_info.config."""
+        import zipfile
+
+        path = tmp_path / filename
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("Metadata/slice_info.config", slice_info_xml)
+            zf.writestr("Metadata/plate_1.gcode", "G28\n")
+        return str(path)
+
+    def test_extracts_bambu_metadata(self, tmp_path):
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<config><plate>\n"
+            '  <metadata key="prediction" value="3600"/>\n'
+            '  <metadata key="weight" value="50.0"/>\n'
+            '  <filament id="1" type="PLA" used_m="16.67" used_g="50.0"/>\n'
+            "</plate></config>"
+        )
+        path = self._make_3mf(tmp_path, xml)
+        est = CostEstimator().estimate_from_file(path)
+
+        assert est.material == "PLA"
+        assert est.filament_weight_grams == 50.0
+        assert est.filament_length_meters == 16.67
+        assert est.estimated_time_seconds == 3600
+        assert est.filament_cost_usd > 0
+        assert est.total_cost_usd > 0
+        assert not est.warnings
+
+    def test_multi_filament_aggregates(self, tmp_path):
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<config><plate>\n"
+            '  <metadata key="prediction" value="7200"/>\n'
+            '  <filament id="1" type="PLA" used_m="10.0" used_g="30.0"/>\n'
+            '  <filament id="2" type="PLA" used_m="5.0" used_g="15.0"/>\n'
+            "</plate></config>"
+        )
+        path = self._make_3mf(tmp_path, xml)
+        est = CostEstimator().estimate_from_file(path)
+
+        assert est.filament_length_meters == 15.0
+        assert est.filament_weight_grams == 45.0
+
+    def test_falls_back_to_gcode_when_no_metadata(self, tmp_path):
+        """A 3MF without slice_info.config falls back to gcode parsing."""
+        import zipfile
+
+        path = tmp_path / "no_meta.3mf"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("plate_1.gcode", "G1 X10 E50.0\n")
+        est = CostEstimator().estimate_from_file(str(path))
+        # Falls back to text parsing — won't find valid gcode in a zip.
+        assert est.warnings  # Should have "No extrusion" warning
+
+    def test_falls_back_when_zero_weight(self, tmp_path):
+        """Zero weight/length triggers fallback to gcode parsing."""
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<config><plate>\n"
+            '  <metadata key="prediction" value="100"/>\n'
+            '  <filament id="1" type="PLA" used_m="0.00" used_g="0.00"/>\n'
+            "</plate></config>"
+        )
+        path = self._make_3mf(tmp_path, xml)
+        est = CostEstimator().estimate_from_file(path)
+        # Falls back — zero metadata means unreliable.
+        assert est.warnings
+
+    def test_detects_material_from_3mf(self, tmp_path):
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<config><plate>\n"
+            '  <metadata key="prediction" value="1800"/>\n'
+            '  <filament id="1" type="PETG" used_m="10.0" used_g="30.0"/>\n'
+            "</plate></config>"
+        )
+        path = self._make_3mf(tmp_path, xml)
+        # Even though caller says PLA, 3MF says PETG — 3MF wins.
+        est = CostEstimator().estimate_from_file(path, material="PLA")
+        assert est.material == "PETG"
+
+
+# -----------------------------------------------------------------------
 # Weight / volume calculation accuracy
 # -----------------------------------------------------------------------
 
