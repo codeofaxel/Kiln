@@ -46,6 +46,7 @@ scripts/
 
 # Internal task tracking
 task.md
+tasks.md
 
 # Circle recovery files
 .circle-recovery.txt
