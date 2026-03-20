@@ -72,7 +72,13 @@ class _FulfillmentToolsPlugin:
             import re
 
             import kiln.server as _srv
-            from kiln.fulfillment import FulfillmentError
+            try:
+                from kiln.fulfillment import FulfillmentError
+            except ImportError:
+                return _srv._error_dict(
+                    "Fulfillment module is not available (kiln-pro required).",
+                    code="NOT_AVAILABLE",
+                )
 
             try:
                 provider = _srv._get_fulfillment()
@@ -140,7 +146,13 @@ class _FulfillmentToolsPlugin:
             order.
             """
             import kiln.server as _srv
-            from kiln.fulfillment import FulfillmentError, QuoteRequest
+            try:
+                from kiln.fulfillment import FulfillmentError, QuoteRequest
+            except ImportError:
+                return _srv._error_dict(
+                    "Fulfillment module is not available (kiln-pro required).",
+                    code="NOT_AVAILABLE",
+                )
             try:
                 from kiln.payments.base import PaymentError
             except ImportError:
@@ -242,9 +254,23 @@ class _FulfillmentToolsPlugin:
             Use ``fulfillment_order_status`` to track progress after placing.
             """
             import kiln.server as _srv
-            from kiln.fulfillment import FulfillmentError, OrderRequest
-            from kiln.fulfillment.intelligence import QuoteValidation
-            from kiln.licensing import LicenseTier
+            try:
+                from kiln.fulfillment import FulfillmentError, OrderRequest
+                from kiln.fulfillment.intelligence import QuoteValidation
+            except ImportError:
+                return _srv._error_dict(
+                    "Fulfillment module is not available (kiln-pro required).",
+                    code="NOT_AVAILABLE",
+                )
+            try:
+                from kiln.licensing import LicenseTier
+            except ImportError:
+                class _DummyTier:
+                    PRO = "pro"
+                    ENTERPRISE = "enterprise"
+                    BUSINESS = "business"
+                    FREE = "free"
+                LicenseTier = _DummyTier
             try:
                 from kiln.payments.base import PaymentError
             except ImportError:
@@ -460,7 +486,13 @@ class _FulfillmentToolsPlugin:
             Returns current order state, tracking info, and estimated delivery.
             """
             import kiln.server as _srv
-            from kiln.fulfillment import FulfillmentError
+            try:
+                from kiln.fulfillment import FulfillmentError
+            except ImportError:
+                return _srv._error_dict(
+                    "Fulfillment module is not available (kiln-pro required).",
+                    code="NOT_AVAILABLE",
+                )
 
             try:
                 provider = _srv._get_fulfillment()
@@ -496,8 +528,24 @@ class _FulfillmentToolsPlugin:
             Only orders that have not yet shipped can be cancelled.
             """
             import kiln.server as _srv
-            from kiln.fulfillment import FulfillmentError
-            from kiln.licensing import LicenseTier, check_tier
+            try:
+                from kiln.fulfillment import FulfillmentError
+            except ImportError:
+                return _srv._error_dict(
+                    "Fulfillment module is not available (kiln-pro required).",
+                    code="NOT_AVAILABLE",
+                )
+            try:
+                from kiln.licensing import LicenseTier, check_tier
+            except ImportError:
+                class _DummyTier:
+                    PRO = "pro"
+                    ENTERPRISE = "enterprise"
+                    BUSINESS = "business"
+                    FREE = "free"
+                LicenseTier = _DummyTier
+                def check_tier(*_a, **_kw):
+                    return True
 
             if err := _srv._check_billing_auth("print"):
                 return err
@@ -538,6 +586,11 @@ class _FulfillmentToolsPlugin:
 
             try:
                 monitor = _srv._get_fulfillment_monitor()
+                if monitor is None:
+                    return _srv._error_dict(
+                        "Fulfillment monitor is not available (kiln-pro required).",
+                        code="NOT_AVAILABLE",
+                    )
                 alerts = monitor.get_alerts()
                 return {"success": True, "alerts": alerts, "count": len(alerts)}
             except Exception as exc:

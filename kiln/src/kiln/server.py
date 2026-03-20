@@ -135,10 +135,27 @@ try:
     )
 except ImportError:
     FREE_TIER_MAX_PRINTERS = 1  # Available in kiln-pro
-    LicenseTier = None
-    check_tier = None
-    get_tier = None
-    requires_tier = None
+
+    class _DummyTier:
+        """Stub for LicenseTier when licensing module is not installed."""
+        PRO = "pro"
+        ENTERPRISE = "enterprise"
+        BUSINESS = "business"
+        FREE = "free"
+
+    LicenseTier = _DummyTier  # type: ignore[misc]
+
+    def check_tier(*_a, **_kw):
+        return True
+
+    def get_tier(*_a, **_kw):
+        return "free"
+
+    def requires_tier(_tier):
+        """No-op decorator -- all features unlocked when licensing not installed."""
+        def decorator(fn):
+            return fn
+        return decorator
 from kiln.log_config import configure_logging as _configure_log_rotation
 from kiln.marketplaces import (
     Cults3DAdapter,
@@ -1147,17 +1164,21 @@ def _get_fulfillment() -> FulfillmentProvider:
 _fulfillment_monitor: Any | None = None
 
 
-def _get_fulfillment_monitor() -> Any:
+def _get_fulfillment_monitor() -> Any | None:
     """Return the lazily-initialised fulfillment monitor.
 
     Starts the background polling thread on first access.
+    Returns None if the fulfillment_monitor module is not installed.
     """
     global _fulfillment_monitor  # noqa: PLW0603
 
     if _fulfillment_monitor is not None:
         return _fulfillment_monitor
 
-    from kiln.fulfillment_monitor import FulfillmentMonitor
+    try:
+        from kiln.fulfillment_monitor import FulfillmentMonitor
+    except ImportError:
+        return None
 
     _fulfillment_monitor = FulfillmentMonitor(
         db=get_db(),
@@ -7789,6 +7810,11 @@ def fulfillment_alerts() -> dict:
     """
     try:
         monitor = _get_fulfillment_monitor()
+        if monitor is None:
+            return _error_dict(
+                "Fulfillment monitor is not available (kiln-pro required).",
+                code="NOT_AVAILABLE",
+            )
         alerts = monitor.get_alerts()
         return {"success": True, "alerts": alerts, "count": len(alerts)}
     except Exception as exc:
