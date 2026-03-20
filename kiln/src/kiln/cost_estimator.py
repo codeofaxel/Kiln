@@ -164,6 +164,7 @@ class CostEstimate:
     total_plastic_volume_mm3: float = 0.0
     infill_percent: float = 20.0
     cost_breakdown: dict[str, float] = field(default_factory=dict)
+    cost_summary: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -509,6 +510,11 @@ class CostEstimator:
             "electricity": round(electricity_cost, 4),
         }
 
+        cost_summary = {
+            "material": round(filament_cost + support_cost + adhesion_cost, 2),
+            "electricity": round(electricity_cost, 2),
+        }
+
         return CostEstimate(
             file_name=os.path.basename(file_path),
             material=profile.name,
@@ -528,6 +534,7 @@ class CostEstimator:
             total_plastic_volume_mm3=round(total_plastic_mm3, 2),
             infill_percent=infill_percent,
             cost_breakdown=cost_breakdown,
+            cost_summary=cost_summary,
         )
 
     def _estimate_from_3mf_metadata(

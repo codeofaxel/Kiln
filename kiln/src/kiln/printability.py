@@ -9,8 +9,10 @@ external mesh libraries.
 from __future__ import annotations
 
 import contextlib
+import json
 import math
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +125,22 @@ class PrintFailureDiagnosis:
 
 
 @dataclass
+class WarpingAnalysis:
+    """Results of warping risk assessment."""
+
+    risk_level: str  # "low", "moderate", "high", "critical"
+    score_deduction: int  # 0 to -20
+    large_flat_surfaces: list[dict[str, float]]  # [{area_mm2, centroid_x/y/z}]
+    sharp_corners_at_base: int  # corners with angle < 90° in bottom 5mm
+    height_to_base_ratio: float  # bbox height / min(width, depth)
+    material_warping_tendency: str  # from materials.json
+    recommendations: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class CostAnalysis:
     """Cost breakdown integrated with printability analysis."""
 
@@ -134,6 +152,7 @@ class CostAnalysis:
     weight_grams: float
     filament_length_meters: float
     cost_breakdown: dict[str, float]
+    cost_summary: dict[str, float]
     cost_saving_recommendations: list[str]
 
     def to_dict(self) -> dict[str, Any]:
@@ -152,6 +171,7 @@ class PrintabilityReport:
     bridging: BridgingAnalysis
     bed_adhesion: BedAdhesionAnalysis
     supports: SupportAnalysis
+    warping: WarpingAnalysis | None = None
     cost: CostAnalysis | None = None
     model_height_mm: float = 0.0
     recommendations: list[str] = field(default_factory=list)
@@ -630,12 +650,202 @@ def _analyze_supports(
     )
 
 
+@lru_cache(maxsize=1)
+def _load_materials_json() -> dict[str, Any]:
+    """Load the materials.json knowledge base (cached)."""
+    path = Path(__file__).resolve().parent / "data" / "design_knowledge" / "materials.json"
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _get_material_warping_tendency(material: str) -> str:
+    """Look up the warping tendency for a material from materials.json.
+
+    Returns one of ``"low"``, ``"moderate"``, ``"high"``, or ``"very_high"``.
+    Falls back to ``"moderate"`` for unknown materials.
+    """
+    data = _load_materials_json()
+    mat_key = material.lower().strip()
+    mat_entry = data.get(mat_key)
+    if mat_entry is None:
+        return "moderate"
+    thermal = mat_entry.get("thermal", {})
+    tendency = thermal.get("warping_tendency", "moderate")
+    # Normalise "none" to "low" since our risk model uses low/moderate/high/very_high
+    if tendency == "none":
+        tendency = "low"
+    return tendency
+
+
+def _analyze_warping(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    vertices: list[tuple[float, ...]],
+    bbox: dict[str, float],
+    *,
+    material: str = "pla",
+) -> WarpingAnalysis:
+    """Assess warping risk based on geometry and material properties.
+
+    Combines large-flat-surface detection, height-to-base ratio, sharp
+    base-corner counting, and material warping tendency into a single
+    risk level with score deductions and actionable recommendations.
+    """
+    z_min = bbox["z_min"]
+    z_max = bbox["z_max"]
+    x_span = bbox["x_max"] - bbox["x_min"]
+    y_span = bbox["y_max"] - bbox["y_min"]
+    z_span = z_max - z_min
+
+    # --- Large flat surfaces ---
+    flat_area_total = 0.0
+    large_flat_surfaces: list[dict[str, float]] = []
+
+    for tri in triangles:
+        n = _triangle_normal(tri[0], tri[1], tri[2])
+        nn = _normalize(n)
+        # Near-parallel to build plate (top or bottom facing)
+        if abs(nn[2]) > 0.95:
+            area = _triangle_area(tri[0], tri[1], tri[2])
+            flat_area_total += area
+            if area > 100.0 and len(large_flat_surfaces) < 20:
+                centroid = _triangle_centroid(tri[0], tri[1], tri[2])
+                large_flat_surfaces.append({
+                    "area_mm2": round(area, 2),
+                    "centroid_x": round(centroid[0], 2),
+                    "centroid_y": round(centroid[1], 2),
+                    "centroid_z": round(centroid[2], 2),
+                })
+
+    # Sort by area descending, keep top 10
+    large_flat_surfaces.sort(key=lambda s: s["area_mm2"], reverse=True)
+    large_flat_surfaces = large_flat_surfaces[:10]
+
+    # --- Sharp corners at base ---
+    # Count unique vertices in the bottom layer that participate in acute
+    # mesh angles.  We track seen vertices by rounded coordinates to
+    # deduplicate across shared triangle edges.
+    base_threshold = z_min + 5.0
+    _sharp_verts_seen: set[tuple[float, float, float]] = set()
+
+    for tri in triangles:
+        centroid = _triangle_centroid(tri[0], tri[1], tri[2])
+        if centroid[2] > base_threshold:
+            continue
+
+        verts = [tri[0], tri[1], tri[2]]
+        for i in range(3):
+            v0 = verts[i]
+            v1 = verts[(i + 1) % 3]
+            v2 = verts[(i + 2) % 3]
+            e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
+            e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
+            dot = e1[0] * e2[0] + e1[1] * e2[1] + e1[2] * e2[2]
+            len1 = math.sqrt(e1[0] ** 2 + e1[1] ** 2 + e1[2] ** 2)
+            len2 = math.sqrt(e2[0] ** 2 + e2[1] ** 2 + e2[2] ** 2)
+            if len1 < 1e-12 or len2 < 1e-12:
+                continue
+            cos_angle = max(-1.0, min(1.0, dot / (len1 * len2)))
+            angle_deg = math.degrees(math.acos(cos_angle))
+            if angle_deg < 90.0:
+                rounded = (round(v0[0], 4), round(v0[1], 4), round(v0[2], 4))
+                _sharp_verts_seen.add(rounded)
+
+    sharp_corners_at_base = len(_sharp_verts_seen)
+
+    # --- Height-to-base ratio ---
+    base_dim = max(0.1, min(x_span, y_span))
+    height_to_base_ratio = z_span / base_dim
+
+    # --- Material warping tendency ---
+    tendency = _get_material_warping_tendency(material)
+
+    # --- Cross-reference risk ---
+    geometry_score = 0
+    if flat_area_total > 20000.0:
+        geometry_score += 2  # Very large flat surface (>20,000mm²)
+    elif flat_area_total > 2000.0:
+        geometry_score += 1
+    if height_to_base_ratio > 5.0:
+        geometry_score += 2
+    elif height_to_base_ratio > 3.0:
+        geometry_score += 1
+    if sharp_corners_at_base > 10:
+        geometry_score += 1
+
+    material_multiplier = {
+        "low": 0.5,
+        "moderate": 1.0,
+        "high": 1.5,
+        "very_high": 2.0,
+    }.get(tendency, 1.0)
+
+    final_risk = geometry_score * material_multiplier
+
+    if final_risk >= 3.0:
+        risk_level = "critical"
+    elif final_risk >= 2.0:
+        risk_level = "high"
+    elif final_risk >= 1.0:
+        risk_level = "moderate"
+    else:
+        risk_level = "low"
+
+    # --- Score deduction ---
+    score_deduction = {
+        "critical": -20,
+        "high": -12,
+        "moderate": -6,
+        "low": 0,
+    }[risk_level]
+
+    # --- Recommendations ---
+    recommendations: list[str] = []
+
+    if flat_area_total > 2000.0:
+        recommendations.append(
+            f"Large flat surface detected ({flat_area_total:.0f}mm\u00b2). "
+            f"Add a 5-8mm brim to resist corner lifting."
+        )
+
+    if height_to_base_ratio > 3.0:
+        recommendations.append(
+            f"Tall/narrow geometry (ratio {height_to_base_ratio:.1f}). "
+            f"Consider splitting into shorter sections or adding a wider base."
+        )
+
+    if tendency in ("high", "very_high"):
+        recommendations.append(
+            f"Material ({material}) has {tendency} warping tendency. "
+            f"Print in an enclosed chamber and increase bed temperature to reduce thermal gradients."
+        )
+
+    if sharp_corners_at_base > 5:
+        recommendations.append(
+            "Sharp corners at the base are prone to curling. "
+            "Add mouse-ear supports or a brim."
+        )
+
+    return WarpingAnalysis(
+        risk_level=risk_level,
+        score_deduction=score_deduction,
+        large_flat_surfaces=large_flat_surfaces,
+        sharp_corners_at_base=sharp_corners_at_base,
+        height_to_base_ratio=round(height_to_base_ratio, 2),
+        material_warping_tendency=tendency,
+        recommendations=recommendations,
+    )
+
+
 def _compute_score(
     overhangs: OverhangAnalysis,
     thin_walls: ThinWallAnalysis,
     bridging: BridgingAnalysis,
     bed_adhesion: BedAdhesionAnalysis,
     supports: SupportAnalysis,
+    warping: WarpingAnalysis | None = None,
 ) -> int:
     """Compute a printability score from 0-100.
 
@@ -669,6 +879,9 @@ def _compute_score(
     elif supports.support_percentage > 5:
         score -= 5
 
+    if warping is not None:
+        score += warping.score_deduction
+
     return max(0, min(100, score))
 
 
@@ -691,6 +904,7 @@ def _build_recommendations(
     bridging: BridgingAnalysis,
     bed_adhesion: BedAdhesionAnalysis,
     supports: SupportAnalysis,
+    warping: WarpingAnalysis | None = None,
 ) -> list[str]:
     """Generate actionable recommendations based on analysis results."""
     recs: list[str] = []
@@ -725,6 +939,9 @@ def _build_recommendations(
             f"Re-orienting the model may reduce material waste."
         )
 
+    if warping is not None and warping.recommendations:
+        recs.extend(warping.recommendations)
+
     if not recs:
         recs.append("Model looks good for printing.  No issues detected.")
 
@@ -739,7 +956,7 @@ def _build_recommendations(
 def _analyze_cost(
     mesh: Any,
     file_path: str,
-    material: str = "pla",
+    material: str = "PLA",
     infill_percent: float = 20.0,
     needs_supports: bool = False,
     adhesion_risk: str = "low",
@@ -823,6 +1040,11 @@ def _analyze_cost(
                 f"— potential savings ~${savings:.2f}"
             )
 
+    cost_summary = {
+        "material": round(estimate.filament_cost_usd + estimate.support_cost_usd + estimate.adhesion_cost_usd, 2),
+        "electricity": round(estimate.electricity_cost_usd, 2),
+    }
+
     return CostAnalysis(
         estimated_cost_usd=estimate.total_cost_usd,
         material_cost_usd=estimate.filament_cost_usd,
@@ -832,6 +1054,7 @@ def _analyze_cost(
         weight_grams=estimate.filament_weight_grams,
         filament_length_meters=estimate.filament_length_meters,
         cost_breakdown=estimate.cost_breakdown,
+        cost_summary=cost_summary,
         cost_saving_recommendations=recommendations,
     )
 
@@ -860,7 +1083,7 @@ def analyze_printability(
         supports are needed.
     :param build_volume: Optional (X, Y, Z) build volume in mm.  If
         provided, the report will warn if the model exceeds it.
-    :param material: Material ID for cost analysis (default ``"pla"``).
+    :param material: Material ID for warping and cost analysis (default ``"pla"``).
     :param infill_percent: Interior infill density (0-100) for cost estimation.
     :returns: A :class:`PrintabilityReport` with scores, grades, and
         recommendations.
@@ -905,10 +1128,11 @@ def analyze_printability(
         layer_height=layer_height,
         normalize_winding=False,
     )
+    warping = _analyze_warping(triangles, vertices, bbox, material=material)
 
-    score = _compute_score(overhangs, thin_walls, bridging, bed_adhesion, supports)
+    score = _compute_score(overhangs, thin_walls, bridging, bed_adhesion, supports, warping=warping)
     grade = _score_to_grade(score)
-    recommendations = _build_recommendations(overhangs, thin_walls, bridging, bed_adhesion, supports)
+    recommendations = _build_recommendations(overhangs, thin_walls, bridging, bed_adhesion, supports, warping=warping)
 
     # Estimate print time modifier: supports and bridges add time.
     time_mod = 1.0
@@ -956,6 +1180,7 @@ def analyze_printability(
         bridging=bridging,
         bed_adhesion=bed_adhesion,
         supports=supports,
+        warping=warping,
         cost=cost,
         model_height_mm=round(model_height, 2),
         recommendations=recommendations,
