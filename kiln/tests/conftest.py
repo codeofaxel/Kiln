@@ -440,8 +440,14 @@ def _bypass_license_tier(monkeypatch, tmp_path):
     errors in existing tests.  Tests that specifically test licensing
     behaviour can override this by patching ``kiln.licensing._manager``
     themselves.
+
+    When kiln.licensing is not installed (extracted to kiln-pro), this
+    fixture is a no-op — all features run unlicensed in free tier.
     """
-    from kiln.licensing import _KEY_PREFIX_BUSINESS, LicenseManager
+    try:
+        from kiln.licensing import _KEY_PREFIX_BUSINESS, LicenseManager
+    except ImportError:
+        return  # Licensing module extracted to kiln-pro; no tier gating active
 
     # Allow legacy prefix keys in tests (no HMAC signature available)
     monkeypatch.setenv("KILN_LICENSE_OFFLINE", "1")

@@ -81,22 +81,32 @@ from kiln.cli.config import _validate_printer_url
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
 from kiln.cost_estimator import CostEstimator
 from kiln.events import Event, EventBus, EventType
-from kiln.fulfillment import (
-    FulfillmentError,
-    FulfillmentProvider,
-    OrderRequest,
-    QuoteRequest,
-)
-from kiln.fulfillment import (
-    get_provider as get_fulfillment_provider,
-)
-from kiln.fulfillment.intelligence import (
-    QuoteValidation,
-    _check_price_drift,
-)
-from kiln.fulfillment.intelligence import (
-    validate_quote_for_order as _validate_quote_for_order,
-)
+try:
+    from kiln.fulfillment import (
+        FulfillmentError,
+        FulfillmentProvider,
+        OrderRequest,
+        QuoteRequest,
+    )
+    from kiln.fulfillment import (
+        get_provider as get_fulfillment_provider,
+    )
+    from kiln.fulfillment.intelligence import (
+        QuoteValidation,
+        _check_price_drift,
+    )
+    from kiln.fulfillment.intelligence import (
+        validate_quote_for_order as _validate_quote_for_order,
+    )
+except ImportError:
+    FulfillmentError = None  # Available in kiln-pro
+    FulfillmentProvider = None
+    OrderRequest = None
+    QuoteRequest = None
+    get_fulfillment_provider = None
+    QuoteValidation = None
+    _check_price_drift = None
+    _validate_quote_for_order = None
 from kiln.gateway.threedos import ThreeDOSClient
 from kiln.gcode import validate_gcode as _validate_gcode_impl
 from kiln.gcode import validate_gcode_for_printer
@@ -115,13 +125,20 @@ from kiln.generation import (
     validate_mesh,
 )
 from kiln.heater_watchdog import HeaterWatchdog
-from kiln.licensing import (
-    FREE_TIER_MAX_PRINTERS,
-    LicenseTier,
-    check_tier,
-    get_tier,
-    requires_tier,
-)
+try:
+    from kiln.licensing import (
+        FREE_TIER_MAX_PRINTERS,
+        LicenseTier,
+        check_tier,
+        get_tier,
+        requires_tier,
+    )
+except ImportError:
+    FREE_TIER_MAX_PRINTERS = 1  # Available in kiln-pro
+    LicenseTier = None
+    check_tier = None
+    get_tier = None
+    requires_tier = None
 from kiln.log_config import configure_logging as _configure_log_rotation
 from kiln.marketplaces import (
     Cults3DAdapter,
