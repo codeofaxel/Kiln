@@ -34,6 +34,78 @@ from kiln.generation.base import (
 
 logger = logging.getLogger(__name__)
 
+# Bundled OpenSCAD library whitelist — only these prefixes are allowed
+# in include/use statements for security.
+_SAFE_LIBRARY_PREFIXES = ("BOSL2/", "MCAD/")
+
+# Dangerous patterns that can read arbitrary files from disk.
+_DANGEROUS_PATTERNS = [
+    r"\bimport\s*\(",  # import() can read arbitrary files
+    r"\bsurface\s*\(",  # surface() reads files from disk
+]
+
+
+def _check_scad_security(code: str) -> None:
+    """Validate OpenSCAD code against security rules.
+
+    Raises :class:`ValueError` if the code contains dangerous operations
+    (``import()``, ``surface()``) or references non-bundled libraries.
+    This MUST be called before any code path that compiles OpenSCAD.
+    """
+    if len(code) > 100_000:
+        raise ValueError("OpenSCAD code too large (max 100KB).")
+
+    for pattern in _DANGEROUS_PATTERNS:
+        if re.search(pattern, code, re.IGNORECASE):
+            raise ValueError(
+                f"OpenSCAD code contains blocked operation matching {pattern}. "
+                f"File I/O operations are not allowed for security."
+            )
+
+    if not _has_only_safe_includes(code):
+        raise ValueError(
+            "OpenSCAD code contains include/use statements referencing "
+            "non-bundled libraries. Only BOSL2 and MCAD are allowed."
+        )
+
+
+def _get_bundled_library_path() -> str:
+    """Return the absolute path to Kiln's bundled OpenSCAD libraries.
+
+    The library directory lives at ``kiln/src/kiln/data/scad_libraries/``
+    and may contain BOSL2, MCAD, or other vetted libraries.
+    """
+    return str(
+        Path(__file__).resolve().parent.parent / "data" / "scad_libraries"
+    )
+
+
+def _has_only_safe_includes(code: str) -> bool:
+    """Check that all ``include``/``use`` statements reference bundled libraries.
+
+    Returns ``True`` if the code contains no ``include``/``use`` at all,
+    or if every such statement references a path starting with one of the
+    allowed library prefixes (BOSL2/, MCAD/).
+
+    Security: rejects path traversal (``..``), absolute paths, null bytes,
+    and non-ASCII characters that could be used to bypass filtering.
+    """
+    for match in re.finditer(r"\b(?:include|use)\s*<([^>]+)>", code, re.IGNORECASE):
+        path = match.group(1).strip()
+        # Reject null bytes and non-ASCII (Unicode tricks)
+        if "\x00" in path or not path.isascii():
+            return False
+        # Reject path traversal
+        if ".." in path:
+            return False
+        # Reject absolute paths
+        if path.startswith("/") or path.startswith("\\"):
+            return False
+        if not any(path.startswith(prefix) for prefix in _SAFE_LIBRARY_PREFIXES):
+            return False
+    return True
+
+
 _MACOS_APP_PATH = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD" if sys.platform == "darwin" else ""
 # Versioned installs (e.g., OpenSCAD-2021.01.app)
 _MACOS_VERSIONED_PATTERN = "/Applications/OpenSCAD-*.app/Contents/MacOS/OpenSCAD" if sys.platform == "darwin" else ""
@@ -158,23 +230,8 @@ class OpenSCADProvider(GenerationProvider):
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{job_id}.stl")
 
-        # Basic safety checks on OpenSCAD input
-        if len(prompt) > 100_000:
-            raise ValueError("OpenSCAD code too large (max 100KB).")
-
-        # Block dangerous OpenSCAD functions that could access the filesystem
-        _DANGEROUS_PATTERNS = [
-            r"\bimport\s*\(",  # import() can read arbitrary files
-            r"\bsurface\s*\(",  # surface() reads files from disk
-            r"\binclude\s*<",  # include <file> reads files
-            r"\buse\s*<",  # use <file> reads files
-        ]
-        for pattern in _DANGEROUS_PATTERNS:
-            if re.search(pattern, prompt, re.IGNORECASE):
-                raise ValueError(
-                    f"OpenSCAD code contains blocked operation matching {pattern}. "
-                    f"File I/O operations are not allowed for security."
-                )
+        # Centralised security checks (size, dangerous ops, include whitelist).
+        _check_scad_security(prompt)
 
         # Write .scad source to a temp file.
         scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_")
@@ -182,7 +239,11 @@ class OpenSCADProvider(GenerationProvider):
             with os.fdopen(scad_fd, "w") as fh:
                 fh.write(prompt)
 
-            cmd = [self._binary, "-o", out_path, scad_path]
+            lib_path = _get_bundled_library_path()
+            cmd = [self._binary, "-o", out_path]
+            if os.path.isdir(lib_path):
+                cmd.extend(["-L", lib_path])
+            cmd.append(scad_path)
             logger.info("OpenSCAD: %s", " ".join(cmd))
 
             work_dir = tempfile.mkdtemp(prefix="kiln_scad_")
@@ -328,14 +389,19 @@ class OpenSCADProvider(GenerationProvider):
         Raises:
             GenerationError: If rendering fails.
         """
-        src = Path(file_path)
+        src = Path(file_path).resolve()
         ext = src.suffix.lower()
+
+        # Security: only allow 3D model files for preview rendering.
+        if ext not in (".stl", ".scad", ".3mf", ".obj", ".amf"):
+            raise ValueError(
+                f"render_preview only accepts 3D model files, got {ext!r}"
+            )
 
         if ext == ".stl":
             # Wrap the STL in an OpenSCAD import statement.
-            # This is safe here because we control the file path — the
-            # security sandbox in generate() blocks agent-supplied imports.
-            scad_code = f'import("{src.resolve()}");'
+            # Path is validated above — only model file extensions allowed.
+            scad_code = f'import("{src}");'
             scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_preview_")
             try:
                 with os.fdopen(scad_fd, "w") as fh:
@@ -434,6 +500,10 @@ class OpenSCADProvider(GenerationProvider):
         Returns:
             Dict with ``valid``, ``errors``, and ``warnings`` keys.
         """
+        # Apply the same security checks as generate() — block import(),
+        # surface(), and non-bundled includes.
+        _check_scad_security(code)
+
         scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_validate_")
         try:
             with os.fdopen(scad_fd, "w") as fh:
@@ -441,7 +511,11 @@ class OpenSCADProvider(GenerationProvider):
 
             # Use /dev/null as output — we only care about stderr
             null_out = os.path.join(tempfile.gettempdir(), f"kiln_null_{uuid.uuid4().hex[:8]}.stl")
-            cmd = [self._binary, "-o", null_out, scad_path]
+            lib_path = _get_bundled_library_path()
+            cmd = [self._binary, "-o", null_out]
+            if os.path.isdir(lib_path):
+                cmd.extend(["-L", lib_path])
+            cmd.append(scad_path)
 
             try:
                 result = subprocess.run(
@@ -504,6 +578,14 @@ class OpenSCADProvider(GenerationProvider):
         for fp in file_paths:
             if not os.path.isfile(fp):
                 raise FileNotFoundError(f"STL file not found: {fp}")
+            # Security: restrict file access to STL/3MF files only.
+            # Prevents agents from importing arbitrary files (e.g. /etc/passwd).
+            ext = os.path.splitext(fp)[1].lower()
+            if ext not in (".stl", ".3mf", ".obj", ".amf", ".off", ".dxf", ".svg"):
+                raise ValueError(
+                    f"boolean_operation only accepts 3D model files, "
+                    f"got unsupported extension {ext!r} for {fp!r}"
+                )
 
         # Build OpenSCAD code that imports and booleans the meshes.
         # We use absolute resolved paths to avoid path confusion.
@@ -606,12 +688,7 @@ def boolean_mesh_operation(
         if not os.path.isfile(fp):
             raise FileNotFoundError(f"STL file not found: {fp}")
 
-    binary = _find_openscad()
-    if binary is None:
-        raise GenerationError(
-            "OpenSCAD not found. Install it from https://openscad.org/",
-            code="OPENSCAD_NOT_FOUND",
-        )
+    binary = _find_openscad()  # raises GenerationError if not found
 
     provider = OpenSCADProvider(binary_path=binary)
     result_path = provider.boolean_operation(
@@ -692,12 +769,7 @@ def compose_from_primitives(
     if not operations:
         raise ValueError("Operations list cannot be empty")
 
-    binary = _find_openscad()
-    if binary is None:
-        raise GenerationError(
-            "OpenSCAD not found. Install it from https://openscad.org/",
-            code="OPENSCAD_NOT_FOUND",
-        )
+    binary = _find_openscad()  # raises GenerationError if not found
 
     # Generate OpenSCAD code from the operation tree
     scad_lines: list[str] = ["// Generated by Kiln compose_from_primitives"]
@@ -709,14 +781,19 @@ def compose_from_primitives(
 
     scad_code = "\n".join(scad_lines)
 
+    # Even though we generated this code ourselves, validate it to catch
+    # any injection via user-controlled fields (e.g. text content).
+    _check_scad_security(scad_code)
+
     # Compile with OpenSCAD
     if output_path is None:
         output_path = os.path.join(tempfile.gettempdir(), f"kiln_composed_{uuid.uuid4().hex[:8]}.stl")
 
-    # Compile directly rather than via provider.generate() which blocks import().
+    # Compile directly — the generated code is validated above via _check_scad_security().
 
-    scad_path = output_path.replace(".stl", ".scad")
-    Path(scad_path).write_text(scad_code, encoding="utf-8")
+    scad_fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_composed_")
+    with os.fdopen(scad_fd, "w") as fh:
+        fh.write(scad_code)
 
     try:
         result = subprocess.run(
@@ -845,9 +922,12 @@ def _primitive_to_scad(op: dict[str, Any], *, indent: int = 0) -> str:
         size = params.get("size", 10)
         depth = params.get("depth", 2)
         font = params.get("font", "Liberation Sans")
+        # Escape quotes and backslashes to prevent OpenSCAD code injection
+        safe_content = str(content).replace("\\", "\\\\").replace('"', '\\"')
+        safe_font = str(font).replace("\\", "\\\\").replace('"', '\\"')
         shape_code = (
             f"linear_extrude(height={depth}) "
-            f'text("{content}", size={size}, font="{font}", halign="center", valign="center");'
+            f'text("{safe_content}", size={size}, font="{safe_font}", halign="center", valign="center");'
         )
     elif shape == "rounded_cube":
         # Cube with rounded edges via minkowski (cube + sphere)
@@ -882,30 +962,22 @@ def _primitive_to_scad(op: dict[str, Any], *, indent: int = 0) -> str:
         )
 
     # Wrap with transformations
-    lines: list[str] = []
-    close_parens = 0
-
-    if translate:
-        lines.append(f"{pad}translate([{translate[0]}, {translate[1]}, {translate[2]}])")
-        close_parens += 1
-    if rotate:
-        lines.append(f"{pad}    " * (1 if translate else 0) + f"{'    ' * indent}rotate([{rotate[0]}, {rotate[1]}, {rotate[2]}])")
-        close_parens += 1
-
-    if lines:
-        # Nest the transformations
-        result_parts = []
-        if translate and rotate:
-            result_parts.append(f"{pad}translate([{translate[0]}, {translate[1]}, {translate[2]}])")
-            result_parts.append(f"{pad}    rotate([{rotate[0]}, {rotate[1]}, {rotate[2]}])")
-            result_parts.append(f"{pad}        {shape_code}")
-        elif translate:
-            result_parts.append(f"{pad}translate([{translate[0]}, {translate[1]}, {translate[2]}])")
-            result_parts.append(f"{pad}    {shape_code}")
-        elif rotate:
-            result_parts.append(f"{pad}rotate([{rotate[0]}, {rotate[1]}, {rotate[2]}])")
-            result_parts.append(f"{pad}    {shape_code}")
-        return "\n".join(result_parts)
+    if translate and rotate:
+        return "\n".join([
+            f"{pad}translate([{translate[0]}, {translate[1]}, {translate[2]}])",
+            f"{pad}    rotate([{rotate[0]}, {rotate[1]}, {rotate[2]}])",
+            f"{pad}        {shape_code}",
+        ])
+    elif translate:
+        return "\n".join([
+            f"{pad}translate([{translate[0]}, {translate[1]}, {translate[2]}])",
+            f"{pad}    {shape_code}",
+        ])
+    elif rotate:
+        return "\n".join([
+            f"{pad}rotate([{rotate[0]}, {rotate[1]}, {rotate[2]}])",
+            f"{pad}    {shape_code}",
+        ])
     else:
         return f"{pad}{shape_code}"
 
