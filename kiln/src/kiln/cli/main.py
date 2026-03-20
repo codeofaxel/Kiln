@@ -6917,7 +6917,14 @@ def rest(host: str, port: int, auth_token: str | None, tier: str) -> None:
     printers.  Tools are available at POST /api/tools/{tool_name} and a
     discovery endpoint at GET /api/tools lists available tools with schemas.
     """
-    from kiln.rest_api import RestApiConfig, run_rest_server
+    try:
+        from kiln_pro.rest_api import RestApiConfig, run_rest_server
+    except ImportError:
+        click.echo(
+            "REST API requires kiln-pro. Install with: pip install kiln-pro\n"
+            "See https://kiln3d.com/pricing for details."
+        )
+        raise SystemExit(1)
 
     resolved_auth_token = auth_token
     if resolved_auth_token is None:
