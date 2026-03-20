@@ -141,6 +141,38 @@ class WarpingAnalysis:
 
 
 @dataclass
+class ThermalStressAnalysis:
+    """Results of thermal stress concentration analysis."""
+
+    risk_level: str  # "low", "moderate", "high", "critical"
+    score_deduction: int  # 0 to -15
+    max_area_change_ratio: float  # largest layer-to-layer area change ratio
+    stress_concentration_zones: list[dict[str, float]]  # [{z_mm, area_change_ratio, layer_area_mm2}]
+    layer_count_analyzed: int
+    material_stress_factor: float  # multiplier from material thermal properties
+    recommendations: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class AdhesionForceEstimate:
+    """Force-balance adhesion prediction."""
+
+    adhesion_force_n: float  # estimated adhesion force in Newtons
+    peel_force_n: float  # estimated thermal peel force in Newtons
+    force_ratio: float  # adhesion / peel — >1.0 means adhesion wins
+    will_detach: bool  # True if peel_force > adhesion_force
+    risk_level: str  # "secure", "marginal", "likely_detach"
+    score_deduction: int  # 0 to -10
+    recommendations: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class CostAnalysis:
     """Cost breakdown integrated with printability analysis."""
 
@@ -172,6 +204,8 @@ class PrintabilityReport:
     bed_adhesion: BedAdhesionAnalysis
     supports: SupportAnalysis
     warping: WarpingAnalysis | None = None
+    thermal_stress: ThermalStressAnalysis | None = None
+    adhesion_force: AdhesionForceEstimate | None = None
     cost: CostAnalysis | None = None
     model_height_mm: float = 0.0
     recommendations: list[str] = field(default_factory=list)
@@ -199,6 +233,72 @@ _BEDSLINGER_PRINTERS: frozenset[str] = frozenset({
     "anycubic_mega", "anycubic_kobra",
     "artillery_sidewinder",
 })
+
+# Material-specific thermal stress multipliers.
+# Based on shrinkage rates and thermal contraction behavior.
+# Higher = more internal stress from temperature changes.
+_MATERIAL_STRESS_FACTORS: dict[str, float] = {
+    "pla": 0.6,      # Low shrinkage (~0.3-0.5%), crystalline
+    "petg": 0.7,     # Low shrinkage (~0.3-0.6%)
+    "abs": 1.5,      # High shrinkage (~0.7-0.8%), amorphous
+    "asa": 1.4,      # Similar to ABS
+    "nylon": 1.6,    # High shrinkage (~1.0-1.5%), hygroscopic stress
+    "pa": 1.6,       # Same as nylon
+    "pc": 1.8,       # Very high shrinkage (~0.6-0.8%), high Tg delta
+    "polycarbonate": 1.8,
+    "tpu": 0.3,      # Flexible, absorbs stress
+    "tpe": 0.3,
+    "pp": 2.0,       # Very high shrinkage (~1.5-2.0%)
+    "peek": 1.5,     # High temp, moderate shrinkage
+    "pla+": 0.6,
+    "cf-pla": 0.5,   # Carbon fiber reduces shrinkage
+    "silk-pla": 0.6,
+    "hips": 1.3,     # Similar to ABS but slightly less
+    "pva": 0.5,      # Water-soluble support, low stress
+}
+
+# Material adhesion strength to common build surfaces (N/mm²).
+# Approximate values for PEI/spring steel sheet at optimal bed temp.
+_MATERIAL_ADHESION_STRENGTH: dict[str, float] = {
+    "pla": 0.15,      # Good adhesion to most surfaces
+    "petg": 0.12,     # Good but can bond TOO well to PEI
+    "abs": 0.08,      # Needs high bed temp, weaker adhesion
+    "asa": 0.08,      # Similar to ABS
+    "nylon": 0.05,    # Poor adhesion without glue stick
+    "pa": 0.05,
+    "pc": 0.06,       # Needs adhesion aids
+    "polycarbonate": 0.06,
+    "tpu": 0.20,      # Excellent adhesion (flexible, conforms)
+    "tpe": 0.20,
+    "pp": 0.03,       # Terrible adhesion — needs special sheet
+    "peek": 0.04,     # Very poor on standard surfaces
+    "pla+": 0.15,
+    "cf-pla": 0.12,   # Carbon fiber slightly reduces adhesion
+    "silk-pla": 0.13,
+    "hips": 0.08,
+    "pva": 0.10,
+}
+
+# Approximate shrinkage strain (mm/mm) for thermal contraction force calculation.
+_MATERIAL_SHRINKAGE_STRAIN: dict[str, float] = {
+    "pla": 0.004,     # ~0.3-0.5% linear shrinkage
+    "petg": 0.005,    # ~0.3-0.6%
+    "abs": 0.008,     # ~0.7-0.8%
+    "asa": 0.007,     # Similar to ABS
+    "nylon": 0.012,   # ~1.0-1.5%
+    "pa": 0.012,
+    "pc": 0.007,      # ~0.6-0.8%
+    "polycarbonate": 0.007,
+    "tpu": 0.002,     # Minimal, flexible
+    "tpe": 0.002,
+    "pp": 0.018,      # ~1.5-2.0%, worst common material
+    "peek": 0.006,    # ~0.5-0.7%
+    "pla+": 0.004,
+    "cf-pla": 0.003,  # CF reduces shrinkage
+    "silk-pla": 0.004,
+    "hips": 0.007,
+    "pva": 0.004,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -839,6 +939,201 @@ def _analyze_warping(
     )
 
 
+def _analyze_thermal_stress(
+    triangles: list[tuple[tuple[float, ...], ...]],
+    bbox: dict[str, float],
+    *,
+    material: str = "pla",
+    layer_height: float = 0.2,
+) -> ThermalStressAnalysis:
+    """Estimate thermal stress concentration from cross-section area changes.
+
+    Buckets triangles by the z-height of their centroids and computes the
+    XY-projected area per layer.  Layers with dramatic area changes relative
+    to their neighbours indicate stress concentration zones where thermal
+    contraction can cause cracking, delamination, or warping.
+    """
+    z_min = bbox["z_min"]
+    z_max = bbox["z_max"]
+    z_span = z_max - z_min
+
+    # Need at least two layers for a meaningful comparison.
+    if z_span < layer_height * 2 or not triangles:
+        return ThermalStressAnalysis(
+            risk_level="low",
+            score_deduction=0,
+            max_area_change_ratio=1.0,
+            stress_concentration_zones=[],
+            layer_count_analyzed=0,
+            material_stress_factor=_MATERIAL_STRESS_FACTORS.get(material.lower(), 1.0),
+            recommendations=[],
+        )
+
+    num_layers = max(2, int(z_span / layer_height))
+    layer_areas: list[float] = [0.0] * num_layers
+
+    for tri in triangles:
+        centroid = _triangle_centroid(tri[0], tri[1], tri[2])
+        # Determine which layer bucket this triangle's centroid falls in.
+        bucket = int((centroid[2] - z_min) / layer_height)
+        bucket = max(0, min(bucket, num_layers - 1))
+
+        # XY-projected area: |normal_z| * triangle_area
+        normal = _triangle_normal(tri[0], tri[1], tri[2])
+        nn = _normalize(normal)
+        area = _triangle_area(tri[0], tri[1], tri[2])
+        xy_area = abs(nn[2]) * area
+        layer_areas[bucket] += xy_area
+
+    # Compute area change ratios between consecutive layers.
+    stress_zones: list[dict[str, float]] = []
+    max_ratio = 1.0
+
+    for i in range(1, num_layers):
+        a_prev = layer_areas[i - 1]
+        a_curr = layer_areas[i]
+        bigger = max(a_prev, a_curr)
+        smaller = min(a_prev, a_curr)
+        # Clamp to avoid division by near-zero.
+        ratio = bigger / max(smaller, 0.01)
+        if ratio > max_ratio:
+            max_ratio = ratio
+        if ratio > 2.0 and len(stress_zones) < 20:
+            stress_zones.append({
+                "z_mm": round(z_min + i * layer_height, 2),
+                "area_change_ratio": round(ratio, 2),
+                "layer_area_mm2": round(a_curr, 2),
+            })
+
+    # Sort by ratio descending, keep top 10.
+    stress_zones.sort(key=lambda z: z["area_change_ratio"], reverse=True)
+    stress_zones = stress_zones[:10]
+
+    # Material stress factor.
+    stress_factor = _MATERIAL_STRESS_FACTORS.get(material.lower(), 1.0)
+    combined_score = max_ratio * stress_factor
+
+    # Risk level from combined score.
+    if combined_score >= 6.0:
+        risk_level = "critical"
+        score_deduction = -15
+    elif combined_score >= 4.0:
+        risk_level = "high"
+        score_deduction = -10
+    elif combined_score >= 2.5:
+        risk_level = "moderate"
+        score_deduction = -5
+    else:
+        risk_level = "low"
+        score_deduction = 0
+
+    # Recommendations.
+    recommendations: list[str] = []
+    if risk_level in ("high", "critical"):
+        recommendations.append(
+            f"Significant cross-section changes detected (max ratio {max_ratio:.1f}x). "
+            f"Gradual geometry transitions reduce internal stress — consider adding fillets or chamfers."
+        )
+    if risk_level == "critical":
+        recommendations.append(
+            "Critical thermal stress risk. Slow print speed in transition zones "
+            "and increase layer cooling fan gradually."
+        )
+    if stress_factor > 1.0 and risk_level != "low":
+        recommendations.append(
+            f"Material ({material}) amplifies thermal stress (factor {stress_factor:.1f}x). "
+            f"Print in an enclosure and reduce temperature gradients."
+        )
+    if risk_level == "moderate":
+        recommendations.append(
+            "Moderate cross-section variation. Adding transition layers or adjusting "
+            "print speed at geometry changes can help."
+        )
+
+    return ThermalStressAnalysis(
+        risk_level=risk_level,
+        score_deduction=score_deduction,
+        max_area_change_ratio=round(max_ratio, 2),
+        stress_concentration_zones=stress_zones,
+        layer_count_analyzed=num_layers,
+        material_stress_factor=stress_factor,
+        recommendations=recommendations,
+    )
+
+
+def _estimate_adhesion_force(
+    contact_area_mm2: float,
+    bbox: dict[str, float],
+    *,
+    material: str = "pla",
+) -> AdhesionForceEstimate:
+    """Predict whether bed adhesion force exceeds warping/peel force.
+
+    Uses a force-balance heuristic: adhesion_force (from contact area times
+    material adhesion strength) vs peel_force (from thermal contraction times
+    part dimensions).  This is *not* FEA — it is a fast first-order estimate
+    for flagging high-risk parts.
+    """
+    mat_key = material.lower()
+    adhesion_strength = _MATERIAL_ADHESION_STRENGTH.get(mat_key, 0.10)
+    shrinkage_strain = _MATERIAL_SHRINKAGE_STRAIN.get(mat_key, 0.005)
+
+    x_span = bbox["x_max"] - bbox["x_min"]
+    y_span = bbox["y_max"] - bbox["y_min"]
+    z_span = bbox["z_max"] - bbox["z_min"]
+
+    # Adhesion force = contact area × adhesion strength.
+    adhesion_force = contact_area_mm2 * adhesion_strength
+
+    # Peel force heuristic: shrinkage × longest XY dimension × height × scaling.
+    longest_xy = max(x_span, y_span)
+    peel_force = shrinkage_strain * longest_xy * z_span * 0.01
+
+    # Force ratio (avoid div-by-zero).
+    force_ratio = adhesion_force / max(peel_force, 0.001)
+
+    will_detach = force_ratio < 1.0
+
+    # Risk levels.
+    if force_ratio >= 3.0:
+        risk_level = "secure"
+        score_deduction = 0
+    elif force_ratio >= 1.5:
+        risk_level = "marginal"
+        score_deduction = -3
+    else:
+        risk_level = "likely_detach"
+        score_deduction = -10
+
+    # Recommendations.
+    recommendations: list[str] = []
+    if risk_level == "likely_detach":
+        recommendations.append(
+            "Part will likely detach during printing. "
+            "Use a brim (8mm+), glue stick, or raft."
+        )
+    elif risk_level == "marginal":
+        recommendations.append(
+            "Adhesion is borderline. Adding a 5mm brim is recommended."
+        )
+
+    if mat_key in ("pp", "nylon", "pa", "peek"):
+        recommendations.append(
+            f"Material ({material}) has very poor adhesion on standard build surfaces. "
+            f"Use a specialized build sheet (e.g., Garolite for nylon, PP sheet for PP)."
+        )
+
+    return AdhesionForceEstimate(
+        adhesion_force_n=round(adhesion_force, 3),
+        peel_force_n=round(peel_force, 3),
+        force_ratio=round(force_ratio, 2),
+        will_detach=will_detach,
+        risk_level=risk_level,
+        score_deduction=score_deduction,
+        recommendations=recommendations,
+    )
+
+
 def _compute_score(
     overhangs: OverhangAnalysis,
     thin_walls: ThinWallAnalysis,
@@ -846,6 +1141,8 @@ def _compute_score(
     bed_adhesion: BedAdhesionAnalysis,
     supports: SupportAnalysis,
     warping: WarpingAnalysis | None = None,
+    thermal_stress: ThermalStressAnalysis | None = None,
+    adhesion_force: AdhesionForceEstimate | None = None,
 ) -> int:
     """Compute a printability score from 0-100.
 
@@ -882,6 +1179,12 @@ def _compute_score(
     if warping is not None:
         score += warping.score_deduction
 
+    if thermal_stress is not None:
+        score += thermal_stress.score_deduction
+
+    if adhesion_force is not None:
+        score += adhesion_force.score_deduction
+
     return max(0, min(100, score))
 
 
@@ -905,6 +1208,8 @@ def _build_recommendations(
     bed_adhesion: BedAdhesionAnalysis,
     supports: SupportAnalysis,
     warping: WarpingAnalysis | None = None,
+    thermal_stress: ThermalStressAnalysis | None = None,
+    adhesion_force: AdhesionForceEstimate | None = None,
 ) -> list[str]:
     """Generate actionable recommendations based on analysis results."""
     recs: list[str] = []
@@ -941,6 +1246,12 @@ def _build_recommendations(
 
     if warping is not None and warping.recommendations:
         recs.extend(warping.recommendations)
+
+    if thermal_stress is not None and thermal_stress.recommendations:
+        recs.extend(thermal_stress.recommendations)
+
+    if adhesion_force is not None and adhesion_force.recommendations:
+        recs.extend(adhesion_force.recommendations)
 
     if not recs:
         recs.append("Model looks good for printing.  No issues detected.")
@@ -1129,10 +1440,22 @@ def analyze_printability(
         normalize_winding=False,
     )
     warping = _analyze_warping(triangles, vertices, bbox, material=material)
+    thermal_stress = _analyze_thermal_stress(
+        triangles, bbox, material=material, layer_height=layer_height,
+    )
+    adhesion_force = _estimate_adhesion_force(
+        bed_adhesion.contact_area_mm2, bbox, material=material,
+    )
 
-    score = _compute_score(overhangs, thin_walls, bridging, bed_adhesion, supports, warping=warping)
+    score = _compute_score(
+        overhangs, thin_walls, bridging, bed_adhesion, supports,
+        warping=warping, thermal_stress=thermal_stress, adhesion_force=adhesion_force,
+    )
     grade = _score_to_grade(score)
-    recommendations = _build_recommendations(overhangs, thin_walls, bridging, bed_adhesion, supports, warping=warping)
+    recommendations = _build_recommendations(
+        overhangs, thin_walls, bridging, bed_adhesion, supports,
+        warping=warping, thermal_stress=thermal_stress, adhesion_force=adhesion_force,
+    )
 
     # Estimate print time modifier: supports and bridges add time.
     time_mod = 1.0
@@ -1181,6 +1504,8 @@ def analyze_printability(
         bed_adhesion=bed_adhesion,
         supports=supports,
         warping=warping,
+        thermal_stress=thermal_stress,
+        adhesion_force=adhesion_force,
         cost=cost,
         model_height_mm=round(model_height, 2),
         recommendations=recommendations,
