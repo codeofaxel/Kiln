@@ -63,6 +63,13 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+# Import kiln-pro early so compatibility shims are installed before
+# any try/except imports of pro modules (kiln.billing, kiln.licensing, etc.).
+try:
+    import kiln_pro  # noqa: F401 — triggers compat shim installation
+except ImportError:
+    pass  # Free tier — kiln-pro not installed
+
 from kiln import parse_float_env, parse_int_env
 from kiln.auth import AuthManager
 from kiln.backup import BackupError
