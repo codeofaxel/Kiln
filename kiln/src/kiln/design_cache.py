@@ -114,6 +114,10 @@ class CachedDesign:
     last_used_at: float = 0.0
     use_count: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Design DNA fields
+    scad_source: str | None = None
+    generation_prompt: str | None = None
+    provider: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict suitable for JSON output."""
@@ -282,6 +286,14 @@ class DesignCache:
             )
             self._conn.commit()
 
+            # Design DNA columns — migration-safe additions for existing DBs.
+            for col in ("scad_source TEXT", "generation_prompt TEXT", "provider TEXT"):
+                try:
+                    self._conn.execute(f"ALTER TABLE designs ADD COLUMN {col}")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists — expected for new installs.
+            self._conn.commit()
+
     # ------------------------------------------------------------------
     # Row conversion
     # ------------------------------------------------------------------
@@ -309,6 +321,9 @@ class DesignCache:
             last_used_at=d["last_used_at"],
             use_count=d["use_count"],
             metadata=json.loads(d["metadata_json"]),
+            scad_source=d.get("scad_source"),
+            generation_prompt=d.get("generation_prompt"),
+            provider=d.get("provider"),
         )
 
     # ------------------------------------------------------------------
@@ -327,6 +342,9 @@ class DesignCache:
         dimensions_mm: dict[str, float] | None = None,
         slicer_used: str | None = None,
         metadata: dict[str, Any] | None = None,
+        scad_source: str | None = None,
+        generation_prompt: str | None = None,
+        provider: str | None = None,
     ) -> CachedDesign:
         """Add a file to the cache.
 
@@ -406,6 +424,9 @@ class DesignCache:
             last_used_at=now,
             use_count=0,
             metadata=metadata or {},
+            scad_source=scad_source,
+            generation_prompt=generation_prompt,
+            provider=provider,
         )
 
         with self._lock:
@@ -416,8 +437,8 @@ class DesignCache:
                      printer_type, file_format, tags_json, source,
                      filament_type, estimated_print_time_s, dimensions_json,
                      slicer_used, created_at, last_used_at, use_count,
-                     metadata_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     metadata_json, scad_source, generation_prompt, provider)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     entry.id,
@@ -437,6 +458,9 @@ class DesignCache:
                     entry.last_used_at,
                     entry.use_count,
                     json.dumps(entry.metadata),
+                    entry.scad_source,
+                    entry.generation_prompt,
+                    entry.provider,
                 ),
             )
             self._conn.commit()
@@ -686,6 +710,75 @@ class DesignCache:
         shutil.copy2(entry.file_path, dest_path)
         logger.info("Exported design %s to %s", design_id, dest_path)
         return dest_path
+
+    # ------------------------------------------------------------------
+    # Design DNA
+    # ------------------------------------------------------------------
+
+    def get_source(self, design_id: str) -> dict[str, str | None] | None:
+        """Get the parametric source for a cached design.
+
+        Returns a dict with ``scad_source``, ``generation_prompt``, and
+        ``provider`` keys, or ``None`` if the design is not found.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT scad_source, generation_prompt, provider FROM designs WHERE id = ?",
+                (design_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "scad_source": row["scad_source"],
+            "generation_prompt": row["generation_prompt"],
+            "provider": row["provider"],
+        }
+
+    def update_source(
+        self,
+        design_id: str,
+        *,
+        scad_source: str | None = None,
+        generation_prompt: str | None = None,
+        provider: str | None = None,
+    ) -> bool:
+        """Attach or update parametric source on an existing cached design.
+
+        Only non-``None`` arguments are written; pass ``None`` to leave
+        a field unchanged.  Returns ``True`` if the design was found.
+        """
+        sets: list[str] = []
+        params: list[Any] = []
+        if scad_source is not None:
+            sets.append("scad_source = ?")
+            params.append(scad_source)
+        if generation_prompt is not None:
+            sets.append("generation_prompt = ?")
+            params.append(generation_prompt)
+        if provider is not None:
+            sets.append("provider = ?")
+            params.append(provider)
+
+        if not sets:
+            return self.get(design_id) is not None
+
+        params.append(design_id)
+        with self._lock:
+            cur = self._conn.execute(
+                f"UPDATE designs SET {', '.join(sets)} WHERE id = ?",
+                params,
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def search_by_provider(self, provider: str, *, limit: int = 50) -> list[CachedDesign]:
+        """Find all cached designs generated by a specific provider."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM designs WHERE provider = ? ORDER BY last_used_at DESC LIMIT ?",
+                (provider, limit),
+            ).fetchall()
+        return [self._row_to_cached_design(r) for r in rows]
 
     def close(self) -> None:
         """Close the database connection."""

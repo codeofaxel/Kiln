@@ -41,6 +41,19 @@ class _DesignToolsPlugin:
         - get_post_processing_guide
         - check_multi_material_pairing
         - get_print_diagnostic
+        - build_parametric_prompt
+        - parse_scad_parameters
+        - update_scad_parameter
+        - validate_scad_parameters
+        - list_design_components
+        - match_design_components
+        - compile_scad
+        - tweak_and_compile_scad
+        - analyze_scad_code
+        - modify_scad_module
+        - insert_into_scad
+        - cache_design_with_source
+        - get_design_source
 
     Tools (construction-scale):
         - get_construction_design_brief
@@ -111,6 +124,7 @@ class _DesignToolsPlugin:
             requirements: str,
             material: str | None = None,
             printer_model: str | None = None,
+            provider: str | None = None,
         ) -> dict:
             """Build a design-aware generation prompt for original 3D creation.
 
@@ -119,10 +133,17 @@ class _DesignToolsPlugin:
             printer-fit limits, and material guidance so text-to-3D backends
             receive a prompt grounded in real printability constraints.
 
+            When provider is specified, the prompt length is optimized for that
+            backend. Use provider="openscad" for maximum constraint injection
+            (100K chars), "meshy" for lean prompts (600 chars), or omit for
+            the default limit.
+
             Args:
                 requirements: Natural language description of the desired part.
                 material: Optional material override (e.g. "petg").
                 printer_model: Optional printer model ID (e.g. "bambu_a1").
+                provider: Optional generation provider (e.g. "openscad", "meshy",
+                    "gemini"). Controls prompt length budget.
             """
             from kiln.generation_feedback import enhance_prompt_with_design_intelligence
 
@@ -131,13 +152,15 @@ class _DesignToolsPlugin:
                     requirements,
                     material=material,
                     printer_model=printer_model,
+                    provider=provider,
                 )
                 return {
                     "status": "success",
                     "prompt": prompt.to_dict(),
                     "message": (
                         f"Built a design-aware prompt with "
-                        f"{len(prompt.constraints_added)} constraints."
+                        f"{len(prompt.constraints_added)} constraints"
+                        f"{f' for {provider} provider' if provider else ''}."
                     ),
                 }
             except Exception as exc:
@@ -847,6 +870,212 @@ class _DesignToolsPlugin:
                 _logger.error("Print diagnostic failed: %s", exc, exc_info=True)
                 return {"status": "error", "error": str(exc)}
 
+        # ── Parametric OpenSCAD tools ──────────────────────────────────────
+
+        @mcp.tool()
+        def build_parametric_prompt(
+            requirements: str,
+            material: str | None = None,
+            printer_model: str | None = None,
+        ) -> dict:
+            """Build a prompt optimized for parametric OpenSCAD code generation.
+
+            Returns an enhanced prompt with OpenSCAD-specific instructions that
+            guide AI to produce well-structured parametric code with named
+            variables, descriptive comments, and material-aware design limits.
+
+            Use this instead of build_generation_prompt when you want the AI to
+            generate editable OpenSCAD code rather than a mesh file.
+
+            Args:
+                requirements: Natural language description of the desired part.
+                material: Optional material override (e.g. "petg").
+                printer_model: Optional printer model ID (e.g. "bambu_a1").
+            """
+            from kiln.generation_feedback import build_parametric_generation_prompt
+
+            try:
+                prompt = build_parametric_generation_prompt(
+                    requirements,
+                    material=material,
+                    printer_model=printer_model,
+                )
+                return {
+                    "status": "success",
+                    "prompt": prompt.to_dict(),
+                    "message": (
+                        f"Built parametric OpenSCAD prompt with "
+                        f"{len(prompt.constraints_added)} design constraints."
+                    ),
+                }
+            except Exception as exc:
+                _logger.error("Build parametric prompt failed: %s", exc, exc_info=True)
+                return {"status": "error", "error": str(exc)}
+
+        @mcp.tool()
+        def parse_scad_parameters(scad_code: str) -> dict:
+            """Parse parameter variables from OpenSCAD code.
+
+            Extracts named dimension variables from the top of an OpenSCAD
+            file, including their values, units, descriptions, and valid
+            ranges (if annotated in comments).
+
+            Use this after generating OpenSCAD code to discover which
+            parameters can be adjusted.
+
+            Args:
+                scad_code: OpenSCAD source code string.
+            """
+            from kiln.parametric import parse_openscad_parameters
+
+            try:
+                params = parse_openscad_parameters(scad_code)
+                return {
+                    "status": "success",
+                    "parameters": [p.to_dict() for p in params],
+                    "count": len(params),
+                    "message": f"Found {len(params)} adjustable parameters.",
+                }
+            except Exception as exc:
+                _logger.error("Parse SCAD parameters failed: %s", exc, exc_info=True)
+                return {"status": "error", "error": str(exc)}
+
+        @mcp.tool()
+        def update_scad_parameter(
+            scad_code: str,
+            parameter_name: str,
+            new_value: float,
+        ) -> dict:
+            """Update a parameter value in OpenSCAD code.
+
+            Finds the named variable declaration and replaces its value,
+            preserving comments and formatting. Use this to tweak dimensions
+            without regenerating the entire model.
+
+            Args:
+                scad_code: OpenSCAD source code string.
+                parameter_name: Name of the variable to update.
+                new_value: New numeric value for the parameter.
+            """
+            from kiln.parametric import update_openscad_parameter
+
+            try:
+                updated = update_openscad_parameter(scad_code, parameter_name, new_value)
+                return {
+                    "status": "success",
+                    "updated_code": updated,
+                    "message": f"Updated {parameter_name} to {new_value}.",
+                }
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+            except Exception as exc:
+                _logger.error("Update SCAD parameter failed: %s", exc, exc_info=True)
+                return {"status": "error", "error": str(exc)}
+
+        @mcp.tool()
+        def validate_scad_parameters(
+            scad_code: str,
+            material: str | None = None,
+        ) -> dict:
+            """Validate OpenSCAD parameters against material design limits.
+
+            Checks if parameter values (wall thickness, hole diameter, etc.)
+            violate the design limits for the specified material. Catches
+            issues before compilation and printing.
+
+            Args:
+                scad_code: OpenSCAD source code string.
+                material: Optional material ID (e.g. "pla", "petg") to check
+                    against material-specific limits.
+            """
+            from kiln.parametric import validate_openscad_parameters
+
+            try:
+                warnings = validate_openscad_parameters(scad_code, material=material)
+                return {
+                    "status": "success",
+                    "warnings": [w.to_dict() for w in warnings],
+                    "count": len(warnings),
+                    "valid": len(warnings) == 0,
+                    "message": (
+                        "All parameters within limits."
+                        if not warnings
+                        else f"Found {len(warnings)} parameter warnings."
+                    ),
+                }
+            except Exception as exc:
+                _logger.error("Validate SCAD parameters failed: %s", exc, exc_info=True)
+                return {"status": "error", "error": str(exc)}
+
+        # ── Library component tools ─────────────────────────────────────
+
+        @mcp.tool()
+        def list_design_components(category: str | None = None) -> dict:
+            """List available pre-built OpenSCAD components from bundled libraries.
+
+            Kiln bundles BOSL2 OpenSCAD libraries with pre-built
+            components for gears, threads, screws, bearings, hinges, and more.
+            These components produce proven geometry — much better than
+            generating complex mechanical parts from scratch.
+
+            Categories: mechanical, fasteners, electronics
+
+            Args:
+                category: Optional filter by category. If not provided, lists
+                    all available components.
+            """
+            from kiln.components import list_components
+
+            try:
+                components = list_components(category=category)
+                return {
+                    "status": "success",
+                    "components": [c.to_dict() for c in components],
+                    "count": len(components),
+                    "message": (
+                        f"Found {len(components)} available components"
+                        f"{f' in category {category!r}' if category else ''}."
+                    ),
+                }
+            except Exception as exc:
+                _logger.error("List components failed: %s", exc, exc_info=True)
+                return {"status": "error", "error": str(exc)}
+
+        @mcp.tool()
+        def match_design_components(description: str) -> dict:
+            """Find pre-built library components matching a design description.
+
+            Given a natural language description of what you want to build,
+            identifies which bundled OpenSCAD library components can be used.
+            Returns import lines, example usage, parameters, and guidance
+            for each matching component.
+
+            Examples:
+                "hand crank with a gear" → finds spur_gear
+                "box with a hinge" → finds knuckle_hinge
+                "mounting bracket with screw holes" → finds screw_hole
+
+            Args:
+                description: Natural language description of the design.
+            """
+            from kiln.components import match_components
+
+            try:
+                matches = match_components(description)
+                return {
+                    "status": "success",
+                    "matches": [m.to_dict() for m in matches],
+                    "count": len(matches),
+                    "message": (
+                        f"Found {len(matches)} matching components."
+                        if matches
+                        else "No matching components found. Design will use pure OpenSCAD."
+                    ),
+                }
+            except Exception as exc:
+                _logger.error("Match components failed: %s", exc, exc_info=True)
+                return {"status": "error", "error": str(exc)}
+
         # ── Construction-scale tools ─────────────────────────────────────
 
         @mcp.tool()
@@ -1173,6 +1402,264 @@ class _DesignToolsPlugin:
                     exc,
                     exc_info=True,
                 )
+                return {"status": "error", "error": str(exc)}
+
+        @mcp.tool()
+        def compile_scad(scad_code: str) -> dict:
+            """Compile OpenSCAD code into an STL file.
+
+            Takes OpenSCAD source code, compiles it using the local OpenSCAD
+            binary, and returns the path to the generated STL. Supports
+            Kiln's bundled BOSL2 library (MCAD also supported).
+
+            Args:
+                scad_code: Valid OpenSCAD source code.
+            """
+            from kiln.parametric import compile_scad_code
+
+            try:
+                stl_path = compile_scad_code(scad_code)
+                return {
+                    "status": "success",
+                    "stl_path": stl_path,
+                    "message": f"Compiled to {stl_path}",
+                }
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+            except Exception as exc:
+                _logger.error("Compile SCAD failed: %s", exc, exc_info=True)
+                return {"status": "error", "error": str(exc)}
+
+        @mcp.tool()
+        def tweak_and_compile_scad(
+            scad_code: str,
+            parameter_name: str,
+            new_value: float,
+            material: str | None = None,
+        ) -> dict:
+            """Update a parameter in OpenSCAD code and recompile to STL.
+
+            The complete parametric tweaking workflow: changes a dimension
+            variable, validates against material limits, and compiles a new
+            STL — all in one step. Perfect for "make it 5mm wider" requests.
+
+            Args:
+                scad_code: OpenSCAD source code.
+                parameter_name: Variable name to update (e.g. "wall_thickness").
+                new_value: New numeric value.
+                material: Optional material for limit validation (e.g. "pla").
+            """
+            from kiln.parametric import tweak_and_compile
+
+            try:
+                result = tweak_and_compile(
+                    scad_code, parameter_name, new_value, material=material,
+                )
+                warnings = result.get("warnings", [])
+                suffix = f" with {len(warnings)} warnings" if warnings else ""
+                return {
+                    "status": "success",
+                    **result,
+                    "message": (
+                        f"Updated {parameter_name}={new_value}, compiled to STL{suffix}."
+                    ),
+                }
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+            except Exception as exc:
+                _logger.error(
+                    "Tweak and compile failed: %s", exc, exc_info=True
+                )
+                return {"status": "error", "error": str(exc)}
+
+        @mcp.tool()
+        def analyze_scad_code(scad_code: str) -> dict:
+            """Analyze the structure of OpenSCAD code.
+
+            Parses parameters, modules, and library imports to understand
+            the code's architecture. Use this before modifying code to know
+            what modules exist and what each one does.
+
+            Args:
+                scad_code: OpenSCAD source code.
+            """
+            from kiln.parametric import analyze_scad_structure
+
+            try:
+                structure = analyze_scad_structure(scad_code)
+                return {
+                    "status": "success",
+                    "structure": structure.to_dict(),
+                    "message": (
+                        f"Found {len(structure.parameters)} parameters and "
+                        f"{len(structure.modules)} modules."
+                    ),
+                }
+            except Exception as exc:
+                _logger.error(
+                    "Analyze SCAD failed: %s", exc, exc_info=True
+                )
+                return {"status": "error", "error": str(exc)}
+
+        @mcp.tool()
+        def modify_scad_module(
+            scad_code: str,
+            module_name: str,
+            new_module_code: str,
+        ) -> dict:
+            """Replace a module in OpenSCAD code with new implementation.
+
+            Finds the named module and replaces its body entirely. Use for
+            major modifications like redesigning a component.
+
+            Args:
+                scad_code: OpenSCAD source code.
+                module_name: Module to replace (e.g. "top_panel").
+                new_module_code: Complete new module code including the
+                    module declaration and braces.
+            """
+            from kiln.parametric import modify_scad_module as _modify
+
+            try:
+                updated = _modify(scad_code, module_name, new_module_code)
+                return {
+                    "status": "success",
+                    "updated_code": updated,
+                    "message": f"Replaced module {module_name!r}.",
+                }
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+            except Exception as exc:
+                _logger.error(
+                    "Modify SCAD module failed: %s", exc, exc_info=True
+                )
+                return {"status": "error", "error": str(exc)}
+
+        @mcp.tool()
+        def insert_into_scad(
+            scad_code: str,
+            module_name: str,
+            code_to_insert: str,
+            position: str = "end",
+        ) -> dict:
+            """Insert code into an OpenSCAD module without replacing it.
+
+            Adds geometry or operations inside a module. Use for targeted
+            additions like "add ventilation holes to the top panel" or
+            "add screw holes to the base."
+
+            Args:
+                scad_code: OpenSCAD source code.
+                module_name: Module to modify (e.g. "base_plate").
+                code_to_insert: OpenSCAD code to insert.
+                position: "end" (before closing brace) or "start" (after
+                    opening brace). Default: "end".
+            """
+            from kiln.parametric import insert_into_scad_module
+
+            try:
+                updated = insert_into_scad_module(
+                    scad_code, module_name, code_to_insert, position=position,
+                )
+                return {
+                    "status": "success",
+                    "updated_code": updated,
+                    "message": f"Inserted code into module {module_name!r} at {position}.",
+                }
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+            except Exception as exc:
+                _logger.error(
+                    "Insert into SCAD failed: %s", exc, exc_info=True
+                )
+                return {"status": "error", "error": str(exc)}
+
+
+        # ── Design DNA ───────────────────────────────────────────────
+
+        @mcp.tool()
+        def cache_design_with_source(
+            file_path: str,
+            scad_source: str,
+            generation_prompt: str = "",
+            provider: str = "openscad",
+            tags: list[str] | None = None,
+            filament_type: str | None = None,
+        ) -> dict:
+            """Cache a design file alongside its parametric source code.
+
+            Stores the STL/3MF file in the design cache and attaches the
+            OpenSCAD source code and generation prompt so the design can
+            be re-generated or tweaked later.
+
+            Args:
+                file_path: Path to the design file (STL, 3MF, etc.).
+                scad_source: OpenSCAD source code that produced this file.
+                generation_prompt: The prompt used to generate the design.
+                provider: Generation provider name (e.g. "openscad", "gemini").
+                tags: Optional tags for search.
+                filament_type: Material type (e.g. "PLA", "PETG").
+            """
+            from kiln.design_cache import get_design_cache
+
+            try:
+                cache = get_design_cache()
+                entry = cache.add(
+                    file_path,
+                    tags=tags,
+                    filament_type=filament_type,
+                    scad_source=scad_source,
+                    generation_prompt=generation_prompt,
+                    provider=provider,
+                )
+                return {
+                    "status": "success",
+                    "design_id": entry.id,
+                    "file_hash": entry.file_hash,
+                    "has_source": entry.scad_source is not None,
+                    "provider": entry.provider,
+                    "message": f"Cached design {entry.id} with parametric source.",
+                }
+            except (FileNotFoundError, ValueError) as exc:
+                return {"status": "error", "error": str(exc)}
+            except Exception as exc:
+                _logger.error("cache_design_with_source failed: %s", exc, exc_info=True)
+                return {"status": "error", "error": str(exc)}
+
+        @mcp.tool()
+        def get_design_source(design_id: str) -> dict:
+            """Retrieve the parametric source code for a cached design.
+
+            Returns the OpenSCAD source, generation prompt, and provider
+            so the design can be re-generated, tweaked, or inspected.
+
+            Args:
+                design_id: ID of the cached design.
+            """
+            from kiln.design_cache import get_design_cache
+
+            try:
+                cache = get_design_cache()
+                source_info = cache.get_source(design_id)
+                if source_info is None:
+                    return {"status": "error", "error": f"Design {design_id!r} not found."}
+                if source_info["scad_source"] is None:
+                    return {
+                        "status": "success",
+                        "design_id": design_id,
+                        "has_source": False,
+                        "message": "Design exists but has no parametric source attached.",
+                    }
+                return {
+                    "status": "success",
+                    "design_id": design_id,
+                    "has_source": True,
+                    "scad_source": source_info["scad_source"],
+                    "generation_prompt": source_info["generation_prompt"],
+                    "provider": source_info["provider"],
+                }
+            except Exception as exc:
+                _logger.error("get_design_source failed: %s", exc, exc_info=True)
                 return {"status": "error", "error": str(exc)}
 
 
