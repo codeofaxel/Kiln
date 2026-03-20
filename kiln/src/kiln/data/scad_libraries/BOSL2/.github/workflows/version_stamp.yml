@@ -1,0 +1,84 @@
+name: Daily Version Stamp
+
+on:
+  schedule:
+    - cron: '8 7 * * *'
+  workflow_dispatch:
+
+jobs:
+  version-stamp:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        ref: master
+        fetch-depth: 0
+
+    - name: Check if latest commit is a merged PR
+      id: check_changes
+      run: |
+        LATEST_MSG=$(git log --first-parent origin/master --format="%s" -50 | grep -E '^(Merge pull request #[0-9]|Version bump to v[0-9])'|head -1)
+        echo "Latest commit: ${LATEST_MSG}"
+
+        if echo "$LATEST_MSG" | grep -q "^Merge pull request #"; then
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "has_changes=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Check if changes are comment-only since last version bump
+      id: check_comments
+      if: steps.check_changes.outputs.has_changes == 'true'
+      run: |
+        LAST_BUMP=$(git log --first-parent origin/master --format="%H %s" | grep " Version bump to v" | head -1 | awk '{print $1}')
+        echo "Last version bump commit: ${LAST_BUMP}"
+
+        if [ -z "$LAST_BUMP" ]; then
+          echo "No previous version bump found; treating as having real changes."
+          echo "only_comments=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Get all added/removed lines since last version bump, excluding version.scad
+        CHANGED_LINES=$(git diff "${LAST_BUMP}"..origin/master -- ':!version.scad' \
+          | grep -E '^[+-]' \
+          | grep -Ev '^(\+\+\+|---)') || true
+
+        if [ -z "$CHANGED_LINES" ]; then
+          echo "No non-version changes found."
+          echo "only_comments=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Strip leading +/- and check for any non-comment, non-blank lines
+        NON_COMMENT=$(echo "$CHANGED_LINES" | sed 's/^[+-]//' | grep -Ev '^[[:space:]]*//' | grep -Ev '^[[:space:]]*$') || true
+
+        if [ -z "$NON_COMMENT" ]; then
+          echo "All changes are comment-only; skipping version bump."
+          echo "only_comments=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "Real code changes detected; proceeding with version bump."
+          echo "only_comments=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Increment version
+      if: steps.check_changes.outputs.has_changes == 'true' && steps.check_comments.outputs.only_comments != 'true'
+      id: version
+      run: |
+        ./scripts/increment_version.sh
+        NEW_VERSION=$(grep -oP 'BOSL_VERSION = \[\K[0-9]+,[0-9]+,[0-9]+' version.scad | tr ',' '.')
+        echo "new_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+    - name: Commit and push
+      if: steps.check_changes.outputs.has_changes == 'true' && steps.check_comments.outputs.only_comments != 'true'
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add version.scad
+        git commit -m "Version bump to v${{ steps.version.outputs.new_version }}"
+        git tag "v${{ steps.version.outputs.new_version }}"
+        git push origin master "v${{ steps.version.outputs.new_version }}"
+
