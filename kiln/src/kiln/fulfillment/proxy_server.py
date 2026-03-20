@@ -27,7 +27,11 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from kiln.billing import BillingLedger
+try:
+    from kiln.billing import BillingLedger
+except ImportError:
+    BillingLedger = None  # Available in kiln-pro
+
 from kiln.fulfillment.base import (
     FulfillmentError,
     OrderRequest,
@@ -35,7 +39,10 @@ from kiln.fulfillment.base import (
 )
 from kiln.fulfillment.registry import get_provider as get_fulfillment_provider
 from kiln.licensing import LicenseManager, LicenseTier, generate_license_key_v2, parse_license_claims
-from kiln.payments.base import PaymentError
+try:
+    from kiln.payments.base import PaymentError
+except ImportError:
+    PaymentError = None  # Available in kiln-pro
 from kiln.pilot_access import EntitlementEnforcer, PilotGrant, SupabasePilotStore, hash_license_key, key_hint
 
 if TYPE_CHECKING:
@@ -577,7 +584,7 @@ class ProxyOrchestrator:
         for k in expired:
             del self._quote_cache[k]
 
-    def _get_payment_mgr(self) -> PaymentManager:
+    def _get_payment_mgr(self):
         """Lazily initialize the payment manager with auto-detected providers."""
         if self._payment_mgr is not None:
             return self._payment_mgr
@@ -586,7 +593,10 @@ class ProxyOrchestrator:
             if self._payment_mgr is not None:
                 return self._payment_mgr
 
-            from kiln.payments.manager import PaymentManager
+            try:
+                from kiln.payments.manager import PaymentManager
+            except ImportError:
+                return None
 
             self._payment_mgr = PaymentManager(
                 db=self._db,

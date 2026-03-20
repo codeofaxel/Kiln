@@ -68,8 +68,15 @@ from kiln.auth import AuthManager
 from kiln.backup import BackupError
 from kiln.backup import backup_database as _backup_db
 from kiln.bed_leveling import BedLevelManager, LevelingPolicy
-from kiln.billing import BillingLedger
-from kiln.billing_alerts import BillingAlertManager
+try:
+    from kiln.billing import BillingLedger
+except ImportError:
+    BillingLedger = None  # Available in kiln-pro
+
+try:
+    from kiln.billing_alerts import BillingAlertManager
+except ImportError:
+    BillingAlertManager = None  # Available in kiln-pro
 from kiln.cli.config import _validate_printer_url
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
 from kiln.cost_estimator import CostEstimator
@@ -127,8 +134,15 @@ from kiln.marketplaces import (
     MarketplaceNotFoundError as MktNotFoundError,
 )
 from kiln.materials import MaterialTracker
-from kiln.payments.base import PaymentError
-from kiln.payments.manager import PaymentManager
+try:
+    from kiln.payments.base import PaymentError
+except ImportError:
+    PaymentError = None  # Available in kiln-pro
+
+try:
+    from kiln.payments.manager import PaymentManager
+except ImportError:
+    PaymentManager = None  # Available in kiln-pro
 from kiln.persistence import get_db
 from kiln.pipelines import (
     PipelineState as _PipelineState,
@@ -1014,9 +1028,9 @@ _event_bus = EventBus()
 _scheduler = JobScheduler(_queue, _registry, _event_bus, persistence=get_db())
 _webhook_mgr = WebhookManager(_event_bus)
 _auth = AuthManager()
-_billing = BillingLedger(db=get_db())
-_payment_mgr: PaymentManager | None = None
-_billing_alert_mgr: BillingAlertManager | None = None
+_billing = BillingLedger(db=get_db()) if BillingLedger is not None else None
+_payment_mgr = None  # PaymentManager, lazily initialized
+_billing_alert_mgr = None  # BillingAlertManager, lazily initialized
 _cost_estimator = CostEstimator()
 _material_tracker = MaterialTracker(db=get_db(), event_bus=_event_bus)
 _bed_level_mgr = BedLevelManager(
@@ -1180,9 +1194,12 @@ def _provider_routing_metadata(
     }
 
 
-def _get_payment_mgr() -> PaymentManager:
+def _get_payment_mgr():
     """Return the lazily-initialised payment manager."""
     global _payment_mgr  # noqa: PLW0603
+
+    if PaymentManager is None:
+        return None
 
     if _payment_mgr is not None:
         return _payment_mgr
@@ -1233,9 +1250,12 @@ def _get_payment_mgr() -> PaymentManager:
     return _payment_mgr
 
 
-def _get_billing_alert_mgr() -> BillingAlertManager:
+def _get_billing_alert_mgr():
     """Return the lazily-initialised billing alert manager."""
     global _billing_alert_mgr  # noqa: PLW0603
+
+    if BillingAlertManager is None:
+        return None
 
     if _billing_alert_mgr is None:
         _billing_alert_mgr = BillingAlertManager(event_bus=_event_bus)
@@ -4811,7 +4831,10 @@ def billing_invoice(charge_id: str = "", job_id: str = "") -> dict:
     if err := _check_billing_auth("billing"):
         return err
     try:
-        from kiln.billing_invoice import generate_invoice
+        try:
+            from kiln.billing_invoice import generate_invoice
+        except ImportError:
+            return {"status": "error", "error": "This feature requires kiln-pro"}
 
         if charge_id:
             charges = _billing.list_charges(limit=500)
@@ -4852,7 +4875,10 @@ def billing_export(format: str = "csv", limit: int = 100) -> dict:
     if err := _check_billing_auth("billing"):
         return err
     try:
-        from kiln.billing_invoice import export_billing_csv, generate_invoices
+        try:
+            from kiln.billing_invoice import export_billing_csv, generate_invoices
+        except ImportError:
+            return {"status": "error", "error": "This feature requires kiln-pro"}
 
         charges = _billing.list_charges(limit=limit)
 

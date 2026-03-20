@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import pytest
 
-from kiln.billing import BillingLedger, FeePolicy
+try:
+    from kiln.billing import BillingLedger, FeePolicy
+except ImportError:
+    pytest.skip("kiln-pro billing module not available", allow_module_level=True)
 from kiln.tax import (
     TaxCalculator,
     TaxResult,

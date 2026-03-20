@@ -8,7 +8,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kiln.payments.base import PaymentError
+try:
+    from kiln.payments.base import PaymentError
+except ImportError:
+    pytest.skip("kiln-pro payments module not available", allow_module_level=True)
 
 # ---------------------------------------------------------------------------
 # Helpers

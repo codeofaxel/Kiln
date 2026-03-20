@@ -141,7 +141,10 @@ class _FulfillmentToolsPlugin:
             """
             import kiln.server as _srv
             from kiln.fulfillment import FulfillmentError, QuoteRequest
-            from kiln.payments.base import PaymentError
+            try:
+                from kiln.payments.base import PaymentError
+            except ImportError:
+                PaymentError = type("PaymentError", (Exception,), {})
 
             try:
                 provider = _srv._get_fulfillment()
@@ -242,7 +245,10 @@ class _FulfillmentToolsPlugin:
             from kiln.fulfillment import FulfillmentError, OrderRequest
             from kiln.fulfillment.intelligence import QuoteValidation
             from kiln.licensing import LicenseTier
-            from kiln.payments.base import PaymentError
+            try:
+                from kiln.payments.base import PaymentError
+            except ImportError:
+                PaymentError = type("PaymentError", (Exception,), {})
 
             if err := _srv._check_billing_auth("print"):
                 return err

@@ -6,6 +6,13 @@ import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+try:
+    from kiln.payments.stripe_provider import StripeProvider as _check  # noqa: F401
+except ImportError:
+    pytest.skip("kiln-pro payments module not available", allow_module_level=True)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -9,12 +9,17 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from kiln.payments.base import (
-    Currency,
-    PaymentRail,
-    PaymentResult,
-    PaymentStatus,
-)
+import pytest
+
+try:
+    from kiln.payments.base import (
+        Currency,
+        PaymentRail,
+        PaymentResult,
+        PaymentStatus,
+    )
+except ImportError:
+    pytest.skip("kiln-pro payments module not available", allow_module_level=True)
 
 # ---------------------------------------------------------------------------
 # check_payment_status

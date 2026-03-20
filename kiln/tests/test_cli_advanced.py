@@ -17,6 +17,19 @@ import yaml
 from click.testing import CliRunner
 
 from kiln.cli.main import cli
+
+try:
+    import kiln.billing  # noqa: F401
+    _has_billing = True
+except ImportError:
+    _has_billing = False
+
+try:
+    import kiln.payments  # noqa: F401
+    _has_payments = True
+except ImportError:
+    _has_payments = False
+
 from kiln.printers.base import (
     JobProgress,
     PrinterFile,
@@ -702,6 +715,7 @@ class TestOrder:
             result = runner.invoke(cli, ["order", "materials", "--json"])
         assert result.exit_code != 0
 
+    @pytest.mark.skipif(not _has_billing, reason="kiln-pro billing module not available")
     def test_order_quote_json(self, runner, tmp_path):
         gcode = tmp_path / "model.gcode"
         gcode.write_text("G28\n")
@@ -750,6 +764,7 @@ class TestOrder:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not _has_payments, reason="kiln-pro payments module not available")
 class TestBilling:
     def test_billing_setup_stripe_json(self, runner):
         mock_mgr = MagicMock()

@@ -27,7 +27,11 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
-from kiln.billing import BillingLedger, FeePolicy
+try:
+    from kiln.billing import BillingLedger, FeePolicy
+except ImportError:
+    BillingLedger = None
+    FeePolicy = None
 from kiln.cli.main import cli
 from kiln.events import Event, EventBus, EventType
 from kiln.gcode import validate_gcode, validate_gcode_for_printer
@@ -657,6 +661,7 @@ class TestQueueSchedulerPrinterFlow:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(BillingLedger is None, reason="kiln-pro billing module not available")
 class TestBillingFulfillmentRefundSaga:
     """Test the billing lifecycle for outsourced fulfillment orders.
 

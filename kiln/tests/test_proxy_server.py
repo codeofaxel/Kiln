@@ -19,7 +19,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kiln.billing import BillingLedger, FeeCalculation
+try:
+    from kiln.billing import BillingLedger, FeeCalculation
+except ImportError:
+    pytest.skip("kiln-pro billing module not available", allow_module_level=True)
 from kiln.fulfillment.base import (
     FulfillmentError,
     Material,
@@ -31,7 +34,10 @@ from kiln.fulfillment.base import (
 )
 from kiln.fulfillment.proxy_server import ProxyOrchestrator, get_orchestrator
 from kiln.licensing import LicenseInfo, LicenseTier
-from kiln.payments.base import PaymentError
+try:
+    from kiln.payments.base import PaymentError
+except ImportError:
+    pass  # skipped above
 
 # ---------------------------------------------------------------------------
 # Helpers

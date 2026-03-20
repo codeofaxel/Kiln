@@ -3468,7 +3468,10 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
     Upload a model file (STL, 3MF, OBJ) and receive pricing, lead time,
     and shipping options from Craftcloud's network of 150+ print services.
     """
-    from kiln.billing import BillingLedger
+    try:
+        from kiln.billing import BillingLedger
+    except ImportError:
+        BillingLedger = None
     from kiln.fulfillment import QuoteRequest
 
     try:
@@ -3482,10 +3485,11 @@ def order_quote(file_path: str, material: str, quantity: int, country: str, json
             )
         )
         quote_data = quote.to_dict()
-        ledger = BillingLedger()
-        fee_calc = ledger.calculate_fee(quote.total_price, currency=quote.currency)
-        quote_data["kiln_fee"] = fee_calc.to_dict()
-        quote_data["total_with_fee"] = fee_calc.total_cost
+        if BillingLedger is not None:
+            ledger = BillingLedger()
+            fee_calc = ledger.calculate_fee(quote.total_price, currency=quote.currency)
+            quote_data["kiln_fee"] = fee_calc.to_dict()
+            quote_data["total_with_fee"] = fee_calc.total_cost
         click.echo(format_quote(quote_data, json_mode=json_mode))
     except click.ClickException:
         raise
@@ -3519,10 +3523,19 @@ def order_place(quote_id: str, shipping_id: str, json_mode: bool) -> None:
 
     Requires a quote ID from 'kiln order quote'.
     """
-    from kiln.billing import BillingLedger
+    try:
+        from kiln.billing import BillingLedger
+    except ImportError:
+        BillingLedger = None
     from kiln.fulfillment import OrderRequest
-    from kiln.payments.base import PaymentError
-    from kiln.payments.manager import PaymentManager
+    try:
+        from kiln.payments.base import PaymentError
+    except ImportError:
+        PaymentError = None
+    try:
+        from kiln.payments.manager import PaymentManager
+    except ImportError:
+        PaymentManager = None
     from kiln.persistence import get_db
 
     try:
@@ -6139,7 +6152,11 @@ def billing_setup(rail: str, json_mode: bool) -> None:
     crypto payments (USDC on Solana/Base).
     """
     from kiln.cli.config import get_billing_config, get_or_create_user_id
-    from kiln.payments.manager import PaymentManager
+    try:
+        from kiln.payments.manager import PaymentManager
+    except ImportError:
+        click.echo(format_error("This feature requires kiln-pro", json_mode=json_mode))
+        sys.exit(1)
     from kiln.persistence import get_db
 
     try:
@@ -6180,7 +6197,11 @@ def billing_setup(rail: str, json_mode: bool) -> None:
 def billing_status(json_mode: bool) -> None:
     """Show current payment method, monthly spend, and limits."""
     from kiln.cli.config import get_billing_config, get_or_create_user_id
-    from kiln.payments.manager import PaymentManager
+    try:
+        from kiln.payments.manager import PaymentManager
+    except ImportError:
+        click.echo(format_error("This feature requires kiln-pro", json_mode=json_mode))
+        sys.exit(1)
     from kiln.persistence import get_db
 
     try:
@@ -6203,7 +6224,11 @@ def billing_status(json_mode: bool) -> None:
 def billing_history(limit: int, json_mode: bool) -> None:
     """Show recent billing charges and payment outcomes."""
     from kiln.cli.config import get_billing_config
-    from kiln.payments.manager import PaymentManager
+    try:
+        from kiln.payments.manager import PaymentManager
+    except ImportError:
+        click.echo(format_error("This feature requires kiln-pro", json_mode=json_mode))
+        sys.exit(1)
     from kiln.persistence import get_db
 
     try:
