@@ -39,16 +39,16 @@ FastMCP.__init__ = _patched_fastmcp_init  # type: ignore[method-assign]
 # Now safe to import everything else.
 # ---------------------------------------------------------------------------
 
-import pytest
+import pytest  # noqa: E402
 
-from kiln.printers.base import (
+from kiln.printers.base import (  # noqa: E402
     JobProgress,
     PrinterCapabilities,
     PrinterFile,
     PrinterState,
     PrinterStatus,
 )
-from kiln.printers.octoprint import OctoPrintAdapter
+from kiln.printers.octoprint import OctoPrintAdapter  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
