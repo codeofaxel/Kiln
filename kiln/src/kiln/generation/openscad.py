@@ -189,11 +189,8 @@ class OpenSCADProvider(GenerationProvider):
         timeout: int = 120,
     ) -> None:
         self._binary = _find_openscad(binary_path)
-        if self._binary is None:
-            raise GenerationError(
-                "OpenSCAD binary not found.",
-                code="OPENSCAD_NOT_FOUND",
-            )
+        # _find_openscad() raises GenerationError on failure, so
+        # self._binary is always a valid path after this line.
         self._timeout = timeout
         self._jobs: dict[str, GenerationJob] = {}
         self._paths: dict[str, str] = {}
@@ -244,8 +241,9 @@ class OpenSCADProvider(GenerationProvider):
             with os.fdopen(scad_fd, "w") as fh:
                 fh.write(prompt)
 
+            binary = self._require_binary()
             lib_path = _get_bundled_library_path()
-            cmd = [self._binary, "-o", out_path]
+            cmd = [binary, "-o", out_path]
             if os.path.isdir(lib_path):
                 cmd.extend(["-L", lib_path])
             cmd.append(scad_path)
@@ -429,6 +427,18 @@ class OpenSCADProvider(GenerationProvider):
                 code="UNSUPPORTED_FORMAT",
             )
 
+    def _require_binary(self) -> str:
+        """Return the OpenSCAD binary path or raise if unavailable."""
+        if not self._binary:
+            raise GenerationError(
+                "OpenSCAD not found. Install it:\n"
+                "  Linux/WSL: apt install openscad\n"
+                "  macOS: brew install openscad\n"
+                "  Or download from https://openscad.org",
+                code="OPENSCAD_NOT_FOUND",
+            )
+        return self._binary
+
     def _render_scad_to_png(
         self,
         scad_path: str,
@@ -443,8 +453,9 @@ class OpenSCADProvider(GenerationProvider):
             out_fd, output_path = tempfile.mkstemp(suffix=".png", prefix="kiln_preview_")
             os.close(out_fd)
 
+        binary = self._require_binary()
         cmd = [
-            self._binary,
+            binary,
             "-o", output_path,
             f"--imgsize={width},{height}",
             "--render",
@@ -516,8 +527,9 @@ class OpenSCADProvider(GenerationProvider):
 
             # Use /dev/null as output — we only care about stderr
             null_out = os.path.join(tempfile.gettempdir(), f"kiln_null_{uuid.uuid4().hex[:8]}.stl")
+            binary = self._require_binary()
             lib_path = _get_bundled_library_path()
-            cmd = [self._binary, "-o", null_out]
+            cmd = [binary, "-o", null_out]
             if os.path.isdir(lib_path):
                 cmd.extend(["-L", lib_path])
             cmd.append(scad_path)
@@ -613,7 +625,8 @@ class OpenSCADProvider(GenerationProvider):
             with os.fdopen(scad_fd, "w") as fh:
                 fh.write(scad_code)
 
-            cmd = [self._binary, "-o", output_path, scad_path]
+            binary = self._require_binary()
+            cmd = [binary, "-o", output_path, scad_path]
             logger.info("OpenSCAD boolean: %s", " ".join(cmd))
 
             try:
@@ -694,8 +707,13 @@ def boolean_mesh_operation(
             raise FileNotFoundError(f"STL file not found: {fp}")
 
     binary = _find_openscad()  # raises GenerationError if not found
+    if not binary:
+        raise GenerationError(
+            "OpenSCAD not found.",
+            code="OPENSCAD_NOT_FOUND",
+        )
 
-    provider = OpenSCADProvider(binary_path=binary)  # re-validates binary
+    provider = OpenSCADProvider(binary_path=binary)
     result_path = provider.boolean_operation(
         operation, file_paths, output_path=output_path,
     )
