@@ -8,11 +8,14 @@ Coverage areas:
 - Feedback loop lifecycle (start, add iteration, get)
 - Prompt length limits
 - Edge cases: no issues, empty feedback, long prompts
+- enhance_prompt_with_design_intelligence provider-aware limits
+- build_parametric_generation_prompt OpenSCAD output
 """
 
 from __future__ import annotations
 
 import sqlite3
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from kiln.generation_feedback import (
@@ -23,6 +26,8 @@ from kiln.generation_feedback import (
     PrintFeedback,
     add_iteration,
     analyze_for_feedback,
+    build_parametric_generation_prompt,
+    enhance_prompt_with_design_intelligence,
     generate_improved_prompt,
     get_feedback_loop,
     start_feedback_loop,
@@ -449,3 +454,279 @@ class TestFeedbackLoopPersistence:
         assert loop.current_iteration == 3
         assert len(loop.iterations) == 3
         assert loop.resolved is True
+
+
+# ---------------------------------------------------------------------------
+# Helpers for design-intelligence mocking
+# ---------------------------------------------------------------------------
+
+
+def _mock_material(design_limits=None, thermal=None, chemical=None, display_name="PLA"):
+    """Create a mock material profile."""
+    return SimpleNamespace(
+        material_id="pla",
+        display_name=display_name,
+        design_limits=design_limits or {},
+        thermal=thermal or {},
+        chemical=chemical or {},
+    )
+
+
+def _mock_brief(material=None, constraints=None, patterns=None, guidance=None):
+    """Create a mock DesignBrief."""
+    mat_rec = None
+    if material:
+        mat_rec = SimpleNamespace(
+            material=material,
+            score=100.0,
+            design_limits_summary=material.design_limits,
+        )
+    return SimpleNamespace(
+        recommended_material=mat_rec,
+        combined_rules=constraints or {},
+        applicable_patterns=patterns or [],
+        combined_guidance=guidance or [],
+    )
+
+
+def _mock_printer_profile(
+    has_enclosure=False,
+    has_direct_drive=True,
+    build_volume=None,
+    typical_tolerance_mm=0.15,
+    max_print_speed_mm_s=200,
+    default_layer_heights_mm=None,
+):
+    return SimpleNamespace(
+        build_volume_mm=build_volume or {"x": 256, "y": 256, "z": 256},
+        has_enclosure=has_enclosure,
+        has_direct_drive=has_direct_drive,
+        typical_tolerance_mm=typical_tolerance_mm,
+        max_print_speed_mm_s=max_print_speed_mm_s,
+        default_layer_heights_mm=default_layer_heights_mm or [0.12, 0.2, 0.28],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Provider-aware prompt limits
+# ---------------------------------------------------------------------------
+
+
+class TestEnhancePromptProvider:
+    """enhance_prompt_with_design_intelligence honours provider limits."""
+
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_openscad_uses_100k_limit(self, mock_constraints, _mock_printer):
+        mat = _mock_material(design_limits={"recommended_wall_thickness_mm": 1.6})
+        mock_constraints.return_value = _mock_brief(material=mat, constraints={})
+        result = enhance_prompt_with_design_intelligence(
+            "a box", provider="openscad",
+        )
+        # With 100K budget, the prompt should NOT be truncated to 600 chars
+        assert len(result.improved_prompt) <= 100_000
+
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_meshy_keeps_under_600(self, mock_constraints, _mock_printer):
+        mat = _mock_material(design_limits={"recommended_wall_thickness_mm": 1.6})
+        mock_constraints.return_value = _mock_brief(material=mat, constraints={})
+        result = enhance_prompt_with_design_intelligence(
+            "a box", provider="meshy",
+        )
+        assert len(result.improved_prompt) <= 600
+
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_none_provider_uses_default(self, mock_constraints, _mock_printer):
+        mat = _mock_material()
+        mock_constraints.return_value = _mock_brief(material=mat)
+        result = enhance_prompt_with_design_intelligence("a box")
+        assert len(result.improved_prompt) <= _MAX_PROMPT_LENGTH
+
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_explicit_max_length_overrides_provider(self, mock_constraints, _mock_printer):
+        mat = _mock_material()
+        mock_constraints.return_value = _mock_brief(material=mat)
+        result = enhance_prompt_with_design_intelligence(
+            "a box", provider="openscad", max_length=200,
+        )
+        assert len(result.improved_prompt) <= 200
+
+
+class TestEnhancePromptDetailedConstraints:
+    """Design-intelligence detailed constraints are injected correctly."""
+
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_min_hole_diameter_in_constraints(self, mock_constraints, _mock_printer):
+        mat = _mock_material(design_limits={"min_hole_diameter_mm": 2.0})
+        mock_constraints.return_value = _mock_brief(material=mat)
+        result = enhance_prompt_with_design_intelligence(
+            "a box", max_length=5000,
+        )
+        assert any("hole diameter" in c for c in result.constraints_added)
+
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_warping_mitigation_no_enclosure(self, mock_constraints):
+        mat = _mock_material(
+            thermal={"warping_tendency": "high"},
+            display_name="ABS",
+        )
+        brief = _mock_brief(material=mat)
+        mock_constraints.return_value = brief
+        printer = _mock_printer_profile(has_enclosure=False)
+        with patch(
+            "kiln.design_intelligence.get_printer_design_profile",
+            return_value=printer,
+        ):
+            result = enhance_prompt_with_design_intelligence(
+                "a case", printer_model="test_printer", max_length=5000,
+            )
+        assert any("warping" in c.lower() for c in result.constraints_added)
+
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_bowden_constraint_for_tpu(self, mock_constraints):
+        mat = _mock_material(display_name="TPU")
+        brief = _mock_brief(material=mat)
+        mock_constraints.return_value = brief
+        printer = _mock_printer_profile(has_direct_drive=False)
+        with patch(
+            "kiln.design_intelligence.get_printer_design_profile",
+            return_value=printer,
+        ):
+            result = enhance_prompt_with_design_intelligence(
+                "a flexible grip",
+                material="tpu",
+                printer_model="test_printer",
+                max_length=5000,
+            )
+        assert any("bowden" in c.lower() for c in result.constraints_added)
+
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_short_limit_only_core_constraints(self, mock_constraints, _mock_printer):
+        mat = _mock_material(
+            design_limits={
+                "recommended_wall_thickness_mm": 1.6,
+                "min_hole_diameter_mm": 2.0,
+            },
+        )
+        mock_constraints.return_value = _mock_brief(material=mat)
+        # 600-char budget → only core constraints, not detailed
+        result = enhance_prompt_with_design_intelligence(
+            "a box", max_length=600,
+        )
+        # min_hole_diameter is a "detailed" constraint, should be absent at 600
+        assert not any("hole diameter" in c for c in result.constraints_added)
+
+
+# ---------------------------------------------------------------------------
+# build_parametric_generation_prompt
+# ---------------------------------------------------------------------------
+
+
+class TestBuildParametricPrompt:
+    """build_parametric_generation_prompt produces OpenSCAD-ready prompts."""
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_contains_openscad_instructions(self, mock_constraints, _p, _m):
+        mock_constraints.return_value = _mock_brief()
+        result = build_parametric_generation_prompt("a box")
+        assert "Generate valid OpenSCAD code" in result.improved_prompt
+
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_material_limits_as_comments(self, mock_constraints, _p):
+        mat = _mock_material(
+            design_limits={
+                "recommended_wall_thickness_mm": 1.6,
+                "max_unsupported_overhang_deg": 50,
+            },
+        )
+        mock_constraints.return_value = _mock_brief(material=mat)
+        with patch(
+            "kiln.design_intelligence.get_material_profile",
+            return_value=SimpleNamespace(
+                display_name="PLA",
+                design_limits={
+                    "recommended_wall_thickness_mm": 1.6,
+                    "max_unsupported_overhang_deg": 50,
+                },
+            ),
+        ):
+            result = build_parametric_generation_prompt("a bracket", material="pla")
+        assert "// Material: PLA" in result.improved_prompt
+        assert "1.6mm" in result.improved_prompt
+
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_includes_design_constraints(self, mock_constraints, _p):
+        mat = _mock_material(design_limits={"recommended_wall_thickness_mm": 1.6})
+        mock_constraints.return_value = _mock_brief(material=mat)
+        with patch(
+            "kiln.design_intelligence.get_material_profile",
+            return_value=None,
+        ):
+            result = build_parametric_generation_prompt("a bracket", material="pla")
+        assert len(result.constraints_added) > 0
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_basic_call_no_material_no_printer(self, mock_constraints, _p, _m):
+        mock_constraints.return_value = _mock_brief()
+        result = build_parametric_generation_prompt("a simple box")
+        assert result.original_prompt == "a simple box"
+        assert "OpenSCAD" in result.improved_prompt
+
+
+# ---------------------------------------------------------------------------
+# build_parametric_generation_prompt with component matching
+# ---------------------------------------------------------------------------
+
+
+class TestBuildParametricPromptWithComponents:
+    """build_parametric_generation_prompt integrates component catalog."""
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_gear_description_includes_bosl2(self, mock_constraints, _p, _m):
+        mock_constraints.return_value = _mock_brief()
+        result = build_parametric_generation_prompt(
+            "phone stand with gear mechanism"
+        )
+        assert "BOSL2" in result.improved_prompt
+        assert "spur_gear" in result.improved_prompt.lower() or "Spur Gear" in result.improved_prompt
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_no_components_uses_pure_openscad(self, mock_constraints, _p, _m):
+        mock_constraints.return_value = _mock_brief()
+        result = build_parametric_generation_prompt("simple rectangular box")
+        assert "No external library dependencies" in result.improved_prompt
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_component_section_has_import_line(self, mock_constraints, _p, _m):
+        mock_constraints.return_value = _mock_brief()
+        result = build_parametric_generation_prompt(
+            "phone stand with gear mechanism"
+        )
+        assert "include <BOSL2" in result.improved_prompt
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_component_section_has_example(self, mock_constraints, _p, _m):
+        mock_constraints.return_value = _mock_brief()
+        result = build_parametric_generation_prompt(
+            "phone stand with gear mechanism"
+        )
+        assert "spur_gear(" in result.improved_prompt
