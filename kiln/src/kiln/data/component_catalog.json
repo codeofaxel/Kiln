@@ -1,0 +1,518 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "description": "Curated catalog of OpenSCAD library components for parametric generation",
+    "libraries": {
+      "BOSL2": {
+        "name": "BOSL2",
+        "license": "BSD-2-Clause",
+        "url": "https://github.com/BelfrySCAD/BOSL2",
+        "path": "scad_libraries/BOSL2"
+      }
+    }
+  },
+  "spur_gear": {
+    "display_name": "Spur Gear",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>",
+    "example_call": "spur_gear(circ_pitch=5, teeth=20, thickness=8, shaft_diam=5);",
+    "key_params": {
+      "teeth": {
+        "type": "int",
+        "default": 20,
+        "description": "number of teeth",
+        "min": 6
+      },
+      "circ_pitch": {
+        "type": "float",
+        "default": 5,
+        "description": "circular pitch in mm"
+      },
+      "thickness": {
+        "type": "float",
+        "default": 8,
+        "description": "gear thickness in mm"
+      },
+      "shaft_diam": {
+        "type": "float",
+        "default": 5,
+        "description": "center shaft hole diameter in mm"
+      }
+    },
+    "agent_guidance": "Same circ_pitch for meshing. Calculate teeth ratio for speed reduction.",
+    "printability_notes": "Print flat. Teeth under circ_pitch=3 won't resolve on 0.4mm nozzle. Use 0.12mm layers.",
+    "category": "mechanical",
+    "user_intents": [
+      "gear",
+      "cog",
+      "toothed wheel",
+      "cogwheel",
+      "spur gear",
+      "gears that mesh",
+      "gear wheel",
+      "pinion"
+    ]
+  },
+  "bevel_gear": {
+    "display_name": "Bevel Gear",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>",
+    "example_call": "bevel_gear(circ_pitch=5, teeth=20, mate_teeth=20, shaft_diam=5);",
+    "key_params": {
+      "teeth": {
+        "type": "int",
+        "default": 20,
+        "description": "number of teeth"
+      },
+      "circ_pitch": {
+        "type": "float",
+        "default": 5,
+        "description": "circular pitch in mm"
+      },
+      "mate_teeth": {
+        "type": "int",
+        "default": 20,
+        "description": "number of teeth on the mating gear"
+      },
+      "shaft_diam": {
+        "type": "float",
+        "default": 5,
+        "description": "center shaft hole diameter in mm"
+      }
+    },
+    "agent_guidance": "mate_teeth must match the paired gear. Both gears need same circ_pitch.",
+    "printability_notes": "Print with flat back on bed. May need supports for tooth undercuts.",
+    "category": "mechanical",
+    "user_intents": [
+      "bevel gear",
+      "angled gear",
+      "90 degree gear",
+      "miter gear",
+      "right angle gear",
+      "corner gear"
+    ]
+  },
+  "rack": {
+    "display_name": "Gear Rack",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>",
+    "example_call": "rack(circ_pitch=5, teeth=10, thickness=8, height=10);",
+    "key_params": {
+      "teeth": {
+        "type": "int",
+        "default": 10,
+        "description": "number of teeth"
+      },
+      "circ_pitch": {
+        "type": "float",
+        "default": 5,
+        "description": "circular pitch in mm"
+      },
+      "thickness": {
+        "type": "float",
+        "default": 8,
+        "description": "rack thickness in mm"
+      },
+      "height": {
+        "type": "float",
+        "default": 10,
+        "description": "rack height in mm"
+      }
+    },
+    "agent_guidance": "Use same circ_pitch as the mating spur_gear.",
+    "printability_notes": "Print flat. Long racks may need bed adhesion help.",
+    "category": "mechanical",
+    "user_intents": [
+      "gear rack",
+      "linear gear",
+      "rack and pinion",
+      "sliding gear",
+      "rail gear",
+      "toothed rail"
+    ]
+  },
+  "worm_gear": {
+    "display_name": "Worm Gear",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/gears.scad>",
+    "example_call": "worm_gear(circ_pitch=5, teeth=30, worm_diam=15, worm_starts=1);",
+    "key_params": {
+      "teeth": {
+        "type": "int",
+        "default": 30,
+        "description": "number of teeth"
+      },
+      "circ_pitch": {
+        "type": "float",
+        "default": 5,
+        "description": "circular pitch in mm"
+      },
+      "worm_diam": {
+        "type": "float",
+        "default": 15,
+        "description": "worm shaft diameter in mm"
+      },
+      "worm_starts": {
+        "type": "int",
+        "default": 1,
+        "description": "number of thread starts on worm"
+      }
+    },
+    "agent_guidance": "Pair with worm() module for the worm shaft. High gear reduction. Often self-locking.",
+    "printability_notes": "Print worm gear flat. Worm shaft prints on side.",
+    "category": "mechanical",
+    "user_intents": [
+      "worm gear",
+      "worm drive",
+      "worm wheel",
+      "high reduction gear",
+      "self-locking gear"
+    ]
+  },
+  "threaded_rod": {
+    "display_name": "Threaded Rod",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/threading.scad>",
+    "example_call": "threaded_rod(d=8, pitch=1.25, l=20);",
+    "key_params": {
+      "d": {
+        "type": "float",
+        "default": 8,
+        "description": "diameter in mm"
+      },
+      "pitch": {
+        "type": "float",
+        "default": 1.25,
+        "description": "thread pitch in mm"
+      },
+      "l": {
+        "type": "float",
+        "default": 20,
+        "description": "length in mm"
+      }
+    },
+    "agent_guidance": "Use standard metric pitches (M3=0.5, M4=0.7, M5=0.8, M6=1.0, M8=1.25). Pair with threaded_nut.",
+    "printability_notes": "Print vertically. Pitch under 1.0mm requires fine nozzle or resin. Add 0.2mm tolerance for mating.",
+    "category": "fasteners",
+    "user_intents": [
+      "threaded rod",
+      "screw thread",
+      "bolt shaft",
+      "threaded shaft",
+      "thread",
+      "rod with threads",
+      "leadscrew"
+    ]
+  },
+  "threaded_nut": {
+    "display_name": "Threaded Nut",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/threading.scad>",
+    "example_call": "threaded_nut(od=13, id=8, pitch=1.25, h=6);",
+    "key_params": {
+      "od": {
+        "type": "float",
+        "default": 13,
+        "description": "outer diameter"
+      },
+      "id": {
+        "type": "float",
+        "default": 8,
+        "description": "inner thread diameter"
+      },
+      "pitch": {
+        "type": "float",
+        "default": 1.25,
+        "description": "thread pitch in mm"
+      },
+      "h": {
+        "type": "float",
+        "default": 6,
+        "description": "height"
+      }
+    },
+    "agent_guidance": "id and pitch must match the threaded_rod. Add 0.2mm tolerance to id for printability.",
+    "printability_notes": "Print flat on hex face.",
+    "category": "fasteners",
+    "user_intents": [
+      "nut",
+      "threaded nut",
+      "hex nut",
+      "coupling nut"
+    ]
+  },
+  "screw": {
+    "display_name": "Screw",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/screws.scad>",
+    "example_call": "screw(\"M5x20\", head=\"socket\");",
+    "key_params": {
+      "spec": {
+        "type": "str",
+        "default": "M5x20",
+        "description": "screw specification e.g. M3x10, M5x20"
+      },
+      "head": {
+        "type": "str",
+        "default": "socket",
+        "description": "head type: socket, hex, flat, button"
+      }
+    },
+    "agent_guidance": "Use standard metric sizes. Common heads: socket, hex, flat, button, pan.",
+    "printability_notes": "Print vertically for best thread quality. Fine threads (M3 and below) are challenging on FDM.",
+    "category": "fasteners",
+    "user_intents": [
+      "screw",
+      "bolt",
+      "fastener",
+      "machine screw",
+      "cap screw",
+      "socket head screw"
+    ]
+  },
+  "screw_hole": {
+    "display_name": "Screw Hole",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/screws.scad>",
+    "example_call": "screw_hole(\"M5\", length=10, head=\"socket\", counterbore=3);",
+    "key_params": {
+      "spec": {
+        "type": "str",
+        "default": "M5",
+        "description": "screw size specification"
+      },
+      "length": {
+        "type": "float",
+        "default": 10,
+        "description": "hole depth in mm"
+      },
+      "head": {
+        "type": "str",
+        "default": "socket",
+        "description": "head type for counterbore shape"
+      },
+      "counterbore": {
+        "type": "float",
+        "default": 0,
+        "description": "counterbore depth in mm"
+      }
+    },
+    "agent_guidance": "Use inside difference() to cut holes in parts. Counterbore hides the screw head.",
+    "printability_notes": "Print with hole axis vertical for best roundness. Holes under 3mm may need drilling.",
+    "category": "fasteners",
+    "user_intents": [
+      "screw hole",
+      "mounting hole",
+      "bolt hole",
+      "clearance hole",
+      "through hole",
+      "fastener hole"
+    ]
+  },
+  "knuckle_hinge": {
+    "display_name": "Knuckle Hinge",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/hinges.scad>",
+    "example_call": "knuckle_hinge(length=30, segs=3, offset=5, arm_height=15);",
+    "key_params": {
+      "length": {
+        "type": "float",
+        "default": 30,
+        "description": "hinge length in mm"
+      },
+      "segs": {
+        "type": "int",
+        "default": 3,
+        "description": "number of knuckle segments"
+      },
+      "offset": {
+        "type": "float",
+        "default": 5,
+        "description": "offset in mm"
+      },
+      "arm_height": {
+        "type": "float",
+        "default": 15,
+        "description": "arm height in mm"
+      }
+    },
+    "agent_guidance": "Print both halves. Use inner=true for the mating half. Add 0.2mm gap for clearance.",
+    "printability_notes": "Print flat. Knuckle segments need good layer adhesion.",
+    "category": "mechanical",
+    "user_intents": [
+      "hinge",
+      "door hinge",
+      "box hinge",
+      "pivot",
+      "swivel joint",
+      "hinge joint",
+      "pin hinge"
+    ]
+  },
+  "snap_lock": {
+    "display_name": "Snap Lock",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/hinges.scad>",
+    "example_call": "snap_lock(thick=3, snaplen=5, snapdiam=5);",
+    "key_params": {
+      "thick": {
+        "type": "float",
+        "default": 3,
+        "description": "material thickness"
+      },
+      "snaplen": {
+        "type": "float",
+        "default": 5,
+        "description": "snap arm length"
+      },
+      "snapdiam": {
+        "type": "float",
+        "default": 5,
+        "description": "snap diameter"
+      }
+    },
+    "agent_guidance": "Pair with snap_socket for the mating part. Material matters \u2014 PLA snaps break, use PETG or nylon.",
+    "printability_notes": "Print with snap arm in XY plane for layer strength.",
+    "category": "mechanical",
+    "user_intents": [
+      "snap fit",
+      "clip",
+      "latch",
+      "snap lock",
+      "click fit",
+      "snap fastener",
+      "clip lock"
+    ]
+  },
+  "ball_bearing": {
+    "display_name": "Ball Bearing",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/ball_bearings.scad>",
+    "example_call": "ball_bearing(\"608\");",
+    "key_params": {
+      "trade_size": {
+        "type": "str",
+        "default": "608",
+        "description": "standard bearing size: 608, 624, 625, 6001"
+      }
+    },
+    "agent_guidance": "Common sizes \u2014 608 (skateboard), 624 (small), 625 (mini). This generates a model of the bearing for visualization/housing design.",
+    "printability_notes": "Not meant for functional printing \u2014 use as reference to design bearing housings.",
+    "category": "mechanical",
+    "user_intents": [
+      "bearing",
+      "ball bearing",
+      "roller bearing",
+      "rotary bearing",
+      "spin bearing"
+    ]
+  },
+  "linear_bearing": {
+    "display_name": "Linear Bearing Housing",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/linear_bearings.scad>",
+    "example_call": "linear_bearing_housing(d=15, l=24, tab=8, wall=3);",
+    "key_params": {
+      "d": {
+        "type": "float",
+        "default": 15,
+        "description": "bearing outer diameter"
+      },
+      "l": {
+        "type": "float",
+        "default": 24,
+        "description": "bearing length"
+      },
+      "tab": {
+        "type": "float",
+        "default": 8,
+        "description": "mounting tab size"
+      },
+      "wall": {
+        "type": "float",
+        "default": 3,
+        "description": "housing wall thickness"
+      }
+    },
+    "agent_guidance": "Standard sizes: LM8UU (d=15), LM10UU (d=19), LM12UU (d=21).",
+    "printability_notes": "Print upright. Ensure wall thickness is sufficient for the bearing press-fit.",
+    "category": "mechanical",
+    "user_intents": [
+      "linear bearing",
+      "slider bearing",
+      "rail bearing",
+      "linear slide",
+      "linear motion",
+      "sliding bearing"
+    ]
+  },
+  "nema_stepper_motor": {
+    "display_name": "NEMA Stepper Motor",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/nema_steppers.scad>",
+    "example_call": "nema_stepper_motor(size=17, h=40, shaft_len=20);",
+    "key_params": {
+      "size": {
+        "type": "int",
+        "default": 17,
+        "description": "NEMA size: 8, 11, 14, 17, 23, 34"
+      },
+      "h": {
+        "type": "float",
+        "default": 40,
+        "description": "motor body height"
+      },
+      "shaft_len": {
+        "type": "float",
+        "default": 20,
+        "description": "shaft length in mm"
+      }
+    },
+    "agent_guidance": "Most common is NEMA 17 for 3D printers and CNC. Use nema_mount_mask() to create screw mounting holes.",
+    "printability_notes": "Reference model for designing mounts \u2014 use nema_mount_mask() in difference().",
+    "category": "electronics",
+    "user_intents": [
+      "stepper motor",
+      "NEMA motor",
+      "motor mount",
+      "motor housing",
+      "NEMA 17",
+      "motor bracket"
+    ]
+  },
+  "joiner": {
+    "display_name": "Joiner",
+    "library": "BOSL2",
+    "import_line": "include <BOSL2/std.scad>\ninclude <BOSL2/joiners.scad>",
+    "example_call": "joiner(l=40, w=10, base=10);",
+    "key_params": {
+      "l": {
+        "type": "float",
+        "default": 40,
+        "description": "total length"
+      },
+      "w": {
+        "type": "float",
+        "default": 10,
+        "description": "width"
+      },
+      "base": {
+        "type": "float",
+        "default": 10,
+        "description": "base thickness"
+      }
+    },
+    "agent_guidance": "Use half_joiner and half_joiner2 for mating pairs. Print-in-place dovetail joints.",
+    "printability_notes": "Print flat. Clearance built in for print-in-place assembly.",
+    "category": "mechanical",
+    "user_intents": [
+      "dovetail",
+      "joint",
+      "interlocking",
+      "snap joint",
+      "mechanical joint",
+      "puzzle joint",
+      "interlock"
+    ]
+  }
+}

@@ -639,7 +639,8 @@ def enhance_prompt_with_design_intelligence(
     *,
     material: str | None = None,
     printer_model: str | None = None,
-    max_length: int = _MAX_PROMPT_LENGTH,
+    provider: str | None = None,
+    max_length: int | None = None,
 ) -> ImprovedPrompt:
     """Enhance a generation prompt with design intelligence constraints.
 
@@ -652,9 +653,17 @@ def enhance_prompt_with_design_intelligence(
 
     :param prompt: The original generation prompt.
     :param material: Optional material to constrain to.
-    :param max_length: Maximum allowed prompt length.
+    :param printer_model: Optional printer model for build-volume/capability
+        constraints.
+    :param provider: Provider name (e.g. ``"meshy"``, ``"openscad"``) for
+        prompt-length limit lookup.  Ignored when *max_length* is given.
+    :param max_length: Explicit maximum prompt length.  When ``None`` the
+        limit is derived from *provider* via
+        :func:`get_provider_prompt_limit`.
     :returns: An :class:`ImprovedPrompt` with design constraints applied.
     """
+    limit = max_length if max_length is not None else get_provider_prompt_limit(provider)
+
     try:
         from kiln.design_intelligence import (
             get_design_constraints,
@@ -682,9 +691,6 @@ def enhance_prompt_with_design_intelligence(
             expected_improvements=[],
         )
 
-    # Extract the most impactful constraints from the brief
-    constraints: list[str] = []
-
     # Material design limits — use actual per-material values, not hardcoded
     rules = brief.combined_rules
     mat = brief.recommended_material
@@ -692,66 +698,155 @@ def enhance_prompt_with_design_intelligence(
     if mat and mat.material and hasattr(mat.material, "design_limits"):
         mat_limits = mat.material.design_limits or {}
 
+    # -----------------------------------------------------------------
+    # Core constraints (always included regardless of budget)
+    # -----------------------------------------------------------------
+    core_constraints: list[str] = []
+
     # Wall thickness — prefer material-specific recommended value
     rec_wall = mat_limits.get("recommended_wall_thickness_mm") or rules.get("min_wall_thickness_mm")
     if rec_wall:
-        constraints.append(f"minimum wall thickness {rec_wall}mm")
+        core_constraints.append(f"minimum wall thickness {rec_wall}mm")
 
     if rules.get("infill_min_pct"):
-        constraints.append(f"solid infill, minimum {rules['infill_min_pct']}% density")
+        core_constraints.append(f"solid infill, minimum {rules['infill_min_pct']}% density")
     if rules.get("gussets_required"):
-        constraints.append("triangular gussets at load-bearing joints")
+        core_constraints.append("triangular gussets at load-bearing joints")
     if rules.get("fillets_required"):
         radius = rules.get("fillet_min_radius_mm", 1)
-        constraints.append(f"rounded fillets (min {radius}mm radius) at corners and joints")
+        core_constraints.append(f"rounded fillets (min {radius}mm radius) at corners and joints")
 
     # Material suitability
     if mat and mat.material:
-        constraints.append(f"designed for {mat.material.display_name} material")
+        core_constraints.append(f"designed for {mat.material.display_name} material")
 
     # Printer build volume
     if printer_profile:
         build = printer_profile.build_volume_mm
-        constraints.append(
+        core_constraints.append(
             f"fit within {build['x']} x {build['y']} x {build['z']} mm build volume"
         )
 
     # Material-specific overhang/bridge limits
     overhang_limit = mat_limits.get("max_unsupported_overhang_deg", 50)
-    constraints.append(f"no overhangs greater than {overhang_limit} degrees")
+    core_constraints.append(f"no overhangs greater than {overhang_limit} degrees")
 
     bridge_limit = mat_limits.get("max_bridge_length_mm")
     if bridge_limit:
-        constraints.append(f"minimize bridges, max {bridge_limit}mm unsupported spans")
+        core_constraints.append(f"minimize bridges, max {bridge_limit}mm unsupported spans")
 
     cantilever_limit = mat_limits.get("max_cantilever_length_mm")
     if cantilever_limit:
-        constraints.append(f"max cantilever length {cantilever_limit}mm")
+        core_constraints.append(f"max cantilever length {cantilever_limit}mm")
 
     # Pattern-specific constraints — include design rules, not just orientation
     for pattern in brief.applicable_patterns[:2]:
         if pattern.print_orientation:
-            constraints.append(pattern.print_orientation_reason)
+            core_constraints.append(pattern.print_orientation_reason)
         # Include the most important pattern-specific rule
         if hasattr(pattern, "design_rules") and pattern.design_rules:
             for key in ("min_arm_thickness_mm", "min_wall_thickness_mm"):
                 val = pattern.design_rules.get(key)
                 if val:
-                    constraints.append(f"{pattern.display_name}: min {key.replace('_', ' ')} {val}")
+                    core_constraints.append(
+                        f"{pattern.display_name}: min {key.replace('_', ' ')} {val}"
+                    )
                     break
 
     # Printability fundamentals
-    constraints.append("flat bottom for bed adhesion")
-    constraints.append("single solid body, no floating parts")
+    core_constraints.append("flat bottom for bed adhesion")
+    core_constraints.append("single solid body, no floating parts")
 
     # Inject top combined_guidance strings (expert rules) when budget allows.
-    # These are the most actionable material/requirement-specific notes.
-    if max_length > 800 and brief.combined_guidance:
+    if limit > 800 and brief.combined_guidance:
         for guidance in brief.combined_guidance[:3]:
-            # Trim long guidance strings to fit budget
             short = guidance[:120].rstrip(". ") if len(guidance) > 120 else guidance.rstrip(". ")
-            if short not in constraints:
-                constraints.append(short)
+            if short not in core_constraints:
+                core_constraints.append(short)
+
+    # -----------------------------------------------------------------
+    # Detailed constraints (included when prompt budget allows)
+    # -----------------------------------------------------------------
+    detailed_constraints: list[str] = []
+
+    # From mat_limits — precision design limits
+    min_hole = mat_limits.get("min_hole_diameter_mm")
+    if min_hole:
+        detailed_constraints.append(f"minimum hole diameter {min_hole}mm")
+
+    min_pin = mat_limits.get("min_pin_diameter_mm")
+    if min_pin:
+        detailed_constraints.append(f"minimum pin diameter {min_pin}mm")
+
+    snap_tol = mat_limits.get("snap_fit_tolerance_mm")
+    if snap_tol:
+        detailed_constraints.append(f"snap-fit clearance tolerance \u00b1{snap_tol}mm")
+
+    press_fit = mat_limits.get("press_fit_interference_mm")
+    if press_fit:
+        detailed_constraints.append(f"press-fit interference {press_fit}mm")
+
+    thread_pitch = mat_limits.get("thread_min_pitch_mm")
+    if thread_pitch:
+        detailed_constraints.append(f"minimum thread pitch {thread_pitch}mm for printable threads")
+
+    # From MaterialProfile thermal/chemical properties
+    if mat and mat.material:
+        max_service = mat.material.thermal.get("max_service_temp_c")
+        if max_service:
+            detailed_constraints.append(f"designed for environments up to {max_service}\u00b0C")
+
+        warping = mat.material.thermal.get("warping_tendency")
+        if warping in ("high", "very_high") and (printer_profile is None or not printer_profile.has_enclosure):
+            detailed_constraints.append(
+                "design with warping mitigation: chamfered corners, "
+                "avoid large flat surfaces, gradual geometry transitions"
+            )
+
+        uv_res = mat.material.chemical.get("uv_resistance")
+        if uv_res in ("poor", "very_poor"):
+            detailed_constraints.append("not suitable for prolonged outdoor/UV exposure")
+
+        moisture = mat.material.chemical.get("moisture_absorption")
+        if moisture == "high":
+            detailed_constraints.append("avoid designs requiring long-term water contact")
+
+    # From PrinterDesignProfile
+    if printer_profile:
+        typ_tol = printer_profile.typical_tolerance_mm
+        if typ_tol:
+            detailed_constraints.append(
+                f"design tolerances for \u00b1{typ_tol}mm printer accuracy"
+            )
+
+        if not printer_profile.has_direct_drive:
+            mat_lower = (material or "").lower()
+            if mat_lower in ("tpu", "flexible", "tpe"):
+                detailed_constraints.append(
+                    "design for bowden extruder: avoid thin walls under 1.5mm, "
+                    "minimize retractions"
+                )
+
+        if printer_profile.max_print_speed_mm_s > 300:
+            detailed_constraints.append(
+                "optimized for high-speed printing: reinforce thin features "
+                "to resist vibration"
+            )
+
+        layer_heights = printer_profile.default_layer_heights_mm
+        if layer_heights:
+            mid = layer_heights[len(layer_heights) // 2]
+            detailed_constraints.append(f"optimized for {mid}mm layer height")
+
+    # -----------------------------------------------------------------
+    # Combine based on budget
+    # -----------------------------------------------------------------
+    if limit > 2000:
+        constraints = core_constraints + detailed_constraints
+    elif limit > 800:
+        constraints = core_constraints + detailed_constraints[:5]
+    else:
+        constraints = core_constraints
 
     if not constraints:
         return ImprovedPrompt(
@@ -764,20 +859,20 @@ def enhance_prompt_with_design_intelligence(
         )
 
     # Build the enhanced prompt — use more constraints when budget allows
-    max_constraints = 8 if max_length <= 600 else 15
+    max_constraints = 8 if limit <= 600 else 15
     requirements = ". ".join(constraints[:max_constraints])
     suffix = f" Requirements: {requirements}."
 
-    max_original = max_length - len(suffix)
+    max_original = limit - len(suffix)
     if max_original < 20:
         suffix = f" Requirements: {'. '.join(constraints[:4])}."
-        max_original = max_length - len(suffix)
+        max_original = limit - len(suffix)
 
     trimmed = prompt[:max_original].rstrip()
     improved = trimmed + suffix
 
-    if len(improved) > max_length:
-        improved = improved[: max_length - 3] + "..."
+    if len(improved) > limit:
+        improved = improved[: limit - 3] + "..."
 
     return ImprovedPrompt(
         original_prompt=prompt,
@@ -787,6 +882,152 @@ def enhance_prompt_with_design_intelligence(
         iteration=0,
         expected_improvements=[
             f"Design-aware generation with {len(constraints)} constraints applied",
+        ],
+    )
+
+
+def build_parametric_generation_prompt(
+    requirements: str,
+    *,
+    material: str | None = None,
+    printer_model: str | None = None,
+) -> ImprovedPrompt:
+    """Build a prompt optimized for parametric OpenSCAD code generation.
+
+    Uses the full design intelligence pipeline with ``provider="openscad"``
+    (100K char limit) and wraps the result in OpenSCAD-specific
+    instructions that guide the LLM to produce well-structured
+    parametric code.
+
+    :param requirements: Natural-language description of the desired part.
+    :param material: Optional material to constrain to.
+    :param printer_model: Optional printer model for build-volume constraints.
+    :returns: An :class:`ImprovedPrompt` with OpenSCAD instructions prepended.
+    """
+    # Get design-intelligence-enhanced prompt
+    inner = enhance_prompt_with_design_intelligence(
+        requirements,
+        material=material,
+        printer_model=printer_model,
+        provider="openscad",
+    )
+
+    # Check for matching library components
+    matched_components: list = []
+    try:
+        from kiln.components import match_components
+
+        matched_components = match_components(requirements)
+    except Exception:
+        logger.debug("Component matching unavailable", exc_info=True)
+
+    # Build library rule and component section conditionally
+    if matched_components:
+        # Collect unique library imports
+        libraries_used: set[str] = set()
+        for m in matched_components:
+            libraries_used.add(m.component.library)
+
+        lib_rule = (
+            "- You may use these bundled OpenSCAD libraries: "
+            + ", ".join(sorted(libraries_used))
+            + "\n"
+        )
+
+        # Build component reference section
+        comp_lines = [
+            "\nAVAILABLE COMPONENTS (use these instead of writing from scratch):"
+        ]
+        for m in matched_components[:5]:  # limit to top 5
+            c = m.component
+            comp_lines.append(f"\n## {c.display_name}")
+            comp_lines.append(f"Import: {c.import_line}")
+            comp_lines.append(f"Usage: {c.example_call}")
+            if c.key_params:
+                param_strs = []
+                for pname, pinfo in c.key_params.items():
+                    desc = pinfo.get("description", pname)
+                    default = pinfo.get("default", "")
+                    param_strs.append(f"  - {pname}: {desc} (default: {default})")
+                comp_lines.append("Parameters:\n" + "\n".join(param_strs))
+            if c.agent_guidance:
+                comp_lines.append(f"Note: {c.agent_guidance}")
+            if c.printability_notes:
+                comp_lines.append(f"Printing: {c.printability_notes}")
+
+        component_section = "\n".join(comp_lines)
+    else:
+        lib_rule = "- No external library dependencies (pure OpenSCAD)\n"
+        component_section = ""
+
+    # OpenSCAD instruction header
+    header = (
+        "Generate valid OpenSCAD code for the following design.\n"
+        "\n"
+        "RULES:\n"
+        "- Put ALL adjustable dimensions as named variables at the top of the file\n"
+        "- Add a comment after each variable with units and valid range: "
+        "// mm (min: 2, max: 50)\n"
+        "- Use descriptive variable names (wall_thickness, not wt)\n"
+        "- Organize code with modules for logical groupings\n"
+        "- Use $fn=60 or higher for smooth curves\n"
+        "- Design for FDM 3D printing: flat bottom, printable geometry\n"
+        "- Single solid body unless multi-part is explicitly requested\n"
+        + lib_rule
+    )
+
+    # Material limits comment block
+    mat_comment = ""
+    try:
+        from kiln.design_intelligence import get_material_profile
+
+        if material:
+            mat_profile = get_material_profile(material)
+            if mat_profile:
+                dl = mat_profile.design_limits or {}
+                lines = [f"// Material: {mat_profile.display_name} \u2014 Design limits:"]
+                rec_wall = dl.get("recommended_wall_thickness_mm")
+                if rec_wall:
+                    lines.append(f"// - Recommended wall thickness: {rec_wall}mm")
+                overhang = dl.get("max_unsupported_overhang_deg")
+                if overhang:
+                    lines.append(f"// - Max unsupported overhang: {overhang}\u00b0")
+                bridge = dl.get("max_bridge_length_mm")
+                if bridge:
+                    lines.append(f"// - Max bridge length: {bridge}mm")
+                min_hole = dl.get("min_hole_diameter_mm")
+                if min_hole:
+                    lines.append(f"// - Min hole diameter: {min_hole}mm")
+                min_pin = dl.get("min_pin_diameter_mm")
+                if min_pin:
+                    lines.append(f"// - Min pin diameter: {min_pin}mm")
+                snap_tol = dl.get("snap_fit_tolerance_mm")
+                if snap_tol:
+                    lines.append(f"// - Snap-fit tolerance: \u00b1{snap_tol}mm")
+                if len(lines) > 1:
+                    mat_comment = "\n".join(lines) + "\n"
+    except Exception:
+        logger.debug("Could not load material profile for OpenSCAD comment", exc_info=True)
+
+    # Combine: header + material comment + components + enhanced prompt
+    parts = [header]
+    if mat_comment:
+        parts.append(mat_comment)
+    if component_section:
+        parts.append(component_section)
+    parts.append(inner.improved_prompt)
+
+    combined = "\n".join(parts)
+
+    return ImprovedPrompt(
+        original_prompt=requirements,
+        improved_prompt=combined,
+        feedback_applied=[],
+        constraints_added=inner.constraints_added,
+        iteration=0,
+        expected_improvements=[
+            f"Parametric OpenSCAD prompt with {len(inner.constraints_added)} "
+            "design constraints applied",
         ],
     )
 
