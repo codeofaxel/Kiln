@@ -85,6 +85,55 @@ BUILTIN_MATERIALS: dict[str, MaterialProfile] = {
         tool_temp_default=270.0,
         bed_temp_default=110.0,
     ),
+    "PLA+": MaterialProfile(
+        name="PLA+",
+        density_g_per_cm3=1.24,
+        cost_per_kg_usd=28.0,
+        tool_temp_default=215.0,
+        bed_temp_default=60.0,
+    ),
+    "CF-PLA": MaterialProfile(
+        name="CF-PLA",
+        density_g_per_cm3=1.30,
+        cost_per_kg_usd=45.0,
+        tool_temp_default=220.0,
+        bed_temp_default=60.0,
+    ),
+    "SILK-PLA": MaterialProfile(
+        name="SILK-PLA",
+        density_g_per_cm3=1.24,
+        cost_per_kg_usd=30.0,
+        tool_temp_default=215.0,
+        bed_temp_default=60.0,
+    ),
+    "HIPS": MaterialProfile(
+        name="HIPS",
+        density_g_per_cm3=1.04,
+        cost_per_kg_usd=22.0,
+        tool_temp_default=240.0,
+        bed_temp_default=100.0,
+    ),
+    "PVA": MaterialProfile(
+        name="PVA",
+        density_g_per_cm3=1.23,
+        cost_per_kg_usd=60.0,
+        tool_temp_default=200.0,
+        bed_temp_default=45.0,
+    ),
+    "PP": MaterialProfile(
+        name="PP",
+        density_g_per_cm3=0.90,
+        cost_per_kg_usd=35.0,
+        tool_temp_default=240.0,
+        bed_temp_default=85.0,
+    ),
+    "PEEK": MaterialProfile(
+        name="PEEK",
+        density_g_per_cm3=1.30,
+        cost_per_kg_usd=300.0,
+        tool_temp_default=400.0,
+        bed_temp_default=120.0,
+    ),
 }
 
 
@@ -108,6 +157,13 @@ class CostEstimate:
     printer_wattage: float = 200.0
     total_cost_usd: float = 0.0
     warnings: list[str] = field(default_factory=list)
+    support_weight_grams: float = 0.0
+    support_cost_usd: float = 0.0
+    adhesion_weight_grams: float = 0.0
+    adhesion_cost_usd: float = 0.0
+    total_plastic_volume_mm3: float = 0.0
+    infill_percent: float = 20.0
+    cost_breakdown: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -295,6 +351,183 @@ class CostEstimator:
             printer_wattage=printer_wattage,
             total_cost_usd=round(total_cost, 2),
             warnings=warnings,
+        )
+
+    def estimate_from_mesh(
+        self,
+        file_path: str,
+        material: str = "PLA",
+        infill_percent: float = 20.0,
+        wall_layers: int = 3,
+        layer_height_mm: float = 0.2,
+        nozzle_mm: float = 0.4,
+        include_supports: bool = False,
+        support_density: float = 15.0,
+        adhesion_type: str = "none",
+        electricity_rate: float = 0.12,
+        printer_wattage: float = 200.0,
+    ) -> CostEstimate:
+        """Estimate print cost directly from a 3D mesh file (STL/OBJ/GLB).
+
+        Analyzes mesh geometry to compute material volume, weight, filament
+        length, support/adhesion costs, electricity, and total cost.  Uses
+        only stdlib-based mesh parsing — no external dependencies required.
+
+        :param file_path: Path to an STL, OBJ, or 3MF mesh file.
+        :param material: Filament material name (case-insensitive).
+        :param infill_percent: Interior infill density (0-100).
+        :param wall_layers: Number of perimeter wall layers.
+        :param layer_height_mm: Slicer layer height in mm.
+        :param nozzle_mm: Nozzle diameter in mm.
+        :param include_supports: Whether to estimate support material.
+        :param support_density: Support infill density (0-100).
+        :param adhesion_type: ``"none"``, ``"brim"``, or ``"raft"``.
+        :param electricity_rate: Electricity cost per kWh in USD.
+        :param printer_wattage: Printer power consumption in watts.
+        :returns: :class:`CostEstimate` with full cost breakdown.
+        :raises FileNotFoundError: If *file_path* does not exist.
+        :raises ValueError: If the mesh has zero or negative volume.
+        """
+        from kiln.generation.validation import analyze_mesh
+
+        if not os.path.isfile(file_path):
+            raise FileNotFoundError(f"Mesh file not found: {file_path}")
+
+        warnings: list[str] = []
+
+        # Analyze mesh geometry (stdlib-based, no external deps)
+        analysis = analyze_mesh(file_path)
+        if analysis.printability_issues and analysis.volume_mm3 <= 0:
+            raise ValueError(
+                f"Mesh has zero or negative volume ({analysis.volume_mm3:.2f} mm³). "
+                f"The file may be non-manifold or empty."
+            )
+
+        total_volume_mm3 = analysis.volume_mm3
+        surface_area_mm2 = analysis.surface_area_mm2
+
+        if total_volume_mm3 <= 0:
+            raise ValueError(
+                f"Mesh has zero or negative volume ({total_volume_mm3:.2f} mm³). "
+                f"The file may be non-manifold or empty."
+            )
+
+        # Material lookup (case-insensitive)
+        profile = self.get_material(material)
+        if profile is None:
+            warnings.append(f"Unknown material '{material}', using PLA defaults")
+            profile = BUILTIN_MATERIALS["PLA"]
+
+        # --- Shell and infill volume ---
+        shell_thickness_mm = wall_layers * nozzle_mm
+        shell_volume_mm3 = surface_area_mm2 * shell_thickness_mm
+        interior_volume_mm3 = max(0.0, total_volume_mm3 - shell_volume_mm3)
+        infill_volume_mm3 = interior_volume_mm3 * (infill_percent / 100.0)
+        total_plastic_mm3 = shell_volume_mm3 + infill_volume_mm3
+
+        # --- Weight and filament length ---
+        density = profile.density_g_per_cm3
+        weight_g = (total_plastic_mm3 / 1000.0) * density
+
+        filament_radius_mm = profile.filament_diameter_mm / 2.0
+        cross_section_mm2 = math.pi * filament_radius_mm * filament_radius_mm
+        filament_length_mm = total_plastic_mm3 / cross_section_mm2
+        filament_length_m = filament_length_mm / 1000.0
+
+        filament_cost = (weight_g / 1000.0) * profile.cost_per_kg_usd
+
+        # --- Support estimation ---
+        support_weight_g = 0.0
+        support_cost = 0.0
+        if include_supports and analysis.overhang_percentage > 0:
+            # Estimate support volume from overhang percentage and part height
+            dims = analysis.dimensions_mm or {}
+            part_height = dims.get("height_mm", 0.0)
+            overhang_frac = analysis.overhang_percentage / 100.0
+            # Approximate: overhang area * average height * support density
+            overhang_area = surface_area_mm2 * overhang_frac
+            avg_height = part_height / 2.0  # average height of overhangs
+            support_volume_mm3 = (
+                overhang_area * avg_height * (support_density / 100.0)
+            )
+            support_weight_g = (support_volume_mm3 / 1000.0) * density
+            support_cost = (support_weight_g / 1000.0) * profile.cost_per_kg_usd
+
+        # --- Adhesion estimation ---
+        adhesion_weight_g = 0.0
+        adhesion_cost = 0.0
+        dims = analysis.dimensions_mm or {}
+        bbox_x = dims.get("width_mm", 0.0)
+        bbox_y = dims.get("depth_mm", 0.0)
+
+        if adhesion_type == "brim":
+            # Approximate footprint perimeter from bounding box
+            perimeter_mm = 2.0 * (bbox_x + bbox_y)
+            brim_width_mm = 8.0
+            brim_area_mm2 = perimeter_mm * brim_width_mm
+            brim_volume_mm3 = brim_area_mm2 * layer_height_mm
+            adhesion_weight_g = (brim_volume_mm3 / 1000.0) * density
+            adhesion_cost = (adhesion_weight_g / 1000.0) * profile.cost_per_kg_usd
+        elif adhesion_type == "raft":
+            margin_mm = 3.0
+            raft_layers = 3
+            raft_volume_mm3 = (
+                (bbox_x + 2.0 * margin_mm)
+                * (bbox_y + 2.0 * margin_mm)
+                * (raft_layers * layer_height_mm)
+            )
+            adhesion_weight_g = (raft_volume_mm3 / 1000.0) * density
+            adhesion_cost = (adhesion_weight_g / 1000.0) * profile.cost_per_kg_usd
+
+        # --- Print time estimation ---
+        total_extrude_volume = total_plastic_mm3 + (
+            support_weight_g / density * 1000.0 if support_weight_g > 0 else 0.0
+        )
+        print_speed_mm_s = 60.0
+        extrusion_cross_section = nozzle_mm * layer_height_mm
+        travel_overhead = 1.3
+        if extrusion_cross_section > 0:
+            linear_distance_mm = total_extrude_volume / extrusion_cross_section
+            est_time_s = int((linear_distance_mm / print_speed_mm_s) * travel_overhead)
+        else:
+            est_time_s = 0
+
+        # --- Electricity cost ---
+        electricity_cost = 0.0
+        if est_time_s > 0:
+            hours = est_time_s / 3600.0
+            kwh = (printer_wattage / 1000.0) * hours
+            electricity_cost = kwh * electricity_rate
+
+        # --- Totals ---
+        total_cost = filament_cost + support_cost + adhesion_cost + electricity_cost
+
+        cost_breakdown = {
+            "filament": round(filament_cost, 4),
+            "support": round(support_cost, 4),
+            "adhesion": round(adhesion_cost, 4),
+            "electricity": round(electricity_cost, 4),
+        }
+
+        return CostEstimate(
+            file_name=os.path.basename(file_path),
+            material=profile.name,
+            filament_length_meters=round(filament_length_m, 3),
+            filament_weight_grams=round(weight_g, 2),
+            filament_cost_usd=round(filament_cost, 4),
+            estimated_time_seconds=est_time_s if est_time_s > 0 else None,
+            electricity_cost_usd=round(electricity_cost, 4),
+            electricity_rate_kwh=electricity_rate,
+            printer_wattage=printer_wattage,
+            total_cost_usd=round(total_cost, 2),
+            warnings=warnings,
+            support_weight_grams=round(support_weight_g, 2),
+            support_cost_usd=round(support_cost, 4),
+            adhesion_weight_grams=round(adhesion_weight_g, 2),
+            adhesion_cost_usd=round(adhesion_cost, 4),
+            total_plastic_volume_mm3=round(total_plastic_mm3, 2),
+            infill_percent=infill_percent,
+            cost_breakdown=cost_breakdown,
         )
 
     def _estimate_from_3mf_metadata(

@@ -41,6 +41,7 @@ class _DesignToolsPlugin:
         - get_post_processing_guide
         - check_multi_material_pairing
         - get_print_diagnostic
+        - estimate_print_cost_from_mesh
         - build_parametric_prompt
         - parse_scad_parameters
         - update_scad_parameter
@@ -870,6 +871,74 @@ class _DesignToolsPlugin:
                 _logger.error("Print diagnostic failed: %s", exc, exc_info=True)
                 return {"status": "error", "error": str(exc)}
 
+        # ── Cost estimation ─────────────────────────────────────────────────
+
+        @mcp.tool()
+        def estimate_print_cost_from_mesh(
+            file_path: str,
+            material: str = "pla",
+            infill_percent: float = 20.0,
+            wall_layers: int = 3,
+            layer_height_mm: float = 0.2,
+            nozzle_mm: float = 0.4,
+            include_supports: bool = False,
+            support_density: float = 15.0,
+            adhesion_type: str = "none",
+            electricity_rate: float = 0.12,
+            printer_wattage: float = 200.0,
+        ) -> dict:
+            """Estimate total print cost from a 3D model file.
+
+            Calculates material, support, adhesion, and electricity costs directly
+            from mesh geometry — no G-code or slicing required. Includes a detailed
+            cost breakdown and actionable recommendations to reduce cost.
+
+            Supported materials: pla, pla+, petg, abs, tpu, asa, nylon, pc,
+            cf-pla, silk-pla, hips, pva, pp, peek.
+
+            Args:
+                file_path: Path to mesh file (.stl, .obj, or .3mf).
+                material: Material type (default "pla").
+                infill_percent: Interior fill percentage 0-100 (default 20).
+                wall_layers: Number of perimeter shells (default 3).
+                layer_height_mm: Layer height in mm (default 0.2).
+                nozzle_mm: Nozzle diameter in mm (default 0.4).
+                include_supports: Estimate support material cost (default False).
+                support_density: Support infill percentage (default 15).
+                adhesion_type: Bed adhesion type: "none", "brim", or "raft".
+                electricity_rate: Electricity cost in $/kWh (default 0.12).
+                printer_wattage: Printer power consumption in watts (default 200).
+            """
+            from kiln.cost_estimator import CostEstimator
+
+            try:
+                estimator = CostEstimator()
+                estimate = estimator.estimate_from_mesh(
+                    file_path,
+                    material=material,
+                    infill_percent=infill_percent,
+                    wall_layers=wall_layers,
+                    layer_height_mm=layer_height_mm,
+                    nozzle_mm=nozzle_mm,
+                    include_supports=include_supports,
+                    support_density=support_density,
+                    adhesion_type=adhesion_type,
+                    electricity_rate=electricity_rate,
+                    printer_wattage=printer_wattage,
+                )
+                result = estimate.to_dict()
+                result["status"] = "success"
+                return result
+            except FileNotFoundError as exc:
+                _logger.error("Cost estimation file not found: %s", exc)
+                return {"status": "error", "error": str(exc)}
+            except ValueError as exc:
+                _logger.error("Cost estimation invalid input: %s", exc)
+                return {"status": "error", "error": str(exc)}
+            except Exception as exc:
+                _logger.error("Cost estimation failed: %s", exc, exc_info=True)
+                return {"status": "error", "error": str(exc)}
+
         # ── Parametric OpenSCAD tools ──────────────────────────────────────
 
         @mcp.tool()
@@ -1660,6 +1729,53 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("get_design_source failed: %s", exc, exc_info=True)
+                return {"status": "error", "error": str(exc)}
+
+        @mcp.tool()
+        def analyze_warping_risk(
+            file_path: str,
+            material: str = "pla",
+        ) -> dict:
+            """Analyze warping risk for a 3D model based on geometry and material.
+
+            Examines the mesh for warping risk factors: large flat surfaces that
+            tend to curl at corners, tall/narrow geometry prone to thermal
+            contraction pulling, and sharp base corners that lift. Cross-references
+            with the material's known warping tendency (from thermal properties).
+
+            Returns a risk assessment with:
+            - risk_level: "low", "moderate", "high", or "critical"
+            - score_deduction: impact on overall printability score
+            - large_flat_surfaces: detected flat areas prone to warping
+            - height_to_base_ratio: geometry aspect ratio risk factor
+            - material_warping_tendency: material's inherent warp behavior
+            - recommendations: actionable mitigation advice
+
+            Args:
+                file_path: Path to STL or OBJ file to analyze.
+                material: Material ID (e.g. "pla", "abs", "petg"). Defaults to PLA.
+                    Used to look up thermal warping tendency.
+
+            Examples:
+                analyze_warping_risk("/path/to/model.stl", material="abs")
+                analyze_warping_risk("/path/to/plate.stl")  # defaults to PLA
+            """
+            from kiln.printability import analyze_printability
+
+            try:
+                report = analyze_printability(file_path, material=material)
+                if report.warping is not None:
+                    result = report.warping.to_dict()
+                    result["status"] = "success"
+                    result["overall_score"] = report.score
+                    result["overall_grade"] = report.grade
+                    return result
+                return {
+                    "status": "error",
+                    "error": "Warping analysis not available for this model.",
+                }
+            except Exception as exc:
+                _logger.error("Warping analysis failed: %s", exc, exc_info=True)
                 return {"status": "error", "error": str(exc)}
 
 

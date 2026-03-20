@@ -8,6 +8,7 @@ external mesh libraries.
 
 from __future__ import annotations
 
+import contextlib
 import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -122,6 +123,24 @@ class PrintFailureDiagnosis:
 
 
 @dataclass
+class CostAnalysis:
+    """Cost breakdown integrated with printability analysis."""
+
+    estimated_cost_usd: float
+    material_cost_usd: float
+    support_cost_usd: float
+    adhesion_cost_usd: float
+    electricity_cost_usd: float
+    weight_grams: float
+    filament_length_meters: float
+    cost_breakdown: dict[str, float]
+    cost_saving_recommendations: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class PrintabilityReport:
     """Full printability analysis report."""
 
@@ -133,6 +152,7 @@ class PrintabilityReport:
     bridging: BridgingAnalysis
     bed_adhesion: BedAdhesionAnalysis
     supports: SupportAnalysis
+    cost: CostAnalysis | None = None
     model_height_mm: float = 0.0
     recommendations: list[str] = field(default_factory=list)
     estimated_print_time_modifier: float = 1.0  # 1.0 = normal
@@ -712,6 +732,111 @@ def _build_recommendations(
 
 
 # ---------------------------------------------------------------------------
+# Cost analysis
+# ---------------------------------------------------------------------------
+
+
+def _analyze_cost(
+    mesh: Any,
+    file_path: str,
+    material: str = "pla",
+    infill_percent: float = 20.0,
+    needs_supports: bool = False,
+    adhesion_risk: str = "low",
+) -> CostAnalysis:
+    """Compute cost breakdown integrated with printability analysis.
+
+    Uses :class:`~kiln.cost_estimator.CostEstimator` to produce a full
+    cost estimate and generates cost-saving recommendations.
+    """
+    from kiln.cost_estimator import CostEstimator
+
+    estimator = CostEstimator()
+
+    # Map adhesion risk to adhesion type
+    adhesion_type = "brim" if adhesion_risk == "high" else "none"
+
+    estimate = estimator.estimate_from_mesh(
+        file_path,
+        material=material,
+        infill_percent=infill_percent,
+        include_supports=needs_supports,
+        adhesion_type=adhesion_type,
+    )
+
+    # --- Cost-saving recommendations ---
+    recommendations: list[str] = []
+
+    # Suggestion: lower infill
+    if infill_percent > 15.0:
+        lower_est = estimator.estimate_from_mesh(
+            file_path,
+            material=material,
+            infill_percent=15.0,
+            include_supports=needs_supports,
+            adhesion_type=adhesion_type,
+        )
+        savings = estimate.total_cost_usd - lower_est.total_cost_usd
+        if savings > 0.01:
+            recommendations.append(
+                f"Reducing infill from {infill_percent:.0f}% to 15% would save ~${savings:.2f}"
+            )
+
+    # Suggestion: support cost
+    if estimate.support_cost_usd > 0:
+        recommendations.append(
+            f"Support material adds ${estimate.support_cost_usd:.2f}. "
+            f"Reorienting the part may reduce overhang area."
+        )
+
+    # Suggestion: expensive material
+    mat_upper = material.upper()
+    profile = estimator.get_material(mat_upper)
+    if profile is not None and profile.cost_per_kg_usd > 30.0:
+        pla_est = estimator.estimate_from_mesh(
+            file_path,
+            material="PLA",
+            infill_percent=infill_percent,
+            include_supports=needs_supports,
+            adhesion_type=adhesion_type,
+        )
+        savings = estimate.total_cost_usd - pla_est.total_cost_usd
+        if savings > 0.01:
+            recommendations.append(
+                f"Using PLA (~$25/kg) instead of {mat_upper} "
+                f"(~${profile.cost_per_kg_usd:.0f}/kg) would save ~${savings:.2f}"
+            )
+
+    # Suggestion: high infill on expensive prints
+    if estimate.total_cost_usd > 5.0 and infill_percent > 20.0:
+        low_est = estimator.estimate_from_mesh(
+            file_path,
+            material=material,
+            infill_percent=10.0,
+            include_supports=needs_supports,
+            adhesion_type=adhesion_type,
+        )
+        savings = estimate.total_cost_usd - low_est.total_cost_usd
+        if savings > 0.01:
+            recommendations.append(
+                f"For non-structural parts, 10% infill is often sufficient "
+                f"— potential savings ~${savings:.2f}"
+            )
+
+    return CostAnalysis(
+        estimated_cost_usd=estimate.total_cost_usd,
+        material_cost_usd=estimate.filament_cost_usd,
+        support_cost_usd=estimate.support_cost_usd,
+        adhesion_cost_usd=estimate.adhesion_cost_usd,
+        electricity_cost_usd=estimate.electricity_cost_usd,
+        weight_grams=estimate.filament_weight_grams,
+        filament_length_meters=estimate.filament_length_meters,
+        cost_breakdown=estimate.cost_breakdown,
+        cost_saving_recommendations=recommendations,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -723,6 +848,8 @@ def analyze_printability(
     layer_height: float = 0.2,
     max_overhang_angle: float = 45.0,
     build_volume: tuple[float, float, float] | None = None,
+    material: str = "pla",
+    infill_percent: float = 20.0,
 ) -> PrintabilityReport:
     """Run a full printability analysis on a mesh file.
 
@@ -733,6 +860,8 @@ def analyze_printability(
         supports are needed.
     :param build_volume: Optional (X, Y, Z) build volume in mm.  If
         provided, the report will warn if the model exceeds it.
+    :param material: Material ID for cost analysis (default ``"pla"``).
+    :param infill_percent: Interior infill density (0-100) for cost estimation.
     :returns: A :class:`PrintabilityReport` with scores, grades, and
         recommendations.
     :raises ValueError: If the file cannot be parsed.
@@ -806,6 +935,18 @@ def analyze_printability(
 
     model_height = bbox["z_max"] - bbox["z_min"]
 
+    # Cost analysis (gracefully degrades if unavailable).
+    cost: CostAnalysis | None = None
+    with contextlib.suppress(Exception):
+        cost = _analyze_cost(
+            None,  # mesh object unused — estimator reloads from file
+            file_path,
+            material=material,
+            infill_percent=infill_percent,
+            needs_supports=overhangs.needs_supports,
+            adhesion_risk=bed_adhesion.adhesion_risk,
+        )
+
     return PrintabilityReport(
         printable=printable,
         score=score,
@@ -815,6 +956,7 @@ def analyze_printability(
         bridging=bridging,
         bed_adhesion=bed_adhesion,
         supports=supports,
+        cost=cost,
         model_height_mm=round(model_height, 2),
         recommendations=recommendations,
         estimated_print_time_modifier=round(time_mod, 2),
