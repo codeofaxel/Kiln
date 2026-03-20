@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
 import struct
 import uuid as _uuid_mod
 from dataclasses import asdict, dataclass, field
@@ -168,7 +169,11 @@ class Assembly:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Assembly:
-        """Reconstruct an Assembly from a dict produced by ``to_dict``."""
+        """Reconstruct an Assembly from a dict (e.g., from JSON).
+
+        Note: bypasses ``add_part`` validation (duplicate IDs, free-tier
+        limit) intentionally — deserialized data is assumed pre-validated.
+        """
         assembly = cls(
             assembly_id=data["assembly_id"],
             name=data["name"],
@@ -229,7 +234,6 @@ class Assembly:
 
 
 def _compute_bbox(
-    triangles: list[tuple[tuple[float, ...], ...]],
     vertices: list[tuple[float, ...]],
     offset: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> dict[str, float]:
@@ -298,10 +302,13 @@ _DATA_DIR = Path(__file__).resolve().parent / "data" / "design_knowledge"
 @lru_cache(maxsize=1)
 def _load_design_patterns() -> dict[str, Any]:
     """Load design_patterns.json with ``@lru_cache``."""
-    with open(_DATA_DIR / "design_patterns.json") as fh:
-        data: dict[str, Any] = json.load(fh)
-    # Strip _meta key
-    return {k: v for k, v in data.items() if not k.startswith("_")}
+    path = Path(__file__).resolve().parent / "data" / "design_knowledge" / "design_patterns.json"
+    try:
+        with open(path) as fh:
+            data: dict[str, Any] = json.load(fh)
+        return {k: v for k, v in data.items() if not k.startswith("_")}
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +373,14 @@ def check_clearance(
         missing = part_a_id if part_a is None else part_b_id
         raise ValueError(f"Part '{missing}' not found in assembly '{assembly.name}'")
 
+    for p in (part_a, part_b):
+        if p.rotation_deg != (0.0, 0.0, 0.0):
+            raise NotImplementedError(
+                f"Part '{p.part_id}' has rotation {p.rotation_deg}. "
+                "Clearance checking with rotation is not yet supported — "
+                "use position_mm offsets only, or pre-rotate the STL file."
+            )
+
     errors_a: list[str] = []
     errors_b: list[str] = []
     tri_a, verts_a = _parse_stl(Path(part_a.file_path), errors_a)
@@ -375,8 +390,8 @@ def check_clearance(
         all_errors = errors_a + errors_b
         raise ValueError(f"STL parse errors: {'; '.join(all_errors)}")
 
-    bbox_a = _compute_bbox(tri_a, verts_a, part_a.position_mm)
-    bbox_b = _compute_bbox(tri_b, verts_b, part_b.position_mm)
+    bbox_a = _compute_bbox(verts_a, part_a.position_mm)
+    bbox_b = _compute_bbox(verts_b, part_b.position_mm)
 
     overlaps = _aabb_overlap(bbox_a, bbox_b)
     overlap_vol = _aabb_overlap_volume(bbox_a, bbox_b) if overlaps else 0.0
@@ -542,6 +557,9 @@ def validate_joint(
                 f"typical minimum {clearance_range[0]} mm."
             )
 
+    else:
+        issues.append(f"Unknown joint type '{jtype}' — no design rules available for validation.")
+
     # -- Material compatibility from design_patterns.json -----------------
     if pattern and "material_compatibility" in pattern:
         compat = pattern["material_compatibility"]
@@ -619,6 +637,12 @@ def compose_assembly(
 
     try:
         for part in assembly.parts:
+            if part.rotation_deg != (0.0, 0.0, 0.0):
+                raise NotImplementedError(
+                    f"Part '{part.part_id}' has rotation {part.rotation_deg}. "
+                    "Composing with rotation is not yet supported — "
+                    "use position_mm offsets only, or pre-rotate the STL file."
+                )
             errors: list[str] = []
             triangles, _verts = _parse_stl(Path(part.file_path), errors)
             if errors:
@@ -633,15 +657,12 @@ def compose_assembly(
 
         result = compose_stls(temp_files, output_path)
     finally:
-        # Clean up temp files
-        for tf in temp_files:
-            Path(tf).unlink(missing_ok=True)
-        temp_dir.rmdir()
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
     # Compute overall bounding box from the composed output
     errors_out: list[str] = []
     tri_out, verts_out = _parse_stl(Path(output_path), errors_out)
-    bbox = _compute_bbox(tri_out, verts_out) if not errors_out else {}
+    bbox = _compute_bbox(verts_out) if not errors_out else {}
 
     return {
         "output_path": output_path,

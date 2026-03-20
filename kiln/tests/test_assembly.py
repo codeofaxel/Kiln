@@ -186,7 +186,7 @@ class TestClearance:
 
         result = check_clearance(asm, "a", "b")
         # Touching faces: clearance should be approximately 0
-        assert result.min_clearance_mm == pytest.approx(0.0, abs=1.0)
+        assert result.min_clearance_mm == pytest.approx(0.0, abs=0.1)
 
 
 class TestJointValidation:
@@ -392,3 +392,224 @@ class TestMaxPartsLimit:
         _write_box_stl(extra_stl, 5, 5, 5)
         with pytest.raises(ValueError):
             asm.add_part(AssemblyPart(part_id="overflow", file_path=extra_stl))
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage
+# ---------------------------------------------------------------------------
+
+
+class TestJointTypeValidationParametrized:
+    @pytest.mark.parametrize(
+        "joint_type,clearance,expected_valid",
+        [
+            ("snap_fit", 0.2, True),       # in range 0.1-0.3
+            ("snap_fit", 0.5, False),      # too much clearance
+            ("press_fit", -0.1, True),     # interference in range
+            ("press_fit", 0.5, False),     # no interference
+            ("clearance_fit", 0.5, True),  # loose enough
+            ("clearance_fit", 0.1, False), # too tight
+            ("threaded", 0.2, True),       # in range
+            ("glued", 0.1, True),          # in range
+            ("loose", 1.0, True),          # loose enough
+            ("loose", 0.1, True),          # below range but only produces recommendation, not issue
+        ],
+    )
+    def test_joint_type_validation(self, two_box_stls, joint_type, clearance, expected_valid):
+        """Parametrized validation across all 6 joint types."""
+        a_path, b_path = two_box_stls
+        iface = MatingInterface(
+            part_a_id="a",
+            part_b_id="b",
+            joint_type=joint_type,
+            clearance_mm=clearance,
+            tolerance_mm=0.1,
+        )
+        parts_dict = {
+            "a": AssemblyPart(part_id="a", file_path=a_path, material="PETG"),
+            "b": AssemblyPart(part_id="b", file_path=b_path, material="PETG"),
+        }
+        result = validate_joint(iface, parts_dict)
+        assert result.valid is expected_valid, (
+            f"joint_type={joint_type}, clearance={clearance}: "
+            f"expected valid={expected_valid}, got valid={result.valid}, "
+            f"issues={result.issues}"
+        )
+
+
+class TestUnknownJointType:
+    def test_unknown_joint_type_warning(self, two_box_stls):
+        """Unknown joint type should produce an issue about no rules."""
+        a_path, b_path = two_box_stls
+        iface = MatingInterface(
+            part_a_id="a",
+            part_b_id="b",
+            joint_type="welded",
+            clearance_mm=0.2,
+            tolerance_mm=0.1,
+        )
+        parts_dict = {
+            "a": AssemblyPart(part_id="a", file_path=a_path, material="PLA"),
+            "b": AssemblyPart(part_id="b", file_path=b_path, material="PLA"),
+        }
+        result = validate_joint(iface, parts_dict)
+        assert len(result.issues) > 0, "Expected issues for unknown joint type 'welded'"
+        assert any("unknown" in issue.lower() or "welded" in issue.lower() for issue in result.issues)
+
+
+class TestPLASnapFitBrittleness:
+    def test_pla_snap_fit_brittleness_warning(self, two_box_stls):
+        """PLA snap_fit should produce brittleness recommendation."""
+        a_path, b_path = two_box_stls
+        iface = MatingInterface(
+            part_a_id="a",
+            part_b_id="b",
+            joint_type="snap_fit",
+            clearance_mm=0.2,
+            tolerance_mm=0.1,
+        )
+        parts_dict = {
+            "a": AssemblyPart(part_id="a", file_path=a_path, material="PLA"),
+            "b": AssemblyPart(part_id="b", file_path=b_path, material="PLA"),
+        }
+        result = validate_joint(iface, parts_dict)
+        all_text = " ".join(result.recommendations + result.issues).lower()
+        assert "brittle" in all_text or "pla" in all_text, (
+            f"Expected brittleness warning for PLA snap_fit, "
+            f"got recommendations={result.recommendations}, issues={result.issues}"
+        )
+
+
+class TestComposeEmptyAssembly:
+    def test_compose_empty_assembly_raises(self, tmp_path):
+        """Composing an assembly with no parts raises ValueError."""
+        asm = create_assembly("empty")
+        with pytest.raises(ValueError, match="no parts"):
+            compose_assembly(asm, str(tmp_path / "out.stl"))
+
+
+class TestComposeOutputValidSTL:
+    def test_compose_output_valid_stl(self, tmp_path):
+        """Composed STL should be re-parseable as valid binary STL."""
+        from pathlib import Path as _Path
+
+        from kiln.generation.validation import _parse_stl
+
+        stl_a = str(tmp_path / "a.stl")
+        stl_b = str(tmp_path / "b.stl")
+        _write_box_stl(stl_a, 10, 10, 10)
+        _write_box_stl(stl_b, 10, 10, 10)
+
+        asm = create_assembly("test")
+        asm.add_part(AssemblyPart(part_id="a", file_path=stl_a, position_mm=(0, 0, 0)))
+        asm.add_part(AssemblyPart(part_id="b", file_path=stl_b, position_mm=(30, 0, 0)))
+
+        output = str(tmp_path / "composed.stl")
+        compose_assembly(asm, output)
+
+        errors: list[str] = []
+        triangles, verts = _parse_stl(_Path(output), errors)
+        assert not errors, f"Composed STL has parse errors: {errors}"
+        assert len(triangles) == 24  # 12 per box
+
+
+class TestClearanceExactDistance:
+    def test_clearance_exact_distance(self, tmp_path):
+        """Two 20mm boxes, 50mm apart center-to-center, should have exactly 30mm clearance."""
+        stl_a = str(tmp_path / "a.stl")
+        stl_b = str(tmp_path / "b.stl")
+        _write_box_stl(stl_a, 20, 20, 20)
+        _write_box_stl(stl_b, 20, 20, 20)
+
+        asm = create_assembly("test")
+        # Box A centered at x=0 (spans -10 to +10)
+        asm.add_part(AssemblyPart(part_id="a", file_path=stl_a, position_mm=(0, 0, 0)))
+        # Box B centered at x=50 (spans 40 to 60)
+        asm.add_part(AssemblyPart(part_id="b", file_path=stl_b, position_mm=(50, 0, 0)))
+
+        check = check_clearance(asm, "a", "b")
+        # Gap = 40 - 10 = 30mm
+        assert check.min_clearance_mm == pytest.approx(30.0, abs=0.01)
+
+
+class TestClearanceMissingPart:
+    def test_clearance_missing_part_raises(self, tmp_path):
+        """check_clearance with non-existent part_id raises ValueError."""
+        stl_a = str(tmp_path / "a.stl")
+        _write_box_stl(stl_a, 10, 10, 10)
+
+        asm = create_assembly("test")
+        asm.add_part(AssemblyPart(part_id="p1", file_path=stl_a, position_mm=(0, 0, 0)))
+
+        with pytest.raises(ValueError):
+            check_clearance(asm, "p1", "nonexistent")
+
+
+class TestRotationNotSupported:
+    def test_rotation_not_supported(self, tmp_path):
+        """Parts with non-zero rotation should raise NotImplementedError in clearance check."""
+        stl_a = str(tmp_path / "a.stl")
+        stl_b = str(tmp_path / "b.stl")
+        _write_box_stl(stl_a, 10, 10, 10)
+        _write_box_stl(stl_b, 10, 10, 10)
+
+        asm = create_assembly("test")
+        asm.add_part(AssemblyPart(
+            part_id="p1", file_path=stl_a, position_mm=(0, 0, 0), rotation_deg=(0, 0, 90),
+        ))
+        asm.add_part(AssemblyPart(
+            part_id="p2", file_path=stl_b, position_mm=(30, 0, 0),
+        ))
+
+        with pytest.raises(NotImplementedError, match="rotation"):
+            check_clearance(asm, "p1", "p2")
+
+
+class TestCreateAssemblyExplicitId:
+    def test_create_assembly_explicit_id(self):
+        """create_assembly with explicit assembly_id uses it."""
+        asm = create_assembly("test", assembly_id="custom-123")
+        assert asm.assembly_id == "custom-123"
+
+
+class TestRoundtripWithValidationData:
+    def test_roundtrip_with_validation_data(self, tmp_path):
+        """to_dict/from_dict preserves clearance_checks and joint_validations."""
+        stl_a = str(tmp_path / "a.stl")
+        stl_b = str(tmp_path / "b.stl")
+        _write_box_stl(stl_a, 10, 10, 10)
+        _write_box_stl(stl_b, 10, 10, 10)
+
+        asm = create_assembly("roundtrip_validation")
+        asm.add_part(AssemblyPart(part_id="a", file_path=stl_a, position_mm=(0, 0, 0)))
+        asm.add_part(AssemblyPart(part_id="b", file_path=stl_b, position_mm=(50, 0, 0)))
+        asm.add_interface(MatingInterface(
+            part_a_id="a", part_b_id="b", joint_type="snap_fit",
+            clearance_mm=0.2, tolerance_mm=0.1,
+        ))
+
+        # Run full validation to populate clearance_checks and joint_validations
+        validate_assembly(asm)
+        assert len(asm.clearance_checks) > 0
+        assert len(asm.joint_validations) > 0
+
+        # Roundtrip through dict
+        data = asm.to_dict()
+        restored = Assembly.from_dict(data)
+
+        # Verify clearance_checks preserved
+        assert len(restored.clearance_checks) == len(asm.clearance_checks)
+        assert restored.clearance_checks[0].part_a_id == asm.clearance_checks[0].part_a_id
+        assert restored.clearance_checks[0].min_clearance_mm == pytest.approx(
+            asm.clearance_checks[0].min_clearance_mm, abs=0.01,
+        )
+        assert restored.clearance_checks[0].overlaps == asm.clearance_checks[0].overlaps
+
+        # Verify joint_validations preserved
+        assert len(restored.joint_validations) == len(asm.joint_validations)
+        assert restored.joint_validations[0].joint_type == asm.joint_validations[0].joint_type
+        assert restored.joint_validations[0].valid == asm.joint_validations[0].valid
+
+        # Verify overall_valid and recommendations preserved
+        assert restored.overall_valid == asm.overall_valid
+        assert restored.recommendations == asm.recommendations
