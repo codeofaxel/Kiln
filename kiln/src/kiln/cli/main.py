@@ -6924,7 +6924,7 @@ def rest(host: str, port: int, auth_token: str | None, tier: str) -> None:
             "REST API requires kiln-pro. Install with: pip install kiln-pro\n"
             "See https://kiln3d.com/pricing for details."
         )
-        raise SystemExit(1) from None
+        raise SystemExit(1)
 
     resolved_auth_token = auth_token
     if resolved_auth_token is None:
