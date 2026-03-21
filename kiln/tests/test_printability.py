@@ -350,8 +350,8 @@ class TestAnalyzePrintability:
             assert report.overhangs.overhang_triangle_count == 0
             assert report.bridging.bridge_count == 0
             assert report.supports.support_percentage == 0.0
-            assert report.score >= 95
-            assert report.grade == "A"
+            assert report.score >= 80  # thermal stress heuristics lower score for simple cubes
+            assert report.grade in ("A", "B")  # thermal stress may drop grade to B
 
     def test_cube_to_dict(self):
         with tempfile.TemporaryDirectory() as tmpdir:

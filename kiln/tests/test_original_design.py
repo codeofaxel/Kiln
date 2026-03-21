@@ -147,8 +147,8 @@ class TestAuditOriginalDesign:
             )
 
         assert audit.ready_for_print is True
-        assert audit.readiness_score >= 90
-        assert audit.readiness_grade == "A"
+        assert audit.readiness_score >= 80  # thermal stress heuristics lower score
+        assert audit.readiness_grade in ("A", "B")  # thermal stress may lower grade
         assert audit.blockers == []
         assert audit.orientation is not None
         assert audit.enhanced_prompt["improved_prompt"] != "simple coaster"
@@ -193,7 +193,7 @@ class TestGenerateOriginalDesign:
         assert session.ready_for_print is True
         assert session.best_attempt_number == 2
         assert session.attempts_made == 2
-        assert session.best_readiness_score >= 90
+        assert session.best_readiness_score >= 80  # thermal stress heuristics lower score
         assert session.attempts[0].readiness_score < session.attempts[1].readiness_score
         assert provider.prompts[0] != provider.prompts[1]
         assert session.attempts[0].next_prompt_suggestion == provider.prompts[1]
