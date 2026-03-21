@@ -10,13 +10,13 @@
       The intelligence layer between your idea and a physical object.
     </p>
 
+    <p class="install-label">Get started</p>
     <div class="install-block">
-      <code><span class="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/codeofaxel/Kiln/main/install.sh | sh</code>
+      <code><span class="prompt">$</span> pip install kiln3d</code>
       <button class="copy-install">Copy</button>
     </div>
     <p class="install-alt">
-      or: <code>pip install kiln3d</code> &middot;
-      Requires Python 3.10+
+      Then connect your printer and create objects with AI.
     </p>
 
     <div class="badges">
@@ -34,9 +34,7 @@
 <script>
   const copyBtn = document.querySelector('.copy-install');
   copyBtn?.addEventListener('click', () => {
-    navigator.clipboard.writeText(
-      'curl -fsSL https://raw.githubusercontent.com/codeofaxel/Kiln/main/install.sh | sh'
-    );
+    navigator.clipboard.writeText('pip install kiln3d');
     if (copyBtn) {
       copyBtn.textContent = 'Copied!';
       setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
@@ -112,6 +110,14 @@
   }
 
   /* Install block */
+  .install-label {
+    font-size: clamp(14px, 2vw, 16px);
+    font-weight: 600;
+    color: var(--text);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 12px;
+  }
   .install-block {
     background: var(--bg-code);
     border: 1px solid var(--border);
