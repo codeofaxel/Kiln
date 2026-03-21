@@ -29,6 +29,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kiln.step_import import (
+    SUBPROCESS_TIMEOUT_S,
+    TESSELLATION_TOLERANCE,
     NoBackendError,
     StepImportError,
     StepImportResult,
@@ -564,3 +566,136 @@ def test_no_backend_error_message():
     assert "gmsh" in str(err).lower()
     assert "cadquery" in str(err).lower()
     assert str(err) == _INSTALL_HELP
+
+
+# ---------------------------------------------------------------------------
+# 21. Malformed JSON in KILN_RESULT line
+# ---------------------------------------------------------------------------
+
+
+def test_parse_subprocess_malformed_json():
+    """Malformed JSON in KILN_RESULT raises StepImportError."""
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = "KILN_RESULT:{not valid json\n"
+    mock_proc.stderr = ""
+
+    with pytest.raises(StepImportError, match="malformed result JSON"):
+        _parse_subprocess_result(mock_proc, "FreeCAD")
+
+
+# ---------------------------------------------------------------------------
+# 22. KILN_RESULT missing required keys
+# ---------------------------------------------------------------------------
+
+
+def test_parse_subprocess_missing_keys():
+    """KILN_RESULT with missing keys raises StepImportError."""
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = 'KILN_RESULT:{"body_count": 1}\n'
+    mock_proc.stderr = ""
+
+    with pytest.raises(StepImportError, match="missing required keys"):
+        _parse_subprocess_result(mock_proc, "Gmsh")
+
+
+# ---------------------------------------------------------------------------
+# 23. Empty STEP file metadata extraction
+# ---------------------------------------------------------------------------
+
+
+def test_metadata_empty_step_file(tmp_dir: Path):
+    """get_step_metadata handles an empty STEP file gracefully."""
+    f = tmp_dir / "empty.step"
+    f.write_text("")
+    metadata = get_step_metadata(str(f))
+
+    assert metadata["file_name"] == "empty.step"
+    assert metadata["file_size_bytes"] == 0
+    assert metadata["estimated_body_count"] == 0
+    assert metadata["products"] == []
+    assert metadata["schema"] is None
+
+
+# ---------------------------------------------------------------------------
+# 24. Conversion with no output files raises
+# ---------------------------------------------------------------------------
+
+
+@patch("kiln.step_import._find_freecad_cmd", return_value=None)
+@patch("kiln.step_import._find_gmsh_cmd", return_value=None)
+@patch("kiln.step_import._cadquery_available", return_value=True)
+def test_convert_no_output_files_raises(mock_cq, mock_gmsh, mock_fc, sample_step_file):
+    """Conversion that produces no output files raises StepImportError."""
+    # Return paths that don't exist on disk.
+    with patch(
+        "kiln.step_import._convert_via_cadquery",
+        return_value=(["/nonexistent/output.stl"], 1),
+    ):
+        with pytest.raises(StepImportError, match="no output files"):
+            convert_step_to_stl(str(sample_step_file))
+
+
+# ---------------------------------------------------------------------------
+# 25. Configurable constants are sensible
+# ---------------------------------------------------------------------------
+
+
+def test_configurable_constants():
+    """TESSELLATION_TOLERANCE and SUBPROCESS_TIMEOUT_S have sensible defaults."""
+    assert 0.001 <= TESSELLATION_TOLERANCE <= 1.0
+    assert 30 <= SUBPROCESS_TIMEOUT_S <= 3600
+
+
+# ---------------------------------------------------------------------------
+# 26. FreeCAD failure falls through to Gmsh
+# ---------------------------------------------------------------------------
+
+
+@patch("kiln.step_import._find_freecad_cmd", return_value="FreeCADCmd")
+@patch("kiln.step_import._find_gmsh_cmd", return_value="gmsh")
+@patch("kiln.step_import._cadquery_available", return_value=False)
+def test_freecad_failure_falls_to_gmsh(mock_cq, mock_gmsh, mock_fc, sample_step_file):
+    """When FreeCAD raises a non-StepImportError, falls through to Gmsh."""
+    out_stl = sample_step_file.parent / "merged.stl"
+    out_stl.write_bytes(b"\x00" * 100)
+
+    kiln_result = json.dumps({"body_count": 1, "outputs": [str(out_stl)]})
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = f"KILN_RESULT:{kiln_result}\n"
+    mock_proc.stderr = ""
+
+    call_count = 0
+
+    def side_effect(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("FreeCAD crashed")
+        return mock_proc
+
+    with patch("kiln.step_import.subprocess.run", side_effect=side_effect):
+        result = convert_step_to_stl(str(sample_step_file))
+        assert result.body_count == 1
+        assert any("FreeCAD failed" in w for w in result.warnings)
+
+
+# ---------------------------------------------------------------------------
+# 27. Subprocess stderr is truncated in error messages
+# ---------------------------------------------------------------------------
+
+
+def test_parse_subprocess_truncates_stderr():
+    """Long stderr is truncated to prevent huge error messages."""
+    mock_proc = MagicMock()
+    mock_proc.returncode = 1
+    mock_proc.stdout = ""
+    mock_proc.stderr = "X" * 1000
+
+    with pytest.raises(StepImportError) as exc_info:
+        _parse_subprocess_result(mock_proc, "FreeCAD")
+
+    # stderr should be capped at 500 chars.
+    assert len(str(exc_info.value)) < 600

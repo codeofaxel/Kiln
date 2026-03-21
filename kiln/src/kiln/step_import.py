@@ -10,6 +10,7 @@ This is a **free-tier** feature — no kiln-pro dependency.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -28,6 +29,12 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _VALID_EXTENSIONS = frozenset({".step", ".stp"})
+
+#: Default tessellation tolerance for mesh conversion (lower = finer mesh).
+TESSELLATION_TOLERANCE: float = 0.1
+
+#: Subprocess timeout in seconds for FreeCAD/Gmsh backends.
+SUBPROCESS_TIMEOUT_S: int = 300
 
 _INSTALL_HELP = (
     "No STEP import backend found. Install one of:\n"
@@ -49,6 +56,7 @@ import Mesh
 step_path = {step_path!r}
 output_dir = {output_dir!r}
 merge = {merge!r}
+tolerance = {tolerance!r}
 
 doc = FreeCAD.newDocument("import")
 Part.insert(step_path, doc.Name)
@@ -58,11 +66,10 @@ body_count = len(bodies)
 
 if merge or body_count <= 1:
     shapes = [obj.Shape for obj in bodies]
-    compound = Part.makeCompound(shapes)
     out_path = os.path.join(output_dir, "merged.stl")
     mesh = Mesh.Mesh()
     for s in shapes:
-        mesh.addMesh(Mesh.Mesh(s.tessellate(0.1)))
+        mesh.addMesh(Mesh.Mesh(s.tessellate(tolerance)))
     mesh.write(out_path)
     outputs = [out_path]
 else:
@@ -72,7 +79,7 @@ else:
         name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
         out_path = os.path.join(output_dir, "%s.stl" % name)
         m = Mesh.Mesh()
-        m.addMesh(Mesh.Mesh(obj.Shape.tessellate(0.1)))
+        m.addMesh(Mesh.Mesh(obj.Shape.tessellate(tolerance)))
         m.write(out_path)
         outputs.append(out_path)
 
@@ -281,6 +288,7 @@ def _convert_via_freecad(
         step_path=str(step_path),
         output_dir=str(output_dir),
         merge=merge_bodies,
+        tolerance=TESSELLATION_TOLERANCE,
     )
 
     with tempfile.NamedTemporaryFile(
@@ -294,7 +302,7 @@ def _convert_via_freecad(
             [freecad_cmd, script_path],
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=SUBPROCESS_TIMEOUT_S,
         )
     finally:
         os.unlink(script_path)
@@ -328,7 +336,7 @@ def _convert_via_gmsh(
             ["python3", script_path],
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=SUBPROCESS_TIMEOUT_S,
         )
     finally:
         os.unlink(script_path)
@@ -378,8 +386,6 @@ def _parse_subprocess_result(
     Raises:
         StepImportError: If the subprocess failed or result not found.
     """
-    import json
-
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()[:500]
         raise StepImportError(
@@ -388,7 +394,17 @@ def _parse_subprocess_result(
 
     for line in (result.stdout or "").splitlines():
         if line.startswith("KILN_RESULT:"):
-            data = json.loads(line[len("KILN_RESULT:"):])
+            try:
+                data = json.loads(line[len("KILN_RESULT:"):])
+            except json.JSONDecodeError as exc:
+                raise StepImportError(
+                    f"{backend_name} produced malformed result JSON: {exc}"
+                ) from exc
+            if "outputs" not in data or "body_count" not in data:
+                raise StepImportError(
+                    f"{backend_name} result missing required keys "
+                    f"('outputs', 'body_count'): {data!r}"
+                )
             return data["outputs"], data["body_count"]
 
     raise StepImportError(
@@ -479,10 +495,19 @@ def convert_step_to_stl(
 
     elapsed = time.monotonic() - t0
 
+    # Verify at least one output file was actually created.
+    existing = [p for p in outputs if Path(p).exists()]
+    if not existing:
+        raise StepImportError(
+            "Conversion produced no output files. "
+            f"Expected: {outputs}"
+        )
+    missing = set(outputs) - set(existing)
+    if missing:
+        warnings.append(f"Some output files were not created: {sorted(missing)}")
+
     # Compute total file size.
-    total_size = sum(
-        Path(p).stat().st_size for p in outputs if Path(p).exists()
-    )
+    total_size = sum(Path(p).stat().st_size for p in existing)
 
     primary = outputs[0] if len(outputs) == 1 else str(out_dir)
 
