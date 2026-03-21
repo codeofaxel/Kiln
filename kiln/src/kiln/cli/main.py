@@ -9848,6 +9848,203 @@ def uptime(json_mode: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# step
+# ---------------------------------------------------------------------------
+
+
+@cli.group("step")
+def step_group() -> None:
+    """Import and inspect STEP/STP CAD files."""
+    pass
+
+
+@step_group.command("import")
+@click.argument("file_path")
+@click.option("--output-dir", default=None, help="Output directory (default: same as input).")
+@click.option("--merge/--no-merge", "merge_bodies", default=True, help="Merge multi-body STEP into single STL.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def step_import(file_path: str, output_dir: str | None, merge_bodies: bool, json_mode: bool) -> None:
+    """Convert a STEP/STP file to STL for printing."""
+    try:
+        from kiln.step_import import convert_step_to_stl
+
+        result = convert_step_to_stl(file_path, output_dir=output_dir, merge_bodies=merge_bodies)
+        if json_mode:
+            click.echo(format_response("success", data=result.to_dict(), json_mode=True))
+        else:
+            click.echo(f"✓ Converted {os.path.basename(file_path)} → {len(result.output_paths)} file(s)")
+            for p in result.output_paths:
+                click.echo(f"  {p}")
+            click.echo(f"  Bodies: {result.body_count} | Time: {result.conversion_time_s:.1f}s")
+            if result.warnings:
+                for w in result.warnings:
+                    click.echo(f"  ⚠ {w}")
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@step_group.command("info")
+@click.argument("file_path")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def step_info(file_path: str, json_mode: bool) -> None:
+    """Show metadata from a STEP file without converting it."""
+    try:
+        from kiln.step_import import get_step_metadata
+
+        meta = get_step_metadata(file_path)
+        if json_mode:
+            click.echo(format_response("success", data=meta, json_mode=True))
+        else:
+            click.echo(f"STEP file: {os.path.basename(file_path)}")
+            for key, val in meta.items():
+                click.echo(f"  {key}: {val}")
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@step_group.command("check")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def step_check(json_mode: bool) -> None:
+    """Check which STEP conversion backends are available."""
+    try:
+        from kiln.step_import import check_step_support
+
+        support = check_step_support()
+        if json_mode:
+            click.echo(format_response("success", data=support, json_mode=True))
+        else:
+            click.echo("STEP import backends:")
+            for backend, available in support.get("backends", {}).items():
+                status = "✓ available" if available else "✗ not found"
+                click.echo(f"  {backend}: {status}")
+            if support.get("any_available"):
+                click.echo("\n✓ STEP import is ready.")
+            else:
+                click.echo("\n✗ No backends found. Install FreeCAD, Gmsh, or CadQuery.")
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# versions
+# ---------------------------------------------------------------------------
+
+
+@cli.group("versions")
+def versions_group() -> None:
+    """Manage design version history."""
+    pass
+
+
+@versions_group.command("save")
+@click.argument("design_id")
+@click.argument("file_path")
+@click.option("--notes", default="", help="Notes about this version.")
+@click.option("--prompt", "design_prompt", default="", help="Original design prompt.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def versions_save(design_id: str, file_path: str, notes: str, design_prompt: str, json_mode: bool) -> None:
+    """Save a new version of a design from a file."""
+    try:
+        from kiln.design_versions import DesignVersionStore
+
+        source = Path(file_path).read_text()
+        store = DesignVersionStore()
+        try:
+            version = store.save_version(design_id, source, notes=notes, prompt=design_prompt)
+            if json_mode:
+                click.echo(format_response("success", data=version.to_dict(), json_mode=True))
+            else:
+                click.echo(f"✓ Saved {design_id} v{version.version_number} ({version.version_id[:8]})")
+        finally:
+            store.close()
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@versions_group.command("list")
+@click.argument("design_id")
+@click.option("--limit", default=20, help="Max versions to show.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def versions_list(design_id: str, limit: int, json_mode: bool) -> None:
+    """List all versions of a design."""
+    try:
+        from kiln.design_versions import DesignVersionStore
+
+        store = DesignVersionStore()
+        try:
+            versions = store.list_versions(design_id, limit=limit)
+            if json_mode:
+                click.echo(format_response("success", data=[v.to_dict() for v in versions], json_mode=True))
+            else:
+                if not versions:
+                    click.echo(f"No versions found for '{design_id}'.")
+                    return
+                click.echo(f"Versions of '{design_id}' ({len(versions)} total):")
+                for v in versions:
+                    ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(v.created_at))
+                    notes = f" — {v.notes}" if v.notes else ""
+                    click.echo(f"  v{v.version_number}  {v.version_id[:8]}  {ts}{notes}")
+        finally:
+            store.close()
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@versions_group.command("diff")
+@click.argument("version_a")
+@click.argument("version_b")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def versions_diff(version_a: str, version_b: str, json_mode: bool) -> None:
+    """Show diff between two design versions."""
+    try:
+        from kiln.design_versions import DesignVersionStore
+
+        store = DesignVersionStore()
+        try:
+            diff = store.diff_versions(version_a, version_b)
+            if json_mode:
+                click.echo(format_response("success", data={"diff": diff}, json_mode=True))
+            else:
+                if diff:
+                    click.echo(diff)
+                else:
+                    click.echo("No differences between versions.")
+        finally:
+            store.close()
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
+@versions_group.command("rollback")
+@click.argument("design_id")
+@click.argument("version_id")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def versions_rollback(design_id: str, version_id: str, json_mode: bool) -> None:
+    """Rollback a design to a previous version (creates a new version from it)."""
+    try:
+        from kiln.design_versions import DesignVersionStore
+
+        store = DesignVersionStore()
+        try:
+            new_version = store.rollback(design_id, version_id)
+            if json_mode:
+                click.echo(format_response("success", data=new_version.to_dict(), json_mode=True))
+            else:
+                click.echo(f"✓ Rolled back '{design_id}' to {version_id[:8]} → new v{new_version.version_number}")
+        finally:
+            store.close()
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
 def main() -> None:
     """CLI entry point."""
     cli()
