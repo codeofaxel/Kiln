@@ -1,74 +1,66 @@
 ---
 const features = [
   {
-    icon: '\u{1F6E1}\uFE0F',
-    title: 'Hardware-Safe by Default',
-    desc: "Per-printer temperature limits, G-code validation, mandatory pre-flight checks, rate limiting, and emergency stop. Safety profiles for 30 printer models — agents can't bypass them.",
+    icon: '\u{1F4A1}',
+    title: 'Design Intelligence',
+    desc: '52 materials with mechanical properties, 20 proven design patterns (snap-fits, living hinges, threads), 70 parametric templates, and structural load estimation. Kiln understands what makes a good print before generating anything.',
   },
   {
-    icon: '\u{1F5A8}\uFE0F',
-    title: '5 Printer Backends',
-    desc: 'Native adapters for OctoPrint, Moonraker (Klipper), Bambu Lab (MQTT), Elegoo (SDCP), and Prusa Link. Same commands work across all of them.',
-  },
-  {
-    icon: '\u{1F527}',
-    title: 'CLI + MCP Server',
-    desc: '132 CLI commands with --json output for agents, or 432 MCP tools for deeper integration. Pick whichever your agent platform supports.',
-  },
-  {
-    icon: '\u2702\uFE0F',
-    title: 'Integrated Slicing',
-    desc: 'PrusaSlicer and OrcaSlicer integration with bundled profiles for popular printers. Go from STL to print in one pipeline.',
-  },
-  {
-    icon: '\u{1F3ED}',
-    title: 'Outsourced Manufacturing',
-    desc: 'No local printer? Kiln quotes and places orders through Craftcloud\u2019s network of 150+ print services (no API key needed). Same CLI, same safety model.',
-  },
-  {
-    icon: '\u{1F4E1}',
-    title: 'Fleet Management',
-    desc: 'Multi-printer registry, priority job queue, smart routing based on print history, background scheduling, and pub/sub event bus.',
-  },
-  {
-    icon: '\u{1F441}\uFE0F',
-    title: 'Vision Monitoring',
-    desc: "Webcam snapshots for first-layer checks and print quality monitoring. Agents can see what\u2019s happening on the build plate.",
-  },
-  {
-    icon: '\u{1F9CA}',
+    icon: '\u2728',
     title: 'Text & Sketch to 3D',
-    desc: 'Generate printable models from text descriptions or napkin sketches via Gemini Deep Think, Meshy, Tripo3D, Stability AI, or OpenSCAD. Auto-discovers providers from env vars. Mesh validation before printing.',
+    desc: 'Describe what you want or sketch it. Kiln generates printable models via Gemini Deep Think, Meshy, Tripo3D, Stability AI, or parametric OpenSCAD with a 14-component catalog. Design DNA preserves the source for iteration.',
   },
   {
-    icon: '\u{1F4E6}',
-    title: 'Model Marketplace Search',
-    desc: 'Search and download 3D models from Thingiverse, MyMiniFactory, and Cults3D (search only). Find existing blueprints before generating from scratch.',
+    icon: '\u{1F52C}',
+    title: 'Printability Engine',
+    desc: 'Every model is analyzed across 7 dimensions: overhangs, thin walls, bridging, bed adhesion, support volume, warping risk, and thermal stress. Auto-orientation and adhesion recommendations included.',
   },
   {
-    icon: '\u{1F514}',
-    title: 'Real-Time Webhooks',
-    desc: 'Register HTTP endpoints to receive instant notifications when jobs complete, fail, or change state. HMAC-SHA256 signed payloads for secure integration.',
+    icon: '\u{1F9E9}',
+    title: 'Multi-Part Assembly',
+    desc: 'Design assemblies with up to 10 parts. Clearance validation, joint type detection (snap-fit, press-fit, threaded), tolerance stacking, and automatic split planning for oversize models.',
   },
   {
-    icon: '\u{1F4B0}',
-    title: 'Revenue & Billing',
-    desc: 'Orchestration fee tracking on outsourced manufacturing orders. Monthly summaries, billing history export, and transparent per-order breakdowns. Local printing is always free.',
+    icon: '\u{1F9EE}',
+    title: 'Smart Cost Estimation',
+    desc: 'Know what a print will cost before it starts \u2014 material, electricity, time. Get recommendations for cheaper filament alternatives, faster speed profiles, and quality tradeoffs.',
   },
   {
-    icon: '\u{1F510}',
-    title: 'Confirmation Protocol',
-    desc: 'Every command has a safety level (safe/guarded/confirm/emergency). Agents know when to act autonomously and when to ask the human first.',
+    icon: '\u{1F504}',
+    title: 'Print \u2192 Monitor \u2192 Recover',
+    desc: 'Full lifecycle: slice, validate safety, upload, print, monitor with camera vision, detect failures, diagnose root cause, auto-fix slicer settings, and retry. One conversation, start to finish.',
   },
+  {
+    icon: '\u{1F6E1}\uFE0F',
+    title: 'Safety at Every Step',
+    desc: "29 per-printer safety profiles with temperature and speed limits. G-code validation before every send. Preflight checks, emergency stop, heater watchdog. Agents can\u2019t bypass safety.",
+  },
+  {
+    icon: '\u{1F30D}',
+    title: 'Fleet & Fulfillment',
+    desc: "Multi-printer fleet with job routing, scheduling, and failure rerouting. No local printer? Outsource to Craftcloud\u2019s 150+ third-party services. Same tools, same safety.",
+  },
+  {
+    icon: '\u{1F9F0}',
+    title: '430+ Tools, One Protocol',
+    desc: "430+ MCP tools and 134 CLI commands with --json output. Any MCP-compatible agent (Claude, GPT, custom) gets full access. Open source, MIT licensed, plugin-extensible.",
+  },
+];
+
+const printerBackends = [
+  'OctoPrint',
+  'Moonraker/Klipper',
+  'Bambu Lab',
+  'Prusa Link',
+  'Elegoo',
 ];
 ---
 
 <section id="features">
   <div class="container">
-    <h2>What Kiln 3D does</h2>
+    <h2>How Kiln works</h2>
     <p class="lead">
-      Everything an AI agent needs to go from a model file to a finished print,
-      with safety enforced at every step.
+      From your idea to a physical object &mdash; with intelligence at every step.
     </p>
 
     <div class="features">
@@ -79,6 +71,19 @@ const features = [
           <p>{f.desc}</p>
         </div>
       ))}
+    </div>
+
+    <div class="compat-strip">
+      <p class="compat-title">Works with your printer</p>
+      <div class="compat-list">
+        {printerBackends.map((name, i) => (
+          <>
+            <span class="compat-name">{name}</span>
+            {i < printerBackends.length - 1 && <span class="compat-dot">&middot;</span>}
+          </>
+        ))}
+      </div>
+      <p class="compat-sub">Native adapters for 5 printer backends. Same commands work across all of them.</p>
     </div>
   </div>
 </section>
@@ -112,6 +117,43 @@ const features = [
     margin-bottom: 8px;
   }
   .feature p {
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  .compat-strip {
+    margin-top: 48px;
+    padding: 36px 32px;
+    text-align: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .compat-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+  .compat-list {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .compat-name {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .compat-dot {
+    color: var(--text-muted);
+    font-size: 18px;
+    user-select: none;
+  }
+  .compat-sub {
     font-size: 14px;
     color: var(--text-muted);
     line-height: 1.5;

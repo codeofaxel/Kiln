@@ -8,23 +8,23 @@
 
 ### Overview
 
-Kiln is agentic infrastructure for physical fabrication. It provides a unified interface for AI agents to control 3D printers, outsource to manufacturing services, and route jobs through connected external provider/network integrations — all through the Model Context Protocol (MCP) or a conventional CLI.
+Kiln is the intelligence layer between idea and physical object. It provides a unified interface for AI agents to design, validate, and manufacture 3D-printed parts — controlling local printers, searching third-party model marketplaces (Thingiverse, MyMiniFactory, Cults3D), and routing jobs to fulfillment providers (Craftcloud) — all through the Model Context Protocol (MCP) or a 134-command CLI.
 
-**Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and external provider/network adapters as integrations are available.
+**Clarification:** Kiln does **not** operate its own marketplace or manufacturing network. It integrates with third-party marketplaces for model discovery and third-party fulfillment providers for outsourced manufacturing. Kiln is orchestration and agent infrastructure, not a supply-side platform.
 
 **Three ways to print:**
 
 - **🖨️ Your printers.** Control OctoPrint, Moonraker, Bambu Lab, or Prusa Link machines on your LAN — or remotely via Bambu Cloud.
-- **🏭 Fulfillment centers.** Outsource to Craftcloud (150+ services — no API key required). No printer required — or use alongside local printers for overflow and specialty materials. More providers as integrations launch.
-- **🌐 External provider integrations.** Route jobs through connected third-party provider/network adapters.
+- **🏭 Fulfillment providers.** Route to third-party fulfillment services like Craftcloud (150+ services — no API key required). No printer required — or use alongside local printers for overflow and specialty materials.
+- **🌐 External provider integrations.** Route jobs through connected third-party provider APIs.
 
 All three modes use the same MCP tools and CLI commands.
 
 **Non-goals:**
 
-- Operating a first-party decentralized manufacturing marketplace/network
-- Replacing partner supply-side networks
-- Owning provider marketplaces instead of integrating with them
+- Operating a first-party marketplace or manufacturing network
+- Replacing third-party supply-side platforms
+- Owning marketplaces instead of integrating with them
 - Acting as merchant of record for provider-routed manufacturing orders
 
 **Key properties:**
@@ -52,9 +52,9 @@ All three modes use the same MCP tools and CLI commands.
 
 **MCP Tools** — Typed functions exposed to agents via the Model Context Protocol. Each tool has a defined input schema and returns structured JSON.
 
-**MarketplaceAdapter** — Abstract base class for 3D model repositories. Implements: search, details, files, download. Concrete adapters for Thingiverse (deprecated — acquired by MyMiniFactory, Feb 2026), MyMiniFactory, and Cults3D (search only).
+**MarketplaceAdapter** — Abstract base class for searching third-party 3D model repositories. Implements: search, details, files, download. Concrete adapters for Thingiverse (deprecated — acquired by MyMiniFactory, Feb 2026), MyMiniFactory, and Cults3D (search only). Kiln does not host models — it searches external marketplaces.
 
-**MarketplaceRegistry** — Manages connected marketplace adapters. Provides `search_all()` for parallel fan-out search across all sources with round-robin result interleaving.
+**MarketplaceRegistry** — Manages connected marketplace adapters. Provides `search_all()` for parallel fan-out search across all third-party sources with round-robin result interleaving.
 
 **GenerationProvider** — Abstract base class for text-to-3D model generation backends. Implements: generate, get_job_status, download_result. Concrete providers for Meshy (cloud AI), Tripo3D (cloud AI), Stability AI (synchronous cloud), Gemini Deep Think (AI-reasoned text/sketch-to-3D via Gemini + OpenSCAD), and OpenSCAD (local parametric). A `GenerationRegistry` auto-discovers providers from `KILN_*_API_KEY` environment variables.
 
@@ -278,7 +278,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **432 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **427 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
 
 #### Printer Control
 
@@ -357,12 +357,14 @@ Kiln exposes **432 MCP tools** in total. The most commonly used tools are docume
 | `list_webhooks` | — | Webhook list |
 | `delete_webhook` | `webhook_id` | Confirmation |
 
-#### Cost Estimation
+#### Cost Estimation (Quick Reference)
+
+See [Cost Estimation](#cost-estimation) below for the full tool set including `slice_and_estimate`, `compare_print_options`, and material cost from mesh geometry.
 
 | Tool | Input | Output |
 |---|---|---|
-| `estimate_cost` | `file_path`, `material`, `electricity_rate`, `printer_wattage` | Cost breakdown |
-| `list_materials` | — | Material profiles |
+| `estimate_cost` | `file_path`, `material`, `electricity_rate`, `printer_wattage` | Filament cost + electricity cost + total |
+| `list_materials` | — | 9 material profiles with densities and costs |
 
 #### Material Tracking
 
@@ -429,7 +431,7 @@ Kiln exposes **432 MCP tools** in total. The most commonly used tools are docume
 
 #### External Provider Integrations *(As Integrations Launch)*
 
-Kiln does not operate a first-party marketplace/network. These tools integrate with third-party provider APIs.
+Kiln does not operate its own marketplace or manufacturing network. These tools integrate with third-party provider APIs for capacity discovery and job routing.
 
 | Tool | Input | Output |
 |---|---|---|
@@ -449,11 +451,13 @@ Kiln does not operate a first-party marketplace/network. These tools integrate w
 | `safety_settings` | — | Current safety/auto-print settings |
 | `safety_status` | — | Comprehensive safety status |
 
-#### Fulfillment Services
+#### Fulfillment Services (Third-Party Providers)
+
+Routes manufacturing to third-party fulfillment providers (Craftcloud). Kiln acts as an API client to these providers — it does not operate manufacturing capacity or act as merchant of record.
 
 | Tool | Input | Output |
 |---|---|---|
-| `fulfillment_materials` | `provider` | Available materials from external print services |
+| `fulfillment_materials` | `provider` | Available materials from third-party print services |
 | `fulfillment_quote` | `file_path`, `material_id`, `quantity`, `provider` | Manufacturing quote + provider ownership metadata (`provider_name`, `provider_terms_url`, `support_owner=provider`, `merchant_of_record=provider`) |
 | `fulfillment_order` | `quote_id`, `shipping_option_id`, `payment_hold_id` | Order confirmation with billing + provider metadata (`provider_order_id`) |
 | `fulfillment_order_status` | `order_id` | Order tracking details + provider ownership metadata |
@@ -541,6 +545,17 @@ Pure-Python mesh operations — no external mesh libraries required. Operates di
 | `estimate_print_time` | `file_path`, `profile`, `slicer_path` | Slicer-based print time and filament estimate (requires slicer installed) |
 | `get_feedback_loop_status` | `model_id` | Feedback loop iteration history and resolution status |
 
+#### Original Design Audit & Design DNA
+
+The `generate_original_design` / `audit_original_design` pipeline produces idea-to-part designs and validates them through a multi-gate readiness audit. Each audit gate (mesh validity, printability, design constraints, orientation, build volume) independently passes or blocks with severity levels.
+
+When designs are generated via OpenSCAD (parametric), the pipeline preserves the parametric source code alongside the compiled mesh. This "Design DNA" allows agents to iterate on the design by modifying parameters rather than regenerating from scratch. The `audit_original_design` function chains: mesh validation, printability analysis (7-dimension), design intelligence constraint checking, auto-orientation scoring, and prompt improvement feedback — returning a single `OriginalDesignAudit` with a readiness score, blockers list, and next-action recommendations.
+
+| Tool | Input | Output |
+|---|---|---|
+| `generate_original_design` | `requirements`, `provider`, `material`, `printer_model`, `max_attempts` | Best candidate + readiness audit + retry history |
+| `audit_original_design` | `file_path`, `requirements`, `material`, `printer_model` | Multi-gate audit with readiness score, blockers, next actions |
+
 #### Print Analysis
 
 | Tool | Input | Output |
@@ -577,6 +592,53 @@ Kiln provides structured monitoring data (webcam snapshots, temperatures, print 
 | `suggest_printer_for_job` | `file_hash`, `material_type`, `file_name` | Ranked printers by success rate + availability |
 | `recommend_settings` | `printer_name`, `material_type`, `file_hash` | Median temps/speed, mode slicer profile, confidence, quality distribution |
 
+#### Printability Engine
+
+7-dimension analysis of STL/OBJ meshes for FDM printing readiness. Pure Python (no external mesh libraries). Each dimension produces a typed dataclass result; the composite report includes a 0-100 score, letter grade (A-F), and actionable recommendations.
+
+| Dimension | What it measures | Key output fields |
+|---|---|---|
+| Overhangs | Triangles exceeding the max overhang angle (default 45 deg) | `max_overhang_angle`, `overhang_percentage`, `needs_supports`, `worst_regions` |
+| Thin walls | Walls below nozzle diameter (default 0.4mm) | `min_wall_thickness_mm`, `thin_wall_count`, `problematic_regions` |
+| Bridging | Unsupported horizontal spans | `max_bridge_length_mm`, `bridge_count`, `needs_supports_for_bridges` |
+| Bed adhesion | Contact area at z-min as percentage of bounding-box footprint | `contact_area_mm2`, `contact_percentage`, `adhesion_risk` (low/medium/high) |
+| Support volume | Estimated support material required | `estimated_support_volume_mm3`, `support_percentage`, `support_regions` |
+| Thermal stress | Stress concentration from sharp cross-section changes and tall thin features | `stress_risk`, `concentration_zones`, `recommended_mitigations` |
+| Adhesion force | Estimated peel/shear force at the bed interface for a given material and printer | `estimated_force_n`, `force_margin`, `detachment_risk` |
+
+The last two dimensions (thermal stress and adhesion force) are material-aware heuristics. Thermal stress accounts for layer bonding weakness at sharp geometric transitions. Adhesion force estimation combines contact area, material shrinkage coefficients, and printer type (bed-slinger vs. CoreXY) to predict detachment risk.
+
+| Tool | Input | Output |
+|---|---|---|
+| `analyze_printability` | `file_path`, `nozzle_diameter`, `layer_height`, `max_overhang_angle`, `build_volume_*` | Full `PrintabilityReport` with score, grade, per-dimension results, recommendations |
+| `recommend_adhesion_settings` | `file_path`, `material`, `printer_model`, `has_enclosure` | Brim/raft recommendation with slicer overrides dict |
+| `auto_orient_model` | `file_path`, `output_path` | Auto-rotated mesh minimizing overhangs and maximizing bed contact |
+| `estimate_supports` | `file_path` | Support volume and weight estimate |
+
+Adhesion intelligence includes a decision matrix combining contact percentage, material warp tendency (`_HIGH_WARP_MATERIALS`: ABS, ASA, PA, PC, etc.), bed-slinger detection, enclosure status, and model height to produce concrete slicer overrides (`brim_width`, `brim_type`, `raft_layers`).
+
+#### Multi-Part Assembly & Job Splitting
+
+Splits large models or multi-part assemblies across multiple printers for parallel printing. Three split modes: build volume overflow (model exceeds one printer), multi-copy distribution (N copies across fleet), and assembly splitting (multi-STL archive across printers with reassembly instructions).
+
+| Tool | Input | Output |
+|---|---|---|
+| `plan_multi_copy_split` | `file_path`, `copies`, `material` | `SplitPlan` with per-printer assignments, time savings percentage |
+| `plan_assembly_split` | `file_paths`, `material` | `SplitPlan` with part-to-printer mapping and assembly instructions |
+| `split_plan_status` | `plan_id` | `SplitProgress` with per-part status and estimated remaining time |
+| `cancel_split_plan` | `plan_id` | Cancellation confirmation |
+
+#### Cost Estimation
+
+G-code and 3MF cost analysis. Parses extrusion totals, calculates filament weight and cost from a 9-material database (PLA, PETG, ABS, TPU, ASA, Nylon, PC, PVA, HIPS), and optionally includes electricity cost from slicer-embedded time estimates. For 3MF files (including Bambu `.gcode.3mf`), extracts slicer metadata directly from the archive.
+
+| Tool | Input | Output |
+|---|---|---|
+| `estimate_cost` | `file_path`, `material`, `electricity_rate`, `printer_wattage` | Filament length/weight/cost, electricity cost, total cost, warnings |
+| `estimate_material_cost` | `file_path`, `material`, `infill_pct`, `wall_layers` | Filament weight (g), length (m), cost ($) for mesh geometry |
+| `compare_print_options` | `file_path`, `material` | Local vs. fulfillment provider cost comparison |
+| `slice_and_estimate` | `input_path`, `material`, `printer_model` | Slice + cost + printability + adhesion recommendation (no print) |
+| `list_materials` | -- | All material profiles with densities and costs |
 
 #### Pipelines (Runtime)
 
@@ -783,9 +845,9 @@ export KILN_PRINTER_MAINBOARD_ID=ABCD1234  # optional
 
 ---
 
-## Model Marketplaces
+## Model Marketplaces (Third-Party Search)
 
-Kiln provides a `MarketplaceAdapter` interface (mirroring the printer adapter pattern) for searching and downloading 3D models from external repositories. A `MarketplaceRegistry` manages connected adapters and exposes `search_all()` for parallel fan-out across all sources.
+Kiln provides a `MarketplaceAdapter` interface (mirroring the printer adapter pattern) for searching and downloading 3D models from third-party repositories. Kiln does not host or serve models itself — it searches external marketplaces on the user's behalf. A `MarketplaceRegistry` manages connected adapters and exposes `search_all()` for parallel fan-out across all sources.
 
 ### Supported Marketplaces
 
@@ -985,13 +1047,16 @@ kiln/src/kiln/
     auth.py              # API key authentication
     billing.py           # Fee tracking
     gcode.py             # G-code safety validator (per-printer limits)
-    safety_profiles.py   # Bundled safety database (30 printer models)
+    safety_profiles.py   # Bundled safety database (29 printer models)
     slicer_profiles.py   # Bundled slicer profiles (auto .ini generation)
     printer_intelligence.py  # Printer knowledge base (quirks, materials, fixes)
     design_intelligence.py   # Design knowledge queries (materials, patterns, constraints)
     design_validator.py      # Design validation + feedback bridge
     pipelines.py         # Pre-validated print pipelines (quick_print, calibrate, benchmark)
-    cost_estimator.py    # Print cost estimation
+    cost_estimator.py    # Print cost estimation (G-code + 3MF, 9 materials)
+    printability.py      # 7-dimension printability engine (overhangs, thin walls, bridging, adhesion, supports, thermal stress, adhesion force)
+    job_splitter.py      # Multi-printer job splitting (multi-copy, assembly, build volume overflow)
+    original_design.py   # Original design audit pipeline (multi-gate readiness)
     materials.py         # Multi-material tracking
     bed_leveling.py      # Bed leveling trigger system
     streaming.py         # MJPEG webcam proxy
@@ -1010,6 +1075,16 @@ kiln/src/kiln/
     backup.py            # Database backup and restore
     log_config.py        # Structured logging configuration
     model_cache.py       # Local model cache with metadata tracking
+    plugins/             # Auto-discovered MCP tool plugins (22 modules)
+        printability_tools.py    # Printability analysis, auto-orient, adhesion
+        recovery_tools.py        # Job splitting, print recovery, checkpoint
+        estimate_tools.py        # Slice-and-estimate (no-print cost preview)
+        smart_print_tools.py     # Smart reprint, AMS-aware printing
+        design_tools.py          # Design intelligence MCP tools
+        generation_tools.py      # Model generation + original design
+        fulfillment_tools.py     # Third-party fulfillment provider tools
+        mesh_diagnostic_tools.py # Advanced mesh diagnostics
+        ...                      # + 14 more plugin modules
     payments/
         base.py          # PaymentProvider interface, PaymentRail enum
         manager.py       # Payment orchestration across providers
@@ -1036,8 +1111,8 @@ kiln/src/kiln/
     fulfillment/
         base.py          # Fulfillment adapter interface
         registry.py      # Provider registry and factory
-        craftcloud.py    # Craftcloud v5 API client (upload → price → cart → order)
-        sculpteo.py      # Sculpteo partner API client (inactive — pending partner credentials)
+        craftcloud.py    # Craftcloud v5 API client (third-party; upload → price → cart → order)
+        sculpteo.py      # Sculpteo partner API client (third-party; inactive — pending partner credentials)
     marketplaces/
         base.py          # Marketplace adapter interface
         myminifactory.py # MyMiniFactory API client (primary)

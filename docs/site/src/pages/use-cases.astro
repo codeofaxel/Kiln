@@ -12,6 +12,58 @@ interface UseCase {
 
 const useCases: UseCase[] = [
   {
+    name: 'design-to-print',
+    title: 'Design-to-print pipeline',
+    description:
+      'Describe what you want in plain language or upload a sketch. Kiln generates the 3D model, validates printability, optimizes orientation, and sends it to your printer — one conversation from idea to physical object.',
+    outcomes: [
+      'Text-to-3D and image-to-3D generation with automatic printability analysis',
+      'Material-aware design intelligence that adapts geometry for your chosen filament',
+      'End-to-end pipeline: describe, generate, validate, slice, print, monitor',
+    ],
+    icon: '🎨',
+    num: '01',
+  },
+  {
+    name: 'printability-analysis',
+    title: 'Printability analysis and optimization',
+    description:
+      'Catch problems before they waste filament. Kiln analyzes models for structural risks, overhang issues, thin walls, and support requirements — then suggests fixes or applies them automatically.',
+    outcomes: [
+      'Structural risk scoring and load-bearing analysis before printing',
+      'Automatic orientation optimization to minimize supports and maximize strength',
+      'Wall thickness validation and mesh repair for manifold geometry',
+    ],
+    icon: '🔍',
+    num: '02',
+  },
+  {
+    name: 'multi-part-assembly',
+    title: 'Multi-part assembly design',
+    description:
+      'Design objects that are too large for a single build plate, or that require multiple materials. Kiln plans the split, generates assembly-ready parts with alignment features, and sequences the prints.',
+    outcomes: [
+      'Automatic splitting of oversized models into printable components',
+      'Assembly planning with connector geometry and alignment guides',
+      'Multi-material print coordination across AMS slots or multiple printers',
+    ],
+    icon: '🧩',
+    num: '03',
+  },
+  {
+    name: 'cost-estimation',
+    title: 'Cost estimation and budgeting',
+    description:
+      'Know the cost before you commit. Kiln estimates material consumption, print time, and electricity for local jobs — or compares quotes from third-party fulfillment providers for outsourced production.',
+    outcomes: [
+      'Per-print material weight, time, and cost breakdown',
+      'Side-by-side comparison of local printing vs. third-party fulfillment quotes',
+      'Project-level cost tracking across multiple prints and materials',
+    ],
+    icon: '📊',
+    num: '04',
+  },
+  {
     name: 'print-farms',
     title: 'Print farm automation',
     description:
@@ -22,33 +74,33 @@ const useCases: UseCase[] = [
       'Centralized telemetry for progress, temperatures, and health',
     ],
     icon: '🏭',
-    num: '01',
+    num: '05',
   },
   {
     name: 'agent-prototyping',
     title: 'AI agent rapid prototyping',
     description:
-      'Let agents move from prompt to physical part by discovering models, slicing for the target printer, and launching monitored jobs with guardrails.',
+      'Let agents move from prompt to physical part by discovering models, slicing for the target printer, and launching monitored jobs with safety guardrails.',
     outcomes: [
-      'Text-to-3D and sketch-to-3D workflows tied to printability checks',
       'Reusable command pipelines for repeated prototype cycles',
-      'CLI + MCP support for custom app integrations',
+      '430+ MCP tools and 134 CLI commands for full workflow control',
+      'REST API, CLI, and MCP interfaces for custom agent integrations',
     ],
     icon: '🤖',
-    num: '02',
+    num: '06',
   },
   {
-    name: 'outsourced-manufacturing',
-    title: 'Outsourced manufacturing fallback',
+    name: 'fulfillment-routing',
+    title: 'Third-party fulfillment routing',
     description:
-      'When local printers are overloaded, route jobs to external services without changing tools or workflows.',
+      'When local printers are overloaded or you need professional-grade materials, Kiln searches third-party fulfillment providers and routes orders — without changing your workflow.',
     outcomes: [
-      'Compare local cost versus fulfillment pricing in one flow',
-      'Place orders with provider APIs from the same Kiln interface',
-      'Keep auditability across local and remote production',
+      'Compare local cost versus third-party fulfillment quotes in one flow',
+      'Route orders to external providers from the same Kiln interface',
+      'Kiln orchestrates the workflow; the provider remains merchant of record',
     ],
     icon: '☁️',
-    num: '03',
+    num: '07',
   },
   {
     name: 'education-labs',
@@ -61,20 +113,20 @@ const useCases: UseCase[] = [
       'Document print histories and job outcomes for reproducibility',
     ],
     icon: '🔬',
-    num: '04',
+    num: '08',
   },
   {
     name: 'marketplace-creators',
-    title: 'Marketplace and maker businesses',
+    title: 'Model discovery and maker businesses',
     description:
-      'Go from model idea to printable asset to publishable product with integrated tooling for generation, validation, and fulfillment.',
+      'Search third-party model marketplaces, generate original designs, validate printability, and go from idea to finished product with integrated tooling.',
     outcomes: [
+      'Search Thingiverse, MyMiniFactory, and Cults3D from one interface',
       'Generate, validate, and orient designs before wasting material',
-      'Publish models and track downstream performance',
-      'Automate repetitive order and printing workflows',
+      'Automate repetitive print-and-ship workflows',
     ],
     icon: '🛒',
-    num: '05',
+    num: '09',
   },
 ];
 
@@ -98,24 +150,27 @@ const useCasesSchema = {
 ---
 
 <BaseLayout
-  title="Kiln Use Cases — AI 3D Printing Infrastructure for Teams and Makers"
-  description="See how teams use Kiln for print farm automation, AI prototyping, outsourced 3D manufacturing, lab operations, and marketplace workflows."
+  title="Kiln Use Cases — From Idea to Physical Object with AI"
+  description="See how teams use Kiln for design-to-print pipelines, printability analysis, multi-part assembly, cost estimation, print farm automation, and AI prototyping."
   current="use-cases"
   keywords={[
     'kiln use cases',
     'ai 3d printing workflows',
+    'text to 3d print',
+    'design to print pipeline',
+    'printability analysis',
     'print farm software',
     '3d printer ai infrastructure',
-    'agentic manufacturing',
   ]}
   schema={useCasesSchema}
 >
   <section class="usecases-hero">
     <div class="container">
-      <h1>Use Kiln across the entire 3D printing workflow</h1>
+      <h1>Describe it or draw it. Kiln makes it real.</h1>
       <p class="lead">
-        Kiln is built for makers, labs, and production teams that want AI-driven 3D print operations
-        without sacrificing safety, observability, or control.
+        Kiln is the intelligence layer between an idea and a physical object. From text-to-print
+        pipelines to fleet automation, Kiln handles every step — design, validation, slicing,
+        printing, and monitoring — with safety guardrails built in.
       </p>
     </div>
   </section>

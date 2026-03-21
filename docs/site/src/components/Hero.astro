@@ -3,12 +3,11 @@
 
 <div class="hero">
   <div class="container">
-    <img src="/assets/kiln-logo-dark-notext.svg" alt="Kiln" class="hero-logo" width="200" height="200">
-    <h1><span class="brand">Kiln 3D</span> lets AI agents <span class="accent">safely</span><br>control 3D printers</h1>
+    <img src="/assets/kiln-pfp-1024-flat.svg" alt="Kiln" class="hero-logo" width="300" height="300">
+    <p class="tagline"><span class="tagline-line">Describe it or draw it.</span><br><span class="tagline-emphasis">Kiln makes it real.</span></p>
+    <h1><span class="brand">Kiln 3D</span> lets AI agents <span class="accent">safely</span> control 3D printers</h1>
     <p class="subtitle">
-      Open-source 3D printing infrastructure for AI agents.
-      Design new objects, discover existing models, slice, print, monitor,
-      and recover from failures — with safety limits that can't be bypassed.
+      The intelligence layer between your idea and a physical object.
     </p>
 
     <div class="install-block">
@@ -27,7 +26,7 @@
       <img src="https://img.shields.io/badge/python-3.10%E2%80%933.13-blue" alt="Python 3.10-3.13" width="120" height="20">
       <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" width="80" height="20">
       <img src="https://img.shields.io/badge/tests-8%2C000%2B%20passed-brightgreen" alt="Tests" width="130" height="20">
-      <img src="https://img.shields.io/badge/MCP%20tools-432-orange" alt="432 MCP Tools" width="120" height="20">
+      <img src="https://img.shields.io/badge/MCP%20tools-430%2B-orange" alt="430+ MCP Tools" width="120" height="20">
     </div>
   </div>
 </div>
@@ -51,21 +50,59 @@
     text-align: center;
   }
   .hero-logo {
-    width: clamp(120px, 15vw, 200px);
+    width: clamp(200px, 25vw, 340px);
     height: auto;
-    border-radius: 32px;
-    margin-bottom: 32px;
+    border-radius: 48px;
+    margin-bottom: 44px;
+    filter: drop-shadow(0 0 60px rgba(245, 158, 66, 0.25)) drop-shadow(0 0 120px rgba(245, 158, 66, 0.1));
+    transition: filter 0.3s ease;
   }
-  .hero h1 {
-    font-size: clamp(32px, 5vw, 56px);
-    font-weight: 700;
+  .hero-logo:hover {
+    filter: drop-shadow(0 0 80px rgba(245, 158, 66, 0.35)) drop-shadow(0 0 160px rgba(245, 158, 66, 0.15));
+  }
+
+  /* Primary tagline — the emotional hero statement */
+  .tagline {
+    font-size: clamp(28px, 4.5vw, 64px);
+    font-weight: 800;
     line-height: 1.15;
-    margin-bottom: 20px;
+    letter-spacing: -0.03em;
+    margin-bottom: 24px;
+    color: var(--text);
+  }
+  .tagline-line,
+  .tagline-emphasis {
+    white-space: nowrap;
+  }
+  .tagline-emphasis {
+    background: linear-gradient(135deg, var(--accent), #f59e42, var(--accent));
+    background-size: 200% 200%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: gradient-shift 6s ease-in-out infinite;
+  }
+
+  @keyframes gradient-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  /* Secondary H1 — SEO-optimized, visually subordinate */
+  .hero h1 {
+    font-size: clamp(18px, 2.8vw, 26px);
+    font-weight: 500;
+    line-height: 1.4;
+    margin-bottom: 16px;
+    color: var(--text-muted);
+    letter-spacing: -0.01em;
   }
   .hero h1 .brand {
-    letter-spacing: 0.01em;
+    font-weight: 600;
+    color: var(--text);
   }
-  .hero h1 .accent { color: var(--accent); }
+  .hero h1 .accent { color: var(--accent); font-weight: 600; }
+
   .subtitle {
     font-size: clamp(16px, 2.5vw, 20px);
     color: var(--text-muted);
@@ -137,6 +174,7 @@
 
   @media (max-width: 640px) {
     .hero { padding: 60px 0 50px; }
+    .tagline { margin-bottom: 20px; }
     .install-block { flex-direction: column; text-align: center; }
   }
 </style>

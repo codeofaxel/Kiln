@@ -37,10 +37,6 @@
 
 Kiln lets AI agents design, queue, and execute physical manufacturing jobs on real 3D printers with zero human intervention. It exposes printer control through both a **CLI** and the **Model Context Protocol (MCP)**, making any MCP-compatible agent (OpenClaw, Claude, GPT, custom) a first-class operator of your print farm.
 
-### Positioning Clarification
-
-> **Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and external provider/network adapters as integrations are available.
-
 ### Three ways to print
 
 | Mode | What it is | You need |
@@ -50,13 +46,6 @@ Kiln lets AI agents design, queue, and execute physical manufacturing jobs on re
 | **🌐 External provider integrations** | Route jobs through connected third-party provider/network adapters. Kiln does not operate a first-party network marketplace | Integrations as available |
 
 All three modes use the same MCP tools and CLI commands. An agent can seamlessly fall back from a busy local printer to a fulfillment center or connected external provider integration — all in one workflow.
-
-### Non-goals
-
-- Operating a first-party decentralized manufacturing marketplace/network
-- Replacing partner supply-side networks
-- Owning provider marketplaces instead of integrating with them
-- Acting as merchant of record for provider-routed manufacturing orders
 
 ### Why Kiln?
 
@@ -1062,6 +1051,17 @@ Kiln is free, open-source software. If you find it useful, consider sending a ti
 
 - **Solana:** `kiln3d.sol`
 - **Ethereum:** `kiln3d.eth`
+
+## Positioning Clarification
+
+> **Messaging clarification (February 24, 2026):** We clarified wording to remove ambiguity and align with existing intent; no strategy change. Kiln is orchestration and agent infrastructure for fabrication workflows. Kiln does **not** operate a first-party decentralized manufacturing marketplace/network. Kiln integrates with third-party providers and external provider/network adapters as integrations are available.
+
+### Non-goals
+
+- Operating a first-party decentralized manufacturing marketplace/network
+- Replacing partner supply-side networks
+- Owning provider marketplaces instead of integrating with them
+- Acting as merchant of record for provider-routed manufacturing orders
 
 ## License
 

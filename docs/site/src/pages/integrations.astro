@@ -63,19 +63,43 @@ const ecosystemIntegrations: Integration[] = [
   },
   {
     name: 'thingiverse',
-    title: 'Marketplace Search',
+    title: 'Search 3rd-Party Marketplaces',
     description:
       'Search and download 3D models from Thingiverse, MyMiniFactory, and Cults3D (search only). Find existing blueprints before generating from scratch.',
     icon: '🔍',
     tag: 'Discovery',
   },
   {
+    name: 'slicing',
+    title: 'PrusaSlicer & OrcaSlicer',
+    description:
+      'Auto-detect installed slicers. Slice STL files with bundled printer profiles, adaptive layer heights, and material-aware settings. Go from model to G-code in one call.',
+    icon: '✂️',
+    tag: 'Slicing',
+  },
+  {
     name: 'mcp',
     title: 'Model Context Protocol',
     description:
-      'Expose Kiln as an MCP server so Claude, GPT, and other AI agents can use 3D printer tools safely with structured, typed responses.',
+      'Expose Kiln as an MCP server so Claude, GPT, and other AI agents can use 430+ 3D printing tools safely with structured, typed responses.',
     icon: '🤖',
     tag: 'AI Protocol',
+  },
+  {
+    name: 'generation',
+    title: 'Text & Sketch to 3D',
+    description:
+      'Generate printable models from text or sketches via Gemini Deep Think, Meshy, Tripo3D, Stability AI, or parametric OpenSCAD. Auto-discovered from env vars.',
+    icon: '✨',
+    tag: 'Generation',
+  },
+  {
+    name: 'webhooks',
+    title: 'Webhooks & Event Bus',
+    description:
+      'Register HTTP endpoints for instant notifications when jobs complete, fail, or change state. HMAC-SHA256 signed payloads for secure integration.',
+    icon: '🔔',
+    tag: 'Events',
   },
 ];
 
@@ -124,11 +148,11 @@ const integrationSchema = {
           <span class="stat-label">Fulfillment providers</span>
         </div>
         <div class="stat">
-          <span class="stat-num">6</span>
-          <span class="stat-label">Marketplaces</span>
+          <span class="stat-num">3</span>
+          <span class="stat-label">3rd-party marketplaces</span>
         </div>
         <div class="stat">
-          <span class="stat-num">300</span>
+          <span class="stat-num">430+</span>
           <span class="stat-label">MCP tools</span>
         </div>
       </div>
@@ -163,8 +187,8 @@ const integrationSchema = {
     <div class="container">
       <div class="section-header">
         <span class="section-label">Ecosystem</span>
-        <h2>Discovery, outsourcing, and AI interop</h2>
-        <p class="lead">Beyond printer control: find models, outsource jobs, and plug into AI agents.</p>
+        <h2>Fulfillment, discovery, and AI interop</h2>
+        <p class="lead">Route to 3rd-party fulfillment providers, search existing marketplaces, generate models, and plug into AI agents.</p>
       </div>
       <div class="ecosystem-grid">
         {ecosystemIntegrations.map((integration) => (

@@ -17,7 +17,7 @@ const sections: Section[] = [
     items: [
       {
         q: "What is Kiln?",
-        a: "Kiln is open-source infrastructure that lets AI agents design new objects, discover existing models, and autonomously slice, print, and monitor 3D printers. It exposes your printer through the Model Context Protocol (MCP), so any compatible AI agent — like Claude, GPT, or a custom agent — can run full print workflows with safety guardrails built in. Think of it as the bridge between conversational AI and physical manufacturing."
+        a: "Kiln is open-source infrastructure that lets AI agents design new objects, discover existing models, and autonomously slice, print, and monitor 3D printers. It exposes 430+ tools through the Model Context Protocol (MCP), so any compatible AI agent — like Claude, GPT, or a custom agent — can run full print workflows with safety guardrails built in. Describe what you want or upload a sketch, and Kiln handles everything from generation to the finished print. Think of it as the intelligence layer between an idea and a physical object."
       },
       {
         q: "How is Kiln different from just using OctoPrint or Moonraker?",
@@ -25,7 +25,7 @@ const sections: Section[] = [
       },
       {
         q: "How is Kiln different from decentralized manufacturing networks/providers?",
-        a: "Kiln is orchestration infrastructure for agents. It does not operate a first-party decentralized manufacturing marketplace/network. Instead, Kiln integrates with third-party providers/networks where integrations are available. See the <a href='/boundary'>product boundary page</a> for a direct comparison."
+        a: "Kiln is orchestration infrastructure for agents — it does not operate its own marketplace or manufacturing network. Instead, Kiln searches third-party model marketplaces (Thingiverse, MyMiniFactory, Cults3D) and routes fulfillment orders to third-party providers (like Craftcloud). The provider remains merchant of record for any outsourced orders. See the <a href='/boundary'>product boundary page</a> for a direct comparison."
       },
       {
         q: "Is Kiln free?",
@@ -58,7 +58,7 @@ const sections: Section[] = [
       },
       {
         q: "Can I use Kiln without AI, just as a CLI or API?",
-        a: "Yes. Kiln includes a full command-line interface (102 commands) and a REST API. You can manage printers, queue jobs, slice files, and run print operations entirely from the terminal or your own scripts — no AI agent required."
+        a: "Yes. Kiln includes a full command-line interface with 134 commands and a REST API. You can manage printers, queue jobs, slice files, and run print operations entirely from the terminal or your own scripts — no AI agent required."
       },
     ]
   },
@@ -75,7 +75,7 @@ const sections: Section[] = [
       },
       {
         q: "Does Kiln send my data to the cloud?",
-        a: "No. Kiln runs entirely on your local machine. Your printer data, G-code files, and print history stay on your network. The only external connections are ones you explicitly configure — like fulfillment providers or marketplace integrations."
+        a: "No. Kiln runs entirely on your local machine. Your printer data, G-code files, and print history stay on your network. The only external connections are ones you explicitly configure — like third-party fulfillment providers or third-party marketplace search."
       },
       {
         q: "Can I restrict which tools the AI agent can access?",
@@ -96,15 +96,35 @@ const sections: Section[] = [
       },
       {
         q: "Can I order prints from external services through Kiln?",
-        a: "Yes. Kiln supports outsourced manufacturing through Craftcloud — works out of the box with no API key required. Your AI agent can compare quotes from 150+ print services across FDM, SLA, SLS, MJF, and metal, select materials, and place orders through the same interface used for local printing. Additional third-party providers and external provider/network integrations are exposed as integrations launch. Kiln is orchestration infrastructure and does not operate a first-party decentralized manufacturing marketplace/network. For provider-routed orders, the provider remains merchant of record."
+        a: "Yes. Kiln routes orders to third-party fulfillment providers — currently Craftcloud, which works out of the box with no API key required. Your AI agent can compare quotes from 150+ third-party print services across FDM, SLA, SLS, MJF, and metal, select materials, and place orders through the same interface used for local printing. Kiln does not operate its own manufacturing network — it orchestrates the workflow while the third-party provider remains merchant of record."
       },
       {
         q: "Does Kiln support model marketplaces?",
-        a: "Yes. Kiln includes adapters for Thingiverse, MyMiniFactory, and Cults3D (search only). Your AI agent can search for models, download files, and send them to your printer — all in one workflow."
+        a: "Yes. Kiln searches third-party model marketplaces — Thingiverse, MyMiniFactory, and Cults3D — so your AI agent can discover existing models, download files, and send them to your printer in one workflow. Kiln does not operate its own marketplace; it provides search and download adapters for these external platforms."
       },
       {
         q: "Can I automate recurring prints or batch jobs?",
         a: "Yes. Kiln includes a priority job queue with scheduling, so you can queue up multiple prints with different priorities. The scheduler dispatches jobs automatically as printers become available, and you can build fully automated pipelines using the pre-validated print pipeline system (quick_print, calibrate, benchmark)."
+      },
+      {
+        q: "Can Kiln generate 3D models from text or sketches?",
+        a: "Yes. Kiln supports text-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, and Stability AI, plus parametric code-as-CAD generation via OpenSCAD with a 14-component catalog (threads, gears, boxes, brackets, etc). You can also upload a napkin sketch for image-to-3D conversion. Providers are auto-discovered from environment variables — just set your API key and Kiln finds it."
+      },
+      {
+        q: "What is Design Intelligence?",
+        a: "Design Intelligence is Kiln's engineering knowledge base — 52 materials with mechanical/thermal/chemical properties, 20 proven design patterns (snap-fits, living hinges, threads, press-fits), 70 parametric templates, and structural load estimation. When you describe what you want to print, Kiln uses this knowledge to select the right material, apply proven patterns, and validate that the design will actually work before generating geometry."
+      },
+      {
+        q: "What does the Printability Engine do?",
+        a: "Before any model reaches your slicer, Kiln analyzes it across 7 dimensions: overhang detection, thin wall analysis, bridging assessment, bed adhesion estimation, support volume calculation, warping risk, and thermal stress. It scores models 0-100, recommends optimal print orientation, and suggests adhesion settings (brim/raft) based on the geometry, material, and your specific printer."
+      },
+      {
+        q: "Can Kiln design multi-part assemblies?",
+        a: "Yes. The assembly module validates clearances between parts, detects joint types (snap-fit, press-fit, threaded, adhesive), checks tolerance stacking, and plans splits for models that exceed your build plate. Free tier supports up to 10 parts per assembly."
+      },
+      {
+        q: "How does cost estimation work?",
+        a: "Kiln calculates the cost of any print before it starts — material cost (by weight and filament type), electricity, and time. It also provides smart recommendations: cheaper filament alternatives that maintain strength, speed profiles that save time, and quality tradeoffs. Use it to budget projects or compare local vs outsourced manufacturing costs."
       },
     ]
   },
