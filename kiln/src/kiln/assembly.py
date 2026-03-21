@@ -25,6 +25,15 @@ from kiln.generation.validation import _parse_stl, compose_stls
 
 _MAX_FREE_TIER_PARTS = 10
 
+
+def _has_pro_license() -> bool:
+    """Check if kiln-pro is installed and has a valid license."""
+    try:
+        from kiln_pro.bridge import pro_features
+        return pro_features.has_valid_license
+    except ImportError:
+        return False
+
 # Joint type clearance ranges (mm) — used when design_patterns.json
 # doesn't have specific values
 _DEFAULT_JOINT_CLEARANCES: dict[str, tuple[float, float]] = {
@@ -134,10 +143,14 @@ class Assembly:
     # -- mutators ---------------------------------------------------------
 
     def add_part(self, part: AssemblyPart) -> None:
-        """Add a part, enforcing uniqueness and the free-tier limit."""
+        """Add a part, enforcing uniqueness and the free-tier limit.
+
+        Pro/Business/Enterprise users with a valid kiln-pro license
+        bypass the part limit entirely.
+        """
         if any(p.part_id == part.part_id for p in self.parts):
             raise ValueError(f"Part '{part.part_id}' already exists in assembly")
-        if len(self.parts) >= _MAX_FREE_TIER_PARTS:
+        if len(self.parts) >= _MAX_FREE_TIER_PARTS and not _has_pro_license():
             raise ValueError(
                 f"Free tier limited to {_MAX_FREE_TIER_PARTS} parts per assembly. "
                 "Upgrade to Kiln Pro for unlimited parts."
