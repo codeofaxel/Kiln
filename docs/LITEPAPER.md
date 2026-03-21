@@ -18,7 +18,7 @@ The gap between "I need a part" and holding that part in your hand is filled wit
 
 ## The Solution
 
-Kiln acts as a universal intelligence layer between AI agents and physical fabrication. One interface, any idea, any printer. With 430+ MCP tools and 134 CLI commands, agents have everything they need to go from concept to physical object.
+Kiln acts as a universal intelligence layer between AI agents and physical fabrication. One interface, any idea, any printer. With 444+ MCP tools and 143 CLI commands, agents have everything they need to go from concept to physical object.
 
 **From idea to object.** Kiln gives agents multiple paths to turn a thought into a physical part:
 
@@ -70,7 +70,7 @@ You (or your agent) --> Kiln --> Design Intelligence (materials, patterns, templ
                                  Fulfillment Providers (Craftcloud)
 ```
 
-Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. There's also a full CLI with 134 commands and a REST API for custom integrations.
+Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. There's also a full CLI with 143 commands and a REST API for custom integrations.
 
 ## Business Model
 

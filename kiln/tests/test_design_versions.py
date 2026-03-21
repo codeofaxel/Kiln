@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import os
-import tempfile
 import threading
 import time
 
 import pytest
 
-from kiln.design_versions import DesignVersion, DesignVersionStore
-
+from kiln.design_versions import DesignVersionStore
 
 # ---------------------------------------------------------------------------
 # Fixtures
