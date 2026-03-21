@@ -99,5 +99,5 @@ Full documentation, CLI reference, and the technical whitepaper are available in
 
 ---
 
-Kiln is open-source infrastructure released under the MIT License. Version 0.4.2, March 2026.
+Kiln is open-source infrastructure released under the MIT License. Version 0.5.0, March 2026.
 Kiln is a project of Hadron Labs Inc.
