@@ -1151,7 +1151,15 @@ class _DidYouMeanGroup(click.Group):
 @click.version_option(package_name="kiln3d")
 @click.pass_context
 def cli(ctx: click.Context, printer: str | None) -> None:
-    """Kiln — agent-friendly 3D printer control."""
+    """Kiln — agent-friendly 3D printer control.
+
+    \b
+    🤖 AI agent? Use Kiln as an MCP server instead of CLI:
+       kiln serve
+       MCP provides 444 tools with richer descriptions,
+       structured JSON responses, and tool chaining.
+       See: https://kiln3d.com/docs
+    """
     # Load environment variables so API keys (KILN_GEMINI_API_KEY, etc.) are
     # available to all subcommands, not just the server.
     with contextlib.suppress(ImportError):
