@@ -1,20 +1,43 @@
 ---
-const lines = `<span class="prompt">$</span> <span class="cmd">kiln setup</span>
-<span class="output">&nbsp;==&gt; Scanning network for printers...</span>
-<span class="output">&nbsp; &#10003;&nbsp; Found: Bambu A1 Mini (192.168.1.42)</span>
-<span class="output">&nbsp; &#10003;&nbsp; Config saved to ~/.kiln/config.yaml</span>
+const lines = `<span class="user">You:</span> Print me a headphone stand for my desk
 
-<span class="prompt">$</span> <span class="cmd">kiln print bracket.gcode --dry-run --json</span>
-<span class="output">&nbsp;{"preflight": "passed", "file": "bracket.gcode", "material": "PLA"}</span>
+<span class="agent">Agent:</span> Let me design that for you.
 
-<span class="dim"># Agent asks human: "Ready to print bracket.gcode with PLA. Proceed?"</span>
-<span class="dim"># Human: "yes"</span>
+<span class="tool">→ get_design_brief</span>("headphone stand, desk-mounted")
+<span class="output">&nbsp; ✓ Material: PLA (low stress, indoor use)</span>
+<span class="output">&nbsp; ✓ Pattern: cantilever-arm with weighted base</span>
+<span class="output">&nbsp; ✓ Min wall: 2.4mm | Infill: 20%</span>
 
-<span class="prompt">$</span> <span class="cmd">kiln print bracket.gcode --json</span>
-<span class="output">&nbsp;{"status": "success", "message": "Print started"}</span>
+<span class="tool">→ generate_model</span>("minimalist headphone stand, curved arm, wide base")
+<span class="output">&nbsp; ✓ Generated via Gemini → headphone_stand.stl</span>
+<span class="output">&nbsp; ✓ Design DNA preserved for iteration</span>
 
-<span class="prompt">$</span> <span class="cmd">kiln status --json</span>
-<span class="output">&nbsp;{"status": "printing", "progress": 42.5, "temps": {"tool": 210, "bed": 60}}</span>`;
+<span class="tool">→ analyze_printability</span>("headphone_stand.stl")
+<span class="output">&nbsp; ✓ Score: 87/100</span>
+<span class="output">&nbsp; ✓ Overhangs: 38° on arm curve (safe, no supports)</span>
+<span class="output">&nbsp; ✓ Bridging: 12mm span (within limits)</span>
+<span class="output">&nbsp; ✓ Warping: low | Adhesion: good (wide base)</span>
+
+<span class="tool">→ estimate_cost</span>("headphone_stand.stl")
+<span class="output">&nbsp; ✓ Material: $1.89 | Electricity: $0.22 | Total: $2.11</span>
+<span class="output">&nbsp; ✓ 💡 15% infill saves $0.34 (non-structural part)</span>
+
+<span class="tool">→ preflight_check</span>()
+<span class="output">&nbsp; ✓ Bambu Lab A1 — ready</span>
+<span class="output">&nbsp; ✓ PLA loaded (AMS slot 2, grey) | Bed clear</span>
+
+<span class="tool">→ start_print</span>("headphone_stand.stl")
+<span class="output">&nbsp; ✓ Sliced: 186 layers @ 0.2mm | ETA: 2h 10m</span>
+
+<span class="tool">→ monitor_print</span>()
+<span class="output">&nbsp; Print Status — 100% complete</span>
+<span class="output">&nbsp; - Layer: 186 / 186</span>
+<span class="output">&nbsp; - Time: 2h 08m | Nozzle: 210°C | Bed: 60°C</span>
+<span class="output">&nbsp; - Material used: ~64g PLA</span>
+<span class="output">&nbsp; - Cost: ~$1.89 filament | $0.22 electricity</span>
+<span class="output">&nbsp; - Errors: None</span>
+
+<span class="agent">Agent:</span> Your headphone stand is ready. $2.11 total, 2 hours, 64g of PLA.`;
 ---
 
 <div class="container">
@@ -33,7 +56,7 @@ const lines = `<span class="prompt">$</span> <span class="cmd">kiln setup</span>
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 12px;
-    max-width: 720px;
+    max-width: 760px;
     margin: 0 auto 100px;
     overflow: hidden;
   }
@@ -57,13 +80,13 @@ const lines = `<span class="prompt">$</span> <span class="cmd">kiln setup</span>
   .demo-content {
     padding: 24px;
     font-family: var(--mono);
-    font-size: 13px;
-    line-height: 1.8;
+    font-size: 12.5px;
+    line-height: 1.7;
     color: var(--text-muted);
     white-space: pre-wrap;
   }
-  .demo-content :global(.cmd) { color: var(--text); }
-  .demo-content :global(.prompt) { color: var(--accent); }
+  .demo-content :global(.user) { color: var(--text); font-weight: 600; }
+  .demo-content :global(.agent) { color: var(--accent); font-weight: 600; }
+  .demo-content :global(.tool) { color: #8BA8E8; }
   .demo-content :global(.output) { color: #6B8A6B; }
-  .demo-content :global(.dim) { color: #555; }
 </style>

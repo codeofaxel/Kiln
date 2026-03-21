@@ -2017,13 +2017,16 @@ def monitor_print(
             f"- Errors: {error_str}",
         ])
 
-        # --- Cost estimate ---
+        # --- Material usage & cost estimate ---
         cost_info = _estimate_print_cost(elapsed_s, remaining_s)
         if cost_info is not None:
             lines.append(
-                f"- Estimated filament cost: ~${cost_info['estimated_cost_usd']:.2f} "
-                f"({cost_info['material']} @ ${cost_info['cost_per_kg_usd']:.0f}/kg, "
-                f"~{cost_info['estimated_weight_g']:.0f}g)"
+                f"- Material used: ~{cost_info['estimated_weight_g']:.0f}g "
+                f"{cost_info['material']}"
+            )
+            lines.append(
+                f"- Cost: ~${cost_info['estimated_cost_usd']:.2f} filament "
+                f"({cost_info['material']} @ ${cost_info['cost_per_kg_usd']:.0f}/kg)"
             )
 
         lines.extend([
