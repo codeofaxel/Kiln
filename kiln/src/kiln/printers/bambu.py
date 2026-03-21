@@ -495,6 +495,7 @@ class BambuAdapter(PrinterAdapter):
         # MQTT client.
         self._mqtt_client: mqtt.Client | None = None
         self._mqtt_connected = threading.Event()
+        self._connect_lock = threading.Lock()
 
         # Exponential backoff for reconnection attempts.
         self._backoff = _BackoffState()
@@ -696,116 +697,125 @@ class BambuAdapter(PrinterAdapter):
             PrinterError: If connection fails within the timeout or the
                 adapter is in a backoff cooldown period.
         """
+        # Fast path — no lock needed if already connected.
         if self._mqtt_client is not None and self._mqtt_connected.is_set():
             return self._mqtt_client
 
-        # Respect backoff cooldown — don't spam reconnection attempts.
-        if self._backoff.in_cooldown():
-            raise PrinterError(
-                f"MQTT reconnection to {self._host} is in backoff cooldown "
-                f"(attempt #{self._backoff.attempt_count}, "
-                f"retry in {self._backoff.next_retry_time - time.monotonic():.1f}s)"
-            )
+        with self._connect_lock:
+            # Double-check inside the lock to avoid duplicate connections.
+            if self._mqtt_client is not None and self._mqtt_connected.is_set():
+                return self._mqtt_client
 
-        # Tear down stale client that lost its connection.
-        if self._mqtt_client is not None:
-            logger.debug("MQTT client exists but disconnected; tearing down stale client")
-            self._safe_stop_client(self._mqtt_client)
-            self._mqtt_client = None
-
-        try:
-            client = mqtt.Client(
-                callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-                client_id=f"kiln-{self._serial[:8]}",
-                protocol=mqtt.MQTTv311,
-            )
-            client.username_pw_set(_MQTT_USERNAME, self._access_code)
-
-            tls_context = self._build_tls_context()
-            client.tls_set_context(tls_context)
-
-            client.on_connect = self._on_connect
-            client.on_message = self._on_message
-            client.on_disconnect = self._on_disconnect
-
-            self._mqtt_connected.clear()
-            client.connect(self._host, _MQTT_PORT, keepalive=60)
-            client.loop_start()
-
-            # Wait for the connection to be established.
-            if not self._mqtt_connected.wait(timeout=self._timeout):
-                self._safe_stop_client(client)
-                self._backoff.record_failure()
+            # Respect backoff cooldown — don't spam reconnection attempts.
+            if self._backoff.in_cooldown():
                 raise PrinterError(
-                    f"MQTT connection to {self._host} timed out after "
-                    f"{self._timeout}s. Check network connectivity and access code.\n"
-                    "  Checklist:\n"
-                    "  1) Printer is powered on and on the same network\n"
-                    "  2) LAN Access Code is correct (printer → Settings → Network)\n"
-                    "  3) LAN Mode is enabled on the printer\n"
-                    "  4) Port 8883 is not blocked by a firewall\n"
-                    "  Try: kiln verify"
+                    f"MQTT reconnection to {self._host} is in backoff cooldown "
+                    f"(attempt #{self._backoff.attempt_count}, "
+                    f"retry in {self._backoff.next_retry_time - time.monotonic():.1f}s)"
                 )
 
-            # Certificate policy check (pin/explicit fingerprint) after TLS handshake.
-            mqtt_sock = None
+            # Tear down stale client that lost its connection.
+            if self._mqtt_client is not None:
+                logger.debug("MQTT client exists but disconnected; tearing down stale client")
+                self._safe_stop_client(self._mqtt_client)
+                self._mqtt_client = None
+
             try:
-                mqtt_sock = client.socket()
-            except Exception:
+                client = mqtt.Client(
+                    callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+                    client_id=f"kiln-{self._serial[:8]}",
+                    protocol=mqtt.MQTTv311,
+                )
+                client.username_pw_set(_MQTT_USERNAME, self._access_code)
+
+                tls_context = self._build_tls_context()
+                client.tls_set_context(tls_context)
+
+                client.on_connect = self._on_connect
+                client.on_message = self._on_message
+                client.on_disconnect = self._on_disconnect
+
+                self._mqtt_connected.clear()
+                # Use connect_async so the TCP handshake happens in the
+                # background network thread instead of blocking the caller.
+                # Prevents scheduler TimeoutError on slow/flaky networks.
+                client.connect_async(self._host, _MQTT_PORT, keepalive=60)
+                client.loop_start()
+
+                # Wait for the connection to be established.
+                if not self._mqtt_connected.wait(timeout=self._timeout):
+                    self._safe_stop_client(client)
+                    self._backoff.record_failure()
+                    raise PrinterError(
+                        f"MQTT connection to {self._host} timed out after "
+                        f"{self._timeout}s. Check network connectivity and access code.\n"
+                        "  Checklist:\n"
+                        "  1) Printer is powered on and on the same network\n"
+                        "  2) LAN Access Code is correct (printer → Settings → Network)\n"
+                        "  3) LAN Mode is enabled on the printer\n"
+                        "  4) Port 8883 is not blocked by a firewall\n"
+                        "  Try: kiln verify"
+                    )
+
+                # Certificate policy check (pin/explicit fingerprint) after TLS handshake.
                 mqtt_sock = None
-            try:
-                self._validate_peer_certificate(
-                    self._extract_socket_cert(mqtt_sock),
-                    transport="MQTT",
-                )
+                try:
+                    mqtt_sock = client.socket()
+                except Exception:
+                    mqtt_sock = None
+                try:
+                    self._validate_peer_certificate(
+                        self._extract_socket_cert(mqtt_sock),
+                        transport="MQTT",
+                    )
+                except PrinterError:
+                    self._safe_stop_client(client)
+                    self._backoff.record_failure()
+                    raise
+
+                self._mqtt_client = client
+                self._backoff.record_success()
+                return client
+
             except PrinterError:
-                self._safe_stop_client(client)
-                self._backoff.record_failure()
                 raise
-
-            self._mqtt_client = client
-            self._backoff.record_success()
-            return client
-
-        except PrinterError:
-            raise
-        except Exception as exc:
-            self._backoff.record_failure()
-            # Detect single-client rejection: Bambu printers only allow one
-            # LAN MQTT connection at a time.  When BambuStudio or Bambu Handy
-            # holds the slot, the TLS handshake is reset or times out.
-            exc_str = str(exc).lower()
-            is_single_client = (
-                isinstance(exc, (ConnectionResetError, ssl.SSLError))
-                or "connection reset by peer" in exc_str
-                or "errno 54" in exc_str
-                or "tls" in exc_str and "handshake" in exc_str
-            )
-            if is_single_client:
+            except Exception as exc:
+                self._backoff.record_failure()
+                # Detect single-client rejection: Bambu printers only allow one
+                # LAN MQTT connection at a time.  When BambuStudio or Bambu Handy
+                # holds the slot, the TLS handshake is reset or times out.
+                exc_str = str(exc).lower()
+                is_single_client = (
+                    isinstance(exc, (ConnectionResetError, ssl.SSLError))
+                    or "connection reset by peer" in exc_str
+                    or "errno 54" in exc_str
+                    or "tls" in exc_str and "handshake" in exc_str
+                )
+                if is_single_client:
+                    raise PrinterError(
+                        _SINGLE_CLIENT_MSG,
+                        cause=exc,
+                    ) from exc
+                exc_lower = str(exc).lower()
+                if isinstance(exc, ConnectionRefusedError) or "connection refused" in exc_lower:
+                    detail = (
+                        f"MQTT connection to {self._host}:{_MQTT_PORT} refused. "
+                        "Printer may be powered off or MQTT port 8883 is blocked.\n"
+                        "  1) Check that the printer is powered on\n"
+                        "  2) Check that no firewall is blocking port 8883\n"
+                    )
+                elif isinstance(exc, OSError) or "errno" in exc_lower:
+                    detail = (
+                        f"Network error connecting MQTT to {self._host}:{_MQTT_PORT}: {exc}\n"
+                        "  1) Check that the printer is on the same network\n"
+                        "  2) Check router/firewall settings\n"
+                    )
+                else:
+                    detail = f"Failed to connect MQTT to {self._host}:{_MQTT_PORT}: {exc}\n"
                 raise PrinterError(
-                    _SINGLE_CLIENT_MSG,
+                    detail + "Retry with `get_state()` to check printer reachability.",
                     cause=exc,
                 ) from exc
-            exc_lower = str(exc).lower()
-            if isinstance(exc, ConnectionRefusedError) or "connection refused" in exc_lower:
-                detail = (
-                    f"MQTT connection to {self._host}:{_MQTT_PORT} refused. "
-                    "Printer may be powered off or MQTT port 8883 is blocked.\n"
-                    "  1) Check that the printer is powered on\n"
-                    "  2) Check that no firewall is blocking port 8883\n"
-                )
-            elif isinstance(exc, OSError) or "errno" in exc_lower:
-                detail = (
-                    f"Network error connecting MQTT to {self._host}:{_MQTT_PORT}: {exc}\n"
-                    "  1) Check that the printer is on the same network\n"
-                    "  2) Check router/firewall settings\n"
-                )
-            else:
-                detail = f"Failed to connect MQTT to {self._host}:{_MQTT_PORT}: {exc}\n"
-            raise PrinterError(
-                detail + "Retry with `get_state()` to check printer reachability.",
-                cause=exc,
-            ) from exc
 
     def _on_connect(
         self,
@@ -816,7 +826,17 @@ class BambuAdapter(PrinterAdapter):
         properties: Any = None,
     ) -> None:
         """MQTT on_connect callback."""
-        client.subscribe(self._topic_report)
+        # Check for auth failure or rejected connection before proceeding.
+        rc = int(reason_code) if reason_code is not None else 0
+        if rc != 0:
+            logger.warning(
+                "MQTT connection rejected by %s (reason_code=%s)",
+                self._host,
+                reason_code,
+            )
+            return
+
+        client.subscribe(self._topic_report, qos=0)
         self._mqtt_connected.set()
         with self._state_lock:
             self._connected = True
@@ -911,12 +931,14 @@ class BambuAdapter(PrinterAdapter):
         """
         c = client or self._ensure_mqtt()
         try:
-            result = c.publish(
+            c.publish(
                 self._topic_request,
                 json.dumps(payload),
-                qos=1,
+                qos=0,
             )
-            result.wait_for_publish(timeout=self._timeout)
+            # QoS 0 is fire-and-forget — no PUBACK to wait for.
+            # Bambu LAN MQTT broker does not support QoS 1 and
+            # disconnects immediately on receiving a QoS 1 PUBLISH.
         except Exception as exc:
             raise PrinterError(
                 f"Failed to publish MQTT command: {exc}\n"
