@@ -287,11 +287,10 @@ class DesignCache:
             self._conn.commit()
 
             # Design DNA columns — migration-safe additions for existing DBs.
+            import contextlib
             for col in ("scad_source TEXT", "generation_prompt TEXT", "provider TEXT"):
-                try:
+                with contextlib.suppress(sqlite3.OperationalError):
                     self._conn.execute(f"ALTER TABLE designs ADD COLUMN {col}")
-                except sqlite3.OperationalError:
-                    pass  # Column already exists — expected for new installs.
             self._conn.commit()
 
     # ------------------------------------------------------------------

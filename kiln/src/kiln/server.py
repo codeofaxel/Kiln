@@ -45,6 +45,10 @@ Environment variables
 from __future__ import annotations
 
 import atexit
+
+# Import kiln-pro early so compatibility shims are installed before
+# any try/except imports of pro modules (kiln.billing, kiln.licensing, etc.).
+import contextlib
 import logging
 import os
 import re
@@ -63,18 +67,22 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-# Import kiln-pro early so compatibility shims are installed before
-# any try/except imports of pro modules (kiln.billing, kiln.licensing, etc.).
-try:
+with contextlib.suppress(ImportError):
     import kiln_pro  # noqa: F401 — triggers compat shim installation
-except ImportError:
-    pass  # Free tier — kiln-pro not installed
+
+
+
+
+
+
+
 
 from kiln import parse_float_env, parse_int_env
 from kiln.auth import AuthManager
 from kiln.backup import BackupError
 from kiln.backup import backup_database as _backup_db
 from kiln.bed_leveling import BedLevelManager, LevelingPolicy
+
 try:
     from kiln.billing import BillingLedger
 except ImportError:
@@ -88,6 +96,7 @@ from kiln.cli.config import _validate_printer_url
 from kiln.cloud_sync import CloudSyncManager, SyncConfig
 from kiln.cost_estimator import CostEstimator
 from kiln.events import Event, EventBus, EventType
+
 try:
     from kiln.fulfillment import (
         FulfillmentError,
@@ -132,6 +141,7 @@ from kiln.generation import (
     validate_mesh,
 )
 from kiln.heater_watchdog import HeaterWatchdog
+
 try:
     from kiln.licensing import (
         FREE_TIER_MAX_PRINTERS,
@@ -175,6 +185,7 @@ from kiln.marketplaces import (
     MarketplaceNotFoundError as MktNotFoundError,
 )
 from kiln.materials import MaterialTracker
+
 try:
     from kiln.payments.base import PaymentError
 except ImportError:
