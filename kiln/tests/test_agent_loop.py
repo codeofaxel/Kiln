@@ -634,7 +634,7 @@ class TestRunAgentLoop:
             AgentMessage(role="user", content="first msg"),
             AgentMessage(role="assistant", content="first reply"),
         ]
-        result = run_agent_loop("follow up", config, conversation=history)
+        run_agent_loop("follow up", config, conversation=history)
 
         # At call time: 3 history + 1 new user message = 4
         assert len(captured_messages) == 4

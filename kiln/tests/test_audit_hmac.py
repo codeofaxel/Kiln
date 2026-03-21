@@ -74,7 +74,7 @@ class TestAuditHMAC:
         assert result["valid"] == 1
 
     def test_hmac_with_all_fields(self, db):
-        row_id = db.log_audit(
+        db.log_audit(
             tool_name="send_gcode",
             safety_level="confirm",
             action="executed",
@@ -86,7 +86,7 @@ class TestAuditHMAC:
         assert result["valid"] == 1
 
     def test_hmac_null_optional_fields(self, db):
-        row_id = db.log_audit(
+        db.log_audit(
             tool_name="status",
             safety_level="safe",
             action="executed",

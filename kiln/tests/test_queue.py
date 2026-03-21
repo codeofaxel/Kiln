@@ -16,6 +16,7 @@ Covers:
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 
@@ -658,7 +659,7 @@ class TestPrintQueueThreadSafety:
     def test_concurrent_submit_and_cancel(self):
         queue = PrintQueue()
         submitted: list[str] = []
-        lock = threading.Lock()
+        threading.Lock()
 
         for _ in range(10):
             job_id = queue.submit(file_name="test.gcode")
@@ -666,10 +667,8 @@ class TestPrintQueueThreadSafety:
 
         def cancel_jobs(job_ids: list[str]) -> None:
             for jid in job_ids:
-                try:
+                with contextlib.suppress(JobNotFoundError, ValueError):
                     queue.cancel(jid)
-                except (JobNotFoundError, ValueError):
-                    pass
 
         half = len(submitted) // 2
         t1 = threading.Thread(target=cancel_jobs, args=(submitted[:half],))

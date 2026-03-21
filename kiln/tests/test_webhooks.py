@@ -745,7 +745,7 @@ class TestInactiveEndpoints:
         sender = MagicMock(return_value=200)
         _inject_sender(mgr, sender)
 
-        ep1 = mgr.register(url="https://active.com", events=["job.completed"])
+        mgr.register(url="https://active.com", events=["job.completed"])
         ep2 = mgr.register(url="https://inactive.com", events=["job.completed"])
         ep2.active = False
         mgr.start()

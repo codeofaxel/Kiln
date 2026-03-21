@@ -1,5 +1,5 @@
+
 import py
-import os.path
 
 dirpath = py.path.local("./")
 

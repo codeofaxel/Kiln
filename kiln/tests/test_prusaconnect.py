@@ -543,7 +543,7 @@ class TestSnapshot:
 
     def test_snapshot_no_camera(self):
         a = _adapter()
-        resp = _mock_response(status_code=204, ok=False)
+        _mock_response(status_code=204, ok=False)
         with patch.object(a._session, "request", side_effect=Exception("no camera")):
             data = a.get_snapshot()
 

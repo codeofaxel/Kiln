@@ -123,7 +123,7 @@ class TestEmergencyStopSingle:
 
     def test_success_via_hardware_estop(self):
         adapter = _FakeAdapter(estop_success=True)
-        registry = _make_registry({"voron": adapter})
+        _make_registry({"voron": adapter})
 
         coord = EmergencyCoordinator()
         with mock.patch("kiln.emergency.EmergencyCoordinator._send_emergency_gcode") as mock_send:
@@ -195,7 +195,7 @@ class TestEmergencyStopAll:
     """emergency_stop_all() across the fleet."""
 
     def test_no_known_printers_returns_empty(self):
-        coord = EmergencyCoordinator()
+        EmergencyCoordinator()
         with mock.patch("kiln.emergency.EmergencyCoordinator.emergency_stop_all") as orig:
             # Call the real method but patch the registry import to fail
             orig.side_effect = lambda **kw: []
@@ -203,7 +203,7 @@ class TestEmergencyStopAll:
         # Actually call the real implementation with no printers known
         coord2 = EmergencyCoordinator()
         with mock.patch.dict("sys.modules", {"kiln.server": None}):
-            with mock.patch("kiln.emergency.EmergencyCoordinator.emergency_stop") as mock_stop:
+            with mock.patch("kiln.emergency.EmergencyCoordinator.emergency_stop"):
                 results = coord2.emergency_stop_all(reason=EmergencyReason.POWER_ANOMALY)
         assert results == []
 
@@ -793,7 +793,7 @@ class TestModuleLevelFunctions:
         original = mod._coordinator
         mod._coordinator = mock_coord
         try:
-            result = mod.emergency_stop("voron", reason=EmergencyReason.AGENT_REQUEST)
+            mod.emergency_stop("voron", reason=EmergencyReason.AGENT_REQUEST)
             mock_coord.emergency_stop.assert_called_once_with(
                 "voron", reason=EmergencyReason.AGENT_REQUEST,
             )
@@ -809,7 +809,7 @@ class TestModuleLevelFunctions:
         original = mod._coordinator
         mod._coordinator = mock_coord
         try:
-            result = mod.emergency_stop_all(reason=EmergencyReason.SOFTWARE_FAULT)
+            mod.emergency_stop_all(reason=EmergencyReason.SOFTWARE_FAULT)
             mock_coord.emergency_stop_all.assert_called_once_with(
                 reason=EmergencyReason.SOFTWARE_FAULT,
             )

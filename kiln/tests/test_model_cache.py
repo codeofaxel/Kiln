@@ -145,7 +145,7 @@ class TestModelCacheAdd:
     def test_add_creates_cache_directory(self, db, tmp_path, sample_stl):
         cache_dir = str(tmp_path / "new_cache_dir")
         assert not os.path.exists(cache_dir)
-        cache = ModelCache(db=db, cache_dir=cache_dir)
+        ModelCache(db=db, cache_dir=cache_dir)
         assert os.path.isdir(cache_dir)
 
 

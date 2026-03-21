@@ -516,7 +516,6 @@ class TestAdapterSnapshot:
         snapshot_response.content = b"\xff\xd8\xff\xe0jpeg"
 
         # First _get_json call is the webcams list
-        original_get_json = adapter._get_json
         adapter._get_json = MagicMock(return_value=webcam_response.json())
         adapter._session.get = MagicMock(return_value=snapshot_response)
 

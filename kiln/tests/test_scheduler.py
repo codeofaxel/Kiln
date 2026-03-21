@@ -381,7 +381,7 @@ class TestSkipBusyPrinters:
         adapter = make_mock_adapter(name="printer-1", state=PrinterStatus.IDLE)
         registry.register("printer-1", adapter)
 
-        job_id1 = queue.submit(file_name="first.gcode")
+        queue.submit(file_name="first.gcode")
         scheduler.tick()
 
         # Adapter still reports idle (race condition), but active_jobs tracks it
@@ -392,7 +392,7 @@ class TestSkipBusyPrinters:
         with scheduler._lock:
             scheduler._active_jobs["fake-job"] = "printer-1"
 
-        job_id2 = queue.submit(file_name="second.gcode")
+        queue.submit(file_name="second.gcode")
         result = scheduler.tick()
 
         # The printer-1 should be filtered out because it has an active job
@@ -525,7 +525,7 @@ class TestPrinterTargeting:
         registry.register("printer-b", adapter_b)
 
         # Job specifically targeting printer-b
-        job_id = queue.submit(
+        queue.submit(
             file_name="targeted.gcode", printer_name="printer-b"
         )
         result = scheduler.tick()
@@ -579,7 +579,7 @@ class TestAnyPrinterJobs:
         registry.register("printer-a", adapter_a)
         registry.register("printer-b", adapter_b)
 
-        job_id = queue.submit(file_name="any.gcode", printer_name=None)
+        queue.submit(file_name="any.gcode", printer_name=None)
         result = scheduler.tick()
 
         assert len(result["dispatched"]) == 1
@@ -654,7 +654,7 @@ class TestStartPrintFailure:
             start_print_message="",
         )
         registry.register("printer-1", adapter)
-        job_id = queue.submit(file_name="test.gcode")
+        queue.submit(file_name="test.gcode")
 
         result = scheduler.tick()
 
@@ -735,7 +735,7 @@ class TestThreadSafety:
         """Multiple threads reading active_jobs concurrently."""
         adapter = make_mock_adapter(name="printer-1")
         registry.register("printer-1", adapter)
-        job_id = queue.submit(file_name="benchy.gcode")
+        queue.submit(file_name="benchy.gcode")
         scheduler.tick()
 
         results = []
@@ -801,7 +801,7 @@ class TestMultipleDispatch:
         adapter = make_mock_adapter(name="printer-1")
         registry.register("printer-1", adapter)
 
-        job1 = queue.submit(file_name="file1.gcode")
+        queue.submit(file_name="file1.gcode")
         time.sleep(0.01)
         job2 = queue.submit(file_name="file2.gcode")
 
@@ -837,7 +837,7 @@ class TestEdgeCases:
         adapter = make_mock_adapter(name="printer-1")
         registry.register("printer-1", adapter)
 
-        job1 = queue.submit(file_name="file1.gcode")
+        queue.submit(file_name="file1.gcode")
         scheduler.tick()
 
         # Now there is one active job -- tick should check it

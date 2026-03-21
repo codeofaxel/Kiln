@@ -217,7 +217,7 @@ class TestCloudSyncManagerSync:
         })
         mgr.sync_now()
         # Second sync should not push same job
-        result = mgr.sync_now()
+        mgr.sync_now()
         # May be 0 or push again depending on cursor, but mark_synced was called
         assert mgr.status().jobs_synced >= 1
 

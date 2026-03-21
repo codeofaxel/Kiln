@@ -607,7 +607,7 @@ class TestEstimateTimeline:
     def test_unknown_technology_falls_back_to_fdm(self):
         tl_unknown = estimate_timeline("XYZTECH", shipping_days=5)
         tl_fdm = estimate_timeline("FDM", shipping_days=5)
-        for su, sf in zip(tl_unknown.stages, tl_fdm.stages):
+        for su, sf in zip(tl_unknown.stages, tl_fdm.stages, strict=False):
             assert su.estimated_days == sf.estimated_days
 
     def test_shipping_estimate_us(self):

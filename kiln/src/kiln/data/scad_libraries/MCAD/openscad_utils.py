@@ -1,5 +1,10 @@
-import py, re, os, signal, time, subprocess, sys
-from subprocess import Popen, PIPE
+import re
+import subprocess
+import sys
+import time
+from subprocess import PIPE, Popen
+
+import py
 
 mod_re = (r"\bmodule\s+(", r")\s*\(\s*")
 func_re = (r"\bfunction\s+(", r")\s*\(")

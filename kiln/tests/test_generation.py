@@ -701,8 +701,7 @@ class TestMeshValidation:
         # exactly the right file size but actually contains triangles.
         # Better approach: create a fake binary STL with the right header.
         count = _WARN_TRIANGLES + 1
-        header = b"\x00" * 80
-        count_bytes = struct.pack("<I", count)
+        struct.pack("<I", count)
         # Write one triangle per count to make the file size match.
         # This would be huge, so instead test the truncation error path.
         # Actually, let's just create a small STL but patch the triangle count

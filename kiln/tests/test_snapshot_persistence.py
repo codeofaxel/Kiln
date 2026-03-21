@@ -33,7 +33,7 @@ class TestSnapshotPersistence:
         assert row_id > 0
 
     def test_save_snapshot_with_all_fields(self):
-        row_id = self.db.save_snapshot(
+        self.db.save_snapshot(
             printer_name="voron",
             image_path="/tmp/frame_0001.jpg",
             job_id="job-abc",

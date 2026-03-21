@@ -370,7 +370,7 @@ class TestMainStartup:
     @patch("kiln.server._scheduler")
     def test_main_starts_scheduler(self, mock_scheduler, mock_webhook_mgr, mock_mcp):
         """main() calls _scheduler.start()."""
-        with patch("kiln.server.atexit") as mock_atexit:
+        with patch("kiln.server.atexit"):
             main()
 
         mock_scheduler.start.assert_called_once()
@@ -380,7 +380,7 @@ class TestMainStartup:
     @patch("kiln.server._scheduler")
     def test_main_starts_webhook_mgr(self, mock_scheduler, mock_webhook_mgr, mock_mcp):
         """main() calls _webhook_mgr.start()."""
-        with patch("kiln.server.atexit") as mock_atexit:
+        with patch("kiln.server.atexit"):
             main()
 
         mock_webhook_mgr.start.assert_called_once()

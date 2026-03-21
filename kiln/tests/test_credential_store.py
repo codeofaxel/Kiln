@@ -392,7 +392,7 @@ class TestRotateMasterKey:
 
     def test_rotate_changes_ciphertext(self, tmp_path):
         store = _make_store(tmp_path)
-        cred = store.store(CredentialType.API_KEY, "unchanged-plaintext")
+        store.store(CredentialType.API_KEY, "unchanged-plaintext")
         old_enc = store.list_credentials()[0].encrypted_value
         store.rotate_master_key("different-master-key")
         new_enc = store.list_credentials()[0].encrypted_value

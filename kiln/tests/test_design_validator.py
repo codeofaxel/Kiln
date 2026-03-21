@@ -625,7 +625,7 @@ class TestDesignValidationEdgeCases:
 
     def test_build_volume_not_checked_when_not_provided(self, cube_stl):
         report = validate_design(cube_stl, "coaster")
-        check_names = {c.check_name for c in report.checks}
+        {c.check_name for c in report.checks}
         # No build_volume check since we didn't provide one
         # (build_volume check is not in the default set — it's in
         # printability, not design_validator, by default)

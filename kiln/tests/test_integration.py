@@ -599,7 +599,7 @@ class TestQueueSchedulerPrinterFlow:
         )
 
         # Submit two jobs
-        job1_id = print_queue.submit(
+        print_queue.submit(
             file_name="part1.gcode",
             printer_name="voron-350",
             submitted_by="test-agent",
@@ -637,7 +637,7 @@ class TestQueueSchedulerPrinterFlow:
         )
 
         # Submit low-priority, then high-priority
-        low_id = print_queue.submit(
+        print_queue.submit(
             file_name="low.gcode",
             printer_name="voron-350",
             submitted_by="test-agent",
@@ -890,7 +890,7 @@ class TestEventBusWebhookDelivery:
 
         # Register endpoint bypassing SSRF validation for test
         with patch("kiln.webhooks._validate_webhook_url", return_value=(True, "")):
-            endpoint = manager.register(
+            manager.register(
                 url="https://hooks.example.com/kiln",
                 events=["job.completed", "job.failed"],
                 secret="test-secret-123",
@@ -1169,7 +1169,7 @@ class TestFleetRegistryScheduling:
         )
 
         # Submit job targeting voron-350 specifically
-        job_id = queue.submit(
+        queue.submit(
             file_name="part.gcode",
             printer_name="voron-350",
             submitted_by="test-agent",
@@ -1196,7 +1196,7 @@ class TestFleetRegistryScheduling:
             event_bus=event_bus,
         )
 
-        job_id = queue.submit(
+        queue.submit(
             file_name="part.gcode",
             printer_name=None,  # Any printer
             submitted_by="test-agent",
@@ -1253,7 +1253,7 @@ class TestFleetRegistryScheduling:
             event_bus=event_bus,
         )
 
-        job_id = queue.submit(
+        queue.submit(
             file_name="test.gcode",
             printer_name=None,
             submitted_by="test-agent",

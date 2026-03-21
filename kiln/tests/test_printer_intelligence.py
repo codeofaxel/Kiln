@@ -241,7 +241,7 @@ class TestIntelToDict:
         intel = get_printer_intel("ender3")
         d = intel_to_dict(intel)
         assert isinstance(d["materials"], dict)
-        for mat_name, mat_data in d["materials"].items():
+        for _mat_name, mat_data in d["materials"].items():
             assert "hotend" in mat_data
             assert "bed" in mat_data
             assert "fan" in mat_data

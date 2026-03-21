@@ -2,9 +2,6 @@
 
 import json
 import struct
-from pathlib import Path
-
-import pytest
 
 
 def _write_box_stl(path: str, x: float, y: float, z: float) -> None:

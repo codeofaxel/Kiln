@@ -324,7 +324,7 @@ class TestCheckpointLifecycle:
     def test_get_all_checkpoints_ordered(self):
         mgr = RecoveryManager()
         cp1 = mgr.save_checkpoint("j1", "p1", "heating", 0.0)
-        cp2 = mgr.save_checkpoint("j1", "p1", "printing", 25.0)
+        mgr.save_checkpoint("j1", "p1", "printing", 25.0)
         cp3 = mgr.save_checkpoint("j1", "p1", "printing", 75.0)
         all_cps = mgr.get_all_checkpoints("j1")
         assert len(all_cps) == 3
