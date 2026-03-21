@@ -376,3 +376,89 @@ class TestLargeSource:
         v2 = store.save_version("d1", src_b)
         assert v2.diff_from_prev is not None
         assert len(v2.diff_from_prev) > 0
+
+
+class TestInputValidation:
+    def test_empty_design_id_rejected(self, store):
+        with pytest.raises(ValueError, match="design_id must not be empty"):
+            store.save_version("", SCAD_V1)
+
+    def test_blank_design_id_rejected(self, store):
+        with pytest.raises(ValueError, match="design_id must not be empty"):
+            store.save_version("   ", SCAD_V1)
+
+    def test_empty_scad_source_rejected(self, store):
+        with pytest.raises(ValueError, match="scad_source must not be empty"):
+            store.save_version("d1", "")
+
+    def test_null_byte_in_design_id_rejected(self, store):
+        with pytest.raises(ValueError, match="null bytes"):
+            store.save_version("d1\x00bad", SCAD_V1)
+
+    def test_null_byte_in_scad_source_rejected(self, store):
+        with pytest.raises(ValueError, match="null bytes"):
+            store.save_version("d1", "cube();\x00DROP TABLE")
+
+    def test_null_byte_in_prompt_rejected(self, store):
+        with pytest.raises(ValueError, match="null bytes"):
+            store.save_version("d1", SCAD_V1, prompt="good\x00bad")
+
+    def test_null_byte_in_notes_rejected(self, store):
+        with pytest.raises(ValueError, match="null bytes"):
+            store.save_version("d1", SCAD_V1, notes="ok\x00evil")
+
+
+class TestUnicode:
+    def test_unicode_in_source(self, store):
+        src = "// Schale mit Griff \u2014 \u00e4\u00f6\u00fc\u00df\nmodule cup() { sphere(r=10); }"
+        v = store.save_version("d1", src)
+        fetched = store.get_version(v.version_id)
+        assert fetched.scad_source == src
+
+    def test_unicode_in_prompt_and_notes(self, store):
+        v = store.save_version(
+            "d1", SCAD_V1,
+            prompt="\u8bbe\u8ba1\u4e00\u4e2a\u624b\u673a\u652f\u67b6",
+            notes="\u2615 caf\u00e9 holder \u2764",
+        )
+        fetched = store.get_version(v.version_id)
+        assert fetched.prompt == "\u8bbe\u8ba1\u4e00\u4e2a\u624b\u673a\u652f\u67b6"
+        assert fetched.notes == "\u2615 caf\u00e9 holder \u2764"
+
+    def test_search_unicode(self, store):
+        store.save_version("d1", SCAD_V1, prompt="\u8bbe\u8ba1\u4e00\u4e2a\u624b\u673a\u652f\u67b6")
+        results = store.search_versions("\u624b\u673a")
+        assert len(results) == 1
+
+
+class TestLikeEscaping:
+    def test_search_with_percent_literal(self, store):
+        store.save_version("d1", SCAD_V1, prompt="100% done")
+        store.save_version("d2", SCAD_V2, prompt="something else")
+        results = store.search_versions("100%")
+        assert len(results) == 1
+        assert results[0].design_id == "d1"
+
+    def test_search_with_underscore_literal(self, store):
+        store.save_version("d1", SCAD_V1, prompt="var_name")
+        store.save_version("d2", SCAD_V2, prompt="varXname")
+        results = store.search_versions("var_name")
+        assert len(results) == 1
+        assert results[0].design_id == "d1"
+
+
+class TestLimitClamping:
+    def test_negative_limit_clamped(self, store):
+        store.save_version("d1", SCAD_V1)
+        versions = store.list_versions("d1", limit=-5)
+        assert len(versions) == 1
+
+    def test_zero_limit_clamped(self, store):
+        store.save_version("d1", SCAD_V1)
+        versions = store.list_versions("d1", limit=0)
+        assert len(versions) == 1
+
+    def test_search_negative_limit_clamped(self, store):
+        store.save_version("d1", SCAD_V1, prompt="findme")
+        results = store.search_versions("findme", limit=-1)
+        assert len(results) == 1

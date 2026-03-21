@@ -25,6 +25,7 @@ class _VersionToolsPlugin:
         - diff_design_versions
         - rollback_design_version
         - get_design_version
+        - search_design_versions
     """
 
     @property
@@ -166,11 +167,16 @@ class _VersionToolsPlugin:
         def get_design_version(version_id: str) -> dict:
             """Retrieve a single design version by its ID.
 
+            Use this to inspect the full source code, parameters, and diff
+            for a specific version when you already know the version_id.
+
             Args:
-                version_id: The unique version identifier.
+                version_id: The unique version identifier (UUID hex string).
 
             Returns:
-                The version record, or an error if not found.
+                The version record including scad_source, prompt,
+                parameters, diff_from_prev, and parent_version_id.
+                Returns an error if the version does not exist.
             """
             from kiln.design_versions import DesignVersionStore
 
@@ -182,6 +188,38 @@ class _VersionToolsPlugin:
                 return {"ok": True, "version": version.to_dict()}
             except Exception as exc:
                 _logger.exception("get_design_version failed")
+                return {"ok": False, "error": str(exc)}
+            finally:
+                store.close()
+
+        @mcp.tool()
+        def search_design_versions(query: str, limit: int = 10) -> dict:
+            """Search design versions by prompt or notes text.
+
+            Performs a case-insensitive substring search across the prompt
+            and notes fields of all saved versions.  Useful for finding
+            designs when you remember a keyword but not the exact design_id.
+
+            Args:
+                query: The search term (literal substring, not regex).
+                limit: Maximum number of results to return (default 10).
+
+            Returns:
+                A list of matching version records, newest first.
+            """
+            from kiln.design_versions import DesignVersionStore
+
+            store = DesignVersionStore()
+            try:
+                versions = store.search_versions(query, limit=limit)
+                return {
+                    "ok": True,
+                    "query": query,
+                    "count": len(versions),
+                    "versions": [v.to_dict() for v in versions],
+                }
+            except Exception as exc:
+                _logger.exception("search_design_versions failed")
                 return {"ok": False, "error": str(exc)}
             finally:
                 store.close()

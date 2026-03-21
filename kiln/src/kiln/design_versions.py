@@ -171,7 +171,24 @@ class DesignVersionStore:
         (if any), assigns a UUID version_id, and records the timestamp.
 
         Returns the newly created :class:`DesignVersion`.
+
+        Raises:
+            ValueError: If *design_id* or *scad_source* is empty/blank,
+                or if any string argument contains null bytes.
         """
+        if not design_id or not design_id.strip():
+            raise ValueError("design_id must not be empty")
+        if not scad_source:
+            raise ValueError("scad_source must not be empty")
+        # Null bytes can corrupt SQLite TEXT columns.
+        for name, val in [
+            ("design_id", design_id),
+            ("scad_source", scad_source),
+            ("prompt", prompt),
+            ("notes", notes),
+        ]:
+            if "\x00" in val:
+                raise ValueError(f"{name} must not contain null bytes")
         if parameters is None:
             parameters = {}
 
@@ -245,6 +262,8 @@ class DesignVersionStore:
         self, design_id: str, *, limit: int = 20
     ) -> list[DesignVersion]:
         """List versions for *design_id*, newest first."""
+        if limit < 1:
+            limit = 1
         rows = self._conn.execute(
             "SELECT * FROM design_versions "
             "WHERE design_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?",
@@ -273,14 +292,21 @@ class DesignVersionStore:
         Raises :class:`ValueError` if the target version doesn't exist or
         belongs to a different design.
         """
-        target = self.get_version(version_id)
-        if target is None:
-            raise ValueError(f"Version not found: {version_id}")
-        if target.design_id != design_id:
-            raise ValueError(
-                f"Version {version_id} belongs to design "
-                f"{target.design_id}, not {design_id}"
-            )
+        # Validate target inside the lock to avoid TOCTOU races.
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM design_versions WHERE version_id = ?",
+                (version_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Version not found: {version_id}")
+            target = self._row_to_version(row)
+            if target.design_id != design_id:
+                raise ValueError(
+                    f"Version {version_id} belongs to design "
+                    f"{target.design_id}, not {design_id}"
+                )
+        # save_version acquires its own lock.
         return self.save_version(
             design_id=design_id,
             scad_source=target.scad_source,
@@ -311,11 +337,19 @@ class DesignVersionStore:
     def search_versions(
         self, query: str, *, limit: int = 10
     ) -> list[DesignVersion]:
-        """Search versions by prompt or notes text (case-insensitive)."""
-        like = f"%{query}%"
+        """Search versions by prompt or notes text (case-insensitive).
+
+        LIKE metacharacters (``%``, ``_``) in *query* are escaped so the
+        search is always a literal substring match.
+        """
+        if limit < 1:
+            limit = 1
+        # Escape LIKE metacharacters so user input is a literal substring.
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{escaped}%"
         rows = self._conn.execute(
             "SELECT * FROM design_versions "
-            "WHERE prompt LIKE ? OR notes LIKE ? "
+            "WHERE prompt LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\' "
             "ORDER BY created_at DESC LIMIT ?",
             (like, like, limit),
         ).fetchall()
