@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import time
@@ -1036,6 +1037,10 @@ class TestErrorHandling:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    not importlib.util.find_spec("kiln.licensing"),
+    reason="kiln.licensing extracted to kiln-pro",
+)
 class TestLicenseCommands:
     """Tests for kiln upgrade and kiln license-info CLI commands."""
 
@@ -1146,6 +1151,10 @@ class TestLicenseCommands:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    not importlib.util.find_spec("kiln.licensing"),
+    reason="kiln.licensing extracted to kiln-pro",
+)
 class TestFleetCLI:
     """Tests for kiln fleet CLI commands."""
 
@@ -1285,6 +1294,10 @@ class TestFleetCLI:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    not importlib.util.find_spec("kiln.licensing"),
+    reason="kiln.licensing extracted to kiln-pro",
+)
 class TestQueueCLI:
     """Tests for kiln queue CLI commands."""
 

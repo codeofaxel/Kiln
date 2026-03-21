@@ -45,13 +45,18 @@ def submit_job(
     """
     import kiln.server as _srv
     from kiln.events import Event, EventType
-    from kiln.licensing import FREE_TIER_MAX_QUEUED_JOBS, LicenseTier, get_tier
+    try:
+        from kiln.licensing import FREE_TIER_MAX_QUEUED_JOBS, LicenseTier, get_tier
+    except ImportError:
+        FREE_TIER_MAX_QUEUED_JOBS = 10
+        LicenseTier = None
+        get_tier = lambda: None  # noqa: E731
 
     if err := _srv._check_auth("queue"):
         return err
     # Free-tier queue cap: limit pending jobs.
     current_tier = get_tier()
-    if current_tier < LicenseTier.PRO:
+    if LicenseTier is not None and current_tier is not None and current_tier < LicenseTier.PRO:
         pending = _srv._queue.pending_count()
         if pending >= FREE_TIER_MAX_QUEUED_JOBS:
             return {

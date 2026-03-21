@@ -22,6 +22,7 @@ import json
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import os
 import struct
@@ -1261,6 +1262,10 @@ class TestSendGcodeWithValidation:
 # fleet_status()
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(
+    not importlib.util.find_spec("kiln.licensing"),
+    reason="kiln.licensing extracted to kiln-pro",
+)
 class TestFleetStatus:
     """Tests for the fleet_status MCP tool."""
 
