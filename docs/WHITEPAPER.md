@@ -4,7 +4,7 @@
 
 # Kiln: The Intelligence Layer Between Ideas and Physical Objects
 
-**Version 0.5.0 — March 2026**
+**Version 0.4.2 — March 2026**
 
 > Describe it or draw it. Kiln makes it real.
 
