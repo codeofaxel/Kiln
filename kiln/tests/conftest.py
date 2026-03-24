@@ -434,27 +434,17 @@ def mock_file_list():
 
 @pytest.fixture(autouse=True)
 def _bypass_license_tier(monkeypatch, tmp_path):
-    """Ensure all tests run with a BUSINESS-tier license by default.
+    """Ensure all tests run with tier checks bypassed by default.
 
     This prevents tier-gated MCP tools from returning LICENSE_REQUIRED
     errors in existing tests.  Tests that specifically test licensing
     behaviour can override this by patching ``kiln.licensing._manager``
-    themselves.
-
-    When kiln.licensing is not installed (extracted to kiln-pro), this
-    fixture is a no-op — all features run unlicensed in free tier.
+    or ``check_tier`` themselves.
     """
     try:
-        from kiln.licensing import _KEY_PREFIX_BUSINESS, LicenseManager
-    except ImportError:
-        return  # Licensing module extracted to kiln-pro; no tier gating active
-
-    # Allow legacy prefix keys in tests (no HMAC signature available)
-    monkeypatch.setenv("KILN_LICENSE_OFFLINE", "1")
-
-    mgr = LicenseManager(
-        license_key=f"{_KEY_PREFIX_BUSINESS}test_bypass_key",
-        license_path=tmp_path / "test_license",
-        cache_path=tmp_path / "test_cache.json",
-    )
-    monkeypatch.setattr("kiln.licensing._manager", mgr)
+        import kiln.licensing  # noqa: F401 — ensure shim is resolved
+        monkeypatch.setattr(
+            "kiln.licensing.check_tier", lambda _tier: (True, None)
+        )
+    except (ImportError, AttributeError):
+        pass  # Licensing not available; stub requires_tier in server.py handles it

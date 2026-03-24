@@ -6159,6 +6159,15 @@ def billing_setup(rail: str, json_mode: bool) -> None:
     Generates a setup URL to add a credit card (Stripe) or configure
     crypto payments (USDC on Solana/Base).
     """
+    try:
+        from kiln.licensing import LicenseTier, check_tier
+        ok, msg = check_tier(LicenseTier.PRO)
+        if not ok:
+            click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
+            sys.exit(1)
+    except ImportError:
+        click.echo(format_error("This feature requires kiln-pro", json_mode=json_mode))
+        sys.exit(1)
     from kiln.cli.config import get_billing_config, get_or_create_user_id
     try:
         from kiln.payments.manager import PaymentManager
@@ -6204,6 +6213,15 @@ def billing_setup(rail: str, json_mode: bool) -> None:
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def billing_status(json_mode: bool) -> None:
     """Show current payment method, monthly spend, and limits."""
+    try:
+        from kiln.licensing import LicenseTier, check_tier
+        ok, msg = check_tier(LicenseTier.PRO)
+        if not ok:
+            click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
+            sys.exit(1)
+    except ImportError:
+        click.echo(format_error("This feature requires kiln-pro", json_mode=json_mode))
+        sys.exit(1)
     from kiln.cli.config import get_billing_config, get_or_create_user_id
     try:
         from kiln.payments.manager import PaymentManager
@@ -6231,6 +6249,15 @@ def billing_status(json_mode: bool) -> None:
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 def billing_history(limit: int, json_mode: bool) -> None:
     """Show recent billing charges and payment outcomes."""
+    try:
+        from kiln.licensing import LicenseTier, check_tier
+        ok, msg = check_tier(LicenseTier.PRO)
+        if not ok:
+            click.echo(format_error(msg, code="LICENSE_REQUIRED", json_mode=json_mode))
+            sys.exit(1)
+    except ImportError:
+        click.echo(format_error("This feature requires kiln-pro", json_mode=json_mode))
+        sys.exit(1)
     from kiln.cli.config import get_billing_config
     try:
         from kiln.payments.manager import PaymentManager
@@ -6926,12 +6953,22 @@ def rest(host: str, port: int, auth_token: str | None, tier: str) -> None:
     discovery endpoint at GET /api/tools lists available tools with schemas.
     """
     try:
+        from kiln.licensing import LicenseTier, check_tier
+        ok, msg = check_tier(LicenseTier.PRO)
+        if not ok:
+            click.echo(msg)
+            raise SystemExit(1)
+    except ImportError:
+        click.echo(
+            "REST API requires kiln-pro. Install with: pip install kiln-pro\n"
+            "See https://kiln3d.com/pricing for details."
+        )
+        raise SystemExit(1) from None
+    try:
         from kiln_pro.rest_api import RestApiConfig, run_rest_server
     except ImportError as exc:
         missing = getattr(exc, "name", None) or ""
         if missing and missing != "kiln_pro" and not missing.startswith("kiln_pro."):
-            # kiln-pro is installed but a runtime dependency is missing
-            # (e.g. fastapi, uvicorn, starlette).
             click.echo(
                 f"REST API dependency '{missing}' not found.\n"
                 "Install REST extras with: pip install 'kiln3d[rest]'"

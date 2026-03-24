@@ -49,6 +49,7 @@ import atexit
 # Import kiln-pro early so compatibility shims are installed before
 # any try/except imports of pro modules (kiln.billing, kiln.licensing, etc.).
 import contextlib
+import functools
 import logging
 import os
 import re
@@ -162,16 +163,35 @@ except ImportError:
 
     LicenseTier = _DummyTier  # type: ignore[misc]
 
-    def check_tier(*_a, **_kw):
-        return True
+    def check_tier(required, *_a, **_kw):
+        tier_label = getattr(required, "value", required) if required else "pro"
+        return (False, (
+            f"This feature requires a Kiln {str(tier_label).title()} license. "
+            "You're on the Free tier. "
+            "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+        ))
 
     def get_tier(*_a, **_kw):
         return "free"
 
     def requires_tier(_tier):
-        """No-op decorator -- all features unlocked when licensing not installed."""
+        """Gate pro/enterprise features when kiln-pro is not installed."""
+        tier_label = getattr(_tier, "value", _tier) if _tier else "pro"
         def decorator(fn):
-            return fn
+            @functools.wraps(fn)
+            def wrapper(*args, **kwargs):
+                return {
+                    "success": False,
+                    "error": (
+                        f"This feature requires a Kiln {str(tier_label).title()} license. "
+                        "You're on the Free tier. "
+                        "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+                    ),
+                    "code": "LICENSE_REQUIRED",
+                    "required_tier": str(tier_label),
+                    "upgrade_url": "https://kiln3d.com/pro",
+                }
+            return wrapper
         return decorator
 from kiln.log_config import configure_logging as _configure_log_rotation
 from kiln.marketplaces import (
@@ -7327,6 +7347,7 @@ def webcam_stream(
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def cloud_sync_status() -> dict:
     """Get the current cloud sync status."""
     global _cloud_sync
@@ -7336,6 +7357,7 @@ def cloud_sync_status() -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def cloud_sync_now() -> dict:
     """Trigger an immediate cloud sync cycle."""
     global _cloud_sync
@@ -7352,6 +7374,7 @@ def cloud_sync_now() -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def cloud_sync_configure(
     cloud_url: str,
     api_key: str,
@@ -7964,6 +7987,7 @@ def kiln_health() -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.BUSINESS)
 def register_webhook(
     url: str,
     events: list[str] | None = None,
@@ -8004,6 +8028,7 @@ def register_webhook(
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.BUSINESS)
 def list_webhooks() -> dict:
     """List all registered webhook endpoints.
 
@@ -8032,6 +8057,7 @@ def list_webhooks() -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.BUSINESS)
 def delete_webhook(endpoint_id: str) -> dict:
     """Delete a registered webhook endpoint.
 
@@ -13095,6 +13121,7 @@ def get_safety_profile(printer_id: str) -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.BUSINESS)
 def add_safety_profile(printer_model: str, profile: dict) -> dict:
     """Add a community safety profile for a printer model.
 
@@ -15827,6 +15854,7 @@ def estimate_print_progress(
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def route_print_job(
     file_path: str,
     *,
@@ -15865,6 +15893,7 @@ def route_print_job(
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def fleet_submit_job(
     file_path: str,
     *,
@@ -15903,6 +15932,7 @@ def fleet_submit_job(
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def fleet_job_status(job_id: str) -> dict:
     """Get the status of a fleet-managed print job.
 
@@ -15923,6 +15953,7 @@ def fleet_job_status(job_id: str) -> dict:
 
 
 @mcp.tool()
+@requires_tier(LicenseTier.PRO)
 def fleet_utilization() -> dict:
     """Get fleet utilization metrics — busy/idle/offline counts and utilization %.
 

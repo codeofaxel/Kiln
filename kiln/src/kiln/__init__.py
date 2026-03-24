@@ -82,3 +82,20 @@ def parse_float_env(name: str, default: float) -> float:
             default,
         )
         return default
+
+
+# ---------------------------------------------------------------------------
+# Lazy attribute lookup for kiln-pro compat shims.
+# kiln-pro registers shimmed submodules (e.g. kiln.licensing) in
+# sys.modules but doesn't set them as attributes on this package.
+# __getattr__ bridges that gap so attribute-based traversal works.
+# ---------------------------------------------------------------------------
+import sys as _sys  # noqa: E402
+
+def __getattr__(name: str):
+    fqn = f"{__name__}.{name}"
+    mod = _sys.modules.get(fqn)
+    if mod is not None:
+        setattr(_sys.modules[__name__], name, mod)
+        return mod
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

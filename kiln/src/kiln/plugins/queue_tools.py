@@ -50,13 +50,18 @@ def submit_job(
     except ImportError:
         FREE_TIER_MAX_QUEUED_JOBS = 10
         LicenseTier = None
-        get_tier = lambda: None  # noqa: E731
+        def get_tier():
+            return "free"
 
     if err := _srv._check_auth("queue"):
         return err
     # Free-tier queue cap: limit pending jobs.
     current_tier = get_tier()
-    if LicenseTier is not None and current_tier is not None and current_tier < LicenseTier.PRO:
+    _is_free = (
+        (LicenseTier is not None and current_tier is not None and current_tier < LicenseTier.PRO)
+        or LicenseTier is None  # kiln-pro not installed → free tier
+    )
+    if _is_free:
         pending = _srv._queue.pending_count()
         if pending >= FREE_TIER_MAX_QUEUED_JOBS:
             return {
