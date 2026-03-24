@@ -1172,11 +1172,14 @@ class TestBambuAdapterMQTTInternals:
         assert call_args[0][0] == adapter_with_mqtt._topic_request
         assert json.loads(call_args[0][1]) == payload
 
-    def test_publish_command_waits_for_publish(self, adapter_with_mqtt: BambuAdapter) -> None:
+    def test_publish_command_uses_qos_zero(self, adapter_with_mqtt: BambuAdapter) -> None:
         adapter_with_mqtt._publish_command({"test": "data"})
 
+        call_args = adapter_with_mqtt._mqtt_client.publish.call_args
+        assert call_args.kwargs.get("qos", call_args[0][2] if len(call_args[0]) > 2 else None) == 0
+        # QoS 0 is fire-and-forget — no wait_for_publish call expected.
         publish_result = adapter_with_mqtt._mqtt_client.publish.return_value
-        publish_result.wait_for_publish.assert_called_once()
+        publish_result.wait_for_publish.assert_not_called()
 
     def test_publish_command_raises_on_failure(self, adapter_with_mqtt: BambuAdapter) -> None:
         adapter_with_mqtt._mqtt_client.publish.side_effect = Exception("Publish failed")
@@ -1239,7 +1242,7 @@ class TestBambuAdapterMQTTInternals:
 
         adapter._on_connect(mock_client, None, None, None)
 
-        mock_client.subscribe.assert_called_once_with(adapter._topic_report)
+        mock_client.subscribe.assert_called_once_with(adapter._topic_report, qos=0)
         assert adapter._mqtt_connected.is_set()
         assert adapter._connected is True
         mock_client.publish.assert_called_once()
@@ -3093,7 +3096,7 @@ class TestMqttSingleClientErrorMessaging:
         exc = ConnectionResetError(54, "Connection reset by peer")
         with mock.patch("paho.mqtt.client.Client") as mock_mqtt_cls:
             mock_client = mock_mqtt_cls.return_value
-            mock_client.connect.side_effect = exc
+            mock_client.connect_async.side_effect = exc
             with pytest.raises(PrinterError, match="another client"):
                 adapter._ensure_mqtt()
 
@@ -3102,7 +3105,7 @@ class TestMqttSingleClientErrorMessaging:
         exc = ssl.SSLError("TLS handshake timed out")
         with mock.patch("paho.mqtt.client.Client") as mock_mqtt_cls:
             mock_client = mock_mqtt_cls.return_value
-            mock_client.connect.side_effect = exc
+            mock_client.connect_async.side_effect = exc
             with pytest.raises(PrinterError, match="another client"):
                 adapter._ensure_mqtt()
 
@@ -3111,7 +3114,7 @@ class TestMqttSingleClientErrorMessaging:
         exc = OSError("Network is unreachable")
         with mock.patch("paho.mqtt.client.Client") as mock_mqtt_cls:
             mock_client = mock_mqtt_cls.return_value
-            mock_client.connect.side_effect = exc
+            mock_client.connect_async.side_effect = exc
             with pytest.raises(PrinterError, match="Network is unreachable"):
                 adapter._ensure_mqtt()
 
