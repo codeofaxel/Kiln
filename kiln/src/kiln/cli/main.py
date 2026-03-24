@@ -6927,11 +6927,20 @@ def rest(host: str, port: int, auth_token: str | None, tier: str) -> None:
     """
     try:
         from kiln_pro.rest_api import RestApiConfig, run_rest_server
-    except ImportError:
-        click.echo(
-            "REST API requires kiln-pro. Install with: pip install kiln-pro\n"
-            "See https://kiln3d.com/pricing for details."
-        )
+    except ImportError as exc:
+        missing = getattr(exc, "name", None) or ""
+        if missing and missing != "kiln_pro" and not missing.startswith("kiln_pro."):
+            # kiln-pro is installed but a runtime dependency is missing
+            # (e.g. fastapi, uvicorn, starlette).
+            click.echo(
+                f"REST API dependency '{missing}' not found.\n"
+                "Install REST extras with: pip install 'kiln3d[rest]'"
+            )
+        else:
+            click.echo(
+                "REST API requires kiln-pro. Install with: pip install kiln-pro\n"
+                "See https://kiln3d.com/pricing for details."
+            )
         raise SystemExit(1) from None
 
     resolved_auth_token = auth_token
