@@ -434,6 +434,7 @@ class TestCompatibilityMatrix:
     VALID_UPGRADES = {
         "hardened_nozzle", "all_metal_hotend", "enclosure",
         "heated_bed", "direct_drive", "dry_box",
+        "pp_adhesion_sheet",
     }
 
     def test_every_printer_exists_in_printer_intelligence(

@@ -175,6 +175,14 @@
         "direct_drive"
       ],
       "notes": "Bowden extruder cannot reliably push ultra-soft TPU 85A. Direct drive upgrade required."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "artillery_sw_x3": {
@@ -337,6 +345,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "bambu_a1": {
@@ -499,6 +515,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "bambu_a1_mini": {
@@ -661,6 +685,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "bambu_p1p": {
@@ -823,6 +855,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "bambu_p1s": {
@@ -972,6 +1012,13 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
     }
   },
   "bambu_x1c": {
@@ -1111,6 +1158,13 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
     }
   },
   "cr10": {
@@ -1292,6 +1346,14 @@
         "direct_drive"
       ],
       "notes": "TPU 85A requires direct drive extruder. Too soft for Bowden systems."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "default": {
@@ -1458,6 +1520,14 @@
         "direct_drive"
       ],
       "notes": "TPU 85A requires direct drive extruder. Too soft for Bowden systems."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "elegoo_centauri_carbon": {
@@ -1607,6 +1677,13 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
     }
   },
   "elegoo_neptune3": {
@@ -1787,6 +1864,14 @@
         "direct_drive"
       ],
       "notes": "TPU 85A requires direct drive extruder. Too soft for Bowden systems."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "elegoo_neptune4": {
@@ -1949,6 +2034,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "elegoo_orangestorm_giga": {
@@ -2111,6 +2204,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "ender3": {
@@ -2292,6 +2393,14 @@
         "direct_drive"
       ],
       "notes": "TPU 85A requires direct drive extruder. Too soft for Bowden systems."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "ender3_s1": {
@@ -2454,6 +2563,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "ender5": {
@@ -2635,6 +2752,14 @@
         "direct_drive"
       ],
       "notes": "TPU 85A requires direct drive extruder. Too soft for Bowden systems."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "flashforge_adventurer5m": {
@@ -2800,6 +2925,13 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
     }
   },
   "k1": {
@@ -2962,6 +3094,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "klipper_generic": {
@@ -3124,6 +3264,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "prusa_mini": {
@@ -3305,6 +3453,14 @@
         "direct_drive"
       ],
       "notes": "TPU 85A requires direct drive extruder. Too soft for Bowden systems."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "prusa_mk3s": {
@@ -3467,6 +3623,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "prusa_mk4": {
@@ -3629,6 +3793,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "prusa_xl": {
@@ -3791,6 +3963,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "qidi_x_plus3": {
@@ -3940,6 +4120,13 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
     }
   },
   "ratrig_vcore3": {
@@ -4102,6 +4289,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "sovol_sv06": {
@@ -4264,6 +4459,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "sovol_sv07": {
@@ -4426,6 +4629,14 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "enclosure",
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     }
   },
   "voron_0": {
@@ -4575,6 +4786,13 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
     }
   },
   "voron_2": {
@@ -4724,6 +4942,13 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
+    },
+    "pp": {
+      "status": "needs_upgrade",
+      "upgrades_needed": [
+        "pp_adhesion_sheet"
+      ],
+      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
     }
   }
 }

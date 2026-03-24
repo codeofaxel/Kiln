@@ -1511,5 +1511,63 @@
         "tradeoffs": "TPU 85A is designed for maximum flexibility and softness. Strengthening is not a meaningful concept for this material \u2014 its purpose is to be soft and elastic."
       }
     ]
+  },
+  "pp": {
+    "techniques": [
+      {
+        "name": "Flame Treatment",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "small propane torch",
+          "heat-resistant gloves",
+          "fire extinguisher nearby"
+        ],
+        "procedure": "Pass a propane torch flame quickly over the PP surface at a distance of 5-8 cm. Move steadily at roughly 30 cm/s — do not linger or the part will melt. A single brief pass is enough to oxidize the surface and raise surface energy for bonding or painting.",
+        "result": "Improved surface energy that allows adhesives, primers, and paints to wet the surface. Effect is temporary — bond or paint within 30 minutes of treatment.",
+        "safety_notes": "Work in a well-ventilated area away from flammables. Wear heat-resistant gloves. Keep a fire extinguisher within reach. PP is flammable — do not overheat."
+      },
+      {
+        "name": "Light Sanding",
+        "difficulty": "easy",
+        "tools_needed": [
+          "320-grit sandpaper",
+          "400-grit sandpaper",
+          "water for wet sanding (optional)"
+        ],
+        "procedure": "Sand very lightly with 320+ grit to knock down layer lines. PP is soft and waxy, so use minimal pressure — heavy sanding will gouge or smear the surface rather than smooth it. Wet sanding helps prevent loading.",
+        "result": "Reduced layer line visibility. Surface remains waxy to the touch. Does not significantly improve paint adhesion on its own.",
+        "safety_notes": "Wear a dust mask. Use light pressure — PP deforms easily under sanding force."
+      },
+      {
+        "name": "Annealing",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "oven with accurate temperature control",
+          "flat ceramic tile or glass plate",
+          "oven thermometer"
+        ],
+        "procedure": "Place part on a flat surface (ceramic tile or glass) in an oven. Heat to 80-90C and hold for 2-4 hours. Cool slowly in the oven — do not remove while hot. The long hold time allows PP to relieve internal stress and increase crystallinity.",
+        "result": "Reduced warping and improved dimensional stability. Modest increase in stiffness and crystallinity.",
+        "safety_notes": "Do not exceed 90C — PP softens significantly above this range and will deform. Ensure adequate ventilation."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "PP-specific adhesion promoter (e.g., Bulldog PP Primer, 3M Adhesion Promoter)",
+      "paint_types": [
+        "spray_paint",
+        "acrylic"
+      ],
+      "notes": "Very poor paintability. PP's low surface energy (approx. 30 dynes/cm) means paint, primer, and adhesives will not stick without surface activation. Flame treatment or a dedicated PP adhesion promoter is mandatory. Even with proper preparation, adhesion is marginal — expect paint to chip under mechanical stress. Not recommended for high-wear painted surfaces."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat to 80-90C and hold for 2-4 hours. Cool slowly in the oven. Annealing relieves internal stress from the printing process and promotes crystallinity, reducing the tendency of PP to warp after printing.",
+        "strength_gain_pct": 15,
+        "tradeoffs": "Long anneal time required (2-4 hours). Modest strength and stiffness improvement. No chemical smoothing options exist for PP — acetone, IPA, and other common solvents do not dissolve polypropylene."
+      }
+    ]
   }
 }

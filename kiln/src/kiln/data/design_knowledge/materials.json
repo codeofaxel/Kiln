@@ -2052,5 +2052,88 @@
       ]
     },
     "_notes": "Shore 85A TPU has limited manufacturer datasheets for FDM-specific properties. Mechanical values are approximate and vary more than 95A across brands. Flexural and compressive values extrapolated from Shore hardness scaling. Extremely difficult to print \u2014 not recommended for novice users or budget printers."
+  },
+  "pp": {
+    "display_name": "Polypropylene (PP)",
+    "category": "specialty",
+    "mechanical": {
+      "tensile_strength_mpa": 30,
+      "flexural_strength_mpa": 35,
+      "compressive_strength_mpa": 40,
+      "elongation_at_break_pct": 400,
+      "youngs_modulus_gpa": 1.2,
+      "impact_resistance": "excellent",
+      "layer_adhesion": "poor",
+      "creep_resistance": "good",
+      "fatigue_resistance": "excellent"
+    },
+    "thermal": {
+      "glass_transition_c": 0,
+      "heat_deflection_c": 100,
+      "max_service_temp_c": 100,
+      "print_temp_range_c": [
+        220,
+        240
+      ],
+      "bed_temp_range_c": [
+        85,
+        100
+      ],
+      "warping_tendency": "very_high"
+    },
+    "chemical": {
+      "uv_resistance": "moderate",
+      "moisture_absorption": "very_low",
+      "chemical_resistance": "excellent",
+      "food_safe": "yes",
+      "biodegradable": false,
+      "outgassing": "minimal"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.2,
+      "recommended_wall_thickness_mm": 2.0,
+      "max_unsupported_overhang_deg": 40,
+      "max_bridge_length_mm": 6,
+      "min_hole_diameter_mm": 3.0,
+      "min_embossed_text_height_mm": 1.0,
+      "min_engraved_text_depth_mm": 0.8,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.2,
+      "thread_min_pitch_mm": 2.0,
+      "living_hinge_viable": true,
+      "max_cantilever_length_mm": 40,
+      "min_pin_diameter_mm": 4.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "moderate",
+      "outdoor_use": "good",
+      "food_contact": "good",
+      "high_temp_environment": "moderate",
+      "impact_resistance": "excellent",
+      "repeated_flexing": "excellent",
+      "cosmetic_finish": "poor",
+      "dimensional_accuracy": "poor",
+      "prototyping": "poor",
+      "snap_fits": "good",
+      "gears_and_bearings": "poor",
+      "water_tight": "excellent"
+    },
+    "agent_guidance": [
+      "NOTORIOUSLY DIFFICULT TO PRINT. PP has terrible bed adhesion \u2014 a dedicated PP adhesion sheet is absolutely required. Standard build plates (PEI, glass, textured) will not work.",
+      "EXTREME WARPING. PP shrinks significantly during cooling. Use an enclosure, slow cooling, brim of 10mm+, and keep bed temp high. Even with precautions, warping is common on larger parts.",
+      "THE LIVING HINGE CHAMPION. PP is the best FDM material for living hinges \u2014 it can flex thousands of cycles without fatigue failure. Design living hinges 0.3-0.5mm thick.",
+      "Excellent fatigue resistance \u2014 PP can endure repeated flexing and stress cycles far better than PLA, PETG, or ABS. Ideal for snap-fit containers and hinged lids.",
+      "Food-safe and chemically resistant. PP resists acids, bases, solvents, and most household chemicals. One of the best FDM materials for food containers and chemical storage.",
+      "Very low moisture absorption \u2014 PP is essentially waterproof. Excellent for water-tight containers, outdoor applications, and humid environments.",
+      "Poor layer adhesion makes PP parts weaker along the Z-axis than most materials. Compensate with thicker walls (2mm+) and orient parts to minimize Z-axis stress.",
+      "Good for: living hinges, snap-fit containers, food containers, chemical-resistant vessels, water-tight enclosures, fatigue-resistant parts. Bad for: precise parts, cosmetic prints, beginners, anything requiring good bed adhesion without a PP sheet."
+    ],
+    "_validation": {
+      "source": "eSun PP, Verbatim PP datasheets",
+      "verified_date": "2026-03-24",
+      "confidence": "high",
+      "_review_needed": []
+    },
+    "_notes": "PP is a semi-crystalline polymer with excellent chemical resistance and fatigue life but notoriously poor printability. Bed adhesion requires dedicated PP adhesion sheets or PP tape. Warping is extreme even with enclosure. Mechanical values represent typical FDM-printed properties. Elongation range 300-500% depending on print orientation and layer adhesion."
   }
 }

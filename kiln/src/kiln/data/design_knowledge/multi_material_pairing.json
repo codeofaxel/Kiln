@@ -117,6 +117,11 @@
         "compatible": true,
         "interface_adhesion": "excellent",
         "notes": "PVA is designed as soluble support for PLA. Bonds well during printing, dissolves cleanly in water."
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "none",
+        "notes": "No adhesion. PP's low surface energy prevents chemical bonding with PLA. Parts delaminate immediately at the interface."
       }
     },
     "abs": {
@@ -149,6 +154,11 @@
         "compatible": true,
         "interface_adhesion": "moderate",
         "notes": "Works for overmolded soft-touch grips on rigid ABS structures. Needs careful temp management — print ABS first, then TPU at lower temps to avoid softening the ABS. Use interlocking geometry at the interface."
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "none",
+        "notes": "No adhesion. PP's low surface energy prevents chemical bonding with ABS. Parts delaminate immediately at the interface."
       }
     },
     "asa": {
@@ -203,6 +213,11 @@
         "compatible": false,
         "interface_adhesion": "poor",
         "notes": "Different polymer families. Poor chemical bonding at the interface."
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "none",
+        "notes": "No adhesion. PP's low surface energy prevents chemical bonding with PETG. Parts delaminate immediately at the interface."
       }
     },
     "polycarbonate": {
@@ -249,6 +264,11 @@
         "compatible": false,
         "interface_adhesion": "poor",
         "notes": "Temperature mismatch and no chemical affinity. TPU oozes badly at PETG print temps."
+      },
+      "pp": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Marginal adhesion at best. PP's extremely low surface energy makes reliable bonding nearly impossible, though TPU's flexibility can create weak mechanical interlocking. Not recommended for structural interfaces."
       }
     },
     "cf_pla": {
@@ -282,6 +302,48 @@
         "compatible": true,
         "interface_adhesion": "excellent",
         "notes": "PC-ABS is a blend of these two. Natural compatibility."
+      }
+    },
+    "pp": {
+      "pp": {
+        "compatible": true,
+        "interface_adhesion": "excellent",
+        "notes": "Same polymer. PP bonds to itself without issue."
+      },
+      "tpu": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Marginal adhesion at best. PP's extremely low surface energy makes reliable bonding nearly impossible, though TPU's flexibility can create weak mechanical interlocking. Not recommended for structural interfaces."
+      },
+      "pla": {
+        "compatible": false,
+        "interface_adhesion": "none",
+        "notes": "No adhesion. PP's low surface energy prevents chemical bonding with PLA. Parts delaminate immediately at the interface."
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "none",
+        "notes": "No adhesion. PP's low surface energy prevents chemical bonding with PETG. Parts delaminate immediately at the interface."
+      },
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "none",
+        "notes": "No adhesion. PP's low surface energy prevents chemical bonding with ABS. Parts delaminate immediately at the interface."
+      },
+      "asa": {
+        "compatible": false,
+        "interface_adhesion": "none",
+        "notes": "No adhesion. PP's low surface energy prevents chemical bonding with ASA. Parts delaminate immediately at the interface."
+      },
+      "nylon": {
+        "compatible": false,
+        "interface_adhesion": "none",
+        "notes": "No adhesion. PP's low surface energy prevents chemical bonding with Nylon. Parts delaminate immediately at the interface."
+      },
+      "polycarbonate": {
+        "compatible": false,
+        "interface_adhesion": "none",
+        "notes": "No adhesion. PP's low surface energy prevents chemical bonding with Polycarbonate. Parts delaminate immediately at the interface."
       }
     }
   },

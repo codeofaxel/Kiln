@@ -3930,5 +3930,140 @@
       "85A TPU is ideal for ultra-flexible gaskets, wearable padding, soft-grip handles, and components that need rubber-like flexibility. Not suitable for structural or load-bearing parts.",
       "Expect significant stringing \u2014 this is normal at 85A hardness. Post-process with a heat gun or accept it as a characteristic of the material."
     ]
+  },
+  "pp": {
+    "common_issues": [
+      {
+        "symptom": "Severe warping and curling",
+        "severity": "major",
+        "root_cause": "PP has high crystallinity and shrinkage (~1.5-2%), causing extreme warping as the part cools unevenly. Corners and long edges lift aggressively.",
+        "fixes": [
+          {
+            "action": "Use a fully enclosed printer chamber to maintain ambient temperature above 30C",
+            "priority": 1
+          },
+          {
+            "action": "Use a PP-specific adhesion sheet on the build plate \u2014 standard surfaces will not hold PP",
+            "priority": 2
+          },
+          {
+            "action": "Slow cooling by reducing part fan to 0-20% and allowing gradual cooldown after print completes",
+            "priority": 3
+          },
+          {
+            "action": "Add a brim of at least 10mm width to resist curling forces at part edges",
+            "priority": 4
+          },
+          {
+            "action": "Reduce bed temperature to 85C after the first layer to minimize thermal gradient stress",
+            "priority": 5
+          }
+        ],
+        "prevention": "Design parts with rounded corners instead of sharp edges. Avoid large flat surfaces \u2014 add ribs or curvature to reduce warping stress. Always use an enclosure."
+      },
+      {
+        "symptom": "Bed adhesion failure",
+        "severity": "major",
+        "root_cause": "PP has extremely low surface energy, meaning almost nothing bonds to it except PP itself. Standard bed surfaces (PEI, glass, BuildTak) cannot grip PP.",
+        "fixes": [
+          {
+            "action": "Use a PP-specific adhesion sheet \u2014 this is mandatory, not optional. PP only sticks to PP.",
+            "priority": 1
+          },
+          {
+            "action": "Clean the adhesion sheet thoroughly with IPA before every print to remove oils and residue",
+            "priority": 2
+          },
+          {
+            "action": "Print the first layer at 240C nozzle temperature and 15mm/s speed for maximum adhesion",
+            "priority": 3
+          },
+          {
+            "action": "Use a wide brim (10-15mm) to maximize contact area with the adhesion sheet",
+            "priority": 4
+          }
+        ],
+        "prevention": "Always keep PP adhesion sheets in stock. Replace the sheet when it becomes scratched or worn \u2014 adhesion degrades with use."
+      },
+      {
+        "symptom": "Stringing between features",
+        "severity": "moderate",
+        "root_cause": "PP is semi-crystalline and stays molten longer than amorphous materials, allowing thin strings to draw between travel moves even at moderate temperatures.",
+        "fixes": [
+          {
+            "action": "Increase retraction distance to 4-6mm at 40mm/s retraction speed",
+            "priority": 1
+          },
+          {
+            "action": "Lower nozzle temperature to 220C to reduce melt fluidity",
+            "priority": 2
+          },
+          {
+            "action": "Increase travel speed to 150-200mm/s to reduce ooze time between features",
+            "priority": 3
+          }
+        ],
+        "prevention": "Print a retraction tower to find the optimal retraction distance for your specific PP filament and extruder setup."
+      },
+      {
+        "symptom": "Layer delamination and poor interlayer adhesion",
+        "severity": "major",
+        "root_cause": "PP crystallizes rapidly between layers, creating a weak bond at each layer interface. Insufficient nozzle temperature or excessive cooling accelerates this problem.",
+        "fixes": [
+          {
+            "action": "Increase nozzle temperature to 235-240C to ensure the new layer remelts into the previous one",
+            "priority": 1
+          },
+          {
+            "action": "Reduce print speed to 30-40mm/s to allow more heat transfer at each layer",
+            "priority": 2
+          },
+          {
+            "action": "Use an enclosed chamber to maintain elevated ambient temperature and slow crystallization",
+            "priority": 3
+          },
+          {
+            "action": "Reduce part cooling fan to 30% maximum to prevent premature crystallization at the layer interface",
+            "priority": 4
+          }
+        ],
+        "prevention": "Never print PP without an enclosure. Keep fan speed low throughout the entire print, not just the first layers."
+      },
+      {
+        "symptom": "Elephant's foot on first layer",
+        "severity": "moderate",
+        "root_cause": "PP is a soft material at printing temperature, and the high bed temperature required for adhesion causes the first layer to squish outward under the weight of subsequent layers.",
+        "fixes": [
+          {
+            "action": "Raise the nozzle slightly by increasing Z-offset by 0.02-0.05mm to reduce first layer compression",
+            "priority": 1
+          },
+          {
+            "action": "Reduce first layer flow rate to 90% to decrease material volume at the base",
+            "priority": 2
+          },
+          {
+            "action": "Lower bed temperature after the first layer to reduce softening of the base",
+            "priority": 3
+          }
+        ],
+        "prevention": "Calibrate Z-offset with a single-layer test print on the PP adhesion sheet. Use elephant's foot compensation of 0.1-0.2mm in slicer."
+      }
+    ],
+    "storage_requirements": {
+      "humidity_sensitive": false,
+      "max_humidity_pct": 50,
+      "storage_method": "PP is not hygroscopic and does not absorb significant moisture. Store in a cool, dry location away from direct sunlight. UV exposure degrades PP over time.",
+      "drying_temp_c": 50,
+      "drying_time_hours": 4
+    },
+    "break_in_tips": [
+      "PP is one of the most difficult FDM materials to print. A PP-specific adhesion sheet is absolutely mandatory \u2014 do not attempt to print PP on PEI, glass, or any other surface.",
+      "Start at 220-240C nozzle, 85-100C bed, 30-40mm/s. An enclosed printer is strongly recommended to reduce warping.",
+      "Reduce part cooling fan to 20-30%. PP crystallizes too quickly with high airflow, causing warping and weak layer bonds.",
+      "Expect significant shrinkage (~1.5-2%). Compensate in your slicer by scaling the model up 1.5-2% if dimensional accuracy matters.",
+      "PP is ideal for living hinges, chemical-resistant containers, food-safe applications, and flexible snap-fit parts. Its fatigue resistance is exceptional.",
+      "Post-processing is very difficult \u2014 PP resists paint, glue, and solvents. Flame treatment or PP-specific adhesion promoters are needed for bonding or painting."
+    ]
   }
 }

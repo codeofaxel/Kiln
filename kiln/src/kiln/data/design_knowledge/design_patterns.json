@@ -19,7 +19,7 @@
     },
     "material_compatibility": {
       "excellent": ["petg", "nylon", "tpu"],
-      "good": ["abs", "asa", "polycarbonate"],
+      "good": ["abs", "asa", "polycarbonate", "pp"],
       "poor": ["pla"],
       "avoid": []
     },
@@ -48,7 +48,7 @@
     "material_compatibility": {
       "excellent": ["petg", "abs", "asa", "nylon"],
       "good": ["pla", "polycarbonate"],
-      "poor": ["tpu"],
+      "poor": ["tpu", "pp"],
       "avoid": []
     },
     "print_orientation": "hole_axis_vertical",
@@ -73,7 +73,7 @@
       "min_rigid_section_mm": 10
     },
     "material_compatibility": {
-      "excellent": ["tpu", "nylon"],
+      "excellent": ["tpu", "nylon", "pp"],
       "good": ["polycarbonate"],
       "poor": [],
       "avoid": ["pla", "petg", "abs", "asa"]
@@ -104,7 +104,7 @@
     "material_compatibility": {
       "excellent": ["petg", "abs", "asa", "nylon"],
       "good": ["pla", "polycarbonate"],
-      "poor": ["tpu"],
+      "poor": ["tpu", "pp"],
       "avoid": []
     },
     "print_orientation": "thread_axis_vertical",
@@ -133,7 +133,7 @@
     },
     "material_compatibility": {
       "excellent": ["petg", "abs", "asa", "nylon", "polycarbonate"],
-      "good": [],
+      "good": ["pp"],
       "poor": ["pla"],
       "avoid": ["tpu"]
     },
@@ -164,7 +164,7 @@
     },
     "material_compatibility": {
       "excellent": ["petg", "tpu"],
-      "good": ["pla", "abs", "asa"],
+      "good": ["pla", "abs", "asa", "pp"],
       "poor": ["nylon"],
       "avoid": []
     },
@@ -199,7 +199,7 @@
     },
     "material_compatibility": {
       "excellent": ["petg", "abs", "asa"],
-      "good": ["pla", "nylon", "polycarbonate"],
+      "good": ["pla", "nylon", "polycarbonate", "pp"],
       "poor": ["tpu"],
       "avoid": []
     },
@@ -233,7 +233,7 @@
     "material_compatibility": {
       "excellent": ["nylon"],
       "good": ["petg", "abs", "asa", "polycarbonate"],
-      "poor": ["pla"],
+      "poor": ["pla", "pp"],
       "avoid": ["tpu"]
     },
     "print_orientation": "gear_face_on_bed",

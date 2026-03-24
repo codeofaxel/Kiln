@@ -574,6 +574,66 @@
     "compatible_with": ["generic_pla"],
     "notes": "Wood-like PLA with sandable matte finish. Creates realistic wood appearance."
   },
+  "bambu_pla_cf": {
+    "vendor": "Bambu Lab",
+    "material_type": "PLA-CF",
+    "material_family": "cf_pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [28, 32],
+    "variants": ["black"],
+    "sources": {
+      "amazon": "Bambu+Lab+PLA-CF+1.75mm+black+1kg",
+      "manufacturer": "https://store.bambulab.com"
+    },
+    "compatible_with": ["generic_cf_pla"],
+    "notes": "Carbon fiber reinforced PLA with RFID. Stiff and lightweight. Requires hardened nozzle."
+  },
+  "polymaker_polylite_pla_cf": {
+    "vendor": "Polymaker",
+    "material_type": "PolyLite PLA-CF",
+    "material_family": "cf_pla",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [1.0],
+    "price_range_usd": [26, 30],
+    "variants": ["black"],
+    "sources": {
+      "amazon": "Polymaker+PolyLite+PLA-CF+1.75mm+black+1kg",
+      "manufacturer": "https://www.polymaker.com"
+    },
+    "compatible_with": ["generic_cf_pla"],
+    "notes": "Carbon fiber reinforced PLA. Good stiffness and matte surface finish. Requires hardened nozzle."
+  },
+  "verbatim_pp": {
+    "vendor": "Verbatim",
+    "material_type": "PP",
+    "material_family": "pp",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [0.5],
+    "price_range_usd": [32, 38],
+    "variants": ["natural", "black"],
+    "sources": {
+      "amazon": "Verbatim+PP+Polypropylene+1.75mm+{color}",
+      "manufacturer": "https://www.verbatim.com"
+    },
+    "compatible_with": ["generic_pp"],
+    "notes": "Chemical-resistant polypropylene. Lightweight and flexible. Requires PP-specific bed adhesion."
+  },
+  "formfutura_centaur_pp": {
+    "vendor": "Formfutura",
+    "material_type": "Centaur PP",
+    "material_family": "pp",
+    "diameter_mm": 1.75,
+    "weight_options_kg": [0.5],
+    "price_range_usd": [38, 42],
+    "variants": ["natural", "black"],
+    "sources": {
+      "amazon": "Formfutura+Centaur+PP+1.75mm+{color}",
+      "manufacturer": "https://www.formfutura.com"
+    },
+    "compatible_with": ["generic_pp"],
+    "notes": "Premium polypropylene with improved printability. Good chemical resistance and living hinges."
+  },
   "elegoo_standard_resin": {
     "vendor": "Elegoo",
     "material_type": "Standard Resin",
