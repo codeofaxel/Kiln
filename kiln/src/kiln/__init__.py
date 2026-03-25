@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys as _sys
 from pathlib import Path
 
 try:
@@ -90,7 +91,7 @@ def parse_float_env(name: str, default: float) -> float:
 # sys.modules but doesn't set them as attributes on this package.
 # __getattr__ bridges that gap so attribute-based traversal works.
 # ---------------------------------------------------------------------------
-import sys as _sys  # noqa: E402
+
 
 def __getattr__(name: str):
     fqn = f"{__name__}.{name}"
