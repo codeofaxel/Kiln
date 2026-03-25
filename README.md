@@ -682,13 +682,9 @@ The Kiln MCP server (`kiln serve`) exposes **432 tools** to agents. Key tools ar
 | `list_construction_building_requirements` | List all available building program requirement profiles |
 | `match_construction_building_requirements` | Match a building description to known program requirements |
 
-### Provider Tool Deprecation Timeline
+### Provider Tools
 
-- Canonical provider integration tools: `connect_provider_account`, `sync_provider_capacity`, `list_provider_capacity`, `find_provider_capacity`, `submit_provider_job`, `provider_job_status`.
-- Legacy aliases (`network_*`) remain available for compatibility only.
-- `network_*` deprecated in `v0.2.0`.
-- Removal target for `network_*`: `v0.4.0`.
-- Clarification only: existing intent unchanged, no strategy change.
+The legacy `network_*` CLI commands and MCP tool aliases were deprecated in `v0.2.0` and have been removed. Use the canonical provider integration tools instead: `connect_provider_account`, `sync_provider_capacity`, `list_provider_capacity`, `find_provider_capacity`, `submit_provider_job`, `provider_job_status`.
 
 ## Supported Printers
 

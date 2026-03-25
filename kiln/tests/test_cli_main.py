@@ -1276,14 +1276,13 @@ class TestFleetCLI:
 
     def test_fleet_requires_license(self, runner, tmp_path):
         """kiln fleet status requires Pro license."""
-        from kiln.licensing import LicenseManager
+        from kiln.licensing import LicenseTier
 
-        mgr = LicenseManager(
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
-        with patch("kiln.licensing._manager", mgr), \
-             patch.dict("os.environ", {}, clear=True):
+        with patch("kiln.licensing.check_tier", return_value=(False, (
+            "This feature requires a Kiln Pro license. "
+            "You're on the Free tier. "
+            "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+        ))):
             result = runner.invoke(cli, ["fleet", "status"])
         assert result.exit_code != 0
         assert "Free tier" in result.output or "upgrade" in result.output.lower()

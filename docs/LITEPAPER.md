@@ -18,7 +18,7 @@ The gap between "I need a part" and holding that part in your hand is filled wit
 
 ## The Solution
 
-Kiln acts as a universal intelligence layer between AI agents and physical fabrication. One interface, any idea, any printer. With 456+ MCP tools and 143 CLI commands, agents have everything they need to go from concept to physical object.
+Kiln acts as a universal intelligence layer between AI agents and physical fabrication. One interface, any idea, any printer. With 456+ MCP tools and 136 CLI commands, agents have everything they need to go from concept to physical object.
 
 **From idea to object.** Kiln gives agents multiple paths to turn a thought into a physical part:
 
