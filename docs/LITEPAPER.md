@@ -70,7 +70,7 @@ You (or your agent) --> Kiln --> Design Intelligence (materials, patterns, templ
                                  Fulfillment Providers (Craftcloud)
 ```
 
-Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. There's also a full CLI with 143 commands and a REST API for custom integrations.
+Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. There's also a full CLI with 136 commands and a REST API for custom integrations.
 
 ## Business Model
 
