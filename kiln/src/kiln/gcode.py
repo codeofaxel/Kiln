@@ -97,6 +97,15 @@ _DIALECT_BLOCKED: dict[GCodeDialect, dict[str, str]] = {
     },
 }
 
+# Commands that are globally blocked but ALLOWED for specific dialects.
+# These override ``_BLOCKED_COMMANDS`` when the dialect matches.
+# Use this for commands that are dangerous in general but are standard
+# slicer output for a particular firmware (e.g. Bambu Studio emits M500
+# to save bed-leveling calibration after G29 -- safe and expected).
+_DIALECT_ALLOWED: dict[GCodeDialect, set[str]] = {
+    GCodeDialect.BAMBU: {"M500"},
+}
+
 
 # ---------------------------------------------------------------------------
 # Safety limits
@@ -280,8 +289,11 @@ def _validate_single(
         blocked.append(cleaned)
         return None
 
+    # --- Dialect-specific allowlist (overrides global blocks) -------------
+    dialect_allows = _DIALECT_ALLOWED.get(dialect, set())
+
     # --- Blocked commands ------------------------------------------------
-    if cmd in _BLOCKED_COMMANDS:
+    if cmd in _BLOCKED_COMMANDS and cmd not in dialect_allows:
         errors.append(_BLOCKED_COMMANDS[cmd])
         blocked.append(cleaned)
         return None
@@ -589,8 +601,11 @@ def _validate_single_with_profile(
         blocked.append(cleaned)
         return None
 
+    # --- Dialect-specific allowlist (overrides global blocks) ---
+    dialect_allows = _DIALECT_ALLOWED.get(dialect, set())
+
     # --- Blocked commands (same regardless of printer) ---
-    if cmd in _BLOCKED_COMMANDS:
+    if cmd in _BLOCKED_COMMANDS and cmd not in dialect_allows:
         errors.append(_BLOCKED_COMMANDS[cmd])
         blocked.append(cleaned)
         return None

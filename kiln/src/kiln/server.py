@@ -2157,9 +2157,21 @@ def upload_file(file_path: str) -> dict:
         scan_warnings: list[str] = []
         if os.path.splitext(file_path)[1].lower() in _GCODE_EXTENSIONS:
             try:
-                from kiln.gcode import scan_gcode_file
+                from kiln.gcode import GCodeDialect, scan_gcode_file
 
-                scan = scan_gcode_file(file_path, printer_id=_PRINTER_MODEL or None)
+                # Use dialect-aware scanning so that commands standard for
+                # the printer firmware (e.g. M500 for Bambu bed-leveling)
+                # are not falsely blocked.
+                _dialect = (
+                    GCodeDialect.BAMBU if _PRINTER_TYPE == "bambu"
+                    else GCodeDialect.KLIPPER if _PRINTER_TYPE == "moonraker"
+                    else GCodeDialect.GENERIC
+                )
+                scan = scan_gcode_file(
+                    file_path,
+                    printer_id=_PRINTER_MODEL or None,
+                    dialect=_dialect,
+                )
                 if not scan.valid:
                     return {
                         "success": False,
@@ -10220,9 +10232,31 @@ def print_plate_object(
     extracted_path = extract_result["output_path"]
     matched_object = extract_result["matched_object"]
 
+    # Step 1b: For Bambu printers, wrap extracted gcode in a 3MF container.
+    # Bambu firmware ignores the ``gcode_file`` MQTT command for raw .gcode
+    # files — it only responds to ``project_file`` which requires a .3mf.
+    # Wrapping also avoids false-positive safety blocks (e.g. M500 in the
+    # standard Bambu start gcode) since the scanner skips 3MF archives.
+    upload_path = extracted_path
+    if _PRINTER_TYPE == "bambu":
+        try:
+            from kiln.printers.bambu_3mf import repackage_gcode_as_bambu_3mf
+
+            threemf_path = extracted_path.rsplit(".", 1)[0] + ".gcode.3mf"
+            repackage_gcode_as_bambu_3mf(
+                extracted_path,
+                threemf_path,
+                source_3mf_path=file_path,
+            )
+            upload_path = threemf_path
+        except Exception as exc:
+            logger.warning(
+                "3MF repackaging failed, falling back to raw gcode: %s", exc
+            )
+
     # Step 2: Upload
     try:
-        upload_result = upload_file(extracted_path)
+        upload_result = upload_file(upload_path)
         if not upload_result.get("success", False):
             return {
                 "status": "upload_failed",

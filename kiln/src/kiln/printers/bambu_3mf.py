@@ -840,6 +840,72 @@ def build_bambu_3mf(
     )
 
 
+def repackage_gcode_as_bambu_3mf(
+    gcode_path: str,
+    output_path: str,
+    *,
+    source_3mf_path: str | None = None,
+) -> str:
+    """Wrap already-Bambu gcode in a minimal 3MF container.
+
+    Unlike :func:`build_bambu_3mf` which adds BambuStudio start/end
+    sequences to PrusaSlicer output, this function takes gcode that
+    **already contains** the Bambu startup sequence (e.g. extracted from
+    a .gcode.3mf via :func:`extract_plate_object_gcode`) and simply
+    packages it in the 3MF zip structure that Bambu firmware requires
+    for the ``project_file`` MQTT command.
+
+    This is necessary because Bambu printers ignore the ``gcode_file``
+    MQTT command for raw .gcode uploads — they only respond to
+    ``project_file`` which expects a .3mf archive.
+
+    If *source_3mf_path* is provided, thumbnails are copied from it
+    so the printer's touchscreen shows a preview.
+
+    :param gcode_path: Path to the .gcode file (already Bambu-ready).
+    :param output_path: Path for the output .gcode.3mf file.
+    :param source_3mf_path: Optional source 3MF to copy thumbnails from.
+    :returns: The *output_path* for convenience.
+    :raises FileNotFoundError: If *gcode_path* does not exist.
+    """
+    abs_path = os.path.abspath(gcode_path)
+    if not os.path.isfile(abs_path):
+        raise FileNotFoundError(f"Gcode file not found: {abs_path}")
+
+    gcode_bytes = Path(abs_path).read_bytes()
+    gcode_md5 = hashlib.md5(gcode_bytes).hexdigest()  # noqa: S324
+
+    # Extract thumbnails from source 3MF if available.
+    thumbnails: dict[str, bytes] = {}
+    if source_3mf_path and os.path.isfile(source_3mf_path):
+        try:
+            with zipfile.ZipFile(source_3mf_path) as zf:
+                for name in zf.namelist():
+                    if name.startswith("Metadata/") and name.endswith(".png"):
+                        thumbnails[name] = zf.read(name)
+        except (zipfile.BadZipFile, KeyError):
+            logger.warning(
+                "Could not extract thumbnails from %s", source_3mf_path
+            )
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", _CONTENT_TYPES_XML)
+        zf.writestr("_rels/.rels", _RELS_XML)
+        zf.writestr("3D/3dmodel.model", _MINIMAL_3D_MODEL)
+        zf.writestr("Metadata/plate_1.gcode", gcode_bytes)
+        zf.writestr("Metadata/plate_1.gcode.md5", gcode_md5)
+        for name, data in thumbnails.items():
+            zf.writestr(name, data)
+
+    logger.info(
+        "Repackaged gcode as Bambu 3MF: %s (%d bytes)",
+        output_path,
+        os.path.getsize(output_path),
+    )
+    return output_path
+
+
 def _reset_cache() -> None:
     """Reset lazy singletons — for testing only."""
     global _a1_start_gcode, _a1_end_gcode  # noqa: PLW0603
