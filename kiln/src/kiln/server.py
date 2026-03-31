@@ -10247,6 +10247,9 @@ def print_plate_object(
                 extracted_path,
                 threemf_path,
                 source_3mf_path=file_path,
+                estimated_time_minutes=extract_result.get(
+                    "estimated_time_minutes", 0
+                ),
             )
             upload_path = threemf_path
         except Exception as exc:

@@ -845,6 +845,7 @@ def repackage_gcode_as_bambu_3mf(
     output_path: str,
     *,
     source_3mf_path: str | None = None,
+    estimated_time_minutes: int = 0,
 ) -> str:
     """Wrap already-Bambu gcode in a minimal 3MF container.
 
@@ -859,12 +860,18 @@ def repackage_gcode_as_bambu_3mf(
     MQTT command for raw .gcode uploads — they only respond to
     ``project_file`` which expects a .3mf archive.
 
-    If *source_3mf_path* is provided, thumbnails are copied from it
-    so the printer's touchscreen shows a preview.
+    If *source_3mf_path* is provided, thumbnails and plate metadata
+    are copied from it (with time estimates adjusted) so the printer's
+    touchscreen shows a preview and accurate progress.
 
     :param gcode_path: Path to the .gcode file (already Bambu-ready).
     :param output_path: Path for the output .gcode.3mf file.
-    :param source_3mf_path: Optional source 3MF to copy thumbnails from.
+    :param source_3mf_path: Optional source 3MF to copy thumbnails and
+        plate metadata from.
+    :param estimated_time_minutes: Object's estimated print time in
+        minutes (from extraction).  Used to update the ``prediction``
+        field in slice_info.config so the printer display shows
+        accurate time remaining.
     :returns: The *output_path* for convenience.
     :raises FileNotFoundError: If *gcode_path* does not exist.
     """
@@ -875,18 +882,39 @@ def repackage_gcode_as_bambu_3mf(
     gcode_bytes = Path(abs_path).read_bytes()
     gcode_md5 = hashlib.md5(gcode_bytes).hexdigest()  # noqa: S324
 
-    # Extract thumbnails from source 3MF if available.
+    # Extract thumbnails and plate metadata from source 3MF if available.
     thumbnails: dict[str, bytes] = {}
+    plate_json: str | None = None
+    slice_info: str | None = None
     if source_3mf_path and os.path.isfile(source_3mf_path):
         try:
             with zipfile.ZipFile(source_3mf_path) as zf:
                 for name in zf.namelist():
                     if name.startswith("Metadata/") and name.endswith(".png"):
                         thumbnails[name] = zf.read(name)
+                # Copy plate metadata for accurate printer display
+                if "Metadata/plate_1.json" in zf.namelist():
+                    plate_json = zf.read("Metadata/plate_1.json").decode(
+                        "utf-8", errors="replace"
+                    )
+                if "Metadata/slice_info.config" in zf.namelist():
+                    slice_info = zf.read("Metadata/slice_info.config").decode(
+                        "utf-8", errors="replace"
+                    )
         except (zipfile.BadZipFile, KeyError):
             logger.warning(
-                "Could not extract thumbnails from %s", source_3mf_path
+                "Could not extract metadata from %s", source_3mf_path
             )
+
+    # Update the time prediction in slice_info.config so the printer
+    # display shows correct time remaining instead of the full plate's
+    # estimate.  The ``prediction`` value is in seconds.
+    if slice_info and estimated_time_minutes > 0:
+        slice_info = re.sub(
+            r'(<metadata\s+key="prediction"\s+value=")(\d+)(")',
+            rf"\g<1>{estimated_time_minutes * 60}\3",
+            slice_info,
+        )
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -895,13 +923,18 @@ def repackage_gcode_as_bambu_3mf(
         zf.writestr("3D/3dmodel.model", _MINIMAL_3D_MODEL)
         zf.writestr("Metadata/plate_1.gcode", gcode_bytes)
         zf.writestr("Metadata/plate_1.gcode.md5", gcode_md5)
+        if plate_json:
+            zf.writestr("Metadata/plate_1.json", plate_json)
+        if slice_info:
+            zf.writestr("Metadata/slice_info.config", slice_info)
         for name, data in thumbnails.items():
             zf.writestr(name, data)
 
     logger.info(
-        "Repackaged gcode as Bambu 3MF: %s (%d bytes)",
+        "Repackaged gcode as Bambu 3MF: %s (%d bytes, est %dm)",
         output_path,
         os.path.getsize(output_path),
+        estimated_time_minutes,
     )
     return output_path
 

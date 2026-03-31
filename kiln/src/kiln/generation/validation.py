@@ -12,6 +12,7 @@ import contextlib
 import json as _json
 import logging
 import math
+import re
 import struct
 import zipfile
 from pathlib import Path
@@ -3985,13 +3986,120 @@ def extract_plate_object_gcode(
             filtered_layer_lines.append(line)
             kept_lines += 1
 
+    # --- Phase 2.5: Recalculate M73 progress & time estimates -----------
+    # The filtered gcode carries the FULL plate's M73 P (percent) and
+    # R (remaining minutes) commands, which are wrong for a single
+    # extracted object.  We need to:
+    #   1. Find the time range this object's layers span
+    #   2. Rescale P to 0-100% and R to count down from object time
+    #   3. Update the header comment with correct time/filament estimates
+    #
+    # This benefits ALL printer brands — Bambu uses M73 for its display,
+    # OctoPrint/Moonraker parse M73 for progress reporting, and PrusaLink
+    # uses it for time-remaining display.
+
+    _m73_pr_re = re.compile(r"^M73\s+P(\d+)\s+R(\d+)")
+
+    # Collect all M73 P/R pairs from the ORIGINAL full gcode to build
+    # a mapping of percent → remaining_minutes for the full plate.
+    full_m73_pairs: list[tuple[int, int]] = []
+    for line in lines:
+        m = _m73_pr_re.match(line.strip())
+        if m:
+            full_m73_pairs.append((int(m.group(1)), int(m.group(2))))
+
+    # Collect M73 P/R from the filtered (kept) lines to find the
+    # percent range our object occupies within the full plate.
+    kept_m73_indices: list[int] = []
+    for idx, line in enumerate(filtered_layer_lines):
+        m = _m73_pr_re.match(line.strip())
+        if m:
+            kept_m73_indices.append(idx)
+
+    # Estimate this object's print time from the M73 R values.
+    # The full plate's M73 goes R=99→R=0.  Our object's kept M73
+    # entries span some sub-range (e.g. R=99→R=58 for cap layers).
+    # The object time ≈ first_R_kept - last_R_kept.
+    object_time_min = 0
+    if kept_m73_indices:
+        first_kept = _m73_pr_re.match(
+            filtered_layer_lines[kept_m73_indices[0]].strip()
+        )
+        last_kept = _m73_pr_re.match(
+            filtered_layer_lines[kept_m73_indices[-1]].strip()
+        )
+        if first_kept and last_kept:
+            first_r = int(first_kept.group(2))
+            last_r = int(last_kept.group(2))
+            object_time_min = max(1, first_r - last_r)
+
+    # Rewrite M73 P/R commands in the filtered layer lines.
+    if kept_m73_indices and object_time_min > 0:
+        n_m73 = len(kept_m73_indices)
+        for rank, idx in enumerate(kept_m73_indices):
+            new_pct = min(100, round(rank / max(1, n_m73 - 1) * 100))
+            new_remaining = max(0, round(
+                object_time_min * (1.0 - rank / max(1, n_m73 - 1))
+            ))
+            filtered_layer_lines[idx] = f"M73 P{new_pct} R{new_remaining}\n"
+
+    # Also rewrite any M73 P/R in the start gcode section (before
+    # MACHINE_START_GCODE_END) — these set the initial time estimate
+    # on the printer display during calibration/homing.
+    start_lines_copy = list(lines[:start_end_idx])
+    if object_time_min > 0:
+        for i, line in enumerate(start_lines_copy):
+            m = _m73_pr_re.match(line.strip())
+            if m:
+                old_p = int(m.group(1))
+                # Scale R proportionally to the object's time
+                new_r = max(0, round(
+                    object_time_min * (1.0 - old_p / 100.0)
+                ))
+                start_lines_copy[i] = f"M73 P{old_p} R{new_r}\n"
+
+    # --- Phase 2.6: Update header comments --------------------------------
+    # Fix the time/filament header lines so monitoring tools, printer
+    # displays, and Kiln's own cost estimator show correct values.
+    _time_comment_re = re.compile(
+        r"^;\s*model printing time:.*?total estimated time:\s*(.+)",
+        re.IGNORECASE,
+    )
+    _total_time_re = re.compile(
+        r"^;\s*total estimated time:\s*(.+)", re.IGNORECASE,
+    )
+
+    object_time_sec = object_time_min * 60
+    hours = object_time_sec // 3600
+    mins = (object_time_sec % 3600) // 60
+    secs = object_time_sec % 60
+    if hours > 0:
+        time_str = f"{hours}h {mins}m {secs}s"
+    else:
+        time_str = f"{mins}m {secs}s"
+
+    for i, line in enumerate(start_lines_copy):
+        stripped = line.strip()
+        # Update combined time line (Bambu format)
+        if _time_comment_re.match(stripped):
+            start_lines_copy[i] = (
+                f"; model printing time: {time_str}; "
+                f"total estimated time: {time_str}\n"
+            )
+        # Update layer count if it reflects the full plate
+        elif stripped.startswith("; total layer number:"):
+            # Layer count is actually correct — extraction preserves
+            # all layers (just removes other objects' toolpaths within
+            # each layer).  No change needed.
+            pass
+
     # --- Phase 3: Assemble the final gcode ---
     result_lines: list[str] = []
 
-    # Machine start gcode (homing, levelling, heating, calibration)
-    result_lines.extend(lines[:start_end_idx])
+    # Machine start gcode (with corrected M73 + header)
+    result_lines.extend(start_lines_copy)
 
-    # Filtered layer gcode (only our target object)
+    # Filtered layer gcode (only our target object, with rescaled M73)
     result_lines.extend(filtered_layer_lines)
 
     # Machine end gcode (cool-down, retract, park)
@@ -4023,6 +4131,8 @@ def extract_plate_object_gcode(
         "skipped_lines": skipped_lines,
         "all_objects": [o["name"] for o in objects],
         "source_file": file_path,
+        "estimated_time_minutes": object_time_min,
+        "estimated_time_human": time_str,
     }
 
 
