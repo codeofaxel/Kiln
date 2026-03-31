@@ -15975,6 +15975,216 @@ def multi_material_print(
 
 
 @mcp.tool()
+def multi_color_copies(
+    model_path: str,
+    copies: int | None = None,
+    ams_slots: list[int] | None = None,
+    colors: list[str] | None = None,
+    material: str = "PLA",
+    spacing_mm: float = 10.0,
+    printer_id: str | None = None,
+    slicer_path: str | None = None,
+) -> dict:
+    """Print multiple copies of the same model, each in a different AMS color.
+
+    Takes a single model file and produces a multi-color print where each
+    copy uses a different AMS filament slot.  Perfect for "print 4 lids
+    in 4 different colors" workflows.
+
+    **Auto-detect mode** (default): omit *copies*, *ams_slots*, and
+    *colors* — the tool queries the AMS, finds all loaded trays matching
+    *material*, and prints one copy per loaded tray.
+
+    **Manual mode**: specify *ams_slots* (and optionally *colors*) to
+    choose exactly which AMS trays to use and how many copies.
+
+    Requires PrusaSlicer or OrcaSlicer installed locally.  The printer
+    must be idle and have an AMS with loaded filament.
+
+    :param model_path: Path to the model file (STL or OBJ).
+    :param copies: Number of copies.  Auto-detected from AMS if omitted.
+    :param ams_slots: Explicit AMS slot indices (0-based) per copy.
+        E.g. ``[0, 1, 2, 3]`` for all 4 AMS Lite trays.
+    :param colors: Hex color strings per copy for slicer preview.
+        E.g. ``["#FF0000", "#00FF00", "#0000FF", "#FFFF00"]``.
+        Auto-read from AMS if omitted.
+    :param material: Material type filter for AMS auto-detect
+        (default ``"PLA"``).  Only trays matching this type are used.
+    :param spacing_mm: Gap between copies on the plate (default 10 mm).
+    :param printer_id: Printer model ID for slicer profile selection.
+    :param slicer_path: Explicit path to slicer binary.
+    :returns: Dict with print result, object details, and AMS mapping.
+    """
+    if err := _check_auth("print"):
+        return err
+    try:
+        import json as _json
+        import tempfile
+
+        # --- Validate model file ---
+        if not os.path.isfile(model_path):
+            return _error_dict(f"File not found: {model_path}", code="FILE_NOT_FOUND")
+        ext = os.path.splitext(model_path)[1].lower()
+        if ext not in (".stl", ".obj"):
+            return _error_dict(
+                f"multi_color_copies requires an STL or OBJ file, got {ext!r}. "
+                f"If you have a .gcode.3mf, extract the mesh first or use "
+                f"the original STL/OBJ source file.",
+                code="VALIDATION_ERROR",
+            )
+
+        # --- Resolve AMS slots and colors ---
+        resolved_slots: list[int] = []
+        resolved_colors: list[str] = []
+
+        if ams_slots is not None:
+            # Manual mode: user specified exact slots
+            resolved_slots = list(ams_slots)
+            if copies is not None and copies != len(resolved_slots):
+                return _error_dict(
+                    f"copies ({copies}) doesn't match ams_slots length "
+                    f"({len(resolved_slots)}). Provide one slot per copy.",
+                    code="VALIDATION_ERROR",
+                )
+        else:
+            # Auto-detect mode: query AMS for loaded trays
+            try:
+                ams_result = ams_status()
+                if ams_result.get("status") != "success":
+                    return _error_dict(
+                        "Could not query AMS status. Specify ams_slots manually.",
+                        code="AMS_ERROR",
+                    )
+                mat_upper = material.upper().strip()
+                for unit in ams_result.get("units", []):
+                    for tray in unit.get("trays", []):
+                        ttype = (tray.get("tray_type") or "").strip().upper()
+                        if ttype == mat_upper or mat_upper in ttype:
+                            slot = int(tray.get("slot", 0))
+                            color_hex = tray.get("tray_color", "000000FF")
+                            # Convert RRGGBBAA to #RRGGBB
+                            if len(color_hex) >= 6:
+                                resolved_slots.append(slot)
+                                resolved_colors.append(f"#{color_hex[:6]}")
+            except Exception as exc:
+                return _error_dict(
+                    f"AMS query failed: {exc}. Specify ams_slots manually.",
+                    code="AMS_ERROR",
+                )
+
+            if not resolved_slots:
+                return _error_dict(
+                    f"No AMS trays found with material type '{material}'. "
+                    f"Check that filament is loaded or specify ams_slots manually.",
+                    code="NO_MATERIAL",
+                )
+
+        # Apply copies limit if specified
+        if copies is not None:
+            resolved_slots = resolved_slots[:copies]
+            resolved_colors = resolved_colors[:copies]
+
+        n_copies = len(resolved_slots)
+        if n_copies < 2:
+            return _error_dict(
+                "Need at least 2 AMS slots for multi-color copies. "
+                "For single-color, use start_print directly.",
+                code="VALIDATION_ERROR",
+            )
+        if n_copies > 16:
+            return _error_dict(
+                "Maximum 16 copies supported.", code="VALIDATION_ERROR",
+            )
+
+        # Fill in colors if not provided
+        if colors is not None:
+            resolved_colors = list(colors[:n_copies])
+        # Pad colors if too few
+        default_colors = [
+            "#FF0000", "#00FF00", "#0000FF", "#FFFF00",
+            "#FF00FF", "#00FFFF", "#FFFFFF", "#000000",
+            "#FF8000", "#8000FF", "#0080FF", "#FF0080",
+            "#80FF00", "#00FF80", "#808080", "#C0C0C0",
+        ]
+        while len(resolved_colors) < n_copies:
+            resolved_colors.append(
+                default_colors[len(resolved_colors) % len(default_colors)]
+            )
+
+        # --- Build multi-material 3MF ---
+        # Each copy gets a unique filament_index so the slicer treats them
+        # as separate materials → the printer uses different AMS slots.
+        from kiln.generation.validation import build_multi_material_3mf
+
+        model_name = os.path.splitext(os.path.basename(model_path))[0]
+        build_objects: list[dict[str, Any]] = []
+        for i in range(n_copies):
+            build_objects.append({
+                "file_path": model_path,
+                "filament_index": i,
+                "name": f"{model_name}_color_{i + 1}",
+                "color": resolved_colors[i],
+                "material_name": material,
+            })
+
+        output_3mf = os.path.join(
+            tempfile.gettempdir(), f"kiln_multi_color_{model_name}.3mf"
+        )
+        try:
+            build_multi_material_3mf(build_objects, output_path=output_3mf)
+        except Exception as exc:
+            return _error_dict(
+                f"Failed to build multi-color 3MF: {exc}",
+                code="INTERNAL_ERROR",
+            )
+
+        # --- Build slicer overrides for the material ---
+        overrides: dict[str, str] = {}
+        try:
+            mat_overrides = build_material_overrides(material.lower(), printer_id)
+            if mat_overrides.get("success"):
+                overrides = dict(mat_overrides["overrides"])
+        except Exception:
+            pass  # best-effort — slicer profile defaults are fine
+
+        # --- Slice and print with explicit AMS mapping ---
+        result = run_reslice_and_print(
+            model_path=output_3mf,
+            printer_id=printer_id,
+            overrides=_json.dumps(overrides) if overrides else None,
+            slicer_path=slicer_path,
+            use_ams=True,
+            ams_mapping=_json.dumps(resolved_slots),
+        )
+
+        # Enrich result
+        if isinstance(result, dict):
+            result["multi_color_copies"] = True
+            result["copies"] = n_copies
+            result["objects"] = [
+                {
+                    "name": o["name"],
+                    "color": o["color"],
+                    "ams_slot": resolved_slots[i],
+                }
+                for i, o in enumerate(build_objects)
+            ]
+            result["ams_mapping"] = [
+                {"copy": i + 1, "slot": s, "color": resolved_colors[i]}
+                for i, s in enumerate(resolved_slots)
+            ]
+            result["multi_color_3mf"] = output_3mf
+
+        return result
+    except Exception as exc:
+        logger.exception("Error in multi_color_copies")
+        return _error_dict(
+            f"Failed in multi_color_copies: {exc}",
+            code="INTERNAL_ERROR",
+        )
+
+
+@mcp.tool()
 def extract_file_metadata(file_path: str) -> dict:
     """Extract metadata from a 3D printing file (.gcode, .3mf, .stl, .ufp).
 
