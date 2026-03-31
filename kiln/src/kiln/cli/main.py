@@ -1975,6 +1975,8 @@ def preflight(ctx: click.Context, file_path: str | None, material: str | None, j
     help="AMS slot mapping per extruder, comma-separated (e.g. '0,1'). Implies --use-ams.",
 )
 @click.option("--no-nozzle-check", is_flag=True, help="Disable nozzle clumping/blob detection (Bambu). Use when prints trigger false HMS 0300-8014 errors.")
+@click.option("--object", "object_name", type=str, default=None, help="Extract and print a single object from a multi-object .gcode.3mf (Bambu). Partial name match supported (e.g. 'cap').")
+@click.option("--list-objects", is_flag=True, help="List named objects on the plate of a .gcode.3mf file, then exit.")
 @click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
 @click.pass_context
 def print_cmd(
@@ -1988,6 +1990,8 @@ def print_cmd(
     use_ams: bool | None,
     ams_mapping: str | None,
     no_nozzle_check: bool,
+    object_name: str | None,
+    list_objects: bool,
     json_mode: bool,
 ) -> None:
     """Start a print or check print status.
@@ -2001,12 +2005,108 @@ def print_cmd(
 
     With --queue, multiple files are submitted to the job scheduler and
     printed sequentially as each one finishes.
+
+    Use --object to extract and print a single object from a multi-object
+    Bambu .gcode.3mf file (e.g. --object "cap" to print just the lid).
     """
     import glob as _glob
     import os
 
+    # --list-objects: inspect plate objects without needing a printer connection
+    if list_objects:
+        if not files or len(files) != 1:
+            click.echo(
+                format_error(
+                    "--list-objects requires exactly one .gcode.3mf file.",
+                    code="INVALID_ARGS",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+        source_file = files[0]
+        if not os.path.isfile(source_file):
+            click.echo(format_error(f"File not found: {source_file}", code="FILE_NOT_FOUND", json_mode=json_mode))
+            sys.exit(1)
+
+        from kiln.generation.validation import list_plate_objects as _list_plate_objects
+
+        try:
+            plate_info = _list_plate_objects(source_file, plate_number=plate_number)
+        except (ValueError, FileNotFoundError) as exc:
+            click.echo(format_error(str(exc), code="LIST_OBJECTS_FAILED", json_mode=json_mode))
+            sys.exit(1)
+
+        if json_mode:
+            import json as _json
+
+            click.echo(_json.dumps(plate_info, indent=2))
+        else:
+            objects = plate_info.get("objects", [])
+            click.echo(f"Plate {plate_number} — {len(objects)} object(s):")
+            for obj in objects:
+                area = obj.get("area_mm2", 0)
+                click.echo(f"  {obj['name']}  (label_id={obj['label_id']}, {area:.0f} mm²)")
+            bed = plate_info.get("bed_type", "unknown")
+            colors = plate_info.get("filament_colors", [])
+            click.echo(f"  Bed: {bed}  Filaments: {', '.join(colors) if colors else 'N/A'}")
+        return
+
     try:
         adapter = _get_adapter_from_ctx(ctx)
+
+        # --object: extract a single object from a multi-object .gcode.3mf
+        if object_name is not None:
+            if show_status:
+                click.echo(format_error("--object cannot be used with --status.", code="INVALID_ARGS", json_mode=json_mode))
+                sys.exit(1)
+            if use_queue:
+                click.echo(format_error("--object cannot be used with --queue.", code="INVALID_ARGS", json_mode=json_mode))
+                sys.exit(1)
+            if not files or len(files) != 1:
+                click.echo(
+                    format_error(
+                        "--object requires exactly one .gcode.3mf file.",
+                        code="INVALID_ARGS",
+                        json_mode=json_mode,
+                    )
+                )
+                sys.exit(1)
+            source_file = files[0]
+            if not os.path.isfile(source_file):
+                click.echo(
+                    format_error(
+                        f"File not found: {source_file}",
+                        code="FILE_NOT_FOUND",
+                        json_mode=json_mode,
+                    )
+                )
+                sys.exit(1)
+
+            from kiln.generation.validation import extract_plate_object_gcode
+
+            if not json_mode:
+                click.echo(f"Extracting object {object_name!r} from {os.path.basename(source_file)}...")
+            try:
+                extract_result = extract_plate_object_gcode(
+                    source_file,
+                    object_name,
+                    plate_number=plate_number,
+                )
+            except ValueError as exc:
+                click.echo(format_error(str(exc), code="EXTRACT_FAILED", json_mode=json_mode))
+                sys.exit(1)
+
+            extracted_path = extract_result["output_path"]
+            if not json_mode:
+                click.echo(
+                    f"Extracted {extract_result['matched_object']['name']} → "
+                    f"{os.path.basename(extracted_path)} "
+                    f"({extract_result['kept_lines']} lines)"
+                )
+
+            # Replace files tuple with the extracted gcode so the normal
+            # upload+print flow handles it.
+            files = (extracted_path,)
 
         if show_status or not files:
             state = adapter.get_state()

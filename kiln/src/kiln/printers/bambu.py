@@ -827,7 +827,11 @@ class BambuAdapter(PrinterAdapter):
     ) -> None:
         """MQTT on_connect callback."""
         # Check for auth failure or rejected connection before proceeding.
-        rc = int(reason_code) if reason_code is not None else 0
+        try:
+            rc = int(reason_code) if reason_code is not None else 0
+        except (TypeError, ValueError):
+            # paho-mqtt v2 passes a ReasonCode object
+            rc = reason_code.value if hasattr(reason_code, "value") else 0
         if rc != 0:
             logger.warning(
                 "MQTT connection rejected by %s (reason_code=%s)",
