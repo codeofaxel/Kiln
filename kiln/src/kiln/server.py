@@ -335,6 +335,49 @@ _PRINTER_API_KEY: str = os.environ.get("KILN_PRINTER_API_KEY", "")
 _PRINTER_TYPE: str = os.environ.get("KILN_PRINTER_TYPE", "octoprint")
 _PRINTER_SERIAL: str = os.environ.get("KILN_PRINTER_SERIAL", "")
 _PRINTER_MODEL: str = os.environ.get("KILN_PRINTER_MODEL", "")
+# PrusaSlicer defaults to conservative speeds (~45mm/s) designed for
+# generic printers. Modern printers (especially Bambu with input shaping)
+# can handle much higher speeds safely. These overrides are injected
+# automatically when slicing via slice_and_print / run_reslice_and_print.
+_PRINTER_SPEED_OVERRIDES: dict[str, dict[str, str]] = {
+    "bambu": {
+        "perimeter_speed": "150",
+        "external_perimeter_speed": "100",
+        "infill_speed": "250",
+        "solid_infill_speed": "150",
+        "top_solid_infill_speed": "100",
+        "first_layer_speed": "50",
+        "travel_speed": "350",
+        "max_print_speed": "300",
+        "default_acceleration": "5000",
+        "infill_acceleration": "10000",
+        "first_layer_acceleration": "1000",
+    },
+    "octoprint": {
+        # Conservative: most OctoPrint users have Ender 3 / similar
+        "perimeter_speed": "50",
+        "external_perimeter_speed": "35",
+        "infill_speed": "80",
+        "solid_infill_speed": "50",
+        "top_solid_infill_speed": "40",
+        "first_layer_speed": "30",
+        "travel_speed": "150",
+        "max_print_speed": "100",
+    },
+    "moonraker": {
+        # Klipper with input shaping — moderately fast
+        "perimeter_speed": "100",
+        "external_perimeter_speed": "70",
+        "infill_speed": "150",
+        "solid_infill_speed": "100",
+        "top_solid_infill_speed": "70",
+        "first_layer_speed": "40",
+        "travel_speed": "250",
+        "max_print_speed": "200",
+        "default_acceleration": "3000",
+    },
+}
+
 _CONFIRM_UPLOAD: bool = os.environ.get("KILN_CONFIRM_UPLOAD", "").lower() in ("1", "true", "yes")
 _CONFIRM_MODE: bool = os.environ.get("KILN_CONFIRM_MODE", "").lower() in ("1", "true", "yes")
 _THINGIVERSE_TOKEN: str = os.environ.get("KILN_THINGIVERSE_TOKEN", "")
@@ -6860,6 +6903,31 @@ def slice_and_print(
                         )
             except Exception:
                 logger.debug("Auto-adhesion analysis failed, proceeding without", exc_info=True)
+
+        # Bambu printers: wrap_gcode_as_3mf expects M83 (relative extrusion)
+        # and provides its own start/end gcode, so override PrusaSlicer defaults.
+        if _PRINTER_TYPE == "bambu":
+            adhesion_overrides["use_relative_e_distances"] = "1"
+            adhesion_overrides["start_gcode"] = ""
+            adhesion_overrides["end_gcode"] = ""
+
+        # Prefer per-model speeds when printer_id is available
+        if effective_printer_id:
+            try:
+                from kiln.printer_intelligence import get_slicer_speed_overrides
+                model_speeds = get_slicer_speed_overrides(effective_printer_id)
+                if model_speeds:
+                    for k, v in model_speeds.items():
+                        if k not in adhesion_overrides:
+                            adhesion_overrides[k] = v
+            except (ImportError, Exception):
+                pass  # fall through to per-type defaults below
+
+        # Inject printer-aware speed overrides
+        if _PRINTER_TYPE in _PRINTER_SPEED_OVERRIDES:
+            for k, v in _PRINTER_SPEED_OVERRIDES[_PRINTER_TYPE].items():
+                if k not in adhesion_overrides:  # don't override explicit user settings
+                    adhesion_overrides[k] = v
 
         # Re-resolve profile with adhesion overrides merged in
         if adhesion_overrides and effective_printer_id:
@@ -14010,6 +14078,28 @@ def run_reslice_and_print(
                     f"Invalid JSON in ams_mapping: {exc}",
                     code="VALIDATION_ERROR",
                 )
+
+        # Prefer per-model speeds when printer_id is available
+        if printer_id:
+            try:
+                from kiln.printer_intelligence import get_slicer_speed_overrides
+                model_speeds = get_slicer_speed_overrides(printer_id)
+                if model_speeds:
+                    if parsed_overrides is None:
+                        parsed_overrides = {}
+                    for k, v in model_speeds.items():
+                        if k not in parsed_overrides:
+                            parsed_overrides[k] = v
+            except (ImportError, Exception):
+                pass  # fall through to per-type defaults below
+
+        # Inject printer-aware speed overrides (don't override explicit user settings)
+        if _PRINTER_TYPE in _PRINTER_SPEED_OVERRIDES:
+            if parsed_overrides is None:
+                parsed_overrides = {}
+            for k, v in _PRINTER_SPEED_OVERRIDES[_PRINTER_TYPE].items():
+                if k not in parsed_overrides:
+                    parsed_overrides[k] = v
 
         result = _pipeline_reslice_and_print(
             model_path=model_path,
