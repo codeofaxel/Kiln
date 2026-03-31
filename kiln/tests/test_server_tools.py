@@ -206,6 +206,15 @@ class TestKilnHealth:
 class TestWebhookTools:
     """Tests for register_webhook(), list_webhooks(), delete_webhook() MCP tools."""
 
+    @pytest.fixture(autouse=True)
+    def _bypass_auth(self):
+        """Bypass license/auth checks for webhook tool tests."""
+        with patch("kiln.server._check_auth", return_value=None), \
+             patch("kiln.server.get_tier", return_value=type("T", (), {"value": 99})()):
+            # Also reset webhook manager between tests
+            _webhook_mgr._endpoints.clear()
+            yield
+
     # -- register_webhook --------------------------------------------------
 
     def test_register_webhook_basic(self):

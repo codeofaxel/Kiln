@@ -17,8 +17,10 @@ The proven pipeline:
        gcode (~620 lines, including M620 M motor enable, AMS load,
        nozzle flush, extrusion calibration, bed leveling) and end gcode
        (~150 lines, AMS retract, cooldown, finish sound).
-    3. Layer tracking commands (M73 L, M991 S0 P0, M73 P/R) are
-       injected at each PrusaSlicer ``;LAYER_CHANGE`` marker.
+    3. PrusaSlicer's native ``M73 P R`` progress commands are stripped
+       (they lack the ``L`` parameter and override layer tracking) and
+       replaced with Bambu-compatible ``M73 L``, ``M991 S0 P0``, and
+       ``M73 P R`` at each PrusaSlicer ``;LAYER_CHANGE`` marker.
     4. Everything is packaged as a Bambu 3MF with proper metadata.
 
 Tested and verified on the Bambu Lab A1 Combo (firmware 01.08.03.00).
@@ -37,6 +39,13 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Estimated Bambu startup overhead in seconds (homing, AMS load, bed
+# leveling, calibration).  Varies by printer and settings but 7 minutes
+# is typical for the A1 with AMS.  Added to the slicer's pure-printing
+# estimate so the firmware's remaining-time display is accurate from the
+# very first second of the print.
+_BAMBU_STARTUP_OVERHEAD_SEC = 420  # 7 minutes
 
 # ---------------------------------------------------------------------------
 # Data file paths
@@ -247,9 +256,12 @@ def _extract_slicer_time_estimate(gcode_body: str) -> int:
     OrcaSlicer uses a similar format.  Returns seconds, or 0 if no
     estimate is found.
     """
-    # Search the first and last 300 lines (estimates are in header/footer)
+    # PrusaSlicer puts the time estimate in a footer that can be 300–500+
+    # lines from the end (after a long block of `; key = value` settings).
+    # Search the first 300 and last 600 lines to cover both header and
+    # footer locations across PrusaSlicer, OrcaSlicer, and BambuStudio.
     lines = gcode_body.split("\n")
-    search_lines = lines[:300] + lines[-300:]
+    search_lines = lines[:300] + lines[-600:]
 
     for line in search_lines:
         m = re.search(
@@ -290,7 +302,10 @@ def _postprocess_prusa_body(
 
     1. Strips PrusaSlicer's own init commands (M83, G28, M104, etc.)
        since the BambuStudio start gcode handles machine initialization.
-    2. Injects Bambu-specific layer tracking at each ``;LAYER_CHANGE``:
+    2. Strips PrusaSlicer's native ``M73 P{pct} R{min}`` progress commands
+       which lack the ``L`` parameter and would override our layer tracking,
+       causing the printer display to show stale progress.
+    3. Injects Bambu-specific layer tracking at each ``;LAYER_CHANGE``:
        - ``M73 L{n}`` — layer number for firmware display
        - ``M991 S0 P0`` — notify firmware of layer change
        - ``M73 P{pct} R{min}`` — progress percentage and remaining time
@@ -320,11 +335,19 @@ def _postprocess_prusa_body(
         else:
             cleaned.append(line)
 
-    # Inject Bambu layer tracking at each ;LAYER_CHANGE
+    # Inject Bambu layer tracking at each ;LAYER_CHANGE and strip
+    # PrusaSlicer's own M73 commands.  PrusaSlicer emits M73 P{pct} R{min}
+    # frequently throughout the gcode (often every few lines).  These lack
+    # the L parameter that Bambu firmware needs for layer counting, and they
+    # override the progress values we inject at each layer boundary — causing
+    # the printer display to show stale progress (e.g. stuck at "5% / layer 1").
+    # We replace them with our own M73 commands that include L for layer
+    # tracking alongside correct P/R values.
     layer_num = 0
     processed: list[str] = []
     for line in cleaned:
-        if line.strip() == ";LAYER_CHANGE":
+        stripped = line.strip()
+        if stripped == ";LAYER_CHANGE":
             layer_num += 1
             processed.append(line)
             processed.append(
@@ -339,6 +362,9 @@ def _postprocess_prusa_body(
             )
             remaining_min = max(1, remaining_sec // 60)
             processed.append(f"M73 P{pct} R{remaining_min}")
+            continue
+        # Strip PrusaSlicer's native M73 lines — we inject our own above.
+        if stripped.startswith("M73 ") or stripped == "M73":
             continue
         processed.append(line)
 
@@ -688,7 +714,12 @@ def build_bambu_3mf(
     # slicer didn't embed an estimate.
     est_time_sec = _extract_slicer_time_estimate(gcode_body)
     if est_time_sec <= 0:
-        est_time_sec = total_layers * 6  # conservative fallback
+        # Fallback: estimate from gcode size.  Typical FDM printers process
+        # ~40-60 bytes of gcode per second at normal speeds; 50 B/s is a
+        # reasonable middle ground.  This gives much better estimates than
+        # the old ``layers * 6`` heuristic (which produced ~100 s for a
+        # 20-minute coaster).
+        est_time_sec = max(total_layers * 6, len(gcode_body) // 50)
     est_minutes = max(1, est_time_sec // 60)
 
     logger.info(
@@ -738,8 +769,16 @@ def build_bambu_3mf(
         filament_types=settings.get_filament_types(),
     )
 
+    # Inject an initial M73 at the very start so the firmware shows the
+    # correct time estimate from the first second — before the ~600-line
+    # startup sequence (homing, AMS load, calibration) completes.  Without
+    # this, the firmware shows a garbage estimate until layer printing
+    # begins and the per-layer M73 commands kick in.
+    est_minutes_with_startup = max(1, (est_time_sec + _BAMBU_STARTUP_OVERHEAD_SEC) // 60)
+    initial_m73 = f"M73 P0 R{est_minutes_with_startup}\n"
+
     # Assemble complete gcode.
-    complete_gcode = header + start_gcode + "\n" + processed_body + "\n" + end_gcode
+    complete_gcode = initial_m73 + header + start_gcode + "\n" + processed_body + "\n" + end_gcode
 
     # Build metadata.
     gcode_bytes = complete_gcode.encode("utf-8")
@@ -748,9 +787,14 @@ def build_bambu_3mf(
     f_colors = settings.get_filament_colors()
     f_types = settings.get_filament_types()
 
+    # Include startup overhead in the prediction shown on the printer
+    # display.  The M73 R values use the raw est_time_sec (they count
+    # down during printing, after startup is already finished).
+    est_time_sec_with_startup = est_time_sec + _BAMBU_STARTUP_OVERHEAD_SEC
+
     slice_info = _build_slice_info(
         total_layers=total_layers,
-        est_print_time_sec=est_time_sec,
+        est_print_time_sec=est_time_sec_with_startup,
         filament_type=settings.filament_type,
         filament_color=settings.filament_color,
         nozzle_diameter=settings.nozzle_diameter,
@@ -836,7 +880,7 @@ def build_bambu_3mf(
         max_z=max_z,
         file_size=file_size,
         md5=file_md5,
-        est_print_time_sec=est_time_sec,
+        est_print_time_sec=est_time_sec_with_startup,
     )
 
 
@@ -908,11 +952,13 @@ def repackage_gcode_as_bambu_3mf(
 
     # Update the time prediction in slice_info.config so the printer
     # display shows correct time remaining instead of the full plate's
-    # estimate.  The ``prediction`` value is in seconds.
+    # estimate.  The ``prediction`` value is in seconds.  Include startup
+    # overhead so the estimate is accurate from the first second.
     if slice_info and estimated_time_minutes > 0:
+        prediction_sec = estimated_time_minutes * 60 + _BAMBU_STARTUP_OVERHEAD_SEC
         slice_info = re.sub(
             r'(<metadata\s+key="prediction"\s+value=")(\d+)(")',
-            rf"\g<1>{estimated_time_minutes * 60}\3",
+            rf"\g<1>{prediction_sec}\3",
             slice_info,
         )
 

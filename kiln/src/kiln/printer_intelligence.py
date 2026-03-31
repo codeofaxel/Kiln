@@ -1,5 +1,5 @@
 """Printer intelligence database — firmware quirks, material compatibility,
-calibration guidance, and known failure modes.
+calibration guidance, speed intelligence, and known failure modes.
 
 Ships a curated JSON database of operational knowledge for popular 3D
 printers.  Agents query this to make informed decisions without
@@ -13,6 +13,13 @@ Usage::
     print(intel.materials["PLA"])       # {"hotend": 200, "bed": 60, ...}
     print(intel.quirks)                 # ["PTFE tube degrades above 240C...", ...]
     print(intel.failure_modes[0])       # {"symptom": ..., "cause": ..., "fix": ...}
+
+Speed intelligence::
+
+    from kiln.printer_intelligence import get_slicer_speed_overrides
+
+    overrides = get_slicer_speed_overrides("bambu_a1")
+    # Returns PrusaSlicer INI keys tuned for the Bambu A1's capabilities.
 """
 
 from __future__ import annotations
@@ -235,3 +242,337 @@ def intel_to_dict(intel: PrinterIntel) -> dict[str, Any]:
         "calibration": intel.calibration,
         "failure_modes": [{"symptom": fm.symptom, "cause": fm.cause, "fix": fm.fix} for fm in intel.failure_modes],
     }
+
+
+# ---------------------------------------------------------------------------
+# Raw JSON cache (for fields not captured by the PrinterIntel dataclass)
+# ---------------------------------------------------------------------------
+
+_raw_cache: dict[str, dict[str, Any]] = {}
+_raw_loaded: bool = False
+
+
+def _load_raw() -> None:
+    """Load the raw JSON dict so we can read extended fields like speed data."""
+    global _raw_loaded
+    if _raw_loaded:
+        return
+    try:
+        raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        logger.error("Failed to load raw printer intelligence: %s", exc)
+        _raw_loaded = True
+        return
+    for key, data in raw.items():
+        if key == "_meta":
+            continue
+        _raw_cache[key] = data
+    _raw_loaded = True
+
+
+def _get_raw(printer_id: str) -> dict[str, Any] | None:
+    """Return the raw JSON entry for *printer_id*, or ``None``."""
+    _load_raw()
+    normalised = printer_id.lower().replace("-", "_").strip()
+    entry = _raw_cache.get(normalised)
+    if entry is not None:
+        return entry
+    # Fuzzy prefix match (same logic as get_printer_intel).
+    for key in _raw_cache:
+        if normalised.startswith(key) or key.startswith(normalised):
+            return _raw_cache[key]
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Per-printer speed intelligence for PrusaSlicer
+# ---------------------------------------------------------------------------
+
+# Curated speed capability table keyed by printer_id.
+# Values: (max_print_speed_mm_s, max_accel_mm_s2, has_input_shaping, quality_factor)
+# quality_factor: fraction of max speed to use for quality prints (0.0-1.0).
+_SPEED_CAPABILITIES: dict[str, dict[str, Any]] = {
+    # --- Bambu Lab ---
+    "bambu_a1": {
+        "max_speed": 250,
+        "max_accel": 10000,
+        "input_shaping": True,
+        "quality_factor": 0.75,
+    },
+    "bambu_a1_mini": {
+        "max_speed": 250,
+        "max_accel": 10000,
+        "input_shaping": True,
+        "quality_factor": 0.70,
+    },
+    "bambu_x1c": {
+        "max_speed": 300,
+        "max_accel": 12000,
+        "input_shaping": True,
+        "quality_factor": 0.80,
+    },
+    "bambu_p1s": {
+        "max_speed": 300,
+        "max_accel": 12000,
+        "input_shaping": True,
+        "quality_factor": 0.78,
+    },
+    "bambu_p1p": {
+        "max_speed": 300,
+        "max_accel": 10000,
+        "input_shaping": True,
+        "quality_factor": 0.75,
+    },
+    # --- Creality ---
+    "ender3": {
+        "max_speed": 60,
+        "max_accel": 500,
+        "input_shaping": False,
+        "quality_factor": 0.75,
+    },
+    "ender3_v2": {
+        "max_speed": 70,
+        "max_accel": 600,
+        "input_shaping": False,
+        "quality_factor": 0.75,
+    },
+    "ender3_s1": {
+        "max_speed": 100,
+        "max_accel": 1500,
+        "input_shaping": False,
+        "quality_factor": 0.75,
+    },
+    "k1": {
+        "max_speed": 300,
+        "max_accel": 12000,
+        "input_shaping": True,
+        "quality_factor": 0.75,
+    },
+    # --- Prusa ---
+    "prusa_mk3s": {
+        "max_speed": 100,
+        "max_accel": 1250,
+        "input_shaping": False,
+        "quality_factor": 0.75,
+    },
+    "prusa_mk4": {
+        "max_speed": 150,
+        "max_accel": 4000,
+        "input_shaping": True,
+        "quality_factor": 0.78,
+    },
+    "prusa_mini": {
+        "max_speed": 100,
+        "max_accel": 1000,
+        "input_shaping": False,
+        "quality_factor": 0.70,
+    },
+    "prusa_xl": {
+        "max_speed": 150,
+        "max_accel": 4000,
+        "input_shaping": True,
+        "quality_factor": 0.78,
+    },
+    # --- Voron ---
+    "voron_2": {
+        "max_speed": 300,
+        "max_accel": 10000,
+        "input_shaping": True,
+        "quality_factor": 0.75,
+    },
+    "voron_0": {
+        "max_speed": 250,
+        "max_accel": 8000,
+        "input_shaping": True,
+        "quality_factor": 0.75,
+    },
+    # --- Klipper generic ---
+    "klipper_generic": {
+        "max_speed": 150,
+        "max_accel": 3000,
+        "input_shaping": True,
+        "quality_factor": 0.70,
+    },
+    # --- Elegoo ---
+    "elegoo_neptune3": {
+        "max_speed": 60,
+        "max_accel": 500,
+        "input_shaping": False,
+        "quality_factor": 0.75,
+    },
+    "elegoo_neptune4": {
+        "max_speed": 250,
+        "max_accel": 8000,
+        "input_shaping": True,
+        "quality_factor": 0.72,
+    },
+}
+
+# Generic type-level fallbacks when no printer_id matches.
+_TYPE_SPEED_DEFAULTS: dict[str, dict[str, Any]] = {
+    "bambu": {
+        "max_speed": 250,
+        "max_accel": 10000,
+        "input_shaping": True,
+        "quality_factor": 0.75,
+    },
+    "octoprint": {
+        "max_speed": 80,
+        "max_accel": 800,
+        "input_shaping": False,
+        "quality_factor": 0.70,
+    },
+    "moonraker": {
+        "max_speed": 150,
+        "max_accel": 3000,
+        "input_shaping": True,
+        "quality_factor": 0.70,
+    },
+}
+
+
+def _build_speed_overrides(caps: dict[str, Any]) -> dict[str, str]:
+    """Convert a speed capability dict into PrusaSlicer INI key-value pairs.
+
+    Applies the quality_factor safety margin so prints use a fraction of the
+    printer's advertised maximum, yielding better surface quality while still
+    being significantly faster than PrusaSlicer's conservative defaults.
+    """
+    max_speed: int = caps["max_speed"]
+    max_accel: int = caps["max_accel"]
+    has_is: bool = caps["input_shaping"]
+    qf: float = caps["quality_factor"]
+
+    # Derive operational speeds from max capability * quality factor.
+    perimeter = int(max_speed * qf)
+    # External perimeters need to be slower for surface quality.
+    external_perimeter = int(perimeter * 0.65)
+    infill = int(max_speed * qf * 1.05)  # infill can be slightly faster
+    infill = min(infill, max_speed)  # but never exceed hardware max
+    solid_infill = int(perimeter * 0.90)
+    top_solid_infill = int(external_perimeter * 0.90)
+    first_layer = max(15, int(max_speed * 0.20))  # 20% of max, floor 15
+    first_layer = min(first_layer, 40)  # cap at 40mm/s for reliability
+    # Travel can be close to max — no extrusion quality concerns.
+    travel = int(max_speed * 0.95)
+    travel = min(travel, 300)  # PrusaSlicer cap is typically 300
+    max_print = int(max_speed * qf)
+
+    overrides: dict[str, str] = {
+        "perimeter_speed": str(perimeter),
+        "external_perimeter_speed": str(external_perimeter),
+        "infill_speed": str(infill),
+        "solid_infill_speed": str(solid_infill),
+        "top_solid_infill_speed": str(top_solid_infill),
+        "first_layer_speed": str(first_layer),
+        "travel_speed": str(travel),
+        "max_print_speed": str(max_print),
+    }
+
+    # Acceleration overrides — only if the printer supports meaningful accel.
+    # PrusaSlicer's default_acceleration=0 means "firmware default", but when
+    # we know the printer's capability we can set it explicitly.
+    if max_accel >= 500:
+        # Use ~70% of max accel for general printing.
+        default_accel = int(max_accel * 0.70)
+        # First layer uses much lower acceleration for bed adhesion.
+        first_layer_accel = max(200, int(max_accel * 0.20))
+        first_layer_accel = min(first_layer_accel, 1000)
+        overrides["default_acceleration"] = str(default_accel)
+        overrides["first_layer_acceleration"] = str(first_layer_accel)
+
+    # Input-shaping-aware printers tolerate higher accelerations on
+    # perimeters without ringing, so we don't need to derate as much.
+    if has_is and max_accel >= 3000:
+        perimeter_accel = int(max_accel * 0.55)
+        overrides["perimeter_acceleration"] = str(perimeter_accel)
+        overrides["infill_acceleration"] = str(int(max_accel * 0.80))
+        # External perimeter acceleration slightly lower for surface finish.
+        overrides["external_perimeter_acceleration"] = str(int(max_accel * 0.45))
+
+    return overrides
+
+
+def _resolve_caps(printer_id: str) -> dict[str, Any] | None:
+    """Resolve speed capabilities for a printer.
+
+    Priority order:
+    1. Curated ``_SPEED_CAPABILITIES`` table (hand-tuned practical limits).
+    2. Raw JSON extended fields (``max_speed_mm_s``) — these represent
+       hardware maximums and get derated via a conservative quality_factor.
+    3. Fuzzy prefix match on either source.
+    """
+    normalised = printer_id.lower().replace("-", "_").strip()
+
+    # 1. Curated table — exact match (preferred: hand-tuned practical limits).
+    caps = _SPEED_CAPABILITIES.get(normalised)
+    if caps is not None:
+        return caps
+
+    # 2. Fuzzy prefix match on curated table.
+    for key in _SPEED_CAPABILITIES:
+        if normalised.startswith(key) or key.startswith(normalised):
+            return _SPEED_CAPABILITIES[key]
+
+    # 3. Fall back to raw JSON extended fields.  These are hardware maximums
+    #    (e.g. 500 mm/s for bambu_a1) so we use a lower quality_factor to
+    #    derate to practical printing speeds.
+    raw = _get_raw(normalised)
+    if raw and "max_speed_mm_s" in raw:
+        return {
+            "max_speed": int(raw["max_speed_mm_s"]),
+            "max_accel": int(raw.get("max_acceleration_mm_s2", 5000)),
+            "input_shaping": "input shaping" in " ".join(raw.get("quirks", [])).lower()
+            or raw.get("firmware") == "bambu"
+            or raw.get("firmware") == "klipper",
+            "quality_factor": 0.50,  # conservative: hardware max != practical max
+        }
+
+    return None
+
+
+def get_slicer_speed_overrides(printer_id: str) -> dict[str, str]:
+    """Generate PrusaSlicer speed overrides tuned for a specific printer model.
+
+    Uses the printer intelligence database to produce optimal speed,
+    acceleration, and jerk settings for PrusaSlicer.  This ensures that
+    prints sliced via Kiln run at the printer's actual capability
+    instead of PrusaSlicer's conservative defaults.
+
+    The returned dict maps PrusaSlicer INI keys to string values,
+    ready for injection into the slicer command line or profile.
+
+    Args:
+        printer_id: Printer model identifier (e.g. ``"bambu_a1"``,
+            ``"ender3"``, ``"voron_2.4"``, ``"prusa_mk4"``,
+            ``"bambu_x1c"``, ``"klipper_generic"``).
+
+    Returns:
+        Dict of PrusaSlicer speed overrides.  Empty dict if the printer
+        is not recognized (falls back to PrusaSlicer defaults).
+    """
+    caps = _resolve_caps(printer_id)
+    if caps is None:
+        return {}
+    return _build_speed_overrides(caps)
+
+
+def get_slicer_speed_overrides_for_type(printer_type: str) -> dict[str, str]:
+    """Fallback: get generic speed overrides by printer type.
+
+    Useful when the exact printer model is unknown but the connection
+    type is known (e.g. ``"bambu"``, ``"octoprint"``, ``"moonraker"``).
+
+    Args:
+        printer_type: One of ``"bambu"``, ``"octoprint"``, or
+            ``"moonraker"``.
+
+    Returns:
+        Dict of PrusaSlicer speed overrides for a generic printer
+        of the given type.  Empty dict if the type is not recognized.
+    """
+    normalised = printer_type.lower().strip()
+    caps = _TYPE_SPEED_DEFAULTS.get(normalised)
+    if caps is None:
+        return {}
+    return _build_speed_overrides(caps)

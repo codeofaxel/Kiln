@@ -824,13 +824,21 @@ class TestCommandHelp:
         ["material", "show", "--help"],
         ["material", "spools", "--help"],
         ["material", "add-spool", "--help"],
+        ["plugins", "--help"],
+        ["plugins", "list", "--help"],
+        ["plugins", "info", "--help"],
+    ])
+    def test_help(self, runner, cmd):
+        result = runner.invoke(cli, cmd)
+        assert result.exit_code == 0, f"{' '.join(cmd)} failed: {result.output}"
+
+    # Pro-only CLI commands (sync, billing, order, fleet) require kiln-pro.
+    # Skip when kiln-pro is not installed.
+    @pytest.mark.parametrize("cmd", [
         ["sync", "--help"],
         ["sync", "status", "--help"],
         ["sync", "now", "--help"],
         ["sync", "configure", "--help"],
-        ["plugins", "--help"],
-        ["plugins", "list", "--help"],
-        ["plugins", "info", "--help"],
         ["order", "--help"],
         ["order", "materials", "--help"],
         ["order", "quote", "--help"],
@@ -842,6 +850,7 @@ class TestCommandHelp:
         ["billing", "status", "--help"],
         ["billing", "history", "--help"],
     ])
-    def test_help(self, runner, cmd):
+    @pytest.mark.skipif(not _has_billing, reason="kiln-pro not installed")
+    def test_help_pro(self, runner, cmd):
         result = runner.invoke(cli, cmd)
         assert result.exit_code == 0, f"{' '.join(cmd)} failed: {result.output}"

@@ -449,6 +449,10 @@ class TestIngestService:
 
 
 class TestFleetRoute:
+    @pytest.mark.skipif(
+        not hasattr(__import__("kiln.cli.main", fromlist=["cli"]), "_load_fleet_adapters"),
+        reason="fleet commands require kiln-pro",
+    )
     def test_fleet_route_json(self, runner):
         adapter = MagicMock()
         with (
