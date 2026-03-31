@@ -162,6 +162,7 @@ READ_ONLY_TOOLS: set[str] = {
     "list_generation_providers",
     "validate_generated_mesh",
     "render_model_preview",
+    "visualize_model",
     "get_feedback_loop_status",
     "list_design_templates",
     "analyze_mesh_geometry",

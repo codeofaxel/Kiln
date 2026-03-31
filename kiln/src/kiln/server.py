@@ -609,9 +609,18 @@ def _build_instructions() -> str:
             "Use `build_generation_prompt()` to enhance prompts with design intelligence."
         )
 
+    # --- Visualization ---
+    parts.append(
+        "VISUALIZATION: Before printing ANY model (generated, downloaded, or custom), "
+        "call `visualize_model(file_path)` to render 6-angle previews (iso, front, "
+        "right, top, bottom, back). Show ALL preview images to the user. "
+        "Auto-detects optimal camera distance from model bounding box. "
+        "Works with STL, 3MF, OBJ, and SCAD files. Never skip visualization."
+    )
+
     # --- Recovery ---
     parts.append(
-        "FAILURE RECOVERY: If a print fails, use `analyze_print_failure_smart()` "
+        "FAILURE RECOVERY: If a print fails, use `analyze_print_failure_smart()`"
         "for root cause analysis, then `get_recovery_plan()` for options. "
         "Use `retry_print_with_fix()` to re-slice with corrections applied."
     )
@@ -5720,7 +5729,7 @@ def get_started() -> dict:
             "6. Use `validate_gcode` before `send_gcode` for raw G-code commands.",
         ],
         "core_workflows": {
-            "print_a_file": "upload_file → preflight_check → start_print",
+            "print_a_file": "upload_file → visualize_model → preflight_check → start_print",
             "marketplace_to_print": "search_all_models → download_and_upload → preflight_check → start_print",
             "slice_and_print": "upload_file (STL) → slice_and_print",
             "monitor": "printer_status, printer_snapshot, await_print_completion",
@@ -9660,6 +9669,46 @@ def render_model_preview(
         return _error_dict(f"Render failed: {exc}", code=exc.code or "RENDER_ERROR")
     except Exception as exc:
         logger.exception("Unexpected error in render_model_preview")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
+def visualize_model(
+    file_path: str,
+    angles: list[str] | None = None,
+    width: int = 800,
+    height: int = 600,
+) -> dict:
+    """Render a 3D model from 6 standard camera angles for visual inspection.
+
+    Universal visualization tool that works with ANY 3D file — STL, 3MF,
+    OBJ, or SCAD.  Returns PNG images from 6 angles: isometric, front,
+    right, top, bottom, and back.
+
+    Use this BEFORE printing to verify the model looks correct from all
+    sides.  Both agents and humans should review the output.
+
+    **When to use this vs other preview tools:**
+    - ``visualize_model`` — any file, 6 angles, universal (USE THIS ONE)
+    - ``preview_generated_model`` — after AI generation, includes bottom check
+    - ``render_model_preview`` — single angle, quick check
+
+    Args:
+        file_path: Path to an STL, 3MF, OBJ, or SCAD file.
+        angles: Optional subset of angles to render. Valid values:
+            ``isometric``, ``front``, ``right``, ``top``, ``bottom``, ``back``.
+            Defaults to all 6.
+        width: Image width in pixels (default 800).
+        height: Image height in pixels (default 600).
+    """
+    try:
+        from kiln.model_visualizer import visualize_model as _visualize
+
+        return _visualize(
+            file_path, angles=angles, width=width, height=height,
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error in visualize_model")
         return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
 
