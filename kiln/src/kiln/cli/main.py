@@ -1152,7 +1152,7 @@ def cli(ctx: click.Context, printer: str | None) -> None:
     \b
     🤖 AI agent? Use Kiln as an MCP server instead of CLI:
        kiln serve
-       MCP provides 456 tools with richer descriptions,
+       MCP provides 461 tools with richer descriptions,
        structured JSON responses, and tool chaining.
        See: https://kiln3d.com/docs
     """

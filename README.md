@@ -50,7 +50,7 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 ### Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link. Manage a mixed fleet from one place.
-- **AI-native** — 456 MCP tools built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — 461 MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
 - **Search → Slice → Print** — Search and download 3D models from Thingiverse, MyMiniFactory, and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
 - **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
@@ -449,7 +449,7 @@ pip install kiln3d[rest]
 
 When binding REST to non-localhost addresses (for hosted deployments), set `KILN_API_AUTH_TOKEN` or pass `--auth-token`.
 
-Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 456 tools are available via MCP (`kiln serve`).
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 461 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -468,7 +468,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **456 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **461 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
 
 | Tool | Description |
 |------|-------------|
@@ -507,6 +507,10 @@ The Kiln MCP server (`kiln serve`) exposes **456 tools** to agents. Key tools ar
 | `download_and_upload` | Download from any marketplace and upload to printer in one step |
 | `browse_models` | Browse popular/newest/featured models |
 | `list_model_categories` | List marketplace categories |
+| `list_plate_objects` | List individual objects on each plate of a .gcode.3mf file |
+| `extract_plate_object` | Extract G-code for a single object from a multi-object .gcode.3mf |
+| `print_plate_object` | Extract a single object and print it (extract → upload → print) |
+| `resolve_model_source` | Identify where a .3mf file came from (MakerWorld, etc.) |
 | `slice_model` | Slice an STL/3MF file to G-code |
 | `find_slicer_tool` | Detect installed slicer (PrusaSlicer/OrcaSlicer) |
 | `slice_and_print` | Slice a model then upload and print in one step (auto-detects AMS material, auto-injects brim/raft) |

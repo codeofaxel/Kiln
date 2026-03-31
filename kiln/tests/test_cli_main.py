@@ -1048,13 +1048,21 @@ class TestLicenseCommands:
         """kiln license-info shows FREE tier when no license is set."""
         from kiln.licensing import LicenseManager
 
-        mgr = LicenseManager(
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
-        with patch("kiln.licensing._manager", mgr), \
-             patch.dict("os.environ", {}, clear=True):
-            result = runner.invoke(cli, ["license-info"])
+        _license_env = {
+            "KILN_LICENSE_KEY": "",
+            "KILN_LICENSE_PUBLIC_KEY": "",
+            "KILN_LICENSE_SIGNING_SECRET": "",
+        }
+        with patch.dict("os.environ", _license_env):
+            mgr = LicenseManager(
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            # Force tier resolution so get_info() has _resolved set
+            mgr.get_tier()
+            with patch("kiln.licensing._manager", mgr), \
+                 patch("kiln.licensing.get_license_manager", return_value=mgr):
+                result = runner.invoke(cli, ["license-info"])
         assert result.exit_code == 0
         assert "Free" in result.output
 
@@ -1062,13 +1070,20 @@ class TestLicenseCommands:
         """kiln license-info --json returns valid JSON with tier field."""
         from kiln.licensing import LicenseManager
 
-        mgr = LicenseManager(
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
-        with patch("kiln.licensing._manager", mgr), \
-             patch.dict("os.environ", {}, clear=True):
-            result = runner.invoke(cli, ["license-info", "--json"])
+        _license_env = {
+            "KILN_LICENSE_KEY": "",
+            "KILN_LICENSE_PUBLIC_KEY": "",
+            "KILN_LICENSE_SIGNING_SECRET": "",
+        }
+        with patch.dict("os.environ", _license_env):
+            mgr = LicenseManager(
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            mgr.get_tier()
+            with patch("kiln.licensing._manager", mgr), \
+                 patch("kiln.licensing.get_license_manager", return_value=mgr):
+                result = runner.invoke(cli, ["license-info", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["success"] is True
@@ -1078,13 +1093,20 @@ class TestLicenseCommands:
         """kiln upgrade without --key shows current tier and upgrade URL."""
         from kiln.licensing import LicenseManager
 
-        mgr = LicenseManager(
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
-        with patch("kiln.licensing._manager", mgr), \
-             patch.dict("os.environ", {}, clear=True):
-            result = runner.invoke(cli, ["upgrade"])
+        _license_env = {
+            "KILN_LICENSE_KEY": "",
+            "KILN_LICENSE_PUBLIC_KEY": "",
+            "KILN_LICENSE_SIGNING_SECRET": "",
+        }
+        with patch.dict("os.environ", _license_env):
+            mgr = LicenseManager(
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            mgr.get_tier()
+            with patch("kiln.licensing._manager", mgr), \
+                 patch("kiln.licensing.get_license_manager", return_value=mgr):
+                result = runner.invoke(cli, ["upgrade"])
         assert result.exit_code == 0
         assert "Free" in result.output
         assert "kiln3d.com/pro" in result.output
@@ -1096,12 +1118,15 @@ class TestLicenseCommands:
         _secret = "test-cli-signing-secret"
         license_file = tmp_path / "license"
         key = generate_license_key(LicenseTier.PRO, "test@example.com", signing_key=_secret)
-        with patch.dict("os.environ", {"KILN_LICENSE_SIGNING_SECRET": _secret}, clear=False):
+        _env = {"KILN_LICENSE_SIGNING_SECRET": _secret, "KILN_LICENSE_KEY": ""}
+        with patch.dict("os.environ", _env, clear=False):
             mgr = LicenseManager(
                 license_path=license_file,
                 cache_path=tmp_path / "cache.json",
             )
-            with patch("kiln.licensing._manager", mgr):
+            mgr.get_tier()
+            with patch("kiln.licensing._manager", mgr), \
+                 patch("kiln.licensing.get_license_manager", return_value=mgr):
                 result = runner.invoke(cli, ["upgrade", "--key", key])
         assert result.exit_code == 0
         assert "Pro" in result.output
@@ -1113,12 +1138,15 @@ class TestLicenseCommands:
 
         _secret = "test-cli-signing-secret"
         key = generate_license_key(LicenseTier.PRO, "test@example.com", signing_key=_secret)
-        with patch.dict("os.environ", {"KILN_LICENSE_SIGNING_SECRET": _secret}, clear=False):
+        _env = {"KILN_LICENSE_SIGNING_SECRET": _secret, "KILN_LICENSE_KEY": ""}
+        with patch.dict("os.environ", _env, clear=False):
             mgr = LicenseManager(
                 license_path=tmp_path / "license",
                 cache_path=tmp_path / "cache.json",
             )
-            with patch("kiln.licensing._manager", mgr):
+            mgr.get_tier()
+            with patch("kiln.licensing._manager", mgr), \
+                 patch("kiln.licensing.get_license_manager", return_value=mgr):
                 result = runner.invoke(cli, ["upgrade", "--key", key, "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -1134,12 +1162,18 @@ class TestLicenseCommands:
         key = generate_license_key(LicenseTier.PRO, "test@example.com", signing_key=_secret)
         license_file.write_text(key, encoding="utf-8")
 
-        with patch.dict("os.environ", {"KILN_LICENSE_SIGNING_SECRET": _secret}, clear=False):
+        _env = {
+            "KILN_LICENSE_SIGNING_SECRET": _secret,
+            "KILN_LICENSE_KEY": "",  # prevent env founder key from leaking in
+        }
+        with patch.dict("os.environ", _env, clear=False):
             mgr = LicenseManager(
                 license_path=license_file,
                 cache_path=tmp_path / "cache.json",
             )
-            with patch("kiln.licensing._manager", mgr):
+            mgr.get_tier()
+            with patch("kiln.licensing.get_license_manager", return_value=mgr), \
+                 patch("kiln.licensing._manager", mgr):
                 result = runner.invoke(cli, ["upgrade"])
         assert result.exit_code == 0
         assert "Pro" in result.output
@@ -1486,13 +1520,20 @@ class TestQueueCLI:
         """kiln queue submit is available on Free tier (subject to queue cap)."""
         from kiln.licensing import LicenseManager
 
-        mgr = LicenseManager(
-            license_path=tmp_path / "license",
-            cache_path=tmp_path / "cache.json",
-        )
         mock_result = {"success": True, "job_id": "test-job-123", "position": 1}
-        with patch("kiln.licensing._manager", mgr), \
-             patch.dict("os.environ", {}, clear=True), \
-             patch("kiln.plugins.queue_tools.submit_job", return_value=mock_result):
-            result = runner.invoke(cli, ["queue", "submit", "test.gcode"])
+        _license_env = {
+            "KILN_LICENSE_KEY": "",
+            "KILN_LICENSE_PUBLIC_KEY": "",
+            "KILN_LICENSE_SIGNING_SECRET": "",
+        }
+        with patch.dict("os.environ", _license_env):
+            mgr = LicenseManager(
+                license_path=tmp_path / "license",
+                cache_path=tmp_path / "cache.json",
+            )
+            mgr.get_tier()
+            with patch("kiln.licensing._manager", mgr), \
+                 patch("kiln.licensing.get_license_manager", return_value=mgr), \
+                 patch("kiln.plugins.queue_tools.submit_job", return_value=mock_result):
+                result = runner.invoke(cli, ["queue", "submit", "test.gcode"])
         assert result.exit_code == 0
