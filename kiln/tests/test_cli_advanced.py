@@ -601,39 +601,8 @@ class TestStream:
 
 
 # ---------------------------------------------------------------------------
-# sync subcommands
+# sync subcommands (extracted to kiln-pro)
 # ---------------------------------------------------------------------------
-
-
-class TestSync:
-    def test_sync_status_json(self, runner):
-        result = runner.invoke(cli, ["sync", "status", "--json"])
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert data["status"] == "success"
-
-    def test_sync_now(self, runner):
-        result = runner.invoke(cli, ["sync", "now"])
-        assert result.exit_code == 0
-
-    def test_sync_configure_json(self, runner):
-        mock_db = MagicMock()
-        config_dict = {
-            "cloud_url": "https://api.example.com",
-            "api_key": "key123", "sync_interval_seconds": 30.0,
-        }
-        mock_config = MagicMock()
-        mock_config.to_dict.return_value = config_dict
-        with patch("kiln.persistence.get_db", return_value=mock_db), \
-             patch("kiln.cloud_sync.SyncConfig", return_value=mock_config), \
-             patch("dataclasses.asdict", return_value=config_dict):
-            result = runner.invoke(cli, [
-                "sync", "configure",
-                "--url", "https://api.example.com",
-                "--api-key", "key123",
-                "--interval", "30", "--json",
-            ])
-        assert result.exit_code == 0
 
 
 # ---------------------------------------------------------------------------

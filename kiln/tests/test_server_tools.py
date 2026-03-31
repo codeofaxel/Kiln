@@ -207,10 +207,18 @@ class TestWebhookTools:
     """Tests for register_webhook(), list_webhooks(), delete_webhook() MCP tools."""
 
     @pytest.fixture(autouse=True)
-    def _bypass_auth(self):
-        """Bypass license/auth checks for webhook tool tests."""
+    def _bypass_auth(self, monkeypatch):
+        """Bypass license/auth and requires_tier checks for webhook tool tests."""
+        import sys
+        _mod = sys.modules[__name__]
+
         with patch("kiln.server._check_auth", return_value=None), \
              patch("kiln.server.get_tier", return_value=type("T", (), {"value": 99})()):
+            # Unwrap requires_tier decorator so tests hit the real implementation
+            for fn_name in ("register_webhook", "list_webhooks", "delete_webhook"):
+                fn = getattr(_mod, fn_name)
+                if hasattr(fn, "__wrapped__"):
+                    monkeypatch.setattr(_mod, fn_name, fn.__wrapped__)
             # Also reset webhook manager between tests
             _webhook_mgr._endpoints.clear()
             yield
