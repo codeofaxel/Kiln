@@ -3615,6 +3615,418 @@ def extract_model_from_3mf(
 
 
 # ---------------------------------------------------------------------------
+# Bambu .gcode.3mf plate object inspection and extraction
+# ---------------------------------------------------------------------------
+
+
+def list_plate_objects(
+    file_path: str,
+    plate_number: int = 1,
+) -> dict[str, Any]:
+    """List named objects on the build plate of a Bambu .gcode.3mf file.
+
+    Parses ``Metadata/plate_N.json`` from the archive to enumerate every
+    object that was plated when the file was sliced.  Works even when the
+    3MF contains no mesh geometry (common for .gcode.3mf exports from
+    Bambu Studio / OrcaSlicer).
+
+    Bambu Studio supports multiple plates (plate_1, plate_2, etc.).  Use
+    the *plate_number* parameter to select which plate to inspect.  The
+    returned dict includes a ``plates_available`` field listing all plate
+    numbers found in the archive.
+
+    Each object entry includes:
+
+    * **name** – original STL filename (e.g. ``"TreatHolder - cap.stl"``)
+    * **plate_index** – zero-based position in the plate object list
+    * **label_id** – the gcode label ID used in ``start/stop printing
+      object`` comments (mapped from the gcode header)
+    * **bbox** – ``[x_min, y_min, x_max, y_max]`` bounding box on the
+      build plate
+    * **area_mm2** – footprint area on the plate
+    * **layer_height_mm** – per-object layer height
+
+    Also returns plate-level metadata: bed type, filament colours,
+    nozzle diameter, and whether sequential printing was enabled.
+
+    Use this to discover available objects before calling
+    ``extract_plate_object`` (MCP tool) or
+    ``extract_plate_object_gcode`` (Python API) to isolate one.
+
+    .. note::
+       Only the first 8 KB of the embedded G-code is read (for header
+       parsing), so this function is fast and lightweight regardless of
+       the overall file size.
+
+    Args:
+        file_path: Path to a ``.3mf`` or ``.gcode.3mf`` file.
+        plate_number: Which plate to inspect (1-based).  Defaults to 1.
+
+    Returns:
+        Dict with ``objects`` list, plate metadata, and
+        ``plates_available`` (sorted list of plate numbers found).
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If the file is not a valid ZIP/3MF or contains no
+            plate metadata for the requested plate number.
+    """
+    import re as _re
+
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+    if not zipfile.is_zipfile(file_path):
+        raise ValueError(f"Not a valid ZIP/3MF file: {file_path}")
+
+    plate_json: dict[str, Any] | None = None
+    gcode_header: str = ""
+
+    with zipfile.ZipFile(file_path, "r") as zf:
+        names = zf.namelist()
+
+        # Scan for all available plates (plate_N.json in Metadata/)
+        plates_available: list[int] = sorted({
+            int(m.group(1))
+            for name in names
+            if (m := _re.search(r"(?i)metadata/plate_(\d+)\.json$", name))
+        })
+
+        # Find plate JSON for the requested plate number
+        plate_json_name = f"Metadata/plate_{plate_number}.json"
+        plate_json_name_lower = f"metadata/plate_{plate_number}.json"
+        for candidate in [plate_json_name, plate_json_name_lower]:
+            if candidate in names:
+                plate_json = _json.loads(zf.read(candidate).decode("utf-8"))
+                break
+
+        if plate_json is None:
+            if plates_available:
+                raise ValueError(
+                    f"No plate metadata found for plate {plate_number} in "
+                    f"{file_path}. Available plates: {plates_available}"
+                )
+            raise ValueError(
+                f"No plate metadata found in {file_path}. "
+                f"This may not be a Bambu Studio / OrcaSlicer .gcode.3mf file."
+            )
+
+        # Read gcode header to extract label ID mapping
+        gcode_candidates = [
+            f"Metadata/plate_{plate_number}.gcode",
+            f"metadata/plate_{plate_number}.gcode",
+        ]
+        for candidate in gcode_candidates:
+            if candidate in names:
+                # Read only the first 8KB for the header — label IDs are
+                # in the first few lines.
+                with zf.open(candidate) as gf:
+                    gcode_header = gf.read(8192).decode("utf-8", errors="replace")
+                break
+
+    # Parse label IDs from gcode header:
+    # "; model label id: 724,757"
+    label_ids: list[int] = []
+    for line in gcode_header.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("; model label id:"):
+            id_str = stripped.split(":", 1)[1].strip()
+            label_ids = [int(x.strip()) for x in id_str.split(",") if x.strip()]
+            break
+
+    bbox_objects = plate_json.get("bbox_objects", [])
+
+    objects: list[dict[str, Any]] = []
+    for idx, obj in enumerate(bbox_objects):
+        entry: dict[str, Any] = {
+            "name": obj.get("name", f"object_{idx}"),
+            "plate_index": idx,
+            "label_id": label_ids[idx] if idx < len(label_ids) else None,
+            "bbox": obj.get("bbox"),
+            "area_mm2": round(obj.get("area", 0), 2),
+            "layer_height_mm": round(obj.get("layer_height", 0.2), 3),
+        }
+        objects.append(entry)
+
+    return {
+        "object_count": len(objects),
+        "objects": objects,
+        "bed_type": plate_json.get("bed_type"),
+        "filament_colors": plate_json.get("filament_colors", []),
+        "nozzle_diameter_mm": round(plate_json.get("nozzle_diameter", 0.4), 2),
+        "is_sequential_print": plate_json.get("is_seq_print", False),
+        "plates_available": plates_available,
+        "plate_number": plate_number,
+        "source_file": file_path,
+    }
+
+
+def extract_plate_object_gcode(
+    file_path: str,
+    object_name: str,
+    *,
+    output_path: str | None = None,
+    plate_number: int = 1,
+) -> dict[str, Any]:
+    """Extract a single object's G-code from a Bambu .gcode.3mf file.
+
+    Bambu Studio / OrcaSlicer embed per-object markers in the G-code::
+
+        ; start printing object, unique label id: 757
+        ... (moves for this object) ...
+        ; stop printing object, unique label id: 757
+
+    This function filters the G-code to keep only the sections belonging
+    to the requested object, preserving the machine start-up sequence
+    (homing, bed levelling, heating, calibration) and end sequence
+    (cool-down, retract, park).
+
+    The resulting file is a standalone ``.gcode`` file that can be sent
+    directly to the printer.
+
+    Bambu Studio supports multiple plates.  Use the *plate_number*
+    parameter to select which plate's G-code to read from.
+
+    .. warning::
+       The entire G-code file is read into memory for filtering.  For
+       typical Bambu prints (10-100 MB G-code) this uses roughly
+       200-400 MB of RAM.  For very large prints (500 MB+ G-code),
+       memory usage may be significant.
+
+       Only ``M83`` (relative extrusion) is supported.  Files that use
+       ``M82`` (absolute extrusion) are rejected because per-object
+       extraction would corrupt the extrusion distances.
+
+    **Matching logic:** *object_name* is matched case-insensitively
+    against the ``name`` field in the plate metadata.  Partial / substring
+    matches are accepted so that ``"cap"`` matches
+    ``"TreatHolder - cap.stl"``.
+
+    Args:
+        file_path: Path to the ``.gcode.3mf`` file.
+        object_name: Name (or substring) of the object to extract.
+        output_path: Output ``.gcode`` path.  Auto-generated if omitted.
+        plate_number: Which plate to read from (1-based).  Defaults to 1.
+
+    Returns:
+        Dict with output path, matched object info, and line counts.
+
+    Raises:
+        FileNotFoundError: If the input file does not exist.
+        ValueError: If no matching object is found, or the file is not a
+            valid Bambu .gcode.3mf.
+    """
+    # First, list objects to find the target label ID
+    plate_info = list_plate_objects(file_path, plate_number=plate_number)
+    objects = plate_info["objects"]
+
+    if not objects:
+        raise ValueError(f"No objects found on the plate in {file_path}")
+
+    # Match object by name (case-insensitive).
+    # Priority: exact match > exact match without extension > substring.
+    query = object_name.lower()
+    query_no_ext = query.rsplit(".", 1)[0] if "." in query else query
+
+    matched: dict[str, Any] | None = None
+
+    # Pass 1: exact match (full name with extension)
+    for obj in objects:
+        if obj["name"].lower() == query:
+            matched = obj
+            break
+
+    # Pass 2: exact match without extension
+    if matched is None:
+        for obj in objects:
+            obj_no_ext = obj["name"].lower().rsplit(".", 1)[0]
+            if obj_no_ext == query_no_ext:
+                matched = obj
+                break
+
+    # Pass 3: substring match — collect ALL matches
+    if matched is None:
+        substring_matches: list[dict[str, Any]] = []
+        for obj in objects:
+            obj_name_lower = obj["name"].lower()
+            obj_no_ext = obj_name_lower.rsplit(".", 1)[0] if "." in obj_name_lower else obj_name_lower
+            if query_no_ext in obj_no_ext or query in obj_name_lower:
+                substring_matches.append(obj)
+
+        if len(substring_matches) == 1:
+            matched = substring_matches[0]
+        elif len(substring_matches) > 1:
+            match_names = [m["name"] for m in substring_matches]
+            raise ValueError(
+                f"Ambiguous match: {object_name!r} matches multiple objects: "
+                f"{match_names}. Please use a more specific name."
+            )
+
+    if matched is None:
+        available = [o["name"] for o in objects]
+        raise ValueError(
+            f"No object matching {object_name!r} found on the plate. "
+            f"Available objects: {available}"
+        )
+
+    target_label_id = matched["label_id"]
+    if target_label_id is None:
+        raise ValueError(
+            f"Object {matched['name']!r} has no gcode label ID mapping. "
+            f"Cannot extract gcode."
+        )
+
+    # Read the full gcode from the archive
+    gcode_text: str | None = None
+    with zipfile.ZipFile(file_path, "r") as zf:
+        for candidate in [
+            f"Metadata/plate_{plate_number}.gcode",
+            f"metadata/plate_{plate_number}.gcode",
+        ]:
+            if candidate in zf.namelist():
+                gcode_text = zf.read(candidate).decode("utf-8", errors="replace")
+                break
+
+    if gcode_text is None:
+        raise ValueError(f"No gcode found in {file_path}")
+
+    # Safety check: absolute extrusion (M82) would produce wrong E values
+    # after filtering.  Bambu Studio always uses M83 (relative), but guard
+    # against hand-edited or non-Bambu files.
+    has_m82 = "\nM82" in gcode_text or gcode_text.startswith("M82")
+    has_m83 = "\nM83" in gcode_text or gcode_text.startswith("M83")
+    if has_m82 and not has_m83:
+        raise ValueError(
+            "File uses absolute extrusion (M82). Object extraction only "
+            "supports relative extrusion (M83) as used by Bambu Studio. "
+            "Re-slice with relative extrusion enabled."
+        )
+
+    lines = gcode_text.splitlines(keepends=True)
+    total_lines = len(lines)
+
+    # --- Phase 1: Identify the machine start and end gcode boundaries ---
+    start_end_idx = 0  # end of machine start gcode (inclusive)
+    end_start_idx = total_lines  # start of machine end gcode
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == "; MACHINE_START_GCODE_END":
+            start_end_idx = i + 1
+        elif stripped == "; MACHINE_END_GCODE_START":
+            end_start_idx = i
+            break
+
+    if start_end_idx == 0:
+        logger.warning(
+            "No MACHINE_START_GCODE_END marker found in %s — "
+            "the file may not be a Bambu Studio export. "
+            "Start gcode may not be correctly preserved.",
+            file_path,
+        )
+
+    if end_start_idx == total_lines:
+        logger.warning(
+            "No MACHINE_END_GCODE_START marker found in %s — "
+            "end gcode (cooldown, park) may be missing from output.",
+            file_path,
+        )
+
+    # --- Phase 2: Filter the layer gcode (between start and end) ---
+    # Strategy: Walk through the layer section line by line.
+    # - Keep everything that's NOT inside another object's print section.
+    # - Object sections are bounded by:
+    #   "; start printing object, unique label id: XXX"
+    #   "; stop printing object, unique label id: XXX"
+    # - Layer changes, Z moves, and infrastructure between objects
+    #   are kept (they're outside object markers).
+
+    target_marker = f"unique label id: {target_label_id}"
+    start_marker_prefix = "; start printing object, unique label id:"
+    stop_marker_prefix = "; stop printing object, unique label id:"
+
+    filtered_layer_lines: list[str] = []
+    inside_other_object = False
+    kept_lines = 0
+    skipped_lines = 0
+
+    for i in range(start_end_idx, end_start_idx):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Check for object boundary markers
+        if stripped.startswith(start_marker_prefix):
+            if target_marker in stripped:
+                # Entering our target object — include its lines
+                inside_other_object = False
+                filtered_layer_lines.append(line)
+                kept_lines += 1
+            else:
+                # Entering a different object — skip its lines
+                inside_other_object = True
+                skipped_lines += 1
+            continue
+
+        if stripped.startswith(stop_marker_prefix):
+            if target_marker in stripped:
+                # Leaving our target object
+                inside_other_object = False
+                filtered_layer_lines.append(line)
+                kept_lines += 1
+            else:
+                # Leaving the other object
+                inside_other_object = False
+                skipped_lines += 1
+            continue
+
+        if inside_other_object:
+            skipped_lines += 1
+        else:
+            filtered_layer_lines.append(line)
+            kept_lines += 1
+
+    # --- Phase 3: Assemble the final gcode ---
+    result_lines: list[str] = []
+
+    # Machine start gcode (homing, levelling, heating, calibration)
+    result_lines.extend(lines[:start_end_idx])
+
+    # Filtered layer gcode (only our target object)
+    result_lines.extend(filtered_layer_lines)
+
+    # Machine end gcode (cool-down, retract, park)
+    result_lines.extend(lines[end_start_idx:])
+
+    # --- Phase 4: Write output ---
+    if output_path is None:
+        stem = Path(file_path).stem
+        if stem.lower().endswith(".gcode"):
+            stem = stem[: -len(".gcode")]
+        # Sanitise the object name for use in a filename
+        safe_name = matched["name"].rsplit(".", 1)[0]  # strip .stl
+        safe_name = "".join(
+            c if c.isalnum() or c in " _-" else "_" for c in safe_name
+        ).strip()
+        if not safe_name:
+            safe_name = "extracted_object"
+        output_path = str(Path(file_path).parent / f"{safe_name}.gcode")
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as fh:
+        fh.writelines(result_lines)
+
+    return {
+        "output_path": output_path,
+        "matched_object": matched,
+        "total_source_lines": total_lines,
+        "kept_lines": kept_lines + start_end_idx + (total_lines - end_start_idx),
+        "skipped_lines": skipped_lines,
+        "all_objects": [o["name"] for o in objects],
+        "source_file": file_path,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Geometry-level mesh repair: thicken, fillet, chamfer
 # ---------------------------------------------------------------------------
 

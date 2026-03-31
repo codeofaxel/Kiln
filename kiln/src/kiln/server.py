@@ -196,6 +196,7 @@ except ImportError:
 from kiln.log_config import configure_logging as _configure_log_rotation
 from kiln.marketplaces import (
     Cults3DAdapter,
+    MakerWorldAdapter,
     MarketplaceError,
     MarketplaceRegistry,
     MyMiniFactoryAdapter,
@@ -1170,6 +1171,11 @@ def _init_marketplace_registry() -> None:
             _marketplace_registry.register(Cults3DAdapter(username=_CULTS3D_USERNAME, api_key=_CULTS3D_API_KEY))
         except Exception:
             logger.debug("Could not register Cults3D adapter", exc_info=True)
+    # MakerWorld is always available (no credentials required — metadata-only)
+    try:
+        _marketplace_registry.register(MakerWorldAdapter())
+    except Exception:
+        logger.debug("Could not register MakerWorld adapter", exc_info=True)
 
 
 _fulfillment: FulfillmentProvider | None = None
@@ -2250,6 +2256,10 @@ def analyze_print_file(filename: str) -> dict:
     and filament usage.  This is especially useful when filenames are
     meaningless (e.g. ``test5112.gcode``) and the agent needs to
     understand what a file will print.
+
+    .. note::
+        For multi-object .gcode.3mf files, also consider using
+        ``list_plate_objects()`` to see individual objects on the plate.
 
     Args:
         filename: Name or path of the file as shown by ``printer_files()``.
@@ -5371,8 +5381,10 @@ def search_all_models(
 ) -> dict:
     """Search across all connected 3D model marketplaces simultaneously.
 
-    Searches Thingiverse, MyMiniFactory, and Cults3D in parallel and
-    returns interleaved results from all sources.
+    Searches Thingiverse, MyMiniFactory, Cults3D, and MakerWorld in
+    parallel and returns interleaved results from all sources.  Note
+    that MakerWorld returns a search URL (no direct API access) while
+    other sources return actual model results.
 
     Args:
         query: Search keywords (e.g. "raspberry pi case", "benchy").
@@ -9979,6 +9991,11 @@ def extract_model_from_3mf(file_path: str, output_path: str = "") -> dict:
     binary STL file ready for slicing, multi-copy printing, or further
     mesh operations.
 
+    .. note::
+        For extracting a single object's **G-code** from a multi-object
+        Bambu .gcode.3mf file, use ``extract_plate_object`` instead.
+        Use ``list_plate_objects`` to discover available objects.
+
     Works with both standard 3MF files and Bambu Studio .gcode.3mf files
     (which bundle both G-code and the source model).  When multiple
     objects exist they are merged into a single STL.
@@ -9999,7 +10016,390 @@ def extract_model_from_3mf(file_path: str, output_path: str = "") -> dict:
     except FileNotFoundError as exc:
         return _error_dict(str(exc), code="FILE_NOT_FOUND")
     except Exception as exc:
-        return _error_dict(f"3MF extraction failed: {exc}", code="EXTRACT_ERROR")
+        msg = f"3MF extraction failed: {exc}"
+        result = _error_dict(msg, code="EXTRACT_ERROR")
+        if "no mesh geometry" in str(exc).lower():
+            result["hint"] = (
+                "This .gcode.3mf has no mesh data. Use list_plate_objects() "
+                "to see what objects are on the plate, then "
+                "extract_plate_object() to extract one object's G-code."
+            )
+        return result
+
+
+@mcp.tool()
+def list_plate_objects(file_path: str, plate_number: int = 1) -> dict:
+    """List named objects on the build plate of a Bambu .gcode.3mf file.
+
+    Parses the plate metadata embedded in .gcode.3mf files exported by
+    Bambu Studio or OrcaSlicer.  Returns every object that was on the
+    plate when the file was sliced, with its name, bounding box, area,
+    and layer height.
+
+    Works even when the 3MF contains NO mesh geometry (common for
+    .gcode.3mf exports).
+
+    Bambu Studio supports multiple plates (plate_1, plate_2, etc.).
+    Use ``plate_number`` to select which plate to inspect.  The response
+    includes a ``plates_available`` field listing all plate numbers found
+    in the archive.
+
+    Use this to discover which parts are in a multi-object file before
+    calling ``extract_plate_object`` to isolate one.
+
+    :param file_path: Path to the .3mf or .gcode.3mf file.
+    :param plate_number: Which plate to inspect (1-based, default 1).
+    :returns: Dict with ``objects`` list, plate metadata (bed type,
+        filament colours, nozzle diameter, sequential print flag),
+        and ``plates_available``.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import (
+            list_plate_objects as _list_plate,
+        )
+
+        return {"status": "success", **_list_plate(file_path, plate_number=plate_number)}
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except Exception as exc:
+        return _error_dict(
+            f"Failed to list plate objects: {exc}", code="PLATE_PARSE_ERROR"
+        )
+
+
+@mcp.tool()
+def extract_plate_object(
+    file_path: str,
+    object_name: str,
+    output_dir: str = "",
+    plate_number: int = 1,
+) -> dict:
+    """Extract a single object's G-code from a multi-object Bambu .gcode.3mf.
+
+    When a .gcode.3mf contains multiple objects (e.g. a lid and a body),
+    this tool extracts ONLY the G-code for the requested object, producing
+    a standalone .gcode file that can be printed directly.
+
+    The machine start-up (homing, levelling, heating) and end (cool-down,
+    park) sequences are preserved.  Only the per-layer toolpath sections
+    for other objects are removed.
+
+    Bambu Studio supports multiple plates (plate_1, plate_2, etc.).
+    Use ``plate_number`` to select which plate to extract from.
+
+    Object matching is case-insensitive and supports partial names:
+    ``"cap"`` will match ``"TreatHolder - cap.stl"``.
+
+    Use ``list_plate_objects`` first to see available object names.
+
+    :param file_path: Path to the .gcode.3mf file.
+    :param object_name: Name (or partial name) of the object to extract.
+    :param output_dir: Directory for the output .gcode file. Defaults to
+        the same directory as the input file.
+    :param plate_number: Which plate to extract from (1-based, default 1).
+    :returns: Dict with output path, matched object info, and line counts.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import extract_plate_object_gcode
+
+        # Let the implementation handle output path generation; if
+        # output_dir is specified, build a path in that directory using
+        # the object name (sanitised by the implementation).
+        output_path = None
+        if output_dir:
+            from pathlib import Path as _Path
+
+            _Path(output_dir).mkdir(parents=True, exist_ok=True)
+            # Pass output_dir as parent; the implementation sanitises
+            # the object name for the filename.
+            safe_name = object_name.rsplit(".", 1)[0]
+            safe_name = "".join(
+                c if c.isalnum() or c in " _-" else "_" for c in safe_name
+            ).strip() or "extracted_object"
+            output_path = str(_Path(output_dir) / f"{safe_name}.gcode")
+
+        result = extract_plate_object_gcode(
+            file_path, object_name, output_path=output_path,
+            plate_number=plate_number,
+        )
+        return {"status": "success", **result}
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except ValueError as exc:
+        msg = str(exc)
+        if "absolute extrusion" in msg or "M82" in msg:
+            code = "EXTRUSION_MODE_ERROR"
+        elif "No object matching" in msg:
+            code = "OBJECT_NOT_FOUND"
+        else:
+            code = "VALIDATION_ERROR"
+        return _error_dict(msg, code=code)
+    except Exception as exc:
+        return _error_dict(
+            f"Failed to extract plate object: {exc}", code="EXTRACT_ERROR"
+        )
+
+
+@mcp.tool()
+def print_plate_object(
+    file_path: str,
+    object_name: str,
+    use_ams: str = "auto",
+    ams_mapping: list[int] | None = None,
+    bed_leveling: bool = True,
+    flow_cali: bool = True,
+    vibration_cali: bool = True,
+    bed_type: str = "auto",
+    plate_number: int = 1,
+) -> dict:
+    """Extract a single object from a multi-object .gcode.3mf and print it.
+
+    This is a compound workflow tool that performs the complete pipeline
+    in one call:
+
+    1. **Extract** the requested object's G-code (``extract_plate_object``)
+    2. **Upload** the extracted G-code to the printer (``upload_file``)
+    3. **Preflight + Start** the print (``start_print``, which runs its
+       own preflight safety check)
+
+    Bambu Studio supports multiple plates (plate_1, plate_2, etc.).
+    Use ``plate_number`` to select which plate to extract and print from.
+
+    Object matching is case-insensitive and supports partial names:
+    ``"cap"`` matches ``"TreatHolder - cap.stl"``.
+
+    Use ``list_plate_objects`` first if you want to preview what's
+    available before committing to a print.
+
+    :param file_path: Path to the .gcode.3mf file.
+    :param object_name: Name (or partial name) of the object to print.
+    :param use_ams: AMS mode — ``"auto"``, ``"true"``, or ``"false"``.
+    :param ams_mapping: AMS slot mapping (e.g. ``[0]`` for slot 1).
+    :param bed_leveling: Run bed leveling before print.
+    :param flow_cali: Run flow calibration before print.
+    :param vibration_cali: Run vibration calibration before print.
+    :param bed_type: Bed surface type — ``"auto"``, ``"textured_plate"``,
+        ``"cool_plate"``, or ``"engineering_plate"`` (Bambu only).
+    :param plate_number: Which plate to extract from (1-based, default 1).
+    :returns: Dict with extraction info and print start status.
+    """
+    if err := _check_auth("print"):
+        return err
+
+    import tempfile
+
+    # Step 1: Extract the object's gcode
+    try:
+        from kiln.generation.validation import extract_plate_object_gcode
+
+        output_dir = os.path.join(tempfile.gettempdir(), "kiln_plate_extract")
+        os.makedirs(output_dir, mode=0o700, exist_ok=True)
+
+        extract_result = extract_plate_object_gcode(
+            file_path,
+            object_name,
+            output_path=os.path.join(
+                output_dir,
+                _safe_filename(object_name) + ".gcode",
+            ),
+            plate_number=plate_number,
+        )
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except ValueError as exc:
+        return _error_dict(str(exc), code="OBJECT_NOT_FOUND")
+    except Exception as exc:
+        return _error_dict(
+            f"Failed to extract object: {exc}", code="EXTRACT_ERROR"
+        )
+
+    extracted_path = extract_result["output_path"]
+    matched_object = extract_result["matched_object"]
+
+    # Step 2: Upload
+    try:
+        upload_result = upload_file(extracted_path)
+        if not upload_result.get("success", False):
+            return {
+                "status": "upload_failed",
+                "phase": "upload",
+                "message": (
+                    f"Upload failed. The extracted G-code is at: {extracted_path}. "
+                    f"Try upload_file() manually."
+                ),
+                "extracted_gcode": extracted_path,
+                "matched_object": matched_object,
+                "upload_error": upload_result,
+            }
+    except Exception as exc:
+        return _error_dict(
+            f"Upload failed: {exc}. Extracted gcode at: {extracted_path}",
+            code="UPLOAD_ERROR",
+        )
+
+    # Step 3: Start print (start_print has its own preflight gate built in)
+    uploaded_name = upload_result.get("file_name") or os.path.basename(extracted_path)
+    try:
+        print_result = start_print(
+            file_name=uploaded_name,
+            use_ams=use_ams,
+            ams_mapping=ams_mapping,
+            bed_leveling=bed_leveling,
+            flow_cali=flow_cali,
+            vibration_cali=vibration_cali,
+            bed_type=bed_type,
+        )
+    except Exception as exc:
+        return _error_dict(
+            f"Start print failed: {exc}. File uploaded as: {uploaded_name}",
+            code="PRINT_ERROR",
+        )
+
+    # Check if start_print returned an error (rate limit, confirmation, etc.)
+    if print_result.get("error"):
+        return {
+            "status": "print_blocked",
+            "phase": "start_print",
+            "message": (
+                f"Print could not start. The file was uploaded as: {uploaded_name}. "
+                f"Resolve the issue and call start_print() manually."
+            ),
+            "extracted_gcode": extracted_path,
+            "matched_object": matched_object,
+            "upload": upload_result,
+            "print": print_result,
+        }
+
+    return {
+        "status": "success",
+        "message": (
+            f"Printing '{matched_object['name']}' extracted from "
+            f"'{os.path.basename(file_path)}'."
+        ),
+        "matched_object": matched_object,
+        "all_objects": extract_result["all_objects"],
+        "extracted_gcode": extracted_path,
+        "skipped_lines": extract_result["skipped_lines"],
+        "upload": upload_result,
+        "print": print_result,
+    }
+
+
+def _safe_filename(name: str) -> str:
+    """Sanitise a string for use as a filename."""
+    safe = name.rsplit(".", 1)[0] if "." in name else name
+    safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in safe).strip()
+    return safe or "extracted_object"
+
+
+@mcp.tool()
+def resolve_model_source(file_path: str) -> dict:
+    """Identify where a .3mf or .gcode.3mf file was downloaded from.
+
+    Reads embedded metadata to determine the original marketplace source.
+    Supports MakerWorld metadata and generic 3MF metadata (Title,
+    Designer, Application, License, etc.).
+
+    Returns the model title, designer, model URL (if available), slicer
+    application name, and a list of objects on the plate.
+
+    Use this when you need to trace a file back to its source — for
+    example, to find the original STL files on MakerWorld when the
+    .gcode.3mf only contains pre-sliced G-code without mesh geometry.
+
+    :param file_path: Path to the .3mf or .gcode.3mf file.
+    :returns: Dict with source marketplace, model URL, designer info,
+        and plate object names.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.marketplaces.makerworld import resolve_makerworld_source
+
+        # Try MakerWorld first
+        result = resolve_makerworld_source(file_path)
+        if result is not None:
+            return {"status": "success", **result}
+
+        # Fall back to generic 3MF metadata extraction
+        import json as _json
+        import xml.etree.ElementTree as ET
+        import zipfile
+
+        model_xml: str | None = None
+        plate_json_raw: bytes | None = None
+
+        with zipfile.ZipFile(file_path, "r") as zf:
+            for candidate in ["3D/3dmodel.model", "3d/3dmodel.model"]:
+                if candidate in zf.namelist():
+                    model_xml = zf.read(candidate).decode("utf-8")
+                    break
+            if model_xml is None:
+                for name in zf.namelist():
+                    if name.lower().endswith(".model"):
+                        model_xml = zf.read(name).decode("utf-8")
+                        break
+            for candidate in ["Metadata/plate_1.json", "metadata/plate_1.json"]:
+                if candidate in zf.namelist():
+                    plate_json_raw = zf.read(candidate)
+                    break
+
+        if model_xml is None:
+            return _error_dict(
+                f"No 3D model metadata found in {file_path}",
+                code="SOURCE_NOT_FOUND",
+            )
+
+        root = ET.fromstring(model_xml)
+        ns = ""
+        if root.tag.startswith("{"):
+            ns = root.tag.split("}")[0] + "}"
+
+        meta: dict[str, str] = {}
+        for el in root.findall(f"{ns}metadata"):
+            name_attr = el.get("name", "")
+            text = el.text or ""
+            if name_attr and text:
+                meta[name_attr] = text
+
+        if not meta:
+            return _error_dict(
+                f"No metadata found in {file_path}",
+                code="SOURCE_NOT_FOUND",
+            )
+
+        generic: dict[str, Any] = {
+            "source": "unknown",
+            "title": meta.get("Title", ""),
+            "designer": meta.get("Designer", ""),
+            "license": meta.get("License", ""),
+            "application": meta.get("Application", ""),
+            "creation_date": meta.get("CreationDate", ""),
+            "modification_date": meta.get("ModificationDate", ""),
+            "description": meta.get("Description", ""),
+        }
+
+        if plate_json_raw is not None:
+            plate_data = _json.loads(plate_json_raw.decode("utf-8"))
+            objects = plate_data.get("bbox_objects", [])
+            generic["plate_objects"] = [
+                obj.get("name", f"object_{i}")
+                for i, obj in enumerate(objects)
+            ]
+
+        return {"status": "success", **generic}
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except ValueError as exc:
+        return _error_dict(str(exc), code="SOURCE_NOT_FOUND")
+    except Exception as exc:
+        return _error_dict(
+            f"Failed to resolve model source: {exc}", code="RESOLVE_ERROR"
+        )
 
 
 @mcp.tool()
@@ -15543,6 +15943,10 @@ def extract_file_metadata(file_path: str) -> dict:
 
     Parses file headers for estimated print time, layer count, filament usage,
     dimensions, slicer info, and material hints — without re-slicing.
+
+    .. note::
+        For multi-object .gcode.3mf files, also consider using
+        ``list_plate_objects()`` to see individual objects on the plate.
 
     Args:
         file_path: Path to the print file.

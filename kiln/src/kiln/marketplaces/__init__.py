@@ -47,6 +47,7 @@ from kiln.marketplaces.base import (
     ModelSummary,
 )
 from kiln.marketplaces.cults3d import Cults3DAdapter
+from kiln.marketplaces.makerworld import MakerWorldAdapter
 from kiln.marketplaces.myminifactory import MyMiniFactoryAdapter
 from kiln.marketplaces.thingiverse import ThingiverseAdapter
 
@@ -65,6 +66,7 @@ __all__ = [
     # Adapters
     "ThingiverseAdapter",
     "MyMiniFactoryAdapter",
+    "MakerWorldAdapter",
     "Cults3DAdapter",
     # Health monitoring
     "MarketplaceHealth",
