@@ -682,6 +682,7 @@ def build_bambu_3mf(
     *,
     settings: BambuPrintSettings | None = None,
     source_3mf_path: str | None = None,
+    stl_paths: list[str] | None = None,
 ) -> Bambu3MFResult:
     """Build a Bambu-compatible 3MF from PrusaSlicer gcode body.
 
@@ -720,6 +721,19 @@ def build_bambu_3mf(
         # the old ``layers * 6`` heuristic (which produced ~100 s for a
         # 20-minute coaster).
         est_time_sec = max(total_layers * 6, len(gcode_body) // 50)
+
+    # Apply Bambu speed correction: PrusaSlicer overestimates by ~2x for
+    # printers with input shaping because it doesn't model their actual
+    # acceleration profiles.  This corrects the M73 R (remaining time)
+    # values so the printer LCD shows accurate time from the first second.
+    try:
+        from kiln.printer_intelligence import get_slicer_time_factor
+
+        time_factor = get_slicer_time_factor("bambu_a1")
+        est_time_sec = max(60, int(est_time_sec * time_factor))
+    except ImportError:
+        pass
+
     est_minutes = max(1, est_time_sec // 60)
 
     logger.info(
@@ -740,6 +754,19 @@ def build_bambu_3mf(
         _load_a1_end_gcode(),
         max_z=max_z,
     )
+
+    # Correct M73 R values in the start gcode template.  The template has
+    # hardcoded R186/R184/R183/R179 from a BambuStudio default (~186 min).
+    # Scale them proportionally to our corrected estimate so the LCD is
+    # accurate throughout the startup sequence too.
+    _DEFAULT_TEMPLATE_MINUTES = 186
+    def _scale_start_m73(match: re.Match) -> str:
+        p = int(match.group(1))
+        old_r = int(match.group(2))
+        new_r = max(1, round(old_r * est_minutes_with_startup / _DEFAULT_TEMPLATE_MINUTES))
+        return f"M73 P{p} R{new_r}"
+    est_minutes_with_startup = max(1, (est_time_sec + _BAMBU_STARTUP_OVERHEAD_SEC) // 60)
+    start_gcode = re.sub(r"M73 P(\d+) R(\d+)", _scale_start_m73, start_gcode)
 
     # Post-process the PrusaSlicer body.
     processed_body = _postprocess_prusa_body(
@@ -774,7 +801,7 @@ def build_bambu_3mf(
     # startup sequence (homing, AMS load, calibration) completes.  Without
     # this, the firmware shows a garbage estimate until layer printing
     # begins and the per-layer M73 commands kick in.
-    est_minutes_with_startup = max(1, (est_time_sec + _BAMBU_STARTUP_OVERHEAD_SEC) // 60)
+    # (est_minutes_with_startup computed above, before start_gcode M73 scaling)
     initial_m73 = f"M73 P0 R{est_minutes_with_startup}\n"
 
     # Assemble complete gcode.
@@ -834,6 +861,17 @@ def build_bambu_3mf(
             logger.warning(
                 "Could not extract thumbnails from %s", source_3mf_path
             )
+
+    # If no thumbnails were extracted and STL paths are available,
+    # generate a thumbnail via OpenSCAD (best-effort).
+    if not thumbnails and stl_paths:
+        try:
+            from kiln.multicolor_3mf import _generate_thumbnail
+            thumb_data = _generate_thumbnail(stl_paths)
+            if thumb_data:
+                thumbnails["Metadata/plate_1.png"] = thumb_data
+        except Exception:
+            pass
 
     # Build the 3MF.
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
