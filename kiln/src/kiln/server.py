@@ -4635,15 +4635,28 @@ def register_printer(
                 code="INVALID_ARGS",
             )
 
+        # Disconnect the boot-time default adapter if it's a separate
+        # object not managed by the registry.  The registry's own
+        # register() handles disconnecting its old adapter.
+        global _adapter  # noqa: PLW0603
+        old_default = _adapter
+        _adapter = adapter  # Update immediately so tools use the new one.
+
         _registry.register(name, adapter)
 
-        # If the newly registered printer targets the same host as the
-        # env-var default adapter, replace the default adapter so that
-        # tools using ``_get_adapter()`` pick up the fresh connection
-        # (and its reset backoff state) instead of the stale singleton.
-        global _adapter  # noqa: PLW0603
-        if _adapter is not None and host == _PRINTER_HOST:
-            _adapter = adapter
+        # If the boot-time adapter was a different object (not in the
+        # registry), disconnect it to stop orphaned MQTT threads.
+        if old_default is not None and old_default is not adapter:
+            in_registry = any(
+                old_default is a for a in _registry.list_all().values()
+            )
+            if not in_registry:
+                _disc = getattr(old_default, "disconnect", None)
+                if _disc is not None:
+                    try:
+                        _disc()
+                    except Exception:
+                        logger.debug("Failed to disconnect old default adapter", exc_info=True)
 
         result = {
             "success": True,

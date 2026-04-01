@@ -55,6 +55,22 @@ class PrinterMetadata:
         }
 
 
+def _disconnect_adapter(adapter: PrinterAdapter, name: str = "") -> None:
+    """Safely disconnect an adapter if it supports it.
+
+    Not all backends have persistent connections (e.g. OctoPrint and
+    Moonraker use stateless HTTP), so ``disconnect()`` is optional.
+    """
+    disconnect_fn = getattr(adapter, "disconnect", None)
+    if disconnect_fn is None:
+        return
+    try:
+        logger.info("Disconnecting old adapter for %r", name)
+        disconnect_fn()
+    except Exception as exc:
+        logger.warning("Failed to disconnect adapter for %r: %s", name, exc)
+
+
 class PrinterNotFoundError(KeyError):
     """Raised when a printer name is not in the registry."""
 
@@ -96,6 +112,10 @@ class PrinterRegistry:
         :param tags: Arbitrary key-value tags for filtering.
         """
         with self._lock:
+            # Grab the old adapter if replacing an existing printer.
+            old_adapter = self._printers.get(name)
+            if old_adapter is adapter:
+                old_adapter = None  # Same object, no disconnect needed.
             self._printers[name] = adapter
             self._metadata[name] = PrinterMetadata(
                 site=site,
@@ -104,9 +124,16 @@ class PrinterRegistry:
             if name not in self._printer_locks:
                 self._printer_locks[name] = threading.Lock()
             logger.info("Registered printer %r (%s) at site %r", name, adapter.name, site)
+        # Disconnect outside the lock to avoid holding it during I/O
+        # (MQTT disconnect can block waiting for thread join).
+        if old_adapter is not None:
+            _disconnect_adapter(old_adapter, name)
 
     def unregister(self, name: str) -> None:
         """Remove a printer from the registry.
+
+        Disconnects the adapter before removing it so MQTT/websocket
+        threads are cleanly stopped.
 
         Raises:
             PrinterNotFoundError: If *name* is not registered.
@@ -114,9 +141,11 @@ class PrinterRegistry:
         with self._lock:
             if name not in self._printers:
                 raise PrinterNotFoundError(name)
-            del self._printers[name]
+            adapter = self._printers.pop(name)
             self._metadata.pop(name, None)
             logger.info("Unregistered printer %r", name)
+        # Disconnect outside the lock to avoid holding it during I/O.
+        _disconnect_adapter(adapter, name)
 
     # ------------------------------------------------------------------
     # Lookup
