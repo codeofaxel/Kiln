@@ -12168,6 +12168,185 @@ def merge_stl(
 
 
 @mcp.tool()
+def compose_multicolor_3mf(
+    parts: list[dict],
+    output_path: str = "",
+) -> dict:
+    """Compose a multi-color / multi-material .3mf from multiple STL files.
+
+    Creates a **single print-ready .3mf** containing all parts with per-part
+    AMS/extruder slot assignments.  This is the correct way to send a
+    multi-color design to any FDM printer — the printer receives one file,
+    not multiple.
+
+    Compatible with:
+    * **BambuStudio / Bambu A1, X1, P1 + AMS** — reads ``Metadata/model_settings.config``
+    * **PrusaSlicer / MMU** — reads ``slic3rpe:extruder`` on each ``<item>``
+    * **Cura** and any 3MF-capable slicer
+
+    Typical two-color workflow::
+
+        # 1. Export body STL (main color, e.g. grey PLA)
+        # 2. Export accent STL (second color, same coordinate origin)
+        # 3. Compose:
+        result = compose_multicolor_3mf(parts=[
+            {"stl_path": "/tmp/body.stl",    "extruder": 1,
+             "name": "body",    "color": "#AAAAAA", "material": "PLA Grey"},
+            {"stl_path": "/tmp/qr_pads.stl", "extruder": 2,
+             "name": "qr_code", "color": "#111111", "material": "PLA Black"},
+        ])
+        # 4. Upload and print:
+        upload_file(result["output_path"])
+        start_print(result["output_path"])
+
+    Args:
+        parts: List of part dicts.  Each dict requires:
+
+            * ``stl_path`` (str) — absolute path to the STL for this part
+            * ``extruder`` (int) — 1-indexed AMS slot (1 = AMS tray 1 on Bambu)
+
+            Optional per-part keys:
+
+            * ``name`` (str) — label shown in the slicer object list
+            * ``color`` (str) — hex preview color e.g. ``"#AAAAAA"`` (display only)
+            * ``material`` (str) — filament label e.g. ``"PLA Grey"`` (display only)
+
+        output_path: Where to write the .3mf.  Defaults to a temp file whose
+            path is returned in the result.
+
+    Returns:
+        Dict with ``success``, ``output_path``, ``parts``, ``total_triangles``,
+        ``total_vertices``, ``extruder_map``, and ``message``.
+    """
+    _check_auth("design:compose")
+
+    try:
+        from kiln.multicolor_3mf import ColorPart
+        from kiln.multicolor_3mf import compose_multicolor_3mf as _compose
+    except ImportError as exc:
+        return {"success": False, "error": f"multicolor_3mf module unavailable: {exc}"}
+
+    color_parts = []
+    for i, p in enumerate(parts):
+        if not isinstance(p, dict) or "stl_path" not in p:
+            return {
+                "success": False,
+                "error": f"Part {i + 1} missing required key 'stl_path'.",
+            }
+        color_parts.append(
+            ColorPart(
+                stl_path=str(p["stl_path"]),
+                extruder=int(p.get("extruder", 1)),
+                name=str(p.get("name", f"part_{i + 1}")),
+                color=p.get("color"),
+                material=p.get("material"),
+                x=float(p.get("x", 0.0)),
+                y=float(p.get("y", 0.0)),
+                z=float(p.get("z", 0.0)),
+            )
+        )
+
+    return _compose(color_parts, output_path=output_path or None)
+
+
+@mcp.tool()
+def auto_arrange_parts_on_plate(
+    part_specs: list[dict],
+    plate_width: float = 256.0,
+    plate_depth: float = 256.0,
+    gap_mm: float = 5.0,
+) -> dict:
+    """Calculate non-overlapping XY positions for multiple parts on a print plate.
+
+    Use this **before** :func:`compose_multicolor_3mf` when you have multiple
+    separate objects (e.g., two coasters) to print in one job.  Parts that
+    share the same ``group`` index are treated as a multi-color unit and
+    placed at the *same* XY position (they overlap intentionally).
+
+    Returns a list of positioned part specs ready to pass directly to
+    ``compose_multicolor_3mf``.
+
+    Arrangement strategy (free tier): simple left-to-right row layout.  For
+    maximum plate density (2D bin-packing), use kiln-pro.
+
+    Example — two coasters, each with a body + QR layer::
+
+        positioned = auto_arrange_parts_on_plate(part_specs=[
+            {"stl_path": "/tmp/c1_body.stl", "extruder": 1, "group": 0, "material": "PLA Grey"},
+            {"stl_path": "/tmp/c1_qr.stl",   "extruder": 2, "group": 0, "material": "PLA Black"},
+            {"stl_path": "/tmp/c2_body.stl",  "extruder": 1, "group": 1, "material": "PLA Grey"},
+            {"stl_path": "/tmp/c2_qr.stl",    "extruder": 2, "group": 1, "material": "PLA Black"},
+        ], plate_width=256, plate_depth=256, gap_mm=5)
+        # → each part now has "x", "y" set; pass to compose_multicolor_3mf
+
+    Args:
+        part_specs: List of dicts, each with:
+
+            * ``stl_path`` (str) — absolute path to the STL
+            * ``extruder`` (int) — 1-indexed AMS slot
+            * ``group`` (int, optional) — parts sharing a group get the same
+              XY position (multi-color unit).  Default: each part is its own group.
+            * ``name`` (str, optional) — label in slicer
+            * ``color`` (str, optional) — hex preview color
+            * ``material`` (str, optional) — filament label (also triggers
+              compatibility checks when passed to compose_multicolor_3mf)
+
+        plate_width: Print plate X dimension in mm (default 256 for Bambu A1).
+        plate_depth: Print plate Y dimension in mm (default 256 for Bambu A1).
+        gap_mm: Minimum spacing between groups in mm.
+
+    Returns:
+        Dict with ``success``, ``parts`` list (each part has ``x``, ``y`` set),
+        ``group_count``, and ``message``.
+    """
+    _check_auth("design:compose")
+
+    try:
+        from kiln.multicolor_3mf import auto_arrange_parts as _arrange
+    except ImportError as exc:
+        return {"success": False, "error": f"multicolor_3mf module unavailable: {exc}"}
+
+    arranged = _arrange(
+        part_specs,
+        plate_width=plate_width,
+        plate_depth=plate_depth,
+        gap_mm=gap_mm,
+    )
+
+    groups_seen: set = set()
+    for spec in part_specs:
+        g = spec.get("group")
+        if g is not None:
+            groups_seen.add(int(g))
+
+    result_parts = [
+        {
+            "stl_path": p.stl_path,
+            "extruder": p.extruder,
+            "name": p.name,
+            "color": p.color,
+            "material": p.material,
+            "x": p.x,
+            "y": p.y,
+            "z": p.z,
+        }
+        for p in arranged
+    ]
+
+    group_count = len(groups_seen) if groups_seen else len(arranged)
+    return {
+        "success": True,
+        "parts": result_parts,
+        "group_count": group_count,
+        "message": (
+            f"Arranged {len(arranged)} parts ({group_count} groups) "
+            f"on a {plate_width}×{plate_depth}mm plate with {gap_mm}mm gap. "
+            f"Pass 'parts' directly to compose_multicolor_3mf()."
+        ),
+    }
+
+
+@mcp.tool()
 def cross_section_view(
     file_path: str,
     plane: str = "z",
