@@ -246,8 +246,8 @@ def test_compose_model_xml_has_vertices_and_triangles(stl_a: Path, tmp_path: Pat
         xml = zf.read("3D/3dmodel.model").decode()
     assert "<vertices>" in xml
     assert "<triangles>" in xml
-    assert "<v x=" in xml
-    assert "<t v1=" in xml
+    assert "<vertex x=" in xml
+    assert "<triangle v1=" in xml
 
 
 def test_compose_slic3rpe_extruder_in_build_section(stl_a: Path, stl_b: Path, tmp_path: Path):

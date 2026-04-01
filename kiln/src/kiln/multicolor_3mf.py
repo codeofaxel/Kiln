@@ -273,13 +273,13 @@ def _build_model_xml(parsed: list[_ParsedPart]) -> str:
             "        <vertices>",
         ]
         for x, y, z in vertices:
-            lines.append(f'          <v x="{x:.6f}" y="{y:.6f}" z="{z:.6f}"/>')
+            lines.append(f'          <vertex x="{x:.6f}" y="{y:.6f}" z="{z:.6f}"/>')
         lines += [
             "        </vertices>",
             "        <triangles>",
         ]
         for v1, v2, v3 in triangles:
-            lines.append(f'          <t v1="{v1}" v2="{v2}" v3="{v3}"/>')
+            lines.append(f'          <triangle v1="{v1}" v2="{v2}" v3="{v3}"/>')
         lines += [
             "        </triangles>",
             "      </mesh>",
