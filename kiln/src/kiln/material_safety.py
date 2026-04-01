@@ -345,8 +345,8 @@ _COMPAT: dict[frozenset, dict[str, Any]] = {
 
 
 def _normalise(material: str) -> str:
-    """Normalise material name for lookup (uppercase, strip spaces)."""
-    return material.strip().upper().replace("-", "-")
+    """Normalise material name for lookup (uppercase, strip whitespace)."""
+    return material.strip().upper()
 
 
 def _lookup_compat(mat_a: str, mat_b: str) -> dict[str, Any]:

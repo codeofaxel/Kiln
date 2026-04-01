@@ -429,11 +429,15 @@ def auto_arrange_parts(
         ], plate_width=256, plate_depth=256, gap_mm=5)
         result = compose_multicolor_3mf(parts)
     """
-    # Assign default groups (each spec is its own group if not specified)
+    # Assign default groups (each spec is its own group if not specified).
+    # Track group per spec in a parallel list so the result-build pass never
+    # calls list.index() — which would give wrong results for identical dicts.
     groups: dict[int, list[dict[str, Any]]] = {}
+    spec_groups: list[int] = []          # parallel to part_specs
     for i, spec in enumerate(part_specs):
         g = int(spec.get("group", i))
         groups.setdefault(g, []).append(spec)
+        spec_groups.append(g)
 
     # For each group, determine the bounding box by taking the union of all parts
     group_order = sorted(groups.keys())
@@ -467,8 +471,8 @@ def auto_arrange_parts(
 
     # Build final ColorPart list with positions
     result: list[ColorPart] = []
-    for spec in part_specs:
-        g = int(spec.get("group", part_specs.index(spec)))
+    for i, spec in enumerate(part_specs):
+        g = spec_groups[i]
         px, py = group_positions.get(g, (0.0, 0.0))
         result.append(ColorPart(
             stl_path=str(spec["stl_path"]),
