@@ -24,7 +24,6 @@ import logging
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -96,8 +95,8 @@ def _get_bounding_box(scad_path: str) -> float:
         # gives ~80% frame fill with margin.
         #
         # Quick approach: read STL binary header for bounding box if it's an STL.
-        import struct
-
+        # Note: ASCII STL files will silently fall back to _DEFAULT_DISTANCE
+        # since _distance_from_stl assumes binary format.
         stl_path = None
         # Check if the scad_path imports an STL
         content = Path(scad_path).read_text(encoding="utf-8")

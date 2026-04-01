@@ -13,9 +13,8 @@ Usage::
 
 from __future__ import annotations
 
-import os
-
 import logging
+import os
 import threading
 import uuid
 from pathlib import Path
