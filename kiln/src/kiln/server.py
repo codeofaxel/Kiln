@@ -1882,39 +1882,80 @@ _MATERIAL_COST_PER_KG: dict[str, float] = {
 # estimate across typical desktop prints (5-10 g/hr range).
 _AVG_FILAMENT_G_PER_HOUR: float = 7.5
 
+# Average electricity cost for an FDM printer: ~$0.05-0.15/kWh in the US.
+# Typical desktop FDM printers draw ~100-200W (Bambu A1 ~120W average).
+_PRINTER_WATTS: float = 120.0
+_ELECTRICITY_COST_PER_KWH: float = 0.12  # US average
+
+# Bambu AMS purge waste per tool change: ~0.3-0.7g, use 0.5g average.
+_AMS_PURGE_WASTE_G: float = 0.5
+
 
 def _estimate_print_cost(
     elapsed_s: int | float | None,
     remaining_s: int | float | None,
     *,
     material: str | None = None,
+    filament_weight_g: float | None = None,
+    tool_changes: int = 0,
 ) -> dict[str, Any] | None:
-    """Estimate filament cost from total print time.
+    """Estimate print cost from filament weight and electricity.
 
-    Returns a dict with cost details, or ``None`` if estimation is not
-    possible (e.g. both time values are missing).
+    Prefers *filament_weight_g* (from gcode metadata) when available.
+    Falls back to the time-based heuristic (g/hr) when no metadata exists.
+
+    Includes electricity cost based on printer wattage and total time.
+    For multicolor prints, adds AMS purge waste per tool change.
+
+    Returns a dict with cost breakdown, or ``None`` if estimation is not
+    possible (e.g. both time values and weight are missing).
     """
-    # Need at least one time value to estimate
     elapsed = elapsed_s if elapsed_s is not None and elapsed_s >= 0 else 0
     remaining = remaining_s if remaining_s is not None and remaining_s >= 0 else 0
     total_s = elapsed + remaining
-    if total_s <= 0:
+    if total_s <= 0 and filament_weight_g is None:
         return None
 
     mat_key = (material or "pla").lower().strip()
     cost_per_kg = _MATERIAL_COST_PER_KG.get(mat_key, _MATERIAL_COST_PER_KG["pla"])
     mat_label = mat_key.upper()
 
-    total_hours = total_s / 3600.0
-    estimated_weight_g = total_hours * _AVG_FILAMENT_G_PER_HOUR
-    estimated_cost = (estimated_weight_g / 1000.0) * cost_per_kg
+    # --- Filament weight ---
+    if filament_weight_g is not None and filament_weight_g > 0:
+        estimated_weight_g = filament_weight_g
+        weight_source = "gcode"
+    else:
+        # Fallback to time-based heuristic
+        total_hours = total_s / 3600.0
+        estimated_weight_g = total_hours * _AVG_FILAMENT_G_PER_HOUR
+        weight_source = "time_estimate"
+
+    # Add AMS purge waste for multicolor
+    purge_waste_g = tool_changes * _AMS_PURGE_WASTE_G
+    total_weight_g = estimated_weight_g + purge_waste_g
+
+    # --- Material cost ---
+    material_cost = (total_weight_g / 1000.0) * cost_per_kg
+
+    # --- Electricity cost ---
+    total_hours = total_s / 3600.0 if total_s > 0 else 0
+    electricity_kwh = (_PRINTER_WATTS / 1000.0) * total_hours
+    electricity_cost = electricity_kwh * _ELECTRICITY_COST_PER_KWH
+
+    total_cost = material_cost + electricity_cost
 
     return {
         "material": mat_label,
-        "estimated_weight_g": round(estimated_weight_g, 1),
-        "estimated_cost_usd": round(estimated_cost, 2),
+        "estimated_weight_g": round(total_weight_g, 1),
+        "print_weight_g": round(estimated_weight_g, 1),
+        "purge_waste_g": round(purge_waste_g, 1),
+        "material_cost_usd": round(material_cost, 2),
+        "electricity_cost_usd": round(electricity_cost, 2),
+        "total_cost_usd": round(total_cost, 2),
         "cost_per_kg_usd": cost_per_kg,
         "total_print_time_hours": round(total_hours, 2),
+        "tool_changes": tool_changes,
+        "weight_source": weight_source,
     }
 
 
@@ -2096,15 +2137,75 @@ def monitor_print(
         ])
 
         # --- Material usage & cost estimate ---
-        cost_info = _estimate_print_cost(elapsed_s, remaining_s)
+        # Try to get filament weight from gcode metadata (more accurate
+        # than time-based heuristic).  Also count tool changes for purge waste.
+        _filament_weight_g: float | None = None
+        _tool_changes = 0
+        if file_name:
+            try:
+                from kiln.gcode_metadata import extract_gcode_metadata
+                from kiln.printers.base import PrinterFile
+
+                # Check if we have the file locally (in prints dir or temp)
+                _local_paths = []
+                try:
+                    from kiln.cli.config import get_prints_dir
+                    _prints = get_prints_dir()
+                    import glob as _globmod
+                    _local_paths = _globmod.glob(
+                        str(_prints / "**" / "gcode" / "*.gcode"),
+                        recursive=True,
+                    )
+                except Exception:
+                    pass
+
+                # Also check the uploaded file metadata from the printer
+                _pf = PrinterFile(name=file_name)
+                _meta = adapter.get_file_metadata(file_name)
+                if _meta and hasattr(_meta, "filament_used_mm") and _meta.filament_used_mm:
+                    # Convert mm to grams: volume = pi * (d/2)^2 * length
+                    import math as _math
+                    _d = 1.75  # mm filament diameter
+                    _vol_mm3 = _math.pi * (_d / 2) ** 2 * _meta.filament_used_mm
+                    _density = 0.00124  # PLA g/mm³
+                    _filament_weight_g = _vol_mm3 * _density
+            except Exception:
+                pass  # Fallback to time-based
+
+            # Count T commands in merged gcode to estimate tool changes
+            try:
+                for _lp in _local_paths:
+                    if "merged" in _lp.lower() or "multicolor" in _lp.lower():
+                        import re as _re_mod
+                        with open(_lp) as _f:
+                            _gc = _f.read()
+                        _tool_changes = len(_re_mod.findall(r"^T\d+$", _gc, _re_mod.MULTILINE))
+                        # Also try to get filament weight from gcode comments
+                        if _filament_weight_g is None:
+                            _fil_g_m = _re_mod.search(
+                                r"filament used \[g\]\s*=\s*([\d.]+)", _gc
+                            )
+                            if _fil_g_m:
+                                _filament_weight_g = float(_fil_g_m.group(1))
+                        break
+            except Exception:
+                pass
+
+        cost_info = _estimate_print_cost(
+            elapsed_s,
+            remaining_s,
+            filament_weight_g=_filament_weight_g,
+            tool_changes=_tool_changes,
+        )
         if cost_info is not None:
+            weight_str = f"~{cost_info['estimated_weight_g']:.0f}g {cost_info['material']}"
+            if cost_info['purge_waste_g'] > 0:
+                weight_str += f" ({cost_info['print_weight_g']:.0f}g print + {cost_info['purge_waste_g']:.0f}g purge)"
+            lines.append(f"- Material used: {weight_str}")
             lines.append(
-                f"- Material used: ~{cost_info['estimated_weight_g']:.0f}g "
-                f"{cost_info['material']}"
-            )
-            lines.append(
-                f"- Cost: ~${cost_info['estimated_cost_usd']:.2f} filament "
-                f"({cost_info['material']} @ ${cost_info['cost_per_kg_usd']:.0f}/kg)"
+                f"- Cost: ~${cost_info['material_cost_usd']:.2f} material"
+                f" + ~${cost_info['electricity_cost_usd']:.2f} electricity"
+                f" = ~${cost_info['total_cost_usd']:.2f} total"
             )
 
         lines.extend([
@@ -4535,6 +4636,15 @@ def register_printer(
             )
 
         _registry.register(name, adapter)
+
+        # If the newly registered printer targets the same host as the
+        # env-var default adapter, replace the default adapter so that
+        # tools using ``_get_adapter()`` pick up the fresh connection
+        # (and its reset backoff state) instead of the stale singleton.
+        global _adapter  # noqa: PLW0603
+        if _adapter is not None and host == _PRINTER_HOST:
+            _adapter = adapter
+
         result = {
             "success": True,
             "message": f"Registered printer {name!r} ({printer_type} @ {host}).",
