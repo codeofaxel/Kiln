@@ -36,6 +36,7 @@ _KNOWN_KEYS: set[str] = {
     "trusted_printers",
     "autonomy",
     "monitoring",
+    "prints_dir",
 }
 
 
@@ -642,3 +643,61 @@ def is_trusted_printer(
     """Check whether a hostname/IP is in the trusted printers list."""
     trusted = get_trusted_printers(config_path=config_path)
     return host.strip() in trusted
+
+
+# ---------------------------------------------------------------------------
+# Prints directory
+# ---------------------------------------------------------------------------
+
+_DEFAULT_PRINTS_DIR = Path.home() / "Kiln" / "prints"
+
+
+def get_prints_dir(
+    *,
+    config_path: Path | None = None,
+) -> Path:
+    """Return the base directory for saved print artifacts.
+
+    Resolution order:
+        1. ``KILN_PRINTS_DIR`` environment variable.
+        2. ``prints_dir`` key in the config file.
+        3. Default: ``~/Kiln/prints/``.
+
+    The directory is created automatically if it does not exist.
+    """
+    # 1. Env var
+    env_val = os.environ.get("KILN_PRINTS_DIR", "")
+    if env_val:
+        prints_dir = Path(env_val).expanduser()
+    else:
+        # 2. Config file
+        path = config_path or get_config_path()
+        raw = _read_config_file(path)
+        cfg_val = raw.get("prints_dir", "")
+        if cfg_val:
+            prints_dir = Path(str(cfg_val)).expanduser()
+        else:
+            # 3. Default
+            prints_dir = _DEFAULT_PRINTS_DIR
+
+    prints_dir.mkdir(parents=True, exist_ok=True)
+    return prints_dir
+
+
+def get_project_prints_dir(
+    project_name: str,
+    *,
+    config_path: Path | None = None,
+) -> Path:
+    """Create and return a project-specific prints directory.
+
+    Creates ``<prints_dir>/<project_name>/`` with standard subdirectories:
+    ``stl``, ``gcode``, ``3mf``, and ``previews``.
+
+    Returns the project directory path (the parent of the subdirectories).
+    """
+    base = get_prints_dir(config_path=config_path)
+    project_dir = base / project_name
+    for subdir in ("stl", "gcode", "3mf", "previews"):
+        (project_dir / subdir).mkdir(parents=True, exist_ok=True)
+    return project_dir
