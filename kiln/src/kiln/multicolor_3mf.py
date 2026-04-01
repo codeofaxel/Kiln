@@ -66,6 +66,7 @@ pairings regardless of subscription tier.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import struct
@@ -76,6 +77,81 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Thumbnail generation
+# ---------------------------------------------------------------------------
+
+_THUMBNAIL_SIZE = 512
+
+
+def _generate_thumbnail(stl_paths: list[str]) -> bytes | None:
+    """Render a plate thumbnail PNG from STL files via OpenSCAD.
+
+    Imports all STL parts into a single scene so the thumbnail shows
+    the complete model as it will be printed.  Uses preview mode (not
+    full render) so non-manifold meshes work, and applies a neutral
+    grey color with the DeepOcean colorscheme for high contrast on
+    printer LCDs.
+
+    Returns PNG bytes suitable for embedding as ``Metadata/plate_1.png``
+    in a 3MF archive, or ``None`` if OpenSCAD is unavailable.
+    """
+    if not stl_paths:
+        return None
+    try:
+        import subprocess
+
+        from kiln.generation.openscad import OpenSCADProvider
+
+        provider = OpenSCADProvider()
+        binary = provider._binary
+        if not binary:
+            return None
+
+        # Build a SCAD file that imports all parts with a neutral colour
+        # so the model is visible against any colorscheme background.
+        imports = "\n".join(
+            f'  import("{Path(p).resolve()}");'
+            for p in stl_paths
+            if os.path.isfile(p)
+        )
+        if not imports:
+            return None
+
+        scad_code = f"color([0.75, 0.75, 0.80]) {{\n{imports}\n}}\n"
+        fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_thumb_")
+        fd2, png_path = tempfile.mkstemp(suffix=".png", prefix="kiln_thumb_")
+        os.close(fd2)
+        try:
+            with os.fdopen(fd, "w") as fh:
+                fh.write(scad_code)
+
+            # Preview mode (no --render) avoids CGAL failures on
+            # non-manifold STLs.  DeepOcean gives a dark background
+            # with good contrast for printer LCD thumbnails.
+            cmd = [
+                binary,
+                "-o", png_path,
+                f"--imgsize={_THUMBNAIL_SIZE},{_THUMBNAIL_SIZE}",
+                "--autocenter",
+                "--viewall",
+                "--colorscheme", "DeepOcean",
+                scad_path,
+            ]
+            subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30,
+            )
+            if os.path.isfile(png_path) and os.path.getsize(png_path) > 0:
+                return Path(png_path).read_bytes()
+            return None
+        finally:
+            for p in (scad_path, png_path):
+                with contextlib.suppress(OSError):
+                    os.unlink(p)
+    except Exception:
+        logger.debug("Thumbnail generation skipped (OpenSCAD unavailable or render failed)")
+        return None
 
 # ---------------------------------------------------------------------------
 # Public data class
@@ -629,6 +705,11 @@ def compose_multicolor_3mf(
         os.close(fd)
 
     # -----------------------------------------------------------------------
+    # Generate plate thumbnail (best-effort, non-blocking)
+    # -----------------------------------------------------------------------
+    thumbnail_data = _generate_thumbnail([p.stl_path for p in parts])
+
+    # -----------------------------------------------------------------------
     # Build and write the 3MF ZIP archive
     # -----------------------------------------------------------------------
     try:
@@ -642,6 +723,8 @@ def compose_multicolor_3mf(
                     "Metadata/project_settings.config",
                     _build_project_settings(flush_matrix_str),
                 )
+            if thumbnail_data:
+                zf.writestr("Metadata/plate_1.png", thumbnail_data)
     except Exception as exc:
         return {"success": False, "error": f"Failed to write 3MF archive: {exc}"}
 

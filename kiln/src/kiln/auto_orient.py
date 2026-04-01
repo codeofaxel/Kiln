@@ -935,6 +935,7 @@ def build_multicolor_plate_3mf(
         '  <Default Extension="model" ContentType='
         '"application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>\n'
         '  <Default Extension="config" ContentType="text/xml"/>\n'
+        '  <Default Extension="png" ContentType="image/png"/>\n'
         "</Types>"
     )
 
@@ -953,11 +954,21 @@ def build_multicolor_plate_3mf(
         fd, output_path = _tempfile.mkstemp(suffix="_multicolor.3mf")
         os.close(fd)
 
+    # Generate a plate thumbnail (best-effort).
+    thumbnail_data: bytes | None = None
+    try:
+        from kiln.multicolor_3mf import _generate_thumbnail
+        thumbnail_data = _generate_thumbnail([file_path])
+    except Exception:
+        pass
+
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("[Content_Types].xml", content_types)
         zf.writestr("_rels/.rels", rels)
         zf.writestr("3D/3dmodel.model", model_xml)
         zf.writestr("Metadata/Slic3r_PE_model.config", slic3r_config)
+        if thumbnail_data:
+            zf.writestr("Metadata/plate_1.png", thumbnail_data)
 
     return output_path
 

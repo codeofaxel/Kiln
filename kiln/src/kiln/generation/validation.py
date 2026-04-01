@@ -1081,6 +1081,7 @@ def export_3mf(
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml" />
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" />
+  <Default Extension="png" ContentType="image/png" />
 </Types>"""
 
     rels = """<?xml version="1.0" encoding="UTF-8"?>
@@ -1089,10 +1090,20 @@ def export_3mf(
                  Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" />
 </Relationships>"""
 
+    # Generate thumbnail (best-effort).
+    thumbnail_data: bytes | None = None
+    try:
+        from kiln.multicolor_3mf import _generate_thumbnail
+        thumbnail_data = _generate_thumbnail([file_path])
+    except Exception:
+        pass
+
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("[Content_Types].xml", content_types)
         zf.writestr("_rels/.rels", rels)
         zf.writestr("3D/3dmodel.model", model_xml)
+        if thumbnail_data:
+            zf.writestr("Metadata/plate_1.png", thumbnail_data)
 
     return output_path
 
@@ -1252,6 +1263,7 @@ def build_multi_material_3mf(
         'ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml" />\n'
         '  <Default Extension="rels" '
         'ContentType="application/vnd.openxmlformats-package.relationships+xml" />\n'
+        '  <Default Extension="png" ContentType="image/png" />\n'
         "</Types>"
     )
 
@@ -1263,10 +1275,21 @@ def build_multi_material_3mf(
         "</Relationships>"
     )
 
+    # Generate thumbnail from all STL parts (best-effort).
+    thumbnail_data: bytes | None = None
+    try:
+        from kiln.multicolor_3mf import _generate_thumbnail
+        stl_paths = [obj["file_path"] for obj in objects if obj.get("file_path")]
+        thumbnail_data = _generate_thumbnail(stl_paths)
+    except Exception:
+        pass
+
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("[Content_Types].xml", content_types)
         zf.writestr("_rels/.rels", rels)
         zf.writestr("3D/3dmodel.model", model_xml)
+        if thumbnail_data:
+            zf.writestr("Metadata/plate_1.png", thumbnail_data)
 
     return output_path
 
