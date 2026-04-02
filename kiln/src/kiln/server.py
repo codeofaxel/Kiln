@@ -8135,7 +8135,7 @@ def fulfillment_alerts() -> dict:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-_GCODE_EXTENSIONS = {".gcode", ".gco", ".g"}
+_GCODE_EXTENSIONS = {".gcode", ".gco", ".g", ".3mf"}
 _MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
 
 
