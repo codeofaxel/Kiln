@@ -629,6 +629,8 @@ _MINIMAL_3D_MODEL = (
     '<?xml version="1.0" encoding="UTF-8"?>\n'
     '<model unit="millimeter" '
     'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n'
+    '  <metadata name="Application">Kiln</metadata>\n'
+    '  <metadata name="CreatedBy">Kiln — kiln3d.com</metadata>\n'
     "  <resources>\n"
     '    <object id="1" type="model">\n'
     "      <mesh>\n"

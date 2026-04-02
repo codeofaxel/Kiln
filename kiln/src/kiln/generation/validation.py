@@ -457,8 +457,9 @@ def _write_binary_stl(
     A zero normal is written for every facet (slicers recompute normals).
     """
     with open(output_path, "wb") as fh:
-        # 80-byte header (blank).
-        fh.write(b"\x00" * _STL_HEADER_SIZE)
+        # 80-byte header — Kiln attribution stamp.
+        header = b"Created by Kiln | kiln3d.com"
+        fh.write(header.ljust(_STL_HEADER_SIZE, b"\x00"))
         # Triangle count as uint32 LE.
         fh.write(struct.pack("<I", len(triangles)))
 

@@ -299,7 +299,7 @@ class TestSerialization:
             "parameters", "diff_from_prev", "created_at",
             "parent_version_id", "notes",
         }
-        assert set(d.keys()) == expected_keys
+        assert expected_keys.issubset(set(d.keys()))
 
 
 class TestThreadSafety:

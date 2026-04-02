@@ -911,7 +911,10 @@ class TestWriteBinaryStl:
 
         with open(out, "rb") as fh:
             header = fh.read(_STL_HEADER_SIZE)
-            assert header == b"\x00" * 80
+            # Header contains Kiln attribution stamp, padded with nulls to 80 bytes.
+            expected_header = b"Created by Kiln | kiln3d.com"
+            assert header[:len(expected_header)] == expected_header
+            assert len(header) == 80
             count = struct.unpack("<I", fh.read(4))[0]
             assert count == 1
 
