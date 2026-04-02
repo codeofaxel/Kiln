@@ -46,11 +46,19 @@ class _VersionToolsPlugin:
             prompt: str = "",
             parameters: dict | None = None,
             notes: str = "",
+            provenance: dict | None = None,
+            stl_path: str = "",
+            parent_version_id: str = "",
         ) -> dict:
             """Save a new version of a parametric design.
 
             Automatically computes a unified diff from the previous version,
             assigns a unique version ID, and records the timestamp.
+
+            **Upgrade to Kiln Pro** for automatic mesh fingerprinting,
+            regression detection (warns when features are lost between
+            versions), and ``.kiln.json`` sidecar provenance files that
+            travel with your STLs.
 
             Args:
                 design_id: Identifier grouping versions of the same design.
@@ -58,10 +66,21 @@ class _VersionToolsPlugin:
                 prompt: The natural-language prompt that produced this version.
                 parameters: Parametric values used for generation.
                 notes: Free-text notes for this version.
+                provenance: Context on how this version was created.
+                    Recommended keys: ``tools_used``, ``change_summary``,
+                    ``source_files``.  (Pro: auto-enriched with mesh
+                    fingerprinting and regression detection.)
+                stl_path: Path to the output STL file.  (Pro: auto-computes
+                    a geometric fingerprint and warns if features were
+                    lost from the parent version.)
+                parent_version_id: Explicit parent version ID.  Use when
+                    deriving from a version in a different design (fork
+                    or rename).
 
             Returns:
                 The saved version record including version_id, diff, and
-                parent information.
+                parent information.  Pro users also get provenance,
+                mesh_fingerprint, and mesh_diff with regression warnings.
             """
             from kiln.design_versions import DesignVersionStore
 
@@ -74,7 +93,27 @@ class _VersionToolsPlugin:
                     parameters=parameters or {},
                     notes=notes,
                 )
-                return {"ok": True, "version": version.to_dict()}
+                result: dict = {"ok": True, "version": version.to_dict()}
+
+                # Pro enrichment: fingerprinting, sidecar, provenance
+                try:
+                    from kiln_pro.bridge import pro_features
+
+                    enriched = pro_features.enrich_version(
+                        result["version"],
+                        stl_path=stl_path or None,
+                        provenance=provenance,
+                        parent_version_id=parent_version_id or None,
+                    )
+                    result["version"] = enriched
+                    # Surface regression warnings prominently
+                    mesh_diff = enriched.get("mesh_diff")
+                    if mesh_diff and mesh_diff.get("warnings"):
+                        result["warnings"] = mesh_diff["warnings"]
+                except ImportError:
+                    pass  # Free tier — no provenance enrichment
+
+                return result
             except Exception as exc:
                 _logger.exception("save_design_version failed")
                 return {"ok": False, "error": str(exc)}

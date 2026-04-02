@@ -5,15 +5,18 @@ code revisions, rollback capability, and searchable history.  Each design
 (identified by ``design_id``) maintains an ordered chain of versions with
 automatic unified-diff computation between consecutive revisions.
 
+**Provenance tracking** (v0.5.1+, requires kiln-pro): Each version can
+carry provenance metadata, mesh fingerprints, and mesh diffs when
+kiln-pro is installed.  The schema supports these fields even on the
+free tier so that kiln-pro can enrich versions without schema changes.
+
 Data is persisted in a SQLite database at ``~/.kiln/design_versions.db``
 (configurable via the ``db_path`` constructor parameter).
-
-This is a **free-tier** feature.  The paid extension (print-outcome
-correlation across versions) lives in kiln-pro.
 """
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import json
 import logging
@@ -22,7 +25,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -63,10 +66,18 @@ class DesignVersion:
     created_at: float
     parent_version_id: str | None
     notes: str
+    provenance: dict[str, Any] | None = field(default=None)
+    mesh_fingerprint: dict[str, Any] | None = field(default=None)
+    mesh_diff: dict[str, Any] | None = field(default=None)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict suitable for JSON output."""
-        return asdict(self)
+        d = asdict(self)
+        # Drop None provenance/fingerprint/diff to keep output clean
+        for key in ("provenance", "mesh_fingerprint", "mesh_diff"):
+            if d.get(key) is None:
+                del d[key]
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -113,14 +124,36 @@ class DesignVersionStore:
                 created_at        REAL NOT NULL,
                 parent_version_id TEXT,
                 notes             TEXT NOT NULL DEFAULT '',
-                version_number    INTEGER NOT NULL DEFAULT 1
+                version_number    INTEGER NOT NULL DEFAULT 1,
+                provenance        TEXT,
+                mesh_fingerprint  TEXT,
+                mesh_diff         TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_dv_design_id
                 ON design_versions(design_id);
             CREATE INDEX IF NOT EXISTS idx_dv_created_at
                 ON design_versions(created_at);
+
+            -- Alias table: tracks renames so "bob" → "robert" lineage
+            -- is preserved.  Searching either name finds the full tree.
+            CREATE TABLE IF NOT EXISTS design_aliases (
+                alias       TEXT NOT NULL,
+                design_id   TEXT NOT NULL,
+                created_at  REAL NOT NULL,
+                PRIMARY KEY (alias, design_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_da_alias
+                ON design_aliases(alias);
+            CREATE INDEX IF NOT EXISTS idx_da_design_id
+                ON design_aliases(design_id);
             """
         )
+        # Migrate existing databases that lack the new columns.
+        for col in ("provenance", "mesh_fingerprint", "mesh_diff"):
+            with contextlib.suppress(sqlite3.OperationalError):
+                self._conn.execute(
+                    f"ALTER TABLE design_versions ADD COLUMN {col} TEXT"
+                )
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -128,6 +161,10 @@ class DesignVersionStore:
     # ------------------------------------------------------------------
 
     def _row_to_version(self, row: sqlite3.Row) -> DesignVersion:
+        cols = set(row.keys())
+        prov_raw = row["provenance"] if "provenance" in cols else None
+        fp_raw = row["mesh_fingerprint"] if "mesh_fingerprint" in cols else None
+        md_raw = row["mesh_diff"] if "mesh_diff" in cols else None
         return DesignVersion(
             version_id=row["version_id"],
             design_id=row["design_id"],
@@ -138,6 +175,9 @@ class DesignVersionStore:
             created_at=row["created_at"],
             parent_version_id=row["parent_version_id"],
             notes=row["notes"],
+            provenance=json.loads(prov_raw) if prov_raw else None,
+            mesh_fingerprint=json.loads(fp_raw) if fp_raw else None,
+            mesh_diff=json.loads(md_raw) if md_raw else None,
         )
 
     @staticmethod
@@ -354,6 +394,119 @@ class DesignVersionStore:
             (like, like, limit),
         ).fetchall()
         return [self._row_to_version(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Aliases & ancestry
+    # ------------------------------------------------------------------
+
+    def add_alias(self, design_id: str, alias: str) -> None:
+        """Register *alias* as an alternative name for *design_id*.
+
+        Useful when a design is renamed (e.g. "bob" → "robert") — the
+        alias preserves the link so searches on either name find the
+        full version tree.
+
+        Safe to call multiple times; duplicates are silently ignored.
+        """
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO design_aliases "
+                "(alias, design_id, created_at) VALUES (?, ?, ?)",
+                (alias, design_id, time.time()),
+            )
+            self._conn.commit()
+
+    def resolve_aliases(self, name: str) -> list[str]:
+        """Return all design_ids associated with *name*.
+
+        Checks both direct design_id matches and the alias table.
+        Returns a deduplicated list of design_ids.
+        """
+        ids: set[str] = set()
+        # Direct: name is a design_id
+        row = self._conn.execute(
+            "SELECT DISTINCT design_id FROM design_versions WHERE design_id = ?",
+            (name,),
+        ).fetchone()
+        if row:
+            ids.add(row[0])
+        # Alias → design_id
+        rows = self._conn.execute(
+            "SELECT design_id FROM design_aliases WHERE alias = ?",
+            (name,),
+        ).fetchall()
+        for r in rows:
+            ids.add(r[0])
+        # design_id → alias (reverse lookup)
+        rows = self._conn.execute(
+            "SELECT alias FROM design_aliases WHERE design_id = ?",
+            (name,),
+        ).fetchall()
+        for r in rows:
+            sub = self._conn.execute(
+                "SELECT DISTINCT design_id FROM design_versions WHERE design_id = ?",
+                (r[0],),
+            ).fetchone()
+            if sub:
+                ids.add(sub[0])
+        return sorted(ids)
+
+    def get_ancestry(
+        self, version_id: str, *, max_depth: int = 50
+    ) -> list[DesignVersion]:
+        """Walk the parent chain from *version_id* back to the root.
+
+        Returns a list from the given version to the oldest ancestor,
+        following parent_version_id pointers — even across design_id
+        boundaries (renames).  Stops at the root or after *max_depth*
+        hops to prevent infinite loops.
+        """
+        chain: list[DesignVersion] = []
+        seen: set[str] = set()
+        current_id: str | None = version_id
+
+        for _ in range(max_depth):
+            if current_id is None or current_id in seen:
+                break
+            seen.add(current_id)
+            version = self.get_version(current_id)
+            if version is None:
+                break
+            chain.append(version)
+            current_id = version.parent_version_id
+
+        return chain
+
+    def rename_design(
+        self, old_design_id: str, new_design_id: str
+    ) -> int:
+        """Rename a design, preserving version history and aliases.
+
+        Creates an alias from *old_design_id* → *new_design_id* so
+        searching for either name finds the full tree.  Future versions
+        should use *new_design_id*.
+
+        Returns the number of versions updated.
+        """
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO design_aliases "
+                "(alias, design_id, created_at) VALUES (?, ?, ?)",
+                (old_design_id, new_design_id, time.time()),
+            )
+            cur = self._conn.execute(
+                "UPDATE design_versions SET design_id = ? WHERE design_id = ?",
+                (new_design_id, old_design_id),
+            )
+            self._conn.commit()
+        count = cur.rowcount
+        logger.info(
+            "Renamed design %s → %s (%d versions updated)",
+            old_design_id,
+            new_design_id,
+            count,
+        )
+        return count
 
     def close(self) -> None:
         """Close the underlying database connection."""
