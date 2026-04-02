@@ -10776,6 +10776,7 @@ def validate_openscad_code(code: str) -> dict:
 def estimate_print_time(
     file_path: str,
     profile: str = "",
+    printer_id: str = "",
     slicer_path: str = "",
 ) -> dict:
     """Estimate print time and filament usage for a model.
@@ -10783,17 +10784,36 @@ def estimate_print_time(
     Slices the model and parses the G-code for print time, filament
     length/weight, layer count, and cost estimates.
 
-    :param file_path: Path to STL/3MF/OBJ file.
+    For **already-sliced** G-code files, pass the ``.gcode`` path
+    directly — it will be parsed without re-slicing.
+
+    :param file_path: Path to STL/3MF/OBJ or .gcode file.
     :param profile: Optional slicer profile path.
+    :param printer_id: Optional printer model ID for bundled profile
+        (e.g. ``"bambu_a1"``).  Used when no explicit profile is given.
     :param slicer_path: Optional explicit slicer binary path.
     :returns: Dict with time, filament, and layer estimates.
     """
     try:
+        from kiln.slicer import _parse_gcode_estimates
+
+        # If already a gcode file, just parse it directly
+        if file_path.lower().endswith((".gcode", ".gco", ".g")):
+            result = _parse_gcode_estimates(file_path)
+            return {"status": "success", **result}
+
+        # Otherwise, slice first with the right profile
         from kiln.slicer import estimate_print
+
+        resolved_profile = profile or None
+        if not resolved_profile and printer_id:
+            from kiln.slicer_profiles import get_profile_for_printer
+
+            resolved_profile = get_profile_for_printer(printer_id)
 
         result = estimate_print(
             file_path,
-            profile=profile or None,
+            profile=resolved_profile,
             slicer_path=slicer_path or None,
         )
         return {"status": "success", **result}

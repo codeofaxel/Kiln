@@ -365,8 +365,9 @@ def estimate_print(
 def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
     """Parse G-code file for slicer-generated estimates.
 
-    Reads the first and last 200 lines (where PrusaSlicer/OrcaSlicer
-    place their estimate comments) to avoid reading the entire file.
+    Reads the first 200 and last 500 lines where PrusaSlicer/OrcaSlicer
+    place their estimate comments.  PrusaSlicer puts estimates ~350 lines
+    from EOF (after slicer config comments), so 200 was too small.
     """
     import re as _re
 
@@ -380,8 +381,8 @@ def _parse_gcode_estimates(gcode_path: str) -> dict[str, Any]:
                 if i < 200:
                     head.append(line)
                 lines.append(line)
-            # Keep last 200 lines
-            tail = lines[-200:] if len(lines) > 200 else []
+            # Keep last 500 lines — PrusaSlicer puts estimates ~350 from EOF
+            tail = lines[-500:] if len(lines) > 500 else []
             search_lines = head + tail
     except OSError:
         return estimates
@@ -796,23 +797,29 @@ def merge_multipart_gcode(
 
     merged_body = "".join(merged_blocks)
 
-    # Sum slicer time estimates from each part's original gcode (faster
-    # than scanning the full merged body, and avoids duplicating the
-    # regex from bambu_3mf._extract_slicer_time_estimate).
+    # Sum slicer time estimates from each part's original gcode file.
+    # PrusaSlicer puts estimates at the END of the file (after all layers),
+    # so we scan the full file, not just the pre-layer header.
     _TIME_RE = re.compile(
         r"estimated printing time \(normal mode\).*?=\s*"
         r"(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?",
         re.IGNORECASE,
     )
     total_time = 0
-    for header, _layers, _part in parsed:
-        for m in _TIME_RE.finditer(header):
-            total_time += (
-                int(m.group(1) or 0) * 86400
-                + int(m.group(2) or 0) * 3600
-                + int(m.group(3) or 0) * 60
-                + int(m.group(4) or 0)
-            )
+    for _header, _layers, part_info in parsed:
+        gcode_path = part_info.get("gcode_path", "")
+        if gcode_path and os.path.isfile(gcode_path):
+            with open(gcode_path, errors="replace") as _f:
+                for _line in _f:
+                    m = _TIME_RE.search(_line)
+                    if m:
+                        total_time += (
+                            int(m.group(1) or 0) * 86400
+                            + int(m.group(2) or 0) * 3600
+                            + int(m.group(3) or 0) * 60
+                            + int(m.group(4) or 0)
+                        )
+                        break  # one estimate per file
 
     if not output_path:
         output_path = os.path.join(
