@@ -15336,6 +15336,22 @@ def _ensure_internal_tool_plugins_registered() -> None:
         _DedupingToolRegistrationProxy(mcp),
         plugin_package="kiln.plugins",
     )
+
+    # Load kiln-pro plugins if kiln-pro is installed (paid users only).
+    # This discovers tools like set_speed_percent, batch_decorate, etc.
+    try:
+        import kiln_pro  # noqa: F401
+
+        register_all_plugins(
+            _DedupingToolRegistrationProxy(mcp),
+            plugin_package="kiln_pro.plugins",
+        )
+        logger.info("kiln-pro plugins loaded successfully")
+    except ImportError:
+        pass  # kiln-pro not installed — free tier, no pro plugins
+    except Exception as exc:
+        logger.warning("Failed to load kiln-pro plugins: %s", exc)
+
     _INTERNAL_TOOL_PLUGINS_REGISTERED = True
 
 
