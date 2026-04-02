@@ -625,6 +625,13 @@ def _build_instructions() -> str:
         "Use `retry_print_with_fix()` to re-slice with corrections applied."
     )
 
+    # --- Server management ---
+    parts.append(
+        "SERVER: Call `restart_server()` to hot-restart the Kiln MCP server "
+        "without closing the client app. Use after plugin updates, env var "
+        "changes, or code edits. The client auto-reconnects in ~1 second."
+    )
+
     # --- Multi-color ---
     if has_printer:
         parts.append(
@@ -5736,6 +5743,39 @@ def health_check() -> dict:
         health_data["billing_health"] = {"status": "unknown"}
 
     return health_data
+
+
+@mcp.tool()
+def restart_server() -> dict:
+    """Restart the Kiln MCP server process in-place.
+
+    Replaces the current process with a fresh instance using
+    ``os.execv``.  The MCP client (Claude Code, etc.) should detect
+    the connection drop and automatically reconnect, picking up any
+    code changes made since the last startup.
+
+    Use after installing or updating kiln-pro plugins, changing
+    environment variables, or modifying server code — avoids the
+    need to fully restart the MCP client application.
+
+    :returns: Confirmation that the restart is imminent.  The
+        connection will drop within ~0.5 seconds.
+    """
+    import threading
+
+    def _do_restart() -> None:
+        time.sleep(0.3)  # let the tool response flush
+        logger.info("Kiln MCP server restarting via restart_server tool...")
+        os.execv(sys.executable, [sys.executable, "-m", "kiln"])
+
+    threading.Thread(target=_do_restart, daemon=True).start()
+    return {
+        "success": True,
+        "message": (
+            "Kiln server restarting in ~0.3s. The MCP connection will "
+            "drop and the client should auto-reconnect to the fresh process."
+        ),
+    }
 
 
 @mcp.tool()
