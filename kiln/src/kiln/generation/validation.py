@@ -4673,3 +4673,191 @@ def add_chamfer(
         "distance_mm": distance_mm,
         "angle_threshold_deg": angle_threshold_deg,
     }
+
+
+def detect_mesh_pockets(
+    file_path: str,
+    *,
+    min_depth_mm: float = 0.3,
+    face_normal_tolerance: float = 0.15,
+) -> dict[str, Any]:
+    """Detect pockets and cavities on the top/bottom faces of a mesh.
+
+    Analyzes an STL file for recessed regions (circular or rectangular
+    pockets) by clustering Z-up and Z-down face normals at different
+    height levels.  Useful for pre-composition audit before placing
+    overlay geometry (QR pads, logos) into a base model's pockets.
+
+    :param file_path: Path to the STL file.
+    :param min_depth_mm: Minimum pocket depth to report.
+    :param face_normal_tolerance: How close to ±1.0 the Z-component
+        of a face normal must be to count as a top/bottom face.
+    :returns: Dict with pocket list, main surface heights, and bounding box.
+    """
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    errors: list[str] = []
+    triangles, vertices = _parse_stl(path, errors)
+    if errors:
+        raise ValueError(f"STL parse errors: {'; '.join(errors)}")
+    if not triangles:
+        raise ValueError("STL file contains no triangles.")
+
+    bbox = _bounding_box(vertices)
+    overall_height = bbox["z_max"] - bbox["z_min"]
+
+    # -- Compute face normals and classify triangles -------------------------
+    z_up_threshold = 1.0 - face_normal_tolerance
+    z_down_threshold = -(1.0 - face_normal_tolerance)
+
+    # Each entry: (avg_z, tri_vertices)
+    z_up_faces: list[tuple[float, tuple[tuple[float, ...], ...]]] = []
+    z_down_faces: list[tuple[float, tuple[tuple[float, ...], ...]]] = []
+
+    for tri in triangles:
+        v0, v1, v2 = tri
+        # Cross product (v1-v0) x (v2-v0)
+        e1 = (v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2])
+        e2 = (v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2])
+        nx = e1[1] * e2[2] - e1[2] * e2[1]
+        ny = e1[2] * e2[0] - e1[0] * e2[2]
+        nz = e1[0] * e2[1] - e1[1] * e2[0]
+        length = math.sqrt(nx * nx + ny * ny + nz * nz)
+        if length < 1e-12:
+            continue
+        nz_norm = nz / length
+
+        avg_z = (v0[2] + v1[2] + v2[2]) / 3.0
+
+        if nz_norm > z_up_threshold:
+            z_up_faces.append((avg_z, tri))
+        elif nz_norm < z_down_threshold:
+            z_down_faces.append((avg_z, tri))
+
+    # -- Cluster faces by Z height -------------------------------------------
+    _Z_CLUSTER_TOL = 0.05  # mm
+
+    def _cluster_z_levels(
+        faces: list[tuple[float, tuple[tuple[float, ...], ...]]],
+    ) -> dict[float, list[tuple[tuple[float, ...], ...]]]:
+        """Group faces into Z-height clusters within tolerance."""
+        if not faces:
+            return {}
+        sorted_faces = sorted(faces, key=lambda f: f[0])
+        clusters: dict[float, list[tuple[tuple[float, ...], ...]]] = {}
+        current_z = sorted_faces[0][0]
+        current_zs: list[float] = [current_z]
+        current_tris: list[tuple[tuple[float, ...], ...]] = [sorted_faces[0][1]]
+
+        for avg_z, tri in sorted_faces[1:]:
+            if abs(avg_z - current_z) <= _Z_CLUSTER_TOL:
+                current_zs.append(avg_z)
+                current_tris.append(tri)
+            else:
+                representative_z = sum(current_zs) / len(current_zs)
+                clusters[representative_z] = current_tris
+                current_z = avg_z
+                current_zs = [avg_z]
+                current_tris = [tri]
+
+        representative_z = sum(current_zs) / len(current_zs)
+        clusters[representative_z] = current_tris
+        return clusters
+
+    # -- Identify pockets from clustered face levels -------------------------
+    def _pocket_shape(
+        tris: list[tuple[tuple[float, ...], ...]],
+    ) -> tuple[str, float | None, float, float, float, float]:
+        """Determine pocket shape from its triangles.
+
+        Returns (shape, radius_or_none, width, height, center_x, center_y).
+        """
+        xs: list[float] = []
+        ys: list[float] = []
+        for tri in tris:
+            for v in tri:
+                xs.append(v[0])
+                ys.append(v[1])
+        x_min, x_max = min(xs), max(xs)
+        y_min, y_max = min(ys), max(ys)
+        width = x_max - x_min
+        height = y_max - y_min
+        cx = (x_min + x_max) / 2.0
+        cy = (y_min + y_max) / 2.0
+
+        # Circular if width ≈ height within 20%
+        avg_dim = (width + height) / 2.0
+        if avg_dim > 0 and abs(width - height) / avg_dim < 0.2:
+            return "circular", avg_dim / 2.0, width, height, cx, cy
+        return "rectangular", None, width, height, cx, cy
+
+    def _find_pockets(
+        faces: list[tuple[float, tuple[tuple[float, ...], ...]]],
+        face_label: str,
+    ) -> tuple[list[dict[str, Any]], float]:
+        """Find pockets in a set of same-direction faces.
+
+        For 'top' faces, the highest cluster is the main surface and lower
+        clusters are pockets.  For 'bottom' faces, the lowest cluster is
+        the main surface and higher clusters are pockets (recessed upward).
+
+        Returns (pocket_list, main_surface_z).
+        """
+        clusters = _cluster_z_levels(faces)
+        if not clusters:
+            return [], 0.0
+
+        sorted_levels = sorted(clusters.keys())
+
+        if face_label == "top":
+            main_z = sorted_levels[-1]
+            pocket_levels = sorted_levels[:-1]
+        else:
+            main_z = sorted_levels[0]
+            pocket_levels = sorted_levels[1:]
+
+        pockets: list[dict[str, Any]] = []
+        for level_z in pocket_levels:
+            if face_label == "top":
+                depth = main_z - level_z
+            else:
+                depth = level_z - main_z
+
+            if depth < min_depth_mm:
+                continue
+
+            tris = clusters[level_z]
+            shape, radius, w, h, cx, cy = _pocket_shape(tris)
+            pockets.append({
+                "face": face_label,
+                "center_x": round(cx, 3),
+                "center_y": round(cy, 3),
+                "floor_z": round(level_z, 3),
+                "depth_mm": round(depth, 3),
+                "shape": shape,
+                "radius_mm": round(radius, 3) if radius is not None else None,
+                "width_mm": round(w, 3),
+                "height_mm": round(h, 3),
+                "triangle_count": len(tris),
+            })
+
+        return pockets, main_z
+
+    top_pockets, main_top_z = _find_pockets(z_up_faces, "top")
+    bottom_pockets, main_bottom_z = _find_pockets(z_down_faces, "bottom")
+
+    # Fallback if no Z-up/Z-down faces found
+    if not z_up_faces:
+        main_top_z = bbox["z_max"]
+    if not z_down_faces:
+        main_bottom_z = bbox["z_min"]
+
+    return {
+        "pockets": top_pockets + bottom_pockets,
+        "main_top_z": round(main_top_z, 3),
+        "main_bottom_z": round(main_bottom_z, 3),
+        "overall_height_mm": round(overall_height, 3),
+        "bounding_box": {k: round(v, 3) for k, v in bbox.items()},
+    }

@@ -709,6 +709,78 @@ class OpenSCADProvider(GenerationProvider):
         return []
 
 
+def _python_boolean_fallback(
+    operation: str,
+    file_paths: list[str],
+    output_path: str,
+) -> str:
+    """Approximate boolean via Python triangle clipping (planar cuts only).
+
+    Only ``"difference"`` is supported — the most common case for cutting
+    pockets or holes aligned to axes.  For the body mesh, triangles whose
+    centroid falls inside the cutter's axis-aligned bounding box are removed.
+
+    Returns:
+        The *output_path* with the clipped mesh written as binary STL.
+
+    Raises:
+        GenerationError: If the operation is not ``"difference"``.
+    """
+    from pathlib import Path
+
+    from kiln.generation.validation import _bounding_box, _parse_stl, _write_binary_stl
+
+    if operation != "difference":
+        raise GenerationError(
+            f"Python fallback only supports 'difference', not '{operation}'. "
+            "Complex booleans require manifold meshes and a working OpenSCAD.",
+            code="BOOL_FALLBACK_UNSUPPORTED",
+        )
+
+    if len(file_paths) < 2:
+        raise GenerationError(
+            "Need at least 2 meshes for a boolean difference.",
+            code="BOOL_FALLBACK_BAD_INPUT",
+        )
+
+    errors: list[str] = []
+    body_tris, _ = _parse_stl(Path(file_paths[0]), errors)
+    _, cutter_verts = _parse_stl(Path(file_paths[1]), errors)
+
+    if not body_tris or not cutter_verts:
+        raise GenerationError(
+            "Failed to parse input STLs for Python boolean fallback.",
+            code="BOOL_FALLBACK_PARSE",
+        )
+
+    bbox = _bounding_box(cutter_verts)
+
+    def _centroid_inside_bbox(
+        tri: tuple[tuple[float, ...], ...],
+        bb: dict[str, float],
+    ) -> bool:
+        cx = sum(v[0] for v in tri) / 3.0
+        cy = sum(v[1] for v in tri) / 3.0
+        cz = sum(v[2] for v in tri) / 3.0
+        return (
+            bb["x_min"] <= cx <= bb["x_max"]
+            and bb["y_min"] <= cy <= bb["y_max"]
+            and bb["z_min"] <= cz <= bb["z_max"]
+        )
+
+    kept = [t for t in body_tris if not _centroid_inside_bbox(t, bbox)]
+
+    if not kept:
+        raise GenerationError(
+            "Python boolean fallback removed all triangles — cutter "
+            "fully encloses the body mesh.",
+            code="BOOL_FALLBACK_EMPTY",
+        )
+
+    _write_binary_stl(kept, output_path)
+    return output_path
+
+
 def boolean_mesh_operation(
     operation: str,
     file_paths: list[str],
@@ -718,7 +790,8 @@ def boolean_mesh_operation(
     """Perform a CSG boolean operation on STL meshes via OpenSCAD.
 
     Convenience function that auto-discovers OpenSCAD and delegates
-    to :meth:`OpenSCADProvider.boolean_operation`.
+    to :meth:`OpenSCADProvider.boolean_operation`.  Includes a 3-stage
+    retry pipeline: fast path → auto-repair → Python fallback.
 
     Args:
         operation: ``"union"``, ``"difference"``, or ``"intersection"``.
@@ -752,9 +825,55 @@ def boolean_mesh_operation(
         )
 
     provider = OpenSCADProvider(binary_path=binary)
-    result_path = provider.boolean_operation(
-        operation, file_paths, output_path=output_path,
-    )
+
+    auto_repaired = False
+    fallback_used = False
+
+    # 1. Fast path: try the boolean as-is
+    try:
+        result_path = provider.boolean_operation(
+            operation, file_paths, output_path=output_path,
+        )
+    except GenerationError as exc:
+        # Only retry on boolean failures, not timeouts / missing binary
+        if "BOOL_FAILED" not in str(getattr(exc, "code", "")) and "BOOL_EMPTY" not in str(getattr(exc, "code", "")):
+            raise
+
+        # 2. Auto-repair each input mesh and retry
+        from kiln.generation.validation import repair_stl_advanced
+
+        logger.info("Boolean %s failed, attempting auto-repair on inputs...", operation)
+        repaired_paths: list[str] = []
+        for fp in file_paths:
+            repaired = tempfile.mkstemp(suffix=".stl", prefix="kiln_repaired_")[1]
+            shutil.copy2(fp, repaired)
+            try:
+                repair_stl_advanced(repaired, close_holes=True)
+                repaired_paths.append(repaired)
+            except Exception:
+                repaired_paths.append(fp)  # Use original if repair fails
+
+        auto_repaired = True
+
+        try:
+            result_path = provider.boolean_operation(
+                operation, repaired_paths, output_path=output_path,
+            )
+        except GenerationError:
+            # 3. Python fallback for simple planar cuts
+            fallback_used = True
+            _out = output_path or tempfile.mkstemp(
+                suffix=".stl", prefix="kiln_bool_fb_",
+            )[1]
+            result_path = _python_boolean_fallback(
+                operation, file_paths, _out,
+            )
+        finally:
+            # Clean up repaired temp files
+            for rp in repaired_paths:
+                if rp not in file_paths:
+                    with contextlib.suppress(OSError):
+                        os.unlink(rp)
 
     # Count triangles in result
     tri_count = 0
@@ -774,6 +893,8 @@ def boolean_mesh_operation(
         "operation": operation,
         "input_files": file_paths,
         "triangle_count": tri_count,
+        "auto_repaired": auto_repaired,
+        "fallback_used": fallback_used,
     }
 
 

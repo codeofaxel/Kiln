@@ -10205,6 +10205,32 @@ def analyze_mesh_geometry(file_path: str) -> dict:
 
 
 @mcp.tool()
+def detect_mesh_pockets(
+    file_path: str,
+    min_depth_mm: float = 0.3,
+) -> dict:
+    """Detect pockets and cavities in a mesh before multi-part composition.
+
+    Analyzes a base model to find recessed regions (circular or rectangular
+    pockets) on top and bottom faces. Call this before compose_models or
+    multi_material_print to know pocket dimensions for overlay geometry.
+
+    :param file_path: Path to the STL file to analyze.
+    :param min_depth_mm: Minimum pocket depth to report (default 0.3mm).
+    :returns: Dict with pocket list, dimensions, and positions.
+    """
+    if err := _check_auth("generate"):
+        return err
+    try:
+        from kiln.generation.validation import detect_mesh_pockets as _detect
+
+        result = _detect(file_path, min_depth_mm=min_depth_mm)
+        return {"status": "success", **result}
+    except Exception as exc:
+        return _error_dict(f"Pocket detection failed: {exc}", code="DETECT_ERROR")
+
+
+@mcp.tool()
 def repair_mesh(file_path: str, output_path: str = "") -> dict:
     """Basic mesh repair: fix degenerate triangles and bad normals (fast, safe).
 
