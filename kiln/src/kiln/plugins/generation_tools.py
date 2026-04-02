@@ -34,6 +34,7 @@ class _GenerationToolsPlugin:
         - generate_and_print
         - preview_generated_model
         - validate_generated_mesh
+        - validate_and_prepare_mesh
     """
 
     @property
@@ -623,7 +624,6 @@ class _GenerationToolsPlugin:
                 GenerationResult,
                 GenerationStatus,
                 convert_to_stl,
-                validate_mesh,
             )
             from kiln.printers import PrinterError, PrinterNotFoundError
 
@@ -674,14 +674,48 @@ class _GenerationToolsPlugin:
                     except Exception as exc:
                         _logger.warning("OBJ→STL conversion failed, keeping OBJ: %s", exc)
 
-                # Step 4: Validate
-                if result.format in ("stl", "obj"):
-                    val = validate_mesh(result.local_path)
-                    if not val.valid:
+                # Step 4: Full validation pipeline (validate → repair → printability → build volume)
+                pipeline_result = None
+                if result.format in ("stl", "obj", "glb"):
+                    from kiln.mesh_validation_pipeline import run_validation_pipeline
+
+                    # Resolve build volume from printer if available
+                    _build_vol = None
+                    try:
+                        if printer_name:
+                            _adapter = _srv._registry.get(printer_name)
+                        else:
+                            _adapter = _srv._get_adapter()
+                        _printer_info = _adapter.get_printer_info()
+                        if hasattr(_printer_info, 'build_volume') and _printer_info.build_volume:
+                            bv = _printer_info.build_volume
+                            _build_vol = (bv.get("x", 256), bv.get("y", 256), bv.get("z", 256))
+                    except Exception:
+                        pass  # No build volume info — skip build volume check
+
+                    pipeline_result = run_validation_pipeline(
+                        result.local_path,
+                        material="PLA",
+                        build_volume=_build_vol,
+                        auto_repair=True,
+                        auto_scale=False,  # Don't silently resize user's model
+                    )
+
+                    if not pipeline_result.passed:
                         return _srv._error_dict(
-                            f"Generated mesh failed validation: {'; '.join(val.errors)}",
+                            f"Generated mesh failed validation pipeline: {pipeline_result.summary}",
                             code="VALIDATION_FAILED",
                         )
+
+                    # Use the (possibly repaired) file path going forward
+                    result = GenerationResult(
+                        job_id=result.job_id,
+                        provider=result.provider,
+                        local_path=pipeline_result.file_path,
+                        format="stl",
+                        file_size_bytes=os.path.getsize(pipeline_result.file_path),
+                        prompt=result.prompt,
+                    )
 
                 # Step 5: Slice
                 from kiln.slicer import slice_file
@@ -706,23 +740,19 @@ class _GenerationToolsPlugin:
                 upload = adapter.upload_file(slice_result.output_path)
                 file_name = upload.file_name or os.path.basename(slice_result.output_path)
 
-                # Compute dimensions for review
-                gen_validation = None
-                gen_dimensions = None
-                if result.format in ("stl", "obj"):
-                    val_result = validate_mesh(result.local_path)
-                    gen_validation = val_result.to_dict()
-                    if val_result.bounding_box:
-                        bb = val_result.bounding_box
-                        w = bb.get("x_max", 0) - bb.get("x_min", 0)
-                        d = bb.get("y_max", 0) - bb.get("y_min", 0)
-                        h = bb.get("z_max", 0) - bb.get("z_min", 0)
-                        gen_dimensions = {
-                            "width_mm": round(w, 2),
-                            "depth_mm": round(d, 2),
-                            "height_mm": round(h, 2),
-                            "summary": f"{w:.1f} x {d:.1f} x {h:.1f} mm",
-                        }
+                # Use pipeline results for response (already computed above)
+                gen_validation = pipeline_result.to_dict() if pipeline_result else None
+                gen_dimensions = pipeline_result.dimensions_mm if pipeline_result else None
+                if gen_dimensions:
+                    w = gen_dimensions.get("width", 0)
+                    d = gen_dimensions.get("depth", 0)
+                    h = gen_dimensions.get("height", 0)
+                    gen_dimensions = {
+                        "width_mm": round(w, 2),
+                        "depth_mm": round(d, 2),
+                        "height_mm": round(h, 2),
+                        "summary": f"{w:.1f} x {d:.1f} x {h:.1f} mm",
+                    }
 
                 # Auto-print only if the user has opted in via KILN_AUTO_PRINT_GENERATED.
                 print_data = None
@@ -910,6 +940,85 @@ class _GenerationToolsPlugin:
                 _logger.exception("Unexpected error in validate_generated_mesh")
                 return _srv._error_dict(
                     f"Unexpected error in validate_generated_mesh: {exc}", code="INTERNAL_ERROR"
+                )
+
+        @mcp.tool()
+        def validate_and_prepare_mesh(
+            file_path: str,
+            material: str = "PLA",
+            nozzle_diameter: float = 0.4,
+            layer_height: float = 0.2,
+            build_volume_x: float | None = None,
+            build_volume_y: float | None = None,
+            build_volume_z: float | None = None,
+            auto_repair: bool = True,
+            auto_scale: bool = False,
+            min_printability_score: int = 40,
+        ) -> dict:
+            """Full validation pipeline: validate, repair, analyze, and prepare a mesh for printing.
+
+            Runs every AI-generated mesh through Kiln's engineering review before
+            it reaches the slicer or printer.  Chains validation → auto-repair →
+            printability analysis → build volume check into a single quality gate.
+
+            **Use this instead of ``validate_generated_mesh`` when you want the
+            full pipeline** — repair, printability scoring, build volume checks,
+            and actionable recommendations.
+
+            The mesh file may be modified in place if ``auto_repair`` or
+            ``auto_scale`` is enabled.  The response includes the final file
+            path (which may differ from the input if repairs created a new file).
+
+            Args:
+                file_path: Path to an STL, OBJ, or GLB file.
+                material: Filament material for printability analysis (default PLA).
+                nozzle_diameter: Printer nozzle diameter in mm (default 0.4).
+                layer_height: Print layer height in mm (default 0.2).
+                build_volume_x: Optional X build dimension (mm).
+                build_volume_y: Optional Y build dimension (mm).
+                build_volume_z: Optional Z build dimension (mm).
+                auto_repair: Auto-repair non-manifold meshes (default True).
+                auto_scale: Auto-scale if mesh exceeds build volume (default False).
+                min_printability_score: Minimum score (0-100) to pass (default 40).
+            """
+            import kiln.server as _srv
+
+            try:
+                from kiln.mesh_validation_pipeline import run_validation_pipeline
+
+                build_volume = None
+                if (
+                    build_volume_x is not None
+                    and build_volume_y is not None
+                    and build_volume_z is not None
+                ):
+                    build_volume = (
+                        build_volume_x,
+                        build_volume_y,
+                        build_volume_z,
+                    )
+
+                result = run_validation_pipeline(
+                    file_path,
+                    material=material,
+                    nozzle_diameter=nozzle_diameter,
+                    layer_height=layer_height,
+                    build_volume=build_volume,
+                    auto_repair=auto_repair,
+                    auto_scale=auto_scale,
+                    min_printability_score=min_printability_score,
+                )
+                return {
+                    "status": "success",
+                    "passed": result.passed,
+                    "result": result.to_dict(),
+                    "message": result.summary,
+                }
+            except Exception as exc:
+                _logger.exception("Unexpected error in validate_and_prepare_mesh")
+                return _srv._error_dict(
+                    f"Unexpected error in validate_and_prepare_mesh: {exc}",
+                    code="INTERNAL_ERROR",
                 )
 
         _logger.debug("Registered generation tools")
