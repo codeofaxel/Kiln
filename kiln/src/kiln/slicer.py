@@ -24,6 +24,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -675,9 +676,6 @@ def merge_multipart_gcode(
         and ``estimated_time_sec``.
     :raises ValueError: If parts list is empty or files not found.
     """
-    import re as _re
-    import tempfile as _tempfile
-
     if not parts:
         raise ValueError("No parts to merge.")
 
@@ -708,7 +706,7 @@ def merge_multipart_gcode(
                 current_block = []
                 current_z = None
             current_block.append(line)
-            m = _re.match(r"^;Z:([\d.]+)", line)
+            m = re.match(r"^;Z:([\d.]+)", line)
             if m:
                 current_z = float(m.group(1))
 
@@ -724,7 +722,8 @@ def merge_multipart_gcode(
         parsed.append(("".join(header_lines), layers, p))
 
     # Find the Z overlap range — the max Z of the shortest part
-    z_maxes = [max(z for z, _ in layers) if layers else 0.0 for _, layers, _ in parsed]
+    # layers is guaranteed non-empty per the zero-layer check above.
+    z_maxes = [max(z for z, _ in layers) for _, layers, _ in parsed]
     overlap_ceiling = min(z_maxes)
 
     # Use the first part's header as the merged header
@@ -790,16 +789,17 @@ def merge_multipart_gcode(
 
     merged_body = "".join(merged_blocks)
 
-    # Compute total time estimate by summing all slicer estimates
+    # Sum slicer time estimates from each part's original gcode (faster
+    # than scanning the full merged body, and avoids duplicating the
+    # regex from bambu_3mf._extract_slicer_time_estimate).
+    _TIME_RE = re.compile(
+        r"estimated printing time \(normal mode\).*?=\s*"
+        r"(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?",
+        re.IGNORECASE,
+    )
     total_time = 0
-    for line in merged_body.split("\n"):
-        m = _re.search(
-            r"estimated printing time \(normal mode\).*?=\s*"
-            r"(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?",
-            line,
-            _re.IGNORECASE,
-        )
-        if m:
+    for header, _layers, _part in parsed:
+        for m in _TIME_RE.finditer(header):
             total_time += (
                 int(m.group(1) or 0) * 86400
                 + int(m.group(2) or 0) * 3600
@@ -809,7 +809,7 @@ def merge_multipart_gcode(
 
     if not output_path:
         output_path = os.path.join(
-            _tempfile.mkdtemp(prefix="kiln_merge_"),
+            tempfile.mkdtemp(prefix="kiln_merge_"),
             "merged_multicolor.gcode",
         )
 

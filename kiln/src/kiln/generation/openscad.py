@@ -65,6 +65,11 @@ def _check_scad_security(code: str, *, allow_local_files: bool = True) -> None:
                 f"OpenSCAD {func_name}() is blocked in this context. "
                 f"File I/O operations are not allowed for security."
             )
+        if not os.path.isabs(file_ref):
+            raise ValueError(
+                f"OpenSCAD {func_name}() must use an absolute path, "
+                f"got relative: {file_ref!r}"
+            )
         resolved = Path(file_ref).resolve()
         if not resolved.is_file():
             raise ValueError(
@@ -116,27 +121,27 @@ def _has_only_safe_includes(code: str) -> bool:
     return True
 
 
-_openscad_has_L_flag: bool | None = None
+_openscad_L_flag_cache: dict[str, bool] = {}
 
 
 def _supports_library_flag(binary: str) -> bool:
     """Check if the OpenSCAD binary supports ``-L`` for library paths.
 
-    OpenSCAD 2021.01 and older do not support ``-L``.  We cache the
-    result so we only run the check once per process.
+    OpenSCAD 2021.01 and older do not support ``-L``.  The result is
+    cached per binary path so we only probe once per distinct binary.
     """
-    global _openscad_has_L_flag
-    if _openscad_has_L_flag is not None:
-        return _openscad_has_L_flag
+    if binary in _openscad_L_flag_cache:
+        return _openscad_L_flag_cache[binary]
     try:
         result = subprocess.run(
             [binary, "--help"],
             capture_output=True, text=True, timeout=10,
         )
-        _openscad_has_L_flag = "-L" in result.stdout or "-L" in result.stderr
+        supported = "-L" in result.stdout or "-L" in result.stderr
     except Exception:
-        _openscad_has_L_flag = False
-    return _openscad_has_L_flag
+        supported = False
+    _openscad_L_flag_cache[binary] = supported
+    return supported
 
 
 _MACOS_APP_PATH = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD" if sys.platform == "darwin" else ""

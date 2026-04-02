@@ -9914,7 +9914,12 @@ def rescale_model(
         return {
             "success": True,
             **result,
-            "message": f"Model rescaled by {result['scale_applied']}x.",
+            "message": (
+                f"Model rescaled by x={result['scale_applied']['x']}, "
+                f"y={result['scale_applied']['y']}, z={result['scale_applied']['z']}"
+                if isinstance(result["scale_applied"], dict)
+                else f"Model rescaled by {result['scale_applied']}x."
+            ),
         }
     except ValueError as exc:
         return _error_dict(str(exc), code="INVALID_INPUT")
@@ -16557,7 +16562,7 @@ def merge_multicolor_gcode(
             parsed_parts,
             output_path=output_path or None,
         )
-        return {"success": True, **result}
+        return {"status": "success", **result}
     except ValueError as exc:
         return _error_dict(str(exc))
     except Exception as exc:
