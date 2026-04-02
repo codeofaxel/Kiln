@@ -52,6 +52,9 @@ tasks.md
 .circle-recovery.txt
 recovery.dat
 
+# Print working files (photos, heightmaps, STLs, gcode — personal/private)
+prints/
+
 # Marketing drafts
 docs/marketing/
 .vercel

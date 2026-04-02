@@ -3469,8 +3469,9 @@ def wrap_gcode_as_3mf(
             import zipfile
 
             try:
-                from PIL import Image
                 from io import BytesIO
+
+                from PIL import Image
 
                 src_img = Image.open(thumbnail_path)
 
@@ -18477,6 +18478,322 @@ def check_ambient_conditions(
     except Exception as exc:
         logger.exception("Error in check_ambient_conditions")
         return _error_dict(f"Failed to check ambient conditions: {exc}", code="AMBIENT_CHECK_ERROR")
+
+
+@mcp.tool()
+def decorate_surface(
+    model_path: str,
+    content: str,
+    face: str = "auto",
+    depth_mm: float = 0.0,
+    mode: str = "deboss",
+    scale: float = 0.7,
+    material: str = "PLA",
+    content_type: str = "auto",
+    offset_x_mm: float = 0.0,
+    offset_y_mm: float = 0.0,
+    image_style: str = "auto",
+) -> dict:
+    """Put any image, text, or pattern onto a 3D model surface.
+
+    Takes a model and content (image file, text string, SVG) and returns
+    a new STL with the content embossed or debossed onto the surface.
+    Automatically detects the best face for placement and scales content
+    to fit.  Single-color coin-relief style — no multi-material needed.
+
+    **Content types** (auto-detected from *content* string):
+
+    - **Image file** (PNG/JPG/SVG): ``"/path/to/photo.jpg"``
+    - **Text**: ``"text:KILN"`` or ``"text:Hello World"``
+
+    **Image styles** for raster images:
+
+    - ``"coin"`` — histogram-equalized posterize, best for FDM coin-relief
+    - ``"portrait"`` — edge-detected line art
+    - ``"composite"`` — posterize base + edge overlay hybrid
+    - ``"medallion"`` — coin + raised border ring (premium look)
+    - ``"photo"`` — simple 3-level posterize
+    - ``"stencil"`` — binary silhouette
+    - ``"lithophane"`` — full gradient for backlit prints
+
+    **Examples**::
+
+        decorate_surface(model_path="coaster.stl", content="photo.jpg",
+                         mode="deboss", depth_mm=1.5, image_style="coin")
+
+        decorate_surface(model_path="keychain.stl", content="text:KILN",
+                         face="top", depth_mm=0.5)
+
+    Requires OpenSCAD installed locally for compilation.
+
+    :param model_path: Path to the base model (STL or OBJ).
+    :param content: What to put on the surface — file path (PNG/JPG/SVG)
+        or ``"text:..."`` for text.
+    :param face: Which face to decorate.  ``"auto"`` picks the largest
+        flat face.  Also accepts ``"top"``, ``"bottom"``, ``"front"``,
+        ``"back"``, ``"left"``, ``"right"``.
+    :param depth_mm: Emboss/deboss depth in mm.  ``0`` = auto based on
+        *material* (e.g. 0.6 mm for PLA, 1.2 mm for TPU).
+    :param mode: ``"deboss"`` (cut into surface) or ``"emboss"`` (raised).
+    :param scale: Fraction of the face to cover (0.1-1.0, default 0.7).
+    :param material: Material for depth auto-tuning (default ``"PLA"``).
+    :param content_type: Override auto-detection: ``"svg"``, ``"image"``,
+        ``"text"``.  Default ``"auto"`` detects from *content*.
+    :param offset_x_mm: Horizontal offset from center (mm).
+    :param offset_y_mm: Vertical offset from center (mm).
+    :param image_style: Image preprocessing style.  ``"auto"`` uses
+        ``"coin"`` for photos.  See docstring for all options.
+    :returns: Dict with output STL path, preview info, and metadata.
+    """
+    if err := _check_auth("design:decorate"):
+        return err
+
+    import tempfile
+
+    # --- Validate model ---
+    if not os.path.isfile(model_path):
+        return _error_dict(f"Model not found: {model_path}", code="FILE_NOT_FOUND")
+    model_ext = os.path.splitext(model_path)[1].lower()
+    if model_ext not in (".stl", ".obj"):
+        return _error_dict(
+            f"decorate_surface requires STL or OBJ, got {model_ext!r}.",
+            code="VALIDATION_ERROR",
+        )
+
+    work_dir = os.path.join(tempfile.gettempdir(), "kiln_decorate_surface")
+    os.makedirs(work_dir, mode=0o700, exist_ok=True)
+    warnings: list[str] = []
+
+    try:
+        # --- Step 1: Detect content type ---
+        ctype = content_type.lower().strip()
+        if ctype == "auto":
+            if content.lower().startswith("text:"):
+                ctype = "text"
+            elif os.path.isfile(content):
+                ext = os.path.splitext(content)[1].lower()
+                if ext == ".svg":
+                    ctype = "svg"
+                elif ext in (".png", ".jpg", ".jpeg", ".bmp", ".gif"):
+                    ctype = "image"
+                else:
+                    return _error_dict(
+                        f"Unsupported image format: {ext!r}. Use PNG, JPG, or SVG.",
+                        code="UNSUPPORTED_FORMAT",
+                    )
+            else:
+                return _error_dict(
+                    f"Cannot resolve content: {content!r}. Provide a file path "
+                    f"or 'text:...' for text.",
+                    code="INVALID_CONTENT",
+                )
+
+        # --- Step 2: Prepare content ---
+        content_info: dict[str, Any] = {}
+
+        if ctype == "svg":
+            from kiln.image_to_surface import prepare_svg_for_emboss
+
+            content_info = prepare_svg_for_emboss(content, work_dir)
+
+        elif ctype == "image":
+            from kiln.image_to_surface import prepare_image_for_emboss
+
+            effective_style = image_style if image_style != "auto" else "coin"
+            content_info = prepare_image_for_emboss(
+                content,
+                work_dir,
+                invert=(mode == "deboss"),
+                style=effective_style,
+            )
+
+        elif ctype == "text":
+            from kiln.image_to_surface import generate_text_image
+
+            text_content = content.split(":", 1)[1] if ":" in content else content
+            content_info = generate_text_image(text_content, work_dir)
+
+        else:
+            return _error_dict(
+                f"Unknown content_type: {content_type!r}.",
+                code="VALIDATION_ERROR",
+            )
+
+        # --- Step 3: Find the target face ---
+        from kiln.surface_intelligence import (
+            find_largest_flat_face,
+            find_named_face,
+        )
+
+        face_lower = face.lower().strip()
+        if face_lower == "auto":
+            face_info = find_largest_flat_face(model_path)
+        else:
+            face_info = find_named_face(model_path, face_lower)
+
+        # --- Step 3.5: Print intelligence warnings ---
+        if face_info.get("face_name") == "bottom":
+            center_z = face_info.get("center", (0, 0, 0))[2]
+            if center_z < 0.5:
+                warnings.append(
+                    "Bottom face touches the print bed — details will be "
+                    "flattened by bed adhesion. Consider face='top' instead."
+                )
+
+        # --- Step 4: Resolve depth ---
+        from kiln.emboss_generator import get_default_depth
+
+        effective_depth = depth_mm if depth_mm > 0 else get_default_depth(material)
+
+        nozzle_mm = 0.4
+        if effective_depth < nozzle_mm * 0.5:
+            warnings.append(
+                f"Depth {effective_depth:.1f}mm < half nozzle ({nozzle_mm}mm). "
+                f"Details may not be visible. Try >= {nozzle_mm * 0.75:.1f}mm."
+            )
+
+        # --- Step 5: Generate OpenSCAD ---
+        from kiln.emboss_generator import generate_emboss_scad
+
+        scad_result = generate_emboss_scad(
+            model_path=os.path.abspath(model_path),
+            content_info=content_info,
+            face=face_info,
+            output_dir=work_dir,
+            depth_mm=effective_depth,
+            mode=mode,
+            scale=scale,
+            offset_x_mm=offset_x_mm,
+            offset_y_mm=offset_y_mm,
+        )
+
+        # --- Step 6: Compile to STL ---
+        from kiln.emboss_generator import compile_embossed_model
+
+        compile_result = compile_embossed_model(
+            scad_result["scad_path"],
+            scad_result["output_stl_path"],
+            timeout=600,
+        )
+
+        if not compile_result.get("success"):
+            result_dict: dict[str, Any] = {
+                "status": "compile_failed",
+                "message": (
+                    f"OpenSCAD compilation failed. "
+                    f"Error: {compile_result.get('error', 'unknown')}"
+                ),
+                "scad_path": scad_result["scad_path"],
+                "compile_result": compile_result,
+            }
+            if warnings:
+                result_dict["warnings"] = warnings
+            return result_dict
+
+        # --- Step 6b: Verify boolean actually cut ---
+        from kiln.emboss_generator import check_boolean_success
+
+        output_stl_path = compile_result["stl_path"]
+        abs_model = os.path.abspath(model_path)
+        boolean_ok = check_boolean_success(abs_model, output_stl_path)
+
+        if not boolean_ok and ctype == "svg":
+            # SVG boolean failed — try heightmap fallback
+            try:
+                from kiln.image_to_surface import (
+                    prepare_image_for_emboss,
+                    rasterize_svg_to_png,
+                )
+
+                raster_png = os.path.join(work_dir, "svg_rasterized.png")
+                rasterize_svg_to_png(content, raster_png)
+                content_info = prepare_image_for_emboss(
+                    raster_png,
+                    work_dir,
+                    invert=(mode == "deboss"),
+                )
+                scad_result = generate_emboss_scad(
+                    model_path=abs_model,
+                    content_info=content_info,
+                    face=face_info,
+                    output_dir=work_dir,
+                    depth_mm=effective_depth,
+                    mode=mode,
+                    scale=scale,
+                    offset_x_mm=offset_x_mm,
+                    offset_y_mm=offset_y_mm,
+                )
+                compile_result = compile_embossed_model(
+                    scad_result["scad_path"],
+                    scad_result["output_stl_path"],
+                    timeout=600,
+                )
+                if compile_result.get("success"):
+                    warnings.append(
+                        "SVG boolean produced no geometry change. "
+                        "Fell back to heightmap rasterization (succeeded)."
+                    )
+                else:
+                    warnings.append(
+                        "SVG boolean and heightmap fallback both failed. "
+                        "Convert SVG to PNG and use content_type='image'."
+                    )
+            except Exception as fallback_exc:
+                logger.debug("SVG heightmap fallback failed: %s", fallback_exc)
+                warnings.append(
+                    "SVG boolean produced no geometry change. "
+                    "Convert to PNG and use content_type='image'."
+                )
+        elif not boolean_ok:
+            warnings.append(
+                "Output STL is similar in size to input — the boolean "
+                "may not have produced visible geometry changes."
+            )
+
+        # --- Step 7: Build result ---
+        output_stl = compile_result["stl_path"]
+        file_size = compile_result.get("file_size", 0)
+
+        result_dict = {
+            "status": "success",
+            "message": (
+                f"Successfully {mode}ed content onto "
+                f"{face_info.get('face_name', 'surface')} face of "
+                f"{os.path.basename(model_path)}."
+            ),
+            "output_stl": output_stl,
+            "file_size_bytes": file_size,
+            "face": {
+                "name": face_info.get("face_name"),
+                "area_mm2": round(face_info.get("area_mm2", 0), 1),
+                "width_mm": round(face_info.get("width_mm", 0), 1),
+                "height_mm": round(face_info.get("height_mm", 0), 1),
+            },
+            "decoration": {
+                "content_type": ctype,
+                "mode": mode,
+                "depth_mm": effective_depth,
+                "scale": scale,
+                "material": material,
+                "image_style": image_style,
+            },
+            "compile_time_seconds": compile_result.get("compile_time_seconds"),
+            "scad_path": scad_result["scad_path"],
+        }
+        if warnings:
+            result_dict["warnings"] = warnings
+        return result_dict
+
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except ValueError as exc:
+        return _error_dict(str(exc), code="VALIDATION_ERROR")
+    except Exception as exc:
+        logger.exception("Error in decorate_surface")
+        return _error_dict(
+            f"Failed in decorate_surface: {exc}",
+            code="INTERNAL_ERROR",
+        )
 
 
 _ensure_internal_tool_plugins_registered()

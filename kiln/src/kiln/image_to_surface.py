@@ -426,6 +426,189 @@ def prepare_image_for_emboss(
         except ImportError:
             pass
 
+    elif style == "coin":
+        # Coin-relief: histogram equalization + 4-level posterize.
+        # Best for single-color FDM deboss — produces clean depth tiers
+        # that cast shadows like a coin face. Handles dark subjects
+        # (dark fur, dark clothing) via equalization BEFORE posterize.
+        # Recommended depth: 1.5-2.0mm for visible relief.
+        try:
+            from PIL import Image, ImageFilter, ImageOps
+
+            img = Image.open(image_path).convert("L")
+            img = ImageOps.fit(img, (max_resolution, max_resolution), method=Image.LANCZOS)
+            # Equalize histogram FIRST — critical for dark subjects
+            img = ImageOps.equalize(img)
+            img = ImageOps.autocontrast(img, cutoff=2)
+            # 4-level posterize for clean FDM depth steps
+            step = 256 // 4
+            img = img.point(lambda x: (x // step) * step * 255 // (step * 3))
+            # Circular mask for medallion framing
+            mask = Image.new("L", img.size, 0)
+            from PIL import ImageDraw
+
+            draw = ImageDraw.Draw(mask)
+            cx, cy = img.size[0] // 2, img.size[1] // 2
+            r = min(cx, cy) - 2
+            draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
+            result = Image.new("L", img.size, 0)
+            result.paste(img, mask=mask)
+            preprocessed = os.path.join(output_dir, "preprocessed_coin.png")
+            os.makedirs(output_dir, exist_ok=True)
+            result.save(preprocessed)
+            image_path = preprocessed
+            edge_enhance = False
+        except ImportError:
+            pass
+
+    elif style == "portrait":
+        # Edge-detected portrait: equalize + edge detection + dilation.
+        # Best for: line-art style emboss, subjects with clear outlines.
+        # Not ideal for dark-on-dark subjects (use "coin" instead).
+        # Recommended depth: 0.8-1.5mm.
+        try:
+            from PIL import Image, ImageDraw, ImageFilter, ImageOps
+
+            img = Image.open(image_path).convert("L")
+            img = ImageOps.fit(img, (max_resolution, max_resolution), method=Image.LANCZOS)
+            # Equalize to pull detail from dark areas
+            eq = ImageOps.equalize(img)
+            eq = ImageOps.autocontrast(eq, cutoff=3)
+            smooth = eq.filter(ImageFilter.MedianFilter(size=3))
+            smooth = smooth.filter(ImageFilter.GaussianBlur(radius=0.8))
+            edges = smooth.filter(ImageFilter.FIND_EDGES)
+            edges = edges.point(lambda x: min(255, x * 3))
+            # Laplacian for finer detail
+            lap = smooth.filter(
+                ImageFilter.Kernel(
+                    size=(3, 3),
+                    kernel=[-1, -1, -1, -1, 8, -1, -1, -1, -1],
+                    scale=1,
+                    offset=0,
+                )
+            )
+            lap = lap.point(lambda x: min(255, x * 2))
+            edges = Image.blend(edges, lap, 0.4)
+            edges = edges.point(lambda x: 255 if x > 40 else 0)
+            # Dilate for minimum print width (~0.8mm)
+            edges = edges.filter(ImageFilter.MaxFilter(size=3))
+            edges = edges.filter(ImageFilter.GaussianBlur(radius=0.5))
+            # Circular mask
+            mask = Image.new("L", edges.size, 0)
+            draw = ImageDraw.Draw(mask)
+            cx, cy = edges.size[0] // 2, edges.size[1] // 2
+            r = min(cx, cy) - 2
+            draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
+            result = Image.new("L", edges.size, 0)
+            result.paste(edges, mask=mask)
+            preprocessed = os.path.join(output_dir, "preprocessed_portrait.png")
+            os.makedirs(output_dir, exist_ok=True)
+            result.save(preprocessed)
+            image_path = preprocessed
+            edge_enhance = False
+        except ImportError:
+            pass
+
+    elif style == "composite":
+        # Hybrid: posterized base (volume) + edge overlay (definition).
+        # Combines the clean depth tiers of "coin" with edge sharpness.
+        # Good all-rounder for photos with both broad areas and fine detail.
+        # Recommended depth: 1.0-1.5mm.
+        try:
+            from PIL import Image, ImageDraw, ImageFilter, ImageOps
+
+            img = Image.open(image_path).convert("L")
+            img = ImageOps.fit(img, (max_resolution, max_resolution), method=Image.LANCZOS)
+            # Base: posterized for volume
+            eq = ImageOps.equalize(img)
+            eq = ImageOps.autocontrast(eq, cutoff=2)
+            step = 256 // 4
+            base = eq.point(lambda x: (x // step) * step * 255 // (step * 3))
+            # Overlay: edge detail
+            smooth = img.filter(ImageFilter.MedianFilter(size=3))
+            edge = smooth.filter(ImageFilter.FIND_EDGES)
+            edge = edge.point(lambda x: min(255, x * 3))
+            edge = edge.filter(ImageFilter.MaxFilter(size=3))
+            edge = edge.filter(ImageFilter.GaussianBlur(radius=0.5))
+            # Blend: 70% base + 30% edge
+            comp = Image.blend(base, edge, 0.3)
+            comp = ImageOps.autocontrast(comp, cutoff=1)
+            # Circular mask
+            mask = Image.new("L", comp.size, 0)
+            draw = ImageDraw.Draw(mask)
+            cx, cy = comp.size[0] // 2, comp.size[1] // 2
+            r = min(cx, cy) - 2
+            draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
+            result = Image.new("L", comp.size, 0)
+            result.paste(comp, mask=mask)
+            preprocessed = os.path.join(output_dir, "preprocessed_composite.png")
+            os.makedirs(output_dir, exist_ok=True)
+            result.save(preprocessed)
+            image_path = preprocessed
+            edge_enhance = False
+        except ImportError:
+            pass
+
+    elif style == "medallion":
+        # Coin with raised border ring — like a commemorative medal.
+        # Border ring is full height, relief is 80% height, inner bevel.
+        # Most premium single-color look. Recommended depth: 1.5-2.0mm.
+        try:
+            from PIL import Image, ImageDraw, ImageFilter, ImageOps
+
+            img = Image.open(image_path).convert("L")
+            sz = max_resolution
+            img = ImageOps.fit(img, (sz, sz), method=Image.LANCZOS)
+            # Relief: 5-level posterize + subtle edge enhancement
+            eq = ImageOps.equalize(img)
+            eq = ImageOps.autocontrast(eq, cutoff=2)
+            step = 256 // 5
+            relief = eq.point(lambda x: (x // step) * step * 255 // (step * 4))
+            smooth = img.filter(ImageFilter.MedianFilter(size=3))
+            edge = smooth.filter(ImageFilter.FIND_EDGES)
+            edge = edge.point(lambda x: min(255, x * 2))
+            edge = edge.filter(ImageFilter.MaxFilter(size=3))
+            edge = edge.filter(ImageFilter.GaussianBlur(radius=0.5))
+            relief = Image.blend(relief, edge, 0.25)
+            relief = ImageOps.autocontrast(relief, cutoff=1)
+            # Build medallion structure
+            result = Image.new("L", (sz, sz), 0)
+            draw = ImageDraw.Draw(result)
+            cx, cy = sz // 2, sz // 2
+            r_outer = sz // 2 - 2
+            r_inner = sz // 2 - 8  # 8px border
+            r_relief = r_inner - 3  # gap between border and relief
+            # Outer border ring at full height
+            draw.ellipse([cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer], fill=255)
+            draw.ellipse([cx - r_inner, cy - r_inner, cx + r_inner, cy + r_inner], fill=0)
+            # Relief inside border (scaled to 80% max height)
+            relief_mask = Image.new("L", (sz, sz), 0)
+            ImageDraw.Draw(relief_mask).ellipse(
+                [cx - r_relief, cy - r_relief, cx + r_relief, cy + r_relief], fill=255
+            )
+            relief_scaled = relief.point(lambda x: int(x * 200 / 255))
+            result.paste(relief_scaled, mask=relief_mask)
+            # Inner bevel ring
+            bevel = Image.new("L", (sz, sz), 0)
+            bevel_draw = ImageDraw.Draw(bevel)
+            bevel_draw.ellipse(
+                [cx - r_inner, cy - r_inner, cx + r_inner, cy + r_inner], fill=180
+            )
+            bevel_draw.ellipse(
+                [cx - (r_inner - 2), cy - (r_inner - 2), cx + (r_inner - 2), cy + (r_inner - 2)],
+                fill=0,
+            )
+            result = Image.composite(
+                bevel, result, bevel.point(lambda x: 255 if x > 0 else 0)
+            )
+            preprocessed = os.path.join(output_dir, "preprocessed_medallion.png")
+            os.makedirs(output_dir, exist_ok=True)
+            result.save(preprocessed)
+            image_path = preprocessed
+            edge_enhance = False
+        except ImportError:
+            pass
+
     # style == "default" — no preprocessing, use existing behavior
 
     rows, w, h = _load_image_as_grayscale(image_path)
