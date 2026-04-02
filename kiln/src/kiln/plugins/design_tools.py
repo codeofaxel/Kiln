@@ -1474,20 +1474,25 @@ class _DesignToolsPlugin:
                 return {"status": "error", "error": str(exc)}
 
         @mcp.tool()
-        def compile_scad(scad_code: str) -> dict:
+        def compile_scad(scad_code: str, timeout: int = 300) -> dict:
             """Compile OpenSCAD code into an STL file.
 
             Takes OpenSCAD source code, compiles it using the local OpenSCAD
             binary, and returns the path to the generated STL. Supports
             Kiln's bundled BOSL2 library (MCAD also supported).
 
+            For surface() heightmap operations (photo emboss, lithophane),
+            increase timeout to 600+ seconds.
+
             Args:
                 scad_code: Valid OpenSCAD source code.
+                timeout: Maximum compilation time in seconds (default 300).
+                    Increase for complex surface() operations.
             """
             from kiln.parametric import compile_scad_code
 
             try:
-                stl_path = compile_scad_code(scad_code)
+                stl_path = compile_scad_code(scad_code, timeout=timeout)
                 return {
                     "status": "success",
                     "stl_path": stl_path,

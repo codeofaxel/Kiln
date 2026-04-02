@@ -633,7 +633,7 @@ def compile_scad_code(
     scad_code: str,
     *,
     output_path: str | None = None,
-    timeout: int = 120,
+    timeout: int = 300,
 ) -> str:
     """Compile OpenSCAD code to an STL file.
 
