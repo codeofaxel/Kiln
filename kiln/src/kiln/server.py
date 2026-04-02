@@ -3461,7 +3461,10 @@ def wrap_gcode_as_3mf(
             filament_colors=filament_colors,
             filament_types=filament_types,
         )
-        # Inject thumbnail PNG if provided and not already in the 3MF
+        # Inject thumbnail PNG if provided and not already in the 3MF.
+        # Bambu printers read from Auxiliaries/.thumbnails/ — not just
+        # Metadata/.  Write to all standard locations so the thumbnail
+        # shows on the printer display, in BambuStudio, and in Kiln.
         if thumbnail_path and os.path.isfile(thumbnail_path):
             import zipfile
             thumb_data = Path(thumbnail_path).read_bytes()
@@ -3470,6 +3473,9 @@ def wrap_gcode_as_3mf(
                 for thumb_name in (
                     "Metadata/plate_1.png",
                     "Metadata/top_1.png",
+                    "Auxiliaries/.thumbnails/thumbnail_3mf.png",
+                    "Auxiliaries/.thumbnails/thumbnail_middle.png",
+                    "Auxiliaries/.thumbnails/thumbnail_small.png",
                 ):
                     if thumb_name.lower() not in existing:
                         zf.writestr(thumb_name, thumb_data)

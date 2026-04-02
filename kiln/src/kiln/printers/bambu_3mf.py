@@ -850,7 +850,10 @@ def build_bambu_3mf(
         try:
             with zipfile.ZipFile(source_3mf_path) as zf:
                 for name in zf.namelist():
-                    if name.startswith("Metadata/") and name.endswith(".png"):
+                    if name.endswith(".png") and (
+                        name.startswith("Metadata/")
+                        or name.startswith("Auxiliaries/.thumbnails/")
+                    ):
                         thumbnails[name] = zf.read(name)
                     elif name == "3D/3dmodel.model":
                         model_data = zf.read(name).decode("utf-8")
@@ -867,6 +870,10 @@ def build_bambu_3mf(
             thumb_data = _generate_thumbnail(stl_paths)
             if thumb_data:
                 thumbnails["Metadata/plate_1.png"] = thumb_data
+                thumbnails["Metadata/top_1.png"] = thumb_data
+                thumbnails["Auxiliaries/.thumbnails/thumbnail_3mf.png"] = thumb_data
+                thumbnails["Auxiliaries/.thumbnails/thumbnail_middle.png"] = thumb_data
+                thumbnails["Auxiliaries/.thumbnails/thumbnail_small.png"] = thumb_data
         except Exception:
             pass
 
@@ -969,7 +976,10 @@ def repackage_gcode_as_bambu_3mf(
         try:
             with zipfile.ZipFile(source_3mf_path) as zf:
                 for name in zf.namelist():
-                    if name.startswith("Metadata/") and name.endswith(".png"):
+                    if name.endswith(".png") and (
+                        name.startswith("Metadata/")
+                        or name.startswith("Auxiliaries/.thumbnails/")
+                    ):
                         thumbnails[name] = zf.read(name)
                 # Copy plate metadata for accurate printer display
                 if "Metadata/plate_1.json" in zf.namelist():
