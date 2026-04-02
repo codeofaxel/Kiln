@@ -10292,6 +10292,47 @@ def repair_mesh(file_path: str, output_path: str = "") -> dict:
 
 
 @mcp.tool()
+def splice_mesh_at_z(
+    top_path: str,
+    bottom_path: str,
+    z_plane: float,
+    output_path: str = "",
+) -> dict:
+    """Splice two meshes at a z-plane: top from one STL, bottom from another.
+
+    Takes geometry ABOVE *z_plane* from *top_path* and geometry BELOW
+    *z_plane* from *bottom_path*.  Triangles crossing the boundary are
+    clipped cleanly.  No boolean ops — works on non-manifold meshes.
+
+    **Use case:** Combine a body with the correct top (e.g. logo from
+    v5.3) with a body that has the correct bottom (e.g. larger pocket
+    from v5.4) to create the next design iteration.
+
+    :param top_path: STL providing geometry above z_plane.
+    :param bottom_path: STL providing geometry below z_plane.
+    :param z_plane: Z height (mm) where the splice happens.
+    :param output_path: Output STL path. Auto-generated if empty.
+    :returns: Dict with splice stats and output path.
+    """
+    if err := _check_auth("design:merge"):
+        return err
+    try:
+        from kiln.generation.validation import splice_mesh_at_z as _splice
+
+        if not output_path:
+            import tempfile
+
+            _fd, output_path = tempfile.mkstemp(suffix=".stl", prefix="kiln_splice_")
+            os.close(_fd)
+
+        result = _splice(top_path, bottom_path, z_plane, output_path)
+        return {"status": "success", **result}
+    except Exception as exc:
+        logger.exception("splice_mesh_at_z failed")
+        return _error_dict(f"Splice failed: {exc}", code="SPLICE_ERROR")
+
+
+@mcp.tool()
 def compose_models(file_paths: list[str], output_path: str) -> dict:
     """Merge multiple mesh files into a single combined model.
 

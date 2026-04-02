@@ -945,6 +945,121 @@ def repair_stl(
     }
 
 
+def splice_mesh_at_z(
+    top_path: str,
+    bottom_path: str,
+    z_plane: float,
+    output_path: str,
+) -> dict[str, Any]:
+    """Splice two meshes at a z-plane: keep top from one, bottom from another.
+
+    Takes the top portion (above *z_plane*) from *top_path* and the bottom
+    portion (below *z_plane*) from *bottom_path*, clipping triangles that
+    cross the boundary.  Triangles that straddle the z-plane are split into
+    smaller triangles so the geometry is clean at the seam.
+
+    Use case: combine a body with the correct top surface (e.g. logo) with
+    a body that has the correct bottom geometry (e.g. bigger pocket).
+
+    Args:
+        top_path: STL providing geometry ABOVE z_plane.
+        bottom_path: STL providing geometry BELOW z_plane.
+        z_plane: Z height where the splice happens (mm).
+        output_path: Where to write the combined STL.
+
+    Returns:
+        Dict with triangle counts and splice stats.
+    """
+    top_tris, _ = _parse_stl(Path(top_path), [])
+    bot_tris, _ = _parse_stl(Path(bottom_path), [])
+
+    def _lerp(
+        a: tuple[float, ...], b: tuple[float, ...], t: float,
+    ) -> tuple[float, ...]:
+        return (
+            a[0] + t * (b[0] - a[0]),
+            a[1] + t * (b[1] - a[1]),
+            a[2] + t * (b[2] - a[2]),
+        )
+
+    def _clip_above(
+        tri: tuple[tuple[float, ...], ...], z: float,
+    ) -> list[tuple[tuple[float, ...], ...]]:
+        above = [v for v in tri if v[2] >= z]
+        below = [v for v in tri if v[2] < z]
+        if len(above) == 3:
+            return [tri]
+        if len(above) == 0:
+            return []
+        if len(above) == 1:
+            a = above[0]
+            b, c = below
+            t_ab = (z - a[2]) / (b[2] - a[2]) if b[2] != a[2] else 0.0
+            t_ac = (z - a[2]) / (c[2] - a[2]) if c[2] != a[2] else 0.0
+            return [(a, _lerp(a, b, t_ab), _lerp(a, c, t_ac))]
+        a, b = above
+        c = below[0]
+        t_ac = (z - a[2]) / (c[2] - a[2]) if c[2] != a[2] else 0.0
+        t_bc = (z - b[2]) / (c[2] - b[2]) if c[2] != b[2] else 0.0
+        p_ac, p_bc = _lerp(a, c, t_ac), _lerp(b, c, t_bc)
+        return [(a, b, p_bc), (a, p_bc, p_ac)]
+
+    def _clip_below(
+        tri: tuple[tuple[float, ...], ...], z: float,
+    ) -> list[tuple[tuple[float, ...], ...]]:
+        below = [v for v in tri if v[2] <= z]
+        above = [v for v in tri if v[2] > z]
+        if len(below) == 3:
+            return [tri]
+        if len(below) == 0:
+            return []
+        if len(below) == 1:
+            a = below[0]
+            b, c = above
+            t_ab = (z - a[2]) / (b[2] - a[2]) if b[2] != a[2] else 0.0
+            t_ac = (z - a[2]) / (c[2] - a[2]) if c[2] != a[2] else 0.0
+            return [(a, _lerp(a, b, t_ab), _lerp(a, c, t_ac))]
+        a, b = below
+        c = above[0]
+        t_ac = (z - a[2]) / (c[2] - a[2]) if c[2] != a[2] else 0.0
+        t_bc = (z - b[2]) / (c[2] - b[2]) if c[2] != b[2] else 0.0
+        p_ac, p_bc = _lerp(a, c, t_ac), _lerp(b, c, t_bc)
+        return [(a, b, p_bc), (a, p_bc, p_ac)]
+
+    result: list[tuple[tuple[float, ...], ...]] = []
+    top_kept = top_clipped = 0
+    for tri in top_tris:
+        clipped = _clip_above(tri, z_plane)
+        if clipped:
+            if len(clipped) != 1 or clipped[0] != tri:
+                top_clipped += 1
+            top_kept += len(clipped)
+            result.extend(clipped)
+
+    bot_kept = bot_clipped = 0
+    for tri in bot_tris:
+        clipped = _clip_below(tri, z_plane)
+        if clipped:
+            if len(clipped) != 1 or clipped[0] != tri:
+                bot_clipped += 1
+            bot_kept += len(clipped)
+            result.extend(clipped)
+
+    _write_binary_stl(result, output_path)
+
+    return {
+        "path": output_path,
+        "total_triangles": len(result),
+        "top_source": top_path,
+        "top_triangles_kept": top_kept,
+        "top_triangles_clipped": top_clipped,
+        "bottom_source": bottom_path,
+        "bottom_triangles_kept": bot_kept,
+        "bottom_triangles_clipped": bot_clipped,
+        "z_plane": z_plane,
+    }
+
+
 def compose_stls(
     file_paths: list[str],
     output_path: str,
