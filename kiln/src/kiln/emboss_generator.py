@@ -546,7 +546,7 @@ def check_boolean_success(input_stl: str, output_stl: str, *, tolerance: float =
 
 
 # ---------------------------------------------------------------------------
-# QR code OpenSCAD module (2D-safe)
+# QR code OpenSCAD module — Pro feature, lives in kiln-pro
 # ---------------------------------------------------------------------------
 
 def generate_qr_openscad_module(
@@ -555,53 +555,18 @@ def generate_qr_openscad_module(
     target_size_mm: float = 38.0,
     border: int = 1,
 ) -> tuple[str, dict]:
-    """Generate an OpenSCAD module for a QR code using 2D squares.
+    """Generate an OpenSCAD module for a QR code (Pro feature).
 
-    Uses ``square()`` + ``linear_extrude()`` instead of ``cube()`` to
-    avoid non-manifold meshes from adjacent cubes sharing edges.
-    OpenSCAD's 2D union properly merges touching squares before
-    extrusion, producing a single clean solid.
+    QR code generation is a paid feature. The implementation lives in
+    the kiln-pro package.
 
-    Returns a tuple of (scad_code, metadata) where metadata contains
-    module count, module size, and total size.
-
-    Requires the ``qrcode`` package.
+    Raises :class:`ImportError` if kiln-pro is not installed.
     """
-    import qrcode
-
-    qr = qrcode.QRCode(
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
-        box_size=1,
-        border=border,
-    )
-    qr.add_data(url)
-    qr.make(fit=True)
-    matrix = qr.get_matrix()
-    modules = len(matrix)
-    mod_size = target_size_mm / modules
-
-    lines = [f"module {module_name}() {{"]
-    lines.append(f"  // QR code: {modules}x{modules} modules, {mod_size:.2f}mm each")
-    lines.append(f"  // URL: {url}")
-    lines.append("  linear_extrude(height=1)")
-    lines.append("    union() {")
-
-    for y, row in enumerate(matrix):
-        for x, cell in enumerate(row):
-            if cell:
-                px = x * mod_size - target_size_mm / 2
-                py = (modules - 1 - y) * mod_size - target_size_mm / 2
-                lines.append(f"      translate([{px:.3f}, {py:.3f}]) square([{mod_size:.3f}, {mod_size:.3f}]);")
-
-    lines.append("    }")
-    lines.append("}")
-
-    metadata = {
-        "modules": modules,
-        "module_size_mm": round(mod_size, 3),
-        "total_size_mm": target_size_mm,
-        "dark_count": sum(cell for row in matrix for cell in row),
-        "border": border,
-    }
-
-    return "\n".join(lines), metadata
+    try:
+        from kiln_pro.decoration.qr_openscad import generate_qr_openscad_module as _impl
+    except ImportError:
+        raise ImportError(
+            "QR code generation is a Pro feature. "
+            "Upgrade at https://kiln3d.com/pricing"
+        ) from None
+    return _impl(url, module_name=module_name, target_size_mm=target_size_mm, border=border)
