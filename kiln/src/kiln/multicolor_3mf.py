@@ -764,15 +764,14 @@ def compose_multicolor_3mf(
 
     # Compose human summary
     safety_note = ""
-    if safety_result:
-        if safety_result["level"] in ("caution", "conditional"):
+    if safety_result and safety_result["level"] in ("caution", "conditional"):
             safety_note = f" ⚠️  {safety_result['message']}"
 
     result["message"] = (
         f"Created {len(parsed)}-color 3MF with {total_t:,} triangles. "
         f"Extruder assignments: {extruder_summary}. "
         f"Compatible with BambuStudio (AMS), PrusaSlicer (MMU), and Cura."
-        + (f" Flush matrix embedded for purge tower sizing." if flush_matrix_str else "")
+        + (" Flush matrix embedded for purge tower sizing." if flush_matrix_str else "")
         + safety_note
         + f" Next step: upload_file('{output_path}') then start_print()."
     )

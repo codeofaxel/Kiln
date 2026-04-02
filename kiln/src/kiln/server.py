@@ -2143,7 +2143,6 @@ def monitor_print(
         _tool_changes = 0
         if file_name:
             try:
-                from kiln.gcode_metadata import extract_gcode_metadata
                 from kiln.printers.base import PrinterFile
 
                 # Check if we have the file locally (in prints dir or temp)

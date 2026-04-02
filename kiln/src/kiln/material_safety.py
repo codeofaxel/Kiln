@@ -157,7 +157,7 @@ _COMPAT: dict[frozenset, dict[str, Any]] = {
     # -----------------------------------------------------------------------
     # PLA pairings
     # -----------------------------------------------------------------------
-    frozenset({"PLA", "PLA"}): {
+    frozenset({"PLA"}): {
         "level": "ok",
         "purge_volume_mm3": 30,
         "warning": None,
@@ -250,7 +250,7 @@ _COMPAT: dict[frozenset, dict[str, Any]] = {
     # -----------------------------------------------------------------------
     # PETG pairings
     # -----------------------------------------------------------------------
-    frozenset({"PETG", "PETG"}): {
+    frozenset({"PETG"}): {
         "level": "ok",
         "purge_volume_mm3": 40,
         "warning": None,
@@ -289,7 +289,7 @@ _COMPAT: dict[frozenset, dict[str, Any]] = {
     # -----------------------------------------------------------------------
     # ABS / ASA pairings
     # -----------------------------------------------------------------------
-    frozenset({"ABS", "ABS"}): {
+    frozenset({"ABS"}): {
         "level": "ok",
         "purge_volume_mm3": 40,
         "warning": "Enclosure required for all ABS printing.",
@@ -320,7 +320,7 @@ _COMPAT: dict[frozenset, dict[str, Any]] = {
                    "ABS requires enclosure / high bed temp that will deform TPU sections.",
         "mitigations": ["Do not pair ABS and TPU."],
     },
-    frozenset({"ASA", "ASA"}): {
+    frozenset({"ASA"}): {
         "level": "ok",
         "purge_volume_mm3": 40,
         "warning": "Enclosure required for all ASA printing.",
@@ -329,7 +329,7 @@ _COMPAT: dict[frozenset, dict[str, Any]] = {
     # -----------------------------------------------------------------------
     # TPU / flexible
     # -----------------------------------------------------------------------
-    frozenset({"TPU", "TPU"}): {
+    frozenset({"TPU"}): {
         "level": "ok",
         "purge_volume_mm3": 60,
         "warning": None,
@@ -456,7 +456,7 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
 
     if incompatible_pairs:
         message = (
-            f"⛔ INCOMPATIBLE MATERIALS: "
+            "⛔ INCOMPATIBLE MATERIALS: "
             + "; ".join(
                 f"{p['material_a']} + {p['material_b']}" for p in incompatible_pairs
             )
@@ -464,15 +464,15 @@ def check_material_compatibility(materials: list[str]) -> dict[str, Any]:
         )
     elif worst_level == "conditional":
         message = (
-            f"⚠️  Conditional compatibility. Review mitigations before printing: "
+            "⚠️  Conditional compatibility. Review mitigations before printing: "
             + "; ".join(p["warning"] for p in pairs if p.get("warning"))
         )
     elif worst_level == "caution":
         message = (
-            f"⚠️  Printable with precautions. Review warnings before starting."
+            "⚠️  Printable with precautions. Review warnings before starting."
         )
     else:
-        message = f"✅ All material pairings are compatible."
+        message = "✅ All material pairings are compatible."
 
     return {
         "safe": is_safe,
