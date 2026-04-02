@@ -496,7 +496,7 @@ def quick_print(
             adapter = _registry.get_adapter(printer_name) if printer_name else _registry.get_default_adapter()
             ctx["adapter"] = adapter
             upload_result = adapter.upload_file(ctx["gcode_path"])
-            remote_name = upload_result.get("name", os.path.basename(ctx["gcode_path"]))
+            remote_name = getattr(upload_result, "file_name", None) or os.path.basename(ctx["gcode_path"])
             ctx["remote_name"] = remote_name
             return PipelineStep(
                 name="upload",
@@ -525,12 +525,12 @@ def quick_print(
                     duration_seconds=time.time() - step_start,
                 )
             state = adapter.get_state()
-            checks_passed = state.connected and state.status.value == "idle"
+            checks_passed = state.connected and state.state.value == "idle"
             return PipelineStep(
                 name="preflight",
                 success=checks_passed,
-                message="Printer ready" if checks_passed else f"Printer not ready: {state.status.value}",
-                data={"connected": state.connected, "status": state.status.value},
+                message="Printer ready" if checks_passed else f"Printer not ready: {state.state.value}",
+                data={"connected": state.connected, "status": state.state.value},
                 duration_seconds=time.time() - step_start,
             )
         except Exception as exc:
@@ -778,7 +778,7 @@ def reslice_and_print(
                     )
 
             upload_result = adapter.upload_file(upload_path)
-            remote_name = upload_result.get("name", os.path.basename(upload_path))
+            remote_name = getattr(upload_result, "file_name", None) or os.path.basename(upload_path)
             ctx["remote_name"] = remote_name
             ctx["local_3mf_path"] = upload_path if wrapped_3mf else None
             return PipelineStep(
@@ -809,12 +809,12 @@ def reslice_and_print(
                     duration_seconds=time.time() - step_start,
                 )
             state = adapter.get_state()
-            checks_passed = state.connected and state.status.value == "idle"
+            checks_passed = state.connected and state.state.value == "idle"
             return PipelineStep(
                 name="preflight",
                 success=checks_passed,
-                message="Printer ready" if checks_passed else f"Printer not ready: {state.status.value}",
-                data={"connected": state.connected, "status": state.status.value},
+                message="Printer ready" if checks_passed else f"Printer not ready: {state.state.value}",
+                data={"connected": state.connected, "status": state.state.value},
                 duration_seconds=time.time() - step_start,
             )
         except Exception as exc:
@@ -920,7 +920,7 @@ def calibrate(
                 name="connect",
                 success=state.connected,
                 message="Connected" if state.connected else "Printer offline",
-                data={"status": state.status.value, "connected": state.connected},
+                data={"status": state.state.value, "connected": state.connected},
                 duration_seconds=time.time() - step_start,
             )
         )
@@ -1146,7 +1146,7 @@ def benchmark(
 
         adapter = _registry.get_adapter(printer_name) if printer_name else _registry.get_default_adapter()
         upload_result = adapter.upload_file(gcode_path)
-        remote_name = upload_result.get("name", os.path.basename(gcode_path))
+        remote_name = getattr(upload_result, "file_name", None) or os.path.basename(gcode_path)
         steps.append(
             PipelineStep(
                 name="upload",

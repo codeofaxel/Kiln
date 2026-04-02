@@ -3406,6 +3406,10 @@ def wrap_gcode_as_3mf(
     bed_temp: int = 65,
     filament_type: str = "PLA",
     source_3mf_path: str | None = None,
+    num_filaments: int = 1,
+    filament_colors: list[str] | None = None,
+    filament_types: list[str] | None = None,
+    thumbnail_path: str | None = None,
 ) -> dict:
     """Wrap raw PrusaSlicer G-code in a Bambu-compatible 3MF (Bambu Lab only).
 
@@ -3424,6 +3428,13 @@ def wrap_gcode_as_3mf(
             ``"ABS"``, etc.
         source_3mf_path: Optional path to a source 3MF to copy
             thumbnails and geometry from.
+        num_filaments: Number of filaments (>1 for multi-color prints).
+        filament_colors: List of hex color strings per filament
+            (e.g. ``["#898989FF", "#161616FF"]``).
+        filament_types: List of filament type strings per filament
+            (e.g. ``["PLA", "PLA"]``).
+        thumbnail_path: Optional path to a PNG image to embed as the
+            3MF thumbnail (shown on the printer's display).
 
     Returns a dict with ``output_path`` pointing to the generated 3MF.
     Use ``upload_file()`` to send it to the printer, then ``start_print()``
@@ -3447,13 +3458,29 @@ def wrap_gcode_as_3mf(
             bed_temp=bed_temp,
             filament_type=filament_type,
             source_3mf_path=source_3mf_path,
+            num_filaments=num_filaments,
+            filament_colors=filament_colors,
+            filament_types=filament_types,
         )
+        # Inject thumbnail PNG if provided and not already in the 3MF
+        if thumbnail_path and os.path.isfile(thumbnail_path):
+            import zipfile
+            thumb_data = Path(thumbnail_path).read_bytes()
+            with zipfile.ZipFile(output_path, "a") as zf:
+                existing = {n.lower() for n in zf.namelist()}
+                for thumb_name in (
+                    "Metadata/plate_1.png",
+                    "Metadata/top_1.png",
+                ):
+                    if thumb_name.lower() not in existing:
+                        zf.writestr(thumb_name, thumb_data)
         _audit("wrap_gcode_as_3mf", "executed", details={"gcode_path": gcode_path})
         return {
             "status": "success",
             "output_path": output_path,
             "gcode_path": gcode_path,
             "filament_type": filament_type,
+            "num_filaments": num_filaments,
         }
     except FileNotFoundError as exc:
         return _error_dict(f"G-code file not found: {exc}")
@@ -9841,22 +9868,34 @@ def rescale_model(
     target_height_mm: float | None = None,
     scale_factor: float | None = None,
     max_dimension_mm: float | None = None,
+    scale_x: float | None = None,
+    scale_y: float | None = None,
+    scale_z: float | None = None,
 ) -> dict:
     """Rescale an STL model to meet dimensional targets.
 
     Useful when a generated model is the wrong size for the printer's
     build volume or doesn't match the desired dimensions.
 
-    Provide exactly ONE of the three scaling options:
+    **Uniform scaling** — provide exactly ONE of:
+
     - ``target_height_mm``: Scale so Z-axis equals this value.
     - ``scale_factor``: Uniform multiplier (2.0 = double size).
     - ``max_dimension_mm``: Scale down so largest axis fits this limit.
+
+    **Per-axis scaling** — provide ``scale_x``, ``scale_y``, and/or
+    ``scale_z``.  Omitted axes default to 1.0 (no change).
+
+    Cannot combine uniform and per-axis options.
 
     Args:
         file_path: Path to the STL file to rescale (modified in-place).
         target_height_mm: Desired Z-axis height in mm.
         scale_factor: Uniform scale multiplier.
         max_dimension_mm: Maximum dimension on any axis.
+        scale_x: Per-axis X scale factor.
+        scale_y: Per-axis Y scale factor.
+        scale_z: Per-axis Z scale factor.
     """
     if err := _check_auth("generate"):
         return err
@@ -9868,6 +9907,9 @@ def rescale_model(
             target_height_mm=target_height_mm,
             scale_factor=scale_factor,
             max_dimension_mm=max_dimension_mm,
+            scale_x=scale_x,
+            scale_y=scale_y,
+            scale_z=scale_z,
         )
         return {
             "success": True,
@@ -16198,7 +16240,9 @@ def multi_material_print(
         # Step 1: Look up material properties for each object
         from kiln.design_intelligence import get_material_profile
 
-        unique_materials: dict[str, int] = {}  # material_id → filament_index
+        # Key on (material_id, color) so the same material in two
+        # different colors gets separate filament slots.
+        unique_filaments: dict[tuple[str, str], int] = {}
         filament_idx = 0
         build_objects: list[dict[str, Any]] = []
 
@@ -16211,10 +16255,6 @@ def multi_material_print(
                     code="NOT_FOUND",
                 )
 
-            if mat_id not in unique_materials:
-                unique_materials[mat_id] = filament_idx
-                filament_idx += 1
-
             # Resolve color — prefer user-specified, then material default
             color = obj.get("color")
             if not color:
@@ -16223,21 +16263,30 @@ def multi_material_print(
                     "#FFFFFFFF", "#FF0000FF", "#0000FFFF", "#00FF00FF",
                     "#000000FF", "#FFFF00FF", "#FF00FFFF", "#00FFFFFF",
                 ]
-                color = default_colors[unique_materials[mat_id] % len(default_colors)]
+                # Assign a default based on how many filaments we've seen
+                color = default_colors[filament_idx % len(default_colors)]
+
+            filament_key = (mat_id, color)
+            if filament_key not in unique_filaments:
+                unique_filaments[filament_key] = filament_idx
+                filament_idx += 1
 
             build_objects.append({
                 "file_path": obj["file_path"],
-                "filament_index": unique_materials[mat_id],
+                "filament_index": unique_filaments[filament_key],
                 "name": obj.get("name", _os.path.basename(obj["file_path"])),
                 "color": color,
                 "material_name": profile.display_name,
             })
 
+        # Derive unique material IDs for thermal checks
+        unique_mat_ids = {mat_id for mat_id, _color in unique_filaments}
+
         # Step 1b: Thermal compatibility check across all materials
         # A single-nozzle printer uses ONE temperature for all materials.
         # If materials have incompatible thermal ranges, refuse the print.
         mat_profiles: dict[str, Any] = {}
-        for mat_id in unique_materials:
+        for mat_id in unique_mat_ids:
             prof = get_material_profile(mat_id)
             if prof is not None:
                 mat_profiles[mat_id] = prof
@@ -16297,7 +16346,7 @@ def multi_material_print(
         max_bed = 0
         dominant_mat: str | None = None
         dominant_overrides: dict[str, str] = {}
-        for mat_id in unique_materials:
+        for mat_id in unique_mat_ids:
             mat_result = build_material_overrides(mat_id, printer_id)
             if mat_result.get("success"):
                 ov = mat_result["overrides"]
@@ -16345,26 +16394,58 @@ def multi_material_print(
                         "nylon": ["PA", "Nylon"],
                     }
 
+                    def _normalize_hex(h: str) -> str:
+                        """Strip '#' and alpha, uppercase for comparison."""
+                        h = h.lstrip("#").upper()
+                        if len(h) == 8:
+                            h = h[:6]  # strip alpha channel
+                        return h
+
+                    # Sort filaments by index for deterministic mapping
+                    sorted_filaments = sorted(
+                        unique_filaments.items(), key=lambda kv: kv[1]
+                    )
+
                     mapping = []
                     all_found = True
-                    for mat_id in sorted(unique_materials, key=lambda m: unique_materials[m]):
+                    for (mat_id, req_color), _fil_idx in sorted_filaments:
                         expected = mat_type_map.get(mat_id, [mat_id.upper()])
+                        req_hex = _normalize_hex(req_color)
                         found_slot: int | None = None
+                        # First pass: match both material type AND color
                         for unit in ams_result.get("units", []):
                             for tray in unit.get("trays", []):
                                 ttype = (tray.get("tray_type") or "").strip()
-                                if ttype in expected and tray.get("slot") not in mapping:
+                                tray_color = _normalize_hex(
+                                    tray.get("tray_color") or tray.get("color") or ""
+                                )
+                                if (
+                                    ttype in expected
+                                    and tray_color == req_hex
+                                    and tray.get("slot") not in mapping
+                                ):
                                     found_slot = tray.get("slot", 0)
-                                    ams_info.append({
-                                        "material": mat_id,
-                                        "slot": found_slot,
-                                        "tray_type": ttype,
-                                    })
                                     break
                             if found_slot is not None:
                                 break
+                        # Fallback: match material type only (ignore color)
+                        if found_slot is None:
+                            for unit in ams_result.get("units", []):
+                                for tray in unit.get("trays", []):
+                                    ttype = (tray.get("tray_type") or "").strip()
+                                    if ttype in expected and tray.get("slot") not in mapping:
+                                        found_slot = tray.get("slot", 0)
+                                        break
+                                if found_slot is not None:
+                                    break
                         if found_slot is not None:
                             mapping.append(found_slot)
+                            ams_info.append({
+                                "material": mat_id,
+                                "color": req_color,
+                                "slot": found_slot,
+                                "tray_type": (tray.get("tray_type") or "").strip(),
+                            })
                         else:
                             all_found = False
                             break
@@ -16393,12 +16474,12 @@ def multi_material_print(
                 {"name": o["name"], "material": o["material_name"], "filament_index": o["filament_index"]}
                 for o in build_objects
             ]
-            result["materials_used"] = list(unique_materials.keys())
+            result["materials_used"] = list(unique_mat_ids)
             result["dominant_material"] = dominant_mat
             result["ams_mapping"] = ams_info if ams_info else None
             result["multi_material_3mf"] = output_3mf
             # Warn when AMS mapping was not established
-            if len(unique_materials) > 1 and not ams_info:
+            if len(unique_filaments) > 1 and not ams_info:
                 result["ams_warning"] = (
                     "No AMS slot mapping was established. Multi-material per-object "
                     "assignment requires a Bambu printer with AMS, or a multi-extruder "
@@ -16411,6 +16492,78 @@ def multi_material_print(
         logger.exception("Error in multi_material_print")
         return _error_dict(
             f"Failed in multi_material_print: {exc}",
+            code="INTERNAL_ERROR",
+        )
+
+
+@mcp.tool()
+def merge_multicolor_gcode(
+    parts: str,
+    output_path: str = "",
+) -> dict:
+    """Merge separately-sliced gcode files into one multi-tool gcode.
+
+    Uses a batched strategy that minimises tool changes for multi-color
+    prints.  Parts with overlapping Z ranges are printed in tool order
+    within the overlap zone, then remaining layers continue above.
+
+    This is the key step between slicing individual parts and wrapping
+    as a Bambu 3MF.  The merged gcode contains T0/T1/... tool change
+    commands that ``wrap_gcode_as_3mf`` converts to M620/M621 AMS
+    load sequences.
+
+    **Precondition:** Parts must be **XY-disjoint** (non-overlapping
+    footprints on the build plate).  The batched merge prints each
+    tool's layers independently in the overlap zone — overlapping XY
+    regions will cause collisions.
+
+    Args:
+        parts: JSON array of part objects.  Each must have:
+
+            - ``gcode_path``: Path to the sliced ``.gcode`` file.
+            - ``tool_index``: Tool number (0, 1, ...) for AMS mapping.
+            - ``name``: Human-readable name (e.g. ``"body_grey"``).
+
+            Example::
+
+                [
+                  {"gcode_path": "/path/body.gcode", "tool_index": 0, "name": "body"},
+                  {"gcode_path": "/path/qr.gcode", "tool_index": 1, "name": "qr_pads"}
+                ]
+
+        output_path: Output file path.  Defaults to a temp directory.
+
+    Returns a dict with ``output_path``, merge phases, layer count,
+    and estimated print time.
+    """
+    if err := _check_auth("slicer"):
+        return err
+    try:
+        import json as _json
+
+        parsed_parts = _json.loads(parts) if isinstance(parts, str) else parts
+        if not isinstance(parsed_parts, list):
+            return _error_dict("parts must be a JSON array of part objects.")
+        for p in parsed_parts:
+            if not isinstance(p, dict):
+                return _error_dict("Each part must be a JSON object.")
+            for key in ("gcode_path", "tool_index", "name"):
+                if key not in p:
+                    return _error_dict(f"Missing required key {key!r} in part: {p}")
+
+        from kiln.slicer import merge_multipart_gcode
+
+        result = merge_multipart_gcode(
+            parsed_parts,
+            output_path=output_path or None,
+        )
+        return {"success": True, **result}
+    except ValueError as exc:
+        return _error_dict(str(exc))
+    except Exception as exc:
+        logger.exception("Unexpected error in merge_multicolor_gcode")
+        return _error_dict(
+            f"Failed to merge gcode: {exc}",
             code="INTERNAL_ERROR",
         )
 

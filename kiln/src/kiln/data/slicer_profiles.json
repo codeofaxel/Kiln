@@ -363,6 +363,7 @@
       "max_fan_speed": "100",
       "disable_fan_first_layers": "2",
       "use_relative_e_distances": "1",
+      "layer_gcode": "G92 E0",
       "start_gcode": "",
       "end_gcode": "",
       "retract_length": "0.8",

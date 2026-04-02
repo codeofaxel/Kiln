@@ -38,28 +38,38 @@ logger = logging.getLogger(__name__)
 # in include/use statements for security.
 _SAFE_LIBRARY_PREFIXES = ("BOSL2/", "MCAD/")
 
-# Dangerous patterns that can read arbitrary files from disk.
-_DANGEROUS_PATTERNS = [
-    r"\bimport\s*\(",  # import() can read arbitrary files
-    r"\bsurface\s*\(",  # surface() reads files from disk
-]
+# File-IO patterns that need path validation before compiling.
+_FILE_IO_PATTERN = re.compile(
+    r"\b(import|surface)\s*\(\s*\"([^\"]+)\"", re.IGNORECASE
+)
 
 
-def _check_scad_security(code: str) -> None:
+def _check_scad_security(code: str, *, allow_local_files: bool = True) -> None:
     """Validate OpenSCAD code against security rules.
 
-    Raises :class:`ValueError` if the code contains dangerous operations
-    (``import()``, ``surface()``) or references non-bundled libraries.
-    This MUST be called before any code path that compiles OpenSCAD.
+    When *allow_local_files* is ``True`` (default), ``import()`` and
+    ``surface()`` are permitted **only** for absolute paths to files
+    that already exist on the local filesystem.  This is safe because
+    the agent already has filesystem access.
+
+    Raises :class:`ValueError` on violations.
     """
     if len(code) > 100_000:
         raise ValueError("OpenSCAD code too large (max 100KB).")
 
-    for pattern in _DANGEROUS_PATTERNS:
-        if re.search(pattern, code, re.IGNORECASE):
+    for match in _FILE_IO_PATTERN.finditer(code):
+        func_name = match.group(1)
+        file_ref = match.group(2)
+        if not allow_local_files:
             raise ValueError(
-                f"OpenSCAD code contains blocked operation matching {pattern}. "
+                f"OpenSCAD {func_name}() is blocked in this context. "
                 f"File I/O operations are not allowed for security."
+            )
+        resolved = Path(file_ref).resolve()
+        if not resolved.is_file():
+            raise ValueError(
+                f"OpenSCAD {func_name}() references a file that does "
+                f"not exist: {file_ref!r}"
             )
 
     if not _has_only_safe_includes(code):
@@ -104,6 +114,29 @@ def _has_only_safe_includes(code: str) -> bool:
         if not any(path.startswith(prefix) for prefix in _SAFE_LIBRARY_PREFIXES):
             return False
     return True
+
+
+_openscad_has_L_flag: bool | None = None
+
+
+def _supports_library_flag(binary: str) -> bool:
+    """Check if the OpenSCAD binary supports ``-L`` for library paths.
+
+    OpenSCAD 2021.01 and older do not support ``-L``.  We cache the
+    result so we only run the check once per process.
+    """
+    global _openscad_has_L_flag
+    if _openscad_has_L_flag is not None:
+        return _openscad_has_L_flag
+    try:
+        result = subprocess.run(
+            [binary, "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        _openscad_has_L_flag = "-L" in result.stdout or "-L" in result.stderr
+    except Exception:
+        _openscad_has_L_flag = False
+    return _openscad_has_L_flag
 
 
 _MACOS_APP_PATH = "/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD" if sys.platform == "darwin" else ""
@@ -244,7 +277,7 @@ class OpenSCADProvider(GenerationProvider):
             binary = self._require_binary()
             lib_path = _get_bundled_library_path()
             cmd = [binary, "-o", out_path]
-            if os.path.isdir(lib_path):
+            if os.path.isdir(lib_path) and _supports_library_flag(binary):
                 cmd.extend(["-L", lib_path])
             cmd.append(scad_path)
             logger.info("OpenSCAD: %s", " ".join(cmd))
@@ -530,7 +563,7 @@ class OpenSCADProvider(GenerationProvider):
             binary = self._require_binary()
             lib_path = _get_bundled_library_path()
             cmd = [binary, "-o", null_out]
-            if os.path.isdir(lib_path):
+            if os.path.isdir(lib_path) and _supports_library_flag(binary):
                 cmd.extend(["-L", lib_path])
             cmd.append(scad_path)
 

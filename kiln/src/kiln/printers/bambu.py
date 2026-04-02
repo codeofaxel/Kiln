@@ -838,6 +838,17 @@ class BambuAdapter(PrinterAdapter):
                 self._host,
                 reason_code,
             )
+            # On auth failure (rc=5 "Not authorized", rc=4 "Bad credentials"),
+            # stop the client to prevent infinite reconnect spam that floods
+            # the printer's MQTT broker and can destabilize other connections.
+            if rc in (4, 5):
+                logger.warning(
+                    "Stopping MQTT client for %s due to auth failure — "
+                    "check access code and re-register the printer",
+                    self._host,
+                )
+                self._safe_stop_client(client)
+                self._mqtt_client = None
             return
 
         client.subscribe(self._topic_report, qos=0)

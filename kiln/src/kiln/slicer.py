@@ -641,3 +641,185 @@ def _merge_multicolor_gcode(gcode_bodies: list[str]) -> str:
         parts.append("")
 
     return "\n".join(parts)
+
+
+def merge_multipart_gcode(
+    parts: list[dict[str, Any]],
+    *,
+    output_path: str | None = None,
+) -> dict[str, Any]:
+    """Merge separately-sliced gcode files into one multi-tool gcode.
+
+    Uses a **batched** strategy that minimises tool changes: parts are
+    grouped by Z-height overlap so the printer completes all layers of
+    one tool in the overlap zone before switching, then continues with
+    whichever tool has layers remaining.
+
+    .. note::
+
+        Parts **must be XY-disjoint** — their printed footprints must not
+        overlap on the build plate.  The batched merge prints each tool's
+        layers independently in the overlap zone; if parts share XY space,
+        the later tool will collide with the earlier tool's deposited
+        material.
+
+    Each entry in *parts* must have:
+
+    - ``gcode_path``: Path to the ``.gcode`` file.
+    - ``tool_index``: Tool number (T0, T1, ...) for AMS mapping.
+    - ``name``: Human-readable name (e.g. ``"body_grey"``).
+
+    :param parts: List of part dicts.
+    :param output_path: Output file path.  Defaults to a temp file.
+    :returns: Dict with ``output_path``, ``total_layers``, ``phases``,
+        and ``estimated_time_sec``.
+    :raises ValueError: If parts list is empty or files not found.
+    """
+    import re as _re
+    import tempfile as _tempfile
+
+    if not parts:
+        raise ValueError("No parts to merge.")
+
+    # Parse each gcode into header + [(z, block), ...]
+    parsed: list[tuple[str, list[tuple[float, str]], dict[str, Any]]] = []
+    for p in parts:
+        gcode_path = p["gcode_path"]
+        if not os.path.isfile(gcode_path):
+            raise ValueError(f"Gcode file not found: {gcode_path}")
+
+        with open(gcode_path) as f:
+            lines = f.readlines()
+
+        header_lines: list[str] = []
+        layers: list[tuple[float, str]] = []
+        current_block: list[str] = []
+        current_z: float | None = None
+        found_first = False
+
+        for line in lines:
+            if ";LAYER_CHANGE" in line and not found_first:
+                found_first = True
+            if not found_first:
+                header_lines.append(line)
+                continue
+            if ";LAYER_CHANGE" in line and current_block and current_z is not None:
+                layers.append((current_z, "".join(current_block)))
+                current_block = []
+                current_z = None
+            current_block.append(line)
+            m = _re.match(r"^;Z:([\d.]+)", line)
+            if m:
+                current_z = float(m.group(1))
+
+        if current_block and current_z is not None:
+            layers.append((current_z, "".join(current_block)))
+
+        if not layers:
+            raise ValueError(
+                f"Part {p['name']!r} ({gcode_path}) has zero parsed layers. "
+                "Ensure the gcode contains ;LAYER_CHANGE markers."
+            )
+
+        parsed.append(("".join(header_lines), layers, p))
+
+    # Find the Z overlap range — the max Z of the shortest part
+    z_maxes = [max(z for z, _ in layers) if layers else 0.0 for _, layers, _ in parsed]
+    overlap_ceiling = min(z_maxes)
+
+    # Use the first part's header as the merged header
+    merged_header = parsed[0][0]
+
+    # Build tool names for the merge comment
+    tool_names = ", ".join(
+        f"T{p['tool_index']}={p['name']}" for p in parts
+    )
+    total_layers = max(len(layers) for _, layers, _ in parsed)
+
+    # Build merged output using batched strategy:
+    # Phase 1: For each part (in tool_index order), emit its overlap layers
+    # Phase 2: For each part with layers above the overlap, emit those
+    sorted_parts = sorted(enumerate(parsed), key=lambda x: x[1][2]["tool_index"])
+    phases: list[dict[str, Any]] = []
+    merged_blocks: list[str] = []
+
+    merged_blocks.append(merged_header)
+    merged_blocks.append(
+        f"; Kiln multi-color merge: {len(parts)} parts, "
+        f"{total_layers} layers, tools: {tool_names}\n"
+    )
+
+    for _idx, (_header, layers, part_info) in sorted_parts:
+        tool = part_info["tool_index"]
+        name = part_info["name"]
+        overlap = [(z, blk) for z, blk in layers if z <= overlap_ceiling]
+        above = [(z, blk) for z, blk in layers if z > overlap_ceiling]
+
+        if overlap:
+            merged_blocks.append(f"; --- Tool change: T{tool} ({name}) ---\n")
+            merged_blocks.append(f"T{tool}\n")
+            merged_blocks.append("G92 E0\n")
+            for _z, blk in overlap:
+                merged_blocks.append(blk)
+            phases.append({
+                "tool": tool,
+                "name": name,
+                "zone": "overlap",
+                "layers": len(overlap),
+                "z_range": f"{overlap[0][0]}-{overlap[-1][0]}mm",
+            })
+
+    for _idx, (_header, layers, part_info) in sorted_parts:
+        tool = part_info["tool_index"]
+        name = part_info["name"]
+        above = [(z, blk) for z, blk in layers if z > overlap_ceiling]
+
+        if above:
+            merged_blocks.append(f"; --- Tool change: T{tool} ({name}) ---\n")
+            merged_blocks.append(f"T{tool}\n")
+            merged_blocks.append("G92 E0\n")
+            for _z, blk in above:
+                merged_blocks.append(blk)
+            phases.append({
+                "tool": tool,
+                "name": name,
+                "zone": "upper",
+                "layers": len(above),
+                "z_range": f"{above[0][0]}-{above[-1][0]}mm",
+            })
+
+    merged_body = "".join(merged_blocks)
+
+    # Compute total time estimate by summing all slicer estimates
+    total_time = 0
+    for line in merged_body.split("\n"):
+        m = _re.search(
+            r"estimated printing time \(normal mode\).*?=\s*"
+            r"(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?",
+            line,
+            _re.IGNORECASE,
+        )
+        if m:
+            total_time += (
+                int(m.group(1) or 0) * 86400
+                + int(m.group(2) or 0) * 3600
+                + int(m.group(3) or 0) * 60
+                + int(m.group(4) or 0)
+            )
+
+    if not output_path:
+        output_path = os.path.join(
+            _tempfile.mkdtemp(prefix="kiln_merge_"),
+            "merged_multicolor.gcode",
+        )
+
+    with open(output_path, "w") as f:
+        f.write(merged_body)
+
+    return {
+        "output_path": output_path,
+        "total_layers": total_layers,
+        "phases": phases,
+        "estimated_time_sec": total_time,
+        "parts_merged": len(parts),
+    }

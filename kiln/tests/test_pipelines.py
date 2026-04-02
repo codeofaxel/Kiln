@@ -499,7 +499,7 @@ class TestResliceAndPrintPipeline:
         mock_adapter.upload_file.return_value = {"name": "out.gcode"}
         state = MagicMock()
         state.connected = True
-        state.status.value = "idle"
+        state.state.value = "idle"
         mock_adapter.get_state.return_value = state
         mock_registry.get_adapter.return_value = mock_adapter
 
@@ -548,7 +548,7 @@ class TestResliceAndPrintPipeline:
         mock_adapter.upload_file.return_value = {"name": "out.3mf"}
         state = MagicMock()
         state.connected = True
-        state.status.value = "idle"
+        state.state.value = "idle"
         mock_adapter.get_state.return_value = state
         mock_registry.get_adapter.return_value = mock_adapter
 
@@ -624,7 +624,7 @@ class TestResliceAndPrintPipeline:
         mock_adapter.upload_file.return_value = {"name": "out.gcode"}
         state = MagicMock()
         state.connected = False
-        state.status.value = "offline"
+        state.state.value = "offline"
         mock_adapter.get_state.return_value = state
         mock_registry.get_adapter.return_value = mock_adapter
 

@@ -2513,6 +2513,9 @@ class TestWrapGcodeAs3mf:
             bed_temp=60,
             filament_type="PLA",
             source_3mf_path=None,
+            num_filaments=1,
+            filament_colors=None,
+            filament_types=None,
         )
 
     @patch("kiln.server._get_adapter")
@@ -2578,6 +2581,9 @@ class TestWrapGcodeAs3mf:
             bed_temp=65,
             filament_type="PLA",
             source_3mf_path="/tmp/source.3mf",
+            num_filaments=1,
+            filament_colors=None,
+            filament_types=None,
         )
 
     @patch("kiln.server._get_adapter")

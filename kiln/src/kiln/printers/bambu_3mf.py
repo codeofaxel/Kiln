@@ -253,32 +253,27 @@ def _extract_slicer_time_estimate(gcode_body: str) -> int:
 
         ; estimated printing time (normal mode) = 1h 23m 45s
 
-    OrcaSlicer uses a similar format.  Returns seconds, or 0 if no
-    estimate is found.
-    """
-    # PrusaSlicer puts the time estimate in a footer that can be 300–500+
-    # lines from the end (after a long block of `; key = value` settings).
-    # Search the first 300 and last 600 lines to cover both header and
-    # footer locations across PrusaSlicer, OrcaSlicer, and BambuStudio.
-    lines = gcode_body.split("\n")
-    search_lines = lines[:300] + lines[-600:]
+    OrcaSlicer uses a similar format.  For merged multi-part gcodes that
+    contain multiple "normal mode" estimates (one per sliced part), all
+    estimates are summed to produce the total print time.
 
-    for line in search_lines:
-        m = re.search(
-            r"estimated printing time.*?=\s*"
-            r"(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?",
-            line,
-            re.IGNORECASE,
-        )
-        if m:
-            d = int(m.group(1) or 0)
-            h = int(m.group(2) or 0)
-            mins = int(m.group(3) or 0)
-            s = int(m.group(4) or 0)
-            total = d * 86400 + h * 3600 + mins * 60 + s
-            if total > 0:
-                return total
-    return 0
+    Returns seconds, or 0 if no estimate is found.
+    """
+    total_seconds = 0
+
+    for m in re.finditer(
+        r"estimated printing time \(normal mode\).*?=\s*"
+        r"(?:(\d+)d\s*)?(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?",
+        gcode_body,
+        re.IGNORECASE,
+    ):
+        d = int(m.group(1) or 0)
+        h = int(m.group(2) or 0)
+        mins = int(m.group(3) or 0)
+        s = int(m.group(4) or 0)
+        total_seconds += d * 86400 + h * 3600 + mins * 60 + s
+
+    return total_seconds
 
 
 def _count_layers(gcode_body: str) -> int:

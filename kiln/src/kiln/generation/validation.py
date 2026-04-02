@@ -1355,26 +1355,43 @@ def rescale_stl(
     target_height_mm: float | None = None,
     scale_factor: float | None = None,
     max_dimension_mm: float | None = None,
+    scale_x: float | None = None,
+    scale_y: float | None = None,
+    scale_z: float | None = None,
     output_path: str | None = None,
 ) -> dict[str, Any]:
     """Rescale an STL file to meet dimensional targets.
 
-    Exactly one of ``target_height_mm``, ``scale_factor``, or
-    ``max_dimension_mm`` must be provided.
+    **Uniform scaling** — provide exactly one of ``target_height_mm``,
+    ``scale_factor``, or ``max_dimension_mm``.
+
+    **Per-axis scaling** — provide ``scale_x``, ``scale_y``, and/or
+    ``scale_z``.  Omitted axes default to 1.0.
+
+    Cannot combine uniform and per-axis options.
 
     Args:
         file_path: Path to the input STL file.
         target_height_mm: Desired Z-axis height in mm.
         scale_factor: Uniform scale multiplier (e.g., 2.0 = double).
         max_dimension_mm: Scale down so the largest axis fits this limit.
+        scale_x: X-axis scale multiplier (default 1.0).
+        scale_y: Y-axis scale multiplier (default 1.0).
+        scale_z: Z-axis scale multiplier (default 1.0).
         output_path: Output file path.  Defaults to overwriting input.
 
     Returns:
         Dict with ``path``, ``scale_applied``, ``original_dimensions``,
         and ``new_dimensions``.
     """
-    opts = sum(x is not None for x in (target_height_mm, scale_factor, max_dimension_mm))
-    if opts != 1:
+    uniform_opts = sum(x is not None for x in (target_height_mm, scale_factor, max_dimension_mm))
+    per_axis = any(x is not None for x in (scale_x, scale_y, scale_z))
+
+    if uniform_opts and per_axis:
+        raise ValueError("Cannot combine uniform scaling with per-axis scaling.")
+    if not uniform_opts and not per_axis:
+        raise ValueError("Provide uniform (target_height_mm/scale_factor/max_dimension_mm) or per-axis (scale_x/y/z).")
+    if uniform_opts > 1:
         raise ValueError("Exactly one of target_height_mm, scale_factor, or max_dimension_mm required.")
 
     path = Path(file_path)
@@ -1392,12 +1409,16 @@ def rescale_stl(
         "height_mm": round(bbox["z_max"] - bbox["z_min"], 2),
     }
 
-    # Compute scale
-    if target_height_mm is not None:
+    # Compute scale factors (sx, sy, sz)
+    if per_axis:
+        sx = scale_x if scale_x is not None else 1.0
+        sy = scale_y if scale_y is not None else 1.0
+        sz = scale_z if scale_z is not None else 1.0
+    elif target_height_mm is not None:
         current_h = bbox["z_max"] - bbox["z_min"]
         if current_h < 0.001:
             raise ValueError("Model has near-zero height, cannot scale to target.")
-        sf = target_height_mm / current_h
+        sx = sy = sz = target_height_mm / current_h
     elif max_dimension_mm is not None:
         largest = max(
             bbox["x_max"] - bbox["x_min"],
@@ -1406,28 +1427,30 @@ def rescale_stl(
         )
         if largest < 0.001:
             raise ValueError("Model has near-zero dimensions, cannot scale.")
-        sf = max_dimension_mm / largest if largest > max_dimension_mm else 1.0
+        sx = sy = sz = max_dimension_mm / largest if largest > max_dimension_mm else 1.0
     else:
-        sf = scale_factor  # type: ignore[assignment]
+        sx = sy = sz = scale_factor  # type: ignore[assignment]
 
-    # Apply uniform scale to all vertices
+    # Apply scale to all vertices
     scaled_triangles: list[tuple[tuple[float, ...], ...]] = []
     for tri in triangles:
-        scaled_tri = tuple((v[0] * sf, v[1] * sf, v[2] * sf) for v in tri)
+        scaled_tri = tuple((v[0] * sx, v[1] * sy, v[2] * sz) for v in tri)
         scaled_triangles.append(scaled_tri)
 
     out = output_path or file_path
     _write_binary_stl(scaled_triangles, out)
 
     new_dims = {
-        "width_mm": round(orig_dims["width_mm"] * sf, 2),
-        "depth_mm": round(orig_dims["depth_mm"] * sf, 2),
-        "height_mm": round(orig_dims["height_mm"] * sf, 2),
+        "width_mm": round(orig_dims["width_mm"] * sx, 2),
+        "depth_mm": round(orig_dims["depth_mm"] * sy, 2),
+        "height_mm": round(orig_dims["height_mm"] * sz, 2),
     }
+
+    scale_applied = {"x": round(sx, 4), "y": round(sy, 4), "z": round(sz, 4)} if per_axis else round(sx, 4)
 
     return {
         "path": out,
-        "scale_applied": round(sf, 4),
+        "scale_applied": scale_applied,
         "original_dimensions": orig_dims,
         "new_dimensions": new_dims,
     }

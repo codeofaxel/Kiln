@@ -299,7 +299,7 @@ class TestMeshRescaling:
         path = self._write_cube_stl(tmp_path)
         with pytest.raises(ValueError, match="Exactly one"):
             rescale_stl(path, target_height_mm=50.0, scale_factor=2.0)
-        with pytest.raises(ValueError, match="Exactly one"):
+        with pytest.raises(ValueError, match="Provide uniform"):
             rescale_stl(path)
 
 
