@@ -136,13 +136,14 @@ class VisualVerifier:
             with os.fdopen(scad_fd, "w") as fh:
                 # Use an import statement to load the STL inside OpenSCAD
                 escaped = stl_path.replace("\\", "\\\\").replace('"', '\\"')
-                fh.write(f'import("{escaped}");\n')
+                fh.write(f'color("#AAAAAA") import("{escaped}");\n')
 
             cmd = [
                 self._openscad,
-                "--render",
+                "--preview",
                 "-o", png_path,
                 "--imgsize=800,600",
+                "--colorscheme=DeepOcean",
                 "--camera=0,0,0,55,0,25,200",
                 scad_path,
             ]
@@ -223,7 +224,7 @@ class VisualVerifier:
         try:
             with os.fdopen(scad_fd, "w") as fh:
                 escaped = stl_path.replace("\\", "\\\\").replace('"', '\\"')
-                fh.write(f'import("{escaped}");\n')
+                fh.write(f'color("#AAAAAA") import("{escaped}");\n')
 
             png_paths: list[str] = []
             for label, camera_arg in self._ANGLES:
@@ -234,9 +235,10 @@ class VisualVerifier:
 
                 cmd = [
                     self._openscad,
-                    "--render",
+                    "--preview",
                     "-o", png_path,
                     "--imgsize=800,600",
+                    "--colorscheme=DeepOcean",
                     camera_arg,
                     scad_path,
                 ]

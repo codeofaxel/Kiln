@@ -496,7 +496,8 @@ class OpenSCADProvider(GenerationProvider):
             binary,
             "-o", output_path,
             f"--imgsize={width},{height}",
-            "--render",
+            "--preview",
+            "--colorscheme=DeepOcean",
         ]
         if camera:
             cmd.extend(["--camera", camera])

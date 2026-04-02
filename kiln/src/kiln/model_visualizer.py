@@ -168,10 +168,11 @@ def _make_scad_wrapper(model_path: str) -> str:
         return model_path  # OpenSCAD can render directly
 
     # For STL, OBJ, 3MF — create a wrapper that imports the file
+    # Use neutral grey instead of OpenSCAD's default yellow
     escaped = model_path.replace("\\", "\\\\").replace('"', '\\"')
     fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_viz_")
     with os.fdopen(fd, "w") as fh:
-        fh.write(f'import("{escaped}");\n')
+        fh.write(f'color("#AAAAAA") import("{escaped}");\n')
     return scad_path
 
 
@@ -257,11 +258,11 @@ def visualize_model(
 
             cmd = [
                 openscad,
-                "--render",
+                "--preview",
                 "-o", png_path,
                 f"--imgsize={width},{height}",
                 f"--camera={camera}",
-                "--colorscheme=Cornfield",
+                "--colorscheme=DeepOcean",
                 scad_path,
             ]
 
