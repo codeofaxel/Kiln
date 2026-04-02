@@ -863,17 +863,37 @@ def build_bambu_3mf(
             )
 
     # If no thumbnails were extracted and STL paths are available,
-    # generate a thumbnail via OpenSCAD (best-effort).
+    # generate a thumbnail via OpenSCAD (best-effort), resized to
+    # BambuStudio's expected dimensions per path.
     if not thumbnails and stl_paths:
         try:
             from kiln.multicolor_3mf import _generate_thumbnail
             thumb_data = _generate_thumbnail(stl_paths)
             if thumb_data:
-                thumbnails["Metadata/plate_1.png"] = thumb_data
-                thumbnails["Metadata/top_1.png"] = thumb_data
-                thumbnails["Auxiliaries/.thumbnails/thumbnail_3mf.png"] = thumb_data
-                thumbnails["Auxiliaries/.thumbnails/thumbnail_middle.png"] = thumb_data
-                thumbnails["Auxiliaries/.thumbnails/thumbnail_small.png"] = thumb_data
+                _thumb_specs: dict[str, tuple[int, int]] = {
+                    "Metadata/plate_1.png": (512, 512),
+                    "Metadata/plate_1_small.png": (128, 128),
+                    "Metadata/top_1.png": (512, 512),
+                    "Metadata/pick_1.png": (512, 512),
+                    "Auxiliaries/.thumbnails/thumbnail_3mf.png": (240, 180),
+                    "Auxiliaries/.thumbnails/thumbnail_middle.png": (680, 510),
+                    "Auxiliaries/.thumbnails/thumbnail_small.png": (251, 188),
+                }
+                try:
+                    from io import BytesIO
+
+                    from PIL import Image
+
+                    src_img = Image.open(BytesIO(thumb_data))
+                    for name, (tw, th) in _thumb_specs.items():
+                        resized = src_img.resize((tw, th), Image.LANCZOS)
+                        buf = BytesIO()
+                        resized.save(buf, format="PNG")
+                        thumbnails[name] = buf.getvalue()
+                except ImportError:
+                    # Pillow not available — use raw data for all paths
+                    for name in _thumb_specs:
+                        thumbnails[name] = thumb_data
         except Exception:
             pass
 

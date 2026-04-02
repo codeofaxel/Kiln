@@ -3463,22 +3463,50 @@ def wrap_gcode_as_3mf(
         )
         # Inject thumbnail PNG if provided and not already in the 3MF.
         # Bambu printers read from Auxiliaries/.thumbnails/ — not just
-        # Metadata/.  Write to all standard locations so the thumbnail
-        # shows on the printer display, in BambuStudio, and in Kiln.
+        # Metadata/.  Each path expects a specific resolution matching
+        # BambuStudio's output format.
         if thumbnail_path and os.path.isfile(thumbnail_path):
             import zipfile
-            thumb_data = Path(thumbnail_path).read_bytes()
-            with zipfile.ZipFile(output_path, "a") as zf:
-                existing = {n.lower() for n in zf.namelist()}
-                for thumb_name in (
-                    "Metadata/plate_1.png",
-                    "Metadata/top_1.png",
-                    "Auxiliaries/.thumbnails/thumbnail_3mf.png",
-                    "Auxiliaries/.thumbnails/thumbnail_middle.png",
-                    "Auxiliaries/.thumbnails/thumbnail_small.png",
-                ):
-                    if thumb_name.lower() not in existing:
-                        zf.writestr(thumb_name, thumb_data)
+
+            try:
+                from PIL import Image
+                from io import BytesIO
+
+                src_img = Image.open(thumbnail_path)
+
+                # BambuStudio thumbnail spec: path → (width, height)
+                _THUMB_SPECS: dict[str, tuple[int, int]] = {
+                    "Metadata/plate_1.png": (512, 512),
+                    "Metadata/plate_1_small.png": (128, 128),
+                    "Metadata/top_1.png": (512, 512),
+                    "Metadata/pick_1.png": (512, 512),
+                    "Auxiliaries/.thumbnails/thumbnail_3mf.png": (240, 180),
+                    "Auxiliaries/.thumbnails/thumbnail_middle.png": (680, 510),
+                    "Auxiliaries/.thumbnails/thumbnail_small.png": (251, 188),
+                }
+
+                with zipfile.ZipFile(output_path, "a") as zf:
+                    existing = {n.lower() for n in zf.namelist()}
+                    for thumb_name, (tw, th) in _THUMB_SPECS.items():
+                        if thumb_name.lower() not in existing:
+                            resized = src_img.resize((tw, th), Image.LANCZOS)
+                            buf = BytesIO()
+                            resized.save(buf, format="PNG")
+                            zf.writestr(thumb_name, buf.getvalue())
+            except ImportError:
+                # Pillow not available — fall back to raw copy
+                thumb_data = Path(thumbnail_path).read_bytes()
+                with zipfile.ZipFile(output_path, "a") as zf:
+                    existing = {n.lower() for n in zf.namelist()}
+                    for thumb_name in (
+                        "Metadata/plate_1.png",
+                        "Metadata/top_1.png",
+                        "Auxiliaries/.thumbnails/thumbnail_3mf.png",
+                        "Auxiliaries/.thumbnails/thumbnail_middle.png",
+                        "Auxiliaries/.thumbnails/thumbnail_small.png",
+                    ):
+                        if thumb_name.lower() not in existing:
+                            zf.writestr(thumb_name, thumb_data)
         _audit("wrap_gcode_as_3mf", "executed", details={"gcode_path": gcode_path})
         return {
             "status": "success",
@@ -6711,19 +6739,22 @@ def reslice_with_overrides(
             code="UNSUPPORTED_FORMAT",
         )
 
-    # -- Parse overrides --
+    # -- Parse overrides (accept both JSON string and dict) --
     parsed_overrides: dict[str, str] = {}
     if overrides is not None:
-        try:
-            parsed_overrides = _json.loads(overrides)
-        except (_json.JSONDecodeError, TypeError) as exc:
-            return _error_dict(
-                f"Invalid overrides JSON: {exc}",
-                code="VALIDATION_ERROR",
-            )
-        if not isinstance(parsed_overrides, dict):
-            return _error_dict(
-                "Overrides must be a JSON object (dict), "
+        if isinstance(overrides, dict):
+            parsed_overrides = {str(k): str(v) for k, v in overrides.items()}
+        else:
+            try:
+                parsed_overrides = _json.loads(overrides)
+            except (_json.JSONDecodeError, TypeError) as exc:
+                return _error_dict(
+                    f"Invalid overrides JSON: {exc}",
+                    code="VALIDATION_ERROR",
+                )
+            if not isinstance(parsed_overrides, dict):
+                return _error_dict(
+                    "Overrides must be a JSON object (dict), "
                 f"got {type(parsed_overrides).__name__}.",
                 code="VALIDATION_ERROR",
             )
