@@ -1474,25 +1474,36 @@ class _DesignToolsPlugin:
                 return {"status": "error", "error": str(exc)}
 
         @mcp.tool()
-        def compile_scad(scad_code: str, timeout: int = 300) -> dict:
+        def compile_scad(scad_code: str = "", scad_path: str = "", timeout: int = 300) -> dict:
             """Compile OpenSCAD code into an STL file.
 
-            Takes OpenSCAD source code, compiles it using the local OpenSCAD
-            binary, and returns the path to the generated STL. Supports
-            Kiln's bundled BOSL2 library (MCAD also supported).
+            Takes OpenSCAD source code OR a path to a .scad file, compiles
+            it using the local OpenSCAD binary, and returns the path to the
+            generated STL. Supports Kiln's bundled BOSL2 library.
 
             For surface() heightmap operations (photo emboss, lithophane),
             increase timeout to 600+ seconds.
 
             Args:
-                scad_code: Valid OpenSCAD source code.
+                scad_code: Valid OpenSCAD source code (provide this OR scad_path).
+                scad_path: Path to a .scad file (provide this OR scad_code).
                 timeout: Maximum compilation time in seconds (default 300).
-                    Increase for complex surface() operations.
             """
+            import os
+
             from kiln.parametric import compile_scad_code
 
             try:
-                stl_path = compile_scad_code(scad_code, timeout=timeout)
+                code = scad_code
+                if not code and scad_path:
+                    if not os.path.isfile(scad_path):
+                        return {"status": "error", "error": f"File not found: {scad_path}"}
+                    with open(scad_path, encoding="utf-8") as f:
+                        code = f.read()
+                if not code:
+                    return {"status": "error", "error": "Provide scad_code or scad_path"}
+
+                stl_path = compile_scad_code(code, timeout=timeout)
                 return {
                     "status": "success",
                     "stl_path": stl_path,

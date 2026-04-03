@@ -3416,6 +3416,7 @@ def wrap_gcode_as_3mf(
     filament_colors: list[str] | None = None,
     filament_types: list[str] | None = None,
     thumbnail_path: str | None = None,
+    stl_path: str | None = None,
 ) -> dict:
     """Wrap raw PrusaSlicer G-code in a Bambu-compatible 3MF (Bambu Lab only).
 
@@ -3441,6 +3442,9 @@ def wrap_gcode_as_3mf(
             (e.g. ``["PLA", "PLA"]``).
         thumbnail_path: Optional path to a PNG image to embed as the
             3MF thumbnail (shown on the printer's display).
+        stl_path: Optional path to the source STL file.  When provided,
+            a thumbnail is auto-generated from the model geometry via
+            OpenSCAD (512x512, shown on the Bambu printer screen).
 
     Returns a dict with ``output_path`` pointing to the generated 3MF.
     Use ``upload_file()`` to send it to the printer, then ``start_print()``
@@ -3458,6 +3462,7 @@ def wrap_gcode_as_3mf(
                 "Other printers accept G-code files directly via upload_file().",
                 code="UNSUPPORTED",
             )
+        stl_paths = [stl_path] if stl_path and os.path.isfile(stl_path) else None
         output_path = adapter.wrap_gcode_as_3mf(
             gcode_path,
             hotend_temp=hotend_temp,
@@ -3467,6 +3472,7 @@ def wrap_gcode_as_3mf(
             num_filaments=num_filaments,
             filament_colors=filament_colors,
             filament_types=filament_types,
+            stl_paths=stl_paths,
         )
         # Inject thumbnail PNG if provided and not already in the 3MF.
         # Bambu printers read from Auxiliaries/.thumbnails/ — not just
