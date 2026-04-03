@@ -759,6 +759,92 @@ def _convert_strokes_to_fills(svg_content: str, min_stroke_width: float = 0.0) -
     return result
 
 
+def _svg_to_openscad_polygons(svg_content: str) -> str:
+    """Convert SVG geometry to native OpenSCAD polygon() calls.
+
+    Bypasses OpenSCAD's unreliable SVG import() — native polygon()
+    calls work reliably in difference() against any mesh complexity.
+    This is the approach that made coaster v4's logo deboss work perfectly.
+
+    Parses ``<polygon>``, ``<rect>``, and ``<circle>`` elements from the
+    SVG and emits equivalent OpenSCAD 2D geometry.  Text elements are
+    not supported (stripped by ``_convert_strokes_to_fills``).
+
+    :returns: OpenSCAD code string with ``union() { polygon(...); ... }``
+              or empty string if no extractable geometry.
+    """
+    import math as _math
+
+    fragments: list[str] = []
+
+    # Extract <polygon points="x1,y1 x2,y2 ..."> elements
+    for match in re.finditer(r'<polygon\b[^>]*points\s*=\s*"([^"]+)"', svg_content):
+        points_str = match.group(1).strip()
+        pts: list[tuple[float, float]] = []
+        for pt in points_str.split():
+            parts = pt.split(",")
+            if len(parts) >= 2:
+                try:
+                    pts.append((float(parts[0]), float(parts[1])))
+                except ValueError:
+                    continue
+        if len(pts) >= 3:
+            pts_scad = ", ".join(f"[{x:.2f},{y:.2f}]" for x, y in pts)
+            fragments.append(f"polygon(points=[{pts_scad}]);")
+
+    # Extract <rect x="..." y="..." width="..." height="..."> elements
+    # (skip full-viewBox background rects)
+    for match in re.finditer(r'<rect\b([^>]*)/?>', svg_content):
+        attrs = match.group(1)
+        rw_m = re.search(r'\bwidth\s*=\s*"([^"]+)"', attrs)
+        rh_m = re.search(r'\bheight\s*=\s*"([^"]+)"', attrs)
+        if not (rw_m and rh_m):
+            continue
+        try:
+            rw = float(rw_m.group(1))
+            rh = float(rh_m.group(1))
+        except ValueError:
+            continue
+        # Skip viewBox-filling background rects
+        if rw >= 500 and rh >= 500:
+            continue
+        rx_m = re.search(r'\bx\s*=\s*"([^"]+)"', attrs)
+        ry_m = re.search(r'\by\s*=\s*"([^"]+)"', attrs)
+        rx = float(rx_m.group(1)) if rx_m else 0.0
+        ry = float(ry_m.group(1)) if ry_m else 0.0
+        fragments.append(
+            f"translate([{rx:.2f},{ry:.2f}]) square([{rw:.2f},{rh:.2f}]);"
+        )
+
+    # Extract <circle cx="..." cy="..." r="..."> elements
+    for match in re.finditer(
+        r'<circle\b[^>]*?cx\s*=\s*"([^"]+)"[^>]*?cy\s*=\s*"([^"]+)"'
+        r'[^>]*?r\s*=\s*"([^"]+)"',
+        svg_content,
+    ):
+        try:
+            cx = float(match.group(1))
+            cy = float(match.group(2))
+            r = float(match.group(3))
+        except ValueError:
+            continue
+        # Approximate circle as 60-point polygon
+        n = 60
+        pts = []
+        for i in range(n):
+            a = 2 * _math.pi * i / n
+            pts.append((cx + r * _math.cos(a), cy + r * _math.sin(a)))
+        pts_scad = ", ".join(f"[{x:.2f},{y:.2f}]" for x, y in pts)
+        fragments.append(f"polygon(points=[{pts_scad}]);")
+
+    if not fragments:
+        return ""
+
+    # Wrap all geometry in a union
+    body = "\n    ".join(fragments)
+    return f"union() {{\n    {body}\n}}"
+
+
 def prepare_svg_for_emboss(svg_path: str, output_dir: str, *, min_physical_width_mm: float = 0.8, target_size_mm: float = 0.0) -> dict:
     """Validate and prepare an SVG file for use with OpenSCAD's import().
 
@@ -913,6 +999,12 @@ def prepare_svg_for_emboss(svg_path: str, output_dir: str, *, min_physical_width
             except ValueError:
                 pass
 
+    # Extract native OpenSCAD polygon geometry from SVG.
+    # This bypasses OpenSCAD's unreliable SVG import() — native polygon()
+    # calls work reliably in difference() against any mesh complexity.
+    # Proven approach: coaster v4 used native square()/hull() geometry.
+    openscad_polygons = _svg_to_openscad_polygons(final_svg)
+
     result = {
         "type": "svg",
         "svg_path": abs_path,
@@ -920,6 +1012,9 @@ def prepare_svg_for_emboss(svg_path: str, output_dir: str, *, min_physical_width
         "height": height,
         "aspect_ratio": aspect,
     }
+
+    if openscad_polygons:
+        result["openscad_polygons"] = openscad_polygons
 
     # Add content bounds if we found any geometry
     if content_x_min is not None and content_x_max is not None:

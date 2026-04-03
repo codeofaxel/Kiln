@@ -164,24 +164,25 @@ def _distance_from_stl(stl_path: str) -> float:
     return max(50.0, min(distance, 5000.0))  # clamp to sane range
 
 
-def _make_scad_wrapper(model_path: str) -> str:
+def _make_scad_wrapper(model_path: str, *, color: str = "#AAAAAA") -> str:
     """Create a temporary .scad file that imports the model.
 
-    For STL/OBJ: uses import().
+    For STL/OBJ: uses import() with color().
     For 3MF: extracts the first STL-like geometry via import().
     For SCAD: returns the file path directly (no wrapper needed).
+
+    :param color: Hex color string (e.g. "#F72323" for red) or named color.
     """
     ext = Path(model_path).suffix.lower()
 
     if ext == ".scad":
         return model_path  # OpenSCAD can render directly
 
-    # For STL, OBJ, 3MF — create a wrapper that imports the file
-    # Use neutral grey instead of OpenSCAD's default yellow
     escaped = model_path.replace("\\", "\\\\").replace('"', '\\"')
+    safe_color = color.replace('"', '\\"')
     fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_viz_")
     with os.fdopen(fd, "w") as fh:
-        fh.write(f'color("#AAAAAA") import("{escaped}");\n')
+        fh.write(f'color("{safe_color}") import("{escaped}");\n')
     return scad_path
 
 
@@ -192,6 +193,7 @@ def visualize_model(
     width: int = 800,
     height: int = 600,
     angles: list[str] | None = None,
+    color: str = "",
     timeout: int = 120,
 ) -> dict:
     """Render a 3D model from multiple camera angles.
@@ -249,7 +251,8 @@ def visualize_model(
     os.makedirs(output_dir, mode=0o700, exist_ok=True)
 
     # Create SCAD wrapper if needed
-    scad_path = _make_scad_wrapper(file_path)
+    render_color = color if color else "#AAAAAA"
+    scad_path = _make_scad_wrapper(file_path, color=render_color)
     is_wrapper = scad_path != file_path
 
     # Auto-detect optimal camera distance from bounding box

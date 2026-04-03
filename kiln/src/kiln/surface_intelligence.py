@@ -288,6 +288,81 @@ def _face_centroid(group: dict[str, Any]) -> tuple[float, float, float]:
 
 
 # ---------------------------------------------------------------------------
+# Z-level sub-grouping for bowl/tray face disambiguation
+# ---------------------------------------------------------------------------
+
+# Minimum Z gap (mm) to consider two surfaces as distinct.
+# 1.5mm is safe: tessellation wobble is ±0.1mm, FDM layer height is 0.2mm,
+# so anything >1mm apart is definitely a separate surface.
+_Z_GAP_THRESHOLD_MM = 1.5
+
+
+def _subgroup_by_z_level(group: dict[str, Any]) -> list[dict[str, Any]]:
+    """Split a face group into sub-groups by Z-level clustering.
+
+    Bowl-shaped models (ashtrays, trays) have interior floors AND exterior
+    rims that both face upward (normal=[0,0,1]).  Without Z-splitting,
+    they merge into one face with an averaged centroid that lands inside
+    the wall — wrong for decoration placement.
+
+    Uses gap-based clustering: sort triangle centroids by Z, split wherever
+    two consecutive centroids are >1.5mm apart.  Continuous curves (frisbee
+    dome) have no gap and stay as one group.
+    """
+    tris = group["triangles"]
+    if not tris:
+        return [group]
+
+    # Compute per-triangle Z centroid and area
+    tri_data: list[tuple[float, float, dict[str, Any]]] = []
+    for tri in tris:
+        v1, v2, v3 = tri["vertices"]
+        area = _triangle_area(v1, v2, v3)
+        z_mid = (v1[2] + v2[2] + v3[2]) / 3.0
+        tri_data.append((z_mid, area, tri))
+
+    tri_data.sort(key=lambda t: t[0])
+
+    # Gap-based clustering
+    clusters: list[list[tuple[float, float, dict[str, Any]]]] = []
+    current: list[tuple[float, float, dict[str, Any]]] = [tri_data[0]]
+
+    for i in range(1, len(tri_data)):
+        if tri_data[i][0] - tri_data[i - 1][0] > _Z_GAP_THRESHOLD_MM:
+            clusters.append(current)
+            current = []
+        current.append(tri_data[i])
+    clusters.append(current)
+
+    # Only one cluster — no split needed
+    if len(clusters) == 1:
+        return [group]
+
+    # Build sub-group dicts
+    result: list[dict[str, Any]] = []
+    total_area = sum(t[1] for t in tri_data)
+
+    for cluster in clusters:
+        cluster_tris = [t[2] for t in cluster]
+        cluster_area = sum(t[1] for t in cluster)
+
+        # Discard tiny artifact clusters (<1% of total face area)
+        if cluster_area < total_area * 0.01:
+            continue
+
+        z_values = [t[0] for t in cluster]
+        result.append({
+            "normal": group["normal"],
+            "_weighted_normal": group.get("_weighted_normal", group["normal"]),
+            "triangles": cluster_tris,
+            "area_mm2": cluster_area,
+            "_z_level": sum(z_values) / len(z_values),
+        })
+
+    return result if result else [group]
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -337,11 +412,18 @@ def find_largest_flat_face(stl_path: str, tolerance_deg: float = 10.0) -> dict[s
     if not groups:
         raise ValueError(f"No valid face groups found in {stl_path}")
 
+    # Sub-group by Z-level to separate bowl floors from rims.
+    # Without this, an ashtray's floor (z=3) and rim (z=20) merge into
+    # one "top" face with centroid at z~5 (inside the wall = wrong).
+    expanded: list[dict[str, Any]] = []
+    for g in groups:
+        expanded.extend(_subgroup_by_z_level(g))
+
     # Among faces of similar area (within 5%), prefer top > front > sides
     # because users almost always want to decorate the top/visible face.
     _FACE_PREFERENCE = {"top": 0, "front": 1, "right": 2, "left": 3, "back": 4, "bottom": 5}
-    max_area = max(g["area_mm2"] for g in groups)
-    candidates = [g for g in groups if g["area_mm2"] >= max_area * 0.95]
+    max_area = max(g["area_mm2"] for g in expanded)
+    candidates = [g for g in expanded if g["area_mm2"] >= max_area * 0.95]
     if len(candidates) > 1:
         candidates.sort(key=lambda g: _FACE_PREFERENCE.get(
             _name_from_normal(g["normal"]), 6
@@ -380,7 +462,7 @@ def find_named_face(stl_path: str, face_name: str) -> dict[str, Any]:
 
     groups = _group_triangles_by_normal(tris, tolerance_deg=10.0)
 
-    # Find groups matching the requested face name, pick the largest
+    # Find groups matching the requested face name
     matching = [g for g in groups if _name_from_normal(g["normal"]) == face_name_lower]
     if not matching:
         available = sorted({_name_from_normal(g["normal"]) for g in groups})
@@ -388,8 +470,23 @@ def find_named_face(stl_path: str, face_name: str) -> dict[str, Any]:
             f"No {face_name!r} face found. Available faces: {', '.join(available)}"
         )
 
-    largest = max(matching, key=lambda g: g["area_mm2"])
-    return _build_face_dict(largest)
+    # Sub-group by Z-level to separate bowl floors from rims
+    expanded: list[dict[str, Any]] = []
+    for g in matching:
+        expanded.extend(_subgroup_by_z_level(g))
+
+    # Among sub-groups of similar area (within 15%), prefer lowest Z
+    # for top-facing surfaces — that's the interior floor (most useful
+    # decoration surface).  For bottom-facing, prefer highest Z.
+    max_area = max(sg["area_mm2"] for sg in expanded)
+    candidates = [sg for sg in expanded if sg["area_mm2"] >= max_area * 0.85]
+    if face_name_lower == "top":
+        best = min(candidates, key=lambda sg: sg.get("_z_level", 0))
+    elif face_name_lower == "bottom":
+        best = max(candidates, key=lambda sg: sg.get("_z_level", 0))
+    else:
+        best = max(candidates, key=lambda sg: sg["area_mm2"])
+    return _build_face_dict(best)
 
 
 def compute_face_transform(face: dict[str, Any]) -> dict[str, Any]:

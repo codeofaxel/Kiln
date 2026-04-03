@@ -150,16 +150,32 @@ def _svg_content_block(
 ) -> str:
     """Return the OpenSCAD fragment that produces the SVG extrusion shape.
 
+    Prefers native OpenSCAD polygon() geometry (from ``openscad_polygons``
+    in content_info) over SVG import().  Native polygons work reliably
+    in difference() against any mesh — SVG import() silently fails on
+    complex meshes with existing booleans (hull, difference).
+
     When *content_cx*/*content_cy* are provided (from content-bounds
     analysis), the translate centers the actual geometry instead of the
     viewBox, so logos with whitespace padding scale correctly.
     """
-    svg_path = content_info["svg_path"]
     # Fall back to viewBox center when content center is not provided
     if content_cx is None:
         content_cx = content_info.get("width", 100) / 2
     if content_cy is None:
         content_cy = content_info.get("height", 100) / 2
+
+    # Use native OpenSCAD polygons when available (reliable boolean path)
+    native_code = content_info.get("openscad_polygons", "")
+    if native_code:
+        return (
+            f'scale([{scale_x:.6f}, {scale_y:.6f}, 1])\n'
+            f'                translate([-{content_cx:.6f}, -{content_cy:.6f}, 0])\n'
+            f'                    {native_code}'
+        )
+
+    # Fallback: SVG import (unreliable on complex meshes)
+    svg_path = content_info["svg_path"]
     return (
         f'scale([{scale_x:.6f}, {scale_y:.6f}, 1])\n'
         f'                translate([-{content_cx:.6f}, -{content_cy:.6f}, 0])\n'
