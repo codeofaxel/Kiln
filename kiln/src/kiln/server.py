@@ -18493,6 +18493,7 @@ def decorate_surface(
     offset_x_mm: float = 0.0,
     offset_y_mm: float = 0.0,
     image_style: str = "auto",
+    placement: str = "center",
 ) -> dict:
     """Put any image, text, or pattern onto a 3D model surface.
 
@@ -18543,6 +18544,11 @@ def decorate_surface(
     :param offset_y_mm: Vertical offset from center (mm).
     :param image_style: Image preprocessing style.  ``"auto"`` uses
         ``"coin"`` for photos.  See docstring for all options.
+    :param placement: Named position preset for content placement.
+        ``"center"`` (default), ``"top"``, ``"bottom"``, ``"top-rim"``,
+        ``"bottom-rim"``.  Use ``"bottom"`` for text below a centered
+        portrait on a coaster.  Manual ``offset_x/y_mm`` is added on
+        top of the preset for fine-tuning.
     :returns: Dict with output STL path, preview info, and metadata.
     """
     if err := _check_auth("design:decorate"):
@@ -18669,6 +18675,7 @@ def decorate_surface(
             scale=scale,
             offset_x_mm=offset_x_mm,
             offset_y_mm=offset_y_mm,
+            placement=placement,
         )
 
         # --- Step 6: Compile to STL ---
@@ -18726,6 +18733,7 @@ def decorate_surface(
                     scale=scale,
                     offset_x_mm=offset_x_mm,
                     offset_y_mm=offset_y_mm,
+                    placement=placement,
                 )
                 compile_result = compile_embossed_model(
                     scad_result["scad_path"],
