@@ -8,6 +8,15 @@ import zlib
 
 import pytest
 
+
+def _has_pil() -> bool:
+    try:
+        import PIL  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -189,6 +198,10 @@ class TestPrepareImageForEmboss:
         assert os.path.isfile(result["dat_path"])
 
 
+@pytest.mark.skipif(
+    not _has_pil(),
+    reason="Pillow not installed — coin pipeline requires PIL",
+)
 class TestCoinStyle:
     """Test the proven coin-relief pipeline (v11 Ash coaster)."""
 
