@@ -9954,6 +9954,7 @@ def visualize_model(
     angles: list[str] | None = None,
     width: int = 800,
     height: int = 600,
+    color: str = "",
 ) -> dict:
     """Render a 3D model from 6 standard camera angles for visual inspection.
 
@@ -9976,12 +9977,18 @@ def visualize_model(
             Defaults to all 6.
         width: Image width in pixels (default 800).
         height: Image height in pixels (default 600).
+        color: Hex color for the model (e.g. ``"#F72323"`` for red).
+            Defaults to neutral grey.  Pass the filament color to see
+            a realistic preview matching the printed result.
     """
     try:
         from kiln.model_visualizer import visualize_model as _visualize
 
+        kwargs: dict[str, Any] = {}
+        if color:
+            kwargs["color"] = color
         return _visualize(
-            file_path, angles=angles, width=width, height=height,
+            file_path, angles=angles, width=width, height=height, **kwargs,
         )
     except Exception as exc:
         logger.exception("Unexpected error in visualize_model")
