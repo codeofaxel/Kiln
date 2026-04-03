@@ -15532,6 +15532,13 @@ def main() -> None:
         logger.warning(msg)
         print(f"\n  ⚠  {msg}\n", file=sys.stderr)
 
+    # Anonymous daily heartbeat (one ping per day, daemon thread)
+    try:
+        from kiln.heartbeat import send_heartbeat_async
+        send_heartbeat_async()
+    except Exception:
+        pass  # Never let telemetry failure affect startup
+
     # Start background services
     _scheduler.start()
     _webhook_mgr.start()
