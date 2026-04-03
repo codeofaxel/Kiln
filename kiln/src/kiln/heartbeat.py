@@ -52,18 +52,68 @@ def _mark_sent() -> None:
         pass
 
 
-def _get_printer_model() -> str | None:
-    """Best-effort resolve of the default printer model."""
+def _get_printer_info() -> tuple[str | None, str | None, int]:
+    """Best-effort resolve of printer model, adapter type, and printer count."""
+    model: str | None = None
+    adapter_type: str | None = None
+    printer_count = 0
     try:
         from kiln.registry import get_registry
         reg = get_registry()
+        printer_count = reg.count
         adapter = reg.get("default")
         if adapter is not None:
             info = adapter.get_printer_info()
-            return getattr(info, "model", None) or getattr(info, "printer_model", None)
+            model = getattr(info, "model", None) or getattr(info, "printer_model", None)
+            # Derive adapter type from class name
+            cls_name = type(adapter).__name__.lower()
+            if "bambu" in cls_name:
+                adapter_type = "bambu"
+            elif "octoprint" in cls_name:
+                adapter_type = "octoprint"
+            elif "moonraker" in cls_name:
+                adapter_type = "moonraker"
+            elif "serial" in cls_name:
+                adapter_type = "serial"
+            else:
+                adapter_type = cls_name.replace("adapter", "").strip("_") or None
     except Exception:
         pass
-    return None
+    return model, adapter_type, printer_count
+
+
+def _get_daily_counts() -> tuple[int, int]:
+    """Best-effort count of prints and generations completed today."""
+    prints = 0
+    generations = 0
+    try:
+        import time
+
+        from kiln.persistence import get_db
+        db = get_db()
+        today_start = time.mktime(date.today().timetuple())
+        outcomes = db.list_print_outcomes(limit=100)
+        prints = sum(1 for o in outcomes if o.get("created_at", 0) >= today_start)
+        # Generation count from job history if available
+        if hasattr(db, "list_jobs"):
+            jobs = db.list_jobs(limit=100)
+            generations = sum(
+                1 for j in jobs
+                if j.get("created_at", 0) >= today_start
+                and "generat" in (j.get("type") or "").lower()
+            )
+    except Exception:
+        pass
+    return prints, generations
+
+
+def _is_pro_installed() -> bool:
+    """Check if kiln-pro is installed."""
+    try:
+        import kiln_pro  # noqa: F401
+        return True
+    except ImportError:
+        return False
 
 
 def _send_heartbeat() -> None:
@@ -77,6 +127,7 @@ def _send_heartbeat() -> None:
 
     try:
         import json
+        import platform
         import urllib.request
 
         from kiln.installation import get_installation_id
@@ -90,13 +141,20 @@ def _send_heartbeat() -> None:
         except Exception:
             pass
 
-        printer_model = _get_printer_model()
+        printer_model, adapter_type, printer_count = _get_printer_info()
+        prints_today, generations_today = _get_daily_counts()
 
         rpc_url = f"{_SUPABASE_URL}/rest/v1/rpc/record_heartbeat"
         payload = json.dumps({
             "p_installation_id": installation_id,
             "p_kiln_version": kiln_version,
             "p_printer_model": printer_model,
+            "p_adapter_type": adapter_type,
+            "p_printer_count": printer_count,
+            "p_prints_today": prints_today,
+            "p_generations_today": generations_today,
+            "p_pro_installed": _is_pro_installed(),
+            "p_os_platform": platform.system().lower(),
         }).encode()
 
         req = urllib.request.Request(
