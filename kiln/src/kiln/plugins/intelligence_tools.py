@@ -341,6 +341,13 @@ class _IntelligenceToolsPlugin:
 
                 contribute_print(record)
 
+                # Sync to Supabase if community opt-in is enabled
+                try:
+                    from kiln.community_sync import sync_community_print_async
+                    sync_community_print_async(record.to_dict())
+                except Exception:
+                    pass  # Never let sync failure affect local contribution
+
                 return {
                     "success": True,
                     "geometric_signature": geometric_signature,
