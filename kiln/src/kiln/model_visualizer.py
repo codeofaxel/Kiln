@@ -95,8 +95,8 @@ def _get_bounding_box(scad_path: str) -> float:
         # gives ~80% frame fill with margin.
         #
         # Quick approach: read STL binary header for bounding box if it's an STL.
-        # Note: ASCII STL files will silently fall back to _DEFAULT_DISTANCE
-        # since _distance_from_stl assumes binary format.
+        # Note: ASCII STL files fall back to _DEFAULT_DISTANCE; binary STLs
+        # are parsed for an exact bounding box.
         stl_path = None
         # Check if the scad_path imports an STL
         content = Path(scad_path).read_text(encoding="utf-8")
@@ -125,8 +125,17 @@ def _distance_from_stl(stl_path: str) -> float:
     if len(data) < 84:
         return _DEFAULT_DISTANCE
 
+    # Detect ASCII STL: starts with "solid" AND binary size check fails.
+    # Binary STLs can also start with "solid" in their 80-byte header, so
+    # verify by checking whether the declared triangle count produces the
+    # expected file size.  If it doesn't match, the file is ASCII format.
     num_triangles = struct.unpack_from("<I", data, 80)[0]
     expected = 84 + num_triangles * 50
+    if data[:5] == b"solid" and len(data) != expected:
+        # ASCII STL — fall back to default distance.
+        # TODO: parse vertex lines for a tighter bounding box if needed.
+        return _DEFAULT_DISTANCE
+
     if len(data) < expected:
         return _DEFAULT_DISTANCE
 

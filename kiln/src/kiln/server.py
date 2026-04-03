@@ -9907,37 +9907,39 @@ def render_model_preview(
     width: int = 800,
     height: int = 600,
 ) -> dict:
-    """Render a PNG preview of a 3D model for visual inspection.
+    """Render a PNG preview of a 3D model (DEPRECATED — use visualize_model).
 
-    Uses OpenSCAD to render an STL or SCAD file to a PNG image.
-    This lets agents visually inspect generated geometry before
-    printing -- check proportions, verify the shape matches intent,
-    and spot obvious defects.
-
-    Requires OpenSCAD to be installed on the system.
+    This tool is a thin wrapper around ``visualize_model`` with a single
+    isometric angle.  Prefer ``visualize_model`` directly for multi-angle
+    previews with proper auto-framing.
 
     Args:
-        file_path: Path to an ``.stl`` or ``.scad`` file.
+        file_path: Path to an ``.stl``, ``.3mf``, ``.obj``, or ``.scad`` file.
         width: Image width in pixels (default 800).
         height: Image height in pixels (default 600).
     """
-    try:
-        from kiln.generation.openscad import OpenSCADProvider
-
-        provider = OpenSCADProvider()
-        png_path = provider.render_preview(file_path, width=width, height=height)
+    result = visualize_model(
+        file_path=file_path,
+        angles=["isometric"],
+        width=width,
+        height=height,
+    )
+    if not result.get("success"):
+        return result
+    # Return in the old format for backwards compatibility
+    views = result.get("views", [])
+    if views:
         return {
             "success": True,
-            "preview_path": png_path,
+            "preview_path": views[0]["path"],
             "width": width,
             "height": height,
-            "message": f"Preview rendered to {png_path}.",
+            "message": (
+                f"Preview rendered to {views[0]['path']}. "
+                "TIP: Use visualize_model() for multi-angle previews."
+            ),
         }
-    except GenerationError as exc:
-        return _error_dict(f"Render failed: {exc}", code=exc.code or "RENDER_ERROR")
-    except Exception as exc:
-        logger.exception("Unexpected error in render_model_preview")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+    return _error_dict("No views rendered", code="RENDER_ERROR")
 
 
 @mcp.tool()
@@ -18682,13 +18684,49 @@ def decorate_surface(
                     code="INVALID_CONTENT",
                 )
 
-        # --- Step 2: Prepare content ---
+        # --- Step 2: Find the target face (needed before SVG prep for sizing) ---
+        from kiln.surface_intelligence import (
+            find_largest_flat_face,
+            find_named_face,
+        )
+
+        face_lower = face.lower().strip()
+        if face_lower == "auto":
+            face_info = find_largest_flat_face(model_path)
+        else:
+            face_info = find_named_face(model_path, face_lower)
+
+        face_width_mm = face_info.get("width_mm", 0)
+
+        # --- Step 3: Prepare content ---
         content_info: dict[str, Any] = {}
 
         if ctype == "svg":
+            # SVG logo decoration is a Pro feature
+            try:
+                from kiln_pro.bridge import pro_features
+                if pro_features is None:
+                    raise ImportError("kiln-pro not installed")
+            except ImportError:
+                return _error_dict(
+                    "SVG logo decoration is a Pro feature. "
+                    "Free tier supports PNG/JPG photos and text. "
+                    "Upgrade at https://kiln3d.com/pro",
+                    code="PRO_REQUIRED",
+                )
+
             from kiln.image_to_surface import prepare_svg_for_emboss
 
-            content_info = prepare_svg_for_emboss(content, work_dir)
+            # Pass face size so SVG strokes scale to printable widths.
+            # Minimum stroke = 1.5mm physical (v4 coaster used size*0.04 = 1.92mm
+            # on a 48mm logo — thick enough for clean FDM lines).
+            target_mm = face_width_mm * scale if face_width_mm > 0 else 0
+            content_info = prepare_svg_for_emboss(
+                content,
+                work_dir,
+                min_physical_width_mm=1.5,
+                target_size_mm=target_mm,
+            )
 
         elif ctype == "image":
             from kiln.image_to_surface import prepare_image_for_emboss
@@ -18716,18 +18754,6 @@ def decorate_surface(
                 f"Unknown content_type: {content_type!r}.",
                 code="VALIDATION_ERROR",
             )
-
-        # --- Step 3: Find the target face ---
-        from kiln.surface_intelligence import (
-            find_largest_flat_face,
-            find_named_face,
-        )
-
-        face_lower = face.lower().strip()
-        if face_lower == "auto":
-            face_info = find_largest_flat_face(model_path)
-        else:
-            face_info = find_named_face(model_path, face_lower)
 
         # --- Step 3.5: Print intelligence warnings ---
         if face_info.get("face_name") == "bottom":
@@ -18796,6 +18822,24 @@ def decorate_surface(
         abs_model = os.path.abspath(model_path)
         boolean_ok = check_boolean_success(abs_model, output_stl_path)
 
+        # More aggressive check for SVGs: OpenSCAD's import() + difference()
+        # can produce an output that's slightly different in size but has NO
+        # visible geometry change.  If output < input + 1000 bytes, treat as
+        # failed and trigger the heightmap fallback.
+        if boolean_ok and ctype == "svg":
+            try:
+                _in_sz = os.path.getsize(abs_model)
+                _out_sz = os.path.getsize(output_stl_path)
+                if _out_sz < _in_sz + 1000:
+                    boolean_ok = False
+                    logger.debug(
+                        "SVG boolean size delta too small (%d → %d, "
+                        "delta=%d < 1000) — treating as failed",
+                        _in_sz, _out_sz, _out_sz - _in_sz,
+                    )
+            except OSError:
+                pass
+
         if not boolean_ok and ctype == "svg":
             # SVG boolean failed — try heightmap fallback
             try:
@@ -18805,11 +18849,15 @@ def decorate_surface(
                 )
 
                 raster_png = os.path.join(work_dir, "svg_rasterized.png")
-                rasterize_svg_to_png(content, raster_png)
+                rasterize_svg_to_png(content, raster_png, width_px=2048)
                 content_info = prepare_image_for_emboss(
                     raster_png,
                     work_dir,
+                    max_resolution=400,
                     invert=(mode == "deboss"),
+                    style="stencil",
+                    edge_enhance=False,
+                    flip_rows=True,
                 )
                 scad_result = generate_emboss_scad(
                     model_path=abs_model,
