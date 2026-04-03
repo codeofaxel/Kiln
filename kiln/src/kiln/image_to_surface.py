@@ -751,10 +751,33 @@ def _convert_strokes_to_fills(svg_content: str, min_stroke_width: float = 0.0) -
     result = re.sub(r"<text\b[^>]*>.*?</text>", "", result, flags=re.DOTALL)
 
     # Strip background <rect> that fills the entire viewBox (common in logos)
-    # Keep smaller rects as they may be part of the design
     result = re.sub(
         r'<rect\s+width\s*=\s*"512"\s+height\s*=\s*"512"[^/]*/>', "", result
     )
+
+    # Strip small rects that were part of stripped <text> decoration.
+    # These are orphaned elements (e.g. the orange accent mark between K and I
+    # in "KILN") that survive text stripping because they're <rect> not <text>.
+    # Detect by: small area (< 200 sq units) AND positioned in the lower
+    # portion of the SVG (y > 60% of viewBox height) where text typically lives.
+    def _strip_orphan_rects(match: re.Match[str]) -> str:
+        attrs = match.group(0)
+        ry_m = re.search(r'\by\s*=\s*"([^"]+)"', attrs)
+        rw_m = re.search(r'\bwidth\s*=\s*"([^"]+)"', attrs)
+        rh_m = re.search(r'\bheight\s*=\s*"([^"]+)"', attrs)
+        if ry_m and rw_m and rh_m:
+            try:
+                ry = float(ry_m.group(1))
+                rw = float(rw_m.group(1))
+                rh = float(rh_m.group(1))
+                # Small rect in text region — orphaned decoration
+                if rw * rh < 200 and ry > 300:
+                    return ""
+            except ValueError:
+                pass
+        return match.group(0)
+
+    result = re.sub(r"<rect\b[^>]*/?>", _strip_orphan_rects, result)
 
     return result
 
@@ -766,18 +789,37 @@ def _svg_to_openscad_polygons(svg_content: str) -> str:
     calls work reliably in difference() against any mesh complexity.
     This is the approach that made coaster v4's logo deboss work perfectly.
 
-    Parses ``<polygon>``, ``<rect>``, and ``<circle>`` elements from the
-    SVG and emits equivalent OpenSCAD 2D geometry.  Text elements are
-    not supported (stripped by ``_convert_strokes_to_fills``).
+    **Y-axis flip:** SVG Y goes down (0=top), OpenSCAD Y goes up (0=bottom).
+    All Y coordinates are mirrored: ``y_scad = svg_height - y_svg``.
+
+    **Orphan filtering:** Small rects far from the main polygon cluster
+    (e.g. text decoration marks that survived ``_convert_strokes_to_fills``)
+    are stripped based on Y-distance from the polygon centroid.
 
     :returns: OpenSCAD code string with ``union() { polygon(...); ... }``
               or empty string if no extractable geometry.
     """
     import math as _math
 
-    fragments: list[str] = []
+    # Detect SVG height for Y-axis flip
+    svg_height = 512.0  # default
+    vb_match = re.search(r'viewBox\s*=\s*"([^"]+)"', svg_content, re.IGNORECASE)
+    if vb_match:
+        parts = vb_match.group(1).split()
+        if len(parts) >= 4:
+            with contextlib.suppress(ValueError):
+                svg_height = float(parts[3])
 
-    # Extract <polygon points="x1,y1 x2,y2 ..."> elements
+    def _flip_y(y: float) -> float:
+        return svg_height - y
+
+    # Collect all polygon geometry with flipped Y.
+    # 4-point polygons from stroke conversion → hull() pairs for clean corners.
+    # This matches the coaster v4 proven approach: hull() { square at p1; square at p2; }
+    # produces perfect tapered strokes without jagged corner overlap.
+    poly_fragments: list[str] = []
+    all_poly_y_values: list[float] = []
+
     for match in re.finditer(r'<polygon\b[^>]*points\s*=\s*"([^"]+)"', svg_content):
         points_str = match.group(1).strip()
         pts: list[tuple[float, float]] = []
@@ -785,15 +827,46 @@ def _svg_to_openscad_polygons(svg_content: str) -> str:
             parts = pt.split(",")
             if len(parts) >= 2:
                 try:
-                    pts.append((float(parts[0]), float(parts[1])))
+                    x, y = float(parts[0]), float(parts[1])
+                    pts.append((x, _flip_y(y)))
+                    all_poly_y_values.append(_flip_y(y))
                 except ValueError:
                     continue
-        if len(pts) >= 3:
-            pts_scad = ", ".join(f"[{x:.2f},{y:.2f}]" for x, y in pts)
-            fragments.append(f"polygon(points=[{pts_scad}]);")
 
-    # Extract <rect x="..." y="..." width="..." height="..."> elements
-    # (skip full-viewBox background rects)
+        if len(pts) == 4:
+            # 4-point polygon from stroke-to-fill conversion.
+            # The original line endpoints are at midpoints of the two short edges.
+            # pts[0]-pts[3] is one short edge, pts[1]-pts[2] is the other.
+            p1x = (pts[0][0] + pts[3][0]) / 2
+            p1y = (pts[0][1] + pts[3][1]) / 2
+            p2x = (pts[1][0] + pts[2][0]) / 2
+            p2y = (pts[1][1] + pts[2][1]) / 2
+
+            # Stroke width = distance between pts[0] and pts[3]
+            import math as _m
+            sw = _m.sqrt((pts[0][0] - pts[3][0])**2 + (pts[0][1] - pts[3][1])**2)
+            sw = max(sw, 1.0)  # minimum 1 unit
+
+            # Emit hull() pair — clean tapered stroke like coaster v4
+            poly_fragments.append(
+                f"hull() {{ translate([{p1x:.2f},{p1y:.2f}]) "
+                f"square([{sw:.2f},{sw:.2f}], center=true); "
+                f"translate([{p2x:.2f},{p2y:.2f}]) "
+                f"square([{sw:.2f},{sw:.2f}], center=true); }}"
+            )
+        elif len(pts) >= 3:
+            # General polygon (not from stroke conversion)
+            pts_scad = ", ".join(f"[{x:.2f},{y:.2f}]" for x, y in pts)
+            poly_fragments.append(f"polygon(points=[{pts_scad}]);")
+
+    # Compute centroid Y of all polygon geometry for orphan detection
+    poly_center_y = (
+        sum(all_poly_y_values) / len(all_poly_y_values)
+        if all_poly_y_values else svg_height / 2
+    )
+
+    # Extract rects — skip background fills AND orphaned text-related rects
+    rect_fragments: list[str] = []
     for match in re.finditer(r'<rect\b([^>]*)/?>', svg_content):
         attrs = match.group(1)
         rw_m = re.search(r'\bwidth\s*=\s*"([^"]+)"', attrs)
@@ -805,18 +878,27 @@ def _svg_to_openscad_polygons(svg_content: str) -> str:
             rh = float(rh_m.group(1))
         except ValueError:
             continue
-        # Skip viewBox-filling background rects
-        if rw >= 500 and rh >= 500:
+        # Skip viewBox-filling background rects (covers >90% of viewBox)
+        if rw >= svg_height * 0.9 and rh >= svg_height * 0.9:
             continue
         rx_m = re.search(r'\bx\s*=\s*"([^"]+)"', attrs)
         ry_m = re.search(r'\by\s*=\s*"([^"]+)"', attrs)
         rx = float(rx_m.group(1)) if rx_m else 0.0
         ry = float(ry_m.group(1)) if ry_m else 0.0
-        fragments.append(
-            f"translate([{rx:.2f},{ry:.2f}]) square([{rw:.2f},{rh:.2f}]);"
+        ry_flipped = _flip_y(ry + rh)  # bottom-left in OpenSCAD coords
+
+        # Filter orphaned rects: if the rect center is >100 SVG units
+        # from the polygon centroid Y, it's likely a text decoration remnant
+        rect_center_y = ry_flipped + rh / 2
+        if all_poly_y_values and abs(rect_center_y - poly_center_y) > 100:
+            continue  # orphaned text-related rect
+
+        rect_fragments.append(
+            f"translate([{rx:.2f},{ry_flipped:.2f}]) square([{rw:.2f},{rh:.2f}]);"
         )
 
     # Extract <circle cx="..." cy="..." r="..."> elements
+    circle_fragments: list[str] = []
     for match in re.finditer(
         r'<circle\b[^>]*?cx\s*=\s*"([^"]+)"[^>]*?cy\s*=\s*"([^"]+)"'
         r'[^>]*?r\s*=\s*"([^"]+)"',
@@ -828,20 +910,21 @@ def _svg_to_openscad_polygons(svg_content: str) -> str:
             r = float(match.group(3))
         except ValueError:
             continue
-        # Approximate circle as 60-point polygon
+        cy_flipped = _flip_y(cy)
         n = 60
         pts = []
         for i in range(n):
             a = 2 * _math.pi * i / n
-            pts.append((cx + r * _math.cos(a), cy + r * _math.sin(a)))
+            pts.append((cx + r * _math.cos(a), cy_flipped + r * _math.sin(a)))
         pts_scad = ", ".join(f"[{x:.2f},{y:.2f}]" for x, y in pts)
-        fragments.append(f"polygon(points=[{pts_scad}]);")
+        circle_fragments.append(f"polygon(points=[{pts_scad}]);")
 
-    if not fragments:
+    # Combine all fragments
+    all_fragments = poly_fragments + rect_fragments + circle_fragments
+    if not all_fragments:
         return ""
 
-    # Wrap all geometry in a union
-    body = "\n    ".join(fragments)
+    body = "\n    ".join(all_fragments)
     return f"union() {{\n    {body}\n}}"
 
 

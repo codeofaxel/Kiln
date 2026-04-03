@@ -150,10 +150,15 @@ def _svg_content_block(
 ) -> str:
     """Return the OpenSCAD fragment that produces the SVG extrusion shape.
 
-    Prefers native OpenSCAD polygon() geometry (from ``openscad_polygons``
-    in content_info) over SVG import().  Native polygons work reliably
-    in difference() against any mesh — SVG import() silently fails on
-    complex meshes with existing booleans (hull, difference).
+    Uses native OpenSCAD polygon() geometry extracted from the SVG
+    (via ``openscad_polygons`` in content_info).  This is the primary
+    path because OpenSCAD 2021's SVG ``import()`` silently fails in
+    ``difference()`` operations — the boolean produces no geometry
+    change against both inline and imported STL meshes.  Native
+    polygon() calls work reliably in all OpenSCAD versions.
+
+    Falls back to SVG ``import()`` only when no extractable polygon
+    geometry was found in the SVG.
 
     When *content_cx*/*content_cy* are provided (from content-bounds
     analysis), the translate centers the actual geometry instead of the
