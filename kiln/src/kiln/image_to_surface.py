@@ -470,17 +470,26 @@ def prepare_image_for_emboss(
 
             # Step 4: Dodge+burn — local contrast normalization
             # pixel / local_average via GaussianBlur radius=22
-            import numpy as np
+            # Uses numpy when available (best quality), falls back to
+            # histogram equalization otherwise.
+            try:
+                import numpy as np
 
-            arr = np.array(img, dtype=np.float64)
-            local_avg = np.array(
-                img.filter(ImageFilter.GaussianBlur(radius=22)), dtype=np.float64
-            )
-            # Avoid division by zero
-            local_avg = np.clip(local_avg, 1.0, 255.0)
-            dodged = arr / local_avg * 128.0
-            dodged = np.clip(dodged, 0, 255).astype(np.uint8)
-            img = Image.fromarray(dodged)
+                arr = np.array(img, dtype=np.float64)
+                local_avg = np.array(
+                    img.filter(ImageFilter.GaussianBlur(radius=22)),
+                    dtype=np.float64,
+                )
+                # Avoid division by zero
+                local_avg = np.clip(local_avg, 1.0, 255.0)
+                dodged = arr / local_avg * 128.0
+                dodged = np.clip(dodged, 0, 255).astype(np.uint8)
+                img = Image.fromarray(dodged)
+            except ImportError:
+                # Fallback: equalize + autocontrast (less good for dark
+                # subjects but works without numpy)
+                img = ImageOps.equalize(img)
+                img = ImageOps.autocontrast(img, cutoff=2)
 
             # Step 5: Bilateral smoothing — MedianFilter(3) x3
             for _ in range(3):
