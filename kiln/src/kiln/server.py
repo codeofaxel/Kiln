@@ -18796,6 +18796,111 @@ def decorate_surface(
         )
 
 
+@mcp.tool()
+def save_design_recipe(
+    directory: str,
+    name: str,
+    parts: list[dict],
+    *,
+    source_scad: str | None = None,
+    parameters: dict | None = None,
+    merge_order: list[str] | None = None,
+    final_3mf: str | None = None,
+    notes: str = "",
+) -> dict:
+    """Save a design recipe that tracks all parts, colors, and build pipeline.
+
+    Call this after building a multi-part design (e.g., multicolor coaster)
+    to remember the full recipe. Enables future modifications like
+    "change the portrait color" or "make it bigger" without re-doing
+    the entire pipeline from scratch.
+
+    Each part dict needs: name, role, stl_path, color.
+    Optional: filament_slot, slicer_profile, gcode_path.
+
+    Args:
+        directory: Directory to write .kiln_recipe.json into.
+        name: Human-readable recipe name (e.g. "ash-coaster-v11").
+        parts: List of part dicts describing each component.
+        source_scad: Path to the OpenSCAD source file.
+        parameters: OpenSCAD parameters used in generation.
+        merge_order: Part names in the order they should be merged.
+        final_3mf: Path to the final merged 3MF output.
+        notes: Free-form notes about this recipe.
+    """
+    try:
+        from kiln.design_recipe import create_recipe, save_recipe
+
+        recipe = create_recipe(
+            name,
+            parts,
+            source_scad=source_scad,
+            parameters=parameters,
+            merge_order=merge_order,
+            final_3mf=final_3mf,
+            notes=notes,
+        )
+        path = save_recipe(recipe, directory)
+        return {"success": True, "recipe": recipe.to_dict(), "path": path}
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except (KeyError, ValueError) as exc:
+        return _error_dict(str(exc), code="VALIDATION_ERROR")
+    except Exception as exc:
+        logger.exception("Error in save_design_recipe")
+        return _error_dict(
+            f"Failed to save design recipe: {exc}", code="RECIPE_ERROR"
+        )
+
+
+@mcp.tool()
+def load_design_recipe(path: str) -> dict:
+    """Load a saved design recipe to see all parts, colors, and parameters.
+
+    Args:
+        path: Path to a .kiln_recipe.json file.
+    """
+    try:
+        from kiln.design_recipe import load_recipe
+
+        recipe = load_recipe(path)
+        return {"success": True, "recipe": recipe.to_dict()}
+    except FileNotFoundError as exc:
+        return _error_dict(str(exc), code="FILE_NOT_FOUND")
+    except Exception as exc:
+        logger.exception("Error in load_design_recipe")
+        return _error_dict(
+            f"Failed to load design recipe: {exc}", code="RECIPE_ERROR"
+        )
+
+
+@mcp.tool()
+def list_design_recipes(*, directory: str | None = None) -> dict:
+    """Find all saved design recipes in a directory (recursive).
+
+    Args:
+        directory: Root directory to search. Defaults to current working directory.
+    """
+    try:
+        from kiln.design_recipe import find_recipes_recursive, load_recipe
+
+        search_dir = directory or os.getcwd()
+        paths = find_recipes_recursive(search_dir)
+        recipes = []
+        for p in paths:
+            try:
+                r = load_recipe(p)
+                recipes.append({"path": p, "name": r.name, "parts": len(r.parts)})
+            except Exception:  # noqa: BLE001
+                recipes.append({"path": p, "name": None, "error": "failed to parse"})
+        return {"success": True, "recipes": recipes, "count": len(recipes)}
+    except Exception as exc:
+        logger.exception("Error in list_design_recipes")
+        return _error_dict(
+            f"Failed to list design recipes: {exc}", code="RECIPE_ERROR"
+        )
+
+
 _ensure_internal_tool_plugins_registered()
 
 
