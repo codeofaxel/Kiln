@@ -9706,14 +9706,59 @@ def generate_and_print(
             except Exception as exc:
                 logger.warning("%s→STL conversion failed: %s", result.format.upper(), exc)
 
-        # Step 4: Validate
+        # Step 4: Full validation pipeline (validate → repair → printability → build volume)
+        pipeline_result = None
         if result.format in ("stl", "obj", "glb"):
-            val = validate_mesh(result.local_path)
-            if not val.valid:
+            from kiln.mesh_validation_pipeline import run_validation_pipeline
+
+            # Resolve build volume from printer if available
+            _build_vol = None
+            try:
+                if printer_name:
+                    _adapter = _registry.get(printer_name)
+                else:
+                    _adapter = _get_adapter()
+                _printer_info = _adapter.get_printer_info()
+                bv = getattr(_printer_info, "build_volume", None)
+                if isinstance(bv, dict) and bv:
+                    _build_vol = (
+                        float(bv.get("x", 256)),
+                        float(bv.get("y", 256)),
+                        float(bv.get("z", 256)),
+                    )
+            except Exception:
+                logger.debug("Could not resolve build volume from printer", exc_info=True)
+
+            try:
+                pipeline_result = run_validation_pipeline(
+                    result.local_path,
+                    material="PLA",
+                    build_volume=_build_vol,
+                    auto_repair=True,
+                    auto_scale=False,  # Don't silently resize user's model
+                )
+            except Exception as exc:
+                logger.error("Validation pipeline crashed: %s", exc, exc_info=True)
                 return _error_dict(
-                    f"Generated mesh failed validation: {'; '.join(val.errors)}",
+                    f"Validation pipeline error: {exc}",
+                    code="VALIDATION_ERROR",
+                )
+
+            if not pipeline_result.passed:
+                return _error_dict(
+                    f"Generated mesh failed validation pipeline: {pipeline_result.summary}",
                     code="VALIDATION_FAILED",
                 )
+
+            # Use the (possibly repaired) file path going forward
+            result = GenerationResult(
+                job_id=result.job_id,
+                provider=result.provider,
+                local_path=pipeline_result.file_path,
+                format="stl",
+                file_size_bytes=os.path.getsize(pipeline_result.file_path),
+                prompt=result.prompt,
+            )
 
         # Step 5: Slice
         from kiln.slicer import slice_file
@@ -9736,23 +9781,19 @@ def generate_and_print(
         upload = adapter.upload_file(slice_result.output_path)
         file_name = upload.file_name or os.path.basename(slice_result.output_path)
 
-        # Compute dimensions for review
-        gen_validation = None
-        gen_dimensions = None
-        if result.format in ("stl", "obj", "glb"):
-            val_result = validate_mesh(result.local_path)
-            gen_validation = val_result.to_dict()
-            if val_result.bounding_box:
-                bb = val_result.bounding_box
-                w = bb.get("x_max", 0) - bb.get("x_min", 0)
-                d = bb.get("y_max", 0) - bb.get("y_min", 0)
-                h = bb.get("z_max", 0) - bb.get("z_min", 0)
-                gen_dimensions = {
-                    "width_mm": round(w, 2),
-                    "depth_mm": round(d, 2),
-                    "height_mm": round(h, 2),
-                    "summary": f"{w:.1f} x {d:.1f} x {h:.1f} mm",
-                }
+        # Use pipeline results for response (already computed above)
+        gen_validation = pipeline_result.to_dict() if pipeline_result else None
+        gen_dimensions = pipeline_result.dimensions_mm if pipeline_result else None
+        if gen_dimensions:
+            w = gen_dimensions.get("width", 0)
+            d = gen_dimensions.get("depth", 0)
+            h = gen_dimensions.get("height", 0)
+            gen_dimensions = {
+                "width_mm": round(w, 2),
+                "depth_mm": round(d, 2),
+                "height_mm": round(h, 2),
+                "summary": f"{w:.1f} x {d:.1f} x {h:.1f} mm",
+            }
 
         # Auto-print only if the user has opted in via KILN_AUTO_PRINT_GENERATED.
         print_data = None
