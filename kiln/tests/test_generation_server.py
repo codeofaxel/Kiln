@@ -355,14 +355,24 @@ class TestGenerateAndPrint:
     @patch("kiln.server._get_adapter")
     @patch("kiln.slicer.slice_file")
     @patch("kiln.server.validate_mesh")
+    @patch("kiln.mesh_validation_pipeline.run_validation_pipeline")
+    @patch("os.path.getsize", return_value=42000)
     @patch("kiln.server._get_generation_provider")
-    def test_full_pipeline(self, mock_get_provider, mock_validate, mock_slice, mock_adapter, _auth):
+    def test_full_pipeline(self, mock_get_provider, _mock_getsize, mock_pipeline, mock_validate, mock_slice, mock_adapter, _auth):
         """Synchronous provider (OpenSCAD-like) completes immediately."""
         provider = MagicMock()
         provider.display_name = "OpenSCAD"
         provider.generate.return_value = _make_job(status=GenerationStatus.SUCCEEDED)
         provider.download_result.return_value = _make_result()
         mock_get_provider.return_value = provider
+
+        # Mock the validation pipeline to pass
+        pipeline_result = MagicMock()
+        pipeline_result.passed = True
+        pipeline_result.file_path = "/tmp/kiln_generated/model.stl"
+        pipeline_result.dimensions_mm = {"x": 10.0, "y": 10.0, "z": 10.0}
+        pipeline_result.to_dict.return_value = {"passed": True}
+        mock_pipeline.return_value = pipeline_result
 
         mock_validate.return_value = _make_validation(valid=True)
 
@@ -387,11 +397,9 @@ class TestGenerateAndPrint:
         assert "safety_notice" in result
         assert "start_print" in result["message"]
         provider.generate.assert_called_once()
-        # validate_mesh called twice: once in pipeline step 4, once for preview
-        assert mock_validate.call_count == 2
+        mock_pipeline.assert_called_once()
         mock_slice.assert_called_once()
         adapter.upload_file.assert_called_once()
-        # start_print should NOT be called — requires explicit user action
         adapter.start_print.assert_not_called()
 
     @_AUTH_PATCH
@@ -415,9 +423,9 @@ class TestGenerateAndPrint:
         assert result["error"]["code"] == "GENERATION_FAILED"
 
     @_AUTH_PATCH
-    @patch("kiln.server.validate_mesh")
+    @patch("kiln.mesh_validation_pipeline.run_validation_pipeline")
     @patch("kiln.server._get_generation_provider")
-    def test_validation_fails(self, mock_get_provider, mock_validate, _auth):
+    def test_validation_fails(self, mock_get_provider, mock_pipeline, _auth):
         """Generated mesh fails validation — should not proceed to slice."""
         provider = MagicMock()
         provider.display_name = "Meshy"
@@ -425,9 +433,11 @@ class TestGenerateAndPrint:
         provider.download_result.return_value = _make_result()
         mock_get_provider.return_value = provider
 
-        mock_validate.return_value = _make_validation(
-            valid=False, errors=["Non-manifold edges"],
-        )
+        # Mock the validation pipeline to fail
+        pipeline_result = MagicMock()
+        pipeline_result.passed = False
+        pipeline_result.summary = "Non-manifold edges detected"
+        mock_pipeline.return_value = pipeline_result
 
         result = generate_and_print("a cube")
         assert result["success"] is False
@@ -436,8 +446,10 @@ class TestGenerateAndPrint:
 
     @_AUTH_PATCH
     @patch("kiln.server._registry")
+    @patch("kiln.mesh_validation_pipeline.run_validation_pipeline")
+    @patch("os.path.getsize", return_value=42000)
     @patch("kiln.server._get_generation_provider")
-    def test_printer_not_found(self, mock_get_provider, mock_registry, _auth):
+    def test_printer_not_found(self, mock_get_provider, _mock_getsize, mock_pipeline, mock_registry, _auth):
         from kiln.registry import PrinterNotFoundError
 
         provider = MagicMock()
@@ -448,7 +460,14 @@ class TestGenerateAndPrint:
 
         mock_registry.get.side_effect = PrinterNotFoundError("no-printer")
 
-        # We also need validate_mesh to pass so the pipeline reaches the printer step
+        # Pipeline passes — the NOT_FOUND should come from the upload step
+        pipeline_result = MagicMock()
+        pipeline_result.passed = True
+        pipeline_result.file_path = "/tmp/kiln_generated/model.stl"
+        pipeline_result.dimensions_mm = None
+        pipeline_result.to_dict.return_value = {"passed": True}
+        mock_pipeline.return_value = pipeline_result
+
         with patch("kiln.server.validate_mesh", return_value=_make_validation(valid=True)), \
              patch("kiln.slicer.slice_file") as mock_slice:
             slice_result = MagicMock()

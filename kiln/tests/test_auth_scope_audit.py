@@ -246,7 +246,7 @@ READ_ONLY_TOOLS: set[str] = {
 # added without being in either allowlist.
 # ---------------------------------------------------------------------------
 
-KNOWN_UNSCOPED_MUTATING_TOOLS: set[str] = set()
+KNOWN_UNSCOPED_MUTATING_TOOLS: set[str] = {"restart_server"}
 
 
 # ---------------------------------------------------------------------------
