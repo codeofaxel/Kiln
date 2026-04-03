@@ -6,7 +6,6 @@ import os
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Tests: MATERIAL_DEPTHS and get_default_depth
 # ---------------------------------------------------------------------------
@@ -21,7 +20,7 @@ class TestMaterialDepths:
     def test_values_are_positive_floats(self):
         from kiln.emboss_generator import MATERIAL_DEPTHS
 
-        for mat, depth in MATERIAL_DEPTHS.items():
+        for _mat, depth in MATERIAL_DEPTHS.items():
             assert isinstance(depth, float)
             assert depth > 0
 
@@ -81,7 +80,8 @@ class TestGenerateEmbossScad:
         assert "scad_path" in result
         assert os.path.isfile(result["scad_path"])
 
-        scad_code = open(result["scad_path"]).read()
+        with open(result["scad_path"]) as f:
+            scad_code = f.read()
         assert "difference()" in scad_code  # default mode is deboss
         assert "import(" in scad_code
         assert "linear_extrude" in scad_code
@@ -105,7 +105,8 @@ class TestGenerateEmbossScad:
 
         assert os.path.isfile(result["scad_path"])
 
-        scad_code = open(result["scad_path"]).read()
+        with open(result["scad_path"]) as f:
+            scad_code = f.read()
         assert "union()" in scad_code  # emboss mode
         assert "text(" in scad_code
         assert "KILN" in scad_code

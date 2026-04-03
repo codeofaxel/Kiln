@@ -209,6 +209,42 @@ def _text_content_block(content_info: dict) -> str:
 # Main generation function
 # ---------------------------------------------------------------------------
 
+def _resolve_placement_offsets(
+    placement: str,
+    face: dict,
+    scale: float,
+    offset_x_mm: float,
+    offset_y_mm: float,
+) -> tuple[float, float]:
+    """Convert a named placement preset into concrete X/Y offsets.
+
+    Presets position content relative to the face dimensions so callers
+    don't have to guess offsets manually.
+
+    Supported presets:
+        - ``"center"`` — no offset (default)
+        - ``"top"`` — upper third of the face
+        - ``"bottom"`` — lower third of the face
+        - ``"top-rim"`` — near the top edge (10% from edge)
+        - ``"bottom-rim"`` — near the bottom edge (10% from edge)
+
+    Any explicit ``offset_x_mm`` / ``offset_y_mm`` are added on top of
+    the preset, allowing fine-tuning.
+    """
+    face_h = face.get("height_mm", 0)
+    usable_h = face_h * scale
+
+    preset_offsets: dict[str, tuple[float, float]] = {
+        "center": (0.0, 0.0),
+        "top": (0.0, usable_h * 0.30),
+        "bottom": (0.0, -usable_h * 0.30),
+        "top-rim": (0.0, usable_h * 0.40),
+        "bottom-rim": (0.0, -usable_h * 0.40),
+    }
+    px, py = preset_offsets.get(placement, (0.0, 0.0))
+    return (offset_x_mm + px, offset_y_mm + py)
+
+
 def generate_emboss_scad(
     *,
     model_path: str,
@@ -220,6 +256,7 @@ def generate_emboss_scad(
     scale: float = 0.7,
     offset_x_mm: float = 0.0,
     offset_y_mm: float = 0.0,
+    placement: str = "center",
 ) -> dict[str, Any]:
     """Generate an OpenSCAD ``.scad`` file for an emboss/deboss operation.
 
@@ -294,15 +331,19 @@ def generate_emboss_scad(
     # For deboss: start slightly above the surface, extrude inward
     # For emboss: start at the surface, extrude outward
     _normalize(normal)  # validate normal is non-zero
+    # Resolve placement preset + manual offsets
+    final_offset_x, final_offset_y = _resolve_placement_offsets(
+        placement, face, scale, offset_x_mm, offset_y_mm,
+    )
+
     if mode == "deboss":
-        # Shift inward by depth along the normal
-        tx = cx + offset_x_mm
-        ty = cy + offset_y_mm
+        tx = cx + final_offset_x
+        ty = cy + final_offset_y
         tz = cz
         boolean_op = "difference"
     else:
-        tx = cx + offset_x_mm
-        ty = cy + offset_y_mm
+        tx = cx + final_offset_x
+        ty = cy + final_offset_y
         tz = cz
         boolean_op = "union"
 
