@@ -63,6 +63,7 @@ dev = [
     "pytest-cov>=4.0",
     "pytest-mock>=3.6",
     "responses>=0.20",
+    "Pillow>=9.0",
 ]
 
 [project.scripts]
