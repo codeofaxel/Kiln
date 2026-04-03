@@ -18600,11 +18600,15 @@ def decorate_surface(
             from kiln.image_to_surface import prepare_image_for_emboss
 
             effective_style = image_style if image_style != "auto" else "coin"
+            # Coin style uses proven pipeline defaults: 250px, flip for OpenSCAD
+            coin_like = effective_style in ("coin", "medallion")
             content_info = prepare_image_for_emboss(
                 content,
                 work_dir,
+                max_resolution=250 if coin_like else 200,
                 invert=(mode == "deboss"),
                 style=effective_style,
+                flip_rows=coin_like,
             )
 
         elif ctype == "text":
@@ -18898,6 +18902,28 @@ def list_design_recipes(*, directory: str | None = None) -> dict:
         logger.exception("Error in list_design_recipes")
         return _error_dict(
             f"Failed to list design recipes: {exc}", code="RECIPE_ERROR"
+        )
+
+
+@mcp.tool()
+def list_recipe_versions(directory: str) -> dict:
+    """List all saved versions of a design recipe in a directory.
+
+    Shows the version history with timestamps, notes, and change deltas
+    so you can see how a design evolved over time.
+
+    Args:
+        directory: Directory containing .kiln_recipe.v*.json files.
+    """
+    try:
+        from kiln.design_recipe import list_recipe_versions as _list_versions
+
+        versions = _list_versions(directory)
+        return {"success": True, "versions": versions, "count": len(versions)}
+    except Exception as exc:
+        logger.exception("Error in list_recipe_versions")
+        return _error_dict(
+            f"Failed to list recipe versions: {exc}", code="RECIPE_ERROR"
         )
 
 

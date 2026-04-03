@@ -10,9 +10,11 @@ import pytest
 from kiln.design_recipe import (
     DesignPart,
     DesignRecipe,
+    create_new_version,
     create_recipe,
     find_recipe,
     find_recipes_recursive,
+    list_recipe_versions,
     load_recipe,
     save_recipe,
     update_parameter,
@@ -271,3 +273,172 @@ class TestCreateRecipe:
         recipe = create_recipe("empty", [])
         assert recipe.parts == []
         assert recipe.merge_order == []
+
+
+class TestVersionFields:
+    """Version tracking fields on DesignRecipe."""
+
+    def test_default_version_is_one(self):
+        recipe = _sample_recipe()
+        assert recipe.version == 1
+        assert recipe.parent_version is None
+        assert recipe.changes is None
+
+    def test_to_dict_omits_none_version_fields(self):
+        recipe = _sample_recipe()
+        d = recipe.to_dict()
+        assert d["version"] == 1
+        assert "parent_version" not in d
+        assert "changes" not in d
+
+    def test_to_dict_includes_version_fields_when_set(self):
+        recipe = _sample_recipe()
+        recipe.version = 3
+        recipe.parent_version = "/tmp/.kiln_recipe.v2.json"
+        recipe.changes = {"body.color": "white -> red"}
+        d = recipe.to_dict()
+        assert d["version"] == 3
+        assert d["parent_version"] == "/tmp/.kiln_recipe.v2.json"
+        assert d["changes"] == {"body.color": "white -> red"}
+
+    def test_from_dict_with_version_fields(self):
+        data = {
+            "name": "test",
+            "created": "2026-01-01T00:00:00Z",
+            "version": 5,
+            "parent_version": "/tmp/parent.json",
+            "changes": {"portrait.color": "black -> white"},
+        }
+        recipe = DesignRecipe.from_dict(data)
+        assert recipe.version == 5
+        assert recipe.parent_version == "/tmp/parent.json"
+        assert recipe.changes == {"portrait.color": "black -> white"}
+
+    def test_from_dict_legacy_no_version(self):
+        """Recipes saved before versioning should default to v1."""
+        data = {"name": "legacy", "created": "2025-01-01T00:00:00Z"}
+        recipe = DesignRecipe.from_dict(data)
+        assert recipe.version == 1
+        assert recipe.parent_version is None
+        assert recipe.changes is None
+
+
+class TestCreateNewVersion:
+    """create_new_version: version increment, parent tracking, change delta."""
+
+    def test_increments_version(self, tmp_path):
+        parent = _sample_recipe()
+        parent_path = save_recipe(parent, str(tmp_path))
+        new = create_new_version(parent, parent_path)
+        assert new.version == 2
+        assert new.parent_version == os.path.abspath(parent_path)
+
+    def test_records_changes(self, tmp_path):
+        parent = _sample_recipe()
+        parent_path = save_recipe(parent, str(tmp_path))
+        changes = {"body.color": "white -> red"}
+        new = create_new_version(parent, parent_path, changes=changes, notes="recolor")
+        assert new.changes == changes
+        assert new.notes == "recolor"
+
+    def test_deep_copies_parts(self, tmp_path):
+        parent = _sample_recipe()
+        parent_path = save_recipe(parent, str(tmp_path))
+        new = create_new_version(parent, parent_path)
+        new.parts[0].color = "red"
+        assert parent.parts[0].color == "white"  # original unchanged
+
+    def test_invalidates_final_3mf(self, tmp_path):
+        parent = _sample_recipe()
+        parent.final_3mf = "/tmp/old.3mf"
+        parent_path = save_recipe(parent, str(tmp_path))
+        new = create_new_version(parent, parent_path)
+        assert new.final_3mf is None
+
+    def test_fresh_timestamp(self, tmp_path):
+        parent = _sample_recipe()
+        parent_path = save_recipe(parent, str(tmp_path))
+        new = create_new_version(parent, parent_path)
+        assert new.created != parent.created
+
+    def test_chain_three_versions(self, tmp_path):
+        v1 = _sample_recipe()
+        p1 = save_recipe(v1, str(tmp_path))
+        v2 = create_new_version(v1, p1, changes={"body.color": "white -> red"})
+        p2 = save_recipe(v2, str(tmp_path))
+        v3 = create_new_version(v2, p2, changes={"portrait.color": "black -> blue"})
+        assert v3.version == 3
+        assert v3.parent_version == os.path.abspath(p2)
+
+
+class TestSaveRecipeVersioning:
+    """save_recipe now writes versioned snapshot files."""
+
+    def test_writes_versioned_file(self, tmp_path):
+        recipe = _sample_recipe()
+        save_recipe(recipe, str(tmp_path))
+        versioned = tmp_path / ".kiln_recipe.v1.json"
+        assert versioned.exists()
+
+    def test_versioned_file_matches_main(self, tmp_path):
+        recipe = _sample_recipe()
+        save_recipe(recipe, str(tmp_path))
+        main = json.loads((tmp_path / ".kiln_recipe.json").read_text())
+        versioned = json.loads((tmp_path / ".kiln_recipe.v1.json").read_text())
+        assert main == versioned
+
+    def test_multiple_versions_on_disk(self, tmp_path):
+        v1 = _sample_recipe()
+        p1 = save_recipe(v1, str(tmp_path))
+        v2 = create_new_version(v1, p1, changes={"body.color": "white -> red"})
+        v2.parts[0].color = "red"
+        save_recipe(v2, str(tmp_path))
+        assert (tmp_path / ".kiln_recipe.v1.json").exists()
+        assert (tmp_path / ".kiln_recipe.v2.json").exists()
+        # Main file should be v2
+        main = json.loads((tmp_path / ".kiln_recipe.json").read_text())
+        assert main["version"] == 2
+
+
+class TestListRecipeVersions:
+    """list_recipe_versions: enumerate version history from disk."""
+
+    def test_lists_all_versions(self, tmp_path):
+        v1 = _sample_recipe()
+        p1 = save_recipe(v1, str(tmp_path))
+        v2 = create_new_version(v1, p1, changes={"body.color": "white -> red"})
+        save_recipe(v2, str(tmp_path))
+        versions = list_recipe_versions(str(tmp_path))
+        assert len(versions) == 2
+        assert versions[0]["version"] == 1
+        assert versions[1]["version"] == 2
+
+    def test_sorted_by_version(self, tmp_path):
+        v1 = _sample_recipe()
+        p1 = save_recipe(v1, str(tmp_path))
+        v2 = create_new_version(v1, p1, notes="v2")
+        p2 = save_recipe(v2, str(tmp_path))
+        v3 = create_new_version(v2, p2, notes="v3")
+        save_recipe(v3, str(tmp_path))
+        versions = list_recipe_versions(str(tmp_path))
+        assert [v["version"] for v in versions] == [1, 2, 3]
+
+    def test_empty_directory(self, tmp_path):
+        assert list_recipe_versions(str(tmp_path)) == []
+
+    def test_nonexistent_directory(self):
+        assert list_recipe_versions("/nonexistent") == []
+
+    def test_includes_changes_and_notes(self, tmp_path):
+        v1 = _sample_recipe()
+        p1 = save_recipe(v1, str(tmp_path))
+        v2 = create_new_version(
+            v1, p1,
+            changes={"body.color": "white -> red"},
+            notes="recolor body",
+        )
+        save_recipe(v2, str(tmp_path))
+        versions = list_recipe_versions(str(tmp_path))
+        v2_entry = versions[1]
+        assert v2_entry["notes"] == "recolor body"
+        assert v2_entry["changes"] == {"body.color": "white -> red"}

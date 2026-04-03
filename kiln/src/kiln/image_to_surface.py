@@ -346,6 +346,7 @@ def prepare_image_for_emboss(
     invert: bool = False,
     edge_enhance: bool = True,
     style: str = "default",
+    flip_rows: bool = False,
 ) -> dict:
     """Convert a PNG/JPG image to a grayscale PGM heightmap for OpenSCAD surface().
 
@@ -427,22 +428,68 @@ def prepare_image_for_emboss(
             pass
 
     elif style == "coin":
-        # Coin-relief: histogram equalization + 4-level posterize.
-        # Best for single-color FDM deboss — produces clean depth tiers
-        # that cast shadows like a coin face. Handles dark subjects
-        # (dark fur, dark clothing) via equalization BEFORE posterize.
-        # Recommended depth: 1.5-2.0mm for visible relief.
+        # PROVEN pipeline (v11 Ash coaster, 2026-04-02):
+        # rembg → dodge+burn → bilateral → 8-level posterize → circular mask.
+        # Handles dark subjects (dark fur, dark clothing) via local contrast
+        # normalization (dodge+burn) instead of histogram equalization.
+        # Recommended: max_resolution=250, depth=1.5-2.0mm, white PLA.
         try:
             from PIL import Image, ImageFilter, ImageOps
 
             img = Image.open(image_path).convert("L")
+
+            # Step 1: EXIF-aware open (PIL handles orientation automatically)
+            # Step 2: Background removal via rembg (if available)
+            try:
+                from rembg import remove as _rembg_remove
+
+                img_rgba = Image.open(image_path)
+                img_rgba = _rembg_remove(img_rgba)
+                # Convert removed background (transparent) to white
+                bg = Image.new("RGBA", img_rgba.size, (255, 255, 255, 255))
+                bg.paste(img_rgba, mask=img_rgba.split()[3])
+                img = bg.convert("L")
+            except ImportError:
+                pass  # rembg not installed — skip background removal
+
+            # Step 3: Foreground crop with 8% padding
+            bbox = img.getbbox()
+            if bbox:
+                pad_x = int((bbox[2] - bbox[0]) * 0.08)
+                pad_y = int((bbox[3] - bbox[1]) * 0.08)
+                crop_box = (
+                    max(0, bbox[0] - pad_x),
+                    max(0, bbox[1] - pad_y),
+                    min(img.width, bbox[2] + pad_x),
+                    min(img.height, bbox[3] + pad_y),
+                )
+                img = img.crop(crop_box)
+
+            # Resize to target resolution
             img = ImageOps.fit(img, (max_resolution, max_resolution), method=Image.LANCZOS)
-            # Equalize histogram FIRST — critical for dark subjects
-            img = ImageOps.equalize(img)
-            img = ImageOps.autocontrast(img, cutoff=2)
-            # 4-level posterize for clean FDM depth steps
-            step = 256 // 4
-            img = img.point(lambda x: (x // step) * step * 255 // (step * 3))
+
+            # Step 4: Dodge+burn — local contrast normalization
+            # pixel / local_average via GaussianBlur radius=22
+            import numpy as np
+
+            arr = np.array(img, dtype=np.float64)
+            local_avg = np.array(
+                img.filter(ImageFilter.GaussianBlur(radius=22)), dtype=np.float64
+            )
+            # Avoid division by zero
+            local_avg = np.clip(local_avg, 1.0, 255.0)
+            dodged = arr / local_avg * 128.0
+            dodged = np.clip(dodged, 0, 255).astype(np.uint8)
+            img = Image.fromarray(dodged)
+
+            # Step 5: Bilateral smoothing — MedianFilter(3) x3
+            for _ in range(3):
+                img = img.filter(ImageFilter.MedianFilter(size=3))
+
+            # Step 6: 8-level posterize for clean FDM depth tiers
+            step = 256 // 8
+            img = img.point(lambda x: (x // step) * step * 255 // (step * 7))
+
             # Circular mask for medallion framing
             mask = Image.new("L", img.size, 0)
             from PIL import ImageDraw
@@ -619,6 +666,11 @@ def prepare_image_for_emboss(
 
     if invert:
         rows = _invert(rows)
+
+    # OpenSCAD surface() reads rows bottom-to-top; images are top-to-bottom.
+    # flip_rows=True corrects this so the heightmap orientation matches the image.
+    if flip_rows:
+        rows = list(reversed(rows))
 
     os.makedirs(output_dir, exist_ok=True)
     stem = Path(image_path).stem

@@ -57,7 +57,14 @@ class DesignPart:
 
 @dataclass
 class DesignRecipe:
-    """Full recipe describing a multi-part design and its build pipeline."""
+    """Full recipe describing a multi-part design and its build pipeline.
+
+    Recipes are version-aware: each modification creates a new version
+    rather than overwriting the original.  ``version`` is an incrementing
+    integer, ``parent_version`` links back to the previous version, and
+    ``changes`` records a delta of what changed (e.g.,
+    ``{"portrait.color": "white -> black"}``).
+    """
 
     name: str
     created: str  # ISO-8601 timestamp
@@ -67,11 +74,15 @@ class DesignRecipe:
     merge_order: list[str] = field(default_factory=list)
     final_3mf: str | None = None
     notes: str = ""
+    version: int = 1
+    parent_version: str | None = None  # path to the parent recipe file
+    changes: dict[str, str] | None = None  # delta from parent
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "name": self.name,
             "created": self.created,
+            "version": self.version,
             "source_scad": self.source_scad,
             "parameters": self.parameters,
             "parts": [p.to_dict() for p in self.parts],
@@ -79,6 +90,11 @@ class DesignRecipe:
             "final_3mf": self.final_3mf,
             "notes": self.notes,
         }
+        if self.parent_version is not None:
+            d["parent_version"] = self.parent_version
+        if self.changes is not None:
+            d["changes"] = self.changes
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DesignRecipe:
@@ -92,6 +108,9 @@ class DesignRecipe:
             merge_order=data.get("merge_order", []),
             final_3mf=data.get("final_3mf"),
             notes=data.get("notes", ""),
+            version=data.get("version", 1),
+            parent_version=data.get("parent_version"),
+            changes=data.get("changes"),
         )
 
     def save(self, directory: str) -> str:
@@ -112,13 +131,21 @@ class DesignRecipe:
 def save_recipe(recipe: DesignRecipe, directory: str) -> str:
     """Serialize *recipe* to ``<directory>/.kiln_recipe.json``.
 
+    Also writes a versioned copy (e.g., ``.kiln_recipe.v2.json``) so that
+    every version is preserved on disk alongside the "current" recipe.
+
     :returns: The absolute path of the written file.
     :raises FileNotFoundError: If *directory* does not exist.
     """
     if not os.path.isdir(directory):
         raise FileNotFoundError(f"Directory does not exist: {directory}")
+    # Always write the canonical "current" recipe
     path = os.path.join(directory, _RECIPE_FILENAME)
     with open(path, "w", encoding="utf-8") as fh:
+        json.dump(recipe.to_dict(), fh, indent=2)
+    # Write a versioned snapshot (v1, v2, ...) for history
+    versioned = os.path.join(directory, f".kiln_recipe.v{recipe.version}.json")
+    with open(versioned, "w", encoding="utf-8") as fh:
         json.dump(recipe.to_dict(), fh, indent=2)
     return os.path.abspath(path)
 
@@ -215,3 +242,61 @@ def create_recipe(
         final_3mf=final_3mf,
         notes=notes,
     )
+
+
+def create_new_version(
+    parent: DesignRecipe,
+    parent_path: str,
+    *,
+    changes: dict[str, str] | None = None,
+    notes: str = "",
+) -> DesignRecipe:
+    """Create a new version of *parent*, incrementing the version number.
+
+    Returns a deep copy with ``version`` incremented, ``parent_version``
+    set to *parent_path*, ``changes`` recording the delta, and a fresh
+    timestamp.  The caller should mutate the returned recipe (e.g., update
+    part colors) before saving.
+
+    :param parent: The recipe to derive from.
+    :param parent_path: Absolute path to the parent recipe file.
+    :param changes: Dict of human-readable change descriptions,
+        e.g. ``{"portrait.color": "white -> black"}``.
+    :param notes: Free-text notes for this version.
+    """
+    new = copy.deepcopy(parent)
+    new.version = parent.version + 1
+    new.parent_version = os.path.abspath(parent_path)
+    new.changes = changes
+    new.created = datetime.now(timezone.utc).isoformat()
+    new.notes = notes
+    new.final_3mf = None  # invalidate — must be re-merged
+    return new
+
+
+def list_recipe_versions(directory: str) -> list[dict[str, Any]]:
+    """List all versioned recipe snapshots in *directory*, sorted by version.
+
+    Returns a list of dicts with ``version``, ``path``, ``created``, and
+    ``name`` for each snapshot found.
+    """
+    results: list[dict[str, Any]] = []
+    if not os.path.isdir(directory):
+        return results
+    for fname in os.listdir(directory):
+        if fname.startswith(".kiln_recipe.v") and fname.endswith(".json"):
+            path = os.path.abspath(os.path.join(directory, fname))
+            try:
+                recipe = load_recipe(path)
+                results.append({
+                    "version": recipe.version,
+                    "path": path,
+                    "created": recipe.created,
+                    "name": recipe.name,
+                    "notes": recipe.notes,
+                    "changes": recipe.changes,
+                })
+            except Exception:  # noqa: BLE001
+                results.append({"path": path, "error": "failed to parse"})
+    results.sort(key=lambda r: r.get("version", 0))
+    return results
