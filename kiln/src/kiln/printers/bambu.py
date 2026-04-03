@@ -1550,6 +1550,7 @@ class BambuAdapter(PrinterAdapter):
         num_filaments: int = 1,
         filament_colors: list[str] | None = None,
         filament_types: list[str] | None = None,
+        stl_paths: list[str] | None = None,
     ) -> str:
         """Wrap PrusaSlicer gcode in a Bambu-compatible 3MF.
 
@@ -1572,6 +1573,8 @@ class BambuAdapter(PrinterAdapter):
         :param num_filaments: Number of filaments (>1 for multi-color).
         :param filament_colors: List of hex color strings per filament.
         :param filament_types: List of filament type strings per filament.
+        :param stl_paths: Optional STL paths for auto-generating thumbnails
+            when no source_3mf_path is provided.
         :returns: Path to the output 3MF file.
         :raises FileNotFoundError: If the gcode file doesn't exist.
         :raises ValueError: If the gcode has no layer changes.
@@ -1601,6 +1604,7 @@ class BambuAdapter(PrinterAdapter):
             output_path,
             settings=settings,
             source_3mf_path=source_3mf_path,
+            stl_paths=stl_paths,
         )
         return result.output_path
 
