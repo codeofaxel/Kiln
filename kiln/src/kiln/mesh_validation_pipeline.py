@@ -14,6 +14,7 @@ The pipeline:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import shutil
 import tempfile
@@ -21,7 +22,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -189,219 +190,244 @@ def run_validation_pipeline(
     working_path = file_path
     was_repaired = False
     repair_stats: dict[str, Any] | None = None
-
-    # ------------------------------------------------------------------
-    # Step 1: Parse & validate
-    # ------------------------------------------------------------------
-    logger.info("Step 1/4: Validating mesh geometry — %s", file_path)
-    validation = validate_mesh(file_path)
-
-    is_manifold = validation.is_manifold
-    triangle_count = validation.triangle_count
-    bounding_box = validation.bounding_box
-    dimensions = _dimensions_from_bbox(bounding_box)
-
-    errors.extend(validation.errors)
-    warnings.extend(validation.warnings)
-
-    if not validation.valid and not validation.is_manifold and not auto_repair:
-        # Mesh is broken and we aren't allowed to repair — early out.
-        logger.warning("Mesh is invalid and auto_repair is disabled.")
-
-    # ------------------------------------------------------------------
-    # Step 2: Auto-repair if needed
-    # ------------------------------------------------------------------
-    if not is_manifold and auto_repair:
-        logger.info("Step 2/4: Mesh is non-manifold — attempting basic repair")
-
-        # Work on a copy to preserve the original.
-        suffix = Path(file_path).suffix
-        tmp_repaired = tempfile.mktemp(suffix=suffix, prefix="kiln_repair_")
-        shutil.copy2(file_path, tmp_repaired)
-
-        # Phase A: basic repair (degenerate removal + normal fix)
-        try:
-            repair_stats = repair_stl(tmp_repaired)
-            logger.info(
-                "Basic repair complete: %s",
-                {k: v for k, v in repair_stats.items() if k != "path"},
-            )
-        except (ValueError, OSError) as exc:
-            errors.append(f"Basic repair failed: {exc}")
-            logger.error("Basic repair failed: %s", exc)
-
-        # Re-validate after basic repair
-        post_basic = validate_mesh(tmp_repaired)
-        is_manifold = post_basic.is_manifold
-        triangle_count = post_basic.triangle_count
-        bounding_box = post_basic.bounding_box
-        dimensions = _dimensions_from_bbox(bounding_box)
-
-        # Phase B: advanced repair if still non-manifold
-        if not is_manifold:
-            logger.info("Step 2/4: Still non-manifold — attempting advanced repair (hole closing)")
-            try:
-                adv_stats = repair_stl_advanced(tmp_repaired, close_holes=True)
-                # Merge stats
-                if repair_stats is not None:
-                    repair_stats["advanced"] = adv_stats
-                else:
-                    repair_stats = {"advanced": adv_stats}
-                logger.info(
-                    "Advanced repair complete: %s",
-                    {k: v for k, v in adv_stats.items() if k != "path"},
-                )
-            except (ValueError, OSError) as exc:
-                errors.append(f"Advanced repair failed: {exc}")
-                logger.error("Advanced repair failed: %s", exc)
-
-            # Re-validate after advanced repair
-            post_adv = validate_mesh(tmp_repaired)
-            is_manifold = post_adv.is_manifold
-            triangle_count = post_adv.triangle_count
-            bounding_box = post_adv.bounding_box
-            dimensions = _dimensions_from_bbox(bounding_box)
-
-        if is_manifold:
-            was_repaired = True
-            working_path = tmp_repaired
-            logger.info("Repair succeeded — mesh is now manifold.")
-        else:
-            warnings.append("Mesh remains non-manifold after repair attempts.")
-            # Still use the repaired copy — degenerate cleanup may help downstream.
-            was_repaired = True
-            working_path = tmp_repaired
-            logger.warning("Repair could not achieve manifold status.")
-    else:
-        logger.info("Step 2/4: Skipped — mesh is already manifold (or repair disabled).")
-
-    # ------------------------------------------------------------------
-    # Step 3: Printability analysis
-    # ------------------------------------------------------------------
-    logger.info("Step 3/4: Analyzing printability")
-
-    printability_score = 0
-    printability_grade = "F"
-    printability_details: dict[str, Any] | None = None
+    _temp_files: list[str] = []  # track temp files for cleanup on failure
 
     try:
-        from kiln.printability import analyze_printability
+        # ------------------------------------------------------------------
+        # Step 1: Parse & validate
+        # ------------------------------------------------------------------
+        _logger.info("Step 1/4: Validating mesh geometry — %s", file_path)
+        validation = validate_mesh(file_path)
 
-        report = analyze_printability(
-            working_path,
-            nozzle_diameter=nozzle_diameter,
-            layer_height=layer_height,
-            material=material.lower(),
-        )
-        printability_score = report.score
-        printability_grade = report.grade
-        printability_details = report.to_dict()
-        recommendations.extend(report.recommendations)
-        logger.info("Printability score: %d/100 (grade %s)", report.score, report.grade)
-    except (ValueError, OSError) as exc:
-        errors.append(f"Printability analysis failed: {exc}")
-        logger.error("Printability analysis failed: %s", exc)
+        is_manifold = validation.is_manifold
+        triangle_count = validation.triangle_count
+        bounding_box = validation.bounding_box
+        dimensions = _dimensions_from_bbox(bounding_box)
 
-    # ------------------------------------------------------------------
-    # Step 4: Build volume check (+ optional auto-scale)
-    # ------------------------------------------------------------------
-    fits_build_volume: bool | None = None
-    was_scaled = False
-    scale_factor = 1.0
+        errors.extend(validation.errors)
+        warnings.extend(validation.warnings)
 
-    if build_volume is not None:
-        logger.info(
-            "Step 4/4: Checking build volume fit (%.0f x %.0f x %.0f mm)",
-            *build_volume,
-        )
-        fits = _mesh_fits_volume(dimensions, build_volume)
+        if not validation.valid and not validation.is_manifold and not auto_repair:
+            _logger.warning("Mesh is invalid and auto_repair is disabled.")
 
-        if fits:
-            fits_build_volume = True
-            logger.info("Mesh fits within build volume.")
-        elif auto_scale:
-            logger.info("Mesh exceeds build volume — auto-scaling to fit.")
+        # ------------------------------------------------------------------
+        # Step 2: Auto-repair if needed
+        # ------------------------------------------------------------------
+        if not is_manifold and auto_repair:
+            _logger.info("Step 2/4: Mesh is non-manifold — attempting basic repair")
+
+            # Work on a copy to preserve the original.
+            suffix = Path(file_path).suffix or ".stl"
+            with tempfile.NamedTemporaryFile(
+                suffix=suffix, prefix="kiln_repair_", delete=False,
+            ) as tmp_fd:
+                tmp_repaired = tmp_fd.name
+            shutil.copy2(file_path, tmp_repaired)
+            _temp_files.append(tmp_repaired)
+
+            # Phase A: basic repair (degenerate removal + normal fix)
             try:
-                scale_result = scale_to_fit(
-                    working_path,
-                    max_x_mm=build_volume[0],
-                    max_y_mm=build_volume[1],
-                    max_z_mm=build_volume[2],
+                repair_stats = repair_stl(tmp_repaired)
+                _logger.info(
+                    "Basic repair complete: %s",
+                    {k: v for k, v in repair_stats.items() if k != "path"},
                 )
-                scale_factor = scale_result["scale_factor"]
-                was_scaled = scale_factor < 1.0
-                working_path = scale_result["path"]
-                fits_build_volume = True
+            except Exception as exc:
+                errors.append(f"Basic repair failed: {exc}")
+                _logger.error("Basic repair failed: %s", exc, exc_info=True)
 
-                if was_scaled:
-                    warnings.append(
-                        f"Mesh was scaled to {scale_factor:.2%} of original size "
-                        f"to fit build volume."
+            # Re-validate after basic repair
+            post_basic = validate_mesh(tmp_repaired)
+            is_manifold = post_basic.is_manifold
+            triangle_count = post_basic.triangle_count
+            bounding_box = post_basic.bounding_box
+            dimensions = _dimensions_from_bbox(bounding_box)
+
+            # Phase B: advanced repair if still non-manifold
+            if not is_manifold:
+                _logger.info(
+                    "Step 2/4: Still non-manifold — attempting advanced repair (hole closing)",
+                )
+                try:
+                    adv_stats = repair_stl_advanced(tmp_repaired, close_holes=True)
+                    if repair_stats is not None:
+                        repair_stats["advanced"] = adv_stats
+                    else:
+                        repair_stats = {"advanced": adv_stats}
+                    _logger.info(
+                        "Advanced repair complete: %s",
+                        {k: v for k, v in adv_stats.items() if k != "path"},
                     )
-                    # Refresh dimensions after scaling
-                    dimensions = scale_result.get("new_dimensions", dimensions)
-                    logger.info("Scaled to %.2f%% — new dims: %s", scale_factor * 100, dimensions)
-                else:
-                    logger.info("Mesh already fits — no scaling needed.")
-            except (ValueError, OSError) as exc:
-                errors.append(f"Auto-scale failed: {exc}")
-                fits_build_volume = False
-                logger.error("Auto-scale failed: %s", exc)
+                except Exception as exc:
+                    errors.append(f"Advanced repair failed: {exc}")
+                    _logger.error("Advanced repair failed: %s", exc, exc_info=True)
+
+                # Re-validate after advanced repair
+                post_adv = validate_mesh(tmp_repaired)
+                is_manifold = post_adv.is_manifold
+                triangle_count = post_adv.triangle_count
+                bounding_box = post_adv.bounding_box
+                dimensions = _dimensions_from_bbox(bounding_box)
+
+            if is_manifold:
+                was_repaired = True
+                working_path = tmp_repaired
+                _logger.info("Repair succeeded — mesh is now manifold.")
+            else:
+                warnings.append("Mesh remains non-manifold after repair attempts.")
+                # Still use the repaired copy — degenerate cleanup may help downstream.
+                was_repaired = repair_stats is not None
+                working_path = tmp_repaired
+                _logger.warning("Repair could not achieve manifold status.")
         else:
-            fits_build_volume = False
-            errors.append(
-                f"Mesh exceeds build volume "
-                f"({dimensions!r} vs {build_volume[0]}x{build_volume[1]}x{build_volume[2]} mm)."
+            _logger.info(
+                "Step 2/4: Skipped — mesh is already manifold (or repair disabled).",
             )
-            logger.warning("Mesh does not fit build volume.")
-    else:
-        logger.info("Step 4/4: Skipped — no build volume specified.")
 
-    # ------------------------------------------------------------------
-    # Step 5: Composite verdict
-    # ------------------------------------------------------------------
-    passed = True
+        # ------------------------------------------------------------------
+        # Step 3: Printability analysis
+        # ------------------------------------------------------------------
+        _logger.info("Step 3/4: Analyzing printability")
 
-    if not is_manifold:
-        passed = False
+        printability_score = 0
+        printability_grade = "F"
+        printability_details: dict[str, Any] | None = None
 
-    if printability_score < min_printability_score:
-        passed = False
-        if "Printability analysis failed" not in " ".join(errors):
+        try:
+            from kiln.printability import analyze_printability
+
+            report = analyze_printability(
+                working_path,
+                nozzle_diameter=nozzle_diameter,
+                layer_height=layer_height,
+                material=material.lower(),
+            )
+            printability_score = report.score
+            printability_grade = report.grade
+            printability_details = report.to_dict()
+            recommendations.extend(report.recommendations)
+            _logger.info(
+                "Printability score: %d/100 (grade %s)", report.score, report.grade,
+            )
+        except ImportError:
             warnings.append(
-                f"Printability score {printability_score} is below minimum "
-                f"threshold of {min_printability_score}."
+                "Printability analysis unavailable (missing kiln.printability module).",
             )
+            _logger.warning("kiln.printability not importable — skipping analysis")
+        except Exception as exc:
+            errors.append(f"Printability analysis failed: {exc}")
+            _logger.error("Printability analysis failed: %s", exc, exc_info=True)
 
-    if fits_build_volume is False:
-        passed = False
+        # ------------------------------------------------------------------
+        # Step 4: Build volume check (+ optional auto-scale)
+        # ------------------------------------------------------------------
+        fits_build_volume: bool | None = None
+        was_scaled = False
+        scale_factor = 1.0
 
-    # Any hard errors from validation also fail the pipeline
-    if validation.errors:
-        passed = False
+        if build_volume is not None:
+            _logger.info(
+                "Step 4/4: Checking build volume fit (%.0f x %.0f x %.0f mm)",
+                *build_volume,
+            )
+            fits = _mesh_fits_volume(dimensions, build_volume)
 
-    result = ValidationPipelineResult(
-        passed=passed,
-        file_path=working_path,
-        original_file_path=file_path,
-        is_manifold=is_manifold,
-        triangle_count=triangle_count,
-        bounding_box=bounding_box,
-        dimensions_mm=dimensions,
-        was_repaired=was_repaired,
-        repair_stats=repair_stats,
-        printability_score=printability_score,
-        printability_grade=printability_grade,
-        printability_details=printability_details,
-        fits_build_volume=fits_build_volume,
-        was_scaled=was_scaled,
-        scale_factor=scale_factor,
-        errors=errors,
-        warnings=warnings,
-        recommendations=recommendations,
-        summary="",
-    )
-    result.summary = _build_summary(result)
+            if fits:
+                fits_build_volume = True
+                _logger.info("Mesh fits within build volume.")
+            elif auto_scale:
+                _logger.info("Mesh exceeds build volume — auto-scaling to fit.")
+                try:
+                    scale_result = scale_to_fit(
+                        working_path,
+                        max_x_mm=build_volume[0],
+                        max_y_mm=build_volume[1],
+                        max_z_mm=build_volume[2],
+                    )
+                    scale_factor = scale_result["scale_factor"]
+                    was_scaled = scale_factor < 1.0
+                    working_path = scale_result["path"]
+                    fits_build_volume = True
 
-    logger.info("Pipeline complete — %s", "PASSED" if passed else "FAILED")
-    return result
+                    if was_scaled:
+                        warnings.append(
+                            f"Mesh was scaled to {scale_factor:.2%} of original size "
+                            f"to fit build volume.",
+                        )
+                        dimensions = scale_result.get("new_dimensions", dimensions)
+                        _logger.info(
+                            "Scaled to %.2f%% — new dims: %s",
+                            scale_factor * 100,
+                            dimensions,
+                        )
+                    else:
+                        _logger.info("Mesh already fits — no scaling needed.")
+                except Exception as exc:
+                    errors.append(f"Auto-scale failed: {exc}")
+                    fits_build_volume = False
+                    _logger.error("Auto-scale failed: %s", exc, exc_info=True)
+            else:
+                fits_build_volume = False
+                errors.append(
+                    f"Mesh exceeds build volume "
+                    f"({dimensions!r} vs "
+                    f"{build_volume[0]}x{build_volume[1]}x{build_volume[2]} mm).",
+                )
+                _logger.warning("Mesh does not fit build volume.")
+        else:
+            _logger.info("Step 4/4: Skipped — no build volume specified.")
+
+        # ------------------------------------------------------------------
+        # Step 5: Composite verdict
+        # ------------------------------------------------------------------
+        passed = True
+
+        if not is_manifold:
+            passed = False
+
+        if printability_score < min_printability_score:
+            passed = False
+            if "Printability analysis failed" not in " ".join(errors):
+                warnings.append(
+                    f"Printability score {printability_score} is below minimum "
+                    f"threshold of {min_printability_score}.",
+                )
+
+        if fits_build_volume is False:
+            passed = False
+
+        if validation.errors:
+            passed = False
+
+        result = ValidationPipelineResult(
+            passed=passed,
+            file_path=working_path,
+            original_file_path=file_path,
+            is_manifold=is_manifold,
+            triangle_count=triangle_count,
+            bounding_box=bounding_box,
+            dimensions_mm=dimensions,
+            was_repaired=was_repaired,
+            repair_stats=repair_stats,
+            printability_score=printability_score,
+            printability_grade=printability_grade,
+            printability_details=printability_details,
+            fits_build_volume=fits_build_volume,
+            was_scaled=was_scaled,
+            scale_factor=scale_factor,
+            errors=errors,
+            warnings=warnings,
+            recommendations=recommendations,
+            summary="",
+        )
+        result.summary = _build_summary(result)
+
+        _logger.info("Pipeline complete — %s", "PASSED" if passed else "FAILED")
+        return result
+
+    except Exception:
+        # Clean up temp files on unexpected failure
+        for tmp in _temp_files:
+            with contextlib.suppress(OSError):
+                Path(tmp).unlink(missing_ok=True)
+        raise

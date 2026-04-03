@@ -9679,19 +9679,30 @@ def generate_and_print(
                 else:
                     _adapter = _get_adapter()
                 _printer_info = _adapter.get_printer_info()
-                if hasattr(_printer_info, 'build_volume') and _printer_info.build_volume:
-                    bv = _printer_info.build_volume
-                    _build_vol = (bv.get("x", 256), bv.get("y", 256), bv.get("z", 256))
+                bv = getattr(_printer_info, "build_volume", None)
+                if isinstance(bv, dict) and bv:
+                    _build_vol = (
+                        float(bv.get("x", 256)),
+                        float(bv.get("y", 256)),
+                        float(bv.get("z", 256)),
+                    )
             except Exception:
-                pass  # No build volume info — skip build volume check
+                logger.debug("Could not resolve build volume from printer", exc_info=True)
 
-            pipeline_result = run_validation_pipeline(
-                result.local_path,
-                material="PLA",
-                build_volume=_build_vol,
-                auto_repair=True,
-                auto_scale=False,  # Don't silently resize user's model
-            )
+            try:
+                pipeline_result = run_validation_pipeline(
+                    result.local_path,
+                    material="PLA",
+                    build_volume=_build_vol,
+                    auto_repair=True,
+                    auto_scale=False,  # Don't silently resize user's model
+                )
+            except Exception as exc:
+                logger.error("Validation pipeline crashed: %s", exc, exc_info=True)
+                return _error_dict(
+                    f"Validation pipeline error: {exc}",
+                    code="VALIDATION_ERROR",
+                )
 
             if not pipeline_result.passed:
                 return _error_dict(
