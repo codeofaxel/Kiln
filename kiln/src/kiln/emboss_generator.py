@@ -275,6 +275,7 @@ def generate_emboss_scad(
     depth_mm: float = 0.8,
     mode: str = "deboss",
     scale: float = 0.7,
+    absolute_size_mm: float = 0.0,
     offset_x_mm: float = 0.0,
     offset_y_mm: float = 0.0,
     placement: str = "center",
@@ -306,7 +307,14 @@ def generate_emboss_scad(
     mode:
         ``"deboss"`` (cut into surface) or ``"emboss"`` (raised above).
     scale:
-        Fraction of the face to cover (0.0 – 1.0).
+        Fraction of the face to cover (0.0 – 1.0).  Ignored when
+        *absolute_size_mm* is provided.
+    absolute_size_mm:
+        Exact width of the decoration in millimetres.  When > 0, overrides
+        *scale* so the decoration is always this width regardless of the
+        product size.  Use for brand specs that require a fixed logo size
+        across different products.  Clamped to 95% of face width if too
+        large; warns if below 5mm (near FDM detail limits).
     offset_x_mm:
         Horizontal offset from face centre in mm.
     offset_y_mm:
@@ -344,9 +352,29 @@ def generate_emboss_scad(
     face_h = face["height_mm"]
     normal = face["normal"]
 
-    # Scale content to fit within the target fraction of the face
-    target_w = face_w * scale
-    target_h = face_h * scale
+    # Scale content to fit within the target area.
+    # absolute_size_mm overrides scale — exact width in mm.
+    warnings: list[str] = []
+    if absolute_size_mm > 0:
+        max_allowed = face_w * 0.95
+        if absolute_size_mm > max_allowed:
+            warnings.append(
+                f"absolute_size_mm={absolute_size_mm:.1f} exceeds 95% of "
+                f"face width ({face_w:.1f}mm). Clamped to {max_allowed:.1f}mm."
+            )
+            absolute_size_mm = max_allowed
+        if absolute_size_mm < 5.0:
+            warnings.append(
+                f"absolute_size_mm={absolute_size_mm:.1f}mm is very small — "
+                f"near FDM detail limits. Features may not be visible."
+            )
+        # Compute effective scale from absolute size
+        scale = absolute_size_mm / face_w if face_w > 0 else 0.5
+        target_w = absolute_size_mm
+        target_h = absolute_size_mm * (face_h / face_w) if face_w > 0 else absolute_size_mm
+    else:
+        target_w = face_w * scale
+        target_h = face_h * scale
 
     # Compute the translation along the face normal for positioning
     # For deboss: start slightly above the surface, extrude inward
@@ -441,11 +469,14 @@ def generate_emboss_scad(
 
     openscad_cmd = f'openscad -o "{output_stl_path}" "{scad_path}"'
 
-    return {
+    result = {
         "scad_path": str(scad_path),
         "output_stl_path": str(output_stl_path),
         "openscad_command": openscad_cmd,
     }
+    if warnings:
+        result["warnings"] = warnings
+    return result
 
 
 # ---------------------------------------------------------------------------

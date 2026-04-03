@@ -18597,6 +18597,7 @@ def decorate_surface(
     offset_y_mm: float = 0.0,
     image_style: str = "auto",
     placement: str = "center",
+    absolute_size_mm: float = 0.0,
 ) -> dict:
     """Put any image, text, or pattern onto a 3D model surface.
 
@@ -18800,10 +18801,14 @@ def decorate_surface(
             depth_mm=effective_depth,
             mode=mode,
             scale=scale,
+            absolute_size_mm=absolute_size_mm,
             offset_x_mm=offset_x_mm,
             offset_y_mm=offset_y_mm,
             placement=placement,
         )
+        # Collect warnings from emboss generator (e.g. absolute_size_mm clamping)
+        if scad_result.get("warnings"):
+            warnings.extend(scad_result["warnings"])
 
         # --- Step 6: Compile to STL ---
         from kiln.emboss_generator import compile_embossed_model
@@ -18880,6 +18885,7 @@ def decorate_surface(
                     depth_mm=effective_depth,
                     mode=mode,
                     scale=scale,
+                    absolute_size_mm=absolute_size_mm,
                     offset_x_mm=offset_x_mm,
                     offset_y_mm=offset_y_mm,
                     placement=placement,
