@@ -77,6 +77,12 @@ class DesignRecipe:
     version: int = 1
     parent_version: str | None = None  # path to the parent recipe file
     changes: dict[str, str] | None = None  # delta from parent
+    # Provenance fields (absorbed from DesignVersion system)
+    design_id: str | None = None  # unique identifier grouping versions of the same design
+    prompt: str | None = None  # natural-language prompt that produced this design
+    generation_provider: str | None = None  # e.g. "gemini", "openscad", "manual"
+    provenance: dict[str, Any] | None = None  # freeform context (tools_used, change_summary, source_files)
+    stl_path: str | None = None  # path to the primary output STL
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -94,6 +100,16 @@ class DesignRecipe:
             d["parent_version"] = self.parent_version
         if self.changes is not None:
             d["changes"] = self.changes
+        if self.design_id is not None:
+            d["design_id"] = self.design_id
+        if self.prompt is not None:
+            d["prompt"] = self.prompt
+        if self.generation_provider is not None:
+            d["generation_provider"] = self.generation_provider
+        if self.provenance is not None:
+            d["provenance"] = self.provenance
+        if self.stl_path is not None:
+            d["stl_path"] = self.stl_path
         return d
 
     @classmethod
@@ -111,6 +127,11 @@ class DesignRecipe:
             version=data.get("version", 1),
             parent_version=data.get("parent_version"),
             changes=data.get("changes"),
+            design_id=data.get("design_id"),
+            prompt=data.get("prompt"),
+            generation_provider=data.get("generation_provider"),
+            provenance=data.get("provenance"),
+            stl_path=data.get("stl_path"),
         )
 
     def save(self, directory: str) -> str:
@@ -271,6 +292,9 @@ def create_new_version(
     new.created = datetime.now(timezone.utc).isoformat()
     new.notes = notes
     new.final_3mf = None  # invalidate — must be re-merged
+    new.stl_path = None  # invalidate — output path changes per version
+    # design_id, prompt, generation_provider, and provenance are carried
+    # forward from the deep copy — they describe the design lineage
     return new
 
 

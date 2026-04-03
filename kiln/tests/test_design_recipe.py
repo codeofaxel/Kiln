@@ -400,6 +400,91 @@ class TestSaveRecipeVersioning:
         assert main["version"] == 2
 
 
+class TestProvenanceFields:
+    """Provenance fields: design_id, prompt, generation_provider, provenance, stl_path."""
+
+    def test_defaults_are_none(self):
+        recipe = _sample_recipe()
+        assert recipe.design_id is None
+        assert recipe.prompt is None
+        assert recipe.generation_provider is None
+        assert recipe.provenance is None
+        assert recipe.stl_path is None
+
+    def test_to_dict_omits_none_provenance_fields(self):
+        recipe = _sample_recipe()
+        d = recipe.to_dict()
+        assert "design_id" not in d
+        assert "prompt" not in d
+        assert "generation_provider" not in d
+        assert "provenance" not in d
+        assert "stl_path" not in d
+
+    def test_to_dict_includes_provenance_fields_when_set(self):
+        recipe = _sample_recipe()
+        recipe.design_id = "ash-coaster"
+        recipe.prompt = "portrait coaster with embossed face"
+        recipe.generation_provider = "openscad"
+        recipe.provenance = {"tools_used": ["rembg", "openscad"], "source_files": ["/tmp/ash.png"]}
+        recipe.stl_path = "/tmp/coaster.stl"
+        d = recipe.to_dict()
+        assert d["design_id"] == "ash-coaster"
+        assert d["prompt"] == "portrait coaster with embossed face"
+        assert d["generation_provider"] == "openscad"
+        assert d["provenance"]["tools_used"] == ["rembg", "openscad"]
+        assert d["stl_path"] == "/tmp/coaster.stl"
+
+    def test_from_dict_round_trip_with_provenance(self):
+        recipe = _sample_recipe()
+        recipe.design_id = "ash-coaster"
+        recipe.prompt = "embossed portrait"
+        recipe.generation_provider = "gemini"
+        recipe.provenance = {"change_summary": "initial generation"}
+        recipe.stl_path = "/tmp/merged.stl"
+        restored = DesignRecipe.from_dict(recipe.to_dict())
+        assert restored.design_id == "ash-coaster"
+        assert restored.prompt == "embossed portrait"
+        assert restored.generation_provider == "gemini"
+        assert restored.provenance == {"change_summary": "initial generation"}
+        assert restored.stl_path == "/tmp/merged.stl"
+
+    def test_backward_compat_old_dict_without_provenance(self):
+        """Old recipes without provenance fields must load with None defaults."""
+        data = {"name": "legacy", "created": "2025-01-01T00:00:00Z"}
+        recipe = DesignRecipe.from_dict(data)
+        assert recipe.design_id is None
+        assert recipe.prompt is None
+        assert recipe.generation_provider is None
+        assert recipe.provenance is None
+        assert recipe.stl_path is None
+
+    def test_create_new_version_carries_provenance(self, tmp_path):
+        parent = _sample_recipe()
+        parent.design_id = "ash-coaster"
+        parent.prompt = "embossed portrait"
+        parent.generation_provider = "openscad"
+        parent.provenance = {"tools_used": ["rembg"]}
+        parent.stl_path = "/tmp/v1.stl"
+        parent_path = save_recipe(parent, str(tmp_path))
+        new = create_new_version(parent, parent_path, changes={"body.color": "white -> grey"})
+        # Provenance lineage fields carried forward
+        assert new.design_id == "ash-coaster"
+        assert new.prompt == "embossed portrait"
+        assert new.generation_provider == "openscad"
+        assert new.provenance == {"tools_used": ["rembg"]}
+        # stl_path invalidated (output changes per version)
+        assert new.stl_path is None
+
+    def test_create_new_version_deep_copies_provenance(self, tmp_path):
+        """Mutating new.provenance must not affect parent.provenance."""
+        parent = _sample_recipe()
+        parent.provenance = {"tools_used": ["rembg"]}
+        parent_path = save_recipe(parent, str(tmp_path))
+        new = create_new_version(parent, parent_path)
+        new.provenance["tools_used"].append("openscad")
+        assert parent.provenance["tools_used"] == ["rembg"]
+
+
 class TestListRecipeVersions:
     """list_recipe_versions: enumerate version history from disk."""
 
