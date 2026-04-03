@@ -1067,4 +1067,6 @@ Kiln is free, open-source software. If you find it useful, consider sending a ti
 
 Kiln is a project of **Hadron Labs Inc.**
 
-[MIT License](LICENSE) — free for any use. See LICENSE for details.
+[AGPL-3.0 License](LICENSE) — open source with copyleft. [Commercial licensing](COMMERCIAL_LICENSE.md) available for companies that need proprietary use.
+
+By contributing, you agree to the [Contributor License Agreement](CONTRIBUTOR_LICENSE_AGREEMENT.md).

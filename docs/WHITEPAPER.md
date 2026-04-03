@@ -302,5 +302,5 @@ Kiln demonstrates that the gap between an idea and a physical object can be coll
 
 ---
 
-*Kiln is open-source infrastructure released under the MIT License.*
+*Kiln is open-source infrastructure released under the GNU Affero General Public License v3.0 (AGPL-3.0). Commercial licensing is available for organizations that require proprietary use.*
 *Kiln is a project of Hadron Labs Inc.*

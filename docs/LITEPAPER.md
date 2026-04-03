@@ -74,7 +74,7 @@ Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI a
 
 ## Business Model
 
-Local printing with Kiln is free and always will be. The core infrastructure is released under the MIT license.
+Local printing with Kiln is free and always will be. The core infrastructure is released under the AGPL-3.0 license. Commercial licensing is available for companies that need proprietary use.
 
 Revenue comes from optional services:
 
@@ -99,5 +99,5 @@ Full documentation, CLI reference, and the technical whitepaper are available in
 
 ---
 
-Kiln is open-source infrastructure released under the MIT License. Version 0.4.2, March 2026.
+Kiln is open-source infrastructure released under the AGPL-3.0 License. Version 0.4.2, March 2026.
 Kiln is a project of Hadron Labs Inc.

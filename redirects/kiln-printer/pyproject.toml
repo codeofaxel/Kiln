@@ -7,7 +7,7 @@ name = "kiln-printer"
 version = "1.0.0"
 description = "This package redirects to kiln3d — the open-source MCP server for AI-controlled 3D printers. Install with: pip install kiln3d"
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 requires-python = ">=3.10"
 authors = [{ name = "Adam Arreola" }]
 keywords = ["kiln", "kiln3d", "3d-printing", "mcp"]
