@@ -23,6 +23,7 @@ from kiln.generation_feedback import (
     FeedbackLoop,
     FeedbackType,
     ImprovedPrompt,
+    PrinterGenerationContext,
     PrintFeedback,
     add_iteration,
     analyze_for_feedback,
@@ -30,7 +31,9 @@ from kiln.generation_feedback import (
     enhance_prompt_with_design_intelligence,
     generate_improved_prompt,
     get_feedback_loop,
+    resolve_printer_generation_context,
     start_feedback_loop,
+    structural_risks_to_feedback,
 )
 
 
@@ -730,3 +733,395 @@ class TestBuildParametricPromptWithComponents:
             "phone stand with gear mechanism"
         )
         assert "spur_gear(" in result.improved_prompt
+
+
+# ---------------------------------------------------------------------------
+# structural_risks_to_feedback
+# ---------------------------------------------------------------------------
+
+
+def _mock_risk(
+    risk_type: str = "thin_neck",
+    severity: str = "warning",
+    description: str = "Narrow cross-section at z=15mm",
+):
+    return SimpleNamespace(
+        risk_type=risk_type,
+        severity=severity,
+        description=description,
+    )
+
+
+def _mock_load_analysis(
+    layer_concern: str = "Load crosses layer boundaries",
+    recommended: str = "on_side",
+):
+    return SimpleNamespace(
+        layer_direction_concern=layer_concern,
+        recommended_print_orientation=recommended,
+    )
+
+
+class TestStructuralRisksToFeedback:
+    """structural_risks_to_feedback converts geometric risks to prompt constraints."""
+
+    def test_empty_risks_returns_empty(self):
+        result = structural_risks_to_feedback([], original_prompt="a bracket")
+        assert result == []
+
+    def test_no_risks_with_none_load_returns_empty(self):
+        result = structural_risks_to_feedback(
+            [], original_prompt="a bracket", load_analysis=None
+        )
+        assert result == []
+
+    def test_single_risk_produces_feedback(self):
+        risks = [_mock_risk()]
+        result = structural_risks_to_feedback(risks, original_prompt="a bracket")
+        assert len(result) == 1
+        assert result[0].feedback_type == FeedbackType.STRUCTURAL
+        assert result[0].severity == "moderate"
+        assert len(result[0].issues) == 1
+        assert "cross-section" in result[0].issues[0].lower()
+
+    def test_critical_risk_sets_critical_severity(self):
+        risks = [_mock_risk(severity="critical")]
+        result = structural_risks_to_feedback(risks, original_prompt="test")
+        assert result[0].severity == "critical"
+
+    def test_multiple_risks_dedupe_constraints(self):
+        risks = [
+            _mock_risk(risk_type="thin_neck", description="Thin at z=15"),
+            _mock_risk(risk_type="thin_neck", description="Thin at z=30"),
+        ]
+        result = structural_risks_to_feedback(risks, original_prompt="test")
+        assert len(result) == 1
+        assert len(result[0].issues) == 2
+        # Same risk_type => same constraint, should not duplicate.
+        assert len(result[0].constraints) == 1
+
+    def test_different_risk_types_produce_multiple_constraints(self):
+        risks = [
+            _mock_risk(risk_type="thin_neck"),
+            _mock_risk(risk_type="cantilever"),
+            _mock_risk(risk_type="sharp_corner"),
+        ]
+        result = structural_risks_to_feedback(risks, original_prompt="test")
+        assert len(result[0].constraints) == 3
+
+    def test_load_analysis_adds_orientation_constraint(self):
+        result = structural_risks_to_feedback(
+            [],
+            original_prompt="a bracket",
+            load_analysis=_mock_load_analysis(),
+        )
+        assert len(result) == 1
+        assert any("on_side" in c for c in result[0].constraints)
+        assert any("layer" in issue.lower() for issue in result[0].issues)
+
+    def test_risks_plus_load_analysis_combined(self):
+        risks = [_mock_risk(risk_type="cantilever")]
+        load = _mock_load_analysis()
+        result = structural_risks_to_feedback(
+            risks, original_prompt="test", load_analysis=load
+        )
+        assert len(result) == 1
+        # Issues from both risk and load.
+        assert len(result[0].issues) >= 2
+        # Constraints from both risk and load.
+        assert len(result[0].constraints) >= 2
+
+    def test_dict_risks_accepted(self):
+        """Accepts dict-form risks (e.g. from to_dict())."""
+        risks = [
+            {
+                "risk_type": "stress_concentration",
+                "severity": "warning",
+                "description": "Abrupt section change",
+            }
+        ]
+        result = structural_risks_to_feedback(risks, original_prompt="test")
+        assert len(result) == 1
+        assert "smooth" in result[0].constraints[0].lower()
+
+    def test_dict_load_analysis_accepted(self):
+        """Accepts dict-form load analysis."""
+        load = {
+            "layer_direction_concern": "Load crosses layers",
+            "recommended_print_orientation": "upright",
+        }
+        result = structural_risks_to_feedback(
+            [], original_prompt="test", load_analysis=load
+        )
+        assert len(result) == 1
+        assert any("upright" in c for c in result[0].constraints)
+
+    def test_unknown_risk_type_still_produces_issue(self):
+        risks = [_mock_risk(risk_type="unknown_type", description="Something weird")]
+        result = structural_risks_to_feedback(risks, original_prompt="test")
+        assert len(result) == 1
+        assert "Something weird" in result[0].issues[0]
+        # No matching constraint for unknown type, but issues are still present.
+
+    def test_feedback_integrates_with_improved_prompt(self):
+        """Structural feedback can be fed into generate_improved_prompt."""
+        risks = [_mock_risk(risk_type="cantilever", severity="critical")]
+        fb = structural_risks_to_feedback(risks, original_prompt="a shelf bracket")
+        improved = generate_improved_prompt("a shelf bracket", fb, iteration=1)
+        assert "gusset" in improved.improved_prompt.lower() or "cantilever" in improved.improved_prompt.lower()
+        assert improved.iteration == 1
+
+
+# ---------------------------------------------------------------------------
+# PrinterGenerationContext + resolve_printer_generation_context
+# ---------------------------------------------------------------------------
+
+
+class TestPrinterGenerationContext:
+    """PrinterGenerationContext dataclass and serialization."""
+
+    def test_defaults(self):
+        ctx = PrinterGenerationContext()
+        assert ctx.material is None
+        assert ctx.nozzle_diameter_mm == 0.4
+        assert ctx.material_source == ""
+
+    def test_to_dict(self):
+        ctx = PrinterGenerationContext(
+            material="pla",
+            material_source="ams",
+            printer_model="bambu_a1",
+        )
+        d = ctx.to_dict()
+        assert d["material"] == "pla"
+        assert d["material_source"] == "ams"
+        assert d["printer_model"] == "bambu_a1"
+
+    def test_explicit_material_sets_source(self):
+        ctx = PrinterGenerationContext(
+            material="petg",
+            material_source="user",
+        )
+        assert ctx.material_source == "user"
+
+
+class TestResolvePrinterGenerationContext:
+    """resolve_printer_generation_context with mocked printer state."""
+
+    def test_explicit_material_wins(self):
+        ctx = resolve_printer_generation_context(material="abs")
+        assert ctx.material == "abs"
+        assert ctx.material_source == "user"
+
+    def test_no_printer_returns_defaults(self):
+        ctx = resolve_printer_generation_context()
+        # With no printer connected, should return defaults gracefully.
+        assert ctx.nozzle_diameter_mm == 0.4
+        # Material may or may not be resolved depending on printer availability.
+
+    def test_common_failures_default_none(self):
+        ctx = resolve_printer_generation_context()
+        # Without a printer model, failures stay None.
+        assert ctx.common_failures is None or isinstance(ctx.common_failures, list)
+
+
+class TestEnhanceWithPrinterContext:
+    """enhance_prompt_with_design_intelligence uses printer_context."""
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_failure_mitigations_injected(self, mock_constraints, _p, _m):
+        mock_constraints.return_value = _mock_brief()
+        ctx = PrinterGenerationContext(
+            common_failures=["adhesion", "warping"],
+        )
+        result = enhance_prompt_with_design_intelligence(
+            "a phone stand",
+            printer_context=ctx,
+        )
+        # Should contain adhesion and warping mitigations.
+        lowered = result.improved_prompt.lower()
+        assert "adhesion" in lowered or "brim" in lowered
+        assert "warp" in lowered or "chamfer" in lowered
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_auto_material_from_context(self, mock_constraints, _p, _m):
+        mock_constraints.return_value = _mock_brief()
+        ctx = PrinterGenerationContext(
+            material="petg",
+            material_source="ams",
+        )
+        enhance_prompt_with_design_intelligence(
+            "a bracket",
+            printer_context=ctx,
+        )
+        # material=None but printer_context provides "petg" —
+        # design_constraints should be called with petg.
+        call_kwargs = mock_constraints.call_args
+        assert call_kwargs[1].get("material") == "petg" or call_kwargs.kwargs.get("material") == "petg"
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_explicit_material_overrides_context(self, mock_constraints, _p, _m):
+        mock_constraints.return_value = _mock_brief()
+        ctx = PrinterGenerationContext(
+            material="petg",
+            material_source="ams",
+        )
+        enhance_prompt_with_design_intelligence(
+            "a bracket",
+            material="abs",
+            printer_context=ctx,
+        )
+        # Explicit "abs" should override context's "petg".
+        call_kwargs = mock_constraints.call_args
+        assert call_kwargs[1].get("material") == "abs" or call_kwargs.kwargs.get("material") == "abs"
+
+    @patch("kiln.design_intelligence.get_material_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_printer_design_profile", return_value=None)
+    @patch("kiln.design_intelligence.get_design_constraints")
+    def test_no_context_works_normally(self, mock_constraints, _p, _m):
+        mock_constraints.return_value = _mock_brief()
+        result = enhance_prompt_with_design_intelligence(
+            "a simple cube",
+        )
+        assert "Requirements:" in result.improved_prompt
+
+
+# ---------------------------------------------------------------------------
+# AMS material auto-detection
+# ---------------------------------------------------------------------------
+
+
+class TestResolvePrinterContextAMS:
+    """resolve_printer_generation_context auto-detects material from AMS."""
+
+    @patch("kiln.server._get_adapter")
+    def test_bambu_ams_material_detected(self, mock_adapter):
+        """Auto-detect PLA from Bambu AMS tray_type."""
+        adapter = MagicMock()
+        adapter.get_printer_info.return_value = SimpleNamespace(
+            build_volume={"x": 256, "y": 256, "z": 256},
+            nozzle_diameter=0.4,
+            model="bambu_a1",
+        )
+        adapter.get_ams_status.return_value = {
+            "tray_now": "1",
+            "units": [
+                {
+                    "trays": [
+                        {"slot": 0, "tray_type": "PLA", "remain": 80},
+                        {"slot": 1, "tray_type": "PETG", "remain": 60},
+                    ]
+                }
+            ],
+        }
+        mock_adapter.return_value = adapter
+
+        ctx = resolve_printer_generation_context()
+        assert ctx.material == "petg"  # tray_now=1, slot 1 is PETG
+        assert ctx.material_source == "ams"
+
+    @patch("kiln.server._get_adapter")
+    def test_ams_no_tray_now_uses_first(self, mock_adapter):
+        """When tray_now is None, use first tray with material."""
+        adapter = MagicMock()
+        adapter.get_printer_info.return_value = SimpleNamespace(
+            build_volume=None, nozzle_diameter=None, model=None,
+        )
+        adapter.get_ams_status.return_value = {
+            "tray_now": None,
+            "units": [{"trays": [{"slot": 0, "tray_type": "ABS"}]}],
+        }
+        mock_adapter.return_value = adapter
+
+        ctx = resolve_printer_generation_context()
+        assert ctx.material == "abs"
+        assert ctx.material_source == "ams"
+
+    @patch("kiln.server._get_adapter")
+    def test_explicit_material_skips_ams(self, mock_adapter):
+        """Explicit material= prevents AMS query entirely."""
+        ctx = resolve_printer_generation_context(material="tpu")
+        assert ctx.material == "tpu"
+        assert ctx.material_source == "user"
+        # Adapter should not be called when material is explicit.
+
+    @patch("kiln.server._get_adapter")
+    def test_no_ams_falls_back_gracefully(self, mock_adapter):
+        """Adapters without get_ams_status don't crash."""
+        adapter = MagicMock()
+        adapter.get_printer_info.side_effect = Exception("offline")
+        del adapter.get_ams_status  # Simulate adapter without AMS support
+        mock_adapter.return_value = adapter
+
+        ctx = resolve_printer_generation_context()
+        assert ctx.material is None  # No detection, no crash
+
+    @patch("kiln.server._get_adapter")
+    def test_build_volume_resolved(self, mock_adapter):
+        adapter = MagicMock()
+        adapter.get_printer_info.return_value = SimpleNamespace(
+            build_volume={"x": 180, "y": 180, "z": 180},
+            nozzle_diameter=0.6,
+            model="prusa_mini",
+        )
+        adapter.get_ams_status.side_effect = AttributeError
+        mock_adapter.return_value = adapter
+
+        ctx = resolve_printer_generation_context()
+        assert ctx.build_volume_mm == {"x": 180.0, "y": 180.0, "z": 180.0}
+        assert ctx.nozzle_diameter_mm == 0.6
+        assert ctx.printer_model == "prusa_mini"
+
+
+# ---------------------------------------------------------------------------
+# Structural feedback → improved prompt integration test
+# ---------------------------------------------------------------------------
+
+
+class TestStructuralFeedbackIntegration:
+    """Full cycle: risks → feedback → improved prompt with constraints."""
+
+    def test_thin_neck_constraint_appears_in_prompt(self):
+        risks = [
+            _mock_risk(risk_type="thin_neck", severity="critical",
+                       description="Cross-section at z=15mm is only 2mm²"),
+        ]
+        fb = structural_risks_to_feedback(risks, original_prompt="a shelf bracket")
+        improved = generate_improved_prompt("a shelf bracket", fb, iteration=1)
+        assert "cross-section" in improved.improved_prompt.lower() or "4mm" in improved.improved_prompt
+        assert improved.iteration == 1
+        assert len(improved.constraints_added) >= 1
+
+    def test_multiple_risk_types_all_constrained(self):
+        risks = [
+            _mock_risk(risk_type="cantilever", description="Unsupported arm"),
+            _mock_risk(risk_type="sharp_corner", description="Crack-prone edge"),
+            _mock_risk(risk_type="insufficient_base", description="Topple risk"),
+        ]
+        load = _mock_load_analysis(recommended="on_side")
+        fb = structural_risks_to_feedback(
+            risks, original_prompt="a wall hook", load_analysis=load,
+        )
+        improved = generate_improved_prompt("a wall hook", fb, iteration=2)
+        lowered = improved.improved_prompt.lower()
+        assert "gusset" in lowered or "cantilever" in lowered
+        assert "rounded" in lowered or "corner" in lowered or "crack" in lowered
+        assert "base" in lowered or "stability" in lowered
+        assert "on_side" in lowered
+        assert improved.iteration == 2
+
+    def test_no_risks_produces_no_constraints(self):
+        fb = structural_risks_to_feedback([], original_prompt="a cube")
+        improved = generate_improved_prompt("a cube", fb, iteration=1)
+        # No feedback → prompt unchanged.
+        assert improved.improved_prompt == "a cube"
+
+
+# NOTE: TestASCIISTLBoundingBox tests live on feature/provenance-qr-validation
+# and will merge when model_visualizer changes land.

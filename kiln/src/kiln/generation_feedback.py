@@ -457,6 +457,135 @@ def analyze_for_feedback(
     return feedback_items
 
 
+def structural_risks_to_feedback(
+    risks: list[Any],
+    *,
+    original_prompt: str,
+    load_analysis: Any | None = None,
+) -> list[PrintFeedback]:
+    """Convert structural risk analysis into generation feedback.
+
+    Maps :class:`~kiln.design_reasoning.StructuralRisk` items and an
+    optional :class:`~kiln.design_reasoning.LoadAnalysis` into
+    :class:`PrintFeedback` constraints that can refine a generation
+    prompt on the next iteration.
+
+    :param risks: List of ``StructuralRisk`` objects (or dicts with
+        ``risk_type``, ``severity``, ``description``).
+    :param original_prompt: The generation prompt being refined.
+    :param load_analysis: Optional ``LoadAnalysis`` for orientation /
+        layer-strength guidance.
+    :returns: List of :class:`PrintFeedback` items.
+    """
+    if not risks and load_analysis is None:
+        return []
+
+    _RISK_CONSTRAINTS: dict[str, str] = {
+        "thin_neck": "no thin connection points, minimum 4mm cross-section",
+        "stress_concentration": "smooth transitions between sections, add fillets at joints",
+        "cantilever": "minimize unsupported cantilevers, add gussets at overhanging joints",
+        "sharp_corner": "rounded edges at concave corners to prevent crack initiation",
+        "insufficient_base": "wide flat base for stability, low center of gravity",
+        "weak_layer_adhesion": "orient load paths along print layers, not across them",
+    }
+
+    structural_issues: list[str] = []
+    structural_constraints: list[str] = []
+    has_critical = False
+
+    for risk in risks:
+        risk_type = risk.risk_type if hasattr(risk, "risk_type") else risk.get("risk_type", "")
+        severity = risk.severity if hasattr(risk, "severity") else risk.get("severity", "warning")
+        description = risk.description if hasattr(risk, "description") else risk.get("description", "")
+
+        if severity == "critical":
+            has_critical = True
+
+        structural_issues.append(description or f"Structural risk: {risk_type}")
+
+        constraint = _RISK_CONSTRAINTS.get(risk_type)
+        if constraint and constraint not in structural_constraints:
+            structural_constraints.append(constraint)
+
+    # Load analysis adds orientation and layer-strength guidance.
+    if load_analysis is not None:
+        concern = (
+            load_analysis.layer_direction_concern
+            if hasattr(load_analysis, "layer_direction_concern")
+            else (load_analysis.get("layer_direction_concern") if isinstance(load_analysis, dict) else "")
+        )
+        if concern:
+            structural_issues.append(f"Layer direction concern: {concern}")
+
+        rec_orient = (
+            load_analysis.recommended_print_orientation
+            if hasattr(load_analysis, "recommended_print_orientation")
+            else (load_analysis.get("recommended_print_orientation") if isinstance(load_analysis, dict) else "")
+        )
+        if rec_orient:
+            structural_constraints.append(
+                f"design for {rec_orient} print orientation for maximum strength"
+            )
+
+    if not structural_issues:
+        return []
+
+    return [
+        PrintFeedback(
+            original_prompt=original_prompt,
+            feedback_type=FeedbackType.STRUCTURAL,
+            issues=structural_issues,
+            constraints=structural_constraints,
+            severity="critical" if has_critical else "moderate",
+        )
+    ]
+
+
+def design_validation_to_feedback(
+    report: Any,
+    original_prompt: str,
+) -> list[PrintFeedback]:
+    """Convert a DesignValidationReport into feedback items.
+
+    Delegates to :func:`~kiln.design_validator.validation_to_feedback`
+    but accepts either a :class:`~kiln.design_validator.DesignValidationReport`
+    or a raw dict, and always returns :class:`PrintFeedback` objects.
+    """
+    if hasattr(report, "checks"):
+        from kiln.design_validator import validation_to_feedback
+
+        return validation_to_feedback(report, original_prompt)
+
+    # Dict form — rebuild minimal check objects.
+    checks = report.get("checks", []) if isinstance(report, dict) else []
+    failed = [c for c in checks if not c.get("passed", True)]
+    if not failed:
+        return []
+
+    issues: list[str] = []
+    constraints: list[str] = []
+    for check in failed:
+        fix = check.get("fix_suggestion", "")
+        name = check.get("check_name", "unknown")
+        actual = check.get("actual_value", "")
+        required = check.get("required_value", "")
+        issues.append(f"{name}: actual={actual}, required={required}")
+        if fix:
+            constraints.append(fix)
+
+    return [
+        PrintFeedback(
+            original_prompt=original_prompt,
+            feedback_type=FeedbackType.PRINTABILITY,
+            issues=issues,
+            constraints=constraints,
+            severity="critical" if any(
+                c.get("severity") == "critical" for c in failed
+            ) else "moderate",
+        )
+    ]
+
+
 def generate_improved_prompt(
     original_prompt: str,
     feedback: list[PrintFeedback],
@@ -634,6 +763,123 @@ def add_iteration(
     return loop
 
 
+@dataclass
+class PrinterGenerationContext:
+    """Live printer context for generation-aware prompt enrichment.
+
+    Resolved from the actual printer state at generation time — loaded
+    material, nozzle diameter, build volume, and common failure modes.
+    """
+
+    material: str | None = None
+    material_source: str = ""  # "user", "ams", "spool", "default"
+    nozzle_diameter_mm: float = 0.4
+    build_volume_mm: dict[str, float] | None = None
+    printer_model: str | None = None
+    common_failures: list[str] | None = None  # e.g. ["adhesion", "stringing"]
+    printer_notes: list[str] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def resolve_printer_generation_context(
+    *,
+    material: str | None = None,
+    printer_name: str | None = None,
+) -> PrinterGenerationContext:
+    """Resolve live printer state for generation-aware prompt enrichment.
+
+    When the agent doesn't specify a material, queries the printer's
+    AMS or filament sensor to detect what's loaded.  Also resolves
+    build volume, nozzle diameter, and common failure patterns from
+    printer intelligence.
+
+    :param material: Explicit material override.  When provided, skips
+        auto-detection.
+    :param printer_name: Printer to query.  ``None`` for the default.
+    :returns: A :class:`PrinterGenerationContext` with resolved values.
+    """
+    ctx = PrinterGenerationContext()
+
+    # Explicit material wins.
+    if material:
+        ctx.material = material
+        ctx.material_source = "user"
+
+    try:
+        # Use the server's adapter resolution — handles both fleet registry
+        # and single-printer setups.
+        import kiln.server as _srv
+
+        if printer_name:
+            adapter = _srv._registry.get(printer_name)
+        else:
+            adapter = _srv._get_adapter()
+    except Exception:
+        logger.debug("No printer available for context resolution", exc_info=True)
+        return ctx
+
+    # Build volume from printer info.
+    try:
+        info = adapter.get_printer_info()
+        bv = getattr(info, "build_volume", None)
+        if isinstance(bv, dict) and bv:
+            ctx.build_volume_mm = {
+                "x": float(bv.get("x", 256)),
+                "y": float(bv.get("y", 256)),
+                "z": float(bv.get("z", 256)),
+            }
+        nozzle = getattr(info, "nozzle_diameter", None)
+        if nozzle:
+            ctx.nozzle_diameter_mm = float(nozzle)
+        model = getattr(info, "model", None) or getattr(info, "printer_model", None)
+        if model:
+            ctx.printer_model = str(model)
+    except Exception:
+        logger.debug("Could not resolve printer info", exc_info=True)
+
+    # Auto-detect material from AMS (Bambu) or spool manager.
+    if not ctx.material:
+        try:
+            # Bambu AMS: get_ams_status() → units → trays → tray_type
+            if hasattr(adapter, "get_ams_status"):
+                ams = adapter.get_ams_status()
+                if isinstance(ams, dict):
+                    # Find the currently active tray's material type.
+                    tray_now = ams.get("tray_now")
+                    for unit in ams.get("units", []):
+                        for tray in unit.get("trays", []):
+                            slot = tray.get("slot")
+                            tray_type = tray.get("tray_type", "")
+                            if tray_type and (tray_now is None or str(slot) == str(tray_now)):
+                                ctx.material = tray_type.lower()
+                                ctx.material_source = "ams"
+                                break
+                        if ctx.material:
+                            break
+        except Exception:
+            logger.debug("Could not auto-detect material from AMS", exc_info=True)
+
+    # Printer intelligence — common failure modes and notes.
+    if ctx.printer_model:
+        try:
+            from kiln.printer_intelligence import get_printer_intelligence
+
+            intel = get_printer_intelligence(ctx.printer_model)
+            if intel:
+                failures = intel.get("common_failures", [])
+                if failures:
+                    ctx.common_failures = [f.get("symptom", "") for f in failures[:5] if f.get("symptom")]
+                notes = intel.get("agent_notes", [])
+                if notes:
+                    ctx.printer_notes = notes[:3]
+        except Exception:
+            logger.debug("Printer intelligence unavailable", exc_info=True)
+
+    return ctx
+
+
 def enhance_prompt_with_design_intelligence(
     prompt: str,
     *,
@@ -641,6 +887,7 @@ def enhance_prompt_with_design_intelligence(
     printer_model: str | None = None,
     provider: str | None = None,
     max_length: int | None = None,
+    printer_context: PrinterGenerationContext | None = None,
 ) -> ImprovedPrompt:
     """Enhance a generation prompt with design intelligence constraints.
 
@@ -660,8 +907,18 @@ def enhance_prompt_with_design_intelligence(
     :param max_length: Explicit maximum prompt length.  When ``None`` the
         limit is derived from *provider* via
         :func:`get_provider_prompt_limit`.
+    :param printer_context: Optional :class:`PrinterGenerationContext`
+        from :func:`resolve_printer_generation_context`.  When provided,
+        auto-resolved material and printer-specific failure mitigations
+        are included in the prompt.
     :returns: An :class:`ImprovedPrompt` with design constraints applied.
     """
+    # Merge printer context into explicit parameters when available.
+    if printer_context is not None:
+        if not material and printer_context.material:
+            material = printer_context.material
+        if not printer_model and printer_context.printer_model:
+            printer_model = printer_context.printer_model
     limit = max_length if max_length is not None else get_provider_prompt_limit(provider)
 
     try:
@@ -752,6 +1009,24 @@ def enhance_prompt_with_design_intelligence(
                         f"{pattern.display_name}: min {key.replace('_', ' ')} {val}"
                     )
                     break
+
+    # Printer-specific failure mitigations — learned from this printer's
+    # common failure patterns so the generated design avoids them.
+    _FAILURE_MITIGATIONS: dict[str, str] = {
+        "adhesion": "extra-wide base for bed adhesion, consider brim",
+        "stringing": "minimize travel moves, avoid thin isolated features",
+        "warping": "chamfered corners, avoid large flat surfaces",
+        "layer_shift": "low center of gravity, avoid tall narrow geometry",
+        "spaghetti": "no unsupported overhangs, solid geometry",
+        "elephant_foot": "slight chamfer on bottom edges",
+        "under_extrusion": "minimum wall thickness 1.2mm",
+        "clogging": "avoid rapid retraction zones",
+    }
+    if printer_context is not None and printer_context.common_failures:
+        for failure in printer_context.common_failures[:3]:
+            mitigation = _FAILURE_MITIGATIONS.get(failure.lower())
+            if mitigation and mitigation not in core_constraints:
+                core_constraints.append(mitigation)
 
     # Printability fundamentals
     core_constraints.append("flat bottom for bed adhesion")
@@ -1030,27 +1305,6 @@ def build_parametric_generation_prompt(
             "design constraints applied",
         ],
     )
-
-
-def design_validation_to_feedback(
-    report: Any,
-    original_prompt: str,
-) -> list[PrintFeedback]:
-    """Convert a :class:`~kiln.design_validator.DesignValidationReport` into feedback.
-
-    Bridge function that converts design validation failures into
-    :class:`PrintFeedback` items for the existing iterative improvement
-    loop.  This closes the loop: generate -> validate -> feedback ->
-    regenerate.
-
-    :param report: A ``DesignValidationReport`` from
-        :func:`~kiln.design_validator.validate_design`.
-    :param original_prompt: The original generation prompt.
-    :returns: List of :class:`PrintFeedback` items.
-    """
-    from kiln.design_validator import validation_to_feedback
-
-    return validation_to_feedback(report, original_prompt)
 
 
 def get_feedback_loop(model_id: str) -> FeedbackLoop | None:

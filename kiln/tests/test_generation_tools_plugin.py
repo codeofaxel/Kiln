@@ -32,6 +32,45 @@ def registered_tools(mock_mcp):
     return tools
 
 
+_EXPECTED_TOOLS = {
+    "generate_original_design",
+    "preview_generated_model",
+    "validate_and_prepare_mesh",
+    "generate_texture",
+}
+
+
+class TestGenerationToolsRegistration:
+    """Verify exactly the intended tools are registered — no more, no less."""
+
+    def test_registers_exactly_four_tools(self, registered_tools) -> None:
+        assert set(registered_tools.keys()) == _EXPECTED_TOOLS
+
+    def test_no_server_duplicates(self, registered_tools) -> None:
+        """Tools owned by server.py must NOT be re-registered by the plugin."""
+        server_owned = {
+            "list_generation_providers",
+            "generate_model",
+            "generate_model_from_image",
+            "generation_status",
+            "download_generated_model",
+            "await_generation",
+            "generate_and_print",
+            "validate_generated_mesh",
+        }
+        for name in server_owned:
+            assert name not in registered_tools, f"{name} should not be in plugin"
+
+    def test_preview_generated_model_registered(self, registered_tools) -> None:
+        assert "preview_generated_model" in registered_tools
+
+    def test_validate_and_prepare_mesh_registered(self, registered_tools) -> None:
+        assert "validate_and_prepare_mesh" in registered_tools
+
+    def test_generate_texture_registered(self, registered_tools) -> None:
+        assert "generate_texture" in registered_tools
+
+
 class TestGenerationToolsPlugin:
     def test_registers_generate_original_design(self, registered_tools) -> None:
         assert "generate_original_design" in registered_tools
