@@ -1085,8 +1085,19 @@ def _step_estimate(report: _PipelineReport, working_path: str) -> None:
         from kiln.generation.validation import estimate_print_time_from_mesh as _est_fn
 
         est_result = _est_fn(working_path)
-        time_min = int(est_result.get("time_min", 0))
-        filament_g = round(float(est_result.get("filament_g", 0)), 1)
+        # Map real function keys → pipeline keys
+        est_seconds = float(est_result.get("estimated_time_seconds", 0))
+        time_min = max(1, int(round(est_seconds / 60))) if est_seconds > 0 else 0
+        # Estimate filament from surface area + height (shell volume proxy)
+        sa_mm2 = float(est_result.get("surface_area_mm2", 0))
+        height_mm = float(est_result.get("height_mm", 0))
+        if sa_mm2 > 0 and height_mm > 0:
+            # Approximate volume: SA * avg_wall_thickness * infill_factor
+            vol_cm3 = (sa_mm2 * 1.2 * _DEFAULT_INFILL_FACTOR) / 1000.0
+            filament_g = round(vol_cm3 * _PLA_DENSITY_G_PER_CM3, 1)
+        else:
+            bbox_vol = report.model_info.get("bounding_box_volume_cm3", 0)
+            filament_g = round(bbox_vol * _PLA_DENSITY_G_PER_CM3 * _DEFAULT_INFILL_FACTOR, 1) if bbox_vol else 0.0
         cost_usd = round(filament_g * _MATERIAL_COST_PER_GRAM, 2)
         report.model_info["estimated_print_time_min"] = time_min
         report.model_info["estimated_filament_g"] = filament_g
