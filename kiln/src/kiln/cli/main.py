@@ -322,7 +322,10 @@ def _notify_preview_if_available(preview_path: str) -> bool:
         import subprocess
 
         try:
-            cmd = cmd_template.replace("{path}", preview_path)
+            import shlex
+
+            safe_path = shlex.quote(preview_path)
+            cmd = cmd_template.replace("{path}", safe_path)
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=20)
             if result.returncode == 0:
                 return True
