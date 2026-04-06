@@ -5749,6 +5749,39 @@ def health_check() -> dict:
         logger.debug("Failed to get billing health summary: %s", exc)
         health_data["billing_health"] = {"status": "unknown"}
 
+    try:
+        from kiln.emboss_generator import (
+            _OPENSCAD_MIN_VERSION_YEAR,
+            _OPENSCAD_UPGRADE_MSG,
+            _openscad_version_year,
+            get_openscad_version,
+        )
+
+        _platform = sys.platform
+        if _platform == "darwin":
+            _install_cmd = "brew install --cask openscad@snapshot"
+        elif _platform.startswith("linux"):
+            _install_cmd = "sudo snap install openscad --edge"
+        else:
+            _install_cmd = "Download from https://openscad.org/downloads#snapshots"
+
+        openscad_version = get_openscad_version()
+        openscad_info: dict[str, Any] = {"version": openscad_version or "not_found"}
+        if openscad_version:
+            year = _openscad_version_year(openscad_version)
+            if year and year < _OPENSCAD_MIN_VERSION_YEAR:
+                openscad_info["warning"] = _OPENSCAD_UPGRADE_MSG
+                openscad_info["svg_operations_supported"] = False
+                openscad_info["install_command"] = _install_cmd
+            else:
+                openscad_info["svg_operations_supported"] = True
+        else:
+            openscad_info["install_command"] = _install_cmd
+        health_data["openscad"] = openscad_info
+    except Exception as exc:
+        logger.debug("Failed to get OpenSCAD version: %s", exc)
+        health_data["openscad"] = {"version": "unknown"}
+
     return health_data
 
 
@@ -5943,6 +5976,69 @@ def get_started() -> dict:
     # Build a concise tier summary
     tier_summary = {name: {"tool_count": len(tools), "examples": tools[:5]} for name, tools in TIERS.items()}
 
+    # Check OpenSCAD installation status for guidance
+    openscad_guidance: dict[str, Any] = {}
+    _openscad_action_needed = False
+    try:
+        from kiln.emboss_generator import _openscad_version_year, get_openscad_version
+
+        _platform = sys.platform
+        if _platform == "darwin":
+            _install_cmd = "brew install --cask openscad@snapshot"
+        elif _platform.startswith("linux"):
+            _install_cmd = "sudo snap install openscad --edge"
+        else:
+            _install_cmd = "Download from https://openscad.org/downloads#snapshots"
+
+        _ver = get_openscad_version()
+        if not _ver:
+            _openscad_action_needed = True
+            openscad_guidance = {
+                "installed": False,
+                "message": (
+                    "Install OpenSCAD for 3D model generation and decoration: "
+                    "brew install --cask openscad@snapshot  (macOS) "
+                    "or download from https://openscad.org/downloads"
+                ),
+                "install_command": _install_cmd,
+                "required_for": ["compile_scad", "generate_product_base", "decorate_surface", "visualize_model"],
+            }
+        elif _openscad_version_year(_ver) < 2024:
+            _openscad_action_needed = True
+            openscad_guidance = {
+                "installed": True,
+                "version": _ver,
+                "status": "outdated",
+                "message": (
+                    f"OpenSCAD {_ver} is outdated. Upgrade for full feature support: "
+                    "brew install --cask openscad@snapshot  (macOS) "
+                    "or download from https://openscad.org/downloads"
+                ),
+                "install_command": _install_cmd,
+                "required_for": ["compile_scad", "generate_product_base", "decorate_surface", "visualize_model"],
+            }
+        else:
+            openscad_guidance = {"installed": True, "version": _ver, "status": "ok"}
+    except Exception:  # noqa: BLE001
+        openscad_guidance = {"installed": False, "status": "unknown"}
+
+    _quick_start_base = [
+        "1. Call `printer_status` to check if a printer is connected and its current state.",
+        "2. Call `fleet_status` if managing multiple printers.",
+        "3. Call `preflight_check` before starting any print to validate readiness.",
+        "4. Use `search_all_models` to find 3D models across marketplaces.",
+        "5. Use `slice_model` or `slice_and_print` to prepare and print files.",
+        "6. Use `validate_gcode` before `send_gcode` for raw G-code commands.",
+    ]
+    if _openscad_action_needed:
+        _openscad_step = (
+            f"0. IMPORTANT: {openscad_guidance.get('message', 'Install/upgrade OpenSCAD')} "
+            f"— run: {openscad_guidance.get('install_command', '')}"
+        )
+        _quick_start = [_openscad_step] + _quick_start_base
+    else:
+        _quick_start = _quick_start_base
+
     return {
         "success": True,
         "overview": (
@@ -5950,14 +6046,7 @@ def get_started() -> dict:
             "MCP tools to monitor printers, manage files, slice models, "
             "search marketplaces, queue print jobs, and more."
         ),
-        "quick_start": [
-            "1. Call `printer_status` to check if a printer is connected and its current state.",
-            "2. Call `fleet_status` if managing multiple printers.",
-            "3. Call `preflight_check` before starting any print to validate readiness.",
-            "4. Use `search_all_models` to find 3D models across marketplaces.",
-            "5. Use `slice_model` or `slice_and_print` to prepare and print files.",
-            "6. Use `validate_gcode` before `send_gcode` for raw G-code commands.",
-        ],
+        "quick_start": _quick_start,
         "core_workflows": {
             "print_a_file": "upload_file → visualize_model → preflight_check → start_print",
             "marketplace_to_print": "search_all_models → download_and_upload → preflight_check → start_print",
@@ -5983,6 +6072,7 @@ def get_started() -> dict:
             "explore from there. Use `safety_status` for a full safety "
             "dashboard, or `safety_settings` to check auto-print settings."
         ),
+        "openscad": openscad_guidance,
     }
 
 
@@ -18598,6 +18688,9 @@ def decorate_surface(
     image_style: str = "auto",
     placement: str = "center",
     absolute_size_mm: float = 0.0,
+    svg_id: str = "",
+    svg_layer: str = "",
+    template_id: str = "",
 ) -> dict:
     """Put any image, text, or pattern onto a 3D model surface.
 
@@ -18653,6 +18746,18 @@ def decorate_surface(
         ``"bottom-rim"``.  Use ``"bottom"`` for text below a centered
         portrait on a coaster.  Manual ``offset_x/y_mm`` is added on
         top of the preset for fine-tuning.
+    :param svg_id: Target a specific SVG group by ``id`` attribute when using
+        SVG ``import()`` fallback on OpenSCAD 2024+.  E.g. ``"icon"`` targets
+        ``<g id="icon">``.  No effect on the native polygon path.
+    :param svg_layer: Target a specific SVG layer by ``layer`` attribute when
+        using SVG ``import()`` fallback on OpenSCAD 2024+.  E.g.
+        ``"foreground"`` targets a layer named ``foreground``.
+    :param template_id: Optional template ID (e.g. ``"nameplate"``).
+        When provided, auto-fills ``face``, ``depth_mm``, ``mode``,
+        ``scale``, and ``image_style`` from the template's decoration
+        profile.  Explicit values you provide override the profile.
+        Use ``list_decoratable_templates()`` to see which templates
+        have profiles.
     :returns: Dict with output STL path, preview info, and metadata.
     """
     if err := _check_auth("design:decorate"):
@@ -18680,7 +18785,17 @@ def decorate_surface(
             if _recipe.generation_provider:
                 _provenance_info["generation_provider"] = _recipe.generation_provider
 
-            # Pre-populate material from recipe if caller left the default
+            # Use recipe's design_id as template_id if caller didn't provide one
+            if not template_id and _recipe.design_id:
+                template_id = _recipe.design_id
+                logger.debug(
+                    "Provenance: using design_id %r as template_id", template_id
+                )
+
+            # Pre-populate material from recipe if caller left the default.
+            # Note: material=="PLA" is treated as "no explicit preference"
+            # since PLA is the function's default.  If the recipe specifies
+            # a different material, use it.
             recipe_material = (
                 _recipe.parameters.get("material")
                 or (_recipe.provenance and _recipe.provenance.get("material"))
@@ -18709,6 +18824,35 @@ def decorate_surface(
             )
     except Exception:
         logger.debug("Provenance sidecar check failed", exc_info=True)
+
+    # --- Auto-resolve from template decoration profile ---
+    template_profile_used = False
+    if template_id:
+        try:
+            from kiln.template_decoration import resolve_decoration_defaults
+
+            resolved = resolve_decoration_defaults(
+                template_id,
+                material=material,
+                face=face if face != "auto" else None,
+                depth_mm=depth_mm if depth_mm != 0.0 else None,
+                mode=mode if mode != "deboss" else None,
+                scale=scale if scale != 0.7 else None,
+                image_style=image_style if image_style != "auto" else None,
+            )
+            if resolved.get("profile_used"):
+                face = resolved["face"]
+                depth_mm = resolved["depth_mm"]
+                mode = resolved["mode"]
+                scale = resolved["scale"]
+                image_style = resolved["image_style"]
+                template_profile_used = True
+                logger.info(
+                    "Template %s decoration profile applied: face=%s depth=%.1f style=%s",
+                    template_id, face, depth_mm, image_style,
+                )
+        except Exception:
+            logger.debug("Template decoration profile lookup failed", exc_info=True)
 
     # --- Validate model ---
     if not os.path.isfile(model_path):
@@ -18855,6 +18999,8 @@ def decorate_surface(
             offset_x_mm=offset_x_mm,
             offset_y_mm=offset_y_mm,
             placement=placement,
+            svg_id=svg_id,
+            svg_layer=svg_layer,
         )
         # Collect warnings from emboss generator (e.g. absolute_size_mm clamping)
         if scad_result.get("warnings"):
@@ -18939,6 +19085,8 @@ def decorate_surface(
                     offset_x_mm=offset_x_mm,
                     offset_y_mm=offset_y_mm,
                     placement=placement,
+                    svg_id=svg_id,
+                    svg_layer=svg_layer,
                 )
                 compile_result = compile_embossed_model(
                     scad_result["scad_path"],
@@ -18997,6 +19145,9 @@ def decorate_surface(
             "compile_time_seconds": compile_result.get("compile_time_seconds"),
             "scad_path": scad_result["scad_path"],
         }
+        if template_profile_used:
+            result_dict["template_profile_used"] = True
+            result_dict["template_id"] = template_id
         if _provenance_info:
             result_dict["provenance"] = _provenance_info
         if warnings:

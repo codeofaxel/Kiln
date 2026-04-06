@@ -118,31 +118,28 @@ class TestZHeightAssignment:
 
     def test_two_bands_simple(self):
         tris = [_make_triangle(0, 0, 0), _make_triangle(10, 10, 10)]
-        assignments, z_range = _assign_z_height(tris, 2)
-        assert assignments == [0, 1]
-        assert z_range == pytest.approx(10.0)
+        result = _assign_z_height(tris, 2)
+        assert result == [0, 1]
 
     def test_four_bands(self):
+        # Triangles at z=0, 2.5, 5.0, 7.5
         tris = [
             _make_triangle(0, 0, 0),
             _make_triangle(2.5, 2.5, 2.5),
             _make_triangle(5.0, 5.0, 5.0),
             _make_triangle(7.5, 7.5, 7.5),
         ]
-        assignments, z_range = _assign_z_height(tris, 4)
-        assert assignments == [0, 1, 2, 3]
-        assert z_range == pytest.approx(7.5)
+        result = _assign_z_height(tris, 4)
+        assert result == [0, 1, 2, 3]
 
     def test_all_same_z(self):
         tris = [_make_triangle(5, 5, 5)] * 3
-        assignments, z_range = _assign_z_height(tris, 2)
-        assert all(r == assignments[0] for r in assignments)
-        assert z_range == pytest.approx(0.0)
+        result = _assign_z_height(tris, 2)
+        # All same Z → all in same band (clamped)
+        assert all(r == result[0] for r in result)
 
     def test_empty_list(self):
-        assignments, z_range = _assign_z_height([], 4)
-        assert assignments == []
-        assert z_range == 0.0
+        assert _assign_z_height([], 4) == []
 
 
 # ---------------------------------------------------------------------------
@@ -1172,15 +1169,15 @@ class TestSampleFaceColor:
     def test_samples_texture_with_pillow(self):
         from PIL import Image
 
+        # 2x2 red image
         img = Image.new("RGB", (2, 2), (255, 0, 0))
-        pixels = list(img.getdata())
         face = _ObjFace(
             vertex_indices=[0, 1, 2],
             uv_indices=[0, 1, 2],
             material="",
         )
         uvs = [(0.5, 0.5), (0.5, 0.5), (0.5, 0.5)]
-        color = _sample_face_color(face, uvs, pixels, 2, 2)
+        color = _sample_face_color(face, uvs, img, 2, 2)
         assert color == (255, 0, 0)
 
 

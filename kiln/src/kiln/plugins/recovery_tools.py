@@ -409,6 +409,25 @@ class _RecoveryToolsPlugin:
                     failure_mode=failure_mode,
                     printability_report=printability_report if printability_report else None,
                 )
+
+                # Structural analysis — identify geometry that will
+                # snap, crack, or topple and feed it back as constraints.
+                try:
+                    from kiln.design_reasoning import analyze_structural_risks as _analyze_risks
+                    from kiln.design_reasoning import assess_load_bearing as _assess_load
+                    from kiln.generation_feedback import structural_risks_to_feedback
+
+                    risks = _analyze_risks(file_path)
+                    load = _assess_load(file_path)
+                    structural_fb = structural_risks_to_feedback(
+                        risks,
+                        original_prompt=original_prompt,
+                        load_analysis=load,
+                    )
+                    feedback.extend(structural_fb)
+                except (ValueError, ImportError):
+                    pass  # File not STL or design_reasoning unavailable.
+
                 return {
                     "success": True,
                     "feedback": [f.to_dict() for f in feedback],
@@ -434,11 +453,13 @@ class _RecoveryToolsPlugin:
             min_wall_thickness: float | None = None,
             has_bridges: bool = False,
             iteration: int = 1,
+            file_path: str | None = None,
         ) -> dict:
             """Generate an improved prompt from feedback.
 
             Adds physical constraints to the original prompt to address
-            printability issues, without modifying the creative intent.
+            printability and structural issues, without modifying the
+            creative intent.
 
             Args:
                 original_prompt: The original generation prompt.
@@ -447,6 +468,10 @@ class _RecoveryToolsPlugin:
                 min_wall_thickness: Minimum wall thickness detected.
                 has_bridges: Whether bridges were detected.
                 iteration: Which retry iteration this is.
+                file_path: Optional path to the STL file for structural
+                    analysis.  When provided, the tool also analyzes
+                    structural risks and folds them into the improved
+                    prompt.
             """
             import kiln.server as _srv
             from kiln.generation_feedback import (
@@ -466,11 +491,30 @@ class _RecoveryToolsPlugin:
                     printability_report["has_bridges"] = True
 
                 feedback = analyze_for_feedback(
-                    "",  # No file needed for prompt improvement
+                    file_path or "",
                     original_prompt=original_prompt,
                     failure_mode=failure_mode,
                     printability_report=printability_report if printability_report else None,
                 )
+
+                # Structural feedback from mesh geometry.
+                if file_path:
+                    try:
+                        from kiln.design_reasoning import analyze_structural_risks as _sr_risks
+                        from kiln.design_reasoning import assess_load_bearing as _sr_load
+                        from kiln.generation_feedback import structural_risks_to_feedback
+
+                        risks = _sr_risks(file_path)
+                        load = _sr_load(file_path)
+                        feedback.extend(
+                            structural_risks_to_feedback(
+                                risks,
+                                original_prompt=original_prompt,
+                                load_analysis=load,
+                            )
+                        )
+                    except (ValueError, ImportError):
+                        pass
 
                 improved = generate_improved_prompt(
                     original_prompt,

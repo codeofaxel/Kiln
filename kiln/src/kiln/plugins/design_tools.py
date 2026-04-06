@@ -1794,10 +1794,12 @@ class _DesignToolsPlugin:
                 _logger.error("Warping analysis failed: %s", exc, exc_info=True)
                 return {"status": "error", "error": str(exc)}
 
+        # ---------------------------------------------------------------
+        # Template decoration profiles and design styles are Pro features.
+        # See kiln_pro/plugins/template_decoration_tools.py and
+        # kiln_pro/plugins/design_styles_tools.py.
 
-def register_plugin(mcp: Any) -> None:
-    """Entry point for plugin auto-discovery."""
-    _DesignToolsPlugin().register(mcp)
+        _logger.debug("Registered design tools")
 
 
 plugin = _DesignToolsPlugin()

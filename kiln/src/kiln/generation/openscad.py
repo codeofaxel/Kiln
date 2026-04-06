@@ -282,6 +282,19 @@ class OpenSCADProvider(GenerationProvider):
             binary = self._require_binary()
             lib_path = _get_bundled_library_path()
             cmd = [binary, "-o", out_path]
+            # Use Manifold backend on OpenSCAD 2024+ for faster booleans.
+            # Opt-out: KILN_OPENSCAD_BACKEND=cgal
+            _backend = os.environ.get("KILN_OPENSCAD_BACKEND", "manifold")
+            if _backend == "manifold":
+                try:
+                    from kiln.emboss_generator import (
+                        _openscad_version_year,
+                        get_openscad_version,
+                    )
+                    if _openscad_version_year(get_openscad_version(binary)) >= 2024:
+                        cmd.append("--backend=manifold")
+                except Exception:  # noqa: BLE001
+                    pass  # version check failed — skip manifold flag
             if os.path.isdir(lib_path) and _supports_library_flag(binary):
                 cmd.extend(["-L", lib_path])
             cmd.append(scad_path)
@@ -1221,6 +1234,10 @@ def _parse_openscad_output(stderr: str, return_code: int) -> dict[str, Any]:
             entry["line"] = int(parser_match.group(1))
 
         lower = line.lower()
+        # Skip OpenSCAD status lines that contain "error" as a substring
+        # but are not actual errors (e.g. "Status:     NoError").
+        if "noerror" in lower.replace(" ", ""):
+            continue
         if "error" in lower or "parser error" in lower:
             errors.append(entry)
         elif "warning" in lower or "deprecated" in lower:

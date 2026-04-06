@@ -21,7 +21,7 @@ import struct
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 _logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ _STL_TRIANGLE_SIZE = 50  # 12 (normal) + 36 (3 vertices) + 2 (attr)
 _DEFAULT_PALETTE = ["#FFFFFF", "#F72323", "#161616", "#898989"]
 
 _PLA_DENSITY_G_PER_CM3 = 1.24
+_DEFAULT_INFILL_FACTOR = 0.30
 
 # Rough FDM print-time estimate: weight * this factor (minutes per gram at
 # standard speed / 0.2 mm layers / 20 % infill).
@@ -200,13 +201,12 @@ def _parse_binary_stl(file_path: str) -> list[_Triangle]:
                 f"Truncated STL: expected {expected} bytes, got {size}"
             )
 
-        body = fh.read(tri_count * _STL_TRIANGLE_SIZE)
-        for i in range(tri_count):
-            offset = i * _STL_TRIANGLE_SIZE
-            if offset + _STL_TRIANGLE_SIZE > len(body):
+        for _ in range(tri_count):
+            data = fh.read(_STL_TRIANGLE_SIZE)
+            if len(data) < _STL_TRIANGLE_SIZE:
                 break
-            floats = struct.unpack_from("<12f", body, offset)
-            attr = struct.unpack_from("<H", body, offset + 48)[0]
+            floats = struct.unpack_from("<12f", data, 0)
+            attr = struct.unpack_from("<H", data, 48)[0]
             triangles.append(
                 _Triangle(
                     normal=(floats[0], floats[1], floats[2]),
@@ -239,14 +239,10 @@ def _write_binary_stl(triangles: list[_Triangle], output_path: str) -> None:
 def _assign_z_height(
     triangles: list[_Triangle],
     num_colors: int,
-) -> tuple[list[int], float]:
-    """Assign each triangle to a color zone by Z-height band.
-
-    :returns: ``(assignments, z_range)`` — zone index per triangle and
-        the total Z extent of the model in mm.
-    """
+) -> list[int]:
+    """Assign each triangle to a color zone by Z-height band."""
     if not triangles:
-        return [], 0.0
+        return []
 
     z_values = [t.centroid_z for t in triangles]
     z_min = min(z_values)
@@ -254,16 +250,17 @@ def _assign_z_height(
     z_range = z_max - z_min
 
     if z_range < 1e-9:
-        return [0] * len(triangles), z_range
+        return [0] * len(triangles)
 
     band_size = z_range / num_colors
     assignments: list[int] = []
     for z in z_values:
         band = int((z - z_min) / band_size)
+        # Clamp the top-edge case
         if band >= num_colors:
             band = num_colors - 1
         assignments.append(band)
-    return assignments, z_range
+    return assignments
 
 
 def _assign_normal(
@@ -675,7 +672,7 @@ def _parse_mtl(mtl_path: str) -> dict[str, str]:
                     tex_file = line.split(None, 1)[1]
                     textures[current_name] = tex_file
     except OSError:
-        _logger.warning("Cannot read MTL file: %s", mtl_path)
+        _logger.debug("Cannot read MTL file: %s", mtl_path)
 
     return textures
 
@@ -712,18 +709,18 @@ def _find_mtl_path(obj_path: str) -> str | None:
 def _sample_face_color(
     face: _ObjFace,
     uvs: list[tuple[float, float]],
-    pixels: list[tuple[int, ...]],
+    img: Any,
     img_width: int,
     img_height: int,
 ) -> tuple[int, int, int]:
     """Sample the texture at the centroid UV of a face.
 
-    :param pixels: Pre-loaded pixel list from ``list(img.getdata())``.
     :returns: ``(r, g, b)`` tuple in 0-255 range.
     """
     if not face.uv_indices or not uvs:
-        return (128, 128, 128)
+        return (128, 128, 128)  # neutral grey fallback
 
+    # Average UV coordinates of the face
     u_sum = 0.0
     v_sum = 0.0
     count = 0
@@ -736,15 +733,23 @@ def _sample_face_color(
     if count == 0:
         return (128, 128, 128)
 
-    u = (u_sum / count) % 1.0
-    v = (v_sum / count) % 1.0
+    u = u_sum / count
+    v = v_sum / count
 
-    px = max(0, min(img_width - 1, int(u * (img_width - 1))))
-    py = max(0, min(img_height - 1, int((1.0 - v) * (img_height - 1))))
+    # Wrap to [0, 1] via modulo (standard UV tiling behavior)
+    u = u % 1.0
+    v = v % 1.0
 
-    pixel = pixels[py * img_width + px]
+    # OBJ UV: (0,0) is bottom-left; image pixels: (0,0) is top-left
+    px = int(u * (img_width - 1))
+    py = int((1.0 - v) * (img_height - 1))
+    px = max(0, min(img_width - 1, px))
+    py = max(0, min(img_height - 1, py))
+
+    pixel = img.getpixel((px, py))
     if isinstance(pixel, (tuple, list)):
         return (pixel[0], pixel[1], pixel[2])
+    # Greyscale
     return (pixel, pixel, pixel)
 
 
@@ -876,40 +881,6 @@ def _obj_face_to_triangle(
 
 
 # ---------------------------------------------------------------------------
-# Shared validation helpers
-# ---------------------------------------------------------------------------
-
-
-def _validate_stl_input(
-    input_path: str,
-    num_colors: int,
-) -> dict[str, str] | None:
-    """Validate common STL tool inputs. Returns error dict or None if valid."""
-    if not Path(input_path).exists():
-        return {"status": "error", "error": f"File not found: {input_path}"}
-    if num_colors < 1:
-        return {"status": "error", "error": "num_colors must be >= 1"}
-    try:
-        tris = _parse_binary_stl(input_path)
-    except ValueError as exc:
-        return {"status": "error", "error": str(exc)}
-    if not tris:
-        return {"status": "error", "error": "No triangles found in STL"}
-    return None
-
-
-def _resolve_palette(
-    color_palette: list[str] | None,
-    num_colors: int,
-) -> list[str]:
-    """Resolve and cycle palette to match requested color count."""
-    palette = color_palette or _DEFAULT_PALETTE
-    if len(palette) < num_colors:
-        palette = [palette[i % len(palette)] for i in range(num_colors)]
-    return palette
-
-
-# ---------------------------------------------------------------------------
 # Plugin class
 # ---------------------------------------------------------------------------
 
@@ -939,7 +910,7 @@ class _ColorToolsPlugin:
             input_path: str,
             num_colors: int = 4,
             color_palette: list[str] | None = None,
-        ) -> dict[str, Any]:
+        ) -> dict:
             """Split a 3D model into horizontal color zones by Z-height.
 
             Divides the model's Z-range into N equal bands and assigns
@@ -956,20 +927,37 @@ class _ColorToolsPlugin:
             :returns: Dict with zone STL paths, hex colors, face counts,
                 AMS slot mapping, weight estimates, and optional 3MF path.
             """
-            err = _validate_stl_input(input_path, num_colors)
-            if err is not None:
-                return err
+            path = Path(input_path)
+            if not path.exists():
+                return {"status": "error", "error": f"File not found: {input_path}"}
 
-            palette = _resolve_palette(color_palette, num_colors)
-            triangles = _parse_binary_stl(input_path)
+            if num_colors < 1:
+                return {"status": "error", "error": "num_colors must be >= 1"}
+
+            palette = color_palette or _DEFAULT_PALETTE
+            if len(palette) < num_colors:
+                # Cycle palette to fill
+                palette = [palette[i % len(palette)] for i in range(num_colors)]
+
+            try:
+                triangles = _parse_binary_stl(input_path)
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+
+            if not triangles:
+                return {"status": "error", "error": "No triangles found in STL"}
+
             output_dir = tempfile.mkdtemp(prefix="kiln_color_")
-            base_name = Path(input_path).stem
+            base_name = path.stem
 
-            assignments, z_range = _assign_z_height(triangles, num_colors)
+            assignments = _assign_z_height(triangles, num_colors)
             zones = _split_and_write(
                 triangles, assignments, num_colors, palette, output_dir, base_name,
             )
             threemf_path, compose_err = _try_compose_3mf(zones, output_dir, base_name)
+
+            z_values = [t.centroid_z for t in triangles]
+            z_range = max(z_values) - min(z_values)
             warn = _band_height_warning(z_range, num_colors)
 
             return _build_result(
@@ -983,9 +971,9 @@ class _ColorToolsPlugin:
         def auto_color_by_region(
             input_path: str,
             num_colors: int = 4,
-            method: Literal["z_height", "normal", "random"] = "z_height",
+            method: str = "z_height",
             color_palette: list[str] | None = None,
-        ) -> dict[str, Any]:
+        ) -> dict:
             """Split a 3D model into color zones by geometric region.
 
             Supports multiple assignment methods:
@@ -1012,19 +1000,30 @@ class _ColorToolsPlugin:
                     "error": f"Unknown method '{method}'. Choose from: {sorted(valid_methods)}",
                 }
 
-            err = _validate_stl_input(input_path, num_colors)
-            if err is not None:
-                return err
+            path = Path(input_path)
+            if not path.exists():
+                return {"status": "error", "error": f"File not found: {input_path}"}
 
-            palette = _resolve_palette(color_palette, num_colors)
-            triangles = _parse_binary_stl(input_path)
+            if num_colors < 1:
+                return {"status": "error", "error": "num_colors must be >= 1"}
+
+            palette = color_palette or _DEFAULT_PALETTE
+            if len(palette) < num_colors:
+                palette = [palette[i % len(palette)] for i in range(num_colors)]
+
+            try:
+                triangles = _parse_binary_stl(input_path)
+            except ValueError as exc:
+                return {"status": "error", "error": str(exc)}
+
+            if not triangles:
+                return {"status": "error", "error": "No triangles found in STL"}
+
             output_dir = tempfile.mkdtemp(prefix="kiln_color_")
-            base_name = Path(input_path).stem
+            base_name = path.stem
 
-            warn: str | None = None
             if method == "z_height":
-                assignments, z_range = _assign_z_height(triangles, num_colors)
-                warn = _band_height_warning(z_range, num_colors)
+                assignments = _assign_z_height(triangles, num_colors)
             elif method == "normal":
                 assignments = _assign_normal(triangles, num_colors)
             else:
@@ -1034,6 +1033,12 @@ class _ColorToolsPlugin:
                 triangles, assignments, num_colors, palette, output_dir, base_name,
             )
             threemf_path, compose_err = _try_compose_3mf(zones, output_dir, base_name)
+
+            warn: str | None = None
+            if method == "z_height":
+                z_values = [t.centroid_z for t in triangles]
+                z_range = max(z_values) - min(z_values)
+                warn = _band_height_warning(z_range, num_colors)
 
             return _build_result(
                 zones, output_dir, base_name, method,
@@ -1046,7 +1051,7 @@ class _ColorToolsPlugin:
         def auto_multicolor_from_texture(
             obj_path: str,
             num_colors: int = 4,
-        ) -> dict[str, Any]:
+        ) -> dict:
             """Convert a textured OBJ into per-color STL zones for multicolor printing.
 
             Takes an OBJ file with MTL + PNG textures (e.g. from Meshy
@@ -1096,6 +1101,7 @@ class _ColorToolsPlugin:
             if mtl_path:
                 tex_map = _parse_mtl(mtl_path)
 
+            # Load texture images per material
             obj_dir = os.path.dirname(os.path.abspath(obj_path))
             loaded_textures: dict[str, Any] = {}
             for mat_name, tex_file in tex_map.items():
@@ -1104,8 +1110,9 @@ class _ColorToolsPlugin:
                     try:
                         loaded_textures[mat_name] = _PILImage.open(tex_path).convert("RGB")
                     except (OSError, ValueError):
-                        _logger.warning("Failed to open texture: %s", tex_path)
+                        _logger.debug("Failed to open texture: %s", tex_path)
 
+            # If no textures loaded, try to find any PNG in the directory
             if not loaded_textures:
                 for fname in os.listdir(obj_dir):
                     if fname.lower().endswith((".png", ".jpg", ".jpeg")):
@@ -1125,19 +1132,16 @@ class _ColorToolsPlugin:
                     ),
                 }
 
-            # Pre-load pixel data for fast sampling (avoids per-face getpixel overhead)
-            _pixel_cache: dict[str, tuple[list[tuple[int, ...]], int, int]] = {}
-            for mat_name, img in loaded_textures.items():
-                w, h = img.size
-                _get = getattr(img, "get_flattened_data", None) or img.getdata
-                _pixel_cache[mat_name] = (list(_get()), w, h)
-
+            # Sample face colors from texture
             face_colors: list[tuple[int, int, int]] = []
-            default_mat = next(iter(_pixel_cache))
             for face in faces:
-                mat_key = face.material if face.material in _pixel_cache else default_mat
-                pixels, w, h = _pixel_cache[mat_key]
-                color = _sample_face_color(face, uvs, pixels, w, h)
+                # Pick the texture for this face's material
+                img = loaded_textures.get(face.material)
+                if img is None:
+                    # Fall back to first available texture
+                    img = next(iter(loaded_textures.values()))
+                w, h = img.size
+                color = _sample_face_color(face, uvs, img, w, h)
                 face_colors.append(color)
 
             # Quantize to dominant colors

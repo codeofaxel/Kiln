@@ -10,14 +10,101 @@ Only Python stdlib is used.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import platform
+import re
 import shutil
 import subprocess
 import time
 from pathlib import Path
 from typing import Any
+
+_logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# OpenSCAD version cache — checked once per session
+# ---------------------------------------------------------------------------
+
+#: Cached detected OpenSCAD version string, e.g. ``"2024.12.19"``.
+#: ``None`` means not yet checked; ``""`` means check failed / not found.
+_openscad_version_cache: str | None = None
+
+#: Set to True after the first successful Manifold compile so the benchmark
+#: message is only logged once per process lifetime.
+_manifold_benchmarked: bool = False
+
+#: Set to True after the first outdated-version warning so it only fires once
+#: per process lifetime.
+_upgrade_warned: bool = False
+
+_OPENSCAD_MIN_VERSION_YEAR = 2024
+_OPENSCAD_UPGRADE_INSTRUCTIONS = (
+    "  macOS: brew install --cask openscad@snapshot\n"
+    "  Linux: sudo snap install openscad --edge\n"
+    "  Windows: Download from https://openscad.org/downloads#snapshots"
+)
+_OPENSCAD_UPGRADE_MSG = (
+    "OpenSCAD 2021 is outdated and has critical SVG bugs "
+    "(SVG import() in difference() silently fails). "
+    "Please upgrade: "
+    "brew install --cask openscad@snapshot  (macOS) "
+    "or download from https://openscad.org/downloads"
+)
+
+
+def _detect_openscad_version(binary: str) -> str:
+    """Run ``openscad --version`` and return the version string.
+
+    Returns the raw version token (e.g. ``"2024.12.19"``) or ``""`` on
+    failure.  Result is not cached here — callers manage the cache.
+    """
+    try:
+        result = subprocess.run(
+            [binary, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        # OpenSCAD prints e.g. "OpenSCAD version 2024.12.19" to stderr
+        output = result.stderr.strip() or result.stdout.strip()
+        match = re.search(r"(\d{4}\.\d+(?:\.\d+)?)", output)
+        if match:
+            return match.group(1)
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def get_openscad_version(binary: str | None = None) -> str:
+    """Return the cached OpenSCAD version string, detecting it if needed.
+
+    Checks the version once per process lifetime and caches the result.
+    Returns ``""`` if detection fails.
+    """
+    global _openscad_version_cache  # noqa: PLW0603
+    if _openscad_version_cache is not None:
+        return _openscad_version_cache
+    if binary is None:
+        try:
+            binary = _find_openscad()
+        except FileNotFoundError:
+            _openscad_version_cache = ""
+            return ""
+    _openscad_version_cache = _detect_openscad_version(binary)
+    return _openscad_version_cache
+
+
+def _openscad_version_year(version: str) -> int:
+    """Extract the year component from a version string like ``"2024.12.19"``."""
+    if not version:
+        return 0
+    try:
+        return int(version.split(".")[0])
+    except (ValueError, IndexError):
+        return 0
+
 
 # ---------------------------------------------------------------------------
 # Material-aware depth defaults (mm)
@@ -147,6 +234,9 @@ def _svg_content_block(
     scale_y: float,
     content_cx: float | None = None,
     content_cy: float | None = None,
+    *,
+    svg_id: str = "",
+    svg_layer: str = "",
 ) -> str:
     """Return the OpenSCAD fragment that produces the SVG extrusion shape.
 
@@ -173,18 +263,39 @@ def _svg_content_block(
     # Use native OpenSCAD polygons when available (reliable boolean path)
     native_code = content_info.get("openscad_polygons", "")
     if native_code:
+        # On OpenSCAD 2024+, wrap the union() in fill() so that tiny gaps
+        # between adjacent hull() endpoints are closed automatically.
+        # fill() is a stable module (added in 2021.01) — no --enable flag needed.
+        try:
+            use_fill = _openscad_version_year(get_openscad_version()) >= 2024
+        except Exception:  # noqa: BLE001
+            use_fill = False
+
+        if use_fill:
+            inner = (
+                f'fill()\n'
+                f'                        {native_code}'
+            )
+        else:
+            inner = native_code
+
         return (
             f'scale([{scale_x:.6f}, {scale_y:.6f}, 1])\n'
             f'                translate([-{content_cx:.6f}, -{content_cy:.6f}, 0])\n'
-            f'                    {native_code}'
+            f'                    {inner}'
         )
 
     # Fallback: SVG import (unreliable on complex meshes)
     svg_path = content_info["svg_path"]
+    extra_args = ""
+    if svg_id:
+        extra_args += f', id="{_escape_scad_string(svg_id)}"'
+    if svg_layer:
+        extra_args += f', layer="{_escape_scad_string(svg_layer)}"'
     return (
         f'scale([{scale_x:.6f}, {scale_y:.6f}, 1])\n'
         f'                translate([-{content_cx:.6f}, -{content_cy:.6f}, 0])\n'
-        f'                    import("{_escape_scad_string(svg_path)}");'
+        f'                    import("{_escape_scad_string(svg_path)}"{extra_args});'
     )
 
 
@@ -214,15 +325,38 @@ def _heightmap_content_block(
 
 
 def _text_content_block(content_info: dict) -> str:
-    """Return the OpenSCAD fragment for a text() shape."""
+    """Return the OpenSCAD fragment for a text() shape.
+
+    On OpenSCAD 2024+ uses ``textmetrics()`` for pixel-perfect centering.
+    On older versions falls back to ``halign="center"`` which is close but
+    relies on font-specific heuristics.
+    """
     text_str = content_info.get("text", "KILN")
     font_size = content_info.get("font_size", 10)
     font = content_info.get("font", "Liberation Sans:style=Bold")
+
+    # Use textmetrics() on 2024+ for exact centering; fall back safely.
+    try:
+        version_year = _openscad_version_year(get_openscad_version())
+        use_textmetrics = version_year >= 2024
+    except Exception:  # noqa: BLE001
+        use_textmetrics = False
+
+    escaped_text = _escape_scad_string(text_str)
+    escaped_font = _escape_scad_string(font)
+
+    if use_textmetrics:
+        return (
+            f'let(tm = textmetrics(text="{escaped_text}", size={font_size}, font="{escaped_font}"))\n'
+            f'  translate([-tm.size[0]/2, -tm.size[1]/2, 0])\n'
+            f'    text("{escaped_text}", size={font_size}, '
+            f'font="{escaped_font}", valign="baseline");'
+        )
     return (
-        f'text("{_escape_scad_string(text_str)}", '
+        f'text("{escaped_text}", '
         f'size={font_size}, '
         f'halign="center", valign="center", '
-        f'font="{_escape_scad_string(font)}");'
+        f'font="{escaped_font}");'
     )
 
 
@@ -279,6 +413,8 @@ def generate_emboss_scad(
     offset_x_mm: float = 0.0,
     offset_y_mm: float = 0.0,
     placement: str = "center",
+    svg_id: str = "",
+    svg_layer: str = "",
 ) -> dict[str, Any]:
     """Generate an OpenSCAD ``.scad`` file for an emboss/deboss operation.
 
@@ -410,7 +546,10 @@ def generate_emboss_scad(
         scale_y = target_h / svg_h if svg_h else 1.0
         # Use uniform scale to preserve aspect ratio
         uniform_scale = min(scale_x, scale_y)
-        inner = _svg_content_block(content_info, uniform_scale, uniform_scale, content_cx, content_cy)
+        inner = _svg_content_block(
+            content_info, uniform_scale, uniform_scale, content_cx, content_cy,
+            svg_id=svg_id, svg_layer=svg_layer,
+        )
         extrude_height = depth_mm + 0.1
         content_block = (
             f"linear_extrude(height={extrude_height:.4f})\n"
@@ -490,11 +629,25 @@ def _find_openscad(openscad_path: str | None = None) -> str:
     1. *openscad_path* if provided.
     2. macOS application bundle path.
     3. ``openscad`` on ``$PATH``.
+    4. Homebrew fallback paths.
 
     Raises :class:`FileNotFoundError` if no executable is found.
+
+    .. note::
+        This function also caches the detected OpenSCAD version so callers
+        can warn about outdated builds without paying the subprocess cost
+        twice.  SVG-based operations should call
+        :func:`_find_openscad_for_svg` instead, which hard-fails on
+        OpenSCAD < 2024.
     """
+    # Check env var fast path first (CLAUDE.md rule: env vars > config > defaults)
+    if not openscad_path:
+        openscad_path = os.environ.get("KILN_OPENSCAD_PATH")
+
     if openscad_path:
         if os.path.isfile(openscad_path) and os.access(openscad_path, os.X_OK):
+            _detect_and_cache_version(openscad_path)
+            _warn_if_outdated()
             return openscad_path
         raise FileNotFoundError(
             f"Provided OpenSCAD path does not exist or is not executable: {openscad_path}"
@@ -510,22 +663,76 @@ def _find_openscad(openscad_path: str | None = None) -> str:
         ]:
             for mac_path in _glob.glob(pattern):
                 if os.path.isfile(mac_path) and os.access(mac_path, os.X_OK):
+                    _detect_and_cache_version(mac_path)
+                    _warn_if_outdated()
                     return mac_path
 
     # $PATH
     on_path = shutil.which("openscad")
     if on_path:
+        _detect_and_cache_version(on_path)
+        _warn_if_outdated()
         return on_path
 
     # Homebrew fallback (MCP servers may not inherit full $PATH)
     for brew_path in ["/opt/homebrew/bin/openscad", "/usr/local/bin/openscad"]:
         if os.path.isfile(brew_path) and os.access(brew_path, os.X_OK):
+            _detect_and_cache_version(brew_path)
+            _warn_if_outdated()
             return brew_path
 
     raise FileNotFoundError(
-        "OpenSCAD not found. Install it from https://openscad.org or "
-        "pass an explicit path via the openscad_path parameter."
+        "OpenSCAD not found. Install it for 3D model generation:\n"
+        + _OPENSCAD_UPGRADE_INSTRUCTIONS
     )
+
+
+def _detect_and_cache_version(binary: str) -> None:
+    """Detect and cache the OpenSCAD version if not already cached."""
+    global _openscad_version_cache  # noqa: PLW0603
+    if _openscad_version_cache is None:
+        _openscad_version_cache = _detect_openscad_version(binary)
+
+
+def _warn_if_outdated() -> None:
+    """Log a one-time WARNING when the cached OpenSCAD version is < 2024."""
+    global _upgrade_warned  # noqa: PLW0603
+    if _upgrade_warned:
+        return
+    version = _openscad_version_cache or ""
+    year = _openscad_version_year(version)
+    if year and year < _OPENSCAD_MIN_VERSION_YEAR:
+        _upgrade_warned = True
+        _logger.warning(
+            "OpenSCAD %s is outdated. Upgrade for 20-100x faster compiles "
+            "and reliable SVG support:\n%s",
+            version,
+            _OPENSCAD_UPGRADE_INSTRUCTIONS,
+        )
+
+
+def _find_openscad_for_svg(openscad_path: str | None = None) -> str:
+    """Locate the OpenSCAD binary and hard-fail if version < 2024.
+
+    SVG ``import()`` inside ``difference()`` silently fails on OpenSCAD
+    2021, producing no geometry change.  This function rejects outdated
+    builds with an actionable upgrade message so users don't waste time
+    debugging phantom failures.
+
+    For operations that do not use SVG import (pure geometry, text,
+    heightmaps), use :func:`_find_openscad` instead.
+
+    Raises :class:`FileNotFoundError` if binary is not found.
+    Raises :class:`RuntimeError` if binary is OpenSCAD < 2024.
+    """
+    binary = _find_openscad(openscad_path)
+    version = _openscad_version_cache or ""
+    year = _openscad_version_year(version)
+    if year and year < _OPENSCAD_MIN_VERSION_YEAR:
+        raise RuntimeError(
+            f"OpenSCAD {version} detected. {_OPENSCAD_UPGRADE_MSG}"
+        )
+    return binary
 
 
 def compile_embossed_model(
@@ -534,8 +741,9 @@ def compile_embossed_model(
     *,
     openscad_path: str | None = None,
     timeout: int = 120,
+    export_format: str = "stl",
 ) -> dict[str, Any]:
-    """Compile a ``.scad`` file to STL using the OpenSCAD CLI.
+    """Compile a ``.scad`` file to STL or 3MF using the OpenSCAD CLI.
 
     Parameters
     ----------
@@ -543,35 +751,92 @@ def compile_embossed_model(
         Path to the ``.scad`` file (as generated by
         :func:`generate_emboss_scad`).
     output_stl_path:
-        Destination path for the compiled STL.
+        Destination path for the compiled output.  When *export_format* is
+        ``"3mf"`` the caller should supply a ``.3mf`` path here; if a
+        ``.stl`` path is given it is rewritten to ``.3mf`` automatically.
     openscad_path:
         Explicit path to the OpenSCAD binary.  If ``None``, the function
         searches common locations.
     timeout:
         Maximum compilation time in seconds.
+    export_format:
+        Output format — ``"stl"`` (default, backwards-compatible) or
+        ``"3mf"`` (preserves ``color()`` information, requires OpenSCAD
+        2024+).  Falls back to STL silently if the installed OpenSCAD
+        version is older than 2024.
 
     Returns
     -------
     dict
-        ``stl_path`` — path to the output STL (same as *output_stl_path*).
-        ``file_size`` — size of the output STL in bytes.
+        ``stl_path`` — path to the output file (kept for backwards
+        compatibility; identical to *output_path*).
+        ``output_path`` — path to the output file (STL or 3MF).
+        ``export_format`` — the format actually used (``"stl"`` or
+        ``"3mf"``).
+        ``file_size`` — size of the output file in bytes.
         ``compile_time_seconds`` — wall-clock compilation time.
         ``success`` — boolean indicating whether compilation succeeded.
         ``error`` — error message string (only present when *success* is
         ``False``).
     """
+    # Detect whether the .scad file uses SVG import() — if so we need
+    # OpenSCAD 2024+ because 2021 silently fails SVG booleans.
+    _uses_svg = False
     try:
-        exe = _find_openscad(openscad_path)
-    except FileNotFoundError as exc:
+        _scad_text = Path(scad_path).read_text(encoding="utf-8")
+        _uses_svg = ".svg" in _scad_text and "import(" in _scad_text
+    except OSError:
+        pass
+
+    try:
+        exe = _find_openscad_for_svg(openscad_path) if _uses_svg else _find_openscad(openscad_path)
+    except (FileNotFoundError, RuntimeError) as exc:
         return {
             "stl_path": output_stl_path,
+            "output_path": output_stl_path,
+            "export_format": export_format,
             "file_size": 0,
             "compile_time_seconds": 0.0,
             "success": False,
             "error": str(exc),
         }
 
-    cmd = [exe, "-o", output_stl_path, scad_path]
+    import os as _os
+
+    backend = _os.environ.get("KILN_OPENSCAD_BACKEND", "manifold")
+    version = get_openscad_version(exe)
+    version_year = _openscad_version_year(version)
+    use_manifold = version_year >= 2024 and backend == "manifold"
+
+    # 3MF export requires OpenSCAD 2024+; fall back to STL on older versions.
+    use_3mf = export_format == "3mf" and version_year >= 2024
+    if export_format == "3mf" and not use_3mf:
+        _logger.warning(
+            "OpenSCAD %s does not support 3MF export (need 2024+); falling back to STL",
+            version or "unknown",
+        )
+
+    # Resolve the actual output path — rewrite extension when needed.
+    if use_3mf:
+        output_path = str(Path(output_stl_path).with_suffix(".3mf"))
+    else:
+        output_path = str(Path(output_stl_path).with_suffix(".stl"))
+    actual_format = "3mf" if use_3mf else "stl"
+
+    def _build_cmd(*, with_manifold: bool) -> list[str]:
+        c = [exe, "-o", output_path]
+        # Use Manifold backend on OpenSCAD 2024+ for 20-100x faster boolean ops.
+        # Manifold uses multithreaded double-precision FP instead of CGAL's
+        # exact arithmetic. Opt-out via KILN_OPENSCAD_BACKEND=cgal env var.
+        if with_manifold:
+            c.append("--backend=manifold")
+        # Enable textmetrics() on 2024+ for improved font metrics in text().
+        if version_year >= 2024:
+            c.append("--enable=textmetrics")
+        c.append(scad_path)
+        return c
+
+    cmd = _build_cmd(with_manifold=use_manifold)
     start = time.monotonic()
     try:
         result = subprocess.run(
@@ -584,27 +849,70 @@ def compile_embossed_model(
     except subprocess.TimeoutExpired:
         elapsed = time.monotonic() - start
         return {
-            "stl_path": output_stl_path,
+            "stl_path": output_path,
+            "output_path": output_path,
+            "export_format": actual_format,
             "file_size": 0,
             "compile_time_seconds": round(elapsed, 2),
             "success": False,
             "error": f"OpenSCAD compilation timed out after {timeout}s",
         }
 
+    # Auto-fallback: if Manifold compile failed, retry with CGAL backend.
+    if result.returncode != 0 and use_manifold:
+        global _manifold_benchmarked  # noqa: PLW0603
+        _logger.warning("Manifold compile failed, retrying with CGAL backend")
+        cgal_cmd = _build_cmd(with_manifold=False)
+        start = time.monotonic()
+        try:
+            result = subprocess.run(
+                cgal_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            elapsed = time.monotonic() - start
+        except subprocess.TimeoutExpired:
+            elapsed = time.monotonic() - start
+            return {
+                "stl_path": output_path,
+                "output_path": output_path,
+                "export_format": actual_format,
+                "file_size": 0,
+                "compile_time_seconds": round(elapsed, 2),
+                "success": False,
+                "error": f"OpenSCAD CGAL compilation timed out after {timeout}s",
+            }
+
     if result.returncode != 0:
         return {
-            "stl_path": output_stl_path,
+            "stl_path": output_path,
+            "output_path": output_path,
+            "export_format": actual_format,
             "file_size": 0,
             "compile_time_seconds": round(elapsed, 2),
             "success": False,
             "error": result.stderr.strip() or result.stdout.strip(),
         }
 
-    stl = Path(output_stl_path)
-    file_size = stl.stat().st_size if stl.exists() else 0
+    # Log Manifold benchmark once per session on first successful compile.
+    if use_manifold:
+        global _manifold_benchmarked  # noqa: PLW0603
+        if not _manifold_benchmarked:
+            _manifold_benchmarked = True
+            _logger.info(
+                "Manifold backend: %.2fs compile. "
+                "OpenSCAD 2026 with Manifold enables 20-100x faster boolean operations.",
+                elapsed,
+            )
+
+    out = Path(output_path)
+    file_size = out.stat().st_size if out.exists() else 0
 
     return {
-        "stl_path": output_stl_path,
+        "stl_path": output_path,
+        "output_path": output_path,
+        "export_format": actual_format,
         "file_size": file_size,
         "compile_time_seconds": round(elapsed, 2),
         "success": True,

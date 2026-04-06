@@ -30,8 +30,17 @@ class TestGetStarted:
             "tool_tiers",
             "session_recovery",
             "tip",
+            "openscad",
         }
         assert expected_keys == set(result.keys())
+
+    def test_openscad_key_present(self):
+        """openscad section is always present with at least an 'installed' or 'version' field."""
+        result = get_started()
+        openscad = result["openscad"]
+        assert isinstance(openscad, dict)
+        # Must have at least one diagnostic key — not an empty dict.
+        assert len(openscad) > 0
 
     def test_safety_tools_includes_safety_status(self):
         result = get_started()

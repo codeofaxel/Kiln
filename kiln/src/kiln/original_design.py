@@ -27,6 +27,8 @@ from kiln.generation_feedback import (
     design_validation_to_feedback,
     enhance_prompt_with_design_intelligence,
     generate_improved_prompt,
+    resolve_printer_generation_context,
+    structural_risks_to_feedback,
 )
 from kiln.printability import analyze_printability
 
@@ -66,6 +68,7 @@ class OriginalDesignAudit:
     design_validation: dict[str, Any]
     mesh_diagnostics: dict[str, Any] | None
     orientation: dict[str, Any] | None
+    structural_analysis: dict[str, Any] | None = None
     gates: list[AuditGate] = field(default_factory=list)
     feedback: list[dict[str, Any]] = field(default_factory=list)
 
@@ -402,15 +405,19 @@ def audit_original_design(
         else None
     )
 
+    # Resolve printer context for audit prompt enrichment.
+    audit_printer_ctx = resolve_printer_generation_context(material=material)
+
     brief = get_design_constraints(
         requirements_text,
-        material=material,
-        printer_model=printer_model,
+        material=material or audit_printer_ctx.material,
+        printer_model=printer_model or audit_printer_ctx.printer_model,
     )
     prompt = enhance_prompt_with_design_intelligence(
         requirements_text,
-        material=material,
-        printer_model=printer_model,
+        material=material or audit_printer_ctx.material,
+        printer_model=printer_model or audit_printer_ctx.printer_model,
+        printer_context=audit_printer_ctx,
     )
     mesh_validation = validate_mesh(file_path)
     printability = analyze_printability(
@@ -444,6 +451,21 @@ def audit_original_design(
     except ValueError:
         diagnostics = None
 
+    # Structural risk analysis — goes beyond printability to find
+    # geometry that will snap, crack, or topple under real-world use.
+    structural_risks: list[Any] = []
+    structural_load: Any = None
+    structural_plan: dict[str, Any] | None = None
+    try:
+        from kiln.design_reasoning import generate_improvement_plan as _gen_plan
+
+        plan = _gen_plan(file_path)
+        structural_risks = plan.risks
+        structural_load = plan.load_analysis
+        structural_plan = plan.to_dict()
+    except (ValueError, ImportError):
+        pass
+
     feedback_items: list[Any] = []
     feedback_items.extend(
         design_validation_to_feedback(design_validation, requirements_text)
@@ -458,6 +480,14 @@ def audit_original_design(
                 "mesh_diagnostics": diagnostics.to_dict() if diagnostics else None,
                 "build_volume": build_volume_dict,
             },
+        )
+    )
+    # Structural feedback — convert geometric risks into prompt constraints.
+    feedback_items.extend(
+        structural_risks_to_feedback(
+            structural_risks,
+            original_prompt=requirements_text,
+            load_analysis=structural_load,
         )
     )
     feedback = _dedupe_feedback(feedback_items)
@@ -507,6 +537,33 @@ def audit_original_design(
             details=printability.to_dict(),
         ),
     ]
+
+    # Structural integrity gate — critical risks block printing.
+    if structural_plan is not None:
+        struct_critical = structural_plan.get("critical_count", 0)
+        struct_score = structural_plan.get("overall_structural_score", 100)
+        struct_grade = structural_plan.get("structural_grade", "A")
+        struct_passed = struct_critical == 0 and struct_score >= 60
+        gates.append(
+            AuditGate(
+                name="structural_integrity",
+                passed=struct_passed,
+                severity=(
+                    "critical" if struct_critical > 0
+                    else "warning" if struct_score < 70
+                    else "info"
+                ),
+                message=(
+                    f"Structural score {struct_score}/100 ({struct_grade}). "
+                    + (
+                        f"{struct_critical} critical risk(s) found."
+                        if struct_critical > 0
+                        else "No critical structural risks."
+                    )
+                ),
+                details=structural_plan,
+            )
+        )
 
     if diagnostics is not None:
         diag_passed = diagnostics.severity in {"clean", "minor"}
@@ -566,6 +623,10 @@ def audit_original_design(
         score -= severity_penalty.get(diagnostics.severity, 0)
     if orientation is not None and orientation.improvement_percentage >= 10.0:
         score -= 5
+    # Structural risk penalty — critical risks are heavy, warnings are lighter.
+    if structural_plan is not None:
+        score -= structural_plan.get("critical_count", 0) * 15
+        score -= structural_plan.get("warning_count", 0) * 5
     score = max(0, min(100, score))
     grade = _score_to_grade(score)
 
@@ -585,6 +646,12 @@ def audit_original_design(
     )
     if diagnostics is not None:
         next_actions.extend(diagnostics.recommendations[:3])
+    # Structural reinforcement recommendations as next actions.
+    if structural_plan is not None:
+        for rec in structural_plan.get("reinforcements", [])[:3]:
+            desc = rec.get("description", "")
+            if desc:
+                next_actions.append(desc)
     if orientation is not None and orientation.improvement_percentage >= 10.0:
         next_actions.append(
             "Re-orient the model before slicing to reduce supports and improve stability."
@@ -619,6 +686,7 @@ def audit_original_design(
         design_validation=design_validation.to_dict(),
         mesh_diagnostics=diagnostics.to_dict() if diagnostics else None,
         orientation=orientation.to_dict() if orientation else None,
+        structural_analysis=structural_plan,
         gates=gates,
         feedback=feedback,
     )
@@ -661,15 +729,25 @@ def generate_original_design(
     )
     os.makedirs(effective_output_dir, exist_ok=True)
 
+    # Resolve live printer context — auto-detect material, nozzle, build
+    # volume, and common failure patterns from the actual printer state.
+    printer_ctx = resolve_printer_generation_context(
+        material=material,
+        printer_name=None,  # Default printer.
+    )
+    # Use printer-resolved material if the user didn't specify one.
+    effective_material = material or printer_ctx.material
+
     brief = get_design_constraints(
         requirements_text,
-        material=material,
-        printer_model=printer_model,
+        material=effective_material,
+        printer_model=printer_model or printer_ctx.printer_model,
     )
     seed_prompt = enhance_prompt_with_design_intelligence(
         requirements_text,
-        material=material,
-        printer_model=printer_model,
+        material=effective_material,
+        printer_model=printer_model or printer_ctx.printer_model,
+        printer_context=printer_ctx,
     )
     provider_used, generation_provider, selection_reason = _resolve_original_design_provider(
         provider,
