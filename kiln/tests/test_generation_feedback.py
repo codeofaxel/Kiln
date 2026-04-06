@@ -1123,5 +1123,75 @@ class TestStructuralFeedbackIntegration:
         assert improved.improved_prompt == "a cube"
 
 
-# NOTE: TestASCIISTLBoundingBox tests live on feature/provenance-qr-validation
-# and will merge when model_visualizer changes land.
+# ---------------------------------------------------------------------------
+# ASCII STL bounding box parser
+# ---------------------------------------------------------------------------
+
+
+class TestASCIISTLBoundingBox:
+    """_bbox_from_ascii_stl parses vertex lines correctly."""
+
+    def test_simple_triangle(self):
+        from kiln.model_visualizer import _bbox_from_ascii_stl
+
+        stl = (
+            b"solid test\n"
+            b"  facet normal 0 0 1\n"
+            b"    outer loop\n"
+            b"      vertex 0.0 0.0 0.0\n"
+            b"      vertex 10.0 0.0 0.0\n"
+            b"      vertex 5.0 10.0 5.0\n"
+            b"    endloop\n"
+            b"  endfacet\n"
+            b"endsolid test\n"
+        )
+        info = _bbox_from_ascii_stl(stl)
+        assert info.center_x == 5.0
+        assert info.center_y == 5.0
+        assert info.center_z == 2.5
+        assert info.distance > 20  # diagonal of 10x10x5 ≈ 15, * 2.0 = 30
+
+    def test_offset_geometry(self):
+        from kiln.model_visualizer import _bbox_from_ascii_stl
+
+        stl = (
+            b"solid offset\n"
+            b"  facet normal 0 0 1\n"
+            b"    outer loop\n"
+            b"      vertex 100.0 200.0 50.0\n"
+            b"      vertex 150.0 200.0 50.0\n"
+            b"      vertex 125.0 250.0 75.0\n"
+            b"    endloop\n"
+            b"  endfacet\n"
+            b"endsolid offset\n"
+        )
+        info = _bbox_from_ascii_stl(stl)
+        assert info.center_x == 125.0
+        assert info.center_y == 225.0
+        assert info.center_z == 62.5
+
+    def test_empty_stl_returns_default(self):
+        from kiln.model_visualizer import _bbox_from_ascii_stl
+
+        info = _bbox_from_ascii_stl(b"solid empty\nendsolid empty\n")
+        assert info.distance == 250  # default
+
+    def test_scientific_notation_vertices(self):
+        from kiln.model_visualizer import _bbox_from_ascii_stl
+
+        stl = (
+            b"solid sci\n"
+            b"  facet normal 0 0 1\n"
+            b"    outer loop\n"
+            b"      vertex 1.5e1 2.0e1 0.0\n"
+            b"      vertex 3.0e1 2.0e1 0.0\n"
+            b"      vertex 2.25e1 4.0e1 1.0e1\n"
+            b"    endloop\n"
+            b"  endfacet\n"
+            b"endsolid sci\n"
+        )
+        info = _bbox_from_ascii_stl(stl)
+        # 15-30 in X, 20-40 in Y, 0-10 in Z
+        assert abs(info.center_x - 22.5) < 0.01
+        assert abs(info.center_y - 30.0) < 0.01
+        assert abs(info.center_z - 5.0) < 0.01
