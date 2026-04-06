@@ -2680,5 +2680,230 @@
       }
     },
     "scad_template": "// Pegboard Tool Holder\nhl = ${hook_length};\nhd = ${hook_dia};\nps = ${peg_spacing};\nnp = ${pegs};\n\nmodule holder() {\n    // Back pegs\n    for (i = [0:np-1])\n        translate([0, i * ps, 0]) {\n            // Peg (into board)\n            rotate([0, 90, 0])\n                cylinder(h=15, d=hd-0.5, $fn=20);\n            // Up hook\n            translate([-15, 0, 0])\n                cylinder(h=hd, d=hd, $fn=20);\n        }\n    // Connecting bar\n    translate([-15, 0, 0])\n        cube([hd, (np-1)*ps + hd, hd]);\n    // Hook arm\n    translate([-15, ((np-1)*ps)/2, 0])\n        rotate([0, -90, 0])\n            cylinder(h=hl, d=hd, $fn=20);\n    // Hook tip (upward)\n    translate([-15-hl, ((np-1)*ps)/2, 0])\n        cylinder(h=15, d=hd, $fn=20);\n}\n\nholder();"
+  },
+  "fridge_magnet": {
+    "display_name": "Fridge Magnet",
+    "description": "Flat magnet holder in rectangle, square, circle, or oval shapes with recess for a standard disc magnet. Front face is decoration-ready for photos, logos, or text.",
+    "category": "kitchen",
+    "parameters": {
+      "width": {
+        "default": 50,
+        "min": 25,
+        "max": 80,
+        "unit": "mm",
+        "description": "Width (for rectangular) or diameter (for circular)"
+      },
+      "height": {
+        "default": 50,
+        "min": 25,
+        "max": 80,
+        "unit": "mm",
+        "description": "Height (ignored for circular)"
+      },
+      "thickness": {
+        "default": 4,
+        "min": 3,
+        "max": 8,
+        "unit": "mm",
+        "description": "Total thickness"
+      },
+      "magnet_diameter": {
+        "default": 10,
+        "min": 5,
+        "max": 20,
+        "unit": "mm",
+        "description": "Disc magnet diameter"
+      },
+      "magnet_depth": {
+        "default": 2,
+        "min": 1,
+        "max": 5,
+        "unit": "mm",
+        "description": "Magnet recess depth"
+      },
+      "shape": {
+        "default": "rectangle",
+        "min": 0,
+        "max": 0,
+        "unit": "",
+        "description": "Shape: rectangle, square, circle, or oval"
+      }
+    },
+    "scad_template": "// Fridge Magnet \u2014 rectangle, square, circle, or oval\nw = ${width};\nh = ${height};\nt = ${thickness};\nmd = ${magnet_diameter};\nmz = ${magnet_depth};\nshape = \"${shape}\";\n\n$fn = 80;\n\nmodule magnet_body() {\n    if (shape == \"circle\")\n        cylinder(d=w, h=t);\n    else if (shape == \"oval\")\n        scale([1, h/w, 1]) cylinder(d=w, h=t);\n    else if (shape == \"square\") {\n        r = 3;\n        hull() {\n            translate([r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,w-r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([r,w-r,0]) cylinder(r=r, h=t, $fn=20);\n        }\n    } else {\n        // rectangle (default)\n        r = 3;\n        hull() {\n            translate([r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([w-r,h-r,0]) cylinder(r=r, h=t, $fn=20);\n            translate([r,h-r,0]) cylinder(r=r, h=t, $fn=20);\n        }\n    }\n}\n\ndifference() {\n    magnet_body();\n    // Magnet recess on back \u2014 centered\n    cx = (shape == \"circle\" || shape == \"oval\") ? 0 : (shape == \"square\" ? w/2 : w/2);\n    cy = (shape == \"circle\" || shape == \"oval\") ? 0 : (shape == \"square\" ? w/2 : h/2);\n    translate([cx, cy, -0.1])\n        cylinder(d=md+0.3, h=mz+0.1, $fn=40);\n}",
+    "preview_angles": [
+      "top",
+      "bottom",
+      "isometric"
+    ],
+    "preview_notes": "Flat object \u2014 front/back faces are top and bottom. Show top (decoration face) and bottom (magnet recess) at priority."
+  },
+  "bookmark": {
+    "display_name": "Bookmark",
+    "description": "Thin flat bookmark with optional page clip and decoration-ready face. Designed for thin-wall printing.",
+    "category": "accessories",
+    "parameters": {
+      "width": {
+        "default": 30,
+        "min": 20,
+        "max": 50,
+        "unit": "mm",
+        "description": "Bookmark width"
+      },
+      "length": {
+        "default": 120,
+        "min": 80,
+        "max": 180,
+        "unit": "mm",
+        "description": "Bookmark length"
+      },
+      "thickness": {
+        "default": 1.2,
+        "min": 1.0,
+        "max": 2.0,
+        "unit": "mm",
+        "description": "Thickness (keep thin! 1.0mm minimum for durability)"
+      },
+      "clip_depth": {
+        "default": 15,
+        "min": 0,
+        "max": 30,
+        "unit": "mm",
+        "description": "Page clip depth (0 = no clip)"
+      }
+    },
+    "scad_template": "// Parametric Bookmark\nw = ${width};\nl = ${length};\nt = ${thickness};\ncd = ${clip_depth};\n\nmodule bookmark() {\n    // Main body with rounded top\n    hull() {\n        cube([w, l - w/2, t]);\n        translate([w/2, l - w/2, 0])\n            cylinder(d=w, h=t, $fn=40);\n    }\n    // Page clip (hook at bottom)\n    if (cd > 0) {\n        translate([w*0.2, -cd, 0])\n            cube([w*0.6, cd, t]);\n        translate([w*0.2, -cd, 0])\n            cube([w*0.6, t*2, t + 3]);\n    }\n}\n\nbookmark();",
+    "preview_angles": [
+      "top",
+      "bottom",
+      "isometric"
+    ],
+    "preview_notes": "Flat object \u2014 both large faces are decoratable. Show top and bottom faces, not thin edges."
+  },
+  "toothbrush_holder": {
+    "display_name": "Toothbrush Holder",
+    "description": "Countertop toothbrush holder with 2x2 grid layout for stability. Wide base, drainage holes, decoration-ready front and side faces.",
+    "category": "bathroom",
+    "parameters": {
+      "slots": {
+        "default": 4,
+        "min": 2,
+        "max": 6,
+        "unit": "",
+        "description": "Number of toothbrush slots (arranged in grid)"
+      },
+      "slot_diameter": {
+        "default": 18,
+        "min": 14,
+        "max": 24,
+        "unit": "mm",
+        "description": "Slot diameter (18mm fits electric brush heads)"
+      },
+      "height": {
+        "default": 90,
+        "min": 70,
+        "max": 120,
+        "unit": "mm",
+        "description": "Total height including base"
+      },
+      "wall_thickness": {
+        "default": 3,
+        "min": 2,
+        "max": 5,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "base_extra": {
+        "default": 10,
+        "min": 5,
+        "max": 20,
+        "unit": "mm",
+        "description": "Extra base overhang on each side for stability"
+      }
+    },
+    "scad_template": "// Toothbrush Holder \u2014 2xN grid layout for stability\nns = ${slots};\nsd = ${slot_diameter};\nh = ${height};\nwt = ${wall_thickness};\nbx = ${base_extra};\n\n$fn = 40;\n\n// Grid layout: 2 rows, ceil(ns/2) columns\ncols = ceil(ns / 2);\nrows = min(ns, 2);\n\nbody_w = cols * (sd + wt) + wt;\nbody_d = rows * (sd + wt) + wt;\nbase_h = 8;\nbase_w = body_w + 2*bx;\nbase_d = body_d + 2*bx;\n\nmodule base_plate() {\n    r = 4;\n    hull() {\n        translate([r,r,0]) cylinder(r=r, h=base_h);\n        translate([base_w-r,r,0]) cylinder(r=r, h=base_h);\n        translate([base_w-r,base_d-r,0]) cylinder(r=r, h=base_h);\n        translate([r,base_d-r,0]) cylinder(r=r, h=base_h);\n    }\n}\n\nmodule body() {\n    translate([bx, bx, base_h]) {\n        r = 3;\n        hull() {\n            translate([r,r,0]) cylinder(r=r, h=h-base_h);\n            translate([body_w-r,r,0]) cylinder(r=r, h=h-base_h);\n            translate([body_w-r,body_d-r,0]) cylinder(r=r, h=h-base_h);\n            translate([r,body_d-r,0]) cylinder(r=r, h=h-base_h);\n        }\n    }\n}\n\nmodule slots() {\n    for (i = [0:ns-1]) {\n        col = floor(i / 2);\n        row = i % 2;\n        cx = bx + wt + sd/2 + col*(sd+wt);\n        cy = bx + wt + sd/2 + row*(sd+wt);\n        translate([cx, cy, base_h + 5])\n            cylinder(d=sd, h=h);\n        translate([cx, cy, -0.1])\n            cylinder(d=5, h=base_h + 6);\n    }\n}\n\ndifference() {\n    union() {\n        base_plate();\n        body();\n    }\n    slots();\n}\n",
+    "preview_angles": [
+      "isometric",
+      "top",
+      "front"
+    ],
+    "preview_notes": "3D object \u2014 isometric for shape, top for holes, front for decoration wall."
+  },
+  "pen_cup": {
+    "display_name": "Pen Cup",
+    "description": "Desktop pen/pencil holder in cylinder or rectangular shape. Flat outer walls for decoration (logo, text, photo). Bottom has a recessed QR code pocket matching the proven coaster recipe.",
+    "category": "desk",
+    "parameters": {
+      "shape": {
+        "default": "cylinder",
+        "min": 0,
+        "max": 0,
+        "unit": "",
+        "description": "Shape: cylinder or rectangle"
+      },
+      "diameter": {
+        "default": 75,
+        "min": 50,
+        "max": 120,
+        "unit": "mm",
+        "description": "Outer diameter (cylinder) or width (rectangle)"
+      },
+      "depth": {
+        "default": 65,
+        "min": 40,
+        "max": 80,
+        "unit": "mm",
+        "description": "Depth/length for rectangular shape (ignored for cylinder)"
+      },
+      "height": {
+        "default": 100,
+        "min": 70,
+        "max": 150,
+        "unit": "mm",
+        "description": "Total height"
+      },
+      "wall_thickness": {
+        "default": 2.4,
+        "min": 1.6,
+        "max": 4.0,
+        "unit": "mm",
+        "description": "Wall thickness"
+      },
+      "bottom_thickness": {
+        "default": 3.0,
+        "min": 2.0,
+        "max": 5.0,
+        "unit": "mm",
+        "description": "Bottom plate thickness"
+      },
+      "corner_radius": {
+        "default": 8,
+        "min": 2,
+        "max": 20,
+        "unit": "mm",
+        "description": "Corner radius (rectangle) or ignored (cylinder)"
+      },
+      "qr_pocket_size": {
+        "default": 40,
+        "min": 25,
+        "max": 60,
+        "unit": "mm",
+        "description": "QR code pocket size on bottom (0 = no pocket). Must be less than 75% of diameter."
+      },
+      "qr_pocket_depth": {
+        "default": 0.5,
+        "min": 0.3,
+        "max": 1.0,
+        "unit": "mm",
+        "description": "QR pocket recess depth (matches coaster recipe)"
+      }
+    },
+    "scad_template": "// Pen Cup \u2014 cylinder or rectangle with QR pocket on bottom\nshape = \"${shape}\";\nd = ${diameter};\ndp = ${depth};\nh = ${height};\nwt = ${wall_thickness};\nbt = ${bottom_thickness};\ncr = ${corner_radius};\nqr_size = ${qr_pocket_size};\nqr_depth = ${qr_pocket_depth};\n\n$fn = 80;\n\nmodule outer_shell() {\n    if (shape == \"rectangle\") {\n        hull() {\n            translate([cr,cr,0]) cylinder(r=cr, h=h);\n            translate([d-cr,cr,0]) cylinder(r=cr, h=h);\n            translate([d-cr,dp-cr,0]) cylinder(r=cr, h=h);\n            translate([cr,dp-cr,0]) cylinder(r=cr, h=h);\n        }\n    } else {\n        cylinder(d=d, h=h);\n    }\n}\n\nmodule inner_cavity() {\n    if (shape == \"rectangle\") {\n        translate([wt, wt, bt])\n            hull() {\n                r = max(1, cr - wt);\n                translate([r,r,0]) cylinder(r=r, h=h);\n                translate([d-2*wt-r,r,0]) cylinder(r=r, h=h);\n                translate([d-2*wt-r,dp-2*wt-r,0]) cylinder(r=r, h=h);\n                translate([r,dp-2*wt-r,0]) cylinder(r=r, h=h);\n            }\n    } else {\n        translate([0, 0, bt])\n            cylinder(d=d - 2*wt, h=h);\n    }\n}\n\nmodule qr_pocket() {\n    if (qr_size > 0) {\n        cx = (shape == \"rectangle\") ? d/2 : 0;\n        cy = (shape == \"rectangle\") ? dp/2 : 0;\n        translate([cx - qr_size/2, cy - qr_size/2, -0.01])\n            cube([qr_size, qr_size, qr_depth + 0.01]);\n    }\n}\n\ndifference() {\n    outer_shell();\n    inner_cavity();\n    qr_pocket();\n}",
+    "preview_angles": [
+      "isometric",
+      "front",
+      "bottom",
+      "top"
+    ],
+    "preview_notes": "3D object \u2014 isometric for shape, front for decoration wall, bottom for QR pocket, top for opening."
   }
 }
