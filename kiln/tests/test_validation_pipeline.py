@@ -1555,13 +1555,9 @@ class TestPrintTimeEstimateWithRealModule:
         mock_analysis = _make_mock_analysis()
         mock_validation = _make_mock_validation()
 
-        # Mock estimate_print_time_from_mesh — return real function's key format
+        # Mock estimate_print_time_from_mesh in kiln.generation.validation
         fake_estimate = MagicMock(
-            return_value={
-                "estimated_time_seconds": 2700,  # 45 minutes
-                "surface_area_mm2": 5000.0,
-                "height_mm": 50.0,
-            }
+            return_value={"time_min": 45, "filament_g": 12.0}
         )
 
         with (
@@ -1574,15 +1570,19 @@ class TestPrintTimeEstimateWithRealModule:
             result = _invoke_tool(stl)
 
         info = result["model_info"]
-        assert info["estimated_print_time_min"] == 45  # 2700s / 60 = 45
-        assert info["estimated_filament_g"] > 0  # computed from surface area
-        assert info["estimated_cost_usd"] > 0
+        assert info["estimated_print_time_min"] == 45
+        assert info["estimated_filament_g"] == 12.0
+        assert abs(info["estimated_cost_usd"] - 0.24) < 0.01  # 12g * $0.02/g
 
         # Check entry must appear with name="estimate" and passed=True
         est_checks = [c for c in result["checks"] if c["name"] == "estimate"]
         assert len(est_checks) == 1
         assert est_checks[0]["passed"] is True
         assert "45 min" in est_checks[0]["details"]
+        assert "$0.24" in est_checks[0]["details"]
+
+        # Summary should include the time/cost snippet
+        assert "45 min" in result["summary"] or "$0.24" in result["summary"]
 
         # Spaced/paren rough keys must NOT appear when real module is available
         assert "estimated_print_time_min (rough)" not in info

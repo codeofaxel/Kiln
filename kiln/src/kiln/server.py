@@ -18660,6 +18660,56 @@ def decorate_surface(
 
     import tempfile
 
+    # --- Check provenance sidecar for design recipe defaults ---
+    _provenance_info: dict[str, Any] = {}
+    try:
+        recipe_path = os.path.join(
+            os.path.dirname(os.path.abspath(model_path)), ".kiln_recipe.json"
+        )
+        if os.path.isfile(recipe_path):
+            from kiln.design_recipe import DesignRecipe
+
+            _recipe = DesignRecipe.load(recipe_path)
+            if _recipe.name:
+                _provenance_info["recipe_name"] = _recipe.name
+            _provenance_info["recipe_version"] = _recipe.version
+            if _recipe.design_id:
+                _provenance_info["design_id"] = _recipe.design_id
+            if _recipe.prompt:
+                _provenance_info["prompt"] = _recipe.prompt
+            if _recipe.generation_provider:
+                _provenance_info["generation_provider"] = _recipe.generation_provider
+
+            # Pre-populate material from recipe if caller left the default
+            recipe_material = (
+                _recipe.parameters.get("material")
+                or (_recipe.provenance and _recipe.provenance.get("material"))
+            )
+            if recipe_material and recipe_material != material and material == "PLA":
+                material = recipe_material
+                _provenance_info["material_source"] = "recipe"
+                logger.debug("Provenance: material set to %r from recipe", material)
+
+            # Pre-populate face/depth hints from recipe parameters
+            recipe_params = _recipe.parameters
+            if face == "auto" and recipe_params.get("decoration_face"):
+                face = recipe_params["decoration_face"]
+                _provenance_info["face_source"] = "recipe"
+                logger.debug("Provenance: face set to %r from recipe", face)
+            if depth_mm == 0.0 and recipe_params.get("decoration_depth_mm"):
+                depth_mm = float(recipe_params["decoration_depth_mm"])
+                _provenance_info["depth_source"] = "recipe"
+                logger.debug("Provenance: depth set to %.1f from recipe", depth_mm)
+
+            logger.info(
+                "Provenance sidecar loaded for %s (design=%s, v%d)",
+                os.path.basename(model_path),
+                _recipe.design_id or "n/a",
+                _recipe.version,
+            )
+    except Exception:
+        logger.debug("Provenance sidecar check failed", exc_info=True)
+
     # --- Validate model ---
     if not os.path.isfile(model_path):
         return _error_dict(f"Model not found: {model_path}", code="FILE_NOT_FOUND")
@@ -18947,6 +18997,8 @@ def decorate_surface(
             "compile_time_seconds": compile_result.get("compile_time_seconds"),
             "scad_path": scad_result["scad_path"],
         }
+        if _provenance_info:
+            result_dict["provenance"] = _provenance_info
         if warnings:
             result_dict["warnings"] = warnings
         return result_dict

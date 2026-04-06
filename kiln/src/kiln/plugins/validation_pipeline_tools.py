@@ -986,6 +986,95 @@ def _step_structural(report: _PipelineReport) -> None:
         ))
 
 
+def _step_support_assessment(
+    report: _PipelineReport,
+    working_path: str,
+    material: str,
+    *,
+    printer_ctx: dict[str, Any] | None = None,
+    layer_height_mm: float = 0.2,
+) -> None:
+    """Step 5b: support feasibility assessment."""
+    if not material:
+        return  # Can't assess without material
+
+    ext = Path(working_path).suffix.lower()
+    if ext != ".stl":
+        return  # Only STL supported for now
+
+    try:
+        from kiln.support_assessment import assess_support_feasibility
+
+        ctx = printer_ctx or {}
+        assessment = assess_support_feasibility(
+            stl_path=working_path,
+            material=material,
+            nozzle_diameter_mm=float(ctx.get("nozzle_diameter_mm", 0.4)),
+            layer_height_mm=layer_height_mm if layer_height_mm > 0 else 0.2,
+        )
+
+        report.model_info["support_assessment"] = assessment.to_dict()
+
+        # Determine severity
+        if assessment.trapped_regions:
+            report.checks.append(_CheckResult(
+                name="support_assessment",
+                passed=False,
+                details=(
+                    f"Enclosed cavity detected — {len(assessment.trapped_regions)} "
+                    f"support region(s) would be trapped and irremovable"
+                ),
+                severity="error",
+            ))
+        elif assessment.needs_supports and assessment.removal_difficulty == "hard":
+            report.checks.append(_CheckResult(
+                name="support_assessment",
+                passed=False,
+                details=(
+                    f"{assessment.overhang_percentage:.0f}% overhangs require supports. "
+                    f"{material.upper()} support removal is difficult — "
+                    f"{assessment.removal_notes}"
+                ),
+                severity="warning",
+            ))
+        elif assessment.needs_supports:
+            report.checks.append(_CheckResult(
+                name="support_assessment",
+                passed=True,
+                details=(
+                    f"{assessment.overhang_percentage:.0f}% overhangs. "
+                    f"Supports recommended ({assessment.recommended_support_type}). "
+                    f"Removal: {assessment.removal_difficulty}."
+                ),
+                severity="info",
+            ))
+        else:
+            report.checks.append(_CheckResult(
+                name="support_assessment",
+                passed=True,
+                details="No supports needed — all overhangs within material tolerance",
+                severity="info",
+            ))
+
+        report.recommendations.extend(assessment.recommendations)
+
+    except ImportError:
+        report.checks.append(_CheckResult(
+            name="support_assessment",
+            passed=True,
+            details="Skipped — support assessment module unavailable",
+            severity="warning",
+        ))
+    except Exception as exc:
+        _logger.debug("Support assessment failed: %s", exc, exc_info=True)
+        report.checks.append(_CheckResult(
+            name="support_assessment",
+            passed=True,
+            details=f"Skipped — assessment error: {exc}",
+            severity="warning",
+        ))
+
+
 def _step_bed_fit(
     report: _PipelineReport, printer_id: str, auto_scaled: bool,
 ) -> None:
@@ -1085,19 +1174,8 @@ def _step_estimate(report: _PipelineReport, working_path: str) -> None:
         from kiln.generation.validation import estimate_print_time_from_mesh as _est_fn
 
         est_result = _est_fn(working_path)
-        # Map real function keys → pipeline keys
-        est_seconds = float(est_result.get("estimated_time_seconds", 0))
-        time_min = max(1, int(round(est_seconds / 60))) if est_seconds > 0 else 0
-        # Estimate filament from surface area + height (shell volume proxy)
-        sa_mm2 = float(est_result.get("surface_area_mm2", 0))
-        height_mm = float(est_result.get("height_mm", 0))
-        if sa_mm2 > 0 and height_mm > 0:
-            # Approximate volume: SA * avg_wall_thickness * infill_factor
-            vol_cm3 = (sa_mm2 * 1.2 * _DEFAULT_INFILL_FACTOR) / 1000.0
-            filament_g = round(vol_cm3 * _PLA_DENSITY_G_PER_CM3, 1)
-        else:
-            bbox_vol = report.model_info.get("bounding_box_volume_cm3", 0)
-            filament_g = round(bbox_vol * _PLA_DENSITY_G_PER_CM3 * _DEFAULT_INFILL_FACTOR, 1) if bbox_vol else 0.0
+        time_min = int(est_result.get("time_min", 0))
+        filament_g = round(float(est_result.get("filament_g", 0)), 1)
         cost_usd = round(filament_g * _MATERIAL_COST_PER_GRAM, 2)
         report.model_info["estimated_print_time_min"] = time_min
         report.model_info["estimated_filament_g"] = filament_g
@@ -1211,6 +1289,11 @@ class _ValidationPipelinePlugin:
 
             # Step 5: Printability
             _step_printability(report, working_path)
+
+            # Step 5b: Support assessment
+            _step_support_assessment(
+                report, working_path, material,
+            )
 
             # Step 6: Structural
             _step_structural(report)
