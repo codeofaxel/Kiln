@@ -25,7 +25,10 @@ import os
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+
+from kiln.emboss_generator import _openscad_version_year, get_openscad_version
 
 logger = logging.getLogger(__name__)
 
@@ -81,27 +84,16 @@ def _find_openscad() -> str:
     )
 
 
-def _get_bounding_box(scad_path: str) -> float:
-    """Get model bounding box via OpenSCAD and return optimal camera distance.
+def _get_bounding_box(scad_path: str) -> _BoundingBoxInfo:
+    """Get model bounding box and return camera center + distance.
 
-    Renders a tiny preview and parses the geometry info from stderr.
-    Falls back to _DEFAULT_DISTANCE if detection fails.
+    Parses the STL binary header for an exact bounding box.  Falls back
+    to default distance centered at origin if detection fails.
     """
     try:
-        # OpenSCAD prints bounding box info in verbose mode during CSG rendering.
-        # Alternative: we render a tiny image and check the output — the object's
-        # max dimension determines the camera distance.
-        # For a perspective FOV of ~22.5° (OpenSCAD default), distance ≈ max_dim * 2.7
-        # gives ~80% frame fill with margin.
-        #
-        # Quick approach: read STL binary header for bounding box if it's an STL.
-        # Note: ASCII STL files fall back to _DEFAULT_DISTANCE; binary STLs
-        # are parsed for an exact bounding box.
         stl_path = None
-        # Check if the scad_path imports an STL
         content = Path(scad_path).read_text(encoding="utf-8")
         if 'import("' in content:
-            # Extract the imported file path
             start = content.index('import("') + 8
             end = content.index('"', start)
             stl_path = content[start:end]
@@ -112,32 +104,81 @@ def _get_bounding_box(scad_path: str) -> float:
             return _distance_from_stl(stl_path)
 
     except Exception:
-        pass
+        logger.debug("Bounding box detection failed", exc_info=True)
 
-    return _DEFAULT_DISTANCE
+    return _BoundingBoxInfo()
 
 
-def _distance_from_stl(stl_path: str) -> float:
-    """Calculate optimal camera distance from an STL file's bounding box."""
+@dataclass
+class _BoundingBoxInfo:
+    """Bounding box with center and optimal camera distance."""
+
+    center_x: float = 0.0
+    center_y: float = 0.0
+    center_z: float = 0.0
+    distance: float = _DEFAULT_DISTANCE
+
+
+def _bbox_from_ascii_stl(data: bytes) -> _BoundingBoxInfo:
+    """Parse ASCII STL vertex lines to compute bounding box."""
+    import re
+
+    text = data.decode("utf-8", errors="ignore")
+    vertex_re = re.compile(r"vertex\s+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s+"
+                           r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s+"
+                           r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)")
+
+    min_xyz = [float("inf")] * 3
+    max_xyz = [float("-inf")] * 3
+    count = 0
+
+    for m in vertex_re.finditer(text):
+        x, y, z = float(m.group(1)), float(m.group(2)), float(m.group(3))
+        min_xyz[0] = min(min_xyz[0], x)
+        min_xyz[1] = min(min_xyz[1], y)
+        min_xyz[2] = min(min_xyz[2], z)
+        max_xyz[0] = max(max_xyz[0], x)
+        max_xyz[1] = max(max_xyz[1], y)
+        max_xyz[2] = max(max_xyz[2], z)
+        count += 1
+
+    if count == 0:
+        return _BoundingBoxInfo()
+
+    dx = max_xyz[0] - min_xyz[0]
+    dy = max_xyz[1] - min_xyz[1]
+    dz = max_xyz[2] - min_xyz[2]
+
+    import math
+
+    diagonal = math.sqrt(dx * dx + dy * dy + dz * dz)
+    distance = max(50.0, min(diagonal * 2.0, 5000.0))
+
+    return _BoundingBoxInfo(
+        center_x=(min_xyz[0] + max_xyz[0]) / 2.0,
+        center_y=(min_xyz[1] + max_xyz[1]) / 2.0,
+        center_z=(min_xyz[2] + max_xyz[2]) / 2.0,
+        distance=distance,
+    )
+
+
+def _distance_from_stl(stl_path: str) -> _BoundingBoxInfo:
+    """Calculate optimal camera distance and center from an STL bounding box."""
     import struct
 
     data = Path(stl_path).read_bytes()
     if len(data) < 84:
-        return _DEFAULT_DISTANCE
+        return _BoundingBoxInfo()
 
     # Detect ASCII STL: starts with "solid" AND binary size check fails.
-    # Binary STLs can also start with "solid" in their 80-byte header, so
-    # verify by checking whether the declared triangle count produces the
-    # expected file size.  If it doesn't match, the file is ASCII format.
     num_triangles = struct.unpack_from("<I", data, 80)[0]
     expected = 84 + num_triangles * 50
     if data[:5] == b"solid" and len(data) != expected:
-        # ASCII STL — fall back to default distance.
-        # TODO: parse vertex lines for a tighter bounding box if needed.
-        return _DEFAULT_DISTANCE
+        # ASCII STL — parse vertex lines for bounding box.
+        return _bbox_from_ascii_stl(data)
 
     if len(data) < expected:
-        return _DEFAULT_DISTANCE
+        return _BoundingBoxInfo()
 
     min_xyz = [float("inf")] * 3
     max_xyz = [float("-inf")] * 3
@@ -157,21 +198,44 @@ def _distance_from_stl(stl_path: str) -> float:
     dx = max_xyz[0] - min_xyz[0]
     dy = max_xyz[1] - min_xyz[1]
     dz = max_xyz[2] - min_xyz[2]
-    max_dim = max(dx, dy, dz, 1.0)
 
-    # OpenSCAD perspective: FOV ~22.5°, distance ≈ max_dim * 2.7 fills ~80%
-    distance = max_dim * 2.7
-    return max(50.0, min(distance, 5000.0))  # clamp to sane range
+    # Center of the bounding box — camera target
+    cx = (min_xyz[0] + max_xyz[0]) / 2.0
+    cy = (min_xyz[1] + max_xyz[1]) / 2.0
+    cz = (min_xyz[2] + max_xyz[2]) / 2.0
+
+    # Use the 3D diagonal (not just max single axis) so elongated shapes
+    # aren't clipped.  FOV ~22.5° → distance ≈ diagonal * 2.0 fills ~65%
+    # with comfortable margin on all sides.
+    import math
+
+    diagonal = math.sqrt(dx * dx + dy * dy + dz * dz)
+    distance = max(50.0, min(diagonal * 2.0, 5000.0))
+
+    return _BoundingBoxInfo(
+        center_x=cx, center_y=cy, center_z=cz,
+        distance=distance,
+    )
 
 
-def _make_scad_wrapper(model_path: str, *, color: str = "#AAAAAA") -> str:
-    """Create a temporary .scad file that imports the model.
+def _make_scad_wrapper(
+    model_path: str,
+    *,
+    color: str = "#AAAAAA",
+    bbox: _BoundingBoxInfo | None = None,
+) -> str:
+    """Create a temporary .scad file that imports the model centered at origin.
 
-    For STL/OBJ: uses import() with color().
-    For 3MF: extracts the first STL-like geometry via import().
+    For STL/OBJ: uses import() with color(), translated so the bounding
+    box center sits at the origin.  This ensures ``--viewall`` and manual
+    camera distances frame the model correctly regardless of where the
+    original geometry was placed.
+
     For SCAD: returns the file path directly (no wrapper needed).
 
     :param color: Hex color string (e.g. "#F72323" for red) or named color.
+    :param bbox: Bounding box info for centering.  When ``None`` the model
+        is imported without translation (legacy behavior).
     """
     ext = Path(model_path).suffix.lower()
 
@@ -181,8 +245,22 @@ def _make_scad_wrapper(model_path: str, *, color: str = "#AAAAAA") -> str:
     escaped = model_path.replace("\\", "\\\\").replace('"', '\\"')
     safe_color = color.replace('"', '\\"')
     fd, scad_path = tempfile.mkstemp(suffix=".scad", prefix="kiln_viz_")
-    with os.fdopen(fd, "w") as fh:
-        fh.write(f'color("{safe_color}") import("{escaped}");\n')
+
+    # Center the model at origin so camera framing works for any geometry.
+    if bbox and (bbox.center_x != 0 or bbox.center_y != 0 or bbox.center_z != 0):
+        tx = -bbox.center_x
+        ty = -bbox.center_y
+        tz = -bbox.center_z
+        with os.fdopen(fd, "w") as fh:
+            fh.write(
+                f'color("{safe_color}") '
+                f'translate([{tx:.2f},{ty:.2f},{tz:.2f}]) '
+                f'import("{escaped}");\n'
+            )
+    else:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(f'color("{safe_color}") import("{escaped}");\n')
+
     return scad_path
 
 
@@ -232,6 +310,14 @@ def visualize_model(
     except FileNotFoundError as exc:
         return {"success": False, "error": str(exc), "code": "OPENSCAD_NOT_FOUND"}
 
+    # Detect version once for manifold flag — safe to fail
+    _use_manifold = False
+    try:
+        _ver = get_openscad_version(openscad)
+        _use_manifold = _openscad_version_year(_ver) >= 2024
+    except Exception:  # noqa: BLE001
+        pass
+
     # Select angles
     if angles:
         angle_set = {a.lower() for a in angles}
@@ -250,14 +336,25 @@ def visualize_model(
         output_dir = os.path.join(tempfile.gettempdir(), "kiln_visualizations")
     os.makedirs(output_dir, mode=0o700, exist_ok=True)
 
-    # Create SCAD wrapper if needed
+    # Compute bounding box BEFORE creating the wrapper (needs the raw STL).
+    # We use it both to center the model in the wrapper and to set camera distance.
     render_color = color if color else "#AAAAAA"
-    scad_path = _make_scad_wrapper(file_path, color=render_color)
+
+    # Pre-compute bbox from raw file for centering.
+    _raw_scad = _make_scad_wrapper(file_path, color=render_color)
+    bbox = _get_bounding_box(_raw_scad)
+    if _raw_scad != file_path:
+        with contextlib.suppress(OSError):
+            os.unlink(_raw_scad)
+
+    # Create the centered wrapper using the bbox.
+    scad_path = _make_scad_wrapper(file_path, color=render_color, bbox=bbox)
     is_wrapper = scad_path != file_path
 
-    # Auto-detect optimal camera distance from bounding box
-    distance = _get_bounding_box(scad_path)
-    logger.debug("Auto-detected camera distance: %.1f", distance)
+    logger.debug(
+        "Camera: bbox_center=(%.1f,%.1f,%.1f) distance=%.1f (model centered at origin)",
+        bbox.center_x, bbox.center_y, bbox.center_z, bbox.distance,
+    )
 
     try:
         views: list[dict] = []
@@ -265,7 +362,9 @@ def visualize_model(
 
         for label, description in selected:
             rx, ry, rz = _ANGLE_ROTATIONS[label]
-            camera = f"0,0,0,{rx},{ry},{rz},{distance:.0f}"
+            # Model is now centered at origin via translate in the wrapper,
+            # so camera targets 0,0,0 with the computed distance.
+            camera = f"0,0,0,{rx},{ry},{rz},{bbox.distance:.0f}"
             png_path = os.path.join(output_dir, f"{stem}_{label}.png")
 
             cmd = [
@@ -274,9 +373,12 @@ def visualize_model(
                 "-o", png_path,
                 f"--imgsize={width},{height}",
                 f"--camera={camera}",
+                "--viewall",
                 "--colorscheme=DeepOcean",
-                scad_path,
             ]
+            if _use_manifold:
+                cmd.append("--backend=manifold")
+            cmd.append(scad_path)
 
             logger.debug("Rendering %s view: %s", label, " ".join(cmd))
 
