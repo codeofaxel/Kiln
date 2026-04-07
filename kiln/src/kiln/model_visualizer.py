@@ -608,14 +608,20 @@ def compare_renders(
     canvas = Image.new("RGB", (canvas_w, canvas_h), color=(0, 0, 0))
     draw = ImageDraw.Draw(canvas)
 
-    # Load a default font for labels
-    try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
-    except OSError:
+    # Load a default font for labels — try platform-appropriate paths
+    font = None
+    for font_name in (
+        "/System/Library/Fonts/Helvetica.ttc",  # macOS
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Linux
+        "Arial",  # Windows / fallback
+    ):
         try:
-            font = ImageFont.truetype("Arial", 16)
+            font = ImageFont.truetype(font_name, 16)
+            break
         except OSError:
-            font = ImageFont.load_default()
+            continue
+    if font is None:
+        font = ImageFont.load_default()
 
     for idx in range(n):
         if n == 4:
@@ -634,7 +640,8 @@ def compare_renders(
             with Image.open(rpath) as img:
                 img = img.convert("RGB")
                 if img.size != (width, height):
-                    img = img.resize((width, height), Image.LANCZOS)
+                    resample = getattr(Image, "Resampling", Image).LANCZOS
+                    img = img.resize((width, height), resample)
                 canvas.paste(img, (x_offset, y_offset))
         else:
             # Dark placeholder for failed renders

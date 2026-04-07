@@ -81,11 +81,11 @@ def _dummy_png(path: str, *, width: int = 800, height: int = 600) -> None:
     img.save(path)
 
 
-def _make_visualize_success(tmp_path: Path, *, width: int = 800, height: int = 600):
+def _make_visualize_success(tmp_path: Path):
     """Return a mock side_effect for visualize_model that produces real PNGs."""
     call_count = 0
 
-    def _mock(file_path, *, output_dir=None, width=width, height=height,
+    def _mock(file_path, *, output_dir=None, width=800, height=600,
               angles=None, color="", timeout=120):
         nonlocal call_count
         call_count += 1
@@ -93,6 +93,7 @@ def _make_visualize_success(tmp_path: Path, *, width: int = 800, height: int = 6
         os.makedirs(out_dir, exist_ok=True)
         angle = (angles[0] if angles else "isometric")
         png_path = os.path.join(out_dir, f"render_{call_count}_{angle}.png")
+        # Use the CALLER's width/height, not hardcoded defaults
         _dummy_png(png_path, width=width, height=height)
         return {
             "success": True,
@@ -150,12 +151,15 @@ class TestCompareRendersValidation:
         assert result["success"] is False
         assert "invalid_view_xyz" in result["error"].lower() or "angle" in result["error"].lower()
 
-    def test_mismatched_labels_pads_defaults(self, two_stls: list[str]):
-        """Fewer labels than paths → pad with defaults (A, B, ...)."""
-        result = compare_renders(two_stls, labels=["Only One"])
-        # Should succeed — implementation pads missing labels
-        # (friendlier UX than erroring on mismatch)
-        assert result.get("success") is not False or "label" in result.get("error", "").lower()
+    def test_fewer_labels_pads_with_defaults(self, two_stls: list[str], tmp_path: Path):
+        """Fewer labels than paths → pad remaining with A, B, C, D defaults."""
+        mock_viz = _make_visualize_success(tmp_path)
+        with patch("kiln.model_visualizer.visualize_model", side_effect=mock_viz):
+            result = compare_renders(two_stls, labels=["Custom"])
+        assert result["success"] is True
+        assert result["models"][0]["label"] == "Custom"
+        # Second model should be padded with default "B"
+        assert result["models"][1]["label"] == "B"
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +249,52 @@ class TestCompareRendersIntegration:
         assert result["success"] is True
         assert result["models"][0]["label"] == "A"
         assert result["models"][1]["label"] == "B"
+
+    def test_three_models_single_row(self, tmp_path: Path):
+        paths = []
+        for i in range(3):
+            stl = tmp_path / f"model_{i}.stl"
+            header = b"\x00" * 80
+            num_t = struct.pack("<I", 1)
+            tri = struct.pack("<fff", 0, 0, 1)
+            tri += struct.pack("<fff", 0, 0, 0)
+            tri += struct.pack("<fff", 1, 0, 0)
+            tri += struct.pack("<fff", 0, 1, 0)
+            tri += struct.pack("<H", 0)
+            stl.write_bytes(header + num_t + tri)
+            paths.append(str(stl))
+
+        mock_viz = _make_visualize_success(tmp_path)
+        with patch("kiln.model_visualizer.visualize_model", side_effect=mock_viz):
+            result = compare_renders(paths)
+
+        assert result["success"] is True
+        assert len(result["models"]) == 3
+        assert result["layout"] == "3x1"
+        # Width should be 3x single render width (2400 for 800px each)
+        assert result["width"] >= 2400
+
+    def test_custom_dimensions_passed_through(self, two_stls: list[str], tmp_path: Path):
+        captured_dims: list[tuple[int, int]] = []
+
+        def _mock(file_path, *, output_dir=None, width=800, height=600,
+                  angles=None, color="", timeout=120):
+            captured_dims.append((width, height))
+            out_dir = output_dir or str(tmp_path / f"viz_{len(captured_dims)}")
+            os.makedirs(out_dir, exist_ok=True)
+            png = os.path.join(out_dir, f"r{len(captured_dims)}.png")
+            _dummy_png(png, width=width, height=height)
+            return {
+                "success": True,
+                "views": [{"path": png, "angle": "isometric", "description": ""}],
+                "rendered": 1, "failed": 0, "output_dir": out_dir,
+            }
+
+        with patch("kiln.model_visualizer.visualize_model", side_effect=_mock):
+            result = compare_renders(two_stls, width=1024, height=768)
+
+        assert result["success"] is True
+        assert all(w == 1024 and h == 768 for w, h in captured_dims)
 
 
 # ---------------------------------------------------------------------------
