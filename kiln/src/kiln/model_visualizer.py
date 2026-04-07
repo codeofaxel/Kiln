@@ -446,3 +446,245 @@ def visualize_model(
         if is_wrapper:
             with contextlib.suppress(OSError):
                 os.unlink(scad_path)
+
+
+# ---------------------------------------------------------------------------
+# Side-by-side comparison rendering
+# ---------------------------------------------------------------------------
+
+_LABEL_HEIGHT = 30
+_LABEL_BG = (51, 51, 51)  # #333333
+_LABEL_FG = (255, 255, 255)
+_DEFAULT_LABELS = ["A", "B", "C", "D"]
+
+
+def compare_renders(
+    paths: list[str],
+    *,
+    labels: list[str] | None = None,
+    angle: str = "isometric",
+    width: int = 800,
+    height: int = 600,
+    colors: list[str] | None = None,
+    output_path: str | None = None,
+    timeout: int = 120,
+) -> dict:
+    """Render 2-4 models side by side in a single comparison image.
+
+    Each model is rendered at the same camera angle using
+    :func:`visualize_model`, then stitched into a single PNG with text
+    labels beneath each render.  Useful for comparing texture variants,
+    design iterations, before/after decoration, or material options.
+
+    :param paths: 2-4 file paths (STL, 3MF, OBJ, or SCAD).
+    :param labels: Custom labels for each model.  Defaults to A, B, C, D.
+    :param angle: Camera angle for all renders.  One of ``isometric``,
+        ``front``, ``right``, ``top``, ``bottom``, ``back``.
+    :param width: Per-model image width in pixels.
+    :param height: Per-model image height in pixels.
+    :param colors: Optional hex color per model (e.g. ``["#F72323", "#2323F7"]``).
+    :param output_path: Path for the final comparison PNG.  Defaults to a
+        temp file.
+    :param timeout: Max seconds per individual OpenSCAD render.
+    :returns: Dict with ``success``, ``comparison_path``, ``models`` list,
+        and metadata.
+    """
+    # --- Validate inputs ---------------------------------------------------
+    if not isinstance(paths, list) or len(paths) < 2:
+        return {
+            "success": False,
+            "error": "compare_renders requires 2-4 file paths.",
+            "code": "INVALID_COUNT",
+        }
+    if len(paths) > 4:
+        return {
+            "success": False,
+            "error": f"Too many paths ({len(paths)}). Maximum is 4.",
+            "code": "INVALID_COUNT",
+        }
+
+    missing = [p for p in paths if not os.path.isfile(p)]
+    if missing:
+        return {
+            "success": False,
+            "error": f"File(s) not found: {', '.join(missing)}",
+            "code": "FILE_NOT_FOUND",
+        }
+
+    valid_angles = {a[0] for a in _CAMERA_ANGLES}
+    if angle.lower() not in valid_angles:
+        return {
+            "success": False,
+            "error": f"Invalid angle '{angle}'. Valid: {sorted(valid_angles)}",
+            "code": "INVALID_ANGLE",
+        }
+
+    use_labels = list(labels) if labels else _DEFAULT_LABELS[: len(paths)]
+    if len(use_labels) < len(paths):
+        # Pad with defaults if caller provided fewer labels than paths
+        use_labels.extend(_DEFAULT_LABELS[len(use_labels) : len(paths)])
+
+    use_colors = list(colors) if colors else [""] * len(paths)
+    if len(use_colors) < len(paths):
+        use_colors.extend([""] * (len(paths) - len(use_colors)))
+
+    # --- Render each model individually ------------------------------------
+    models: list[dict] = []
+    render_paths: list[str | None] = []
+
+    for idx, fpath in enumerate(paths):
+        color_kwarg: dict[str, str] = {}
+        if use_colors[idx]:
+            color_kwarg["color"] = use_colors[idx]
+
+        result = visualize_model(
+            fpath,
+            angles=[angle.lower()],
+            width=width,
+            height=height,
+            timeout=timeout,
+            **color_kwarg,
+        )
+
+        model_info: dict = {
+            "path": fpath,
+            "label": use_labels[idx],
+            "render_path": None,
+            "error": None,
+        }
+
+        if result.get("success") and result.get("views"):
+            view = result["views"][0]
+            model_info["render_path"] = view.get("path")
+            if not view.get("path"):
+                model_info["error"] = view.get("error", "Render failed")
+        else:
+            model_info["error"] = result.get("error", "Render failed")
+
+        models.append(model_info)
+        render_paths.append(model_info["render_path"])
+
+    successful_renders = [p for p in render_paths if p is not None]
+    if not successful_renders:
+        return {
+            "success": False,
+            "error": "All renders failed. Check that OpenSCAD is installed.",
+            "code": "RENDER_ERROR",
+            "models": models,
+        }
+
+    # --- Stitch into a single comparison image -----------------------------
+    try:
+        from PIL import Image, ImageDraw, ImageFont  # noqa: I001
+    except ImportError:
+        # PIL not available — return individual paths as fallback
+        return {
+            "success": True,
+            "comparison_path": None,
+            "models": models,
+            "angle": angle.lower(),
+            "width": width,
+            "height": height,
+            "stitched": False,
+            "note": (
+                "Pillow is not installed — returning individual render paths. "
+                "Install with: pip install Pillow"
+            ),
+            "message": (
+                f"Rendered {len(successful_renders)}/{len(paths)} models at "
+                f"'{angle}' angle. Install Pillow to get a single comparison image."
+            ),
+        }
+
+    n = len(paths)
+    # 2x2 grid for 4 models, otherwise single row
+    if n == 4:
+        cols, rows = 2, 2
+    else:
+        cols, rows = n, 1
+
+    canvas_w = cols * width
+    canvas_h = rows * (height + _LABEL_HEIGHT)
+    canvas = Image.new("RGB", (canvas_w, canvas_h), color=(0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    # Load a default font for labels
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+    except OSError:
+        try:
+            font = ImageFont.truetype("Arial", 16)
+        except OSError:
+            font = ImageFont.load_default()
+
+    for idx in range(n):
+        if n == 4:
+            col = idx % 2
+            row = idx // 2
+        else:
+            col = idx
+            row = 0
+
+        x_offset = col * width
+        y_offset = row * (height + _LABEL_HEIGHT)
+
+        # Paste render or draw placeholder
+        rpath = render_paths[idx]
+        if rpath and os.path.isfile(rpath):
+            with Image.open(rpath) as img:
+                img = img.convert("RGB")
+                if img.size != (width, height):
+                    img = img.resize((width, height), Image.LANCZOS)
+                canvas.paste(img, (x_offset, y_offset))
+        else:
+            # Dark placeholder for failed renders
+            draw.rectangle(
+                [x_offset, y_offset, x_offset + width, y_offset + height],
+                fill=(30, 30, 30),
+            )
+            draw.text(
+                (x_offset + width // 2, y_offset + height // 2),
+                "render failed",
+                fill=(100, 100, 100),
+                font=font,
+                anchor="mm",
+            )
+
+        # Draw label strip
+        label_y = y_offset + height
+        draw.rectangle(
+            [x_offset, label_y, x_offset + width, label_y + _LABEL_HEIGHT],
+            fill=_LABEL_BG,
+        )
+        label_text = use_labels[idx] if idx < len(use_labels) else _DEFAULT_LABELS[idx]
+        draw.text(
+            (x_offset + width // 2, label_y + _LABEL_HEIGHT // 2),
+            label_text,
+            fill=_LABEL_FG,
+            font=font,
+            anchor="mm",
+        )
+
+    # Save the comparison image
+    if output_path is None:
+        fd, output_path = tempfile.mkstemp(
+            suffix=".png", prefix="kiln_compare_",
+        )
+        os.close(fd)
+
+    canvas.save(output_path, "PNG")
+
+    return {
+        "success": True,
+        "comparison_path": output_path,
+        "models": models,
+        "angle": angle.lower(),
+        "width": canvas_w,
+        "height": canvas_h,
+        "stitched": True,
+        "layout": f"{cols}x{rows}",
+        "message": (
+            f"Compared {len(paths)} models side by side at '{angle}' angle. "
+            f"{len(successful_renders)}/{len(paths)} rendered successfully."
+        ),
+    }
