@@ -10086,6 +10086,56 @@ def visualize_model(
 
 
 @mcp.tool()
+def compare_renders(
+    paths: list[str],
+    labels: list[str] | None = None,
+    angle: str = "isometric",
+    width: int = 800,
+    height: int = 600,
+    colors: list[str] | None = None,
+) -> dict:
+    """Render 2-4 models side by side in a single comparison image.
+
+    General-purpose visual diff tool — compare any 3D models at the same
+    camera angle in one image.  Each model is rendered individually then
+    stitched together with labels.
+
+    **Use cases:**
+    - Texture or decoration variants (compare 3 pattern options)
+    - Design iterations (before vs after)
+    - Material color comparisons
+    - Parameter sweeps (small / medium / large)
+
+    Returns a single PNG image path that can be displayed inline.
+    Supports 2-4 models per comparison.  When 4 models are provided
+    they are arranged in a 2x2 grid; otherwise a single row.
+
+    Args:
+        paths: 2-4 file paths (STL, 3MF, OBJ, or SCAD).
+        labels: Custom labels for each model.  Defaults to A, B, C, D.
+        angle: Camera angle for all renders.  One of ``isometric``,
+            ``front``, ``right``, ``top``, ``bottom``, ``back``.
+        width: Per-model image width in pixels (default 800).
+        height: Per-model image height in pixels (default 600).
+        colors: Optional hex color per model (e.g. ``["#F72323", "#2323F7"]``).
+    """
+    try:
+        from kiln.model_visualizer import compare_renders as _compare_renders
+
+        return _compare_renders(
+            paths,
+            labels=labels,
+            angle=angle,
+            width=width,
+            height=height,
+            colors=colors,
+        )
+    except Exception as exc:
+        logger.exception("Unexpected error in compare_renders")
+        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
+
+
+@mcp.tool()
 def rescale_model(
     file_path: str,
     target_height_mm: float | None = None,
