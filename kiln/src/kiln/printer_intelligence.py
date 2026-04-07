@@ -291,6 +291,11 @@ def _get_raw(printer_id: str) -> dict[str, Any] | None:
 # Curated speed capability table keyed by printer_id.
 # Values: (max_print_speed_mm_s, max_accel_mm_s2, has_input_shaping, quality_factor)
 # quality_factor: fraction of max speed to use for quality prints (0.0-1.0).
+# slicer_time_factor: multiplier to correct PrusaSlicer's time estimate for
+#   this printer.  PrusaSlicer doesn't model input shaping or high acceleration,
+#   so it overestimates by ~2x for modern Bambu/Creality K1 printers.
+#   Applied to M73 R (remaining time) commands before upload so the printer
+#   LCD shows accurate time from the first second.  1.0 = no correction.
 _SPEED_CAPABILITIES: dict[str, dict[str, Any]] = {
     # --- Bambu Lab ---
     "bambu_a1": {
@@ -298,30 +303,35 @@ _SPEED_CAPABILITIES: dict[str, dict[str, Any]] = {
         "max_accel": 10000,
         "input_shaping": True,
         "quality_factor": 0.75,
+        "slicer_time_factor": 0.50,
     },
     "bambu_a1_mini": {
         "max_speed": 250,
         "max_accel": 10000,
         "input_shaping": True,
         "quality_factor": 0.70,
+        "slicer_time_factor": 0.50,
     },
     "bambu_x1c": {
         "max_speed": 300,
         "max_accel": 12000,
         "input_shaping": True,
         "quality_factor": 0.80,
+        "slicer_time_factor": 0.45,
     },
     "bambu_p1s": {
         "max_speed": 300,
         "max_accel": 12000,
         "input_shaping": True,
         "quality_factor": 0.78,
+        "slicer_time_factor": 0.48,
     },
     "bambu_p1p": {
         "max_speed": 300,
         "max_accel": 10000,
         "input_shaping": True,
         "quality_factor": 0.75,
+        "slicer_time_factor": 0.50,
     },
     # --- Creality ---
     "ender3": {
@@ -347,6 +357,7 @@ _SPEED_CAPABILITIES: dict[str, dict[str, Any]] = {
         "max_accel": 12000,
         "input_shaping": True,
         "quality_factor": 0.75,
+        "slicer_time_factor": 0.50,
     },
     # --- Prusa ---
     "prusa_mk3s": {
@@ -555,6 +566,22 @@ def get_slicer_speed_overrides(printer_id: str) -> dict[str, str]:
     if caps is None:
         return {}
     return _build_speed_overrides(caps)
+
+
+def get_slicer_time_factor(printer_id: str) -> float:
+    """Return the slicer time correction factor for a printer.
+
+    PrusaSlicer overestimates print time for printers with input shaping
+    (Bambu, Creality K1) because it doesn't model their acceleration
+    profiles.  This factor corrects the estimate: multiply PrusaSlicer's
+    time by this value to get the real expected print time.
+
+    Returns 1.0 (no correction) for unknown printers.
+    """
+    caps = _resolve_caps(printer_id)
+    if caps is None:
+        return 1.0
+    return caps.get("slicer_time_factor", 1.0)
 
 
 def get_slicer_speed_overrides_for_type(printer_type: str) -> dict[str, str]:

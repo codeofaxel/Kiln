@@ -309,6 +309,114 @@ def validate_profile_for_printer(profile_id: str, printer_model: str) -> dict[st
 
 
 # ---------------------------------------------------------------------------
+# Multi-extruder (AMS / MMU) profile generation
+# ---------------------------------------------------------------------------
+
+# Settings that need to be repeated N times (semicolon-joined) for multi-extruder.
+_PER_EXTRUDER_KEYS: tuple[str, ...] = (
+    "nozzle_diameter",
+    "filament_diameter",
+    "temperature",
+    "first_layer_temperature",
+    "retract_length",
+    "retract_speed",
+    "retract_lift",
+    "retract_lift_above",
+    "retract_lift_below",
+)
+
+
+def resolve_multiextruder_profile(
+    printer_id: str,
+    num_extruders: int = 4,
+    *,
+    overrides: dict[str, str] | None = None,
+) -> str:
+    """Write a temporary .ini profile for *printer_id* with multi-extruder support.
+
+    Generates a PrusaSlicer-compatible INI that configures the slicer for
+    multi-extruder printing.  Per-extruder settings (nozzle diameter,
+    temperatures, retraction) are repeated *num_extruders* times as
+    semicolon-separated values.
+
+    .. note::
+        ``single_extruder_multi_material`` is intentionally **not** set here.
+        On PrusaSlicer 2.9 CLI, enabling that flag causes the slicer to produce
+        an empty output file (silent failure).  Bambu AMS tool-change sequences
+        (M620/M621) are injected later by :func:`~kiln.printers.bambu_3mf.build_bambu_3mf`.
+
+    The output profile is suitable for slicing a model whose objects carry
+    per-volume extruder assignments (as produced by
+    :func:`~kiln.multicolor_3mf.compose_multicolor_3mf`).  The resulting
+    G-code should then be wrapped with :func:`~kiln.printers.bambu_3mf.build_bambu_3mf`
+    (via the ``wrap_gcode_as_3mf`` tool) to inject the Bambu AMS M620/M621
+    load sequences.
+
+    Args:
+        printer_id: Printer model identifier (e.g. ``"bambu_a1"``).
+        num_extruders: Number of extruder slots (2–4 for AMS).
+        overrides: Optional key-value pairs added after profile merging.
+
+    Returns:
+        Absolute path to the generated ``.ini`` file.
+    """
+    if num_extruders < 1 or num_extruders > 16:
+        raise ValueError(f"num_extruders must be 1–16, got {num_extruders}")
+
+    profile = get_slicer_profile(printer_id)
+    merged = dict(profile.settings)
+
+    # Expand per-extruder settings into semicolon-separated arrays.
+    for key in _PER_EXTRUDER_KEYS:
+        if key in merged:
+            merged[key] = ";".join([merged[key]] * num_extruders)
+
+    # Set extruder count.  Do NOT set single_extruder_multi_material=1 —
+    # PrusaSlicer 2.9 CLI silently produces no output with that flag.
+    # Bambu AMS purging is handled by the bambu_3mf wrapping step.
+    merged["extruder_count"] = str(num_extruders)
+    # G92 E0 resets relative extrusion counter before each layer — required
+    # when use_relative_e_distances=1 to avoid "Relative extruder addressing
+    # requires resetting before use" warnings in PrusaSlicer.
+    merged.setdefault("layer_gcode", "G92 E0")
+
+    if overrides:
+        merged.update(overrides)
+
+    cache_key = f"{profile.id}_mme{num_extruders}:{_settings_hash(merged)}"
+    if cache_key in _temp_cache and os.path.isfile(_temp_cache[cache_key]):
+        return _temp_cache[cache_key]
+
+    ini_content = _settings_to_ini(
+        merged,
+        f"{profile.display_name} (AMS {num_extruders}-color)",
+    )
+
+    tmp_dir = os.path.join(tempfile.gettempdir(), "kiln_slicer_profiles")
+    os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=tmp_dir,
+        prefix=f"{profile.id}_mme{num_extruders}_",
+        suffix=".ini",
+        delete=False,
+    ) as fh:
+        fh.write(ini_content)
+        path = fh.name
+
+    _temp_cache[cache_key] = path
+    logger.debug(
+        "Wrote multi-extruder slicer profile %s×%d → %s",
+        profile.id,
+        num_extruders,
+        path,
+    )
+    return path
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

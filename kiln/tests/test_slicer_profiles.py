@@ -27,6 +27,7 @@ from kiln.slicer_profiles import (
     _DATA_FILE,
     get_slicer_profile,
     list_slicer_profiles,
+    resolve_multiextruder_profile,
     resolve_slicer_profile,
     slicer_profile_to_dict,
 )
@@ -311,3 +312,92 @@ class TestProfileSettingsConsistency:
             profile = get_slicer_profile(pid)
             val = float(profile.settings["retract_length"])
             assert val > 0, f"Profile '{pid}' retract_length should be positive"
+
+
+# ===================================================================
+# resolve_multiextruder_profile
+# ===================================================================
+
+class TestResolveMultiextruderProfile:
+    """Tests for resolve_multiextruder_profile() — AMS/MMU INI generation."""
+
+    def test_writes_ini_file(self) -> None:
+        path = resolve_multiextruder_profile("bambu_a1", 2)
+        assert os.path.isfile(path)
+        assert path.endswith(".ini")
+
+    def test_extruder_count_in_ini(self) -> None:
+        path = resolve_multiextruder_profile("bambu_a1", 2)
+        content = Path(path).read_text(encoding="utf-8")
+        assert "extruder_count = 2" in content
+
+    def test_single_extruder_multi_material_not_set(self) -> None:
+        """single_extruder_multi_material must NOT be 1 — PS 2.9 CLI silently
+        produces no output when this flag is enabled."""
+        path = resolve_multiextruder_profile("bambu_a1", 2)
+        content = Path(path).read_text(encoding="utf-8")
+        assert "single_extruder_multi_material = 1" not in content
+
+    def test_layer_gcode_set(self) -> None:
+        """layer_gcode = G92 E0 resets relative extruder counter each layer."""
+        path = resolve_multiextruder_profile("bambu_a1", 2)
+        content = Path(path).read_text(encoding="utf-8")
+        assert "layer_gcode = G92 E0" in content
+
+    def test_nozzle_diameter_expanded(self) -> None:
+        """nozzle_diameter should be repeated N times, semicolon-joined."""
+        path = resolve_multiextruder_profile("bambu_a1", 2)
+        content = Path(path).read_text(encoding="utf-8")
+        assert "nozzle_diameter = 0.4;0.4" in content
+
+    def test_temperature_expanded(self) -> None:
+        path = resolve_multiextruder_profile("bambu_a1", 2)
+        content = Path(path).read_text(encoding="utf-8")
+        # bambu_a1 temp is 220; should be 220;220 for 2-extruder
+        assert "temperature = 220;220" in content
+
+    def test_four_extruder_semicolons(self) -> None:
+        path = resolve_multiextruder_profile("bambu_a1", 4)
+        content = Path(path).read_text(encoding="utf-8")
+        assert "extruder_count = 4" in content
+        assert "nozzle_diameter = 0.4;0.4;0.4;0.4" in content
+
+    def test_base_bambu_settings_preserved(self) -> None:
+        """Bambu-critical settings (empty gcode, relative E) must survive."""
+        path = resolve_multiextruder_profile("bambu_a1", 2)
+        content = Path(path).read_text(encoding="utf-8")
+        assert "use_relative_e_distances = 1" in content
+        assert "start_gcode = " in content
+        assert "end_gcode = " in content
+
+    def test_cache_returns_same_path(self) -> None:
+        path1 = resolve_multiextruder_profile("bambu_a1", 2)
+        path2 = resolve_multiextruder_profile("bambu_a1", 2)
+        assert path1 == path2
+
+    def test_different_num_extruders_different_path(self) -> None:
+        path2 = resolve_multiextruder_profile("bambu_a1", 2)
+        path4 = resolve_multiextruder_profile("bambu_a1", 4)
+        assert path2 != path4
+
+    def test_overrides_applied(self) -> None:
+        path = resolve_multiextruder_profile(
+            "bambu_a1", 2, overrides={"layer_height": "0.1"}
+        )
+        content = Path(path).read_text(encoding="utf-8")
+        assert "layer_height = 0.1" in content
+
+    def test_invalid_num_extruders_raises(self) -> None:
+        with pytest.raises(ValueError, match="num_extruders must be"):
+            resolve_multiextruder_profile("bambu_a1", 0)
+
+    def test_num_extruders_too_large_raises(self) -> None:
+        with pytest.raises(ValueError, match="num_extruders must be"):
+            resolve_multiextruder_profile("bambu_a1", 17)
+
+    def test_does_not_mutate_base_profile(self) -> None:
+        """Base profile settings must not be affected by multi-extruder expansion."""
+        base_before = get_slicer_profile("bambu_a1").settings["nozzle_diameter"]
+        resolve_multiextruder_profile("bambu_a1", 2)
+        base_after = get_slicer_profile("bambu_a1").settings["nozzle_diameter"]
+        assert base_before == base_after  # still single value, not expanded

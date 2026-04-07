@@ -97,7 +97,7 @@ class FileMetadata:
 # ---------------------------------------------------------------------------
 
 _RE_ESTIMATED_TIME = re.compile(
-    r";\s*estimated\s*(?:printing\s*)?time\s*[:=]\s*(.+)",
+    r";\s*estimated\s*(?:printing\s*)?time\b.*?[:=]\s*(.+)",
     re.IGNORECASE,
 )
 _RE_LAYER_COUNT = re.compile(
