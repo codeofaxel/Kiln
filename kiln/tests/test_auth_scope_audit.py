@@ -233,6 +233,9 @@ READ_ONLY_TOOLS: set[str] = {
     "assess_load_bearing",
     "design_improvement_plan",
     "infer_print_settings",
+
+    # Render comparison (read-only)
+    "compare_renders",
 }
 
 
