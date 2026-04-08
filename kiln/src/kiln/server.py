@@ -74,8 +74,6 @@ with contextlib.suppress(ImportError):
 
 from kiln import parse_float_env, parse_int_env
 from kiln.auth import AuthManager
-from kiln.backup import BackupError
-from kiln.backup import backup_database as _backup_db
 from kiln.bed_leveling import BedLevelManager, LevelingPolicy
 
 try:
@@ -6019,53 +6017,7 @@ def _validate_local_file(file_path: str) -> dict[str, Any]:
     return {"valid": valid, "errors": errors, "warnings": warnings, "info": info}
 
 
-# ---------------------------------------------------------------------------
-# MCP Resources — read-only data endpoints for agent context
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def kiln_health() -> dict:
-    """Get a health check for the Kiln system.
-
-    Returns versions, uptime, module availability, scheduler status,
-    webhook status, and overall system health.  Use this to verify the
-    system is running correctly.
-    """
-    import kiln
-
-    uptime_secs = time.time() - _start_time
-    hours, rem = divmod(int(uptime_secs), 3600)
-    mins, secs = divmod(rem, 60)
-
-    modules = {
-        "scheduler": _get_scheduler().is_running,
-        "webhooks": _get_webhook_mgr().is_running,
-        "persistence": True,
-        "auth_enabled": _get_auth().enabled,
-        "billing": True,
-        "thingiverse": bool(_THINGIVERSE_TOKEN),
-    }
-
-    try:
-        import kiln.printers.bambu  # noqa: F401 -- availability check only
-
-        modules["bambu_available"] = True
-    except ImportError:
-        modules["bambu_available"] = False
-
-    return {
-        "success": True,
-        "version": kiln.__version__,
-        "uptime_seconds": int(uptime_secs),
-        "uptime_human": f"{hours}h {mins}m {secs}s",
-        "printers_registered": _get_registry().count,
-        "queue_depth": _get_queue().total_count,
-        "scheduler_running": _get_scheduler().is_running,
-        "webhook_endpoints": len(_get_webhook_mgr().list_endpoints()),
-        "modules": modules,
-        "healthy": True,
-    }
+# kiln_health — moved to plugins/utility_tools.py
 
 
 @mcp.tool()
@@ -9581,98 +9533,13 @@ def pipeline_retry_step(execution_id: str, step_index: int) -> dict:
 # delete_cached_model — extracted to plugins/cache_tools.py
 
 
-# ---------------------------------------------------------------------------
-# Database backup tool
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def backup_database(
-    output_path: str | None = None,
-    redact: bool = True,
-) -> dict:
-    """Back up the Kiln database with optional credential redaction.
-
-    Creates a copy of the SQLite database.  By default, sensitive fields
-    (API keys, access codes, payment refs) are replaced with "REDACTED"
-    in the backup.
-
-    Args:
-        output_path: Destination file path.  Defaults to
-            ``~/.kiln/backups/kiln-YYYYMMDD-HHMMSS.db``.
-        redact: If ``True`` (default), redact credentials in the backup.
-    """
-    auth_err = _check_auth("admin")
-    if auth_err:
-        return auth_err
-    try:
-        db = get_db()
-        result_path = _backup_db(
-            db.path,
-            output_path,
-            redact_credentials=redact,
-        )
-        return {
-            "success": True,
-            "backup_path": result_path,
-            "redacted": redact,
-        }
-    except BackupError as exc:
-        return _error_dict(f"Failed to back up database: {exc}", code="BACKUP_ERROR")
-    except Exception as exc:
-        logger.exception("Unexpected error in backup_database")
-        return _error_dict(f"Unexpected error in backup_database: {exc}", code="INTERNAL_ERROR")
-
-
-# ---------------------------------------------------------------------------
-# Audit integrity verification tool
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def verify_audit_integrity() -> dict:
-    """Verify HMAC signatures on all safety audit log entries.
-
-    Checks each audit log row against its stored HMAC signature to
-    detect tampering.  Returns counts of valid, invalid, and total
-    entries along with an overall integrity status.
-    """
-    auth_err = _check_auth("admin")
-    if auth_err:
-        return auth_err
-    try:
-        db = get_db()
-        result = db.verify_audit_log()
-        return {
-            "success": True,
-            **result,
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in verify_audit_integrity")
-        return _error_dict(f"Unexpected error in verify_audit_integrity: {exc}", code="INTERNAL_ERROR")
-
+# backup_database — moved to plugins/utility_tools.py
+# verify_audit_integrity — moved to plugins/utility_tools.py
 
 # list_trusted_printers, trust_printer, untrust_printer
 # — extracted to plugins/printer_management_tools.py
 
-
-@mcp.tool()
-def get_skill_manifest() -> dict:
-    """Get the Kiln skill manifest for agent self-discovery.
-
-    Returns a machine-readable description of Kiln's capabilities,
-    configuration requirements, available interfaces, and setup
-    instructions.  Use this when first connecting to understand what
-    Kiln can do and what configuration is needed.
-    """
-    try:
-        from kiln.skill_manifest import generate_manifest
-
-        manifest = generate_manifest()
-        return {"success": True, "data": manifest.to_dict()}
-    except Exception as exc:
-        logger.exception("Unexpected error in get_skill_manifest")
-        return _error_dict(f"Failed to generate manifest: {exc}", code="INTERNAL_ERROR")
+# get_skill_manifest — moved to plugins/utility_tools.py
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,13 @@
-"""Slice-and-estimate plugin — slice without printing.
+"""Estimation tools plugin — cost, time, progress, and material estimates.
 
-Provides a single MCP tool, ``slice_and_estimate``, that slices a 3D model
-and returns time/filament estimates, printability analysis, and adhesion
-recommendations **without** uploading or printing anything.
+Provides MCP tools for estimating print costs, time, progress, and
+material usage.  Includes ``slice_and_estimate`` (slice + report without
+printing) and four tools extracted from ``server.py``:
+
+- ``estimate_cost`` — filament + electricity cost from G-code
+- ``estimate_print_time`` — time/filament from model or G-code
+- ``estimate_material_cost`` — material weight/cost from mesh geometry
+- ``estimate_print_progress`` — phase-aware progress prediction
 
 Auto-discovered by :func:`~kiln.plugin_loader.register_all_plugins` —
 no manual imports needed.
@@ -47,10 +52,14 @@ def _format_time(seconds: int | None) -> str:
 
 
 class _EstimateToolsPlugin:
-    """Slice-and-estimate tools.
+    """Estimation tools — cost, time, progress, material, slice-and-estimate.
 
     Tools:
         - slice_and_estimate
+        - estimate_cost
+        - estimate_print_time
+        - estimate_material_cost
+        - estimate_print_progress
     """
 
     @property
@@ -59,7 +68,7 @@ class _EstimateToolsPlugin:
 
     @property
     def description(self) -> str:
-        return "Slice a 3D model and return time/filament estimates without printing"
+        return "Cost, time, progress, material, and slice-and-estimate tools"
 
     def register(self, mcp: Any) -> None:
         """Register estimate tools with the MCP server."""
@@ -222,6 +231,199 @@ class _EstimateToolsPlugin:
                 return _srv._error_dict(
                     f"Unexpected error in slice_and_estimate: {exc}",
                     code="INTERNAL_ERROR",
+                )
+
+        # ------------------------------------------------------------------
+        # estimate_cost
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def estimate_cost(
+            file_path: str,
+            material: str = "PLA",
+            electricity_rate: float = 0.12,
+            printer_wattage: float = 200.0,
+        ) -> dict:
+            """Estimate the cost of a print job from a G-code file.
+
+            Analyses G-code extrusion commands to calculate filament usage,
+            material weight, filament cost, electricity cost, and total.
+
+            Args:
+                file_path: Path to the G-code file.
+                material: Filament material (PLA, PETG, ABS, TPU, ASA, NYLON, PC).
+                electricity_rate: Cost per kWh in USD (default 0.12).
+                printer_wattage: Printer power consumption in watts (default 200).
+            """
+            import kiln.server as _srv
+
+            try:
+                estimate = _srv._get_cost_estimator().estimate_from_file(
+                    file_path,
+                    material=material,
+                    electricity_rate=electricity_rate,
+                    printer_wattage=printer_wattage,
+                )
+                return {"success": True, "estimate": estimate.to_dict()}
+            except FileNotFoundError as exc:
+                return _srv._error_dict(f"Failed to estimate cost: {exc}", code="FILE_NOT_FOUND")
+            except Exception as exc:
+                _logger.exception("Unexpected error in estimate_cost")
+                return _srv._error_dict(
+                    f"Unexpected error in estimate_cost: {exc}", code="INTERNAL_ERROR"
+                )
+
+        # ------------------------------------------------------------------
+        # estimate_print_time
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def estimate_print_time(
+            file_path: str,
+            profile: str = "",
+            printer_id: str = "",
+            slicer_path: str = "",
+        ) -> dict:
+            """Estimate print time and filament usage for a model.
+
+            Slices the model and parses the G-code for print time, filament
+            length/weight, layer count, and cost estimates.
+
+            For **already-sliced** G-code files, pass the ``.gcode`` path
+            directly — it will be parsed without re-slicing.
+
+            :param file_path: Path to STL/3MF/OBJ or .gcode file.
+            :param profile: Optional slicer profile path.
+            :param printer_id: Optional printer model ID for bundled profile
+                (e.g. ``"bambu_a1"``).  Used when no explicit profile is given.
+            :param slicer_path: Optional explicit slicer binary path.
+            :returns: Dict with time, filament, and layer estimates.
+            """
+            import kiln.server as _srv
+
+            try:
+                from kiln.slicer import _parse_gcode_estimates
+
+                # If already a gcode file, just parse it directly
+                if file_path.lower().endswith((".gcode", ".gco", ".g")):
+                    result = _parse_gcode_estimates(file_path)
+                    return {"success": True, **result}
+
+                # Otherwise, slice first with the right profile
+                from kiln.slicer import estimate_print
+
+                resolved_profile = profile or None
+                if not resolved_profile and printer_id:
+                    from kiln.slicer_profiles import get_profile_for_printer
+
+                    resolved_profile = get_profile_for_printer(printer_id)
+
+                result = estimate_print(
+                    file_path,
+                    profile=resolved_profile,
+                    slicer_path=slicer_path or None,
+                )
+                return {"success": True, **result}
+            except Exception as exc:
+                return _srv._error_dict(f"Print estimation failed: {exc}", code="ESTIMATE_ERROR")
+
+        # ------------------------------------------------------------------
+        # estimate_material_cost
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def estimate_material_cost(
+            file_path: str,
+            material: str = "pla",
+            infill_pct: float = 20.0,
+            wall_layers: int = 3,
+            cost_per_kg: float = 0.0,
+        ) -> dict:
+            """Estimate material usage and cost for printing a mesh.
+
+            Computes filament weight, length, and cost based on mesh volume,
+            infill percentage, wall shell count, and material density.
+
+            Supported materials: pla, petg, abs, tpu, asa, nylon, pc, pla+,
+            carbon_fiber_pla.
+
+            :param file_path: Path to mesh file (.stl, .obj, or .glb).
+            :param material: Material type (default "pla").
+            :param infill_pct: Interior fill percentage 0-100 (default 20).
+            :param wall_layers: Number of perimeter shells (default 3).
+            :param cost_per_kg: Override material cost in $/kg (0 = use default).
+            :returns: Dict with weight, filament length, and cost.
+            """
+            import kiln.server as _srv
+
+            try:
+                from kiln.generation.validation import (
+                    estimate_material_cost as _estimate_cost,
+                )
+
+                return {
+                    "success": True,
+                    **_estimate_cost(
+                        file_path,
+                        material=material,
+                        infill_pct=infill_pct,
+                        wall_layers=wall_layers,
+                        cost_per_kg=cost_per_kg if cost_per_kg > 0 else None,
+                    ),
+                }
+            except Exception as exc:
+                return _srv._error_dict(f"Cost estimation failed: {exc}")
+
+        # ------------------------------------------------------------------
+        # estimate_print_progress
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def estimate_print_progress(
+            printer_name: str,
+            *,
+            elapsed_seconds: float | None = None,
+            total_layers: int | None = None,
+            current_layer: int | None = None,
+        ) -> dict:
+            """Estimate print progress with phase-aware time prediction.
+
+            Breaks a print into phases -- preparing, printing, cooling, and
+            post-processing -- and uses historical data from the print outcomes
+            database to estimate time remaining.  Typically more accurate than
+            raw firmware estimates for predicting true completion time.
+
+            Supply ``elapsed_seconds``, ``total_layers``, and ``current_layer``
+            when available; any omitted values will be read from the printer's
+            live status.
+
+            :param printer_name: Printer running the job.
+            :param elapsed_seconds: Seconds elapsed since print start.  Omit to
+                read from printer status.
+            :param total_layers: Total layer count for the job.  Omit to read
+                from printer/G-code metadata.
+            :param current_layer: Current layer being printed.  Omit to read
+                from printer status.
+
+            See also: ``printer_status()``, ``get_print_outcomes()``.
+            """
+            import kiln.server as _srv
+
+            try:
+                from kiln.progress import get_progress_estimator
+
+                estimator = get_progress_estimator()
+                estimate = estimator.estimate(
+                    printer_name=printer_name,
+                    elapsed_seconds=elapsed_seconds,
+                    total_layers=total_layers,
+                    current_layer=current_layer,
+                )
+                return {"success": True, "progress": estimate.to_dict()}
+            except Exception as exc:
+                _logger.exception("Error in estimate_print_progress")
+                return _srv._error_dict(
+                    f"Failed to estimate print progress: {exc}", code="PROGRESS_ERROR"
                 )
 
         _logger.debug("Registered estimate tools")
