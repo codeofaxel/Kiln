@@ -74,8 +74,6 @@ with contextlib.suppress(ImportError):
 
 from kiln import parse_float_env, parse_int_env
 from kiln.auth import AuthManager
-from kiln.backup import BackupError
-from kiln.backup import backup_database as _backup_db
 from kiln.bed_leveling import BedLevelManager, LevelingPolicy
 
 try:
@@ -252,11 +250,7 @@ from kiln.registry import PrinterNotFoundError, PrinterRegistry
 from kiln.safety_profiles import export_profile as _export_profile
 from kiln.scheduler import JobScheduler
 from kiln.slicer_profiles import (
-    get_slicer_profile,
-    list_slicer_profiles,
     resolve_slicer_profile,
-    slicer_profile_to_dict,
-    validate_profile_for_printer,
 )
 from kiln.streaming import MJPEGProxy
 from kiln.thingiverse import (
@@ -1151,6 +1145,8 @@ def _set_cloud_sync(manager: CloudSyncManager | None) -> None:
     if _cloud_sync is not None:
         _cloud_sync.stop()
     _cloud_sync = manager
+
+
 _heater_watchdog: HeaterWatchdog | None = None
 _plugin_mgr: PluginManager | None = None
 _start_time = time.time()
@@ -4304,38 +4300,7 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
 
 # safety_audit — moved to plugins/safety_tools.py
 
-
-@mcp.tool()
-def get_session_log(
-    session_id: str | None = None,
-    limit: int = 100,
-) -> dict:
-    """Return the full audit log for an agent session.
-
-    Every tool call made by an agent is recorded with a session ID — a UUID
-    generated when the MCP server starts.  Use this tool to replay exactly
-    what an agent issued during a session: every command, every safety check
-    that fired, every blocked attempt.
-
-    Args:
-        session_id: Session UUID to query.  Omit to use the current session.
-        limit: Maximum records to return (default 100, max 500).
-    """
-    limit = min(max(1, limit), 500)
-    sid = session_id or _SESSION_ID
-    try:
-        db = get_db()
-        entries = db.query_audit(session_id=sid, limit=limit)
-        return {
-            "success": True,
-            "session_id": sid,
-            "current_session": sid == _SESSION_ID,
-            "count": len(entries),
-            "entries": entries,
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in get_session_log")
-        return _error_dict(f"Unexpected error in get_session_log: {exc}", code="INTERNAL_ERROR")
+# get_session_log — moved to plugins/utility_tools.py
 
 
 # ---------------------------------------------------------------------------
@@ -4624,33 +4589,7 @@ def register_printer(
         return _error_dict(f"Unexpected error in register_printer: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
-def discover_printers(timeout: float = 5.0) -> dict:
-    """Scan the local network for 3D printers.
-
-    Uses mDNS/Bonjour and HTTP subnet probing to find OctoPrint,
-    Moonraker, Bambu Lab, and Elegoo printers on the local network.
-
-    Args:
-        timeout: Maximum scan duration in seconds (default 5).
-
-    Returns a list of discovered printers with host, port, type, and
-    whether the API is reachable.  Use ``register_printer`` to add
-    discovered printers to the fleet.
-    """
-    try:
-        from kiln.discovery import discover_printers as _discover
-
-        results = _discover(timeout=timeout)
-        return {
-            "success": True,
-            "printers": [p.to_dict() for p in results],
-            "count": len(results),
-            "message": f"Found {len(results)} printer(s) on the network.",
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in discover_printers")
-        return _error_dict(f"Unexpected error in discover_printers: {exc}", code="INTERNAL_ERROR")
+# discover_printers — extracted to plugins/printer_management_tools.py
 
 
 # list_fleet_sites, fleet_status_by_site, update_printer_site
@@ -4989,84 +4928,7 @@ def get_upgrade_url(tier: str = "pro", billing: str = "monthly", email: str = ""
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
-def health_check() -> dict:
-    """Return system health information for monitoring.
-
-    No authentication required.  Useful for container healthchecks,
-    dashboards, and verifying the server is responsive.
-    """
-    import platform
-
-    uptime_s = time.time() - _start_time
-    hours = int(uptime_s // 3600)
-    minutes = int((uptime_s % 3600) // 60)
-    secs = int(uptime_s % 60)
-
-    db_ok = False
-    try:
-        get_db()._conn.execute("SELECT 1")
-        db_ok = True
-    except Exception as exc:
-        logger.debug("Database health check failed: %s", exc)
-
-    health_data: dict[str, Any] = {
-        "success": True,
-        "status": "healthy",
-        "uptime": f"{hours}h {minutes}m {secs}s",
-        "uptime_seconds": round(uptime_s, 1),
-        "printers_registered": _get_registry().count,
-        "queue_pending": _get_queue().pending_count(),
-        "queue_active": _get_queue().active_count(),
-        "queue_total": _get_queue().total_count,
-        "scheduler_running": _get_scheduler().is_running,
-        "database_reachable": db_ok,
-        "python_version": platform.python_version(),
-        "platform": platform.system(),
-        "auth_enabled": os.environ.get("KILN_AUTH_ENABLED", "").lower() in ("1", "true", "yes"),
-    }
-
-    try:
-        alert_mgr = _get_billing_alert_mgr()
-        health_data["billing_health"] = alert_mgr.get_health_summary()
-    except Exception as exc:
-        logger.debug("Failed to get billing health summary: %s", exc)
-        health_data["billing_health"] = {"status": "unknown"}
-
-    try:
-        from kiln.emboss_generator import (
-            _OPENSCAD_MIN_VERSION_YEAR,
-            _OPENSCAD_UPGRADE_MSG,
-            _openscad_version_year,
-            get_openscad_version,
-        )
-
-        _platform = sys.platform
-        if _platform == "darwin":
-            _install_cmd = "brew install --cask openscad@snapshot"
-        elif _platform.startswith("linux"):
-            _install_cmd = "sudo snap install openscad --edge"
-        else:
-            _install_cmd = "Download from https://openscad.org/downloads#snapshots"
-
-        openscad_version = get_openscad_version()
-        openscad_info: dict[str, Any] = {"version": openscad_version or "not_found"}
-        if openscad_version:
-            year = _openscad_version_year(openscad_version)
-            if year and year < _OPENSCAD_MIN_VERSION_YEAR:
-                openscad_info["warning"] = _OPENSCAD_UPGRADE_MSG
-                openscad_info["svg_operations_supported"] = False
-                openscad_info["install_command"] = _install_cmd
-            else:
-                openscad_info["svg_operations_supported"] = True
-        else:
-            openscad_info["install_command"] = _install_cmd
-        health_data["openscad"] = openscad_info
-    except Exception as exc:
-        logger.debug("Failed to get OpenSCAD version: %s", exc)
-        health_data["openscad"] = {"version": "unknown"}
-
-    return health_data
+# health_check — moved to plugins/utility_tools.py
 
 
 @mcp.tool()
@@ -5201,117 +5063,7 @@ def check_autonomy(
         return _error_dict(f"Unexpected error in check_autonomy: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
-def get_started() -> dict:
-    """Quick-start guide for AI agents using Kiln.
-
-    Returns an onboarding summary: what Kiln is, core workflows,
-    and the most useful tools to call first.  Call this at the start
-    of a session if you're unfamiliar with the available capabilities.
-    """
-    from kiln.tool_tiers import TIERS
-
-    # Build a concise tier summary
-    tier_summary = {name: {"tool_count": len(tools), "examples": tools[:5]} for name, tools in TIERS.items()}
-
-    # Check OpenSCAD installation status for guidance
-    openscad_guidance: dict[str, Any] = {}
-    _openscad_action_needed = False
-    try:
-        from kiln.emboss_generator import _openscad_version_year, get_openscad_version
-
-        _platform = sys.platform
-        if _platform == "darwin":
-            _install_cmd = "brew install --cask openscad@snapshot"
-        elif _platform.startswith("linux"):
-            _install_cmd = "sudo snap install openscad --edge"
-        else:
-            _install_cmd = "Download from https://openscad.org/downloads#snapshots"
-
-        _ver = get_openscad_version()
-        if not _ver:
-            _openscad_action_needed = True
-            openscad_guidance = {
-                "installed": False,
-                "message": (
-                    "Install OpenSCAD for 3D model generation and decoration: "
-                    "brew install --cask openscad@snapshot  (macOS) "
-                    "or download from https://openscad.org/downloads"
-                ),
-                "install_command": _install_cmd,
-                "required_for": ["compile_scad", "generate_product_base", "decorate_surface", "visualize_model"],
-            }
-        elif _openscad_version_year(_ver) < 2024:
-            _openscad_action_needed = True
-            openscad_guidance = {
-                "installed": True,
-                "version": _ver,
-                "status": "outdated",
-                "message": (
-                    f"OpenSCAD {_ver} is outdated. Upgrade for full feature support: "
-                    "brew install --cask openscad@snapshot  (macOS) "
-                    "or download from https://openscad.org/downloads"
-                ),
-                "install_command": _install_cmd,
-                "required_for": ["compile_scad", "generate_product_base", "decorate_surface", "visualize_model"],
-            }
-        else:
-            openscad_guidance = {"installed": True, "version": _ver, "status": "ok"}
-    except Exception:  # noqa: BLE001
-        openscad_guidance = {"installed": False, "status": "unknown"}
-
-    _quick_start_base = [
-        "1. Call `printer_status` to check if a printer is connected and its current state.",
-        "2. Call `fleet_status` if managing multiple printers.",
-        "3. Call `preflight_check` before starting any print to validate readiness.",
-        "4. Use `search_all_models` to find 3D models across marketplaces.",
-        "5. Use `slice_model` or `slice_and_print` to prepare and print files.",
-        "6. Use `validate_gcode` before `send_gcode` for raw G-code commands.",
-    ]
-    if _openscad_action_needed:
-        _openscad_step = (
-            f"0. IMPORTANT: {openscad_guidance.get('message', 'Install/upgrade OpenSCAD')} "
-            f"— run: {openscad_guidance.get('install_command', '')}"
-        )
-        _quick_start = [_openscad_step] + _quick_start_base
-    else:
-        _quick_start = _quick_start_base
-
-    return {
-        "success": True,
-        "overview": (
-            "Kiln is agent infrastructure for 3D printing. It provides "
-            "MCP tools to monitor printers, manage files, slice models, "
-            "search marketplaces, queue print jobs, and more."
-        ),
-        "quick_start": _quick_start,
-        "core_workflows": {
-            "print_a_file": "upload_file → visualize_model → preflight_check → start_print",
-            "marketplace_to_print": "search_all_models → download_and_upload → preflight_check → start_print",
-            "slice_and_print": "upload_file (STL) → slice_and_print",
-            "monitor": "printer_status, printer_snapshot, await_print_completion",
-            "queue_jobs": "submit_job → job_status → queue_summary",
-        },
-        "safety_tools": [
-            "preflight_check — validates printer readiness before printing",
-            "validate_gcode — checks G-code for dangerous commands before sending",
-            "safety_status — comprehensive safety dashboard (limits, rate-limits, blocked actions, auth)",
-            "safety_settings — shows current auto-print and confirmation settings",
-            "safety_audit — reviews recent safety-relevant actions",
-        ],
-        "tool_tiers": tier_summary,
-        "session_recovery": {
-            "description": "If resuming a previous session, call get_agent_context to restore your memory.",
-            "tool": "get_agent_context",
-            "usage": "Call get_agent_context() at session start to retrieve notes saved in prior sessions.",
-        },
-        "tip": (
-            "Start with `printer_status` to see what's connected, then "
-            "explore from there. Use `safety_status` for a full safety "
-            "dashboard, or `safety_settings` to check auto-print settings."
-        ),
-        "openscad": openscad_guidance,
-    }
+# get_started — moved to plugins/utility_tools.py
 
 
 @mcp.tool()
@@ -5668,258 +5420,10 @@ def _resolve_slice_profile_context(
     return effective_printer_id, effective_profile
 
 
-@mcp.tool()
-def slice_model(
-    input_path: str,
-    output_dir: str | None = None,
-    profile: str | None = None,
-    printer_id: str | None = None,
-    slicer_path: str | None = None,
-) -> dict:
-    """Slice a 3D model (STL/3MF/STEP) to G-code using PrusaSlicer or OrcaSlicer.
-
-    Args:
-        input_path: Path to the input file (STL, 3MF, STEP, OBJ, AMF).
-        output_dir: Directory for the output G-code.  Defaults to
-            the system temp directory.
-        profile: Path to a slicer profile/config file (.ini or .json).
-        printer_id: Optional printer model ID for bundled profile
-            auto-selection (e.g. ``"prusa_mini"``).
-        slicer_path: Explicit path to the slicer binary.  Auto-detected
-            if omitted.
-
-    Returns a JSON object with the output G-code path.  The output file
-    can then be uploaded to a printer with ``upload_file`` and printed
-    with ``start_print``.
-    """
-    if err := _check_auth("slicer"):
-        return err
-
-    try:
-        from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
-
-        effective_printer_id, effective_profile = _resolve_slice_profile_context(
-            profile=profile,
-            printer_id=printer_id,
-        )
-        result = slice_file(
-            input_path,
-            output_dir=output_dir,
-            profile=effective_profile,
-            slicer_path=slicer_path,
-        )
-        response: dict[str, Any] = {
-            "success": True,
-            **result.to_dict(),
-        }
-        if effective_printer_id:
-            response["printer_id"] = effective_printer_id
-        if effective_profile:
-            response["profile_path"] = effective_profile
-
-        # Cross-check slicer profile against printer safety limits
-        if _PRINTER_MODEL and effective_profile:
-            # Extract profile_id from the profile path or use printer model
-            _profile_id = effective_printer_id or os.path.basename(effective_profile).split("_")[0]
-            if _profile_id:
-                validation = validate_profile_for_printer(_profile_id, _PRINTER_MODEL)
-                if validation["warnings"] or validation["errors"]:
-                    response["profile_validation"] = validation
-                    if validation["errors"]:
-                        response["profile_validation_warning"] = (
-                            f"Slicer profile may be incompatible with {_PRINTER_MODEL}: "
-                            + "; ".join(validation["errors"])
-                        )
-                    elif validation["warnings"]:
-                        response["profile_validation_warning"] = "Profile compatibility note: " + "; ".join(
-                            validation["warnings"]
-                        )
-
-        return response
-    except SlicerNotFoundError as exc:
-        return _error_dict(
-            f"Failed to slice model: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.", code="SLICER_NOT_FOUND"
-        )
-    except SlicerError as exc:
-        return _error_dict(f"Failed to slice model: {exc}", code="SLICER_ERROR")
-    except FileNotFoundError as exc:
-        return _error_dict(f"Failed to slice model: {exc}", code="FILE_NOT_FOUND")
-    except Exception as exc:
-        logger.exception("Unexpected error in slice_model")
-        return _error_dict(f"Unexpected error in slice_model: {exc}", code="INTERNAL_ERROR")
+# slice_model — moved to plugins/slicer_tools.py
 
 
-_SLICER_INPUT_EXTENSIONS = {".stl", ".3mf", ".step", ".stp", ".obj", ".amf"}
-
-
-@mcp.tool()
-def reslice_with_overrides(
-    input_path: str,
-    printer_id: str | None = None,
-    overrides: str | None = None,
-    output_dir: str | None = None,
-    slicer_path: str | None = None,
-) -> dict[str, Any]:
-    """Reslice a 3D model with custom slicer parameter overrides.
-
-    Accepts a base printer profile and a JSON dict of overrides to customize
-    the slice. Common override keys (PrusaSlicer INI format):
-
-      Adhesion: brim_width (mm), skirts (count), skirt_distance (mm)
-      Temperature: temperature, first_layer_temperature, bed_temperature
-      Speed: perimeter_speed, infill_speed, external_perimeter_speed, first_layer_speed, travel_speed (mm/s)
-      Structure: fill_density (e.g. "25%"), fill_pattern (gyroid/grid/honeycomb), layer_height
-      Support: support_material (0/1), support_material_buildplate_only (0/1)
-      Retraction: retract_length, retract_speed
-
-    Example overrides JSON: {"brim_width": "8", "perimeter_speed": "30", "fill_density": "25%"}
-
-    Use this tool when a print failed due to adhesion, wobble, or quality issues
-    and you need to reslice with adjusted settings. Pair with rotate_model to
-    also change part orientation before reslicing.
-
-    Requires PrusaSlicer or OrcaSlicer installed locally.
-    Use kiln find-slicer or the find_slicer MCP tool to verify.
-
-    Args:
-        input_path: Path to the input file (STL, 3MF, STEP, OBJ, AMF).
-        printer_id: Printer model ID for bundled profile selection
-            (e.g. ``"prusa_mini"``, ``"bambu_a1"``).
-        overrides: JSON string of key-value pairs to override in the slicer
-            profile (e.g. ``'{"brim_width": "8", "fill_density": "25%"}'``).
-        output_dir: Directory for the output G-code.  Defaults to the
-            system temp directory.
-        slicer_path: Explicit path to the slicer binary.  Auto-detected
-            if omitted.
-    """
-    if err := _check_auth("slicer"):
-        return err
-
-    import json as _json
-
-    # -- Validate input file --
-    input_abs = os.path.abspath(input_path)
-    if not os.path.isfile(input_abs):
-        return _error_dict(
-            f"Input file not found: {os.path.basename(input_abs)}",
-            code="FILE_NOT_FOUND",
-        )
-
-    ext = Path(input_abs).suffix.lower()
-    if ext not in _SLICER_INPUT_EXTENSIONS:
-        return _error_dict(
-            f"Unsupported input format '{ext}'. Supported: {', '.join(sorted(_SLICER_INPUT_EXTENSIONS))}",
-            code="UNSUPPORTED_FORMAT",
-        )
-
-    # -- Parse overrides (accept both JSON string and dict) --
-    parsed_overrides: dict[str, str] = {}
-    if overrides is not None:
-        if isinstance(overrides, dict):
-            parsed_overrides = {str(k): str(v) for k, v in overrides.items()}
-        else:
-            try:
-                parsed_overrides = _json.loads(overrides)
-            except (_json.JSONDecodeError, TypeError) as exc:
-                return _error_dict(
-                    f"Invalid overrides JSON: {exc}",
-                    code="VALIDATION_ERROR",
-                )
-            if not isinstance(parsed_overrides, dict):
-                return _error_dict(
-                    f"Overrides must be a JSON object (dict), got {type(parsed_overrides).__name__}.",
-                    code="VALIDATION_ERROR",
-                )
-
-    try:
-        from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
-
-        # -- Resolve profile with overrides --
-        effective_printer_id = _map_printer_hint_to_profile_id(printer_id) or _map_printer_hint_to_profile_id(
-            _PRINTER_MODEL
-        )
-
-        effective_profile: str | None = None
-        if effective_printer_id:
-            try:
-                effective_profile = resolve_slicer_profile(
-                    effective_printer_id,
-                    overrides=parsed_overrides or None,
-                )
-            except Exception as exc:
-                logger.debug(
-                    "Profile resolution failed for %s: %s",
-                    effective_printer_id,
-                    exc,
-                )
-
-        # -- Safety-validate temperature overrides --
-        validation_result: dict[str, Any] | None = None
-        _temp_keys = {
-            "temperature",
-            "first_layer_temperature",
-            "bed_temperature",
-            "first_layer_bed_temperature",
-        }
-        has_temp_overrides = bool(parsed_overrides and _temp_keys & parsed_overrides.keys())
-
-        if has_temp_overrides and effective_printer_id and _PRINTER_MODEL:
-            validation_result = validate_profile_for_printer(effective_printer_id, _PRINTER_MODEL)
-
-        # -- Slice --
-        result = slice_file(
-            input_abs,
-            output_dir=output_dir,
-            profile=effective_profile,
-            slicer_path=slicer_path,
-        )
-
-        response: dict[str, Any] = {
-            "success": True,
-            **result.to_dict(),
-        }
-        if effective_printer_id:
-            response["printer_id"] = effective_printer_id
-        if effective_profile:
-            response["profile_path"] = effective_profile
-        if parsed_overrides:
-            response["applied_overrides"] = parsed_overrides
-
-        # Attach validation warnings/errors when present
-        if validation_result and (validation_result["warnings"] or validation_result["errors"]):
-            response["profile_validation"] = validation_result
-            if validation_result["errors"]:
-                response["profile_validation_warning"] = (
-                    f"Temperature overrides may be unsafe for {_PRINTER_MODEL}: "
-                    + "; ".join(validation_result["errors"])
-                )
-            elif validation_result["warnings"]:
-                response["profile_validation_warning"] = "Profile compatibility note: " + "; ".join(
-                    validation_result["warnings"]
-                )
-
-        return response
-    except SlicerNotFoundError as exc:
-        return _error_dict(
-            f"Failed to reslice model: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.",
-            code="SLICER_NOT_FOUND",
-        )
-    except SlicerError as exc:
-        return _error_dict(
-            f"Failed to reslice model: {exc}",
-            code="SLICER_ERROR",
-        )
-    except FileNotFoundError as exc:
-        return _error_dict(
-            f"Failed to reslice model: {exc}",
-            code="FILE_NOT_FOUND",
-        )
-    except Exception as exc:
-        logger.exception("Unexpected error in reslice_with_overrides")
-        return _error_dict(
-            f"Unexpected error in reslice_with_overrides: {exc}",
-            code="INTERNAL_ERROR",
-        )
+# reslice_with_overrides — moved to plugins/slicer_tools.py
 
 
 @mcp.tool()
@@ -6027,246 +5531,8 @@ async def check_orientation(
         return _error_dict(f"Orientation check failed: {e}", code="ORIENTATION_ERROR")
 
 
-@mcp.tool(name="find_slicer")
-def find_slicer_tool() -> dict:
-    """Check if a slicer (PrusaSlicer/OrcaSlicer) is available on the system.
-
-    Returns the slicer path, name, and version if found.
-    """
-    try:
-        from kiln.slicer import SlicerNotFoundError
-        from kiln.slicer import find_slicer as _find_slicer
-
-        info = _find_slicer()
-        return {
-            "success": True,
-            **info.to_dict(),
-        }
-    except SlicerNotFoundError as exc:
-        return _error_dict(
-            f"Failed to find slicer: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.", code="SLICER_NOT_FOUND"
-        )
-    except Exception as exc:
-        logger.exception("Unexpected error in find_slicer_tool")
-        return _error_dict(f"Unexpected error in find_slicer_tool: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def slice_and_print(
-    input_path: str,
-    printer_name: str | None = None,
-    profile: str | None = None,
-    printer_id: str | None = None,
-    material: str | None = None,
-) -> dict:
-    """Slice a 3D model (STL/3MF) + upload + print in one step (basic pipeline).
-
-    For a more comprehensive pipeline with validation and profile auto-detection,
-    use ``run_quick_print``. For custom slicer overrides, use ``run_reslice_and_print``.
-    Automatically analyzes bed adhesion and adds brim/raft when needed
-    based on model geometry, material warp tendency, and printer type.
-    This adhesion intelligence only activates when no custom profile is
-    supplied.
-
-    Args:
-        input_path: Path to the 3D model file (STL, 3MF, STEP, etc.).
-        printer_name: Target printer name.  Omit for the default printer.
-        profile: Path to a slicer profile/config file.
-        printer_id: Optional printer model ID for bundled profile
-            auto-selection (e.g. ``"prusa_mini"``).
-        material: Filament material (e.g. ``"PLA"``, ``"ABS"``).  Affects
-            automatic brim/raft decisions.
-
-    Combines ``slice_model``, ``upload_file``, and ``start_print`` into
-    a single action.
-    """
-    if err := _check_auth("print"):
-        return err
-    try:
-        from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
-
-        effective_printer_id, effective_profile = _resolve_slice_profile_context(
-            profile=profile,
-            printer_id=printer_id,
-        )
-
-        # --- Auto-material from AMS if not specified ---
-        if material is None:
-            try:
-                if printer_name:
-                    _adapter = _get_registry().get(printer_name)
-                else:
-                    _adapter = _get_adapter()
-                if hasattr(_adapter, "get_ams_status"):
-                    ams = _adapter.get_ams_status()
-                    tray_now = ams.get("tray_now", "255")
-                    if tray_now != "255":
-                        slot_idx = int(tray_now)
-                        for unit in ams.get("units", []):
-                            for tray in unit.get("trays", []):
-                                if tray.get("slot") == slot_idx and tray.get("tray_type"):
-                                    material = tray["tray_type"]
-                                    logger.debug("Auto-detected material from AMS: %s", material)
-                                    break
-                            if material:
-                                break
-            except Exception:
-                logger.debug("AMS material auto-detection failed", exc_info=True)
-
-        # --- Auto-adhesion: analyse model and inject brim/raft if needed ---
-        adhesion_rec = None
-        adhesion_overrides: dict[str, str] = {}
-        if profile is None and input_path.lower().endswith((".stl", ".obj", ".3mf")):
-            try:
-                from kiln.printability import (
-                    analyze_printability as _analyze_printability,
-                )
-                from kiln.printability import (
-                    is_bedslinger,
-                    recommend_adhesion,
-                )
-
-                report = _analyze_printability(input_path)
-                if report.bed_adhesion:
-                    has_enclosure = False
-                    is_bs = False
-                    if effective_printer_id:
-                        is_bs = is_bedslinger(effective_printer_id)
-                        try:
-                            from kiln.printer_intelligence import get_printer_intel
-
-                            intel = get_printer_intel(effective_printer_id)
-                            if intel:
-                                has_enclosure = intel.get("has_enclosure", False)
-                        except Exception:
-                            pass
-
-                    rec = recommend_adhesion(
-                        report.bed_adhesion,
-                        material=material or "PLA",
-                        has_enclosure=has_enclosure,
-                        is_bedslinger_printer=is_bs,
-                        model_height_mm=report.model_height_mm,
-                    )
-                    if rec.brim_width_mm > 0 or rec.use_raft:
-                        adhesion_rec = rec.to_dict()
-                        adhesion_overrides = dict(rec.slicer_overrides)
-                        logger.info(
-                            "Auto-adhesion: brim=%dmm raft=%s (%s)",
-                            rec.brim_width_mm,
-                            rec.use_raft,
-                            rec.rationale,
-                        )
-            except Exception:
-                logger.debug("Auto-adhesion analysis failed, proceeding without", exc_info=True)
-
-        # Bambu printers: wrap_gcode_as_3mf expects M83 (relative extrusion)
-        # and provides its own start/end gcode, so override PrusaSlicer defaults.
-        if _PRINTER_TYPE == "bambu":
-            adhesion_overrides["use_relative_e_distances"] = "1"
-            adhesion_overrides["start_gcode"] = ""
-            adhesion_overrides["end_gcode"] = ""
-
-        # Prefer per-model speeds when printer_id is available
-        if effective_printer_id:
-            try:
-                from kiln.printer_intelligence import get_slicer_speed_overrides
-
-                model_speeds = get_slicer_speed_overrides(effective_printer_id)
-                if model_speeds:
-                    for k, v in model_speeds.items():
-                        if k not in adhesion_overrides:
-                            adhesion_overrides[k] = v
-            except (ImportError, Exception):
-                pass  # fall through to per-type defaults below
-
-        # Inject printer-aware speed overrides
-        if _PRINTER_TYPE in _PRINTER_SPEED_OVERRIDES:
-            for k, v in _PRINTER_SPEED_OVERRIDES[_PRINTER_TYPE].items():
-                if k not in adhesion_overrides:  # don't override explicit user settings
-                    adhesion_overrides[k] = v
-
-        # Re-resolve profile with adhesion overrides merged in
-        if adhesion_overrides and effective_printer_id:
-            try:
-                effective_profile = resolve_slicer_profile(effective_printer_id, overrides=adhesion_overrides)
-            except Exception:
-                logger.debug("Profile override injection failed", exc_info=True)
-
-        result = slice_file(
-            input_path,
-            profile=effective_profile,
-        )
-
-        if printer_name:
-            adapter = _get_registry().get(printer_name)
-        else:
-            adapter = _get_adapter()
-
-        # Bambu printers need PrusaSlicer output wrapped in a 3MF with
-        # the proprietary BambuStudio start/end gcode.  The adapter
-        # exposes wrap_gcode_as_3mf() for this.
-        upload_path = result.output_path
-        if hasattr(adapter, "wrap_gcode_as_3mf") and result.output_path.endswith(".gcode"):
-            try:
-                upload_path = adapter.wrap_gcode_as_3mf(result.output_path)
-                logger.info("Wrapped gcode as Bambu 3MF: %s", upload_path)
-            except Exception:
-                logger.warning(
-                    "Bambu 3MF wrapping failed, uploading raw gcode",
-                    exc_info=True,
-                )
-
-        upload = adapter.upload_file(upload_path)
-        file_name = upload.file_name or os.path.basename(upload_path)
-
-        # Mandatory pre-flight safety gate before starting print.
-        safety_printer = _resolve_effective_printer_name(printer_name)
-        if block := _emergency_latch_error("slice_and_print", safety_printer):
-            return block
-        pf = preflight_check()
-        if not pf.get("ready", False):
-            _audit(
-                "slice_and_print",
-                "preflight_failed",
-                details={
-                    "file": file_name,
-                    "summary": pf.get("summary", ""),
-                },
-            )
-            return _error_dict(
-                pf.get("summary", "Pre-flight checks failed"),
-                code="PREFLIGHT_FAILED",
-            )
-
-        print_result = adapter.start_print(file_name)
-        _get_heater_watchdog().notify_print_started()
-
-        resp: dict[str, Any] = {
-            "success": True,
-            "slice": result.to_dict(),
-            "upload": upload.to_dict(),
-            "print": print_result.to_dict(),
-            "printer_id": effective_printer_id,
-            "profile_path": effective_profile,
-            "message": f"Sliced, uploaded, and started printing {os.path.basename(input_path)}.",
-        }
-        if adhesion_rec:
-            resp["adhesion"] = adhesion_rec
-        return resp
-    except SlicerNotFoundError as exc:
-        return _error_dict(
-            f"Failed to slice and print: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.", code="SLICER_NOT_FOUND"
-        )
-    except SlicerError as exc:
-        return _error_dict(f"Failed to slice and print: {exc}", code="SLICER_ERROR")
-    except PrinterNotFoundError:
-        return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
-    except (PrinterError, RuntimeError, FileNotFoundError) as exc:
-        return _error_dict(f"Failed to slice and print: {exc}. Check the input file and printer connection.")
-    except Exception as exc:
-        logger.exception("Unexpected error in slice_and_print")
-        return _error_dict(f"Unexpected error in slice_and_print: {exc}", code="INTERNAL_ERROR")
+# find_slicer — moved to plugins/slicer_tools.py
+# slice_and_print — moved to plugins/slicer_tools.py
 
 
 # ---------------------------------------------------------------------------
@@ -6338,42 +5604,7 @@ def printer_snapshot(
         return _error_dict(f"Unexpected error in printer_snapshot: {exc}", code="INTERNAL_ERROR")
 
 
-# ---------------------------------------------------------------------------
-# Cost estimation tools
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def estimate_cost(
-    file_path: str,
-    material: str = "PLA",
-    electricity_rate: float = 0.12,
-    printer_wattage: float = 200.0,
-) -> dict:
-    """Estimate the cost of a print job from a G-code file.
-
-    Analyses G-code extrusion commands to calculate filament usage,
-    material weight, filament cost, electricity cost, and total.
-
-    Args:
-        file_path: Path to the G-code file.
-        material: Filament material (PLA, PETG, ABS, TPU, ASA, NYLON, PC).
-        electricity_rate: Cost per kWh in USD (default 0.12).
-        printer_wattage: Printer power consumption in watts (default 200).
-    """
-    try:
-        estimate = _get_cost_estimator().estimate_from_file(
-            file_path,
-            material=material,
-            electricity_rate=electricity_rate,
-            printer_wattage=printer_wattage,
-        )
-        return {"success": True, "estimate": estimate.to_dict()}
-    except FileNotFoundError as exc:
-        return _error_dict(f"Failed to estimate cost: {exc}", code="FILE_NOT_FOUND")
-    except Exception as exc:
-        logger.exception("Unexpected error in estimate_cost")
-        return _error_dict(f"Unexpected error in estimate_cost: {exc}", code="INTERNAL_ERROR")
+# estimate_cost — moved to plugins/estimate_tools.py
 
 
 @mcp.tool()
@@ -6706,17 +5937,7 @@ def list_plugins() -> dict:
     }
 
 
-@mcp.tool()
-def plugin_info(name: str) -> dict:
-    """Get detailed information about a specific plugin.
-
-    Args:
-        name: Plugin name.
-    """
-    info = _get_plugin_mgr().get_plugin_info(name)
-    if info is None:
-        return _error_dict(f"Plugin {name!r} not found.", code="NOT_FOUND")
-    return {"success": True, "plugin": info.to_dict()}
+# plugin_info — moved to plugins/utility_tools.py
 
 
 # ---------------------------------------------------------------------------
@@ -6796,53 +6017,7 @@ def _validate_local_file(file_path: str) -> dict[str, Any]:
     return {"valid": valid, "errors": errors, "warnings": warnings, "info": info}
 
 
-# ---------------------------------------------------------------------------
-# MCP Resources — read-only data endpoints for agent context
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def kiln_health() -> dict:
-    """Get a health check for the Kiln system.
-
-    Returns versions, uptime, module availability, scheduler status,
-    webhook status, and overall system health.  Use this to verify the
-    system is running correctly.
-    """
-    import kiln
-
-    uptime_secs = time.time() - _start_time
-    hours, rem = divmod(int(uptime_secs), 3600)
-    mins, secs = divmod(rem, 60)
-
-    modules = {
-        "scheduler": _get_scheduler().is_running,
-        "webhooks": _get_webhook_mgr().is_running,
-        "persistence": True,
-        "auth_enabled": _get_auth().enabled,
-        "billing": True,
-        "thingiverse": bool(_THINGIVERSE_TOKEN),
-    }
-
-    try:
-        import kiln.printers.bambu  # noqa: F401 -- availability check only
-
-        modules["bambu_available"] = True
-    except ImportError:
-        modules["bambu_available"] = False
-
-    return {
-        "success": True,
-        "version": kiln.__version__,
-        "uptime_seconds": int(uptime_secs),
-        "uptime_human": f"{hours}h {mins}m {secs}s",
-        "printers_registered": _get_registry().count,
-        "queue_depth": _get_queue().total_count,
-        "scheduler_running": _get_scheduler().is_running,
-        "webhook_endpoints": len(_get_webhook_mgr().list_endpoints()),
-        "modules": modules,
-        "healthy": True,
-    }
+# kiln_health — moved to plugins/utility_tools.py
 
 
 @mcp.tool()
@@ -8278,54 +7453,7 @@ def validate_openscad_code(code: str) -> dict:
         return _error_dict(f"Validation error: {exc}", code="VALIDATION_ERROR")
 
 
-@mcp.tool()
-def estimate_print_time(
-    file_path: str,
-    profile: str = "",
-    printer_id: str = "",
-    slicer_path: str = "",
-) -> dict:
-    """Estimate print time and filament usage for a model.
-
-    Slices the model and parses the G-code for print time, filament
-    length/weight, layer count, and cost estimates.
-
-    For **already-sliced** G-code files, pass the ``.gcode`` path
-    directly — it will be parsed without re-slicing.
-
-    :param file_path: Path to STL/3MF/OBJ or .gcode file.
-    :param profile: Optional slicer profile path.
-    :param printer_id: Optional printer model ID for bundled profile
-        (e.g. ``"bambu_a1"``).  Used when no explicit profile is given.
-    :param slicer_path: Optional explicit slicer binary path.
-    :returns: Dict with time, filament, and layer estimates.
-    """
-    try:
-        from kiln.slicer import _parse_gcode_estimates
-
-        # If already a gcode file, just parse it directly
-        if file_path.lower().endswith((".gcode", ".gco", ".g")):
-            result = _parse_gcode_estimates(file_path)
-            return {"success": True, **result}
-
-        # Otherwise, slice first with the right profile
-        from kiln.slicer import estimate_print
-
-        resolved_profile = profile or None
-        if not resolved_profile and printer_id:
-            from kiln.slicer_profiles import get_profile_for_printer
-
-            resolved_profile = get_profile_for_printer(printer_id)
-
-        result = estimate_print(
-            file_path,
-            profile=resolved_profile,
-            slicer_path=slicer_path or None,
-        )
-        return {"success": True, **result}
-    except Exception as exc:
-        return _error_dict(f"Print estimation failed: {exc}", code="ESTIMATE_ERROR")
-
+# estimate_print_time — moved to plugins/estimate_tools.py
 
 # iterate_design — moved to plugins/design_reasoning_tools.py
 # optimize_print_orientation — moved to plugins/design_reasoning_tools.py
@@ -8376,47 +7504,7 @@ def predict_print_failure(
         return _error_dict(f"Failure prediction failed: {exc}")
 
 
-@mcp.tool()
-def estimate_material_cost(
-    file_path: str,
-    material: str = "pla",
-    infill_pct: float = 20.0,
-    wall_layers: int = 3,
-    cost_per_kg: float = 0.0,
-) -> dict:
-    """Estimate material usage and cost for printing a mesh.
-
-    Computes filament weight, length, and cost based on mesh volume,
-    infill percentage, wall shell count, and material density.
-
-    Supported materials: pla, petg, abs, tpu, asa, nylon, pc, pla+,
-    carbon_fiber_pla.
-
-    :param file_path: Path to mesh file (.stl, .obj, or .glb).
-    :param material: Material type (default "pla").
-    :param infill_pct: Interior fill percentage 0-100 (default 20).
-    :param wall_layers: Number of perimeter shells (default 3).
-    :param cost_per_kg: Override material cost in $/kg (0 = use default).
-    :returns: Dict with weight, filament length, and cost.
-    """
-    try:
-        from kiln.generation.validation import (
-            estimate_material_cost as _estimate_cost,
-        )
-
-        return {
-            "success": True,
-            **_estimate_cost(
-                file_path,
-                material=material,
-                infill_pct=infill_pct,
-                wall_layers=wall_layers,
-                cost_per_kg=cost_per_kg if cost_per_kg > 0 else None,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Cost estimation failed: {exc}")
-
+# estimate_material_cost — moved to plugins/estimate_tools.py
 
 # check_print_readiness — moved to plugins/design_reasoning_tools.py
 
@@ -8629,56 +7717,7 @@ def compose_multicolor_3mf(
 # solve_template_constraints — moved to plugins/design_reasoning_tools.py
 
 
-# ---------------------------------------------------------------------------
-# Firmware update tools
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def firmware_status() -> dict:
-    """Check firmware updates on the default/connected printer (adapter-level, no name needed).
-
-    For fleet setups where you need to check a specific printer by name,
-    use ``check_firmware_status`` instead.  Returns a list of firmware
-    components (e.g. Klipper, Moonraker, OctoPrint) with current and
-    available versions, plus whether
-    an update is available.
-
-    Not all printer backends support firmware updates.  Bambu and
-    PrusaConnect printers will return an ``UNSUPPORTED`` error.
-    """
-    try:
-        adapter = _get_adapter()
-        if not adapter.capabilities.can_update_firmware:
-            return _error_dict(
-                "This printer backend does not support firmware updates.",
-                code="UNSUPPORTED",
-            )
-        status = adapter.get_firmware_status()
-        if status is None:
-            return _error_dict("Could not retrieve firmware status.", code="UNAVAILABLE")
-        return {
-            "success": True,
-            "busy": status.busy,
-            "updates_available": status.updates_available,
-            "components": [
-                {
-                    "name": c.name,
-                    "current_version": c.current_version,
-                    "remote_version": c.remote_version,
-                    "update_available": c.update_available,
-                    "rollback_version": c.rollback_version,
-                    "component_type": c.component_type,
-                    "channel": c.channel,
-                }
-                for c in status.components
-            ],
-        }
-    except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to get firmware status: {exc}. Check that the printer is online.")
-    except Exception as exc:
-        logger.exception("Unexpected error in firmware_status")
-        return _error_dict(f"Unexpected error in firmware_status: {exc}", code="INTERNAL_ERROR")
+# firmware_status — extracted to plugins/firmware_tools.py
 
 
 @mcp.tool()
@@ -9854,89 +8893,7 @@ def export_safety_profile(printer_model: str) -> dict:
 
 # validate_gcode_safe — moved to plugins/gcode_validation_tools.py
 
-# ---------------------------------------------------------------------------
-# Slicer profile tools
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool(name="list_slicer_profiles")
-def list_slicer_profiles_tool() -> dict:
-    """List all bundled slicer profiles for supported printers.
-
-    Returns profile IDs, display names, recommended slicer, and the
-    minimum license tier required for each.  Free-tier profiles can be
-    used by everyone; PRO profiles require a Kiln Pro license.
-
-    Use with ``get_slicer_profile`` to see full settings, or
-    ``slice_model`` with printer_id for auto-profile selection.
-    """
-    if err := _check_auth("slicer"):
-        return err
-    try:
-        ids = list_slicer_profiles()
-        profiles = []
-        for pid in ids:
-            try:
-                p = get_slicer_profile(pid)
-                profiles.append(
-                    {
-                        "id": p.id,
-                        "display_name": p.display_name,
-                        "slicer": p.slicer,
-                        "tier": p.tier,
-                    }
-                )
-            except KeyError:
-                continue
-        return {"success": True, "count": len(profiles), "profiles": profiles}
-    except Exception as exc:
-        logger.exception("Unexpected error in list_slicer_profiles_tool")
-        return _error_dict(f"Unexpected error in list_slicer_profiles_tool: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool(name="get_slicer_profile")
-def get_slicer_profile_tool(printer_id: str) -> dict:
-    """Get the full bundled slicer profile for a printer model.
-
-    Returns all INI settings (layer height, speeds, temps, retraction, etc.)
-    and the recommended slicer.  Free-tier profiles (default, ender3,
-    prusa_mk3s, klipper_generic) are available to all users.  Premium
-    profiles require a Kiln Pro license.
-
-    Args:
-        printer_id: Printer model identifier (e.g. ``"ender3"``,
-            ``"bambu_x1c"``).
-    """
-    if err := _check_auth("slicer"):
-        return err
-    try:
-        profile = get_slicer_profile(printer_id)
-
-        # Gate premium profiles behind PRO license
-        if profile.tier == "pro":
-            ok, message = check_tier(LicenseTier.PRO)
-            if not ok:
-                return {
-                    "success": False,
-                    "error": (
-                        f"The '{profile.display_name}' slicer profile requires a Kiln Pro license. "
-                        f"Free-tier profiles available: default, ender3, prusa_mk3s, klipper_generic. "
-                        f"Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
-                    ),
-                    "code": "LICENSE_REQUIRED",
-                    "required_tier": "pro",
-                    "upgrade_url": "https://kiln3d.com/pro",
-                }
-
-        return {"success": True, "profile": slicer_profile_to_dict(profile)}
-    except KeyError:
-        return _error_dict(
-            f"No slicer profile for '{printer_id}' and no default available.",
-            code="NOT_FOUND",
-        )
-    except Exception as exc:
-        logger.exception("Unexpected error in get_slicer_profile_tool")
-        return _error_dict(f"Unexpected error in get_slicer_profile_tool: {exc}", code="INTERNAL_ERROR")
+# list_slicer_profiles, get_slicer_profile — moved to plugins/slicer_tools.py
 
 
 # ---------------------------------------------------------------------------
@@ -10576,163 +9533,13 @@ def pipeline_retry_step(execution_id: str, step_index: int) -> dict:
 # delete_cached_model — extracted to plugins/cache_tools.py
 
 
-# ---------------------------------------------------------------------------
-# Database backup tool
-# ---------------------------------------------------------------------------
+# backup_database — moved to plugins/utility_tools.py
+# verify_audit_integrity — moved to plugins/utility_tools.py
 
+# list_trusted_printers, trust_printer, untrust_printer
+# — extracted to plugins/printer_management_tools.py
 
-@mcp.tool()
-def backup_database(
-    output_path: str | None = None,
-    redact: bool = True,
-) -> dict:
-    """Back up the Kiln database with optional credential redaction.
-
-    Creates a copy of the SQLite database.  By default, sensitive fields
-    (API keys, access codes, payment refs) are replaced with "REDACTED"
-    in the backup.
-
-    Args:
-        output_path: Destination file path.  Defaults to
-            ``~/.kiln/backups/kiln-YYYYMMDD-HHMMSS.db``.
-        redact: If ``True`` (default), redact credentials in the backup.
-    """
-    auth_err = _check_auth("admin")
-    if auth_err:
-        return auth_err
-    try:
-        db = get_db()
-        result_path = _backup_db(
-            db.path,
-            output_path,
-            redact_credentials=redact,
-        )
-        return {
-            "success": True,
-            "backup_path": result_path,
-            "redacted": redact,
-        }
-    except BackupError as exc:
-        return _error_dict(f"Failed to back up database: {exc}", code="BACKUP_ERROR")
-    except Exception as exc:
-        logger.exception("Unexpected error in backup_database")
-        return _error_dict(f"Unexpected error in backup_database: {exc}", code="INTERNAL_ERROR")
-
-
-# ---------------------------------------------------------------------------
-# Audit integrity verification tool
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def verify_audit_integrity() -> dict:
-    """Verify HMAC signatures on all safety audit log entries.
-
-    Checks each audit log row against its stored HMAC signature to
-    detect tampering.  Returns counts of valid, invalid, and total
-    entries along with an overall integrity status.
-    """
-    auth_err = _check_auth("admin")
-    if auth_err:
-        return auth_err
-    try:
-        db = get_db()
-        result = db.verify_audit_log()
-        return {
-            "success": True,
-            **result,
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in verify_audit_integrity")
-        return _error_dict(f"Unexpected error in verify_audit_integrity: {exc}", code="INTERNAL_ERROR")
-
-
-# ---------------------------------------------------------------------------
-# Trusted printers whitelist tools
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def list_trusted_printers() -> dict:
-    """Return the list of trusted printer hostnames/IPs.
-
-    Trusted printers are used to flag discovered printers that have been
-    explicitly approved by the user, preventing spoofed-printer attacks.
-    """
-    if err := _check_auth("config"):
-        return err
-    try:
-        from kiln.cli.config import get_trusted_printers
-
-        trusted = get_trusted_printers()
-        return {"success": True, "trusted_printers": trusted, "count": len(trusted)}
-    except Exception as exc:
-        logger.exception("Unexpected error in list_trusted_printers")
-        return _error_dict(f"Unexpected error in list_trusted_printers: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def trust_printer(host: str) -> dict:
-    """Add a printer hostname/IP to the trusted whitelist.
-
-    Trusted printers are flagged during network discovery.  Connecting
-    to an untrusted printer should raise a warning.
-
-    Args:
-        host: The hostname or IP address to trust.
-    """
-    if err := _check_auth("config"):
-        return err
-    try:
-        from kiln.cli.config import add_trusted_printer
-
-        add_trusted_printer(host)
-        return {"success": True, "host": host}
-    except ValueError as exc:
-        return _error_dict(f"Failed to trust printer: {exc}", code="VALIDATION_ERROR")
-    except Exception as exc:
-        logger.exception("Unexpected error in trust_printer")
-        return _error_dict(f"Unexpected error in trust_printer: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def untrust_printer(host: str) -> dict:
-    """Remove a printer hostname/IP from the trusted whitelist.
-
-    Args:
-        host: The hostname or IP address to untrust.
-    """
-    if err := _check_auth("config"):
-        return err
-    try:
-        from kiln.cli.config import remove_trusted_printer
-
-        remove_trusted_printer(host)
-        return {"success": True, "host": host}
-    except ValueError as exc:
-        return _error_dict(f"Failed to untrust printer: {exc}", code="NOT_FOUND")
-    except Exception as exc:
-        logger.exception("Unexpected error in untrust_printer")
-        return _error_dict(f"Unexpected error in untrust_printer: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def get_skill_manifest() -> dict:
-    """Get the Kiln skill manifest for agent self-discovery.
-
-    Returns a machine-readable description of Kiln's capabilities,
-    configuration requirements, available interfaces, and setup
-    instructions.  Use this when first connecting to understand what
-    Kiln can do and what configuration is needed.
-    """
-    try:
-        from kiln.skill_manifest import generate_manifest
-
-        manifest = generate_manifest()
-        return {"success": True, "data": manifest.to_dict()}
-    except Exception as exc:
-        logger.exception("Unexpected error in get_skill_manifest")
-        return _error_dict(f"Failed to generate manifest: {exc}", code="INTERNAL_ERROR")
+# get_skill_manifest — moved to plugins/utility_tools.py
 
 
 # ---------------------------------------------------------------------------
@@ -12683,50 +11490,7 @@ def stop_printer_health_monitoring(printer_name: str) -> dict:
         return _error_dict(f"Failed to stop health monitoring: {exc}", code="MONITORING_ERROR")
 
 
-@mcp.tool()
-def estimate_print_progress(
-    printer_name: str,
-    *,
-    elapsed_seconds: float | None = None,
-    total_layers: int | None = None,
-    current_layer: int | None = None,
-) -> dict:
-    """Estimate print progress with phase-aware time prediction.
-
-    Breaks a print into phases -- preparing, printing, cooling, and
-    post-processing -- and uses historical data from the print outcomes
-    database to estimate time remaining.  Typically more accurate than
-    raw firmware estimates for predicting true completion time.
-
-    Supply ``elapsed_seconds``, ``total_layers``, and ``current_layer``
-    when available; any omitted values will be read from the printer's
-    live status.
-
-    :param printer_name: Printer running the job.
-    :param elapsed_seconds: Seconds elapsed since print start.  Omit to
-        read from printer status.
-    :param total_layers: Total layer count for the job.  Omit to read
-        from printer/G-code metadata.
-    :param current_layer: Current layer being printed.  Omit to read
-        from printer status.
-
-    See also: ``printer_status()``, ``get_print_outcomes()``.
-    """
-    try:
-        from kiln.progress import get_progress_estimator
-
-        estimator = get_progress_estimator()
-        estimate = estimator.estimate(
-            printer_name=printer_name,
-            elapsed_seconds=elapsed_seconds,
-            total_layers=total_layers,
-            current_layer=current_layer,
-        )
-        return {"success": True, "progress": estimate.to_dict()}
-    except Exception as exc:
-        logger.exception("Error in estimate_print_progress")
-        return _error_dict(f"Failed to estimate print progress: {exc}", code="PROGRESS_ERROR")
-
+# estimate_print_progress — moved to plugins/estimate_tools.py
 
 # route_print_job, fleet_submit_job, fleet_job_status, fleet_utilization
 # — extracted to plugins/fleet_tools.py
@@ -12760,61 +11524,8 @@ def analyze_print_snapshot(file_path: str) -> dict:
         return _error_dict(f"Failed to analyze snapshot: {exc}", code="SNAPSHOT_ERROR")
 
 
-@mcp.tool()
-def acquire_printer_lock(
-    printer_name: str,
-    *,
-    holder: str = "agent",
-    timeout_seconds: float = 30.0,
-) -> dict:
-    """Acquire an exclusive lock on a printer for safe concurrent access.
-
-    Prevents multiple agents from controlling the same printer simultaneously.
-
-    Args:
-        printer_name: Printer to lock.
-        holder: Identifier of the lock holder.
-        timeout_seconds: Maximum time to wait for the lock.
-    """
-    if err := _check_auth("write"):
-        return err
-
-    try:
-        from kiln.state_lock import get_state_lock_manager
-
-        mgr = get_state_lock_manager()
-        acquired = mgr.acquire(printer_name, holder=holder, timeout=timeout_seconds)
-        if not acquired:
-            return _error_dict(
-                f"Could not acquire lock on {printer_name!r} within {timeout_seconds}s",
-                code="LOCK_TIMEOUT",
-            )
-        return {"success": True, "printer": printer_name, "holder": holder, "locked": True}
-    except Exception as exc:
-        logger.exception("Error in acquire_printer_lock")
-        return _error_dict(f"Failed to acquire printer lock: {exc}", code="LOCK_ERROR")
-
-
-@mcp.tool()
-def release_printer_lock(printer_name: str, *, holder: str = "agent") -> dict:
-    """Release an exclusive lock on a printer.
-
-    Args:
-        printer_name: Printer to unlock.
-        holder: Identifier of the lock holder (must match acquire).
-    """
-    if err := _check_auth("write"):
-        return err
-
-    try:
-        from kiln.state_lock import get_state_lock_manager
-
-        mgr = get_state_lock_manager()
-        released = mgr.release(printer_name, holder=holder)
-        return {"success": True, "printer": printer_name, "released": released}
-    except Exception as exc:
-        logger.exception("Error in release_printer_lock")
-        return _error_dict(f"Failed to release printer lock: {exc}", code="LOCK_ERROR")
+# acquire_printer_lock, release_printer_lock
+# — extracted to plugins/printer_management_tools.py
 
 
 @mcp.tool()
@@ -12846,81 +11557,8 @@ def get_fulfillment_quote_cached(
         return _error_dict(f"Failed to get cached quote: {exc}", code="QUOTE_CACHE_ERROR")
 
 
-@mcp.tool()
-def check_firmware_status(printer_name: str) -> dict:
-    """Check firmware version for a specific printer by name (fleet-level, firmware manager).
-
-    Use this in multi-printer setups. For single-printer setups where you
-    don't need to specify a name, use ``firmware_status`` instead.
-
-    Args:
-        printer_name: Printer to check.
-    """
-    try:
-        from kiln.firmware import get_firmware_manager
-
-        mgr = get_firmware_manager()
-        info = mgr.check_version(printer_name)
-        return {"success": True, "firmware": info.to_dict()}
-    except Exception as exc:
-        logger.exception("Error in check_firmware_status")
-        return _error_dict(f"Failed to check firmware status: {exc}", code="FIRMWARE_ERROR")
-
-
-@mcp.tool()
-def update_printer_firmware(
-    printer_name: str,
-    *,
-    target_version: str | None = None,
-) -> dict:
-    """Start a firmware update on a specific printer by name (fleet-level, supports version pinning).
-
-    Use this in multi-printer setups. For single-printer setups, use ``update_firmware`` instead.
-
-    Args:
-        printer_name: Printer to update.
-        target_version: Specific version to update to (latest if None).
-    """
-    if err := _check_auth("firmware"):
-        return err
-
-    try:
-        from kiln.firmware import get_firmware_manager
-
-        mgr = get_firmware_manager()
-        result = mgr.update_firmware(printer_name, target_version=target_version)
-        return {"success": True, "update": result.to_dict()}
-    except Exception as exc:
-        logger.exception("Error in update_printer_firmware")
-        return _error_dict(f"Failed to update printer firmware: {exc}", code="FIRMWARE_ERROR")
-
-
-@mcp.tool()
-def rollback_printer_firmware(
-    printer_name: str,
-    *,
-    target_version: str | None = None,
-) -> dict:
-    """Rollback firmware on a specific printer by name (fleet-level, supports version pinning).
-
-    Use this in multi-printer setups. For single-printer setups, use ``rollback_firmware`` instead.
-
-    Args:
-        printer_name: Printer to rollback.
-        target_version: Specific version to rollback to.
-    """
-    if err := _check_auth("firmware"):
-        return err
-
-    try:
-        from kiln.firmware import get_firmware_manager
-
-        mgr = get_firmware_manager()
-        result = mgr.rollback_firmware(printer_name, target_version=target_version)
-        return {"success": True, "rollback": result.to_dict()}
-    except Exception as exc:
-        logger.exception("Error in rollback_printer_firmware")
-        return _error_dict(f"Failed to rollback printer firmware: {exc}", code="FIRMWARE_ERROR")
+# check_firmware_status, update_printer_firmware, rollback_printer_firmware
+# — extracted to plugins/firmware_tools.py
 
 
 # ---------------------------------------------------------------------------
