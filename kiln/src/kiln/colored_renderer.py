@@ -594,7 +594,14 @@ def render_colored_mesh(
         for _, _, f, _, _ in face_data
     ]
     contrast = (max(_pixel_lums) - min(_pixel_lums)) if _pixel_lums else 0.0
-    quality = len(unique_colors) * 50.0 + contrast * 0.5
+    # Quality = color diversity (dominant) + contrast (tiebreaker).
+    # A view showing 3 colors is always better than one showing 1 color
+    # with high contrast, because multicolor preview exists to show
+    # color placement.  The 100:1 weighting ensures color count drives
+    # ranking while contrast only breaks ties within the same count.
+    _COLOR_WEIGHT = 100.0
+    _CONTRAST_WEIGHT = 1.0
+    quality = len(unique_colors) * _COLOR_WEIGHT + contrast * _CONTRAST_WEIGHT
 
     return RenderResult(
         path=output_path,
