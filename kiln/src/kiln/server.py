@@ -10405,7 +10405,7 @@ def smart_generate_from_template(
     try:
         # Step 1: Generate from template
         gen_result = generate_from_template(template_id, parameters)
-        if gen_result.get("status") == "error" or not gen_result.get("success"):
+        if not gen_result.get("success"):
             return gen_result  # Pass through error
 
         stl_path = gen_result.get("result", {}).get("local_path", "")
@@ -16430,7 +16430,7 @@ def smart_reprint(
         if auto_ams:
             try:
                 ams_result = ams_status()
-                if ams_result.get("status") == "success":
+                if ams_result.get("success"):
                     mat_lower = material_id.lower()
                     # Map common material IDs to AMS tray_type strings
                     mat_aliases: dict[str, list[str]] = {
@@ -16779,7 +16779,7 @@ def multi_material_print(
         if auto_ams:
             try:
                 ams_result = ams_status()
-                if ams_result.get("status") == "success":
+                if ams_result.get("success"):
                     mat_type_map = {
                         "pla": ["PLA"], "pla_plus": ["PLA", "PLA+"],
                         "pla_matte": ["PLA"], "pla_tough": ["PLA"],
@@ -17040,7 +17040,7 @@ def multi_color_copies(
             # Auto-detect mode: query AMS for loaded trays
             try:
                 ams_result = ams_status()
-                if ams_result.get("status") != "success":
+                if not ams_result.get("success"):
                     return _error_dict(
                         "Could not query AMS status. Specify ams_slots manually.",
                         code="AMS_ERROR",
