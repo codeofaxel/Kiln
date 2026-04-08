@@ -323,7 +323,7 @@ class _GenerationToolsPlugin:
                     min_printability_score=min_printability_score,
                 )
                 return {
-                    "status": "success",
+                    "success": True,
                     "passed": result.passed,
                     "result": result.to_dict(),
                     "message": result.summary,

@@ -149,7 +149,7 @@ class _DecorationLibraryPlugin:
             from kiln.decoration_library import _decoration_dir
 
             return {
-                "status": "success",
+                "success": True,
                 "decoration": decoration.to_dict(),
                 "path": str(_decoration_dir(decoration.slug)),
             }
@@ -174,7 +174,7 @@ class _DecorationLibraryPlugin:
 
             decorations = _list(content_type=content_type, tag=tag)
             return {
-                "status": "success",
+                "success": True,
                 "count": len(decorations),
                 "decorations": [d.to_dict() for d in decorations],
             }
@@ -215,12 +215,12 @@ class _DecorationLibraryPlugin:
             )
 
             if not os.path.isfile(model_path):
-                return {"status": "error", "error": f"Model not found: {model_path}"}
+                return {"success": False, "error": f"Model not found: {model_path}"}
 
             decoration = _get(name)
             if decoration is None:
                 return {
-                    "status": "error",
+                    "success": False,
                     "error": f"Decoration not found: {name!r}. Use list_decorations to see available.",
                 }
 
@@ -256,7 +256,7 @@ class _DecorationLibraryPlugin:
                     content = decoration.content_data
                 else:
                     return {
-                        "status": "error",
+                        "success": False,
                         "error": (
                             f"No content file found for decoration {name!r}. "
                             "The content file may have been deleted from the library."
@@ -280,7 +280,7 @@ class _DecorationLibraryPlugin:
             except Exception as exc:
                 _logger.debug("decorate_surface failed: %s", exc)
                 return {
-                    "status": "error",
+                    "success": False,
                     "error": f"Failed to apply decoration: {exc}",
                 }
 
@@ -313,12 +313,12 @@ class _DecorationLibraryPlugin:
             decoration = _get(name)
             if decoration is None:
                 return {
-                    "status": "error",
+                    "success": False,
                     "error": f"Decoration not found: {name!r}. Use list_decorations to see available.",
                 }
 
             info = decoration.to_dict()
-            info["status"] = "success"
+            info["success"] = True
             info["content_path"] = get_content_file_path(decoration) or ""
             info["source_path"] = get_source_file_path(decoration) or ""
             info["library_path"] = str(_decoration_dir(decoration.slug))

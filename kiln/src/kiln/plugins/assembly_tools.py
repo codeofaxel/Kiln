@@ -55,10 +55,10 @@ class _AssemblyToolsPlugin:
                 from kiln.assembly import create_assembly as _create
 
                 assembly = _create(name)
-                return {"status": "success", "data": assembly.to_dict()}
+                return {"success": True, "data": assembly.to_dict()}
             except Exception as exc:
                 _logger.exception("Unexpected error in create_assembly")
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def add_assembly_part(
@@ -99,12 +99,12 @@ class _AssemblyToolsPlugin:
                     role=role,
                 )
                 assembly.parts.append(part)
-                return {"status": "success", "data": assembly.to_dict()}
+                return {"success": True, "data": assembly.to_dict()}
             except json.JSONDecodeError as exc:
-                return {"status": "error", "error": f"Invalid assembly JSON: {exc}"}
+                return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
             except Exception as exc:
                 _logger.exception("Unexpected error in add_assembly_part")
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def add_assembly_interface(
@@ -137,12 +137,12 @@ class _AssemblyToolsPlugin:
                     clearance_mm=clearance_mm,
                 )
                 assembly.interfaces.append(interface)
-                return {"status": "success", "data": assembly.to_dict()}
+                return {"success": True, "data": assembly.to_dict()}
             except json.JSONDecodeError as exc:
-                return {"status": "error", "error": f"Invalid assembly JSON: {exc}"}
+                return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
             except Exception as exc:
                 _logger.exception("Unexpected error in add_assembly_interface")
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def validate_assembly(assembly_json: str) -> dict:
@@ -160,12 +160,12 @@ class _AssemblyToolsPlugin:
 
                 assembly = Assembly.from_dict(json.loads(assembly_json))
                 validated = _validate(assembly)
-                return {"status": "success", "data": validated.to_dict()}
+                return {"success": True, "data": validated.to_dict()}
             except json.JSONDecodeError as exc:
-                return {"status": "error", "error": f"Invalid assembly JSON: {exc}"}
+                return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
             except Exception as exc:
                 _logger.exception("Unexpected error in validate_assembly")
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def check_assembly_clearances(
@@ -191,14 +191,14 @@ class _AssemblyToolsPlugin:
                     default_clearance_mm=default_clearance_mm,
                 )
                 return {
-                    "status": "success",
+                    "success": True,
                     "data": [c.to_dict() for c in checks],
                 }
             except json.JSONDecodeError as exc:
-                return {"status": "error", "error": f"Invalid assembly JSON: {exc}"}
+                return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
             except Exception as exc:
                 _logger.exception("Unexpected error in check_assembly_clearances")
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def compose_assembly_parts(
@@ -219,12 +219,12 @@ class _AssemblyToolsPlugin:
 
                 assembly = Assembly.from_dict(json.loads(assembly_json))
                 result = compose_assembly(assembly, output_path)
-                return {"status": "success", "data": result}
+                return {"success": True, "data": result}
             except json.JSONDecodeError as exc:
-                return {"status": "error", "error": f"Invalid assembly JSON: {exc}"}
+                return {"success": False, "error": f"Invalid assembly JSON: {exc}"}
             except Exception as exc:
                 _logger.exception("Unexpected error in compose_assembly_parts")
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def get_joint_recommendation(
@@ -251,10 +251,10 @@ class _AssemblyToolsPlugin:
                     material_a,
                     material_b,
                 )
-                return {"status": "success", "data": result}
+                return {"success": True, "data": result}
             except Exception as exc:
                 _logger.exception("Unexpected error in get_joint_recommendation")
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         _logger.debug("Registered assembly tools")
 
