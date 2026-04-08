@@ -100,7 +100,7 @@ class TestGenerationToolsPlugin:
             max_attempts=2,
         )
 
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["message"] == session.summary
         assert result["provider_used"] == "gemini"
         assert result["best_readiness_score"] == 94

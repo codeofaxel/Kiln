@@ -2271,7 +2271,7 @@ class TestGetSpeedProfile:
         mock_get_adapter.return_value = adapter
 
         result = get_speed_profile()
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["level"] == 2
         assert result["name"] == "standard"
         assert result["speed_magnitude"] == 100
@@ -2327,7 +2327,7 @@ class TestGetBedMesh:
         mock_get_adapter.return_value = adapter
 
         result = get_bed_mesh()
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["probed_matrix"] == [[0.1, 0.2], [0.0, -0.1]]
         assert result["variance"] == 0.05
 
@@ -2379,7 +2379,7 @@ class TestGetFilamentStatus:
         mock_get_adapter.return_value = adapter
 
         result = get_filament_status()
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["detected"] is True
         assert result["sensor_enabled"] is True
 
@@ -2432,7 +2432,7 @@ class TestGetToolPosition:
         mock_get_adapter.return_value = adapter
 
         result = get_tool_position()
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["position"]["x"] == 120.5
         assert result["position"]["y"] == 80.3
         assert result["position"]["z"] == 0.2
@@ -2460,7 +2460,7 @@ class TestGetToolPosition:
         mock_get_adapter.return_value = adapter
 
         result = get_tool_position()
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["position"]["e"] == 5.2
 
     @patch("kiln.server._get_adapter")
@@ -2502,7 +2502,7 @@ class TestWrapGcodeAs3mf:
             bed_temp=60,
             filament_type="PLA",
         )
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["output_path"] == "/tmp/output.3mf"
         assert result["gcode_path"] == "/tmp/test.gcode"
         assert result["filament_type"] == "PLA"
@@ -2575,7 +2575,7 @@ class TestWrapGcodeAs3mf:
             gcode_path="/tmp/test.gcode",
             source_3mf_path="/tmp/source.3mf",
         )
-        assert result["status"] == "success"
+        assert result["success"] is True
         adapter.wrap_gcode_as_3mf.assert_called_once_with(
             "/tmp/test.gcode",
             hotend_temp=220,
@@ -2812,14 +2812,14 @@ class TestRotateModel:
     def test_rotate_stl_z_axis(self, tmp_path):
         stl = self._make_stl(str(tmp_path / "model.stl"))
         result = rotate_model(input_path=stl, rotation_z=45.0)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert os.path.isfile(result["output_path"])
         assert result["rotations_applied"]["z"] == 45.0
 
     def test_rotate_3mf_z_axis(self, tmp_path):
         threemf = self._make_3mf(str(tmp_path / "model.3mf"))
         result = rotate_model(input_path=threemf, rotation_z=90.0)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert os.path.isfile(result["output_path"])
         assert result["rotations_applied"]["z"] == 90.0
 
@@ -2838,21 +2838,21 @@ class TestRotateModel:
     def test_rotate_default_output_path(self, tmp_path):
         stl = self._make_stl(str(tmp_path / "my_part.stl"))
         result = rotate_model(input_path=stl, rotation_z=10.0)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert "_rotated" in result["output_path"]
         assert result["output_path"].endswith(".stl")
 
     def test_rotate_3mf_default_output_path(self, tmp_path):
         threemf = self._make_3mf(str(tmp_path / "my_part.3mf"))
         result = rotate_model(input_path=threemf, rotation_z=10.0)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert "_rotated" in result["output_path"]
         assert result["output_path"].endswith(".3mf")
 
     def test_rotate_zero_degrees(self, tmp_path):
         stl = self._make_stl(str(tmp_path / "model.stl"))
         result = rotate_model(input_path=stl)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert os.path.isfile(result["output_path"])
         assert result["rotations_applied"] == {"x": 0.0, "y": 0.0, "z": 0.0}
 
@@ -2860,7 +2860,7 @@ class TestRotateModel:
         stl = self._make_stl(str(tmp_path / "model.stl"))
         out = str(tmp_path / "custom_out.stl")
         result = rotate_model(input_path=stl, rotation_z=90.0, output_path=out)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["output_path"] == out
         assert os.path.isfile(out)
 
