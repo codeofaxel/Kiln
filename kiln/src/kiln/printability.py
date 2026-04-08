@@ -16,6 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from kiln import _vec
 from kiln.generation.validation import _parse_obj, _parse_stl
 
 # ---------------------------------------------------------------------------
@@ -306,28 +307,16 @@ _MATERIAL_SHRINKAGE_STRAIN: dict[str, float] = {
 # ---------------------------------------------------------------------------
 
 
+_normalize = _vec.normalize
+
+
 def _triangle_normal(
     v1: tuple[float, ...],
     v2: tuple[float, ...],
     v3: tuple[float, ...],
 ) -> tuple[float, float, float]:
-    """Compute the normal vector of a triangle via cross product."""
-    # Edge vectors
-    e1 = (v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2])
-    e2 = (v3[0] - v1[0], v3[1] - v1[1], v3[2] - v1[2])
-    # Cross product
-    nx = e1[1] * e2[2] - e1[2] * e2[1]
-    ny = e1[2] * e2[0] - e1[0] * e2[2]
-    nz = e1[0] * e2[1] - e1[1] * e2[0]
-    return (nx, ny, nz)
-
-
-def _normalize(v: tuple[float, float, float]) -> tuple[float, float, float]:
-    """Normalize a 3D vector to unit length."""
-    length = math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2)
-    if length < 1e-12:
-        return (0.0, 0.0, 0.0)
-    return (v[0] / length, v[1] / length, v[2] / length)
+    """Compute the (unnormalized) normal vector of a triangle via cross product."""
+    return _vec.cross(_vec.sub(v2, v1), _vec.sub(v3, v1))
 
 
 def _triangle_area(

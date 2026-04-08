@@ -13,44 +13,13 @@ import math
 from pathlib import Path
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# Vector helpers
-# ---------------------------------------------------------------------------
-
-def _vec_sub(a: tuple[float, ...], b: tuple[float, ...]) -> tuple[float, float, float]:
-    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
-
-
-def _vec_add(a: tuple[float, ...], b: tuple[float, ...]) -> tuple[float, float, float]:
-    return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
-
-
-def _vec_scale(v: tuple[float, ...], s: float) -> tuple[float, float, float]:
-    return (v[0] * s, v[1] * s, v[2] * s)
-
-
-def _vec_dot(a: tuple[float, ...], b: tuple[float, ...]) -> float:
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-
-
-def _vec_cross(a: tuple[float, ...], b: tuple[float, ...]) -> tuple[float, float, float]:
-    return (
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    )
-
-
-def _vec_length(v: tuple[float, ...]) -> float:
-    return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
-
-
-def _vec_normalize(v: tuple[float, ...]) -> tuple[float, float, float]:
-    length = _vec_length(v)
-    if length < 1e-12:
-        return (0.0, 0.0, 0.0)
-    return (v[0] / length, v[1] / length, v[2] / length)
-
+from kiln._vec import add as _vec_add
+from kiln._vec import cross as _vec_cross
+from kiln._vec import dot as _vec_dot
+from kiln._vec import length as _vec_length
+from kiln._vec import normalize as _vec_normalize
+from kiln._vec import scale as _vec_scale
+from kiln._vec import sub as _vec_sub
 
 # ---------------------------------------------------------------------------
 # STL parsing — delegates to generation.validation (single source of truth)

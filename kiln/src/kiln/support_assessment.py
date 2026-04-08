@@ -78,21 +78,24 @@ def _load_profiles() -> dict[str, Any]:
     return _PROFILES
 
 
+MATERIAL_ALIASES: dict[str, str] = {
+    "pla+": "pla",
+    "pla-cf": "pla",
+    "petg-cf": "petg",
+    "asa": "abs",
+    "tpe": "tpu",
+    "nylon": "pa",
+    "pa-cf": "pa",
+    "polycarbonate": "pc",
+}
+"""Canonical material alias mapping shared across Kiln modules."""
+
+
 def _get_profile(material: str) -> dict[str, Any]:
     """Get the support profile for a material, falling back to defaults."""
     profiles = _load_profiles()
     key = material.lower().strip()
-    # Alias mapping
-    aliases: dict[str, str] = {
-        "pla+": "pla",
-        "pla-cf": "pla",
-        "petg-cf": "petg",
-        "tpe": "tpu",
-        "nylon": "pa",
-        "pa-cf": "pa",
-        "polycarbonate": "pc",
-    }
-    key = aliases.get(key, key)
+    key = MATERIAL_ALIASES.get(key, key)
     return profiles.get(key, _DEFAULT_PROFILE)
 
 

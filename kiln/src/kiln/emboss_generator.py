@@ -21,6 +21,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kiln import _vec
+
 _logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -134,27 +136,10 @@ def get_default_depth(material: str) -> float:
 # Internal helpers — face orientation
 # ---------------------------------------------------------------------------
 
-def _vec_length(v: list[float]) -> float:
-    return math.sqrt(sum(c * c for c in v))
-
-
-def _normalize(v: list[float]) -> list[float]:
-    length = _vec_length(v)
-    if length < 1e-12:
-        return [0.0, 0.0, 1.0]
-    return [c / length for c in v]
-
-
-def _dot(a: list[float], b: list[float]) -> float:
-    return sum(ai * bi for ai, bi in zip(a, b, strict=True))
-
-
-def _cross(a: list[float], b: list[float]) -> list[float]:
-    return [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
+_vec_length = _vec.length
+_normalize = _vec.normalize  # type: ignore[assignment]
+_dot = _vec.dot  # type: ignore[assignment]
+_cross = _vec.cross  # type: ignore[assignment]
 
 
 def _rotation_for_normal(normal: list[float]) -> str:
