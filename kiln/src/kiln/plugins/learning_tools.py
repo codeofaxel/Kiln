@@ -180,10 +180,13 @@ def record_print_outcome(
                 "created_at": time.time(),
             }
         )
-        # Telemetry: count completed print
+        # Telemetry: count completed print + print hours
         try:
-            from kiln.daily_stats import record_event
+            from kiln.daily_stats import record_event, record_print_hours
             record_event("prints")
+            # Try to get print time from the job record
+            if job_record and job_record.get("print_time_seconds"):
+                record_print_hours(job_record["print_time_seconds"] / 3600.0)
         except Exception:
             pass
 

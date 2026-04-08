@@ -115,6 +115,14 @@ class _SlicerToolsPlugin:
                                     validation["warnings"]
                                 )
 
+                # Telemetry: count slice with profile detail
+                try:
+                    from kiln.daily_stats import record_event
+                    _profile_name = effective_printer_id or os.path.basename(effective_profile or "unknown")
+                    record_event("slices", detail=_profile_name)
+                except Exception:
+                    pass
+
                 return response
             except SlicerNotFoundError as exc:
                 return _srv._error_dict(
