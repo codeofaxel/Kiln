@@ -253,16 +253,7 @@ from kiln.printers import (
 )
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
-from kiln.safety_profiles import (
-    add_community_profile,
-    get_profile,
-    list_profiles,
-    profile_to_dict,
-    validate_safety_profile,
-)
-from kiln.safety_profiles import (
-    export_profile as _export_profile,
-)
+from kiln.safety_profiles import export_profile as _export_profile
 from kiln.scheduler import JobScheduler
 from kiln.slicer_profiles import (
     get_slicer_profile,
@@ -4302,42 +4293,7 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
 
 # validate_gcode — moved to plugins/gcode_validation_tools.py
 
-# ---------------------------------------------------------------------------
-# Safety audit tool
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def safety_audit(
-    action: str | None = None,
-    tool_name: str | None = None,
-    limit: int = 25,
-) -> dict:
-    """Query the safety audit log.
-
-    Returns a record of all safety-relevant operations: tool executions,
-    blocked attempts, rate-limit violations, and preflight failures.
-
-    Args:
-        action: Filter by action type.  Options: ``"executed"``,
-            ``"blocked"``, ``"rate_limited"``, ``"auth_denied"``,
-            ``"preflight_failed"``, ``"dry_run"``.  Omit for all.
-        tool_name: Filter by MCP tool name (e.g. ``"send_gcode"``).
-        limit: Maximum number of records to return (default 25, max 100).
-    """
-    limit = min(max(1, limit), 100)
-    try:
-        db = get_db()
-        entries = db.query_audit(action=action, tool_name=tool_name, limit=limit)
-        summary = db.audit_summary()
-        return {
-            "success": True,
-            "entries": entries,
-            "summary": summary,
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in safety_audit")
-        return _error_dict(f"Unexpected error in safety_audit: {exc}", code="INTERNAL_ERROR")
+# safety_audit — moved to plugins/safety_tools.py
 
 
 @mcp.tool()
@@ -4430,94 +4386,7 @@ def confirm_action(token: str) -> dict:
         _CONFIRM_MODE = saved
 
 
-# ---------------------------------------------------------------------------
-# Safety dashboard tool
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def safety_status() -> dict:
-    """Get a comprehensive snapshot of all active safety measures.
-
-    Returns a single summary showing: the active safety profile, temperature
-    limits, rate-limit configuration, recent blocked actions, authentication
-    status, and confirmation-mode status.  Use this to answer "is my printer
-    safe right now?" in a single call.
-    """
-    try:
-        # Active safety profile
-        profile_info: dict[str, Any] = {"printer_model": _PRINTER_MODEL or "not configured"}
-        max_tool, max_bed = _get_temp_limits()
-        profile_info["max_hotend_temp"] = max_tool
-        profile_info["max_bed_temp"] = max_bed
-        if _PRINTER_MODEL:
-            try:
-                profile = get_profile(_PRINTER_MODEL)
-                profile_info["profile_id"] = profile.id
-                profile_info["display_name"] = profile.display_name
-                profile_info["max_feedrate"] = profile.max_feedrate
-                if profile.build_volume:
-                    profile_info["build_volume"] = profile.build_volume
-            except KeyError:
-                profile_info["profile_id"] = "default (no specific profile found)"
-
-        # Rate limit configuration
-        rate_limits = {}
-        for tool_name, (interval_ms, per_min) in _TOOL_RATE_LIMITS.items():
-            rate_limits[tool_name] = f"{interval_ms}ms cooldown, {per_min}/min"
-
-        # Confirm-level tools (from tool_safety.json)
-        confirm_tools = sorted(
-            name for name, meta in _TOOL_SAFETY.items() if meta.get("level") in ("confirm", "emergency")
-        )
-
-        # Auth status
-        auth_info = {
-            "enabled": _get_auth().enabled if hasattr(_get_auth(), "enabled") else False,
-        }
-
-        # Confirm mode
-        confirm_mode = os.environ.get("KILN_CONFIRM_MODE", "").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-
-        # Recent blocked actions (from audit log)
-        recent_blocked: list[dict[str, Any]] = []
-        try:
-            db = get_db()
-            summary = db.audit_summary(window_seconds=3600.0)
-            recent_blocked = summary.get("recent_blocked", [])
-        except Exception as exc:
-            logger.debug("Failed to fetch audit summary for safety status: %s", exc)
-
-        # G-code blocked command list
-        from kiln.gcode import _BLOCKED_COMMANDS  # noqa: E402
-
-        blocked_gcode_commands = sorted(_BLOCKED_COMMANDS.keys())
-
-        return {
-            "success": True,
-            "safety_profile": profile_info,
-            "temperature_limits": {"max_hotend": max_tool, "max_bed": max_bed},
-            "rate_limits": rate_limits,
-            "confirm_level_tools": confirm_tools,
-            "auth": auth_info,
-            "confirm_mode_enabled": confirm_mode,
-            "blocked_gcode_commands": blocked_gcode_commands,
-            "recent_blocked_actions": recent_blocked,
-            "summary": (
-                f"Safety profile: {profile_info.get('display_name', _PRINTER_MODEL or 'default')}. "
-                f"Temp limits: {max_tool}°C hotend / {max_bed}°C bed. "
-                f"{len(rate_limits)} rate-limited tools. "
-                f"{len(confirm_tools)} confirm-level tools. "
-                f"{len(recent_blocked)} blocked action(s) in last hour."
-            ),
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in safety_status")
-        return _error_dict(f"Unexpected error in safety_status: {exc}", code="INTERNAL_ERROR")
+# safety_status — moved to plugins/safety_tools.py
 
 
 # ---------------------------------------------------------------------------
@@ -5375,53 +5244,7 @@ def restart_server() -> dict:
     }
 
 
-@mcp.tool()
-def safety_settings() -> dict:
-    """Show current safety and auto-print settings.
-
-    Displays whether auto-print is enabled for marketplace downloads
-    and AI-generated models, along with guidance on how to change them.
-    Call this early in a session to understand what safety protections
-    are active.
-    """
-    return {
-        "success": True,
-        "auto_print_marketplace": {
-            "enabled": _AUTO_PRINT_MARKETPLACE,
-            "env_var": "KILN_AUTO_PRINT_MARKETPLACE",
-            "risk_level": "moderate",
-            "description": (
-                "When enabled, marketplace models are auto-printed after "
-                "download+upload. When disabled (default), models are "
-                "uploaded but require explicit start_print call."
-            ),
-        },
-        "auto_print_generated": {
-            "enabled": _AUTO_PRINT_GENERATED,
-            "env_var": "KILN_AUTO_PRINT_GENERATED",
-            "risk_level": "high",
-            "description": (
-                "When enabled, AI-generated models are auto-printed after "
-                "generation+validation+slicing+upload. When disabled "
-                "(default), models are uploaded but require explicit "
-                "start_print call. Higher risk than marketplace models."
-            ),
-        },
-        "recommendations": [
-            "Prefer downloading proven community models over generating new ones.",
-            "Always validate meshes before printing (validate_generated_mesh).",
-            "Review model dimensions against your printer's build volume.",
-            "Keep auto-print disabled unless you understand the risks.",
-            "AI model generation is experimental — generated geometry may "
-            "have thin walls, non-manifold faces, or impossible overhangs.",
-        ],
-        "how_to_change": (
-            "Set environment variables before starting the MCP server:\n"
-            "  export KILN_AUTO_PRINT_MARKETPLACE=true   # moderate risk\n"
-            "  export KILN_AUTO_PRINT_GENERATED=true     # higher risk\n"
-            "Or run 'kiln setup' to configure interactively."
-        ),
-    }
+# safety_settings — moved to plugins/safety_tools.py
 
 
 @mcp.tool()
@@ -7689,171 +7512,7 @@ def analyze_print_failure(job_id: str) -> dict:
         return _error_dict(f"Unexpected error in analyze_print_failure: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
-def validate_print_quality(
-    job_id: str | None = None,
-    printer_name: str | None = None,
-    save_snapshot: str | None = None,
-) -> dict:
-    """Validate print quality after a completed print job.
-
-    Captures a webcam snapshot (if available), examines the job record and
-    events, and produces a quality assessment with recommendations.
-
-    Args:
-        job_id: The completed job's ID.  If omitted, uses the most recent
-            completed job.
-        printer_name: Target printer name (omit for default printer).
-        save_snapshot: Optional file path to save the post-print snapshot.
-
-    Returns a quality report with snapshot data, job metrics, and any
-    detected issues.
-    """
-    try:
-        import base64
-
-        # Resolve the job
-        target_job = None
-        if job_id:
-            try:
-                target_job = _get_queue().get_job(job_id)
-            except JobNotFoundError:
-                return _error_dict(f"Job {job_id!r} not found.", code="JOB_NOT_FOUND")
-        else:
-            # Find most recent completed job
-            recent = _get_queue().list_jobs(limit=20)
-            for j in recent:
-                if j.status == JobStatus.COMPLETED:
-                    target_job = j
-                    break
-            if target_job is None:
-                return _error_dict(
-                    "No completed jobs found. Provide a job_id explicitly.",
-                    code="NO_COMPLETED_JOB",
-                )
-
-        job_data = target_job.to_dict()
-
-        # Gather adapter for snapshot
-        if printer_name:
-            adapter = _get_registry().get(printer_name)
-        else:
-            try:
-                adapter = _get_adapter()
-            except RuntimeError:
-                adapter = None
-
-        # Capture snapshot
-        snapshot_info: dict[str, Any] = {"available": False}
-        if adapter is not None:
-            try:
-                image_data = adapter.get_snapshot()
-                if image_data is not None:
-                    snapshot_info = {
-                        "available": True,
-                        "size_bytes": len(image_data),
-                    }
-                    if save_snapshot:
-                        # Sanitise path — restrict to home dir or temp dir
-                        _safe = os.path.abspath(save_snapshot)
-                        _home = os.path.expanduser("~")
-                        _tmpdir = os.path.realpath(tempfile.gettempdir())
-                        if not (_safe.startswith(_home) or _safe.startswith(_tmpdir)):
-                            return _error_dict(
-                                "save_snapshot path must be under home directory or temp directory.",
-                                code="VALIDATION_ERROR",
-                            )
-                        os.makedirs(os.path.dirname(_safe) or ".", exist_ok=True)
-                        with open(_safe, "wb") as f:
-                            f.write(image_data)
-                        snapshot_info["saved_to"] = _safe
-                    else:
-                        snapshot_info["image_base64"] = base64.b64encode(image_data).decode("ascii")
-            except Exception as snap_exc:
-                snapshot_info = {"available": False, "error": str(snap_exc)}
-
-        # Gather related events
-        all_events = _get_event_bus().recent_events(limit=200)
-        job_events = [e.to_dict() for e in all_events if e.data.get("job_id") == target_job.id]
-
-        # Analyse quality indicators
-        issues: list[str] = []
-        metrics: dict[str, Any] = {}
-        recommendations: list[str] = []
-
-        # Duration analysis
-        if target_job.elapsed_seconds is not None:
-            metrics["print_duration_seconds"] = target_job.elapsed_seconds
-            metrics["print_duration_hours"] = round(target_job.elapsed_seconds / 3600, 2)
-
-        # Check for retries (may indicate intermittent problems)
-        retry_events = [e for e in job_events if e.get("data", {}).get("retry")]
-        if retry_events:
-            issues.append(f"Job required {len(retry_events)} retry attempt(s) before completing")
-            recommendations.append(
-                "Retries during a print may indicate connectivity or mechanical issues. "
-                "Inspect the print closely for layer shifts or gaps."
-            )
-
-        # Check progress consistency
-        progress_events = [e for e in job_events if e.get("type") in ("print.progress", "job.progress")]
-        if progress_events:
-            completions = [e.get("data", {}).get("completion", 0) for e in progress_events]
-            # Detect non-monotonic progress (resets may indicate issues)
-            for i in range(1, len(completions)):
-                if completions[i] < completions[i - 1] - 5:
-                    issues.append(
-                        f"Progress dropped from {completions[i - 1]:.0f}% to "
-                        f"{completions[i]:.0f}% — possible restart or error recovery"
-                    )
-                    break
-
-        # Snapshot-based hints (we can't do actual vision analysis here,
-        # but we can note the snapshot is available for the agent to inspect)
-        if snapshot_info.get("available"):
-            recommendations.append(
-                "A post-print snapshot was captured. Visually inspect it for: "
-                "stringing, layer shifts, warping, incomplete layers, or "
-                "spaghetti-like extrusion failures."
-            )
-        else:
-            recommendations.append(
-                "No webcam available for visual inspection. Consider adding a camera for automated quality checks."
-            )
-
-        # Overall quality grade
-        if not issues:
-            grade = "PASS"
-            summary = "Print completed successfully with no detected issues."
-        elif len(issues) <= 2:
-            grade = "WARNING"
-            summary = "Print completed but with potential quality concerns."
-        else:
-            grade = "REVIEW"
-            summary = "Print completed with multiple issues detected. Manual inspection recommended."
-
-        return {
-            "success": True,
-            "job": job_data,
-            "quality": {
-                "grade": grade,
-                "summary": summary,
-                "issues": issues,
-                "recommendations": recommendations,
-                "metrics": metrics,
-            },
-            "snapshot": snapshot_info,
-            "related_events": job_events[-10:],
-        }
-
-    except PrinterNotFoundError:
-        return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
-    except (PrinterError, RuntimeError) as exc:
-        return _error_dict(f"Failed to validate print quality: {exc}. Check that the printer is online.")
-    except Exception as exc:
-        logger.exception("Unexpected error in validate_print_quality")
-        return _error_dict(f"Unexpected error in validate_print_quality: {exc}", code="INTERNAL_ERROR")
-
+# validate_print_quality — moved to plugins/gcode_validation_tools.py
 
 @mcp.resource("kiln://status")
 def resource_status() -> str:
@@ -12174,110 +11833,7 @@ def first_layer_status(monitor_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------------------
-# Safety profile tools
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def list_safety_profiles() -> dict:
-    """List all available printer safety profiles.
-
-    Returns a list of profile IDs and display names from the bundled
-    safety database.  Use with ``get_safety_profile`` to inspect limits
-    for a specific printer, or ``validate_gcode_safe`` to validate
-    commands against a printer's limits.
-    """
-    if err := _check_auth("safety"):
-        return err
-    try:
-        ids = list_profiles()
-        profiles = []
-        for pid in ids:
-            try:
-                p = get_profile(pid)
-                profiles.append(
-                    {
-                        "id": p.id,
-                        "display_name": p.display_name,
-                        "max_hotend_temp": p.max_hotend_temp,
-                        "max_bed_temp": p.max_bed_temp,
-                    }
-                )
-            except KeyError:
-                continue
-        return {"success": True, "count": len(profiles), "profiles": profiles}
-    except Exception as exc:
-        logger.exception("Unexpected error in list_safety_profiles")
-        return _error_dict(f"Unexpected error in list_safety_profiles: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def get_safety_profile(printer_id: str) -> dict:
-    """Get the full safety profile for a specific printer model.
-
-    Returns temperature limits, feedrate limits, volumetric flow,
-    build volume, and safety notes.  Falls back to the default
-    profile if the printer_id is not found.
-
-    Args:
-        printer_id: Printer model identifier (e.g. ``"ender3"``,
-            ``"bambu_x1c"``, ``"prusa_mk4"``).
-    """
-    if err := _check_auth("safety"):
-        return err
-    try:
-        profile = get_profile(printer_id)
-        return {"success": True, "profile": profile_to_dict(profile)}
-    except KeyError:
-        return _error_dict(
-            f"No safety profile for '{printer_id}' and no default available.",
-            code="NOT_FOUND",
-        )
-    except Exception as exc:
-        logger.exception("Unexpected error in get_safety_profile")
-        return _error_dict(f"Unexpected error in get_safety_profile: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.BUSINESS)
-def add_safety_profile(printer_model: str, profile: dict) -> dict:
-    """Add a community safety profile for a printer model.
-
-    Validates the profile and saves it to the user-local community
-    profiles file (``~/.kiln/community_profiles.json``).  Community
-    profiles take precedence over bundled profiles, allowing users to
-    contribute limits for printers not in the built-in database.
-
-    Args:
-        printer_model: Short identifier for the printer (e.g.
-            ``"my_custom_corexy"``).
-        profile: Dict containing at least ``max_hotend_temp``,
-            ``max_bed_temp``, ``max_feedrate``, and ``build_volume``
-            (a list of 3 positive numbers ``[X, Y, Z]``).  Optional
-            fields: ``display_name``, ``max_chamber_temp``, ``min_safe_z``,
-            ``max_volumetric_flow``, ``notes``.
-    """
-    if err := _check_auth("safety"):
-        return err
-    try:
-        errors = validate_safety_profile(profile)
-        if errors:
-            return _error_dict(
-                f"Validation failed: {'; '.join(errors)}",
-                code="VALIDATION_ERROR",
-            )
-        add_community_profile(printer_model, profile)
-        return {
-            "success": True,
-            "printer_model": printer_model.lower().replace("-", "_").strip(),
-            "message": "Community safety profile saved successfully.",
-        }
-    except ValueError as exc:
-        return _error_dict(f"Failed to add safety profile: {exc}", code="VALIDATION_ERROR")
-    except Exception as exc:
-        logger.exception("Unexpected error in add_safety_profile")
-        return _error_dict(f"Unexpected error in add_safety_profile: {exc}", code="INTERNAL_ERROR")
+# list_safety_profiles, get_safety_profile, add_safety_profile — moved to plugins/safety_tools.py
 
 
 @mcp.tool()
@@ -12307,49 +11863,7 @@ def export_safety_profile(printer_model: str) -> dict:
         return _error_dict(f"Unexpected error in export_safety_profile: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
-def validate_gcode_safe(
-    commands: str,
-    printer_id: str = "",
-) -> dict:
-    """Validate G-code with printer-specific safety limits (PTFE temp caps, speed limits).
-
-    Preferred over ``validate_gcode`` when you know the target printer — uses
-    that printer's safety profile for accurate limits.  Without a printer_id,
-    falls back to conservative generic defaults.
-
-    Args:
-        commands: G-code commands separated by newlines.
-        printer_id: Optional printer model ID for profile-aware validation.
-    """
-    if err := _check_auth("gcode"):
-        return err
-    try:
-        if printer_id:
-            result = validate_gcode_for_printer(commands, printer_id)
-            profile = get_profile(printer_id)
-            profile_info = {
-                "id": profile.id,
-                "display_name": profile.display_name,
-            }
-        else:
-            result = _validate_gcode_impl(commands)
-            profile_info = {"id": "default", "display_name": "Generic defaults"}
-
-        return {
-            "success": True,
-            "valid": result.valid,
-            "profile": profile_info,
-            "commands_accepted": len(result.commands),
-            "commands_blocked": len(result.blocked_commands),
-            "warnings": result.warnings,
-            "errors": result.errors,
-            "blocked_commands": result.blocked_commands,
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in validate_gcode_safe")
-        return _error_dict(f"Unexpected error in validate_gcode_safe: {exc}", code="INTERNAL_ERROR")
-
+# validate_gcode_safe — moved to plugins/gcode_validation_tools.py
 
 # ---------------------------------------------------------------------------
 # Slicer profile tools
