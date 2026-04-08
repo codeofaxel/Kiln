@@ -14,6 +14,11 @@ import tempfile
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from kiln._vec import Vec3 as _Vec3
+from kiln._vec import dot as _dot
+from kiln._vec import face_normal as _face_normal
+from kiln._vec import normalize as _normalize
+
 if TYPE_CHECKING:
     from kiln.threemf_parser import ColoredTriangle
 
@@ -87,45 +92,10 @@ class RenderResult:
         }
 
 
-# ---------------------------------------------------------------------------
-# Pure-math vector helpers (no numpy)
-# ---------------------------------------------------------------------------
 
-_Vec3 = tuple[float, float, float]
-
-
-def _sub(a: _Vec3, b: _Vec3) -> _Vec3:
-    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
-
-
-def _cross(a: _Vec3, b: _Vec3) -> _Vec3:
-    return (
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    )
-
-
-def _dot(a: _Vec3, b: _Vec3) -> float:
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-
-
-def _length(v: _Vec3) -> float:
-    return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
-
-
-def _normalize(v: _Vec3) -> _Vec3:
-    ln = _length(v)
-    if ln < 1e-12:
-        return (0.0, 0.0, 0.0)
-    return (v[0] / ln, v[1] / ln, v[2] / ln)
-
-
-def _face_normal(v0: _Vec3, v1: _Vec3, v2: _Vec3) -> _Vec3:
-    """Compute the unit normal of a triangle."""
-    edge1 = _sub(v1, v0)
-    edge2 = _sub(v2, v0)
-    return _normalize(_cross(edge1, edge2))
+def _luminance(color: tuple[int, ...]) -> float:
+    """Perceived luminance (ITU-R BT.601) from an RGB tuple."""
+    return (color[0] * 299 + color[1] * 587 + color[2] * 114) / 1000
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +414,7 @@ def render_colored_mesh(
 
         # Lighting uses SMOOTH normal for gradual shading on curves
         smooth_normal = _smooth_normals[i]
-        face_lum = (tri.color[0] * 299 + tri.color[1] * 587 + tri.color[2] * 114) / 1000
+        face_lum = _luminance(tri.color)
         brightness = _compute_brightness(smooth_normal, light_cam, face_luminance=face_lum)
         lit_color = _apply_brightness(tri.color, brightness)
         # Neutral dark outline for color boundaries — a fixed dark gray
@@ -559,9 +529,9 @@ def render_colored_mesh(
             continue  # interior edge, skip
         # Silhouette edge — compute adaptive brightness.
         # Dark faces get a strong contour, bright faces get none.
-        face_lum = (fills[0][0] * 299 + fills[0][1] * 587 + fills[0][2] * 114) / 1000
+        face_lum = _luminance(fills[0])
         # Only draw contour if face is darker than the background
-        bg_lum = (bg_r * 299 + bg_g * 587 + bg_b * 114) / 1000
+        bg_lum = _luminance((bg_r, bg_g, bg_b))
         if face_lum > bg_lum + 30:
             continue  # bright face — already has contrast, skip
         # Strength: max for very dark faces, fading as face approaches bg
@@ -589,10 +559,7 @@ def render_colored_mesh(
     # distinct colors (informative) with decent contrast (readable).
     # color_diversity dominates so isometric (3+ colors visible) beats
     # a single-face view even if that face has extreme contrast.
-    _pixel_lums = [
-        (f[0] * 299 + f[1] * 587 + f[2] * 114) / 1000
-        for _, _, f, _, _ in face_data
-    ]
+    _pixel_lums = [_luminance(f) for _, _, f, _, _ in face_data]
     contrast = (max(_pixel_lums) - min(_pixel_lums)) if _pixel_lums else 0.0
     # Quality = color diversity (dominant) + contrast (tiebreaker).
     # A view showing 3 colors is always better than one showing 1 color
@@ -665,10 +632,7 @@ def render_colored_mesh_multi_angle(
     # all angles.  Triggers when ≥25% of faces are very dark (lum < 40),
     # not just the average — so a gold+obsidian pyramid still triggers
     # while a mostly-bright model with one dark face doesn't.
-    _face_lums = sorted(
-        (tri.color[0] * 299 + tri.color[1] * 587 + tri.color[2] * 114) / 1000
-        for tri in triangles
-    )
+    _face_lums = sorted(_luminance(tri.color) for tri in triangles)
     _q25_idx = max(0, len(_face_lums) // 4)  # 25th percentile
     is_dark_material = _face_lums[_q25_idx] < 40 if _face_lums else False
 

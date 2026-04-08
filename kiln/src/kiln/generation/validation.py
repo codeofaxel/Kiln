@@ -324,6 +324,37 @@ def _parse_stl_ascii(
     return triangles, list(vertex_set)
 
 
+def _compute_bounding_box(
+    vertices: list[tuple[float, ...]],
+) -> dict[str, Any] | None:
+    """Compute axis-aligned bounding box from a list of vertex tuples.
+
+    Returns a dict with min/max per axis and dimension sizes, or ``None``
+    if *vertices* is empty.
+    """
+    if not vertices:
+        return None
+    xs = [v[0] for v in vertices]
+    ys = [v[1] for v in vertices]
+    zs = [v[2] for v in vertices]
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+    z_min, z_max = min(zs), max(zs)
+    return {
+        "x_min": round(x_min, 3),
+        "x_max": round(x_max, 3),
+        "y_min": round(y_min, 3),
+        "y_max": round(y_max, 3),
+        "z_min": round(z_min, 3),
+        "z_max": round(z_max, 3),
+        "dimensions_mm": {
+            "x": round(x_max - x_min, 2),
+            "y": round(y_max - y_min, 2),
+            "z": round(z_max - z_min, 2),
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # OBJ parsing
 # ---------------------------------------------------------------------------

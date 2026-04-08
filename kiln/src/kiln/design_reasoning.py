@@ -167,80 +167,24 @@ class DesignImprovementPlan:
 def _parse_stl_for_analysis(
     file_path: str,
 ) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
-    """Parse STL and return (triangles, vertices).
+    """Parse STL and return (triangles, unique_vertices).
 
-    Each triangle is ((v0x,v0y,v0z), (v1x,v1y,v1z), (v2x,v2y,v2z)).
-    Vertices is a flat list of all vertex positions.
+    Each triangle is ``((v0x,v0y,v0z), (v1x,v1y,v1z), (v2x,v2y,v2z))``.
+    Vertices is a deduplicated list of all vertex positions.
+
+    Delegates to the canonical STL parser in
+    :mod:`kiln.generation.validation`.
     """
+    from kiln.generation.validation import _parse_stl
+
     path = Path(file_path)
     if not path.is_file():
         raise ValueError(f"File not found: {file_path}")
 
-    data = path.read_bytes()
-
-    # Detect ASCII vs binary
-    if data[:5] == b"solid" and b"\n" in data[:80]:
-        # Could be ASCII — check for "facet" keyword
-        try:
-            text = data.decode("ascii", errors="ignore")
-            if "facet" in text.lower():
-                return _parse_stl_ascii_analysis(text)
-        except Exception:
-            pass
-
-    return _parse_stl_binary_analysis(data)
-
-
-def _parse_stl_binary_analysis(
-    data: bytes,
-) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
-    """Parse binary STL for analysis."""
-    if len(data) < 84:
+    errors: list[str] = []
+    triangles, vertices = _parse_stl(path, errors)
+    if errors:
         return [], []
-
-    n_tris = struct.unpack_from("<I", data, 80)[0]
-    triangles: list[tuple[tuple[float, ...], ...]] = []
-    vertices: list[tuple[float, ...]] = []
-    offset = 84
-
-    for _ in range(n_tris):
-        if offset + 50 > len(data):
-            break
-        # Skip normal (12 bytes), read 3 vertices (36 bytes), skip attr (2 bytes)
-        v0 = struct.unpack_from("<3f", data, offset + 12)
-        v1 = struct.unpack_from("<3f", data, offset + 24)
-        v2 = struct.unpack_from("<3f", data, offset + 36)
-        triangles.append((v0, v1, v2))
-        vertices.extend([v0, v1, v2])
-        offset += 50
-
-    return triangles, vertices
-
-
-def _parse_stl_ascii_analysis(
-    text: str,
-) -> tuple[list[tuple[tuple[float, ...], ...]], list[tuple[float, ...]]]:
-    """Parse ASCII STL for analysis."""
-    import re
-
-    triangles: list[tuple[tuple[float, ...], ...]] = []
-    vertices: list[tuple[float, ...]] = []
-
-    vertex_pattern = re.compile(
-        r"vertex\s+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
-        r"\s+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
-        r"\s+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
-    )
-
-    current_tri_verts: list[tuple[float, ...]] = []
-    for match in vertex_pattern.finditer(text):
-        v = (float(match.group(1)), float(match.group(2)), float(match.group(3)))
-        current_tri_verts.append(v)
-        vertices.append(v)
-        if len(current_tri_verts) == 3:
-            triangles.append(tuple(current_tri_verts))  # type: ignore[arg-type]
-            current_tri_verts = []
-
     return triangles, vertices
 
 

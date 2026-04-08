@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kiln.support_assessment import MATERIAL_ALIASES as _MATERIAL_ALIASES
+
 _logger = logging.getLogger(__name__)
 
 _SUPPORTED_FORMATS = {".stl", ".3mf", ".obj", ".step", ".stp", ".glb"}
@@ -149,79 +151,35 @@ def _sanitize_summary_detail(detail: str) -> str:
 
 
 def _inline_stl_analysis(file_path: str) -> dict[str, Any]:
-    """Parse binary STL to extract triangle count and bounding box.
+    """Extract triangle count, bounding box, and dimensions from an STL.
 
-    Uses only the standard library.  Falls back gracefully on ASCII STL
-    or malformed files.
+    Delegates to the canonical STL parser in
+    :mod:`kiln.generation.validation` rather than maintaining a separate
+    binary/ASCII parser.
     """
+    from kiln.generation.validation import (
+        _compute_bounding_box,
+        _parse_stl,
+    )
+
     path = Path(file_path)
-    size = path.stat().st_size
-    result: dict[str, Any] = {}
+    if not path.is_file():
+        return {"error": f"File not found: {file_path}"}
 
-    with open(path, "rb") as fh:
-        header = fh.read(_STL_HEADER_SIZE)
-        if size < _STL_HEADER_SIZE + 4:
-            return {"error": "File too small for valid STL"}
+    errors: list[str] = []
+    triangles, vertices = _parse_stl(path, errors)
+    if errors:
+        return {"error": "; ".join(errors)}
 
-        # Detect ASCII STL early: header starts with "solid" AND the file size
-        # doesn't match what a binary STL with that many triangles would be.
-        # This must happen before any binary float parsing to avoid garbage.
-        if header[:5] == b"solid":
-            count_bytes = fh.read(4)
-            tri_count_candidate = struct.unpack("<I", count_bytes)[0]
-            expected_candidate = _STL_HEADER_SIZE + 4 + tri_count_candidate * _STL_TRIANGLE_SIZE
-            if expected_candidate != size:
-                # ASCII STL — count facets by line scan, skip binary bbox parse
-                fh.seek(0)
-                content = fh.read().decode("ascii", errors="ignore")
-                result["triangle_count"] = content.lower().count("facet normal")
-                return result
-            # Sizes match: treat as binary, count bytes already consumed above
-            tri_count = tri_count_candidate
-        else:
-            count_bytes = fh.read(4)
-            tri_count = struct.unpack("<I", count_bytes)[0]
+    result: dict[str, Any] = {"triangle_count": len(triangles)}
 
-        result["triangle_count"] = tri_count
-
-        expected = _STL_HEADER_SIZE + 4 + tri_count * _STL_TRIANGLE_SIZE
-        if size < expected:
-            # Unexpected size mismatch — skip bbox rather than parse garbage
-            tri_count = 0
-
-        # Bounding box from binary STL vertices
-        if tri_count > 0:
-            x_min = y_min = z_min = float("inf")
-            x_max = y_max = z_max = float("-inf")
-            for _ in range(min(tri_count, 500_000)):
-                data = fh.read(_STL_TRIANGLE_SIZE)
-                if len(data) < _STL_TRIANGLE_SIZE:
-                    break
-                # Skip normal (3 floats), read 3 vertices (9 floats)
-                verts = struct.unpack_from("<9f", data, 12)
-                for i in range(3):
-                    x, y, z = verts[i * 3], verts[i * 3 + 1], verts[i * 3 + 2]
-                    x_min, x_max = min(x_min, x), max(x_max, x)
-                    y_min, y_max = min(y_min, y), max(y_max, y)
-                    z_min, z_max = min(z_min, z), max(z_max, z)
-
-            if x_min != float("inf"):
-                result["bounding_box"] = {
-                    "x_min": round(x_min, 3),
-                    "x_max": round(x_max, 3),
-                    "y_min": round(y_min, 3),
-                    "y_max": round(y_max, 3),
-                    "z_min": round(z_min, 3),
-                    "z_max": round(z_max, 3),
-                }
-                result["dimensions_mm"] = {
-                    "x": round(x_max - x_min, 2),
-                    "y": round(y_max - y_min, 2),
-                    "z": round(z_max - z_min, 2),
-                }
-                # Approximate volume from bounding box (upper bound)
-                vol = (x_max - x_min) * (y_max - y_min) * (z_max - z_min)
-                result["bounding_box_volume_cm3"] = round(vol / 1000.0, 2)
+    bbox = _compute_bounding_box(vertices)
+    if bbox:
+        dims = bbox.pop("dimensions_mm")
+        result["bounding_box"] = bbox
+        result["dimensions_mm"] = dims
+        vol = dims["x"] * dims["y"] * dims["z"]
+        result["bounding_box_volume_cm3"] = round(vol / 1000.0, 2)
 
     return result
 
@@ -418,15 +376,6 @@ def _auto_scale_if_needed(
 # ---------------------------------------------------------------------------
 # Material-specific checks
 # ---------------------------------------------------------------------------
-
-_MATERIAL_ALIASES: dict[str, str] = {
-    "pla+": "pla",
-    "petg": "petg",
-    "abs": "abs",
-    "asa": "abs",  # ABS/ASA share warping behaviour
-    "tpu": "tpu",
-    "tpe": "tpu",
-}
 
 
 def _run_material_check(
