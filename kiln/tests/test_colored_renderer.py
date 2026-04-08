@@ -229,8 +229,11 @@ class TestRenderMultiAngle:
             supersample=1,
         )
         assert len(views) == 2
+        # Canonical order preserved (isometric first)
         assert views[0]["angle"] == "isometric"
         assert views[1]["angle"] == "top"
+        # Quality scores present as metadata
+        assert "quality_score" in views[0]
 
     def test_unknown_angle_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown camera angles"):

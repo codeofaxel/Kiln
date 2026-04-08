@@ -74,6 +74,7 @@ class RenderResult:
     height: int
     triangle_count: int
     face_colors_used: int
+    quality_score: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +83,7 @@ class RenderResult:
             "height": self.height,
             "triangle_count": self.triangle_count,
             "face_colors_used": self.face_colors_used,
+            "quality_score": round(self.quality_score, 1),
         }
 
 
@@ -583,12 +585,24 @@ def render_colored_mesh(
 
     img.save(output_path, "PNG")
 
+    # Compute render quality score.  Rewards views that show more
+    # distinct colors (informative) with decent contrast (readable).
+    # color_diversity dominates so isometric (3+ colors visible) beats
+    # a single-face view even if that face has extreme contrast.
+    _pixel_lums = [
+        (f[0] * 299 + f[1] * 587 + f[2] * 114) / 1000
+        for _, _, f, _, _ in face_data
+    ]
+    contrast = (max(_pixel_lums) - min(_pixel_lums)) if _pixel_lums else 0.0
+    quality = len(unique_colors) * 50.0 + contrast * 0.5
+
     return RenderResult(
         path=output_path,
         width=width,
         height=height,
         triangle_count=len(triangles),
         face_colors_used=len(unique_colors),
+        quality_score=quality,
     )
 
 
@@ -640,6 +654,27 @@ def render_colored_mesh_multi_angle(
         output_dir = _DEFAULT_RENDER_DIR
     os.makedirs(output_dir, mode=0o700, exist_ok=True)
 
+    # --- Adaptive background: detect mesh luminance ONCE, apply to
+    # all angles.  Triggers when ≥25% of faces are very dark (lum < 40),
+    # not just the average — so a gold+obsidian pyramid still triggers
+    # while a mostly-bright model with one dark face doesn't.
+    _face_lums = sorted(
+        (tri.color[0] * 299 + tri.color[1] * 587 + tri.color[2] * 114) / 1000
+        for tri in triangles
+    )
+    _q25_idx = max(0, len(_face_lums) // 4)  # 25th percentile
+    is_dark_material = _face_lums[_q25_idx] < 40 if _face_lums else False
+
+    if is_dark_material:
+        # Shift background lighter for dark meshes
+        bg = (
+            min(255, background[0] + 30),
+            min(255, background[1] + 30),
+            min(255, background[2] + 30),
+        )
+    else:
+        bg = background
+
     results: list[dict[str, Any]] = []
 
     for angle_name in angles:
@@ -653,7 +688,7 @@ def render_colored_mesh_multi_angle(
             height=height,
             elevation=preset["elevation"],
             azimuth=preset["azimuth"],
-            background=background,
+            background=bg,
             supersample=supersample,
         )
 
@@ -661,6 +696,16 @@ def render_colored_mesh_multi_angle(
             "angle": angle_name,
             "path": result.path,
             "description": preset["description"],
+            "quality_score": round(result.quality_score, 1),
         })
+
+    # Quality scores are metadata for the agent — it can mention the
+    # best angle or reorder if it wants.  Default order stays canonical
+    # (isometric first) because it's almost always the best overview.
+
+    # --- Dark material metadata flag for agent context
+    if is_dark_material:
+        for r in results:
+            r["dark_material"] = True
 
     return results
