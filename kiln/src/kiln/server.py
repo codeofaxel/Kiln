@@ -12223,6 +12223,14 @@ def decorate_surface(
             result_dict["provenance"] = _provenance_info
         if warnings:
             result_dict["warnings"] = warnings
+
+        # Telemetry: count decoration
+        try:
+            from kiln.daily_stats import record_event
+            record_event("decorations")
+        except Exception:
+            pass
+
         return result_dict
 
     except FileNotFoundError as exc:

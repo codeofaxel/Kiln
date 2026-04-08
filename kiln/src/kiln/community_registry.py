@@ -14,10 +14,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import asdict, dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_SUPABASE_URL = "https://nomzokpscfshjjzezplr.supabase.co"
+_SUPABASE_ANON_KEY = "sb_publishable_ZCJyEL0qeveSwgqv7dry3A_YI26Yw6S"
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +92,66 @@ _SHARING_SETTING_KEY = "community_sharing_enabled"
 
 
 # ---------------------------------------------------------------------------
+# Supabase community pull
+# ---------------------------------------------------------------------------
+
+
+def _fetch_supabase_community(
+    *,
+    geometric_signature: str | None = None,
+    material: str | None = None,
+    printer_model: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Pull community print records from Supabase.  Best-effort, never raises."""
+    if os.environ.get("KILN_TELEMETRY", "true").strip().lower() in ("false", "0", "no", "off"):
+        return []
+    try:
+        import urllib.request
+
+        params = []
+        if geometric_signature:
+            params.append(f"geometric_signature=eq.{geometric_signature}")
+        if material:
+            params.append(f"material=eq.{material}")
+        if printer_model:
+            params.append(f"printer_model=eq.{printer_model}")
+        params.append(f"limit={limit}")
+        params.append("select=geometric_signature,printer_model,material,settings_hash,settings,outcome,quality_grade,failure_mode,print_time_seconds,created_at")
+
+        url = f"{_SUPABASE_URL}/rest/v1/community_prints?{'&'.join(params)}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "apikey": _SUPABASE_ANON_KEY,
+                "Authorization": f"Bearer {_SUPABASE_ANON_KEY}",
+            },
+        )
+        # Anon key can't SELECT (RLS blocks it), use service key if available
+        secret = (
+            os.environ.get("KILN_SUPABASE_SECRET_KEY", "").strip()
+            or os.environ.get("KILN_SUPABASE_SERVICE_KEY", "").strip()
+            or os.environ.get("KILN_SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        )
+        if secret:
+            req.add_header("apikey", secret)
+            req.add_header("Authorization", f"Bearer {secret}")
+        else:
+            # No secret key — can't read community_prints (RLS blocks anon SELECT).
+            # This is fine for free users; they contribute but pull is pro-only.
+            return []
+
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            if resp.status == 200:
+                rows = json.loads(resp.read().decode("utf-8"))
+                if isinstance(rows, list):
+                    return rows
+    except Exception as exc:
+        logger.debug("Supabase community pull failed (non-fatal): %s", exc)
+    return []
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -138,6 +202,9 @@ def contribute_print(record: CommunityPrintRecord) -> None:
 def get_community_insight(geometric_signature: str) -> CommunityInsight | None:
     """Get aggregated community data for a geometric signature.
 
+    Merges local SQLite records with global Supabase community data
+    to provide the richest possible insight.
+
     :param geometric_signature: The geometric signature to look up.
     :returns: Aggregated insight or ``None`` if no data exists.
     """
@@ -145,35 +212,87 @@ def get_community_insight(geometric_signature: str) -> CommunityInsight | None:
 
     db = get_db()
 
-    rows = db._conn.execute(
+    local_rows = db._conn.execute(
         "SELECT * FROM community_prints WHERE geometric_signature = ?",
         (geometric_signature,),
     ).fetchall()
 
-    if not rows:
+    # Pull from Supabase for global community data
+    remote_rows = _fetch_supabase_community(geometric_signature=geometric_signature)
+
+    # Normalize local rows to dicts
+    records: list[dict[str, Any]] = []
+    for row in local_rows:
+        records.append(dict(row))
+    # Merge remote rows (deduplicate by settings_hash)
+    local_hashes = {r.get("settings_hash") for r in records}
+    for rr in remote_rows:
+        if rr.get("settings_hash") not in local_hashes:
+            records.append(rr)
+
+    if not records:
         return None
 
-    total = len(rows)
+    return _aggregate_records(geometric_signature, records)
+
+
+def get_community_insight_broad(
+    *,
+    material: str | None = None,
+    printer_model: str | None = None,
+) -> CommunityInsight | None:
+    """Get community insight filtered by material and/or printer model.
+
+    Queries Supabase for global community data matching the given
+    filters.  Useful for answering "how does PLA perform on Bambu A1
+    across all prints?" without needing a specific geometric signature.
+
+    :param material: Filter by material (e.g. ``"PLA"``).
+    :param printer_model: Filter by printer model (e.g. ``"Bambu A1"``).
+    :returns: Aggregated insight or ``None`` if no data exists.
+    """
+    if not material and not printer_model:
+        return None
+
+    remote_rows = _fetch_supabase_community(
+        material=material, printer_model=printer_model,
+    )
+    if not remote_rows:
+        return None
+
+    sig = f"{material or 'any'}:{printer_model or 'any'}"
+    return _aggregate_records(sig, remote_rows)
+
+
+def _aggregate_records(
+    signature: str, records: list[dict[str, Any]],
+) -> CommunityInsight:
+    """Aggregate a list of print record dicts into a CommunityInsight."""
+    total = len(records)
     success_count = 0
-    printer_stats: dict[str, dict[str, int]] = {}  # {model: {total, success}}
-    material_stats: dict[str, dict[str, int]] = {}  # {material: {total, success}}
+    printer_stats: dict[str, dict[str, int]] = {}
+    material_stats: dict[str, dict[str, int]] = {}
     failure_counts: dict[str, int] = {}
     total_time = 0
     all_settings: list[dict[str, Any]] = []
 
-    for row in rows:
-        row_dict = dict(row)
-        outcome = row_dict["outcome"]
-        printer = row_dict["printer_model"]
-        material = row_dict["material"]
+    for row_dict in records:
+        outcome = row_dict.get("outcome", "")
+        printer = row_dict.get("printer_model", "unknown")
+        material = row_dict.get("material", "unknown")
         failure = row_dict.get("failure_mode")
-        print_time = row_dict.get("print_time_seconds", 0)
+        print_time = row_dict.get("print_time_seconds") or 0
 
         if outcome == "success":
             success_count += 1
-            settings = json.loads(row_dict.get("settings") or "{}")
-            if settings:
-                all_settings.append(settings)
+            raw_settings = row_dict.get("settings")
+            if isinstance(raw_settings, str):
+                try:
+                    raw_settings = json.loads(raw_settings)
+                except (json.JSONDecodeError, ValueError):
+                    raw_settings = None
+            if isinstance(raw_settings, dict) and raw_settings:
+                all_settings.append(raw_settings)
 
         # Printer stats
         if printer not in printer_stats:
@@ -193,7 +312,9 @@ def get_community_insight(geometric_signature: str) -> CommunityInsight | None:
         if failure:
             failure_counts[failure] = failure_counts.get(failure, 0) + 1
 
-        total_time += print_time
+        import contextlib
+        with contextlib.suppress(ValueError, TypeError):
+            total_time += int(print_time)
 
     # Build top printer models
     top_printers = sorted(
@@ -251,7 +372,7 @@ def get_community_insight(geometric_signature: str) -> CommunityInsight | None:
         confidence = "high"
 
     return CommunityInsight(
-        geometric_signature=geometric_signature,
+        geometric_signature=signature,
         total_prints=total,
         success_rate=round(success_count / total, 4) if total else 0.0,
         top_printer_models=top_printers,
@@ -290,27 +411,41 @@ def _merge_settings(settings_list: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def get_community_stats() -> CommunityStats:
-    """Return overall community registry statistics."""
+    """Return overall community registry statistics (local + remote)."""
     from kiln.persistence import get_db
 
     db = get_db()
 
-    total = db._conn.execute("SELECT COUNT(*) FROM community_prints").fetchone()[0]
-    unique_models = db._conn.execute("SELECT COUNT(DISTINCT geometric_signature) FROM community_prints").fetchone()[0]
-    unique_printers = db._conn.execute("SELECT COUNT(DISTINCT printer_model) FROM community_prints").fetchone()[0]
-    unique_materials = db._conn.execute("SELECT COUNT(DISTINCT material) FROM community_prints").fetchone()[0]
-
-    success_count = db._conn.execute("SELECT COUNT(*) FROM community_prints WHERE outcome = 'success'").fetchone()[0]
-
+    local_total = db._conn.execute("SELECT COUNT(*) FROM community_prints").fetchone()[0]
+    local_models = db._conn.execute("SELECT COUNT(DISTINCT geometric_signature) FROM community_prints").fetchone()[0]
+    local_printers = db._conn.execute("SELECT COUNT(DISTINCT printer_model) FROM community_prints").fetchone()[0]
+    local_materials = db._conn.execute("SELECT COUNT(DISTINCT material) FROM community_prints").fetchone()[0]
+    local_success = db._conn.execute("SELECT COUNT(*) FROM community_prints WHERE outcome = 'success'").fetchone()[0]
     last_row = db._conn.execute("SELECT MAX(timestamp) FROM community_prints").fetchone()
     last_updated = last_row[0] if last_row and last_row[0] else 0.0
 
+    # Pull remote stats
+    remote_rows = _fetch_supabase_community(limit=500)
+    remote_sigs = set()
+    remote_printers = set()
+    remote_materials = set()
+    remote_success = 0
+    for r in remote_rows:
+        remote_sigs.add(r.get("geometric_signature", ""))
+        remote_printers.add(r.get("printer_model", ""))
+        remote_materials.add(r.get("material", ""))
+        if r.get("outcome") == "success":
+            remote_success += 1
+
+    total = local_total + len(remote_rows)
+    success = local_success + remote_success
+
     return CommunityStats(
         total_records=total,
-        unique_models=unique_models,
-        unique_printers=unique_printers,
-        unique_materials=unique_materials,
-        overall_success_rate=round(success_count / total, 4) if total else 0.0,
+        unique_models=local_models + len(remote_sigs),
+        unique_printers=local_printers + len(remote_printers),
+        unique_materials=local_materials + len(remote_materials),
+        overall_success_rate=round(success / total, 4) if total else 0.0,
         last_updated=last_updated,
     )
 

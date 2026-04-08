@@ -241,6 +241,14 @@ class _GenerationAIToolsPlugin:
                 }
                 if enrichment_info:
                     result_dict["design_intelligence"] = enrichment_info
+
+                # Telemetry: count generation
+                try:
+                    from kiln.daily_stats import record_event
+                    record_event("generations")
+                except Exception:
+                    pass
+
                 return result_dict
             except GenerationAuthError as exc:
                 return _srv._error_dict(
@@ -300,6 +308,14 @@ class _GenerationAIToolsPlugin:
             try:
                 gen = _srv._get_generation_provider(provider)
                 job = gen.generate("", format="stl", style=style, image_url=image_url)
+
+                # Telemetry: count generation
+                try:
+                    from kiln.daily_stats import record_event
+                    record_event("generations")
+                except Exception:
+                    pass
+
                 return {
                     "success": True,
                     "job": job.to_dict(),

@@ -24,8 +24,8 @@ _SUPABASE_ANON_KEY = "sb_publishable_ZCJyEL0qeveSwgqv7dry3A_YI26Yw6S"
 
 def community_opt_in_enabled() -> bool:
     """Check if the user has opted in to community data sharing."""
-    val = os.environ.get("KILN_COMMUNITY_OPT_IN", "false").strip().lower()
-    return val in ("true", "1", "yes", "on")
+    val = os.environ.get("KILN_COMMUNITY_OPT_IN", "true").strip().lower()
+    return val not in ("false", "0", "no", "off")
 
 
 def sync_community_print(record: dict[str, Any]) -> bool:

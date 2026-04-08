@@ -381,6 +381,13 @@ class _GenerationToolsPlugin:
             try:
                 gen = _srv._get_generation_provider("meshy")
                 job = gen.retexture(mesh_path, prompt, style=style)
+                # Telemetry: count texture
+                try:
+                    from kiln.daily_stats import record_event
+                    record_event("textures")
+                except Exception:
+                    pass
+
                 return {
                     "success": True,
                     "job": job.to_dict(),

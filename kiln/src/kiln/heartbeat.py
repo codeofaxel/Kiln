@@ -1,9 +1,9 @@
 """Anonymous daily usage heartbeat.
 
 Sends one row per install per day to Supabase: installation UUID, Kiln
-version, printer model.  No PII, no file paths, no user identity.
-Runs in a daemon thread on server startup — never blocks, never errors
-visibly, never delays anything.
+version, printer model, and daily event counts.  No PII, no file paths,
+no user identity.  Runs in a daemon thread on server startup — never
+blocks, never errors visibly, never delays anything.
 
 Disable with ``KILN_TELEMETRY=false`` in environment.
 """
@@ -59,12 +59,20 @@ def _get_printer_info() -> tuple[str | None, str | None, int]:
     printer_count = 0
     try:
         from kiln.registry import get_registry
+
         reg = get_registry()
         printer_count = reg.count
         adapter = reg.get("default")
         if adapter is not None:
-            info = adapter.get_printer_info()
-            model = getattr(info, "model", None) or getattr(info, "printer_model", None)
+            # Try get_printer_info first, fall back to env vars
+            try:
+                info = adapter.get_printer_info()
+                model = getattr(info, "model", None) or getattr(info, "printer_model", None)
+            except Exception:
+                pass
+            # Fall back to env var if model still unknown
+            if not model:
+                model = os.environ.get("KILN_PRINTER_MODEL", None)
             # Derive adapter type from class name
             cls_name = type(adapter).__name__.lower()
             if "bambu" in cls_name:
@@ -79,38 +87,27 @@ def _get_printer_info() -> tuple[str | None, str | None, int]:
                 adapter_type = cls_name.replace("adapter", "").strip("_") or None
     except Exception:
         pass
+    # Last resort: derive adapter type from env
+    if not adapter_type:
+        adapter_type = os.environ.get("KILN_PRINTER_TYPE", None)
     return model, adapter_type, printer_count
 
 
-def _get_daily_counts() -> tuple[int, int]:
-    """Best-effort count of prints and generations completed today."""
-    prints = 0
-    generations = 0
+def _get_daily_counts() -> dict[str, int]:
+    """Read today's event counters from daily_stats."""
     try:
-        import time
+        from kiln.daily_stats import get_daily_stats
 
-        from kiln.persistence import get_db
-        db = get_db()
-        today_start = time.mktime(date.today().timetuple())
-        outcomes = db.list_print_outcomes(limit=100)
-        prints = sum(1 for o in outcomes if o.get("created_at", 0) >= today_start)
-        # Generation count from job history if available
-        if hasattr(db, "list_jobs"):
-            jobs = db.list_jobs(limit=100)
-            generations = sum(
-                1 for j in jobs
-                if j.get("created_at", 0) >= today_start
-                and "generat" in (j.get("type") or "").lower()
-            )
+        return get_daily_stats()
     except Exception:
-        pass
-    return prints, generations
+        return {"prints": 0, "generations": 0, "decorations": 0, "textures": 0}
 
 
 def _is_pro_installed() -> bool:
     """Check if kiln-pro is installed."""
     try:
         import kiln_pro  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -118,7 +115,7 @@ def _is_pro_installed() -> bool:
 
 def _send_heartbeat() -> None:
     """Send a single heartbeat to Supabase."""
-    global _sent_today
+    global _sent_today  # noqa: PLW0603
 
     with _lock:
         if _sent_today or _already_sent_today():
@@ -137,12 +134,13 @@ def _send_heartbeat() -> None:
         kiln_version: str | None = None
         try:
             import kiln
+
             kiln_version = getattr(kiln, "__version__", None)
         except Exception:
             pass
 
         printer_model, adapter_type, printer_count = _get_printer_info()
-        prints_today, generations_today = _get_daily_counts()
+        stats = _get_daily_counts()
 
         rpc_url = f"{_SUPABASE_URL}/rest/v1/rpc/record_heartbeat"
         payload = json.dumps({
@@ -151,8 +149,10 @@ def _send_heartbeat() -> None:
             "p_printer_model": printer_model,
             "p_adapter_type": adapter_type,
             "p_printer_count": printer_count,
-            "p_prints_today": prints_today,
-            "p_generations_today": generations_today,
+            "p_prints_today": stats.get("prints", 0),
+            "p_generations_today": stats.get("generations", 0),
+            "p_decorations_today": stats.get("decorations", 0),
+            "p_textures_today": stats.get("textures", 0),
             "p_pro_installed": _is_pro_installed(),
             "p_os_platform": platform.system().lower(),
         }).encode()

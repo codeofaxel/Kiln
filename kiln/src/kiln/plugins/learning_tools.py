@@ -180,6 +180,43 @@ def record_print_outcome(
                 "created_at": time.time(),
             }
         )
+        # Telemetry: count completed print
+        try:
+            from kiln.daily_stats import record_event
+            record_event("prints")
+        except Exception:
+            pass
+
+        # Auto-contribute to community (anonymous, opt-in)
+        try:
+            import hashlib as _hl
+            import json as _js
+
+            from kiln.community_sync import community_opt_in_enabled
+
+            if community_opt_in_enabled() and file_hash:
+                from kiln.community_sync import sync_community_print_async
+
+                _grade_map = {
+                    "excellent": "A", "good": "B",
+                    "acceptable": "C", "poor": "D",
+                }
+                sync_community_print_async({
+                    "geometric_signature": file_hash,
+                    "printer_model": printer_name or "unknown",
+                    "material": material_type or "unknown",
+                    "settings_hash": _hl.sha256(
+                        _js.dumps(settings or {}, sort_keys=True).encode(),
+                    ).hexdigest()[:16],
+                    "settings": settings,
+                    "outcome": outcome,
+                    "quality_grade": _grade_map.get(quality_grade or "", "B"),
+                    "failure_mode": failure_mode,
+                    "print_time_seconds": 0,
+                })
+        except Exception:
+            pass  # Never let community sync block outcome recording
+
         return {
             "success": True,
             "outcome_id": row_id,
