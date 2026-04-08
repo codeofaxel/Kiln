@@ -861,26 +861,47 @@ def _svg_to_openscad_polygons(svg_content: str) -> str:
                     continue
 
         if len(pts) == 4:
-            # 4-point polygon from stroke-to-fill conversion.
-            # The original line endpoints are at midpoints of the two short edges.
-            # pts[0]-pts[3] is one short edge, pts[1]-pts[2] is the other.
-            p1x = (pts[0][0] + pts[3][0]) / 2
-            p1y = (pts[0][1] + pts[3][1]) / 2
-            p2x = (pts[1][0] + pts[2][0]) / 2
-            p2y = (pts[1][1] + pts[2][1]) / 2
-
-            # Stroke width = distance between pts[0] and pts[3]
+            # 4-point polygon — could be from stroke conversion or filled shape.
+            # Detect if it's a thin stroke-like shape (aspect ratio > 2:1) and
+            # use hull() pairs for clean corners, or emit raw polygon() if it's
+            # a compact shape (like a square accent mark).
             import math as _m
-            sw = _m.sqrt((pts[0][0] - pts[3][0])**2 + (pts[0][1] - pts[3][1])**2)
-            sw = max(sw, 1.0)  # minimum 1 unit
 
-            # Emit hull() pair — clean tapered stroke like coaster v4
-            poly_fragments.append(
-                f"hull() {{ translate([{p1x:.2f},{p1y:.2f}]) "
-                f"square([{sw:.2f},{sw:.2f}], center=true); "
-                f"translate([{p2x:.2f},{p2y:.2f}]) "
-                f"square([{sw:.2f},{sw:.2f}], center=true); }}"
-            )
+            # Compute all 4 edge lengths to find the two short and two long edges
+            edges = []
+            for i in range(4):
+                j = (i + 1) % 4
+                d = _m.sqrt((pts[i][0]-pts[j][0])**2 + (pts[i][1]-pts[j][1])**2)
+                edges.append((d, i, j))
+            edges.sort(key=lambda e: e[0])
+
+            short1, short2 = edges[0][0], edges[1][0]
+            long1 = edges[2][0]
+
+            if long1 > short1 * 2 and short1 > 0.5:
+                # Stroke-like shape — use hull() for clean tapered corners.
+                # Short edges connect the stroke endpoints; midpoints of
+                # short edges are the original line endpoints.
+                si, sj = edges[0][1], edges[0][2]
+                p1x = (pts[si][0] + pts[sj][0]) / 2
+                p1y = (pts[si][1] + pts[sj][1]) / 2
+
+                si2, sj2 = edges[1][1], edges[1][2]
+                p2x = (pts[si2][0] + pts[sj2][0]) / 2
+                p2y = (pts[si2][1] + pts[sj2][1]) / 2
+
+                sw = max(short1, short2, 1.0)
+
+                poly_fragments.append(
+                    f"hull() {{ translate([{p1x:.2f},{p1y:.2f}]) "
+                    f"square([{sw:.2f},{sw:.2f}], center=true); "
+                    f"translate([{p2x:.2f},{p2y:.2f}]) "
+                    f"square([{sw:.2f},{sw:.2f}], center=true); }}"
+                )
+            else:
+                # Compact shape — emit as raw polygon
+                pts_scad = ", ".join(f"[{x:.2f},{y:.2f}]" for x, y in pts)
+                poly_fragments.append(f"polygon(points=[{pts_scad}]);")
         elif len(pts) >= 3:
             # General polygon (not from stroke conversion)
             pts_scad = ", ".join(f"[{x:.2f},{y:.2f}]" for x, y in pts)
