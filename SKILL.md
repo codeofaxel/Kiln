@@ -1,6 +1,6 @@
 # Kiln
 
-AI agent control of 3D printers — 539 MCP tools + 142 CLI commands.
+AI agent control of 3D printers — 533 MCP tools + 142 CLI commands.
 
 ## What it does
 
@@ -28,7 +28,7 @@ pipx install kiln3d
 
 ## Key capabilities
 
-- **539 MCP tools** for full printer lifecycle control
+- **533 MCP tools** for full printer lifecycle control
 - **142 CLI commands** for human and agent use
 - **Model search** across MyMiniFactory, Cults3D, Thangs, GrabCAD, Etsy
 - **Text/sketch-to-3D generation** with multiple provider backends

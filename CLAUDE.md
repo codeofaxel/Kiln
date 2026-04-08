@@ -220,7 +220,7 @@ kiln/                           — MCP Server package
   src/kiln/
     __init__.py
     __main__.py                 — Entry point (python -m kiln)
-    server.py                   — FastMCP server, 539 MCP tools (283 here + 200 in plugins/ + 56 in kiln-pro)
+    server.py                   — FastMCP server, 533 MCP tools (256 here + 221 in plugins/ + 56 in kiln-pro)
     slicer.py                   — PrusaSlicer/OrcaSlicer integration
     slicer_profiles.py          — Bundled slicer profiles per printer
     safety_profiles.py          — Per-printer safety limits (28 models)
