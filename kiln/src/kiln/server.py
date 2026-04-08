@@ -1154,36 +1154,147 @@ def _check_confirmation(tool_name: str, args: dict[str, Any]) -> dict | None:
 # Fleet singletons (registry, queue, event bus)
 # ---------------------------------------------------------------------------
 
-_registry = PrinterRegistry()
-_queue = PrintQueue(db_path=os.path.join(str(Path.home()), ".kiln", "queue.db"))
-_event_bus = EventBus()
-_scheduler = JobScheduler(_queue, _registry, _event_bus, persistence=get_db())
-_webhook_mgr = WebhookManager(_event_bus)
-_auth = AuthManager()
-_billing = BillingLedger(db=get_db()) if BillingLedger is not None else None
+_registry: PrinterRegistry | None = None
+_queue: PrintQueue | None = None
+_event_bus: EventBus | None = None
+_scheduler: JobScheduler | None = None
+_webhook_mgr: WebhookManager | None = None
+_auth: AuthManager | None = None
+_billing: BillingLedger | None = None
 _payment_mgr = None  # PaymentManager, lazily initialized
 _billing_alert_mgr = None  # BillingAlertManager, lazily initialized
-_cost_estimator = CostEstimator()
-_material_tracker = MaterialTracker(db=get_db(), event_bus=_event_bus)
-_bed_level_mgr = BedLevelManager(
-    db=get_db(),
-    event_bus=_event_bus,
-    registry=_registry,
-)
-_stream_proxy = MJPEGProxy()
+_cost_estimator: CostEstimator | None = None
+_material_tracker: MaterialTracker | None = None
+_bed_level_mgr: BedLevelManager | None = None
+_stream_proxy: MJPEGProxy | None = None
 _cloud_sync: CloudSyncManager | None = None
-_heater_watchdog = HeaterWatchdog(
-    get_adapter=lambda: _get_adapter(),
-    timeout_minutes=_HEATER_TIMEOUT_MIN,
-    event_bus=_event_bus,
-)
-# Subscribe watchdog to print lifecycle events from the scheduler/event bus.
-_event_bus.subscribe(EventType.PRINT_STARTED, lambda _e: _heater_watchdog.notify_print_started())
-_event_bus.subscribe(EventType.PRINT_COMPLETED, lambda _e: _heater_watchdog.notify_print_ended())
-_event_bus.subscribe(EventType.PRINT_FAILED, lambda _e: _heater_watchdog.notify_print_ended())
-_event_bus.subscribe(EventType.PRINT_CANCELLED, lambda _e: _heater_watchdog.notify_print_ended())
-_plugin_mgr = PluginManager()
+_heater_watchdog: HeaterWatchdog | None = None
+_plugin_mgr: PluginManager | None = None
 _start_time = time.time()
+
+# Track whether event bus subscriptions have been wired (once-only guard).
+_event_subs_wired: bool = False
+
+
+def _get_registry() -> PrinterRegistry:
+    """Return the lazily-initialised printer registry."""
+    global _registry  # noqa: PLW0603
+    if _registry is None:
+        _registry = PrinterRegistry()
+    return _registry
+
+
+def _get_queue() -> PrintQueue:
+    """Return the lazily-initialised job queue."""
+    global _queue  # noqa: PLW0603
+    if _queue is None:
+        _queue = PrintQueue(db_path=os.path.join(str(Path.home()), ".kiln", "queue.db"))
+    return _queue
+
+
+def _get_event_bus() -> EventBus:
+    """Return the lazily-initialised event bus, wiring subscriptions on first access."""
+    global _event_bus, _event_subs_wired  # noqa: PLW0603
+    if _event_bus is None:
+        _event_bus = EventBus()
+    if not _event_subs_wired:
+        _event_subs_wired = True
+        # Heater watchdog lifecycle subscriptions (use getters to avoid circular init).
+        _event_bus.subscribe(EventType.PRINT_STARTED, lambda _e: _get_heater_watchdog().notify_print_started())
+        _event_bus.subscribe(EventType.PRINT_COMPLETED, lambda _e: _get_heater_watchdog().notify_print_ended())
+        _event_bus.subscribe(EventType.PRINT_FAILED, lambda _e: _get_heater_watchdog().notify_print_ended())
+        _event_bus.subscribe(EventType.PRINT_CANCELLED, lambda _e: _get_heater_watchdog().notify_print_ended())
+    return _event_bus
+
+
+def _get_scheduler() -> JobScheduler:
+    """Return the lazily-initialised job scheduler."""
+    global _scheduler  # noqa: PLW0603
+    if _scheduler is None:
+        _scheduler = JobScheduler(
+            _get_queue(), _get_registry(), _get_event_bus(), persistence=get_db(),
+        )
+    return _scheduler
+
+
+def _get_webhook_mgr() -> WebhookManager:
+    """Return the lazily-initialised webhook manager."""
+    global _webhook_mgr  # noqa: PLW0603
+    if _webhook_mgr is None:
+        _webhook_mgr = WebhookManager(_get_event_bus())
+    return _webhook_mgr
+
+
+def _get_auth() -> AuthManager:
+    """Return the lazily-initialised auth manager."""
+    global _auth  # noqa: PLW0603
+    if _auth is None:
+        _auth = AuthManager()
+    return _auth
+
+
+def _get_billing() -> BillingLedger | None:
+    """Return the lazily-initialised billing ledger (None if unavailable)."""
+    global _billing  # noqa: PLW0603
+    if _billing is None and BillingLedger is not None:
+        _billing = BillingLedger(db=get_db())
+    return _billing
+
+
+def _get_cost_estimator() -> CostEstimator:
+    """Return the lazily-initialised cost estimator."""
+    global _cost_estimator  # noqa: PLW0603
+    if _cost_estimator is None:
+        _cost_estimator = CostEstimator()
+    return _cost_estimator
+
+
+def _get_material_tracker() -> MaterialTracker:
+    """Return the lazily-initialised material tracker."""
+    global _material_tracker  # noqa: PLW0603
+    if _material_tracker is None:
+        _material_tracker = MaterialTracker(db=get_db(), event_bus=_get_event_bus())
+    return _material_tracker
+
+
+def _get_bed_level_mgr() -> BedLevelManager:
+    """Return the lazily-initialised bed level manager."""
+    global _bed_level_mgr  # noqa: PLW0603
+    if _bed_level_mgr is None:
+        _bed_level_mgr = BedLevelManager(
+            db=get_db(),
+            event_bus=_get_event_bus(),
+            registry=_get_registry(),
+        )
+    return _bed_level_mgr
+
+
+def _get_stream_proxy() -> MJPEGProxy:
+    """Return the lazily-initialised MJPEG stream proxy."""
+    global _stream_proxy  # noqa: PLW0603
+    if _stream_proxy is None:
+        _stream_proxy = MJPEGProxy()
+    return _stream_proxy
+
+
+def _get_heater_watchdog() -> HeaterWatchdog:
+    """Return the lazily-initialised heater watchdog."""
+    global _heater_watchdog  # noqa: PLW0603
+    if _heater_watchdog is None:
+        _heater_watchdog = HeaterWatchdog(
+            get_adapter=lambda: _get_adapter(),
+            timeout_minutes=_HEATER_TIMEOUT_MIN,
+            event_bus=_get_event_bus(),
+        )
+    return _heater_watchdog
+
+
+def _get_plugin_mgr() -> PluginManager:
+    """Return the lazily-initialised plugin manager."""
+    global _plugin_mgr  # noqa: PLW0603
+    if _plugin_mgr is None:
+        _plugin_mgr = PluginManager()
+    return _plugin_mgr
 
 # Thingiverse client (lazy -- created on first use so the module can be
 # imported without requiring the token env var).
@@ -6271,6 +6382,27 @@ def download_model(
     """
     if err := _check_auth("files"):
         return err
+
+    # --- Path traversal guard ------------------------------------------
+    # Constrain dest_dir to safe locations so an agent cannot write to
+    # arbitrary directories like /etc or ~/.ssh.
+    _resolved = Path(dest_dir).resolve()
+    _allowed_roots = (
+        Path(tempfile.gettempdir()).resolve(),
+        Path.home().resolve(),
+        Path.cwd().resolve(),
+    )
+    if not any(
+        _resolved == root or _resolved.is_relative_to(root)
+        for root in _allowed_roots
+    ):
+        return _error_dict(
+            "dest_dir must be within /tmp/, home directory, or current "
+            f"working directory. Got: {dest_dir}",
+            code="INVALID_PATH",
+        )
+    # -------------------------------------------------------------------
+
     if disk_err := _check_disk_space(dest_dir):
         return disk_err
     try:
