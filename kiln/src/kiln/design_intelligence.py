@@ -713,45 +713,47 @@ def check_environment_compatibility(
     has_fail = False
     has_warning = False
 
-    uv_keywords = ("uv", "sun", "sunlight", "outdoor", "weather")
-    moisture_keywords = (
-        "water",
-        "wet",
-        "moisture",
-        "humidity",
-        "rain",
-        "immersion",
-        "submerged",
-        "wash",
-        "dishwasher",
-        "marine",
-    )
+    # --- Simple keyword-to-rating factors (same pattern each) ---
+    _simple_factors: list[tuple[str, tuple[str, ...]]] = [
+        ("uv_resistance", ("uv", "sun", "sunlight", "outdoor", "weather")),
+        (
+            "moisture",
+            (
+                "water", "wet", "moisture", "humidity", "rain",
+                "immersion", "submerged", "wash", "dishwasher", "marine",
+            ),
+        ),
+        ("vibration_fatigue", ("vibration", "vibrate", "fatigue", "cyclic", "oscillation")),
+        ("abrasion_resistance", ("abrasion", "wear", "friction", "rubbing", "sliding", "scratch")),
+    ]
+    for data_key, keywords in _simple_factors:
+        if any(k in env_text for k in keywords):
+            section = material_data.get(data_key, {})
+            rating = str(section.get("rating", "conditional")).lower()
+            per_category[data_key] = rating
+            has_fail, has_warning = _accumulate_rating_outcome(
+                category=data_key,
+                rating=rating,
+                has_fail=has_fail,
+                has_warning=has_warning,
+                warnings=warnings,
+            )
+
+    # Moisture immersion sub-check (only when moisture was already matched)
+    if "moisture" in per_category:
+        moisture_data = material_data.get("moisture", {})
+        immersion_keywords = ("immersion", "submerged", "underwater", "continuous water")
+        if any(k in env_text for k in immersion_keywords) and not moisture_data.get(
+            "immersion_safe", False
+        ):
+            has_fail = True
+            warnings.append("Material is not rated immersion-safe for this environment.")
+
+    # --- Temperature (special: numeric extraction + heat/cold sub-branches) ---
     heat_keywords = (
-        "heat",
-        "hot",
-        "temperature",
-        "engine",
-        "dashboard",
-        "thermal",
-        "summer",
-        "oven",
+        "heat", "hot", "temperature", "engine", "dashboard", "thermal", "summer", "oven",
     )
     cold_keywords = ("cold", "freez", "winter", "subzero", "ice")
-    vibration_keywords = ("vibration", "vibrate", "fatigue", "cyclic", "oscillation")
-    abrasion_keywords = ("abrasion", "wear", "friction", "rubbing", "sliding", "scratch")
-
-    if any(k in env_text for k in uv_keywords):
-        uv = material_data.get("uv_resistance", {})
-        rating = str(uv.get("rating", "conditional")).lower()
-        per_category["uv_resistance"] = rating
-        has_fail, has_warning = _accumulate_rating_outcome(
-            category="uv_resistance",
-            rating=rating,
-            has_fail=has_fail,
-            has_warning=has_warning,
-            warnings=warnings,
-        )
-
     detected_temps = _extract_temperatures_c(environment)
     if detected_temps or any(k in env_text for k in heat_keywords + cold_keywords):
         temp = material_data.get("temperature_range", {})
@@ -761,7 +763,6 @@ def check_environment_compatibility(
             "min_service_c": min_service,
             "max_service_c": max_service,
         }
-
         if detected_temps:
             out_of_range = [t for t in detected_temps if t < min_service or t > max_service]
             if out_of_range:
@@ -782,24 +783,8 @@ def check_environment_compatibility(
                     f"Cold-exposed use is conditional; minimum service temperature is {min_service:.0f}C."
                 )
 
-    if any(k in env_text for k in moisture_keywords):
-        moisture = material_data.get("moisture", {})
-        rating = str(moisture.get("rating", "conditional")).lower()
-        per_category["moisture"] = rating
-        has_fail, has_warning = _accumulate_rating_outcome(
-            category="moisture",
-            rating=rating,
-            has_fail=has_fail,
-            has_warning=has_warning,
-            warnings=warnings,
-        )
-        immersion_keywords = ("immersion", "submerged", "underwater", "continuous water")
-        immersion_safe = bool(moisture.get("immersion_safe", False))
-        if any(k in env_text for k in immersion_keywords) and not immersion_safe:
-            has_fail = True
-            warnings.append("Material is not rated immersion-safe for this environment.")
-
-    chemical_map = {
+    # --- Chemicals (sub-map with per-chemical-class keywords) ---
+    chemical_map: dict[str, tuple[str, ...]] = {
         "household_cleaners": ("cleaner", "detergent", "bleach", "soap", "ammonia"),
         "oils_greases": ("oil", "grease", "lubricant"),
         "fuels": ("fuel", "gasoline", "diesel", "petrol", "kerosene"),
@@ -818,30 +803,6 @@ def check_environment_compatibility(
                 has_warning=has_warning,
                 warnings=warnings,
             )
-
-    if any(k in env_text for k in vibration_keywords):
-        vibration = material_data.get("vibration_fatigue", {})
-        rating = str(vibration.get("rating", "conditional")).lower()
-        per_category["vibration_fatigue"] = rating
-        has_fail, has_warning = _accumulate_rating_outcome(
-            category="vibration_fatigue",
-            rating=rating,
-            has_fail=has_fail,
-            has_warning=has_warning,
-            warnings=warnings,
-        )
-
-    if any(k in env_text for k in abrasion_keywords):
-        abrasion = material_data.get("abrasion_resistance", {})
-        rating = str(abrasion.get("rating", "conditional")).lower()
-        per_category["abrasion_resistance"] = rating
-        has_fail, has_warning = _accumulate_rating_outcome(
-            category="abrasion_resistance",
-            rating=rating,
-            has_fail=has_fail,
-            has_warning=has_warning,
-            warnings=warnings,
-        )
 
     if not per_category:
         # Keep output useful when environment text is vague.
