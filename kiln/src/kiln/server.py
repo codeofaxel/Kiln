@@ -72,12 +72,6 @@ with contextlib.suppress(ImportError):
     import kiln_pro  # noqa: F401 — triggers compat shim installation
 
 
-
-
-
-
-
-
 from kiln import parse_float_env, parse_int_env
 from kiln.auth import AuthManager
 from kiln.backup import BackupError
@@ -144,6 +138,7 @@ except ImportError:
 
     class _DummyTier:
         """Stub for LicenseTier when licensing module is not installed."""
+
         PRO = "pro"
         ENTERPRISE = "enterprise"
         BUSINESS = "business"
@@ -153,11 +148,14 @@ except ImportError:
 
     def check_tier(required, *_a, **_kw):
         tier_label = getattr(required, "value", required) if required else "pro"
-        return (False, (
-            f"This feature requires a Kiln {str(tier_label).title()} license. "
-            "You're on the Free tier. "
-            "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
-        ))
+        return (
+            False,
+            (
+                f"This feature requires a Kiln {str(tier_label).title()} license. "
+                "You're on the Free tier. "
+                "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+            ),
+        )
 
     def get_tier(*_a, **_kw):
         return "free"
@@ -165,6 +163,7 @@ except ImportError:
     def requires_tier(_tier):
         """Gate pro/enterprise features when kiln-pro is not installed."""
         tier_label = getattr(_tier, "value", _tier) if _tier else "pro"
+
         def decorator(fn):
             @functools.wraps(fn)
             def wrapper(*args, **kwargs):
@@ -182,8 +181,12 @@ except ImportError:
                     "retryable": False,
                     "upgrade_url": "https://kiln3d.com/pro",
                 }
+
             return wrapper
+
         return decorator
+
+
 from kiln.log_config import configure_logging as _configure_log_rotation
 from kiln.marketplaces import (
     Cults3DAdapter,
@@ -500,8 +503,7 @@ def _build_instructions() -> str:
             ptype = _PRINTER_TYPE or "octoprint"
             if len(printer_names) == 1:
                 parts.append(
-                    f"PRINTER: 1 {ptype} printer registered (\"{printer_names[0]}\"). "
-                    "Use `printer_status` to check it."
+                    f'PRINTER: 1 {ptype} printer registered ("{printer_names[0]}"). Use `printer_status` to check it.'
                 )
             else:
                 parts.append(
@@ -534,19 +536,13 @@ def _build_instructions() -> str:
         from kiln.slicer import find_slicer
 
         slicer_info = find_slicer()
-        parts.append(
-            f"SLICER: {slicer_info.name} found. "
-            "Use `slice_model` to convert STL/3MF to G-code."
-        )
+        parts.append(f"SLICER: {slicer_info.name} found. Use `slice_model` to convert STL/3MF to G-code.")
     except Exception:
         pass  # No slicer — omit rather than add noise
 
     # --- Fulfillment ---
     if _CRAFTCLOUD_API_KEY:
-        parts.append(
-            "FULFILLMENT: Craftcloud connected. "
-            "Use `fulfillment_quote` to outsource prints."
-        )
+        parts.append("FULFILLMENT: Craftcloud connected. Use `fulfillment_quote` to outsource prints.")
 
     # --- Safety summary ---
     safety_notes: list[str] = []
@@ -634,8 +630,8 @@ def _build_instructions() -> str:
 
     # --- Natural language guidance ---
     parts.append(
-        "The user may ask in plain language (e.g. \"what's my printer doing?\", "
-        "\"find me a phone stand\", \"print that benchy\"). Map their intent "
+        'The user may ask in plain language (e.g. "what\'s my printer doing?", '
+        '"find me a phone stand", "print that benchy"). Map their intent '
         "to the appropriate tool. When uncertain, ask — don't guess on "
         "physical operations."
     )
@@ -651,17 +647,12 @@ def _build_instructions() -> str:
 
         # Agent behavioral rules
         if manifest.agent_rules:
-            rules_str = "\n".join(
-                f"  {i}. {rule}" for i, rule in enumerate(manifest.agent_rules, 1)
-            )
+            rules_str = "\n".join(f"  {i}. {rule}" for i, rule in enumerate(manifest.agent_rules, 1))
             parts.append(f"AGENT RULES (MUST FOLLOW):\n{rules_str}")
 
         # Tool quick-reference by use case
         if manifest.tool_recommendations:
-            recs_str = "\n".join(
-                f"  {use_case}: {tool}"
-                for use_case, tool in manifest.tool_recommendations.items()
-            )
+            recs_str = "\n".join(f"  {use_case}: {tool}" for use_case, tool in manifest.tool_recommendations.items())
             parts.append(f"TOOL QUICK-REFERENCE:\n{recs_str}")
 
         # Key workflows
@@ -669,7 +660,8 @@ def _build_instructions() -> str:
             workflow_lines: list[str] = []
             for wf_name, steps in manifest.workflows.items():
                 step_str = " → ".join(
-                    s.split(" — ")[0] for s in steps  # just the function names
+                    s.split(" — ")[0]
+                    for s in steps  # just the function names
                 )
                 workflow_lines.append(f"  {wf_name}: {step_str}")
             parts.append("WORKFLOWS:\n" + "\n".join(workflow_lines))
@@ -1208,7 +1200,10 @@ def _get_scheduler() -> JobScheduler:
     global _scheduler  # noqa: PLW0603
     if _scheduler is None:
         _scheduler = JobScheduler(
-            _get_queue(), _get_registry(), _get_event_bus(), persistence=get_db(),
+            _get_queue(),
+            _get_registry(),
+            _get_event_bus(),
+            persistence=get_db(),
         )
     return _scheduler
 
@@ -1291,6 +1286,7 @@ def _get_plugin_mgr() -> PluginManager:
     if _plugin_mgr is None:
         _plugin_mgr = PluginManager()
     return _plugin_mgr
+
 
 # Thingiverse client (lazy -- created on first use so the module can be
 # imported without requiring the token env var).
@@ -1735,9 +1731,7 @@ def _token_from_mcp_context() -> str:
     headers = getattr(request, "headers", None)
     if headers is not None:
         try:
-            header_token = _extract_bearer_or_raw_token(
-                headers.get("authorization") or headers.get("Authorization")
-            )
+            header_token = _extract_bearer_or_raw_token(headers.get("authorization") or headers.get("Authorization"))
             if header_token:
                 return header_token
         except Exception:
@@ -2164,9 +2158,7 @@ def monitor_print(
         # --- Format values ---
         progress_str = f"{completion:.0f}" if completion is not None else "N/A"
         layer_str = (
-            f"{current_layer} / {total_layers}"
-            if current_layer is not None and total_layers is not None
-            else "N/A"
+            f"{current_layer} / {total_layers}" if current_layer is not None and total_layers is not None else "N/A"
         )
         elapsed_str = _format_duration(elapsed_s)
         remaining_str = _format_duration(remaining_s)
@@ -2196,9 +2188,7 @@ def monitor_print(
                     import uuid as _uuid
 
                     snap_dir = _tmpmod.gettempdir()
-                    snap_path = os.path.join(
-                        snap_dir, f"kiln_monitor_{_uuid.uuid4().hex[:12]}.jpg"
-                    )
+                    snap_path = os.path.join(snap_dir, f"kiln_monitor_{_uuid.uuid4().hex[:12]}.jpg")
                     with open(snap_path, "wb") as f:
                         f.write(image_data)
                     snapshot_line = snap_path
@@ -2228,10 +2218,12 @@ def monitor_print(
         ]
         if chamber_actual is not None:
             lines.append(f"- Chamber: {chamber_actual:.0f}°C")
-        lines.extend([
-            f"- Speed: {speed_str}",
-            f"- Errors: {error_str}",
-        ])
+        lines.extend(
+            [
+                f"- Speed: {speed_str}",
+                f"- Errors: {error_str}",
+            ]
+        )
 
         # --- Material usage & cost estimate ---
         # Try to get filament weight from gcode metadata (more accurate
@@ -2246,8 +2238,10 @@ def monitor_print(
                 _local_paths = []
                 try:
                     from kiln.cli.config import get_prints_dir
+
                     _prints = get_prints_dir()
                     import glob as _globmod
+
                     _local_paths = _globmod.glob(
                         str(_prints / "**" / "gcode" / "*.gcode"),
                         recursive=True,
@@ -2261,6 +2255,7 @@ def monitor_print(
                 if _meta and hasattr(_meta, "filament_used_mm") and _meta.filament_used_mm:
                     # Convert mm to grams: volume = pi * (d/2)^2 * length
                     import math as _math
+
                     _d = 1.75  # mm filament diameter
                     _vol_mm3 = _math.pi * (_d / 2) ** 2 * _meta.filament_used_mm
                     _density = 0.00124  # PLA g/mm³
@@ -2273,14 +2268,13 @@ def monitor_print(
                 for _lp in _local_paths:
                     if "merged" in _lp.lower() or "multicolor" in _lp.lower():
                         import re as _re_mod
+
                         with open(_lp) as _f:
                             _gc = _f.read()
                         _tool_changes = len(_re_mod.findall(r"^T\d+$", _gc, _re_mod.MULTILINE))
                         # Also try to get filament weight from gcode comments
                         if _filament_weight_g is None:
-                            _fil_g_m = _re_mod.search(
-                                r"filament used \[g\]\s*=\s*([\d.]+)", _gc
-                            )
+                            _fil_g_m = _re_mod.search(r"filament used \[g\]\s*=\s*([\d.]+)", _gc)
                             if _fil_g_m:
                                 _filament_weight_g = float(_fil_g_m.group(1))
                         break
@@ -2295,7 +2289,7 @@ def monitor_print(
         )
         if cost_info is not None:
             weight_str = f"~{cost_info['estimated_weight_g']:.0f}g {cost_info['material']}"
-            if cost_info['purge_waste_g'] > 0:
+            if cost_info["purge_waste_g"] > 0:
                 weight_str += f" ({cost_info['print_weight_g']:.0f}g print + {cost_info['purge_waste_g']:.0f}g purge)"
             lines.append(f"- Material used: {weight_str}")
             lines.append(
@@ -2304,10 +2298,12 @@ def monitor_print(
                 f" = ~${cost_info['total_cost_usd']:.2f} total"
             )
 
-        lines.extend([
-            f"Camera: {snapshot_line}",
-            f"Comments: {comment}",
-        ])
+        lines.extend(
+            [
+                f"Camera: {snapshot_line}",
+                f"Comments: {comment}",
+            ]
+        )
         report = "\n".join(lines)
 
         return report
@@ -2418,8 +2414,10 @@ def upload_file(file_path: str) -> dict:
                 # the printer firmware (e.g. M500 for Bambu bed-leveling)
                 # are not falsely blocked.
                 _dialect = (
-                    GCodeDialect.BAMBU if _PRINTER_TYPE == "bambu"
-                    else GCodeDialect.KLIPPER if _PRINTER_TYPE == "moonraker"
+                    GCodeDialect.BAMBU
+                    if _PRINTER_TYPE == "bambu"
+                    else GCodeDialect.KLIPPER
+                    if _PRINTER_TYPE == "moonraker"
                     else GCodeDialect.GENERIC
                 )
                 scan = scan_gcode_file(
@@ -3059,7 +3057,9 @@ def clear_emergency_stop(
         if not result.get("success"):
             reason = str(result.get("reason") or "")
             code = "E_STOP_CLEAR_BLOCKED" if reason == "critical_interlocks_pending" else "INVALID_STATE"
-            payload = _error_dict(str(result.get("message") or "Failed to clear emergency latch."), code=code, retryable=False)
+            payload = _error_dict(
+                str(result.get("message") or "Failed to clear emergency latch."), code=code, retryable=False
+            )
             payload["emergency_status"] = result.get("status")
             return payload
         _audit(
@@ -4136,9 +4136,7 @@ def preflight_check(
                 logger.debug("Cost estimate gcode parse failed: %s", exc)
 
         if _cost_time_s is not None and _cost_time_s > 0:
-            cost_estimate = _estimate_print_cost(
-                _cost_time_s, 0, material=expected_material
-            )
+            cost_estimate = _estimate_print_cost(_cost_time_s, 0, material=expected_material)
 
         # -- Summary -------------------------------------------------------
         ready = all(c["passed"] for c in checks)
@@ -4727,7 +4725,11 @@ def register_printer(
         # without a Pro license.  Replacing an existing printer doesn't
         # count against the limit.
         current_tier = get_tier()
-        if current_tier < LicenseTier.PRO and name not in _get_registry() and _get_registry().count >= FREE_TIER_MAX_PRINTERS:
+        if (
+            current_tier < LicenseTier.PRO
+            and name not in _get_registry()
+            and _get_registry().count >= FREE_TIER_MAX_PRINTERS
+        ):
             return {
                 "success": False,
                 "error": (
@@ -4783,8 +4785,7 @@ def register_printer(
         elif printer_type == "elegoo":
             if ElegooAdapter is None:
                 return _error_dict(
-                    "Elegoo SDCP support requires websocket-client.  "
-                    "Install it with: pip install websocket-client",
+                    "Elegoo SDCP support requires websocket-client.  Install it with: pip install websocket-client",
                     code="MISSING_DEPENDENCY",
                 )
             adapter = ElegooAdapter(
@@ -4817,9 +4818,7 @@ def register_printer(
         # If the boot-time adapter was a different object (not in the
         # registry), disconnect it to stop orphaned MQTT threads.
         if old_default is not None and old_default is not adapter:
-            in_registry = any(
-                old_default is a for a in _get_registry().list_all().values()
-            )
+            in_registry = any(old_default is a for a in _get_registry().list_all().values())
             if not in_registry:
                 _disc = getattr(old_default, "disconnect", None)
                 if _disc is not None:
@@ -4916,7 +4915,9 @@ def fleet_status_by_site() -> dict:
                 "printers": statuses,
                 "count": len(statuses),
                 "idle": [p["name"] for p in statuses if str(p.get("state", "")).lower() == "idle"],
-                "busy": [p["name"] for p in statuses if str(p.get("state", "")).lower() in {"printing", "busy", "paused"}],
+                "busy": [
+                    p["name"] for p in statuses if str(p.get("state", "")).lower() in {"printing", "busy", "paused"}
+                ],
             }
         return {"success": True, "sites": result, "site_count": len(result)}
     except Exception as exc:
@@ -6165,8 +6166,7 @@ def reslice_with_overrides(
     ext = Path(input_abs).suffix.lower()
     if ext not in _SLICER_INPUT_EXTENSIONS:
         return _error_dict(
-            f"Unsupported input format '{ext}'. "
-            f"Supported: {', '.join(sorted(_SLICER_INPUT_EXTENSIONS))}",
+            f"Unsupported input format '{ext}'. Supported: {', '.join(sorted(_SLICER_INPUT_EXTENSIONS))}",
             code="UNSUPPORTED_FORMAT",
         )
 
@@ -6185,18 +6185,16 @@ def reslice_with_overrides(
                 )
             if not isinstance(parsed_overrides, dict):
                 return _error_dict(
-                    "Overrides must be a JSON object (dict), "
-                f"got {type(parsed_overrides).__name__}.",
-                code="VALIDATION_ERROR",
-            )
+                    f"Overrides must be a JSON object (dict), got {type(parsed_overrides).__name__}.",
+                    code="VALIDATION_ERROR",
+                )
 
     try:
         from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
 
         # -- Resolve profile with overrides --
-        effective_printer_id = (
-            _map_printer_hint_to_profile_id(printer_id)
-            or _map_printer_hint_to_profile_id(_PRINTER_MODEL)
+        effective_printer_id = _map_printer_hint_to_profile_id(printer_id) or _map_printer_hint_to_profile_id(
+            _PRINTER_MODEL
         )
 
         effective_profile: str | None = None
@@ -6224,9 +6222,7 @@ def reslice_with_overrides(
         has_temp_overrides = bool(parsed_overrides and _temp_keys & parsed_overrides.keys())
 
         if has_temp_overrides and effective_printer_id and _PRINTER_MODEL:
-            validation_result = validate_profile_for_printer(
-                effective_printer_id, _PRINTER_MODEL
-            )
+            validation_result = validate_profile_for_printer(effective_printer_id, _PRINTER_MODEL)
 
         # -- Slice --
         result = slice_file(
@@ -6248,9 +6244,7 @@ def reslice_with_overrides(
             response["applied_overrides"] = parsed_overrides
 
         # Attach validation warnings/errors when present
-        if validation_result and (
-            validation_result["warnings"] or validation_result["errors"]
-        ):
+        if validation_result and (validation_result["warnings"] or validation_result["errors"]):
             response["profile_validation"] = validation_result
             if validation_result["errors"]:
                 response["profile_validation_warning"] = (
@@ -6258,16 +6252,14 @@ def reslice_with_overrides(
                     + "; ".join(validation_result["errors"])
                 )
             elif validation_result["warnings"]:
-                response["profile_validation_warning"] = (
-                    "Profile compatibility note: "
-                    + "; ".join(validation_result["warnings"])
+                response["profile_validation_warning"] = "Profile compatibility note: " + "; ".join(
+                    validation_result["warnings"]
                 )
 
         return response
     except SlicerNotFoundError as exc:
         return _error_dict(
-            f"Failed to reslice model: {exc}. "
-            "Ensure PrusaSlicer or OrcaSlicer is installed.",
+            f"Failed to reslice model: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.",
             code="SLICER_NOT_FOUND",
         )
     except SlicerError as exc:
@@ -6537,6 +6529,7 @@ def slice_and_print(
         if effective_printer_id:
             try:
                 from kiln.printer_intelligence import get_slicer_speed_overrides
+
                 model_speeds = get_slicer_speed_overrides(effective_printer_id)
                 if model_speeds:
                     for k, v in model_speeds.items():
@@ -6554,9 +6547,7 @@ def slice_and_print(
         # Re-resolve profile with adhesion overrides merged in
         if adhesion_overrides and effective_printer_id:
             try:
-                effective_profile = resolve_slicer_profile(
-                    effective_printer_id, overrides=adhesion_overrides
-                )
+                effective_profile = resolve_slicer_profile(effective_printer_id, overrides=adhesion_overrides)
             except Exception:
                 logger.debug("Profile override injection failed", exc_info=True)
 
@@ -8139,7 +8130,6 @@ def _get_generation_provider(provider: str = "meshy") -> GenerationProvider:
     return inst
 
 
-
 @mcp.tool()
 def list_generation_providers() -> dict:
     """List available text-to-3D generation providers.
@@ -8322,7 +8312,8 @@ def generate_model(
         return result_dict
     except GenerationAuthError as exc:
         return _error_dict(
-            f"Failed to generate model (auth): {exc}. Check your provider API key is set (KILN_MESHY_API_KEY, KILN_GEMINI_API_KEY).", code="AUTH_ERROR"
+            f"Failed to generate model (auth): {exc}. Check your provider API key is set (KILN_MESHY_API_KEY, KILN_GEMINI_API_KEY).",
+            code="AUTH_ERROR",
         )
     except GenerationError as exc:
         return _error_dict(f"Failed to generate model: {exc}", code=exc.code or "GENERATION_ERROR")
@@ -8843,29 +8834,6 @@ def generate_and_print(
 
 
 @mcp.tool()
-def validate_generated_mesh(file_path: str) -> dict:
-    """Validate a 3D mesh file for printing readiness.
-
-    Checks that the file is a valid STL, OBJ, or GLB, has reasonable
-    dimensions, an acceptable polygon count, and is manifold
-    (watertight).
-
-    Args:
-        file_path: Path to an STL, OBJ, or GLB file.
-    """
-    try:
-        result = validate_mesh(file_path)
-        return {
-            "success": True,
-            "validation": result.to_dict(),
-            "message": "Mesh is valid." if result.valid else f"Mesh has issues: {'; '.join(result.errors)}",
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in validate_generated_mesh")
-        return _error_dict(f"Unexpected error in validate_generated_mesh: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
 def render_model_preview(
     file_path: str,
     width: int = 800,
@@ -8899,8 +8867,7 @@ def render_model_preview(
             "width": width,
             "height": height,
             "message": (
-                f"Preview rendered to {views[0]['path']}. "
-                "TIP: Use visualize_model() for multi-angle previews."
+                f"Preview rendered to {views[0]['path']}. TIP: Use visualize_model() for multi-angle previews."
             ),
         }
     return _error_dict("No views rendered", code="RENDER_ERROR")
@@ -8955,7 +8922,11 @@ def visualize_model(
         if color:
             kwargs["color"] = color
         return _visualize(
-            file_path, angles=angles, width=width, height=height, **kwargs,
+            file_path,
+            angles=angles,
+            width=width,
+            height=height,
+            **kwargs,
         )
     except Exception as exc:
         logger.exception("Unexpected error in visualize_model")
@@ -9013,72 +8984,6 @@ def compare_renders(
 
 
 @mcp.tool()
-def rescale_model(
-    file_path: str,
-    target_height_mm: float | None = None,
-    scale_factor: float | None = None,
-    max_dimension_mm: float | None = None,
-    scale_x: float | None = None,
-    scale_y: float | None = None,
-    scale_z: float | None = None,
-) -> dict:
-    """Rescale an STL model to meet dimensional targets.
-
-    Useful when a generated model is the wrong size for the printer's
-    build volume or doesn't match the desired dimensions.
-
-    **Uniform scaling** — provide exactly ONE of:
-
-    - ``target_height_mm``: Scale so Z-axis equals this value.
-    - ``scale_factor``: Uniform multiplier (2.0 = double size).
-    - ``max_dimension_mm``: Scale down so largest axis fits this limit.
-
-    **Per-axis scaling** — provide ``scale_x``, ``scale_y``, and/or
-    ``scale_z``.  Omitted axes default to 1.0 (no change).
-
-    Cannot combine uniform and per-axis options.
-
-    Args:
-        file_path: Path to the STL file to rescale (modified in-place).
-        target_height_mm: Desired Z-axis height in mm.
-        scale_factor: Uniform scale multiplier.
-        max_dimension_mm: Maximum dimension on any axis.
-        scale_x: Per-axis X scale factor.
-        scale_y: Per-axis Y scale factor.
-        scale_z: Per-axis Z scale factor.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import rescale_stl
-
-        result = rescale_stl(
-            file_path,
-            target_height_mm=target_height_mm,
-            scale_factor=scale_factor,
-            max_dimension_mm=max_dimension_mm,
-            scale_x=scale_x,
-            scale_y=scale_y,
-            scale_z=scale_z,
-        )
-        return {
-            "success": True,
-            **result,
-            "message": (
-                f"Model rescaled by x={result['scale_applied']['x']}, "
-                f"y={result['scale_applied']['y']}, z={result['scale_applied']['z']}"
-                if isinstance(result["scale_applied"], dict)
-                else f"Model rescaled by {result['scale_applied']}x."
-            ),
-        }
-    except ValueError as exc:
-        return _error_dict(str(exc), code="INVALID_INPUT")
-    except Exception as exc:
-        logger.exception("Unexpected error in rescale_model")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
 def get_feedback_loop_status(model_id: str) -> dict:
     """Get the feedback loop history for a generated model.
 
@@ -9128,20 +9033,22 @@ def list_design_templates() -> dict:
         for key, tpl in data.items():
             if key.startswith("_"):
                 continue
-            templates.append({
-                "id": key,
-                "name": tpl["display_name"],
-                "description": tpl["description"],
-                "category": tpl.get("category", "general"),
-                "parameters": {
-                    k: {
-                        "default": v["default"],
-                        "description": v.get("description", ""),
-                        "unit": v.get("unit", ""),
-                    }
-                    for k, v in tpl.get("parameters", {}).items()
-                },
-            })
+            templates.append(
+                {
+                    "id": key,
+                    "name": tpl["display_name"],
+                    "description": tpl["description"],
+                    "category": tpl.get("category", "general"),
+                    "parameters": {
+                        k: {
+                            "default": v["default"],
+                            "description": v.get("description", ""),
+                            "unit": v.get("unit", ""),
+                        }
+                        for k, v in tpl.get("parameters", {}).items()
+                    },
+                }
+            )
 
         return {
             "success": True,
@@ -9332,218 +9239,6 @@ def smart_generate_from_template(
 
 
 @mcp.tool()
-def analyze_mesh_geometry(file_path: str) -> dict:
-    """Deep geometric and printability analysis of a 3D mesh.
-
-    Goes beyond basic validation to compute volume, surface area,
-    center of mass, overhang detection, connected components (floating
-    parts), degenerate triangles, and a composite printability score
-    (0-100).
-
-    Use this after generating a model to understand its geometry and
-    identify printability issues before sending to the slicer.
-
-    :param file_path: Path to .stl, .obj, or .glb file.
-    :returns: Dict with full mesh analysis metrics.
-    """
-    try:
-        from kiln.generation.validation import analyze_mesh
-
-        result = analyze_mesh(file_path)
-        return {"success": True, **result.to_dict()}
-    except Exception as exc:
-        return _error_dict(f"Mesh analysis failed: {exc}", code="ANALYSIS_ERROR")
-
-
-@mcp.tool()
-def detect_mesh_pockets(
-    file_path: str,
-    min_depth_mm: float = 0.3,
-) -> dict:
-    """Detect pockets and cavities in a mesh before multi-part composition.
-
-    Analyzes a base model to find recessed regions (circular or rectangular
-    pockets) on top and bottom faces. Call this before compose_models or
-    multi_material_print to know pocket dimensions for overlay geometry.
-
-    :param file_path: Path to the STL file to analyze.
-    :param min_depth_mm: Minimum pocket depth to report (default 0.3mm).
-    :returns: Dict with pocket list, dimensions, and positions.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import detect_mesh_pockets as _detect
-
-        result = _detect(file_path, min_depth_mm=min_depth_mm)
-        return {"success": True, **result}
-    except Exception as exc:
-        return _error_dict(f"Pocket detection failed: {exc}", code="DETECT_ERROR")
-
-
-@mcp.tool()
-def repair_mesh(file_path: str, output_path: str = "") -> dict:
-    """Basic mesh repair: fix degenerate triangles and bad normals (fast, safe).
-
-    For deeper repair with hole closing and boundary edge fixes, use
-    ``repair_mesh_advanced``. Removes zero-area triangles and recomputes
-    face normals.  Use this on meshes from AI generation providers before
-    slicing.
-
-    :param file_path: Path to the STL file to repair.
-    :param output_path: Output path.  Defaults to overwriting the input.
-    :returns: Dict with repair statistics.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import repair_stl
-
-        result = repair_stl(file_path, output_path=output_path or None)
-        return {"success": True, **result}
-    except Exception as exc:
-        return _error_dict(f"Mesh repair failed: {exc}", code="REPAIR_ERROR")
-
-
-@mcp.tool()
-def splice_mesh_at_z(
-    top_path: str,
-    bottom_path: str,
-    z_plane: float,
-    output_path: str = "",
-) -> dict:
-    """Splice two meshes at a z-plane: top from one STL, bottom from another.
-
-    Takes geometry ABOVE *z_plane* from *top_path* and geometry BELOW
-    *z_plane* from *bottom_path*.  Triangles crossing the boundary are
-    clipped cleanly.  No boolean ops — works on non-manifold meshes.
-
-    **Use case:** Combine a body with the correct top (e.g. logo from
-    v5.3) with a body that has the correct bottom (e.g. larger pocket
-    from v5.4) to create the next design iteration.
-
-    :param top_path: STL providing geometry above z_plane.
-    :param bottom_path: STL providing geometry below z_plane.
-    :param z_plane: Z height (mm) where the splice happens.
-    :param output_path: Output STL path. Auto-generated if empty.
-    :returns: Dict with splice stats and output path.
-    """
-    if err := _check_auth("design:merge"):
-        return err
-    try:
-        from kiln.generation.validation import splice_mesh_at_z as _splice
-
-        if not output_path:
-            import tempfile
-
-            _fd, output_path = tempfile.mkstemp(suffix=".stl", prefix="kiln_splice_")
-            os.close(_fd)
-
-        result = _splice(top_path, bottom_path, z_plane, output_path)
-        return {"success": True, **result}
-    except Exception as exc:
-        logger.exception("splice_mesh_at_z failed")
-        return _error_dict(f"Splice failed: {exc}", code="SPLICE_ERROR")
-
-
-@mcp.tool()
-def compose_models(file_paths: list[str], output_path: str) -> dict:
-    """Merge multiple mesh files into a single combined model.
-
-    Concatenates all triangle geometry from the input files into one
-    output STL.  No boolean operations — bodies are simply combined.
-    Useful for multi-part assemblies or adding components to a design.
-
-    :param file_paths: List of .stl/.obj/.glb file paths to merge.
-    :param output_path: Path for the combined output STL.
-    :returns: Dict with merge statistics.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import compose_stls
-
-        result = compose_stls(file_paths, output_path)
-        return {"success": True, **result}
-    except Exception as exc:
-        return _error_dict(f"Composition failed: {exc}", code="COMPOSE_ERROR")
-
-
-@mcp.tool()
-def export_model_3mf(file_path: str, output_path: str = "") -> dict:
-    """Export a mesh to 3MF format (preferred by modern slicers).
-
-    Converts STL/OBJ/GLB to 3MF, a ZIP-based XML format used by
-    PrusaSlicer, OrcaSlicer, and Bambu Studio.  3MF is more compact
-    and supports metadata better than STL.
-
-    :param file_path: Path to the input mesh file.
-    :param output_path: Output 3MF path.  Auto-generated if empty.
-    :returns: Dict with the output file path.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import export_3mf
-
-        out = export_3mf(file_path, output_path=output_path or None)
-        file_size = os.path.getsize(out)
-        return {
-            "success": True,
-            "path": out,
-            "file_size_bytes": file_size,
-            "message": f"Exported to 3MF ({file_size} bytes).",
-        }
-    except Exception as exc:
-        return _error_dict(f"3MF export failed: {exc}", code="EXPORT_ERROR")
-
-
-@mcp.tool()
-def extract_model_from_3mf(file_path: str, output_path: str = "") -> dict:
-    """Extract the embedded 3D model from a .3mf or .gcode.3mf file to STL.
-
-    3MF files are ZIP archives containing XML mesh geometry.  This tool
-    parses the embedded model, extracts all mesh objects, and writes a
-    binary STL file ready for slicing, multi-copy printing, or further
-    mesh operations.
-
-    .. note::
-        For extracting a single object's **G-code** from a multi-object
-        Bambu .gcode.3mf file, use ``extract_plate_object`` instead.
-        Use ``list_plate_objects`` to discover available objects.
-
-    Works with both standard 3MF files and Bambu Studio .gcode.3mf files
-    (which bundle both G-code and the source model).  When multiple
-    objects exist they are merged into a single STL.
-
-    :param file_path: Path to the .3mf or .gcode.3mf file.
-    :param output_path: Output STL path (auto-generated if empty).
-    :returns: Dict with output path, triangle/vertex counts, and dimensions.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import (
-            extract_model_from_3mf as _extract,
-        )
-
-        result = _extract(file_path, output_path=output_path or None)
-        return {"success": True, **result}
-    except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="FILE_NOT_FOUND")
-    except Exception as exc:
-        msg = f"3MF extraction failed: {exc}"
-        result = _error_dict(msg, code="EXTRACT_ERROR")
-        if "no mesh geometry" in str(exc).lower():
-            result["hint"] = (
-                "This .gcode.3mf has no mesh data. Use list_plate_objects() "
-                "to see what objects are on the plate, then "
-                "extract_plate_object() to extract one object's G-code."
-            )
-        return result
-
-
-@mcp.tool()
 def list_plate_objects(file_path: str, plate_number: int = 1) -> dict:
     """List named objects on the build plate of a Bambu .gcode.3mf file.
 
@@ -9580,9 +9275,7 @@ def list_plate_objects(file_path: str, plate_number: int = 1) -> dict:
     except FileNotFoundError as exc:
         return _error_dict(str(exc), code="FILE_NOT_FOUND")
     except Exception as exc:
-        return _error_dict(
-            f"Failed to list plate objects: {exc}", code="PLATE_PARSE_ERROR"
-        )
+        return _error_dict(f"Failed to list plate objects: {exc}", code="PLATE_PARSE_ERROR")
 
 
 @mcp.tool()
@@ -9633,13 +9326,15 @@ def extract_plate_object(
             # Pass output_dir as parent; the implementation sanitises
             # the object name for the filename.
             safe_name = object_name.rsplit(".", 1)[0]
-            safe_name = "".join(
-                c if c.isalnum() or c in " _-" else "_" for c in safe_name
-            ).strip() or "extracted_object"
+            safe_name = (
+                "".join(c if c.isalnum() or c in " _-" else "_" for c in safe_name).strip() or "extracted_object"
+            )
             output_path = str(_Path(output_dir) / f"{safe_name}.gcode")
 
         result = extract_plate_object_gcode(
-            file_path, object_name, output_path=output_path,
+            file_path,
+            object_name,
+            output_path=output_path,
             plate_number=plate_number,
         )
         return {"success": True, **result}
@@ -9655,9 +9350,7 @@ def extract_plate_object(
             code = "VALIDATION_ERROR"
         return _error_dict(msg, code=code)
     except Exception as exc:
-        return _error_dict(
-            f"Failed to extract plate object: {exc}", code="EXTRACT_ERROR"
-        )
+        return _error_dict(f"Failed to extract plate object: {exc}", code="EXTRACT_ERROR")
 
 
 @mcp.tool()
@@ -9729,9 +9422,7 @@ def print_plate_object(
     except ValueError as exc:
         return _error_dict(str(exc), code="OBJECT_NOT_FOUND")
     except Exception as exc:
-        return _error_dict(
-            f"Failed to extract object: {exc}", code="EXTRACT_ERROR"
-        )
+        return _error_dict(f"Failed to extract object: {exc}", code="EXTRACT_ERROR")
 
     extracted_path = extract_result["output_path"]
     matched_object = extract_result["matched_object"]
@@ -9751,15 +9442,11 @@ def print_plate_object(
                 extracted_path,
                 threemf_path,
                 source_3mf_path=file_path,
-                estimated_time_minutes=extract_result.get(
-                    "estimated_time_minutes", 0
-                ),
+                estimated_time_minutes=extract_result.get("estimated_time_minutes", 0),
             )
             upload_path = threemf_path
         except Exception as exc:
-            logger.warning(
-                "3MF repackaging failed, falling back to raw gcode: %s", exc
-            )
+            logger.warning("3MF repackaging failed, falling back to raw gcode: %s", exc)
 
     # Step 2: Upload
     try:
@@ -9769,8 +9456,7 @@ def print_plate_object(
                 "status": "upload_failed",
                 "phase": "upload",
                 "message": (
-                    f"Upload failed. The extracted G-code is at: {extracted_path}. "
-                    f"Try upload_file() manually."
+                    f"Upload failed. The extracted G-code is at: {extracted_path}. Try upload_file() manually."
                 ),
                 "extracted_gcode": extracted_path,
                 "matched_object": matched_object,
@@ -9817,10 +9503,7 @@ def print_plate_object(
 
     return {
         "success": True,
-        "message": (
-            f"Printing '{matched_object['name']}' extracted from "
-            f"'{os.path.basename(file_path)}'."
-        ),
+        "message": (f"Printing '{matched_object['name']}' extracted from '{os.path.basename(file_path)}'."),
         "matched_object": matched_object,
         "all_objects": extract_result["all_objects"],
         "extracted_gcode": extracted_path,
@@ -9927,10 +9610,7 @@ def resolve_model_source(file_path: str) -> dict:
         if plate_json_raw is not None:
             plate_data = _json.loads(plate_json_raw.decode("utf-8"))
             objects = plate_data.get("bbox_objects", [])
-            generic["plate_objects"] = [
-                obj.get("name", f"object_{i}")
-                for i, obj in enumerate(objects)
-            ]
+            generic["plate_objects"] = [obj.get("name", f"object_{i}") for i, obj in enumerate(objects)]
 
         return {"success": True, **generic}
     except FileNotFoundError as exc:
@@ -9938,9 +9618,7 @@ def resolve_model_source(file_path: str) -> dict:
     except ValueError as exc:
         return _error_dict(str(exc), code="SOURCE_NOT_FOUND")
     except Exception as exc:
-        return _error_dict(
-            f"Failed to resolve model source: {exc}", code="RESOLVE_ERROR"
-        )
+        return _error_dict(f"Failed to resolve model source: {exc}", code="RESOLVE_ERROR")
 
 
 @mcp.tool()
@@ -10207,39 +9885,6 @@ def estimate_support_material(file_path: str) -> dict:
 
 
 @mcp.tool()
-def repair_mesh_advanced(
-    file_path: str,
-    output_path: str = "",
-    close_holes: bool = True,
-) -> dict:
-    """Deep mesh repair: degenerate removal + hole closing + boundary edge fixes.
-
-    Use when ``repair_mesh`` (basic) is not enough — e.g. mesh has open
-    holes or boundary edges.  Goes beyond basic repair by finding boundary
-    edges (edges shared by only one triangle) and closing small holes via
-    fan triangulation.
-
-    :param file_path: Path to the STL file.
-    :param output_path: Output path.  Defaults to overwriting the input.
-    :param close_holes: Whether to attempt closing holes (default True).
-    :returns: Dict with repair statistics.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import repair_stl_advanced
-
-        result = repair_stl_advanced(
-            file_path,
-            output_path=output_path or None,
-            close_holes=close_holes,
-        )
-        return {"success": True, **result}
-    except Exception as exc:
-        return _error_dict(f"Advanced repair failed: {exc}", code="REPAIR_ERROR")
-
-
-@mcp.tool()
 def generate_template_variations(
     template_id: str,
     variation_count: int = 3,
@@ -10369,11 +10014,13 @@ def design_advisor(prompt: str, printer_model: str = "") -> dict:
         for tid, keywords in template_keywords.items():
             if any(kw in prompt_lower for kw in keywords):
                 tpl = templates.get(tid, {})
-                matching_templates.append({
-                    "template_id": tid,
-                    "display_name": tpl.get("display_name", tid),
-                    "description": tpl.get("description", ""),
-                })
+                matching_templates.append(
+                    {
+                        "template_id": tid,
+                        "display_name": tpl.get("display_name", tid),
+                        "description": tpl.get("description", ""),
+                    }
+                )
 
         recommendations["matching_templates"] = matching_templates
     except Exception:
@@ -10383,17 +10030,43 @@ def design_advisor(prompt: str, printer_model: str = "") -> dict:
     is_geometric = any(
         w in prompt_lower
         for w in [
-            "box", "bracket", "mount", "holder", "clip", "hook",
-            "shelf", "stand", "frame", "enclosure", "gear", "hinge",
-            "screw", "nut", "bolt", "washer", "spacer", "bushing",
+            "box",
+            "bracket",
+            "mount",
+            "holder",
+            "clip",
+            "hook",
+            "shelf",
+            "stand",
+            "frame",
+            "enclosure",
+            "gear",
+            "hinge",
+            "screw",
+            "nut",
+            "bolt",
+            "washer",
+            "spacer",
+            "bushing",
         ]
     )
     is_organic = any(
         w in prompt_lower
         for w in [
-            "figure", "sculpture", "animal", "character", "face",
-            "statue", "bust", "organic", "creature", "dragon",
-            "plant", "flower", "tree", "body",
+            "figure",
+            "sculpture",
+            "animal",
+            "character",
+            "face",
+            "statue",
+            "bust",
+            "organic",
+            "creature",
+            "dragon",
+            "plant",
+            "flower",
+            "tree",
+            "body",
         ]
     )
     is_simple = len(prompt.split()) < 8 and not is_organic
@@ -10422,8 +10095,7 @@ def design_advisor(prompt: str, printer_model: str = "") -> dict:
     else:
         approach = "openscad" if is_simple else "meshy"
         approach_reason = (
-            "Could work with either approach. "
-            "OpenSCAD for precise dimensions, Meshy for complex/artistic shapes."
+            "Could work with either approach. OpenSCAD for precise dimensions, Meshy for complex/artistic shapes."
         )
         confidence = "low"
 
@@ -10499,31 +10171,9 @@ def design_advisor(prompt: str, printer_model: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Phase 4: Mesh comparison, failure prediction, simplification, scoring, cost
+# Phase 4: Mesh tools extracted → plugins/mesh_tools.py
+# Remaining: failure prediction, material cost, print readiness
 # ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def compare_mesh_versions(file_a: str, file_b: str) -> dict:
-    """Compare two mesh files and report geometric differences.
-
-    Computes volume change, surface area change, dimension deltas,
-    center-of-mass shift, printability delta, and an approximate
-    Hausdorff distance showing how far the meshes differ spatially.
-
-    Useful for verifying that a repair, rescale, or regeneration
-    actually improved the model.
-
-    :param file_a: Path to the reference (original) mesh.
-    :param file_b: Path to the modified mesh.
-    :returns: Dict with comparison metrics and ``meshes_identical`` flag.
-    """
-    try:
-        from kiln.generation.validation import compare_meshes
-
-        return {"success": True, **compare_meshes(file_a, file_b)}
-    except Exception as exc:
-        return _error_dict(f"Mesh comparison failed: {exc}")
 
 
 @mcp.tool()
@@ -10560,63 +10210,6 @@ def predict_print_failure(
         }
     except Exception as exc:
         return _error_dict(f"Failure prediction failed: {exc}")
-
-
-@mcp.tool()
-def simplify_mesh_model(
-    file_path: str,
-    target_ratio: float = 0.5,
-    output_path: str = "",
-) -> dict:
-    """Reduce mesh triangle count for faster preview or smaller files.
-
-    Uses vertex-clustering decimation to merge nearby vertices.
-    The result is a lower-resolution version of the same shape.
-
-    :param file_path: Path to the STL file.
-    :param target_ratio: Target fraction of original triangles (0.01-1.0).
-    :param output_path: Output path (defaults to ``<name>_simplified.stl``).
-    :returns: Dict with original/simplified triangle counts and reduction percentage.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import simplify_mesh
-
-        return {
-            "success": True,
-            **simplify_mesh(
-                file_path,
-                target_ratio=target_ratio,
-                output_path=output_path or None,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Mesh simplification failed: {exc}")
-
-
-@mcp.tool()
-def mesh_quality_scorecard(file_path: str) -> dict:
-    """Generate a multi-factor quality scorecard for a mesh.
-
-    Evaluates four dimensions:
-    - **Printability** (35%): overhangs, manifold, support needs
-    - **Structural** (25%): aspect ratio, base stability, component count
-    - **Efficiency** (20%): fill ratio, support waste
-    - **Quality** (20%): triangle density, degenerate count
-
-    Returns per-factor scores, an overall 0-100 score, and a letter
-    grade (A-F).
-
-    :param file_path: Path to mesh file (.stl, .obj, or .glb).
-    :returns: Dict with scores, grade, and per-factor notes.
-    """
-    try:
-        from kiln.generation.validation import design_scorecard
-
-        return {"success": True, **design_scorecard(file_path)}
-    except Exception as exc:
-        return _error_dict(f"Scorecard generation failed: {exc}")
 
 
 @mcp.tool()
@@ -10659,43 +10252,6 @@ def estimate_material_cost(
         }
     except Exception as exc:
         return _error_dict(f"Cost estimation failed: {exc}")
-
-
-@mcp.tool()
-def remove_mesh_floating_regions(
-    file_path: str,
-    output_path: str = "",
-    keep_largest: bool = True,
-    min_triangle_pct: float = 1.0,
-) -> dict:
-    """Remove small disconnected components (floating geometry).
-
-    Downloads and marketplace models often contain support pillars,
-    internal fragments, or other floating geometry.  This tool
-    identifies connected components and removes the small ones.
-
-    :param file_path: Path to the STL file.
-    :param output_path: Output path (defaults to overwriting input).
-    :param keep_largest: Keep only the largest component (default True).
-    :param min_triangle_pct: Min triangle % to keep (when keep_largest=False).
-    :returns: Dict with removal statistics.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import remove_floating_regions
-
-        return {
-            "success": True,
-            **remove_floating_regions(
-                file_path,
-                output_path=output_path or None,
-                keep_largest=keep_largest,
-                min_triangle_pct=min_triangle_pct,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Floating region removal failed: {exc}")
 
 
 @mcp.tool()
@@ -10743,226 +10299,9 @@ def check_print_readiness(
 
 
 # ---------------------------------------------------------------------------
-# Phase 5: Mirror, hollow, center, non-manifold analysis
+# Phase 5: Mesh tools extracted → plugins/mesh_tools.py
+# Remaining: structural analysis, design reasoning, reinforcements
 # ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def mirror_mesh_model(file_path: str, axis: str = "x", output_path: str = "") -> dict:
-    """Mirror (reflect) a mesh along an axis.
-
-    Creates a mirror image by negating coordinates on the chosen axis
-    and reversing triangle winding order to preserve correct normals.
-
-    :param file_path: Path to the STL file.
-    :param axis: Axis to mirror ("x", "y", or "z", default "x").
-    :param output_path: Output path (defaults to overwriting input).
-    :returns: Dict with mirror info.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import mirror_mesh
-
-        return {
-            "success": True,
-            **mirror_mesh(file_path, axis=axis, output_path=output_path or None),
-        }
-    except Exception as exc:
-        return _error_dict(f"Mirror failed: {exc}")
-
-
-@mcp.tool()
-def hollow_mesh_model(
-    file_path: str,
-    wall_thickness_mm: float = 2.0,
-    output_path: str = "",
-) -> dict:
-    """Create a hollow version of a mesh to save material.
-
-    Generates an inner offset shell and combines it with the outer
-    surface.  Reports estimated material savings.
-
-    :param file_path: Path to the STL file.
-    :param wall_thickness_mm: Wall thickness in mm (default 2.0).
-    :param output_path: Output path (defaults to ``<name>_hollow.stl``).
-    :returns: Dict with hollowing stats and material savings.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import hollow_mesh
-
-        return {
-            "success": True,
-            **hollow_mesh(
-                file_path,
-                wall_thickness_mm=wall_thickness_mm,
-                output_path=output_path or None,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Hollowing failed: {exc}")
-
-
-@mcp.tool()
-def thicken_mesh_walls(
-    file_path: str,
-    amount_mm: float = 0.5,
-    output_path: str = "",
-) -> dict:
-    """Thicken thin walls in a mesh by offsetting vertices outward.
-
-    Detects thin-wall regions and pushes vertices outward along their
-    averaged normals.  This is a **geometry-level fix** — the mesh is
-    surgically modified instead of regenerating from scratch.
-
-    Use after ``predict_print_failures()`` detects ``thin_walls`` or
-    after ``design_scorecard()`` flags wall thickness issues.
-
-    :param file_path: Path to the STL file.
-    :param amount_mm: Offset distance in mm (default 0.5).
-    :param output_path: Output path (defaults to ``<name>_thickened.stl``).
-    :returns: Dict with number of vertices modified, amounts, and output path.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import thicken_walls
-
-        return {
-            "success": True,
-            **thicken_walls(
-                file_path,
-                amount_mm=amount_mm,
-                output_path=output_path or None,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Wall thickening failed: {exc}")
-
-
-@mcp.tool()
-def add_mesh_fillet(
-    file_path: str,
-    radius_mm: float = 1.0,
-    angle_threshold_deg: float = 60.0,
-    output_path: str = "",
-) -> dict:
-    """Add fillets (rounded transitions) at sharp edges.
-
-    Detects edges where adjacent faces meet at a sharp angle and
-    inserts intermediate triangles to approximate a smooth fillet.
-    Reduces stress concentration at corners and improves printability.
-
-    Use after ``design_scorecard()`` flags sharp corners or
-    ``predict_print_failures()`` detects stress risers.
-
-    :param file_path: Path to the STL file.
-    :param radius_mm: Fillet radius in mm (default 1.0).
-    :param angle_threshold_deg: Edges sharper than this get filleted (default 60).
-    :param output_path: Output path (defaults to ``<name>_filleted.stl``).
-    :returns: Dict with sharp edge count, triangles added, and output path.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import add_fillet
-
-        return {
-            "success": True,
-            **add_fillet(
-                file_path,
-                radius_mm=radius_mm,
-                angle_threshold_deg=angle_threshold_deg,
-                output_path=output_path or None,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Fillet failed: {exc}")
-
-
-@mcp.tool()
-def add_mesh_chamfer(
-    file_path: str,
-    distance_mm: float = 0.5,
-    angle_threshold_deg: float = 60.0,
-    output_path: str = "",
-) -> dict:
-    """Add chamfers (flat bevels) at sharp edges.
-
-    Detects edges where adjacent faces meet at a sharp angle and
-    bevels them with a flat transition face.  Chamfers are faster
-    to print than fillets and reduce stress concentration.
-
-    :param file_path: Path to the STL file.
-    :param distance_mm: Chamfer distance from edge in mm (default 0.5).
-    :param angle_threshold_deg: Edges sharper than this get chamfered (default 60).
-    :param output_path: Output path (defaults to ``<name>_chamfered.stl``).
-    :returns: Dict with sharp edge count, triangles added, and output path.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import add_chamfer
-
-        return {
-            "success": True,
-            **add_chamfer(
-                file_path,
-                distance_mm=distance_mm,
-                angle_threshold_deg=angle_threshold_deg,
-                output_path=output_path or None,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Chamfer failed: {exc}")
-
-
-@mcp.tool()
-def boolean_mesh_op(
-    operation: str,
-    file_paths: list[str],
-    output_path: str = "",
-) -> dict:
-    """Perform a CSG boolean operation on two or more STL meshes.
-
-    Uses OpenSCAD's boolean engine to compute:
-    - **union**: combine multiple bodies into one
-    - **difference**: subtract subsequent bodies from the first
-    - **intersection**: keep only the overlapping region
-
-    Requires OpenSCAD installed on the system.
-
-    **Use cases:**
-    - Subtract a cylinder from a block to create a hole
-    - Combine multiple parts into a single printable body
-    - Create complex shapes from simple primitives
-
-    :param operation: ``"union"``, ``"difference"``, or ``"intersection"``.
-    :param file_paths: List of STL file paths (minimum 2).
-    :param output_path: Output path (defaults to a temp file).
-    :returns: Dict with result path, operation, and triangle count.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.openscad import boolean_mesh_operation
-
-        return {
-            "success": True,
-            **boolean_mesh_operation(
-                operation,
-                file_paths,
-                output_path=output_path or None,
-            ),
-        }
-    except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="FILE_NOT_FOUND")
-    except ValueError as exc:
-        return _error_dict(str(exc), code="INVALID_ARGS")
-    except Exception as exc:
-        return _error_dict(f"Boolean operation failed: {exc}")
 
 
 @mcp.tool()
@@ -11123,74 +10462,6 @@ def design_improvement_plan(
         return _error_dict(str(exc), code="INVALID_ARGS")
     except Exception as exc:
         return _error_dict(f"Improvement plan failed: {exc}")
-
-
-@mcp.tool()
-def compose_part_from_primitives(
-    operations: list[dict],
-    output_path: str = "",
-) -> dict:
-    """Build a functional part by composing geometric primitives with booleans.
-
-    The **CAD-aware generation path** — instead of asking text-to-mesh AI
-    to guess at geometry, describe parts as a tree of primitives combined
-    with boolean operations. Produces exact, deterministic, functional parts.
-
-    **Operation format** — each item is either a primitive or boolean:
-
-    Primitive: ``{"type": "primitive", "shape": "<shape>",
-    "params": {...}, "translate": [x,y,z], "rotate": [rx,ry,rz]}``
-
-    Boolean: ``{"type": "boolean", "operation": "union|difference|intersection",
-    "children": [op1, op2, ...]}``
-
-    **Primitive shapes and params:**
-    - cube: ``{"size": [x,y,z]}`` or ``{"size": scalar}``
-    - cylinder: ``{"h": height, "r": radius}`` or ``{"h", "r1", "r2"}``
-    - sphere: ``{"r": radius}``
-    - cone: ``{"h": height, "r1": bottom_r, "r2": top_r}``
-    - torus: ``{"major_r": ring_radius, "minor_r": tube_radius}``
-    - wedge: ``{"width": w, "depth": d, "height": h}``
-    - hex_prism: ``{"r": radius, "h": height}``  — hexagonal (for nuts)
-    - text: ``{"text": "string", "size": 10, "depth": 2}``
-    - rounded_cube: ``{"size": [x,y,z], "radius": 1}``
-    - pipe: ``{"h": height, "outer_r": 10, "inner_r": 8}``
-
-    **Example — L-bracket with mounting hole:**
-    ```json
-    [{"type": "boolean", "operation": "difference", "children": [
-        {"type": "boolean", "operation": "union", "children": [
-            {"type": "primitive", "shape": "cube", "params": {"size": [40, 5, 30]}},
-            {"type": "primitive", "shape": "cube", "params": {"size": [5, 30, 30]}}
-        ]},
-        {"type": "primitive", "shape": "cylinder",
-         "params": {"h": 10, "r": 3},
-         "translate": [20, -1, 15], "rotate": [-90, 0, 0]}
-    ]}]
-    ```
-
-    Requires OpenSCAD installed on the system.
-
-    :param operations: List of operation dicts (primitive/boolean tree).
-    :param output_path: Output path (defaults to temp file).
-    :returns: Dict with result path, SCAD code, and triangle count.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.openscad import compose_from_primitives
-
-        return {
-            "success": True,
-            **compose_from_primitives(
-                operations,
-                output_path=output_path or None,
-            ),
-        }
-    except ValueError as exc:
-        return _error_dict(str(exc), code="INVALID_ARGS")
-    except Exception as exc:
-        return _error_dict(f"Composition failed: {exc}")
 
 
 @mcp.tool()
@@ -11450,44 +10721,6 @@ def search_design_templates(
         return {"success": True, **result.to_dict()}
     except Exception as exc:
         return _error_dict(f"Template search failed: {exc}")
-
-
-@mcp.tool()
-def estimate_mesh_weight(
-    file_path: str,
-    material: str = "pla",
-    infill_percent: float = 20.0,
-    wall_thickness_mm: float = 1.2,
-) -> dict:
-    """Estimate the printed weight of an STL file.
-
-    Uses the divergence theorem to compute mesh volume, then applies
-    material density, infill ratio, and shell fraction for a realistic
-    weight estimate.
-
-    :param file_path: Path to an STL file.
-    :param material: Material name (pla, abs, petg, tpu, nylon, etc.).
-    :param infill_percent: Infill percentage 0-100 (default 20).
-    :param wall_thickness_mm: Perimeter wall thickness in mm (default 1.2).
-    :returns: Dict with volume, weight estimates, bounding box.
-    """
-    _check_auth("design:analyze")
-    try:
-        from kiln.design_reasoning import estimate_weight
-
-        result = estimate_weight(
-            file_path,
-            material=material,
-            infill_percent=infill_percent,
-            wall_thickness_mm=wall_thickness_mm,
-        )
-        return {"success": True, **result.to_dict()}
-    except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="FILE_NOT_FOUND")
-    except ValueError as exc:
-        return _error_dict(str(exc), code="INVALID_ARGS")
-    except Exception as exc:
-        return _error_dict(f"Weight estimation failed: {exc}")
 
 
 @mcp.tool()
@@ -11754,46 +10987,6 @@ def auto_arrange_parts_on_plate(
 
 
 @mcp.tool()
-def cross_section_view(
-    file_path: str,
-    plane: str = "z",
-    offset_ratio: float = 0.5,
-    offset_mm: str = "",
-) -> dict:
-    """Compute a 2D cross-section of a mesh at a cutting plane.
-
-    Slices the mesh perpendicular to the chosen axis and returns
-    contour polygons and cross-sectional area.  Useful for inspecting
-    internal geometry (e.g., wall thickness, hole placement).
-
-    :param file_path: Path to STL file.
-    :param plane: Axis perpendicular to the cut — "x", "y", or "z".
-    :param offset_ratio: Fractional position 0.0-1.0 (default 0.5 = midpoint).
-    :param offset_mm: If set, absolute position in mm (overrides offset_ratio).
-    :returns: Dict with contour_count, contour_points, cross_section_area_mm2.
-    """
-    _check_auth("design:analyze")
-    try:
-        from kiln.design_reasoning import cross_section_at_plane
-
-        kwargs: dict[str, Any] = {
-            "plane": plane,
-            "offset_ratio": offset_ratio,
-        }
-        if offset_mm:
-            kwargs["offset_mm"] = float(offset_mm)
-
-        result = cross_section_at_plane(file_path, **kwargs)
-        return {"success": True, **result.to_dict()}
-    except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="FILE_NOT_FOUND")
-    except ValueError as exc:
-        return _error_dict(str(exc), code="INVALID_ARGS")
-    except Exception as exc:
-        return _error_dict(f"Cross-section failed: {exc}")
-
-
-@mcp.tool()
 def solve_template_constraints(
     template_id: str,
     constraints: str,
@@ -11825,180 +11018,6 @@ def solve_template_constraints(
         return {"success": True, **result.to_dict()}
     except Exception as exc:
         return _error_dict(f"Constraint solving failed: {exc}")
-
-
-@mcp.tool()
-def center_model_on_bed(
-    file_path: str,
-    bed_x_mm: float = 256.0,
-    bed_y_mm: float = 256.0,
-    output_path: str = "",
-) -> dict:
-    """Center a mesh on the build plate and place at z=0.
-
-    Translates the model so it sits centered on the bed with its
-    lowest point touching the build plate.
-
-    :param file_path: Path to the STL file.
-    :param bed_x_mm: Build plate X dimension (default 256).
-    :param bed_y_mm: Build plate Y dimension (default 256).
-    :param output_path: Output path (defaults to overwriting input).
-    :returns: Dict with translation applied.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import center_on_bed
-
-        return {
-            "success": True,
-            **center_on_bed(
-                file_path,
-                bed_x_mm=bed_x_mm,
-                bed_y_mm=bed_y_mm,
-                output_path=output_path or None,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Centering failed: {exc}")
-
-
-@mcp.tool()
-def analyze_non_manifold_edges(file_path: str) -> dict:
-    """Count and classify non-manifold edges in a mesh.
-
-    Reports boundary edges (shared by 1 triangle), T-junction edges
-    (shared by 3+ triangles), and manifold edges (shared by exactly 2).
-
-    This is the diagnostic version of the manifold check — use it
-    to understand exactly how many edges are problematic before
-    deciding whether to repair.
-
-    :param file_path: Path to mesh file (.stl, .obj, or .glb).
-    :returns: Dict with edge count breakdown and watertight status.
-    """
-    try:
-        from kiln.generation.validation import count_non_manifold_edges
-
-        return {"success": True, **count_non_manifold_edges(file_path)}
-    except Exception as exc:
-        return _error_dict(f"Edge analysis failed: {exc}")
-
-
-@mcp.tool()
-def scale_mesh_to_fit(
-    file_path: str,
-    max_x_mm: float = 256.0,
-    max_y_mm: float = 256.0,
-    max_z_mm: float = 256.0,
-    output_path: str = "",
-) -> dict:
-    """Auto-scale a mesh to fit within a build volume while maintaining aspect ratio.
-
-    Useful when a model is too large for your printer — this uniformly
-    shrinks it to the largest size that fits.
-
-    :param file_path: Path to mesh file (.stl).
-    :param max_x_mm: Maximum X dimension of build volume.
-    :param max_y_mm: Maximum Y dimension of build volume.
-    :param max_z_mm: Maximum Z dimension of build volume.
-    :param output_path: Output path. Defaults to overwriting input.
-    :returns: Dict with original/new dimensions and scale factor.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import scale_to_fit
-
-        return {"success": True, **scale_to_fit(
-            file_path, max_x_mm=max_x_mm, max_y_mm=max_y_mm,
-            max_z_mm=max_z_mm, output_path=output_path or None,
-        )}
-    except Exception as exc:
-        return _error_dict(f"Scale failed: {exc}")
-
-
-@mcp.tool()
-def merge_mesh_files(
-    file_paths: list[str],
-    output_path: str,
-) -> dict:
-    """Combine multiple STL files into a single mesh file (simple concatenation).
-
-    For positioning parts with x/y/z offsets, use ``merge_stl`` instead.
-    Useful for composing multi-part designs into one printable file.
-
-    :param file_paths: List of STL file paths to merge.
-    :param output_path: Destination path for the merged file.
-    :returns: Dict with merge statistics.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import merge_stl_files
-
-        return {"success": True, **merge_stl_files(file_paths, output_path=output_path)}
-    except Exception as exc:
-        return _error_dict(f"Merge failed: {exc}")
-
-
-@mcp.tool()
-def split_mesh_by_component(
-    file_path: str,
-    output_dir: str = "",
-) -> dict:
-    """Split a multi-component mesh into separate STL files.
-
-    Identifies disconnected bodies (components) using shared-edge
-    analysis and writes each as a separate file.
-
-    :param file_path: Path to mesh file (.stl).
-    :param output_dir: Directory for output files. Defaults to input directory.
-    :returns: Dict with component count and file paths.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import split_by_component
-
-        return {"success": True, **split_by_component(
-            file_path, output_dir=output_dir or None,
-        )}
-    except Exception as exc:
-        return _error_dict(f"Split failed: {exc}")
-
-
-@mcp.tool()
-def estimate_mesh_print_time(
-    file_path: str,
-    layer_height_mm: float = 0.2,
-    print_speed_mm_s: float = 60.0,
-    material: str = "pla",
-) -> dict:
-    """Rough print time estimate from mesh geometry (STL/OBJ/GLB).
-
-    Uses model height, surface area, and layer count to approximate
-    print duration. This is a ballpark estimate — actual time depends
-    on slicer settings, infill density, supports, and acceleration.
-
-    Unlike estimate_print_time (which uses slicer profiles), this
-    works directly on mesh files before slicing.
-
-    :param file_path: Path to mesh file.
-    :param layer_height_mm: Layer height for slicing.
-    :param print_speed_mm_s: Average print speed in mm/s.
-    :param material: Material hint (affects per-layer overhead).
-    :returns: Dict with estimated time, layer count, and note.
-    """
-    try:
-        from kiln.generation.validation import estimate_print_time_from_mesh
-
-        return {"success": True, **estimate_print_time_from_mesh(
-            file_path, layer_height_mm=layer_height_mm,
-            print_speed_mm_s=print_speed_mm_s, material=material,
-        )}
-    except Exception as exc:
-        return _error_dict(f"Time estimate failed: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -12757,8 +11776,7 @@ class _PrintWatcher:
                             # broken telemetry script.
                             img_hash = hashlib.md5(image_data).hexdigest()  # noqa: S324 — not for security
                             camera_changed = (
-                                self._prev_snapshot_hash is not None
-                                and img_hash != self._prev_snapshot_hash
+                                self._prev_snapshot_hash is not None and img_hash != self._prev_snapshot_hash
                             )
                             self._prev_snapshot_hash = img_hash
 
@@ -12770,15 +11788,15 @@ class _PrintWatcher:
                                 and abs(job.completion - _last_completion) < 0.1
                                 and (time.time() - _last_progress_time) > self._poll_interval * 3
                             ):
-                                    telemetry_mismatch = True
-                                    logger.warning(
-                                        "[watch %s] Camera ground-truth mismatch: "
-                                        "image changed but telemetry stuck at %.1f%% "
-                                        "for %.0fs. Telemetry may be unreliable.",
-                                        self._watch_id,
-                                        job.completion,
-                                        time.time() - _last_progress_time,
-                                    )
+                                telemetry_mismatch = True
+                                logger.warning(
+                                    "[watch %s] Camera ground-truth mismatch: "
+                                    "image changed but telemetry stuck at %.1f%% "
+                                    "for %.0fs. Telemetry may be unreliable.",
+                                    self._watch_id,
+                                    job.completion,
+                                    time.time() - _last_progress_time,
+                                )
 
                             snap = {
                                 "captured_at": now,
@@ -13687,7 +12705,7 @@ def run_reslice_and_print(
                 parsed_overrides = json.loads(overrides)
                 if not isinstance(parsed_overrides, dict):
                     return _error_dict(
-                        "overrides must be a JSON object (e.g. {\"brim_width\": \"8\"})",
+                        'overrides must be a JSON object (e.g. {"brim_width": "8"})',
                         code="VALIDATION_ERROR",
                     )
             except json.JSONDecodeError as exc:
@@ -13718,6 +12736,7 @@ def run_reslice_and_print(
         if printer_id:
             try:
                 from kiln.printer_intelligence import get_slicer_speed_overrides
+
                 model_speeds = get_slicer_speed_overrides(printer_id)
                 if model_speeds:
                     if parsed_overrides is None:
@@ -13834,8 +12853,10 @@ def multi_copy_print(
         if use_duplicate_flag:
             # PrusaSlicer path: use --duplicate flag
             extra_args = [
-                "--duplicate", str(copies),
-                "--duplicate-distance", str(spacing_mm),
+                "--duplicate",
+                str(copies),
+                "--duplicate-distance",
+                str(spacing_mm),
             ]
             result = _pipeline_reslice_and_print(
                 model_path=model_path,
@@ -14567,6 +13588,7 @@ def main() -> None:
     # Anonymous daily heartbeat (one ping per day, daemon thread)
     try:
         from kiln.heartbeat import send_heartbeat_async
+
         send_heartbeat_async()
     except Exception:
         pass  # Never let telemetry failure affect startup
@@ -14741,8 +13763,7 @@ def get_material_properties(material_id: str) -> dict:
 
             available = [p.material_id for p in list_material_profiles()]
             return _error_dict(
-                f"Unknown material '{material_id}'. "
-                f"Available: {', '.join(available)}",
+                f"Unknown material '{material_id}'. Available: {', '.join(available)}",
                 code="NOT_FOUND",
             )
         return {"success": True, "material": profile.to_dict()}
@@ -14787,8 +13808,7 @@ def check_printer_material_support(
         if report is None:
             available = list_compatibility_printers()
             return _error_dict(
-                f"No compatibility data for '{printer_id}'. "
-                f"Available printers: {', '.join(available)}",
+                f"No compatibility data for '{printer_id}'. Available printers: {', '.join(available)}",
                 code="NOT_FOUND",
             )
         result: dict[str, Any] = {
@@ -14800,18 +13820,11 @@ def check_printer_material_support(
             mat_lower = material_id.lower()
             if mat_lower in report.materials:
                 mat_info = report.materials[mat_lower]
-                result["summary"] = (
-                    f"{material_id.upper()} is {mat_info.get('status', 'unknown')} "
-                    f"on {printer_id}"
-                )
+                result["summary"] = f"{material_id.upper()} is {mat_info.get('status', 'unknown')} on {printer_id}"
                 if mat_info.get("upgrades_needed"):
-                    result["summary"] += (
-                        f" (needs: {', '.join(mat_info['upgrades_needed'])})"
-                    )
+                    result["summary"] += f" (needs: {', '.join(mat_info['upgrades_needed'])})"
             else:
-                result["summary"] = (
-                    f"No compatibility data for '{material_id}' on {printer_id}"
-                )
+                result["summary"] = f"No compatibility data for '{material_id}' on {printer_id}"
         return result
     except Exception as exc:
         logger.exception("Error in check_printer_material_support")
@@ -14854,24 +13867,32 @@ def compare_material_properties(
 
         def _thermal_diff(a: dict, b: dict) -> dict:
             keys = [
-                "print_temp_range_c", "bed_temp_range_c",
-                "glass_transition_c", "heat_deflection_c",
-                "max_service_temp_c", "warping_tendency",
+                "print_temp_range_c",
+                "bed_temp_range_c",
+                "glass_transition_c",
+                "heat_deflection_c",
+                "max_service_temp_c",
+                "warping_tendency",
             ]
             return {k: {material_a: a.get(k), material_b: b.get(k)} for k in keys}
 
         def _mech_diff(a: dict, b: dict) -> dict:
             keys = [
-                "tensile_strength_mpa", "flexural_strength_mpa",
-                "elongation_at_break_pct", "impact_resistance",
-                "layer_adhesion", "creep_resistance",
+                "tensile_strength_mpa",
+                "flexural_strength_mpa",
+                "elongation_at_break_pct",
+                "impact_resistance",
+                "layer_adhesion",
+                "creep_resistance",
             ]
             return {k: {material_a: a.get(k), material_b: b.get(k)} for k in keys}
 
         def _design_diff(a: dict, b: dict) -> dict:
             keys = [
-                "min_wall_mm", "max_overhang_deg",
-                "max_bridge_mm", "min_hole_diameter_mm",
+                "min_wall_mm",
+                "max_overhang_deg",
+                "max_bridge_mm",
+                "min_hole_diameter_mm",
             ]
             return {k: {material_a: a.get(k), material_b: b.get(k)} for k in keys}
 
@@ -14896,10 +13917,7 @@ def compare_material_properties(
         warp_a = ta.get("warping_tendency", "unknown")
         warp_b = tb.get("warping_tendency", "unknown")
         if warp_a != warp_b:
-            summary_lines.append(
-                f"Warping: {prof_a.display_name} {warp_a} "
-                f"vs {prof_b.display_name} {warp_b}"
-            )
+            summary_lines.append(f"Warping: {prof_a.display_name} {warp_a} vs {prof_b.display_name} {warp_b}")
 
         return {
             "success": True,
@@ -15220,11 +14238,13 @@ def smart_reprint(
         # 1a. Check if file_name is already an absolute path that exists
         if _os.path.isfile(file_name):
             found_path = file_name
-            steps_log.append({
-                "step": "find_model",
-                "method": "direct_path",
-                "path": found_path,
-            })
+            steps_log.append(
+                {
+                    "step": "find_model",
+                    "method": "direct_path",
+                    "path": found_path,
+                }
+            )
         else:
             # 1b. Search common directories
             default_dirs = [
@@ -15270,12 +14290,14 @@ def smart_reprint(
                 # Pick the most recently modified match
                 candidates.sort(key=lambda x: x[1], reverse=True)
                 found_path = candidates[0][0]
-                steps_log.append({
-                    "step": "find_model",
-                    "method": "directory_search",
-                    "path": found_path,
-                    "candidates_found": len(candidates),
-                })
+                steps_log.append(
+                    {
+                        "step": "find_model",
+                        "method": "directory_search",
+                        "path": found_path,
+                        "candidates_found": len(candidates),
+                    }
+                )
             else:
                 # 1c. Check print history for file name hints
                 try:
@@ -15284,12 +14306,14 @@ def smart_reprint(
                         for rec in history["records"]:
                             rec_name = rec.get("file_name", "")
                             if base_name.lower() in rec_name.lower():
-                                steps_log.append({
-                                    "step": "find_model",
-                                    "method": "history_match",
-                                    "history_file": rec_name,
-                                    "note": "Found in history but source model not on disk",
-                                })
+                                steps_log.append(
+                                    {
+                                        "step": "find_model",
+                                        "method": "history_match",
+                                        "history_file": rec_name,
+                                        "note": "Found in history but source model not on disk",
+                                    }
+                                )
                                 break
                 except Exception:
                     pass
@@ -15366,29 +14390,35 @@ def smart_reprint(
                     if best_slot is not None:
                         detected_ams_mapping = _json.dumps([best_slot])
                         detected_use_ams = True
-                        steps_log.append({
-                            "step": "ams_detection",
-                            "found": True,
-                            "slot": best_slot,
-                            "tray_type": ams_slot_info["tray_type"] if ams_slot_info else "",
-                            "remain_pct": best_remain,
-                        })
+                        steps_log.append(
+                            {
+                                "step": "ams_detection",
+                                "found": True,
+                                "slot": best_slot,
+                                "tray_type": ams_slot_info["tray_type"] if ams_slot_info else "",
+                                "remain_pct": best_remain,
+                            }
+                        )
                     else:
-                        steps_log.append({
-                            "step": "ams_detection",
-                            "found": False,
-                            "note": (
-                                f"No AMS tray with {material_id.upper()} found. "
-                                "Printing without AMS mapping — load the material "
-                                "in an AMS slot or use the external spool holder."
-                            ),
-                        })
+                        steps_log.append(
+                            {
+                                "step": "ams_detection",
+                                "found": False,
+                                "note": (
+                                    f"No AMS tray with {material_id.upper()} found. "
+                                    "Printing without AMS mapping — load the material "
+                                    "in an AMS slot or use the external spool holder."
+                                ),
+                            }
+                        )
             except Exception:
-                steps_log.append({
-                    "step": "ams_detection",
-                    "found": False,
-                    "note": "AMS query failed (non-Bambu printer or not connected)",
-                })
+                steps_log.append(
+                    {
+                        "step": "ams_detection",
+                        "found": False,
+                        "note": "AMS query failed (non-Bambu printer or not connected)",
+                    }
+                )
 
         # ---------------------------------------------------------------
         # Step 3: Delegate to reprint_with_material
@@ -15539,8 +14569,14 @@ def multi_material_print(
             if not color:
                 # Use a distinct default color per filament index
                 default_colors = [
-                    "#FFFFFFFF", "#FF0000FF", "#0000FFFF", "#00FF00FF",
-                    "#000000FF", "#FFFF00FF", "#FF00FFFF", "#00FFFFFF",
+                    "#FFFFFFFF",
+                    "#FF0000FF",
+                    "#0000FFFF",
+                    "#00FF00FF",
+                    "#000000FF",
+                    "#FFFF00FF",
+                    "#FF00FFFF",
+                    "#00FFFFFF",
                 ]
                 # Assign a default based on how many filaments we've seen
                 color = default_colors[filament_idx % len(default_colors)]
@@ -15550,13 +14586,15 @@ def multi_material_print(
                 unique_filaments[filament_key] = filament_idx
                 filament_idx += 1
 
-            build_objects.append({
-                "file_path": obj["file_path"],
-                "filament_index": unique_filaments[filament_key],
-                "name": obj.get("name", _os.path.basename(obj["file_path"])),
-                "color": color,
-                "material_name": profile.display_name,
-            })
+            build_objects.append(
+                {
+                    "file_path": obj["file_path"],
+                    "filament_index": unique_filaments[filament_key],
+                    "name": obj.get("name", _os.path.basename(obj["file_path"])),
+                    "color": color,
+                    "material_name": profile.display_name,
+                }
+            )
 
         # Derive unique material IDs for thermal checks
         unique_mat_ids = {mat_id for mat_id, _color in unique_filaments}
@@ -15594,9 +14632,7 @@ def multi_material_print(
                 )
 
             # Check bed temp gap: >25C difference is risky
-            all_bed_temps = [
-                t for _, r in bed_ranges for t in r
-            ]
+            all_bed_temps = [t for _, r in bed_ranges for t in r]
             bed_spread = max(all_bed_temps) - min(all_bed_temps)
             if bed_spread > 40:
                 names = [f"{mid} ({r[0]}-{r[1]}C)" for mid, r in bed_ranges]
@@ -15664,12 +14700,18 @@ def multi_material_print(
                 ams_result = ams_status()
                 if ams_result.get("success"):
                     mat_type_map = {
-                        "pla": ["PLA"], "pla_plus": ["PLA", "PLA+"],
-                        "pla_matte": ["PLA"], "pla_tough": ["PLA"],
-                        "petg": ["PETG"], "petg_hf": ["PETG", "PETG-HF"],
-                        "cf_petg": ["PETG-CF"], "abs": ["ABS"],
-                        "asa": ["ASA"], "tpu": ["TPU"],
-                        "tpu_95a": ["TPU"], "tpu_85a": ["TPU"],
+                        "pla": ["PLA"],
+                        "pla_plus": ["PLA", "PLA+"],
+                        "pla_matte": ["PLA"],
+                        "pla_tough": ["PLA"],
+                        "petg": ["PETG"],
+                        "petg_hf": ["PETG", "PETG-HF"],
+                        "cf_petg": ["PETG-CF"],
+                        "abs": ["ABS"],
+                        "asa": ["ASA"],
+                        "tpu": ["TPU"],
+                        "tpu_95a": ["TPU"],
+                        "tpu_85a": ["TPU"],
                         "nylon": ["PA", "Nylon"],
                     }
 
@@ -15681,9 +14723,7 @@ def multi_material_print(
                         return h
 
                     # Sort filaments by index for deterministic mapping
-                    sorted_filaments = sorted(
-                        unique_filaments.items(), key=lambda kv: kv[1]
-                    )
+                    sorted_filaments = sorted(unique_filaments.items(), key=lambda kv: kv[1])
 
                     mapping = []
                     all_found = True
@@ -15695,14 +14735,8 @@ def multi_material_print(
                         for unit in ams_result.get("units", []):
                             for tray in unit.get("trays", []):
                                 ttype = (tray.get("tray_type") or "").strip()
-                                tray_color = _normalize_hex(
-                                    tray.get("tray_color") or tray.get("color") or ""
-                                )
-                                if (
-                                    ttype in expected
-                                    and tray_color == req_hex
-                                    and tray.get("slot") not in mapping
-                                ):
+                                tray_color = _normalize_hex(tray.get("tray_color") or tray.get("color") or "")
+                                if ttype in expected and tray_color == req_hex and tray.get("slot") not in mapping:
                                     found_slot = tray.get("slot", 0)
                                     break
                             if found_slot is not None:
@@ -15719,12 +14753,14 @@ def multi_material_print(
                                     break
                         if found_slot is not None:
                             mapping.append(found_slot)
-                            ams_info.append({
-                                "material": mat_id,
-                                "color": req_color,
-                                "slot": found_slot,
-                                "tray_type": (tray.get("tray_type") or "").strip(),
-                            })
+                            ams_info.append(
+                                {
+                                    "material": mat_id,
+                                    "color": req_color,
+                                    "slot": found_slot,
+                                    "tray_type": (tray.get("tray_type") or "").strip(),
+                                }
+                            )
                         else:
                             all_found = False
                             break
@@ -15960,13 +14996,13 @@ def multi_color_copies(
         n_copies = len(resolved_slots)
         if n_copies < 2:
             return _error_dict(
-                "Need at least 2 AMS slots for multi-color copies. "
-                "For single-color, use start_print directly.",
+                "Need at least 2 AMS slots for multi-color copies. For single-color, use start_print directly.",
                 code="VALIDATION_ERROR",
             )
         if n_copies > 16:
             return _error_dict(
-                "Maximum 16 copies supported.", code="VALIDATION_ERROR",
+                "Maximum 16 copies supported.",
+                code="VALIDATION_ERROR",
             )
 
         # Fill in colors if not provided
@@ -15974,15 +15010,25 @@ def multi_color_copies(
             resolved_colors = list(colors[:n_copies])
         # Pad colors if too few
         default_colors = [
-            "#FF0000", "#00FF00", "#0000FF", "#FFFF00",
-            "#FF00FF", "#00FFFF", "#FFFFFF", "#000000",
-            "#FF8000", "#8000FF", "#0080FF", "#FF0080",
-            "#80FF00", "#00FF80", "#808080", "#C0C0C0",
+            "#FF0000",
+            "#00FF00",
+            "#0000FF",
+            "#FFFF00",
+            "#FF00FF",
+            "#00FFFF",
+            "#FFFFFF",
+            "#000000",
+            "#FF8000",
+            "#8000FF",
+            "#0080FF",
+            "#FF0080",
+            "#80FF00",
+            "#00FF80",
+            "#808080",
+            "#C0C0C0",
         ]
         while len(resolved_colors) < n_copies:
-            resolved_colors.append(
-                default_colors[len(resolved_colors) % len(default_colors)]
-            )
+            resolved_colors.append(default_colors[len(resolved_colors) % len(default_colors)])
 
         # --- Build multi-material 3MF ---
         # Each copy gets a unique filament_index so the slicer treats them
@@ -15992,17 +15038,17 @@ def multi_color_copies(
         model_name = os.path.splitext(os.path.basename(model_path))[0]
         build_objects: list[dict[str, Any]] = []
         for i in range(n_copies):
-            build_objects.append({
-                "file_path": model_path,
-                "filament_index": i,
-                "name": f"{model_name}_color_{i + 1}",
-                "color": resolved_colors[i],
-                "material_name": material,
-            })
+            build_objects.append(
+                {
+                    "file_path": model_path,
+                    "filament_index": i,
+                    "name": f"{model_name}_color_{i + 1}",
+                    "color": resolved_colors[i],
+                    "material_name": material,
+                }
+            )
 
-        output_3mf = os.path.join(
-            tempfile.gettempdir(), f"kiln_multi_color_{model_name}.3mf"
-        )
+        output_3mf = os.path.join(tempfile.gettempdir(), f"kiln_multi_color_{model_name}.3mf")
         try:
             build_multi_material_3mf(build_objects, output_path=output_3mf)
         except Exception as exc:
@@ -16043,8 +15089,7 @@ def multi_color_copies(
                 for i, o in enumerate(build_objects)
             ]
             result["ams_mapping"] = [
-                {"copy": i + 1, "slot": s, "color": resolved_colors[i]}
-                for i, s in enumerate(resolved_slots)
+                {"copy": i + 1, "slot": s, "color": resolved_colors[i]} for i, s in enumerate(resolved_slots)
             ]
             result["multi_color_3mf"] = output_3mf
 
@@ -17114,9 +16159,7 @@ def decorate_surface(
     # --- Check provenance sidecar for design recipe defaults ---
     _provenance_info: dict[str, Any] = {}
     try:
-        recipe_path = os.path.join(
-            os.path.dirname(os.path.abspath(model_path)), ".kiln_recipe.json"
-        )
+        recipe_path = os.path.join(os.path.dirname(os.path.abspath(model_path)), ".kiln_recipe.json")
         if os.path.isfile(recipe_path):
             from kiln.design_recipe import DesignRecipe
 
@@ -17134,17 +16177,14 @@ def decorate_surface(
             # Use recipe's design_id as template_id if caller didn't provide one
             if not template_id and _recipe.design_id:
                 template_id = _recipe.design_id
-                logger.debug(
-                    "Provenance: using design_id %r as template_id", template_id
-                )
+                logger.debug("Provenance: using design_id %r as template_id", template_id)
 
             # Pre-populate material from recipe if caller left the default.
             # Note: material=="PLA" is treated as "no explicit preference"
             # since PLA is the function's default.  If the recipe specifies
             # a different material, use it.
-            recipe_material = (
-                _recipe.parameters.get("material")
-                or (_recipe.provenance and _recipe.provenance.get("material"))
+            recipe_material = _recipe.parameters.get("material") or (
+                _recipe.provenance and _recipe.provenance.get("material")
             )
             if recipe_material and recipe_material != material and material == "PLA":
                 material = recipe_material
@@ -17195,7 +16235,10 @@ def decorate_surface(
                 template_profile_used = True
                 logger.info(
                     "Template %s decoration profile applied: face=%s depth=%.1f style=%s",
-                    template_id, face, depth_mm, image_style,
+                    template_id,
+                    face,
+                    depth_mm,
+                    image_style,
                 )
         except Exception:
             logger.debug("Template decoration profile lookup failed", exc_info=True)
@@ -17233,8 +16276,7 @@ def decorate_surface(
                     )
             else:
                 return _error_dict(
-                    f"Cannot resolve content: {content!r}. Provide a file path "
-                    f"or 'text:...' for text.",
+                    f"Cannot resolve content: {content!r}. Provide a file path or 'text:...' for text.",
                     code="INVALID_CONTENT",
                 )
 
@@ -17259,6 +16301,7 @@ def decorate_surface(
             # SVG logo decoration is a Pro feature
             try:
                 from kiln_pro.bridge import pro_features
+
                 if pro_features is None:
                     raise ImportError("kiln-pro not installed")
             except ImportError:
@@ -17364,10 +16407,7 @@ def decorate_surface(
         if not compile_result.get("success"):
             result_dict: dict[str, Any] = {
                 "status": "compile_failed",
-                "message": (
-                    f"OpenSCAD compilation failed. "
-                    f"Error: {compile_result.get('error', 'unknown')}"
-                ),
+                "message": (f"OpenSCAD compilation failed. Error: {compile_result.get('error', 'unknown')}"),
                 "scad_path": scad_result["scad_path"],
                 "compile_result": compile_result,
             }
@@ -17393,9 +16433,10 @@ def decorate_surface(
                 if _out_sz < _in_sz + 1000:
                     boolean_ok = False
                     logger.debug(
-                        "SVG boolean size delta too small (%d → %d, "
-                        "delta=%d < 1000) — treating as failed",
-                        _in_sz, _out_sz, _out_sz - _in_sz,
+                        "SVG boolean size delta too small (%d → %d, delta=%d < 1000) — treating as failed",
+                        _in_sz,
+                        _out_sz,
+                        _out_sz - _in_sz,
                     )
             except OSError:
                 pass
@@ -17441,8 +16482,7 @@ def decorate_surface(
                 )
                 if compile_result.get("success"):
                     warnings.append(
-                        "SVG boolean produced no geometry change. "
-                        "Fell back to heightmap rasterization (succeeded)."
+                        "SVG boolean produced no geometry change. Fell back to heightmap rasterization (succeeded)."
                     )
                 else:
                     warnings.append(
@@ -17451,14 +16491,10 @@ def decorate_surface(
                     )
             except Exception as fallback_exc:
                 logger.debug("SVG heightmap fallback failed: %s", fallback_exc)
-                warnings.append(
-                    "SVG boolean produced no geometry change. "
-                    "Convert to PNG and use content_type='image'."
-                )
+                warnings.append("SVG boolean produced no geometry change. Convert to PNG and use content_type='image'.")
         elif not boolean_ok:
             warnings.append(
-                "Output STL is similar in size to input — the boolean "
-                "may not have produced visible geometry changes."
+                "Output STL is similar in size to input — the boolean may not have produced visible geometry changes."
             )
 
         # --- Step 7: Build result ---
