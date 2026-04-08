@@ -296,76 +296,24 @@ class _DesignKnowledgeBase:
         if self._loaded:
             return
 
-        materials_path = _DATA_DIR / "materials.json"
-        patterns_path = _DATA_DIR / "design_patterns.json"
-        requirements_path = _DATA_DIR / "functional_requirements.json"
-        load_tables_path = _DATA_DIR / "load_tables.json"
-        environment_path = _DATA_DIR / "environment_compatibility.json"
-        printers_path = _DATA_DIR / "printer_profiles.json"
+        _tables: list[tuple[str, str]] = [
+            ("materials.json", "_materials"),
+            ("design_patterns.json", "_patterns"),
+            ("functional_requirements.json", "_requirements"),
+            ("load_tables.json", "_load_tables"),
+            ("environment_compatibility.json", "_environment"),
+            ("printer_profiles.json", "_printers"),
+            ("material_troubleshooting.json", "_troubleshooting"),
+            ("printer_material_compatibility.json", "_printer_compatibility"),
+            ("post_processing.json", "_post_processing"),
+            ("multi_material_pairing.json", "_multi_material"),
+        ]
 
-        if materials_path.exists():
-            raw = json.loads(materials_path.read_text(encoding="utf-8"))
-            self._materials = {
-                k: v for k, v in raw.items() if not k.startswith("_")
-            }
-
-        if patterns_path.exists():
-            raw = json.loads(patterns_path.read_text(encoding="utf-8"))
-            self._patterns = {
-                k: v for k, v in raw.items() if not k.startswith("_")
-            }
-
-        if requirements_path.exists():
-            raw = json.loads(requirements_path.read_text(encoding="utf-8"))
-            self._requirements = {
-                k: v for k, v in raw.items() if not k.startswith("_")
-            }
-
-        if load_tables_path.exists():
-            raw = json.loads(load_tables_path.read_text(encoding="utf-8"))
-            self._load_tables = {
-                k: v for k, v in raw.items() if not k.startswith("_")
-            }
-
-        if environment_path.exists():
-            raw = json.loads(environment_path.read_text(encoding="utf-8"))
-            self._environment = {
-                k: v for k, v in raw.items() if not k.startswith("_")
-            }
-
-        if printers_path.exists():
-            raw = json.loads(printers_path.read_text(encoding="utf-8"))
-            self._printers = {
-                k: v for k, v in raw.items() if not k.startswith("_")
-            }
-
-        troubleshooting_path = _DATA_DIR / "material_troubleshooting.json"
-        if troubleshooting_path.exists():
-            raw = json.loads(troubleshooting_path.read_text(encoding="utf-8"))
-            self._troubleshooting = {
-                k: v for k, v in raw.items() if not k.startswith("_")
-            }
-
-        compatibility_path = _DATA_DIR / "printer_material_compatibility.json"
-        if compatibility_path.exists():
-            raw = json.loads(compatibility_path.read_text(encoding="utf-8"))
-            self._printer_compatibility = {
-                k: v for k, v in raw.items() if not k.startswith("_")
-            }
-
-        post_processing_path = _DATA_DIR / "post_processing.json"
-        if post_processing_path.exists():
-            raw = json.loads(post_processing_path.read_text(encoding="utf-8"))
-            self._post_processing = {
-                k: v for k, v in raw.items() if not k.startswith("_")
-            }
-
-        multi_material_path = _DATA_DIR / "multi_material_pairing.json"
-        if multi_material_path.exists():
-            raw = json.loads(multi_material_path.read_text(encoding="utf-8"))
-            self._multi_material = {
-                k: v for k, v in raw.items() if not k.startswith("_")
-            }
+        for filename, attr in _tables:
+            path = _DATA_DIR / filename
+            if path.exists():
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                setattr(self, attr, {k: v for k, v in raw.items() if not k.startswith("_")})
 
         self._loaded = True
         logger.info(
@@ -609,7 +557,8 @@ def recommend_material_for_design(
     if not scores:
         # Absolute fallback
         pla = get_material_profile("pla")
-        assert pla is not None
+        if pla is None:
+            raise RuntimeError("PLA material profile not found in knowledge base")
         return MaterialRecommendation(
             material=pla,
             score=50.0,
@@ -621,7 +570,8 @@ def recommend_material_for_design(
 
     top_score, top_mid, top_reasons, top_warnings = scores[0]
     top_profile = get_material_profile(top_mid)
-    assert top_profile is not None
+    if top_profile is None:
+        raise RuntimeError(f"Material profile {top_mid!r} not found in knowledge base")
 
     # Build alternatives
     alternatives: list[dict[str, Any]] = []
