@@ -462,8 +462,6 @@ def validation_to_feedback(
     printability_constraints: list[str] = []
     structural_issues: list[str] = []
     structural_constraints: list[str] = []
-    dimensional_issues: list[str] = []
-    dimensional_constraints: list[str] = []
 
     for check in failed:
         name = check.check_name
@@ -533,17 +531,6 @@ def validation_to_feedback(
                 issues=structural_issues,
                 constraints=structural_constraints,
                 severity=severity,
-            )
-        )
-
-    if dimensional_issues:
-        feedback_items.append(
-            PrintFeedback(
-                original_prompt=original_prompt,
-                feedback_type=FeedbackType.DIMENSIONAL,
-                issues=dimensional_issues,
-                constraints=dimensional_constraints,
-                severity="critical",
             )
         )
 

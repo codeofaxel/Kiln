@@ -675,7 +675,7 @@ def start_feedback_loop(model_id: str, original_prompt: str) -> FeedbackLoop:
     db = get_db()
     now = time.time()
     try:
-        db._conn.execute(
+        db.execute(
             """INSERT INTO feedback_loops
                (model_id, original_prompt, iterations, current_iteration,
                 resolved, best_iteration, created_at, updated_at)
@@ -691,7 +691,7 @@ def start_feedback_loop(model_id: str, original_prompt: str) -> FeedbackLoop:
                 now,
             ),
         )
-        db._conn.commit()
+        db.commit()
     except Exception:
         logger.exception("Failed to save feedback loop (non-fatal)")
 
@@ -742,7 +742,7 @@ def add_iteration(
 
     now = time.time()
     try:
-        db._conn.execute(
+        db.execute(
             """UPDATE feedback_loops
                SET iterations = ?, current_iteration = ?, resolved = ?,
                    best_iteration = ?, updated_at = ?
@@ -756,7 +756,7 @@ def add_iteration(
                 model_id,
             ),
         )
-        db._conn.commit()
+        db.commit()
     except Exception:
         logger.exception("Failed to update feedback loop (non-fatal)")
 
@@ -1317,7 +1317,7 @@ def get_feedback_loop(model_id: str) -> FeedbackLoop | None:
 
     db = get_db()
     try:
-        row = db._conn.execute(
+        row = db.execute(
             "SELECT * FROM feedback_loops WHERE model_id = ?",
             (model_id,),
         ).fetchone()
