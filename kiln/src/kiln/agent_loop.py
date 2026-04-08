@@ -183,8 +183,8 @@ _ESSENTIAL_TOOLS = frozenset(
         "get_safety_profile",
         "list_print_pipelines",
         "list_generation_providers",
-        "list_slicer_profiles_tool",
-        "get_slicer_profile_tool",
+        "list_slicer_profiles",
+        "get_slicer_profile",
         "get_printer_intelligence",
     }
 )
@@ -210,7 +210,7 @@ _STANDARD_TOOLS = _ESSENTIAL_TOOLS | frozenset(
         "browse_models",
         "list_model_categories",
         "slice_model",
-        "find_slicer_tool",
+        "find_slicer",
         "slice_and_print",
         "register_printer",
         "discover_printers",

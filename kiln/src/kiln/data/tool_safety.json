@@ -155,7 +155,7 @@
     "list_model_categories": {
       "level": "safe"
     },
-    "find_slicer_tool": {
+    "find_slicer": {
       "level": "safe"
     },
     "slice_model": {
@@ -323,10 +323,10 @@
     "get_safety_profile": {
       "level": "safe"
     },
-    "list_slicer_profiles_tool": {
+    "list_slicer_profiles": {
       "level": "safe"
     },
-    "get_slicer_profile_tool": {
+    "get_slicer_profile": {
       "level": "safe"
     },
     "get_printer_intelligence": {

@@ -146,7 +146,7 @@ READ_ONLY_TOOLS: set[str] = {
     "list_model_categories",
 
     # Slicer discovery (read-only)
-    "find_slicer_tool",
+    "find_slicer",
 
     # Fulfillment read-only
     "fulfillment_materials",
