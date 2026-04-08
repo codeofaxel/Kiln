@@ -164,15 +164,62 @@ class _GenerationToolsPlugin:
             5. Only then proceed to print
 
             Args:
-                file_path: Path to an STL file to render.
+                file_path: Path to an STL or 3MF file to render.  Colored 3MF
+                    files are rendered with per-face colors via the PIL-based
+                    colored renderer; STL and colorless 3MF use OpenSCAD.
             """
             import kiln.server as _srv
 
             if not os.path.isfile(file_path):
                 return _srv._error_dict(
-                    f"STL file not found: {file_path}",
+                    f"File not found: {file_path}",
                     code="FILE_NOT_FOUND",
                 )
+
+            ext = os.path.splitext(file_path)[1].lower()
+
+            # ---- Colored 3MF fast path ----
+            if ext == ".3mf":
+                try:
+                    from kiln.colored_renderer import render_colored_mesh_multi_angle
+                    from kiln.threemf_parser import parse_colored_3mf
+
+                    mesh = parse_colored_3mf(file_path)
+                    if mesh.colors_found:
+                        _logger.debug(
+                            "3MF has per-face colors (%d unique) — using colored renderer",
+                            mesh.color_count,
+                        )
+                        views = render_colored_mesh_multi_angle(
+                            mesh.triangles,
+                            angles=["isometric", "front", "right", "top", "bottom"],
+                        )
+                        return {
+                            "success": True,
+                            "previews": [
+                                {"angle": v["angle"], "path": v["path"]}
+                                for v in views if v.get("path")
+                            ],
+                            "message": (
+                                f"Rendered {len([v for v in views if v.get('path')])} "
+                                "colored preview angles (iso, front, side, top, bottom). "
+                                "View ALL angles to evaluate the model before printing. "
+                                "Check the BOTTOM view to verify flat bed adhesion surface. "
+                                "Check for: thin walls, floating geometry, missing features, "
+                                "incorrect proportions, and overhangs needing supports. "
+                                "Use recommend_material and get_design_constraints from the "
+                                "intelligence tools for material and printability guidance."
+                            ),
+                        }
+                    # No colors — fall through to VisualVerifier / OpenSCAD
+                    _logger.debug("3MF has no per-face colors — using OpenSCAD path")
+                except ImportError:
+                    _logger.debug("Colored renderer not available — using OpenSCAD path")
+                except Exception:  # noqa: BLE001
+                    _logger.debug(
+                        "Colored 3MF parse/render failed — using OpenSCAD path",
+                        exc_info=True,
+                    )
 
             try:
                 from kiln.generation.visual_verify import VisualVerifier
