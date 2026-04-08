@@ -12,11 +12,10 @@ import math
 import os
 import tempfile
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from PIL import Image, ImageDraw
-
-from kiln.threemf_parser import ColoredTriangle
+if TYPE_CHECKING:
+    from kiln.threemf_parser import ColoredTriangle
 
 # ---------------------------------------------------------------------------
 # Camera angle presets — converted from OpenSCAD (rotX, rotY, rotZ) to
@@ -411,6 +410,8 @@ def render_colored_mesh(
 
     # Sort by depth descending (farthest first = largest Y first)
     face_data.sort(key=lambda fd: fd[0], reverse=True)
+
+    from PIL import Image, ImageDraw
 
     img = Image.new("RGB", (rw, rh), background)
     draw = ImageDraw.Draw(img)
