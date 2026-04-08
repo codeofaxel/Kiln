@@ -1138,6 +1138,19 @@ _material_tracker: MaterialTracker | None = None
 _bed_level_mgr: BedLevelManager | None = None
 _stream_proxy: MJPEGProxy | None = None
 _cloud_sync: CloudSyncManager | None = None
+
+
+def _get_cloud_sync() -> CloudSyncManager | None:
+    """Return the current cloud sync manager (may be None if not configured)."""
+    return _cloud_sync
+
+
+def _set_cloud_sync(manager: CloudSyncManager | None) -> None:
+    """Replace the cloud sync manager singleton."""
+    global _cloud_sync  # noqa: PLW0603
+    if _cloud_sync is not None:
+        _cloud_sync.stop()
+    _cloud_sync = manager
 _heater_watchdog: HeaterWatchdog | None = None
 _plugin_mgr: PluginManager | None = None
 _start_time = time.time()
@@ -6684,23 +6697,23 @@ def webcam_stream(
 @requires_tier(LicenseTier.PRO)
 def cloud_sync_status() -> dict:
     """Get the current cloud sync status."""
-    global _cloud_sync
-    if _cloud_sync is None:
+    cs = _get_cloud_sync()
+    if cs is None:
         return {"success": True, "status": {"enabled": False, "last_sync_status": "not_configured"}}
-    return {"success": True, "status": _cloud_sync.status().to_dict()}
+    return {"success": True, "status": cs.status().to_dict()}
 
 
 @mcp.tool()
 @requires_tier(LicenseTier.PRO)
 def cloud_sync_now() -> dict:
     """Trigger an immediate cloud sync cycle."""
-    global _cloud_sync
     if err := _check_auth("admin"):
         return err
-    if _cloud_sync is None:
+    cs = _get_cloud_sync()
+    if cs is None:
         return _error_dict("Cloud sync not configured.", code="NOT_CONFIGURED")
     try:
-        result = _cloud_sync.sync_now()
+        result = cs.sync_now()
         return {"success": True, **result}
     except Exception as exc:
         logger.exception("Unexpected error in cloud_sync_now")
@@ -6721,7 +6734,6 @@ def cloud_sync_configure(
         api_key: API key for authentication.
         interval: Sync interval in seconds (default 60).
     """
-    global _cloud_sync
     if err := _check_auth("admin"):
         return err
     try:
@@ -6730,14 +6742,13 @@ def cloud_sync_configure(
             api_key=api_key,
             sync_interval_seconds=interval,
         )
-        if _cloud_sync is not None:
-            _cloud_sync.stop()
-        _cloud_sync = CloudSyncManager(
+        new_mgr = CloudSyncManager(
             db=get_db(),
             event_bus=_get_event_bus(),
             config=config,
         )
-        _cloud_sync.start()
+        _set_cloud_sync(new_mgr)
+        new_mgr.start()
         return {"success": True, "config": config.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in cloud_sync_configure")
@@ -10918,18 +10929,18 @@ def main() -> None:
     mcp._mcp_server.instructions = _build_instructions()
 
     # Initialise cloud sync from saved config
-    global _cloud_sync
     _saved_sync = get_db().get_setting("cloud_sync_config")
     if _saved_sync:
         import json as _json
 
         try:
-            _cloud_sync = CloudSyncManager(
+            _cs = CloudSyncManager(
                 db=get_db(),
                 event_bus=_get_event_bus(),
                 config=SyncConfig.from_dict(_json.loads(_saved_sync)),
             )
-            _cloud_sync.start()
+            _set_cloud_sync(_cs)
+            _cs.start()
         except Exception:
             logger.debug("Could not restore cloud sync config", exc_info=True)
 
@@ -10983,8 +10994,8 @@ def main() -> None:
         _get_webhook_mgr().stop()
         _get_heater_watchdog().stop()
         _get_stream_proxy().stop()
-        if _cloud_sync is not None:
-            _cloud_sync.stop()
+        if _get_cloud_sync() is not None:
+            _get_cloud_sync().stop()
         # Stop all active print watchers
         for wid in list(_watchers):
             try:
@@ -11001,8 +11012,8 @@ def main() -> None:
     atexit.register(_get_webhook_mgr().stop)
     atexit.register(_get_heater_watchdog().stop)
     atexit.register(_get_stream_proxy().stop)
-    if _cloud_sync is not None:
-        atexit.register(_cloud_sync.stop)
+    if _get_cloud_sync() is not None:
+        atexit.register(_get_cloud_sync().stop)
 
     def _stop_all_watchers() -> None:
         for wid in list(_watchers):
