@@ -82,7 +82,7 @@ When adding new code, find and follow the closest existing pattern. Don't invent
 
 | Adding...                  | Copy the pattern in...                                              |
 |----------------------------|---------------------------------------------------------------------|
-| New MCP tool               | `server.py` → `get_printer_status` (decorator, error handling, return format) |
+| New MCP tool               | `plugins/design_tools.py` or any plugin file (decorator, error handling, return format). **NEVER add new tools to server.py** — it's frozen at 283 tools. All new tools go in `plugins/`. |
 | New printer adapter        | `printers/octoprint.py` (method order, retry logic, error wrapping, dataclass returns) |
 | New CLI command            | `cli/main.py` → `status` command (Click decorators, context, `--json` flag, error handling) |
 | New marketplace adapter    | `marketplaces/thingiverse.py` (API client pattern, auth, response normalization) |
@@ -220,7 +220,7 @@ kiln/                           — MCP Server package
   src/kiln/
     __init__.py
     __main__.py                 — Entry point (python -m kiln)
-    server.py                   — FastMCP server, 539 MCP tools (283 here + 200 in plugins/ + 56 in kiln-pro)
+    server.py                   — FastMCP server, 533 MCP tools (256 here + 221 in plugins/ + 56 in kiln-pro)
     slicer.py                   — PrusaSlicer/OrcaSlicer integration
     slicer_profiles.py          — Bundled slicer profiles per printer
     safety_profiles.py          — Per-printer safety limits (28 models)

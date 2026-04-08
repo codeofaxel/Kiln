@@ -72,12 +72,6 @@ with contextlib.suppress(ImportError):
     import kiln_pro  # noqa: F401 — triggers compat shim installation
 
 
-
-
-
-
-
-
 from kiln import parse_float_env, parse_int_env
 from kiln.auth import AuthManager
 from kiln.backup import BackupError
@@ -102,28 +96,16 @@ try:
     from kiln.fulfillment import (
         FulfillmentError,
         FulfillmentProvider,
-        OrderRequest,
         QuoteRequest,
     )
     from kiln.fulfillment import (
         get_provider as get_fulfillment_provider,
     )
-    from kiln.fulfillment.intelligence import (
-        QuoteValidation,
-        _check_price_drift,
-    )
-    from kiln.fulfillment.intelligence import (
-        validate_quote_for_order as _validate_quote_for_order,
-    )
 except ImportError:
     FulfillmentError = None  # Available in kiln-pro
     FulfillmentProvider = None
-    OrderRequest = None
     QuoteRequest = None
     get_fulfillment_provider = None
-    QuoteValidation = None
-    _check_price_drift = None
-    _validate_quote_for_order = None
 from kiln.gateway.threedos import ThreeDOSClient
 from kiln.gcode import validate_gcode as _validate_gcode_impl
 from kiln.gcode import validate_gcode_for_printer
@@ -156,6 +138,7 @@ except ImportError:
 
     class _DummyTier:
         """Stub for LicenseTier when licensing module is not installed."""
+
         PRO = "pro"
         ENTERPRISE = "enterprise"
         BUSINESS = "business"
@@ -165,11 +148,14 @@ except ImportError:
 
     def check_tier(required, *_a, **_kw):
         tier_label = getattr(required, "value", required) if required else "pro"
-        return (False, (
-            f"This feature requires a Kiln {str(tier_label).title()} license. "
-            "You're on the Free tier. "
-            "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
-        ))
+        return (
+            False,
+            (
+                f"This feature requires a Kiln {str(tier_label).title()} license. "
+                "You're on the Free tier. "
+                "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
+            ),
+        )
 
     def get_tier(*_a, **_kw):
         return "free"
@@ -177,22 +163,30 @@ except ImportError:
     def requires_tier(_tier):
         """Gate pro/enterprise features when kiln-pro is not installed."""
         tier_label = getattr(_tier, "value", _tier) if _tier else "pro"
+
         def decorator(fn):
             @functools.wraps(fn)
             def wrapper(*args, **kwargs):
+                tool_name = fn.__name__
                 return {
                     "success": False,
                     "error": (
-                        f"This feature requires a Kiln {str(tier_label).title()} license. "
+                        f"{tool_name} requires a Kiln {str(tier_label).title()} license. "
                         "You're on the Free tier. "
                         "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
                     ),
-                    "code": "LICENSE_REQUIRED",
+                    "code": "TIER_REQUIRED",
                     "required_tier": str(tier_label),
+                    "tool": tool_name,
+                    "retryable": False,
                     "upgrade_url": "https://kiln3d.com/pro",
                 }
+
             return wrapper
+
         return decorator
+
+
 from kiln.log_config import configure_logging as _configure_log_rotation
 from kiln.marketplaces import (
     Cults3DAdapter,
@@ -509,8 +503,7 @@ def _build_instructions() -> str:
             ptype = _PRINTER_TYPE or "octoprint"
             if len(printer_names) == 1:
                 parts.append(
-                    f"PRINTER: 1 {ptype} printer registered (\"{printer_names[0]}\"). "
-                    "Use `printer_status` to check it."
+                    f'PRINTER: 1 {ptype} printer registered ("{printer_names[0]}"). Use `printer_status` to check it.'
                 )
             else:
                 parts.append(
@@ -543,19 +536,13 @@ def _build_instructions() -> str:
         from kiln.slicer import find_slicer
 
         slicer_info = find_slicer()
-        parts.append(
-            f"SLICER: {slicer_info.name} found. "
-            "Use `slice_model` to convert STL/3MF to G-code."
-        )
+        parts.append(f"SLICER: {slicer_info.name} found. Use `slice_model` to convert STL/3MF to G-code.")
     except Exception:
         pass  # No slicer — omit rather than add noise
 
     # --- Fulfillment ---
     if _CRAFTCLOUD_API_KEY:
-        parts.append(
-            "FULFILLMENT: Craftcloud connected. "
-            "Use `fulfillment_quote` to outsource prints."
-        )
+        parts.append("FULFILLMENT: Craftcloud connected. Use `fulfillment_quote` to outsource prints.")
 
     # --- Safety summary ---
     safety_notes: list[str] = []
@@ -643,8 +630,8 @@ def _build_instructions() -> str:
 
     # --- Natural language guidance ---
     parts.append(
-        "The user may ask in plain language (e.g. \"what's my printer doing?\", "
-        "\"find me a phone stand\", \"print that benchy\"). Map their intent "
+        'The user may ask in plain language (e.g. "what\'s my printer doing?", '
+        '"find me a phone stand", "print that benchy"). Map their intent '
         "to the appropriate tool. When uncertain, ask — don't guess on "
         "physical operations."
     )
@@ -660,17 +647,12 @@ def _build_instructions() -> str:
 
         # Agent behavioral rules
         if manifest.agent_rules:
-            rules_str = "\n".join(
-                f"  {i}. {rule}" for i, rule in enumerate(manifest.agent_rules, 1)
-            )
+            rules_str = "\n".join(f"  {i}. {rule}" for i, rule in enumerate(manifest.agent_rules, 1))
             parts.append(f"AGENT RULES (MUST FOLLOW):\n{rules_str}")
 
         # Tool quick-reference by use case
         if manifest.tool_recommendations:
-            recs_str = "\n".join(
-                f"  {use_case}: {tool}"
-                for use_case, tool in manifest.tool_recommendations.items()
-            )
+            recs_str = "\n".join(f"  {use_case}: {tool}" for use_case, tool in manifest.tool_recommendations.items())
             parts.append(f"TOOL QUICK-REFERENCE:\n{recs_str}")
 
         # Key workflows
@@ -678,7 +660,8 @@ def _build_instructions() -> str:
             workflow_lines: list[str] = []
             for wf_name, steps in manifest.workflows.items():
                 step_str = " → ".join(
-                    s.split(" — ")[0] for s in steps  # just the function names
+                    s.split(" — ")[0]
+                    for s in steps  # just the function names
                 )
                 workflow_lines.append(f"  {wf_name}: {step_str}")
             parts.append("WORKFLOWS:\n" + "\n".join(workflow_lines))
@@ -1217,7 +1200,10 @@ def _get_scheduler() -> JobScheduler:
     global _scheduler  # noqa: PLW0603
     if _scheduler is None:
         _scheduler = JobScheduler(
-            _get_queue(), _get_registry(), _get_event_bus(), persistence=get_db(),
+            _get_queue(),
+            _get_registry(),
+            _get_event_bus(),
+            persistence=get_db(),
         )
     return _scheduler
 
@@ -1300,6 +1286,7 @@ def _get_plugin_mgr() -> PluginManager:
     if _plugin_mgr is None:
         _plugin_mgr = PluginManager()
     return _plugin_mgr
+
 
 # Thingiverse client (lazy -- created on first use so the module can be
 # imported without requiring the token env var).
@@ -1744,9 +1731,7 @@ def _token_from_mcp_context() -> str:
     headers = getattr(request, "headers", None)
     if headers is not None:
         try:
-            header_token = _extract_bearer_or_raw_token(
-                headers.get("authorization") or headers.get("Authorization")
-            )
+            header_token = _extract_bearer_or_raw_token(headers.get("authorization") or headers.get("Authorization"))
             if header_token:
                 return header_token
         except Exception:
@@ -2173,9 +2158,7 @@ def monitor_print(
         # --- Format values ---
         progress_str = f"{completion:.0f}" if completion is not None else "N/A"
         layer_str = (
-            f"{current_layer} / {total_layers}"
-            if current_layer is not None and total_layers is not None
-            else "N/A"
+            f"{current_layer} / {total_layers}" if current_layer is not None and total_layers is not None else "N/A"
         )
         elapsed_str = _format_duration(elapsed_s)
         remaining_str = _format_duration(remaining_s)
@@ -2205,9 +2188,7 @@ def monitor_print(
                     import uuid as _uuid
 
                     snap_dir = _tmpmod.gettempdir()
-                    snap_path = os.path.join(
-                        snap_dir, f"kiln_monitor_{_uuid.uuid4().hex[:12]}.jpg"
-                    )
+                    snap_path = os.path.join(snap_dir, f"kiln_monitor_{_uuid.uuid4().hex[:12]}.jpg")
                     with open(snap_path, "wb") as f:
                         f.write(image_data)
                     snapshot_line = snap_path
@@ -2237,10 +2218,12 @@ def monitor_print(
         ]
         if chamber_actual is not None:
             lines.append(f"- Chamber: {chamber_actual:.0f}°C")
-        lines.extend([
-            f"- Speed: {speed_str}",
-            f"- Errors: {error_str}",
-        ])
+        lines.extend(
+            [
+                f"- Speed: {speed_str}",
+                f"- Errors: {error_str}",
+            ]
+        )
 
         # --- Material usage & cost estimate ---
         # Try to get filament weight from gcode metadata (more accurate
@@ -2255,8 +2238,10 @@ def monitor_print(
                 _local_paths = []
                 try:
                     from kiln.cli.config import get_prints_dir
+
                     _prints = get_prints_dir()
                     import glob as _globmod
+
                     _local_paths = _globmod.glob(
                         str(_prints / "**" / "gcode" / "*.gcode"),
                         recursive=True,
@@ -2270,6 +2255,7 @@ def monitor_print(
                 if _meta and hasattr(_meta, "filament_used_mm") and _meta.filament_used_mm:
                     # Convert mm to grams: volume = pi * (d/2)^2 * length
                     import math as _math
+
                     _d = 1.75  # mm filament diameter
                     _vol_mm3 = _math.pi * (_d / 2) ** 2 * _meta.filament_used_mm
                     _density = 0.00124  # PLA g/mm³
@@ -2282,14 +2268,13 @@ def monitor_print(
                 for _lp in _local_paths:
                     if "merged" in _lp.lower() or "multicolor" in _lp.lower():
                         import re as _re_mod
+
                         with open(_lp) as _f:
                             _gc = _f.read()
                         _tool_changes = len(_re_mod.findall(r"^T\d+$", _gc, _re_mod.MULTILINE))
                         # Also try to get filament weight from gcode comments
                         if _filament_weight_g is None:
-                            _fil_g_m = _re_mod.search(
-                                r"filament used \[g\]\s*=\s*([\d.]+)", _gc
-                            )
+                            _fil_g_m = _re_mod.search(r"filament used \[g\]\s*=\s*([\d.]+)", _gc)
                             if _fil_g_m:
                                 _filament_weight_g = float(_fil_g_m.group(1))
                         break
@@ -2304,7 +2289,7 @@ def monitor_print(
         )
         if cost_info is not None:
             weight_str = f"~{cost_info['estimated_weight_g']:.0f}g {cost_info['material']}"
-            if cost_info['purge_waste_g'] > 0:
+            if cost_info["purge_waste_g"] > 0:
                 weight_str += f" ({cost_info['print_weight_g']:.0f}g print + {cost_info['purge_waste_g']:.0f}g purge)"
             lines.append(f"- Material used: {weight_str}")
             lines.append(
@@ -2313,10 +2298,12 @@ def monitor_print(
                 f" = ~${cost_info['total_cost_usd']:.2f} total"
             )
 
-        lines.extend([
-            f"Camera: {snapshot_line}",
-            f"Comments: {comment}",
-        ])
+        lines.extend(
+            [
+                f"Camera: {snapshot_line}",
+                f"Comments: {comment}",
+            ]
+        )
         report = "\n".join(lines)
 
         return report
@@ -2427,8 +2414,10 @@ def upload_file(file_path: str) -> dict:
                 # the printer firmware (e.g. M500 for Bambu bed-leveling)
                 # are not falsely blocked.
                 _dialect = (
-                    GCodeDialect.BAMBU if _PRINTER_TYPE == "bambu"
-                    else GCodeDialect.KLIPPER if _PRINTER_TYPE == "moonraker"
+                    GCodeDialect.BAMBU
+                    if _PRINTER_TYPE == "bambu"
+                    else GCodeDialect.KLIPPER
+                    if _PRINTER_TYPE == "moonraker"
                     else GCodeDialect.GENERIC
                 )
                 scan = scan_gcode_file(
@@ -3068,7 +3057,9 @@ def clear_emergency_stop(
         if not result.get("success"):
             reason = str(result.get("reason") or "")
             code = "E_STOP_CLEAR_BLOCKED" if reason == "critical_interlocks_pending" else "INVALID_STATE"
-            payload = _error_dict(str(result.get("message") or "Failed to clear emergency latch."), code=code, retryable=False)
+            payload = _error_dict(
+                str(result.get("message") or "Failed to clear emergency latch."), code=code, retryable=False
+            )
             payload["emergency_status"] = result.get("status")
             return payload
         _audit(
@@ -4145,9 +4136,7 @@ def preflight_check(
                 logger.debug("Cost estimate gcode parse failed: %s", exc)
 
         if _cost_time_s is not None and _cost_time_s > 0:
-            cost_estimate = _estimate_print_cost(
-                _cost_time_s, 0, material=expected_material
-            )
+            cost_estimate = _estimate_print_cost(_cost_time_s, 0, material=expected_material)
 
         # -- Summary -------------------------------------------------------
         ready = all(c["passed"] for c in checks)
@@ -4736,7 +4725,11 @@ def register_printer(
         # without a Pro license.  Replacing an existing printer doesn't
         # count against the limit.
         current_tier = get_tier()
-        if current_tier < LicenseTier.PRO and name not in _get_registry() and _get_registry().count >= FREE_TIER_MAX_PRINTERS:
+        if (
+            current_tier < LicenseTier.PRO
+            and name not in _get_registry()
+            and _get_registry().count >= FREE_TIER_MAX_PRINTERS
+        ):
             return {
                 "success": False,
                 "error": (
@@ -4792,8 +4785,7 @@ def register_printer(
         elif printer_type == "elegoo":
             if ElegooAdapter is None:
                 return _error_dict(
-                    "Elegoo SDCP support requires websocket-client.  "
-                    "Install it with: pip install websocket-client",
+                    "Elegoo SDCP support requires websocket-client.  Install it with: pip install websocket-client",
                     code="MISSING_DEPENDENCY",
                 )
             adapter = ElegooAdapter(
@@ -4826,9 +4818,7 @@ def register_printer(
         # If the boot-time adapter was a different object (not in the
         # registry), disconnect it to stop orphaned MQTT threads.
         if old_default is not None and old_default is not adapter:
-            in_registry = any(
-                old_default is a for a in _get_registry().list_all().values()
-            )
+            in_registry = any(old_default is a for a in _get_registry().list_all().values())
             if not in_registry:
                 _disc = getattr(old_default, "disconnect", None)
                 if _disc is not None:
@@ -4925,7 +4915,9 @@ def fleet_status_by_site() -> dict:
                 "printers": statuses,
                 "count": len(statuses),
                 "idle": [p["name"] for p in statuses if str(p.get("state", "")).lower() == "idle"],
-                "busy": [p["name"] for p in statuses if str(p.get("state", "")).lower() in {"printing", "busy", "paused"}],
+                "busy": [
+                    p["name"] for p in statuses if str(p.get("state", "")).lower() in {"printing", "busy", "paused"}
+                ],
             }
         return {"success": True, "sites": result, "site_count": len(result)}
     except Exception as exc:
@@ -5150,438 +5142,10 @@ def recent_events(limit: int = 20, *, type: str | None = None) -> dict:
         return _error_dict(f"Unexpected error in recent_events: {exc}", code="INTERNAL_ERROR")
 
 
-# ---------------------------------------------------------------------------
-# Billing tools
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def billing_summary() -> dict:
-    """Get a summary of Kiln orchestration fees for the current month.
-
-    Shows total fees collected, number of outsourced orders, free tier
-    usage, and the current fee policy.  Only orders placed through
-    external fulfillment services incur fees -- all local printing is free.
-
-    Available on all tiers — anyone who transacts can view their billing.
-    """
-    try:
-        revenue = _get_billing().monthly_revenue()
-        policy = _get_billing()._policy
-        return {
-            "success": True,
-            "month_revenue": revenue,
-            "fee_policy": {
-                "orchestration_fee_percent": policy.network_fee_percent,
-                "network_fee_percent": policy.network_fee_percent,
-                "min_fee_usd": policy.min_fee_usd,
-                "max_fee_usd": policy.max_fee_usd,
-                "free_tier_jobs": policy.free_tier_jobs,
-                "currency": policy.currency,
-            },
-            "outsourced_jobs_this_month": _get_billing().network_jobs_this_month(),
-            "network_jobs_this_month": _get_billing().network_jobs_this_month(),
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in billing_summary")
-        return _error_dict(f"Unexpected error in billing_summary: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def billing_setup_url(rail: str = "stripe") -> dict:
-    """Get a URL to link a payment method for Kiln orchestration fees.
-
-    Args:
-        rail: Payment rail — ``"stripe"`` for credit card, ``"crypto"``
-            for USDC on Solana/Base.
-
-    Returns the setup URL.  Open it in a browser to complete payment
-    method setup.  After setup, Kiln automatically charges the orchestration
-    fee on each outsourced manufacturing order.
-    """
-    if err := _check_billing_auth("billing"):
-        return err
-    try:
-        mgr = _get_payment_mgr()
-        url = mgr.get_setup_url(rail=rail)
-        # Include setup_intent_id so the agent can poll for completion.
-        setup_intent_id = None
-        provider = mgr.get_provider(rail)
-        if provider and hasattr(provider, "_pending_setup_intent_id"):
-            setup_intent_id = provider._pending_setup_intent_id
-        return {
-            "success": True,
-            "setup_url": url,
-            "rail": rail,
-            "setup_intent_id": setup_intent_id,
-            "next_step": (
-                "Open the setup_url in a browser to complete card setup. "
-                "After the user finishes, call billing_check_setup to "
-                "activate the payment method."
-            ),
-        }
-    except PaymentError as exc:
-        return _error_dict(f"Failed to generate billing setup URL: {exc}", code=getattr(exc, "code", "PAYMENT_ERROR"))
-    except Exception as exc:
-        logger.exception("Unexpected error in billing_setup_url")
-        return _error_dict(f"Unexpected error in billing_setup_url: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def billing_status() -> dict:
-    """Get enriched billing status including payment method info.
-
-    Returns payment method details, monthly spend, spend limits,
-    available payment rails, and fee policy.  More detailed than
-    ``billing_summary`` — includes payment infrastructure state.
-    """
-    if err := _check_billing_auth("billing"):
-        return err
-    try:
-        from kiln.cli.config import get_or_create_user_id
-
-        user_id = get_or_create_user_id()
-        mgr = _get_payment_mgr()
-        data = mgr.get_billing_status(user_id)
-        return {"success": True, **data}
-    except Exception as exc:
-        logger.exception("Unexpected error in billing_status")
-        return _error_dict(f"Unexpected error in billing_status: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def billing_history(limit: int = 20) -> dict:
-    """Get recent billing charge history with payment outcomes.
-
-    Available on all tiers — anyone who transacts can view their history.
-
-    Args:
-        limit: Maximum number of records to return (default 20).
-
-    Returns charge records including order cost, fee amount, payment
-    rail, payment status, and timestamps.
-    """
-    if err := _check_billing_auth("billing"):
-        return err
-    try:
-        mgr = _get_payment_mgr()
-        charges = mgr.get_billing_history(limit=limit)
-        return {"success": True, "charges": charges, "count": len(charges)}
-    except Exception as exc:
-        logger.exception("Unexpected error in billing_history")
-        return _error_dict(f"Unexpected error in billing_history: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def billing_invoice(charge_id: str = "", job_id: str = "") -> dict:
-    """Generate an invoice/receipt for a billing charge.
-
-    Args:
-        charge_id: The charge ID (from ``billing_history``).
-        job_id: Or the job/order ID to look up.
-
-    Returns the invoice as structured data with a human-readable
-    receipt and tamper-detection checksum.
-    """
-    if err := _check_billing_auth("billing"):
-        return err
-    try:
-        try:
-            from kiln.billing_invoice import generate_invoice
-        except ImportError:
-            return _error_dict("This feature requires kiln-pro", code="PRO_REQUIRED")
-
-        if charge_id:
-            charges = _get_billing().list_charges(limit=500)
-            charge = next((c for c in charges if c.get("id") == charge_id), None)
-        elif job_id:
-            charges = _get_billing().list_charges(limit=500)
-            charge = next((c for c in charges if c.get("job_id") == job_id), None)
-        else:
-            return _error_dict(
-                "billing_invoice requires either charge_id (from billing_history) or job_id (from fulfillment_order) to look up the charge."
-            )
-
-        if charge is None:
-            return _error_dict("Charge not found.", code="NOT_FOUND")
-
-        invoice = generate_invoice(charge)
-        return {
-            "success": True,
-            "invoice": invoice.to_dict(),
-            "receipt_text": invoice.to_receipt_text(),
-        }
-    except Exception as exc:
-        logger.exception("Error generating invoice")
-        return _error_dict(f"Failed to generate invoice: {exc}")
-
-
-@mcp.tool()
-def billing_export(format: str = "csv", limit: int = 100) -> dict:
-    """Export billing history for accounting.
-
-    Args:
-        format: Export format — ``"csv"`` or ``"json"``.
-        limit: Maximum charges to export (default 100).
-
-    Returns billing data suitable for import into accounting
-    software (QuickBooks, Xero, etc.).
-    """
-    if err := _check_billing_auth("billing"):
-        return err
-    try:
-        try:
-            from kiln.billing_invoice import export_billing_csv, generate_invoices
-        except ImportError:
-            return _error_dict("This feature requires kiln-pro", code="PRO_REQUIRED")
-
-        charges = _get_billing().list_charges(limit=limit)
-
-        if format == "csv":
-            csv_data = export_billing_csv(charges)
-            return {
-                "success": True,
-                "format": "csv",
-                "data": csv_data,
-                "count": len(charges),
-            }
-        else:
-            invoices = generate_invoices(charges)
-            return {
-                "success": True,
-                "format": "json",
-                "invoices": [inv.to_dict() for inv in invoices],
-                "count": len(invoices),
-            }
-    except Exception as exc:
-        logger.exception("Error exporting billing data")
-        return _error_dict(f"Failed to export billing data: {exc}")
-
-
-@mcp.tool()
-def check_payment_status(payment_id: str) -> dict:
-    """Check the current status of a pending payment by ID.
-
-    Use this after a payment returns ``processing`` status to poll
-    for completion.  Works for both Stripe and Circle payments.
-
-    Args:
-        payment_id: The payment/transfer ID to check.
-    """
-    if err := _check_auth("billing"):
-        return err
-    try:
-        mgr = _get_payment_mgr()
-        # Try each registered provider until one recognises the ID
-        for name in mgr.available_rails:
-            provider = mgr.get_provider(name)
-            if provider is None:
-                continue
-            try:
-                result = provider.get_payment_status(payment_id)
-                return {
-                    "success": True,
-                    "payment_id": result.payment_id,
-                    "status": result.status.value,
-                    "amount": result.amount,
-                    "currency": result.currency.value,
-                    "rail": result.rail.value if result.rail else name,
-                    "tx_hash": result.tx_hash,
-                    "provider": name,
-                }
-            except Exception as exc:
-                logger.debug("Failed to check payment %s on provider %s: %s", payment_id, name, exc)
-                continue
-        return _error_dict(
-            f"Payment {payment_id!r} not found on any registered provider.",
-            code="NOT_FOUND",
-        )
-    except Exception as exc:
-        logger.exception("Unexpected error in check_payment_status")
-        return _error_dict(f"Unexpected error in check_payment_status: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def refund_payment(payment_id: str, reason: str = "") -> dict:
-    """Request a refund for a completed payment.
-
-    Args:
-        payment_id: The payment ID from the original charge
-            (found in ``billing_history`` or the ``fulfillment_order`` response).
-        reason: Optional reason for the refund (for audit trail).
-
-    Refunds are processed through the original payment rail (Stripe or
-    Circle/USDC).  Stripe refunds are typically instant; USDC refunds
-    may take a few minutes to confirm on-chain.
-
-    Only completed payments can be refunded.  Authorized holds should
-    be released via the fulfillment cancellation flow instead.
-    """
-    if err := _check_billing_auth("admin"):
-        return err
-    try:
-        mgr = _get_payment_mgr()
-        # Try each provider until one recognises the payment_id.
-        for provider_name in mgr.available_rails:
-            provider = mgr.get_provider(provider_name)
-            if provider is None:
-                continue
-            try:
-                result = provider.refund_payment(payment_id)
-                # Emit refund event.
-                _get_event_bus().publish(
-                    EventType.PAYMENT_REFUNDED,
-                    {
-                        "payment_id": payment_id,
-                        "amount": result.amount,
-                        "rail": provider_name,
-                        "reason": reason,
-                        "status": result.status.value,
-                    },
-                    source="billing",
-                )
-                logger.info(
-                    "Refund processed: payment=%s amount=%.2f rail=%s reason=%s",
-                    payment_id,
-                    result.amount,
-                    provider_name,
-                    reason or "(none)",
-                )
-                return {
-                    "success": True,
-                    "refund": result.to_dict(),
-                    "message": (
-                        f"Refund of ${result.amount:.2f} initiated via {provider_name}. "
-                        "Stripe refunds are typically instant. "
-                        "USDC refunds may take a few minutes to confirm."
-                    ),
-                }
-            except PaymentError:
-                continue  # Not this provider's payment.
-            except Exception as exc:
-                logger.debug("Failed to refund payment %s on provider %s: %s", payment_id, provider_name, exc)
-                continue
-        return _error_dict(
-            f"Payment {payment_id!r} not found in any registered provider. Verify the payment_id from billing_history.",
-            code="PAYMENT_NOT_FOUND",
-        )
-    except Exception as exc:
-        logger.exception("Unexpected error in refund_payment")
-        return _error_dict(f"Refund failed: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def billing_check_setup() -> dict:
-    """Check if billing setup is complete after user visited the setup URL.
-
-    After calling billing_setup_url and the user completes card setup in
-    their browser, call this tool to activate the payment method.  Polls
-    the Stripe SetupIntent for completion and configures the payment
-    method for future charges.
-    """
-    if err := _check_billing_auth("billing"):
-        return err
-
-    try:
-        mgr = _get_payment_mgr()
-        provider = mgr.get_provider("stripe")
-        if provider is None:
-            return _error_dict(
-                "Stripe provider not configured.",
-                code="NO_PROVIDER",
-            )
-        if not hasattr(provider, "poll_setup_intent"):
-            return _error_dict(
-                "Provider does not support setup polling.",
-                code="UNSUPPORTED",
-            )
-        pm_id = provider.poll_setup_intent()
-        if pm_id is None:
-            return {
-                "success": False,
-                "status": "pending",
-                "message": (
-                    "Setup not yet complete.  Ask the user to finish "
-                    "card setup in their browser, then call this tool again."
-                ),
-            }
-        # Activate the payment method on the provider.
-        provider.set_payment_method(pm_id)
-        # Persist to config so it survives restarts.
-        from kiln.cli.config import save_billing_config
-
-        save_billing_config(
-            {
-                "stripe_payment_method_id": pm_id,
-                "stripe_customer_id": getattr(provider, "_customer_id", None),
-            }
-        )
-        return {
-            "success": True,
-            "status": "active",
-            "payment_method_id": pm_id,
-            "message": "Payment method activated. Billing is now enabled.",
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in billing_check_setup")
-        return _error_dict(f"Unexpected error in billing_check_setup: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def billing_alerts() -> dict:
-    """Check billing system health and active alerts.
-
-    Returns payment failure alerts, spend limit violations, and
-    overall payment system health metrics.
-    """
-    try:
-        alert_mgr = _get_billing_alert_mgr()
-        return {
-            "success": True,
-            "health": alert_mgr.get_health_summary(),
-            "alerts": alert_mgr.get_alerts(),
-        }
-    except Exception as exc:
-        logger.exception("Error checking billing alerts")
-        return _error_dict(f"Failed to check billing alerts: {exc}")
-
-
-@mcp.tool()
-def billing_delete_data(confirm: str = "") -> dict:
-    """Delete all your billing data (GDPR right-to-erasure).
-
-    Args:
-        confirm: Must be ``"DELETE"`` to confirm deletion.
-
-    This permanently removes your payment methods and billing
-    preferences.  Billing charge records are retained for 7 years
-    per tax compliance requirements but can be anonymized on request.
-
-    This action cannot be undone.
-    """
-    if err := _check_billing_auth("admin"):
-        return err
-    if confirm != "DELETE":
-        return _error_dict(
-            "Destructive operation requires confirmation. Call again with confirm='DELETE' to proceed.",
-            code="CONFIRMATION_REQUIRED",
-        )
-    try:
-        db = get_db()
-        # Use a placeholder user_id since we're single-tenant.
-        result = db.delete_user_billing_data("default")
-        return {
-            "success": True,
-            "deleted": result,
-            "message": (
-                "Payment methods deleted. Billing charge records are "
-                "retained for 7 years per tax compliance. Contact "
-                "support to request full anonymization."
-            ),
-        }
-    except Exception as exc:
-        logger.exception("Error deleting billing data")
-        return _error_dict(f"Failed to delete billing data: {exc}")
+# Billing tools -- moved to plugins/billing_tools.py
+# (billing_summary, billing_setup_url, billing_status, billing_history,
+#  billing_invoice, billing_export, check_payment_status, refund_payment,
+#  billing_check_setup, billing_alerts, billing_delete_data)
 
 
 # ---------------------------------------------------------------------------
@@ -5733,81 +5297,8 @@ def get_upgrade_url(tier: str = "pro", billing: str = "monthly", email: str = ""
 
 
 # ---------------------------------------------------------------------------
-# Multi-marketplace tools — unified search across all sources
+# Multi-marketplace search tools — moved to plugins/marketplace_tools.py
 # ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def search_all_models(
-    query: str,
-    page: int = 1,
-    per_page: int = 10,
-    sort: str = "relevant",
-    sources: list[str] | None = None,
-) -> dict:
-    """Search across all connected 3D model marketplaces simultaneously.
-
-    Searches Thingiverse, MyMiniFactory, Cults3D, and MakerWorld in
-    parallel and returns interleaved results from all sources.  Note
-    that MakerWorld returns a search URL (no direct API access) while
-    other sources return actual model results.
-
-    Args:
-        query: Search keywords (e.g. "raspberry pi case", "benchy").
-        page: Page number (1-based, default 1).
-        per_page: Results per source (default 10).
-        sort: Sort order — "relevant", "popular", or "newest".
-        sources: Optional list to restrict search (e.g. ["thingiverse",
-            "myminifactory"]).  Omit to search all connected sources.
-
-    Each result includes a ``source`` field identifying the marketplace.
-    Results also include ``is_free``, ``has_printable_files`` (has G-code),
-    and ``has_sliceable_files`` (has STL/3MF) hints.
-
-    Use ``model_details`` with the ``id`` to inspect, ``model_files``
-    to see downloadable files, and ``download_model`` to save locally.
-    """
-    try:
-        if _marketplace_registry.count == 0:
-            _init_marketplace_registry()
-
-        if _marketplace_registry.count == 0:
-            return _error_dict(
-                _MARKETPLACE_SETUP_GUIDE,
-                code="NO_MARKETPLACES",
-            )
-
-        results = _marketplace_registry.search_all(
-            query,
-            page=page,
-            per_page=per_page,
-            sort=sort,
-            sources=sources,
-        )
-        resp = {
-            "success": True,
-            "query": query,
-            "models": [r.to_dict() for r in results.models],
-            "count": len(results.models),
-            "page": page,
-            "sources": _marketplace_registry.connected,
-            "searched": results.searched,
-            "skipped": results.skipped,
-            "failed": results.failed,
-            "health_summary": results.summary,
-        }
-        # Surface deprecation notice when Thingiverse results are included.
-        _tv_sources = results.searched or _marketplace_registry.connected
-        if "thingiverse" in _tv_sources:
-            resp["deprecation_notices"] = {
-                "thingiverse": _THINGIVERSE_DEPRECATION_NOTICE,
-            }
-        return resp
-    except MarketplaceError as exc:
-        return _error_dict(f"Failed to search models: {exc}. Check marketplace credentials are configured.")
-    except Exception as exc:
-        logger.exception("Unexpected error in search_all_models")
-        return _error_dict(f"Unexpected error in search_all_models: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -6239,263 +5730,9 @@ def marketplace_info() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Thingiverse tools — 3D model discovery and download
+# Thingiverse tools — moved to plugins/marketplace_tools.py
+# (search_models, model_details, model_files, download_model)
 # ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def search_models(
-    query: str,
-    page: int = 1,
-    per_page: int = 10,
-    sort: str = "relevant",
-) -> dict:
-    """Search Thingiverse for 3D-printable models.
-
-    Args:
-        query: Search keywords (e.g. "raspberry pi case", "benchy").
-        page: Page number for pagination (1-based, default 1).
-        per_page: Results per page (default 10, max 100).
-        sort: Sort order — "relevant", "popular", "newest", or "makes".
-
-    Returns a list of model summaries including name, creator, thumbnail,
-    and download/like counts.  Use ``model_details`` with the ``id`` to
-    get full information, and ``model_files`` to see downloadable files.
-    """
-    try:
-        client = _get_thingiverse()
-        results = client.search(query, page=page, per_page=per_page, sort=sort)
-        return {
-            "success": True,
-            "query": query,
-            "models": [r.to_dict() for r in results],
-            "count": len(results),
-            "page": page,
-            "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
-        }
-    except (ThingiverseError, RuntimeError) as exc:
-        return _error_dict(f"Failed to search Thingiverse: {exc}. Check that KILN_THINGIVERSE_TOKEN is set.")
-    except Exception as exc:
-        logger.exception("Unexpected error in search_models")
-        return _error_dict(f"Unexpected error in search_models: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def model_details(thing_id: int) -> dict:
-    """Get full details for a Thingiverse model.
-
-    Args:
-        thing_id: Numeric thing ID (from ``search_models`` results).
-
-    Returns comprehensive metadata including description, instructions,
-    license, tags, and file count.
-    """
-    try:
-        client = _get_thingiverse()
-        thing = client.get_thing(thing_id)
-        return {
-            "success": True,
-            "model": thing.to_dict(),
-            "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
-        }
-    except ThingiverseNotFoundError:
-        return _error_dict(f"Model {thing_id} not found.", code="NOT_FOUND")
-    except (ThingiverseError, RuntimeError) as exc:
-        return _error_dict(f"Failed to get model details: {exc}. Check that KILN_THINGIVERSE_TOKEN is set.")
-    except Exception as exc:
-        logger.exception("Unexpected error in model_details")
-        return _error_dict(f"Unexpected error in model_details: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def model_files(thing_id: int) -> dict:
-    """List downloadable files for a Thingiverse model.
-
-    Args:
-        thing_id: Numeric thing ID.
-
-    Returns a list of files with name, size, and download URL.
-    Use ``download_model`` with the ``file_id`` to save a file locally.
-    """
-    try:
-        client = _get_thingiverse()
-        files = client.get_files(thing_id)
-        return {
-            "success": True,
-            "thing_id": thing_id,
-            "files": [f.to_dict() for f in files],
-            "count": len(files),
-            "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
-        }
-    except ThingiverseNotFoundError:
-        return _error_dict(f"Model {thing_id} not found.", code="NOT_FOUND")
-    except (ThingiverseError, RuntimeError) as exc:
-        return _error_dict(f"Failed to list model files: {exc}. Check that KILN_THINGIVERSE_TOKEN is set.")
-    except Exception as exc:
-        logger.exception("Unexpected error in model_files")
-        return _error_dict(f"Unexpected error in model_files: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def download_model(
-    file_id: int | None = None,
-    dest_dir: str = os.path.join(tempfile.gettempdir(), "kiln_downloads"),
-    file_name: str | None = None,
-    model_id: str | None = None,
-    source: str = "thingiverse",
-    download_all: bool = False,
-) -> dict:
-    """Download model file(s) from a marketplace to local storage.
-
-    **Community models are unverified.** Always preview dimensions and
-    validate the mesh (``validate_generated_mesh``) before printing.
-    Models with high download counts and positive ratings are generally
-    safer.  AI-generated or untested designs can damage delicate printer
-    hardware — prefer proven blueprints when possible.
-
-    Args:
-        file_id: Numeric file ID (from ``model_files`` results).  If
-            omitted and ``model_id`` is provided, downloads all files
-            for the model.
-        dest_dir: Local directory to save the file in (default:
-            the system temp directory).
-        file_name: Override the saved file name (single-file mode only).
-            Defaults to the original name from the marketplace.
-        model_id: Model/thing ID.  When ``file_id`` is omitted,
-            all files for this model are downloaded.
-        source: Marketplace source — ``"thingiverse"`` (default),
-            ``"myminifactory"``, etc.
-        download_all: When True, downloads all files for the model
-            regardless of whether ``file_id`` is provided.
-
-    After downloading, validate with ``validate_generated_mesh``, then
-    upload to a printer with ``upload_file`` and print with ``start_print``.
-    """
-    if err := _check_auth("files"):
-        return err
-
-    # --- Path traversal guard ------------------------------------------
-    # Constrain dest_dir to safe locations so an agent cannot write to
-    # arbitrary directories like /etc or ~/.ssh.
-    _resolved = Path(dest_dir).resolve()
-    _allowed_roots = (
-        Path(tempfile.gettempdir()).resolve(),
-        Path.home().resolve(),
-        Path.cwd().resolve(),
-    )
-    if not any(
-        _resolved == root or _resolved.is_relative_to(root)
-        for root in _allowed_roots
-    ):
-        return _error_dict(
-            "dest_dir must be within /tmp/, home directory, or current "
-            f"working directory. Got: {dest_dir}",
-            code="INVALID_PATH",
-        )
-    # -------------------------------------------------------------------
-
-    if disk_err := _check_disk_space(dest_dir):
-        return disk_err
-    try:
-        # Multi-file download: model_id provided without file_id, or download_all
-        if (file_id is None or download_all) and model_id is not None:
-            if _marketplace_registry.count == 0:
-                _init_marketplace_registry()
-
-            mkt = _marketplace_registry.get(source)
-            if not mkt.supports_download:
-                return _error_dict(
-                    f"{mkt.display_name} does not support direct downloads.",
-                    code="UNSUPPORTED",
-                )
-
-            files = mkt.get_files(str(model_id))
-            if not files:
-                return _error_dict(
-                    f"No files found for model {model_id} on {source}.",
-                    code="NOT_FOUND",
-                )
-
-            downloaded: list[dict] = []
-            errors: list[dict] = []
-            for mf in files:
-                try:
-                    path = mkt.download_file(
-                        mf.id,
-                        dest_dir,
-                        file_name=None,
-                    )
-                    downloaded.append(
-                        {
-                            "file_id": mf.id,
-                            "file_name": mf.name,
-                            "local_path": path,
-                        }
-                    )
-                except (MarketplaceError, RuntimeError) as exc:
-                    errors.append(
-                        {
-                            "file_id": mf.id,
-                            "file_name": mf.name,
-                            "error": str(exc),
-                        }
-                    )
-
-            dl_resp = {
-                "success": len(downloaded) > 0,
-                "model_id": model_id,
-                "source": source,
-                "downloaded": downloaded,
-                "errors": errors,
-                "total_files": len(files),
-                "downloaded_count": len(downloaded),
-                "verification_status": "unverified",
-                "safety_notice": (
-                    "These are community-uploaded models and have NOT been "
-                    "verified for print safety or quality. Validate each mesh "
-                    "with validate_generated_mesh before printing. Prefer "
-                    "proven models with high download counts."
-                ),
-                "message": (f"Downloaded {len(downloaded)}/{len(files)} files from {source} to {dest_dir}"),
-            }
-            if source == "thingiverse":
-                dl_resp["deprecation_notice"] = _THINGIVERSE_DEPRECATION_NOTICE
-            return dl_resp
-
-        # Single-file download (legacy Thingiverse path)
-        if file_id is None:
-            return _error_dict(
-                "Either file_id or model_id must be provided.",
-                code="INVALID_INPUT",
-            )
-        client = _get_thingiverse()
-        path = client.download_file(file_id, dest_dir, file_name=file_name)
-        return {
-            "success": True,
-            "file_id": file_id,
-            "local_path": path,
-            "verification_status": "unverified",
-            "safety_notice": (
-                "This is a community-uploaded model and has NOT been "
-                "verified for print safety or quality. Validate the mesh "
-                "with validate_generated_mesh before printing. Prefer "
-                "proven models with high download counts."
-            ),
-            "deprecation_notice": _THINGIVERSE_DEPRECATION_NOTICE,
-            "message": f"Downloaded to {path}",
-        }
-    except (ThingiverseNotFoundError, MktNotFoundError):
-        return _error_dict(
-            f"File {file_id or model_id} not found on {source}.",
-            code="NOT_FOUND",
-        )
-    except (ThingiverseError, MarketplaceError, RuntimeError) as exc:
-        return _error_dict(
-            f"Failed to download model: {exc}. Check marketplace credentials and that the model/file ID is correct."
-        )
-    except Exception as exc:
-        logger.exception("Unexpected error in download_model")
-        return _error_dict(f"Unexpected error in download_model: {exc}", code="INTERNAL_ERROR")
 
 
 @mcp.tool()
@@ -6723,75 +5960,7 @@ def download_and_upload(
         return _error_dict(f"Unexpected error in download_and_upload: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
-def browse_models(
-    browse_type: str = "popular",
-    page: int = 1,
-    per_page: int = 10,
-    category: str | None = None,
-) -> dict:
-    """Browse Thingiverse models by popularity, recency, or category.
-
-    Args:
-        browse_type: One of "popular", "newest", or "featured".
-        page: Page number (1-based, default 1).
-        per_page: Results per page (default 10, max 100).
-        category: Optional category slug to filter by (e.g. "3d-printing",
-            "art").  Use ``list_categories`` to see available slugs.
-
-    Returns model summaries similar to ``search_models``.
-    """
-    try:
-        client = _get_thingiverse()
-
-        if category:
-            results = client.category_things(category, page=page, per_page=per_page)
-        elif browse_type == "popular":
-            results = client.popular(page=page, per_page=per_page)
-        elif browse_type == "newest":
-            results = client.newest(page=page, per_page=per_page)
-        elif browse_type == "featured":
-            results = client.featured(page=page, per_page=per_page)
-        else:
-            return _error_dict(
-                f"Unknown browse_type: {browse_type!r}.  Supported: 'popular', 'newest', 'featured'.",
-                code="INVALID_ARGS",
-            )
-
-        return {
-            "success": True,
-            "browse_type": browse_type if not category else f"category:{category}",
-            "models": [r.to_dict() for r in results],
-            "count": len(results),
-            "page": page,
-        }
-    except (ThingiverseError, RuntimeError) as exc:
-        return _error_dict(f"Failed to browse models: {exc}. Check that KILN_THINGIVERSE_TOKEN is set.")
-    except Exception as exc:
-        logger.exception("Unexpected error in browse_models")
-        return _error_dict(f"Unexpected error in browse_models: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def list_model_categories() -> dict:
-    """List available Thingiverse content categories.
-
-    Returns category names and slugs.  Pass a slug to
-    ``browse_models(category=...)`` to browse models in that category.
-    """
-    try:
-        client = _get_thingiverse()
-        cats = client.list_categories()
-        return {
-            "success": True,
-            "categories": [c.to_dict() for c in cats],
-            "count": len(cats),
-        }
-    except (ThingiverseError, RuntimeError) as exc:
-        return _error_dict(f"Failed to list categories: {exc}. Check that KILN_THINGIVERSE_TOKEN is set.")
-    except Exception as exc:
-        logger.exception("Unexpected error in list_model_categories")
-        return _error_dict(f"Unexpected error in list_model_categories: {exc}", code="INTERNAL_ERROR")
+# browse_models, list_model_categories — moved to plugins/marketplace_tools.py
 
 
 # ---------------------------------------------------------------------------
@@ -6997,8 +6166,7 @@ def reslice_with_overrides(
     ext = Path(input_abs).suffix.lower()
     if ext not in _SLICER_INPUT_EXTENSIONS:
         return _error_dict(
-            f"Unsupported input format '{ext}'. "
-            f"Supported: {', '.join(sorted(_SLICER_INPUT_EXTENSIONS))}",
+            f"Unsupported input format '{ext}'. Supported: {', '.join(sorted(_SLICER_INPUT_EXTENSIONS))}",
             code="UNSUPPORTED_FORMAT",
         )
 
@@ -7017,18 +6185,16 @@ def reslice_with_overrides(
                 )
             if not isinstance(parsed_overrides, dict):
                 return _error_dict(
-                    "Overrides must be a JSON object (dict), "
-                f"got {type(parsed_overrides).__name__}.",
-                code="VALIDATION_ERROR",
-            )
+                    f"Overrides must be a JSON object (dict), got {type(parsed_overrides).__name__}.",
+                    code="VALIDATION_ERROR",
+                )
 
     try:
         from kiln.slicer import SlicerError, SlicerNotFoundError, slice_file
 
         # -- Resolve profile with overrides --
-        effective_printer_id = (
-            _map_printer_hint_to_profile_id(printer_id)
-            or _map_printer_hint_to_profile_id(_PRINTER_MODEL)
+        effective_printer_id = _map_printer_hint_to_profile_id(printer_id) or _map_printer_hint_to_profile_id(
+            _PRINTER_MODEL
         )
 
         effective_profile: str | None = None
@@ -7056,9 +6222,7 @@ def reslice_with_overrides(
         has_temp_overrides = bool(parsed_overrides and _temp_keys & parsed_overrides.keys())
 
         if has_temp_overrides and effective_printer_id and _PRINTER_MODEL:
-            validation_result = validate_profile_for_printer(
-                effective_printer_id, _PRINTER_MODEL
-            )
+            validation_result = validate_profile_for_printer(effective_printer_id, _PRINTER_MODEL)
 
         # -- Slice --
         result = slice_file(
@@ -7080,9 +6244,7 @@ def reslice_with_overrides(
             response["applied_overrides"] = parsed_overrides
 
         # Attach validation warnings/errors when present
-        if validation_result and (
-            validation_result["warnings"] or validation_result["errors"]
-        ):
+        if validation_result and (validation_result["warnings"] or validation_result["errors"]):
             response["profile_validation"] = validation_result
             if validation_result["errors"]:
                 response["profile_validation_warning"] = (
@@ -7090,16 +6252,14 @@ def reslice_with_overrides(
                     + "; ".join(validation_result["errors"])
                 )
             elif validation_result["warnings"]:
-                response["profile_validation_warning"] = (
-                    "Profile compatibility note: "
-                    + "; ".join(validation_result["warnings"])
+                response["profile_validation_warning"] = "Profile compatibility note: " + "; ".join(
+                    validation_result["warnings"]
                 )
 
         return response
     except SlicerNotFoundError as exc:
         return _error_dict(
-            f"Failed to reslice model: {exc}. "
-            "Ensure PrusaSlicer or OrcaSlicer is installed.",
+            f"Failed to reslice model: {exc}. Ensure PrusaSlicer or OrcaSlicer is installed.",
             code="SLICER_NOT_FOUND",
         )
     except SlicerError as exc:
@@ -7369,6 +6529,7 @@ def slice_and_print(
         if effective_printer_id:
             try:
                 from kiln.printer_intelligence import get_slicer_speed_overrides
+
                 model_speeds = get_slicer_speed_overrides(effective_printer_id)
                 if model_speeds:
                     for k, v in model_speeds.items():
@@ -7386,9 +6547,7 @@ def slice_and_print(
         # Re-resolve profile with adhesion overrides merged in
         if adhesion_overrides and effective_printer_id:
             try:
-                effective_profile = resolve_slicer_profile(
-                    effective_printer_id, overrides=adhesion_overrides
-                )
+                effective_profile = resolve_slicer_profile(effective_printer_id, overrides=adhesion_overrides)
             except Exception:
                 logger.debug("Profile override injection failed", exc_info=True)
 
@@ -7985,430 +7144,8 @@ def plugin_info(name: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Fulfillment tools — outsource prints to external services
+# Fulfillment tools — moved to plugins/fulfillment_tools.py
 # ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def fulfillment_materials() -> dict:
-    """List available materials from external manufacturing services.
-
-    Returns materials with technology (FDM, SLA, SLS, etc.), color,
-    finish, and pricing.  Use the material ``id`` when requesting a quote
-    with ``fulfillment_quote``.
-
-    Requires ``KILN_CRAFTCLOUD_API_KEY`` to be set.
-    """
-    try:
-        provider = _get_fulfillment()
-        materials = provider.list_materials()
-        return {
-            "success": True,
-            "provider": provider.name,
-            "materials": [m.to_dict() for m in materials],
-            "count": len(materials),
-        }
-    except (FulfillmentError, RuntimeError) as exc:
-        return _error_dict(f"Failed to list fulfillment materials: {exc}. Check that KILN_CRAFTCLOUD_API_KEY is set.")
-    except Exception as exc:
-        logger.exception("Unexpected error in fulfillment_materials")
-        return _error_dict(f"Unexpected error in fulfillment_materials: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def fulfillment_quote(
-    file_path: str,
-    material_id: str,
-    quantity: int = 1,
-    shipping_country: str = "US",
-) -> dict:
-    """Get a manufacturing quote for a 3D model from Craftcloud.
-
-    Args:
-        file_path: Absolute path to the model file (STL, 3MF, OBJ).
-        material_id: Material ID from ``fulfillment_materials``.
-        quantity: Number of copies to print (default 1).
-        shipping_country: ISO country code for shipping (default "US").
-
-    Uploads the model, returns pricing from Craftcloud's network of 150+
-    print services, including unit price, total, lead time, and shipping
-    options. A Kiln orchestration fee is shown separately so
-    the user sees the full cost before committing.
-
-    If a payment method is linked, a hold is placed on the fee amount
-    at quote time (Stripe auth-and-capture).  The hold is captured
-    when the order is placed via ``fulfillment_order``, or released
-    if the user doesn't proceed.
-
-    Provider-routed jobs remain provider-managed: the response includes
-    provider ownership metadata and merchant-of-record context.
-
-    Use the returned ``quote_id`` with ``fulfillment_order`` to place the
-    order.
-    """
-    try:
-        provider = _get_fulfillment()
-        quote = provider.get_quote(
-            QuoteRequest(
-                file_path=file_path,
-                material_id=material_id,
-                quantity=quantity,
-                shipping_country=shipping_country,
-            )
-        )
-        fee_calc = _get_billing().calculate_fee(
-            quote.total_price,
-            currency=quote.currency,
-        )
-        quote_data = quote.to_dict()
-        quote_data["kiln_fee"] = fee_calc.to_dict()
-        quote_data["total_with_fee"] = fee_calc.total_cost
-        quote_data.update(_provider_routing_metadata(provider.name))
-        quote_data["provider_quote_id"] = quote.quote_id
-
-        # Try to authorize (hold) the fee at quote time.
-        try:
-            mgr = _get_payment_mgr()
-            if mgr.available_rails:
-                auth_result = mgr.authorize_fee(
-                    quote.quote_id,
-                    fee_calc,
-                )
-                if auth_result.payment_id:
-                    quote_data["payment_hold"] = {
-                        "payment_id": auth_result.payment_id,
-                        "status": auth_result.status.value,
-                    }
-        except (PaymentError, Exception):
-            # Hold failed — fee will be collected at order time.
-            pass
-
-        return {
-            "success": True,
-            "quote": quote_data,
-        }
-    except FileNotFoundError as exc:
-        return _error_dict(f"Failed to get fulfillment quote: {exc}", code="FILE_NOT_FOUND")
-    except (FulfillmentError, RuntimeError) as exc:
-        return _error_dict(f"Failed to get fulfillment quote: {exc}. Check that KILN_CRAFTCLOUD_API_KEY is set.")
-    except Exception as exc:
-        logger.exception("Unexpected error in fulfillment_quote")
-        return _error_dict(f"Unexpected error in fulfillment_quote: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.BUSINESS)
-def fulfillment_order(
-    quote_id: str,
-    shipping_option_id: str = "",
-    payment_hold_id: str = "",
-    quoted_price: float = 0.0,
-    quoted_currency: str = "USD",
-    jurisdiction: str = "",
-    business_tax_id: str = "",
-) -> dict:
-    """Place a manufacturing order based on a previous quote.
-
-    Charges the orchestration fee BEFORE placing the order to prevent
-    unpaid orders.  If order placement fails after payment, the
-    charge is automatically refunded.
-
-    Args:
-        quote_id: Quote ID from ``fulfillment_quote``.
-        shipping_option_id: Shipping option ID from the quote's
-            ``shipping_options`` list.
-        payment_hold_id: PaymentIntent ID from the quote's
-            ``payment_hold`` field.  If provided, the previously
-            authorized hold is captured before placing the order.
-            This is the preferred payment flow.
-        quoted_price: Total price returned by ``fulfillment_quote``
-            (used to calculate the fee when no ``payment_hold_id``
-            is provided).  Required when ``payment_hold_id`` is
-            empty and a payment rail is configured.
-        quoted_currency: Currency of ``quoted_price`` (default USD).
-        jurisdiction: Buyer's region (e.g. ``"US-CA"``, ``"DE"``, ``"AU"``).
-            When provided, the response includes an accurate total with
-            tax so the user sees exactly what they'll pay — no hidden
-            fees.  Use ``tax_jurisdictions`` to see all supported codes.
-        business_tax_id: If the buyer is a registered business, their
-            tax ID (EU VAT number, AU ABN, etc.).  Businesses in the
-            EU, UK, Australia, and Japan are tax-exempt via reverse
-            charge — the tax line shows $0.00.
-
-    Use ``fulfillment_order_status`` to track progress after placing.
-    """
-    if err := _check_billing_auth("print"):
-        return err
-    try:
-        provider = _get_fulfillment()
-
-        # 0. Validate quote is still valid (exists, not expired, provider up).
-        quote_validation: QuoteValidation | None = None
-        try:
-            quote_validation = _validate_quote_for_order(
-                quote_id,
-                provider_name=provider.name,
-            )
-        except FulfillmentError as exc:
-            return _error_dict(
-                f"Quote validation failed: {exc}",
-                code=getattr(exc, "code", None) or "QUOTE_INVALID",
-            )
-
-        # 1. Determine the price and calculate the fee BEFORE placing.
-        estimated_price = quoted_price
-        currency = quoted_currency
-        pay_result = None
-        fee_calc = None
-
-        # 1a. Early spend limit check (before any work).
-        if estimated_price and estimated_price > 0:
-            fee_estimate = _get_billing().calculate_fee(
-                estimated_price,
-                currency=currency,
-                jurisdiction=jurisdiction or None,
-                business_tax_id=business_tax_id or None,
-            )
-            if not fee_estimate.waived and fee_estimate.fee_amount > 0:
-                mgr = _get_payment_mgr()
-                ok, reason = mgr.check_spend_limits(fee_estimate.fee_amount)
-                if not ok:
-                    return _error_dict(
-                        f"Order would exceed spend limits: {reason}. "
-                        "Adjust limits in billing settings before placing this order.",
-                        code="SPEND_LIMIT",
-                    )
-
-        # 2. Charge / capture payment BEFORE placing the order.
-        if payment_hold_id or estimated_price > 0:
-            if estimated_price > 0:
-                fee_calc = _get_billing().calculate_fee(
-                    estimated_price,
-                    currency=currency,
-                    jurisdiction=jurisdiction or None,
-                    business_tax_id=business_tax_id or None,
-                )
-
-            try:
-                mgr = _get_payment_mgr()
-                if mgr.available_rails:
-                    if payment_hold_id:
-                        # Capture the hold placed at quote time.
-                        if fee_calc is None:
-                            # Hold exists but no price given — capture
-                            # will use the amount from the original auth.
-                            fee_calc = _get_billing().calculate_fee(0.0)
-                        pay_result = mgr.capture_fee(
-                            payment_hold_id,
-                            quote_id,
-                            fee_calc,
-                        )
-                    elif fee_calc:
-                        # No hold — one-shot charge before order.
-                        pay_result = mgr.charge_fee(quote_id, fee_calc)
-                    else:
-                        return _error_dict(
-                            "Cannot place order: no payment hold and no "
-                            "quoted_price provided.  Re-run fulfillment_quote "
-                            "to get pricing, then pass payment_hold_id or "
-                            "quoted_price.",
-                            code="MISSING_PRICE",
-                        )
-                else:
-                    # No payment rails configured — atomically calculate
-                    # and record the fee to prevent free-tier race
-                    # conditions.
-                    if estimated_price > 0:
-                        fee_calc, _charge_id = _get_billing().calculate_and_record_fee(
-                            quote_id,
-                            estimated_price,
-                            currency=currency,
-                            jurisdiction=jurisdiction or None,
-                            business_tax_id=business_tax_id or None,
-                        )
-            except PaymentError as pe:
-                # Payment failed — do NOT place the order.
-                return _error_dict(
-                    f"Payment failed: {pe}. Order was NOT placed. Please update your payment method and try again.",
-                    code="PAYMENT_ERROR",
-                )
-
-        # 3. Place the order AFTER payment succeeds.
-        try:
-            result = provider.place_order(
-                OrderRequest(
-                    quote_id=quote_id,
-                    shipping_option_id=shipping_option_id,
-                )
-            )
-        except (FulfillmentError, RuntimeError) as exc:
-            # Order failed — refund the payment automatically.
-            refund_warning = _refund_after_order_failure(
-                pay_result,
-                payment_hold_id,
-            )
-            msg = f"Order placement failed: {exc}. "
-            if refund_warning:
-                msg += refund_warning
-            else:
-                msg += "Your payment has been refunded automatically."
-            return _error_dict(msg)
-
-        # 4. Build response.
-        order_data = result.to_dict()
-        order_data.update(
-            _provider_routing_metadata(
-                provider.name,
-                provider_order_id=result.order_id or "",
-            )
-        )
-        if fee_calc:
-            order_data["kiln_fee"] = fee_calc.to_dict()
-            order_data["total_with_fee"] = fee_calc.total_cost
-        if pay_result:
-            order_data["payment"] = pay_result.to_dict()
-
-            # Re-link the charge to the real order_id if it differs
-            # from the quote_id we used for the initial charge.
-            if result.order_id and result.order_id != quote_id:
-                try:
-                    _get_billing().record_charge(
-                        result.order_id,
-                        fee_calc,
-                        payment_id=pay_result.payment_id,
-                        payment_rail=pay_result.rail.value,
-                        payment_status=pay_result.status.value,
-                    )
-                except Exception:
-                    logger.debug(
-                        "Could not link charge to order %s",
-                        result.order_id,
-                    )
-
-        # 5. Price-drift check: warn or block if actual order price
-        #    diverges from the original quoted price.
-        response_warnings: list[str] = []
-        if quote_validation and quote_validation.warnings:
-            response_warnings.extend(quote_validation.warnings)
-
-        if result.total_price is not None and quote_validation:
-            drift_warning, should_block = _check_price_drift(
-                quote_validation.quoted_price,
-                result.total_price,
-            )
-            if should_block:
-                logger.error(
-                    "Price drift BLOCKED order for quote %s: %s",
-                    quote_id,
-                    drift_warning,
-                )
-                # Refund the payment since the order went through at a
-                # price the user did not agree to.
-                refund_warning = _refund_after_order_failure(
-                    pay_result,
-                    payment_hold_id,
-                )
-                msg = drift_warning or "Price drift exceeded safety limit."
-                if refund_warning:
-                    msg += f" {refund_warning}"
-                else:
-                    msg += " Your payment has been refunded automatically."
-                return _error_dict(msg, code="PRICE_DRIFT_BLOCKED")
-            if drift_warning:
-                logger.warning(
-                    "Price drift detected for quote %s: %s",
-                    quote_id,
-                    drift_warning,
-                )
-                response_warnings.append(drift_warning)
-
-        if response_warnings:
-            order_data["warnings"] = response_warnings
-
-        return {
-            "success": True,
-            "order": order_data,
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in fulfillment_order")
-        return _error_dict(f"Unexpected error in fulfillment_order: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def fulfillment_order_status(order_id: str) -> dict:
-    """Check the status of a fulfillment order.
-
-    Args:
-        order_id: Order ID from ``fulfillment_order``.
-
-    Returns current order state, tracking info, and estimated delivery.
-    """
-    try:
-        provider = _get_fulfillment()
-        result = provider.get_order_status(order_id)
-        order_data = result.to_dict()
-        order_data.update(
-            _provider_routing_metadata(
-                provider.name,
-                provider_order_id=order_id,
-            )
-        )
-        return {
-            "success": True,
-            "order": order_data,
-        }
-    except (FulfillmentError, RuntimeError) as exc:
-        return _error_dict(f"Failed to check order status: {exc}. Verify the order_id is correct.")
-    except Exception as exc:
-        logger.exception("Unexpected error in fulfillment_order_status")
-        return _error_dict(f"Unexpected error in fulfillment_order_status: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.BUSINESS)
-def fulfillment_cancel(order_id: str) -> dict:
-    """Cancel a fulfillment order (if still cancellable).
-
-    Args:
-        order_id: Order ID to cancel.
-
-    Only orders that have not yet shipped can be cancelled.
-    """
-    if err := _check_billing_auth("print"):
-        return err
-    try:
-        provider = _get_fulfillment()
-        result = provider.cancel_order(order_id)
-        return {
-            "success": True,
-            "order": result.to_dict(),
-        }
-    except (FulfillmentError, RuntimeError) as exc:
-        return _error_dict(f"Failed to cancel order: {exc}. The order may have already shipped.")
-    except Exception as exc:
-        logger.exception("Unexpected error in fulfillment_cancel")
-        return _error_dict(f"Unexpected error in fulfillment_cancel: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def fulfillment_alerts() -> dict:
-    """Check for fulfillment order alerts (stalled, failed, cancelled orders).
-
-    Returns any active alerts from the background fulfillment monitor.
-    Alerts are generated when orders are cancelled/failed by the provider
-    or have been stuck in processing longer than the expected lead time.
-    """
-    try:
-        monitor = _get_fulfillment_monitor()
-        if monitor is None:
-            return _error_dict(
-                "Fulfillment monitor is not available (kiln-pro required).",
-                code="NOT_AVAILABLE",
-            )
-        alerts = monitor.get_alerts()
-        return {"success": True, "alerts": alerts, "count": len(alerts)}
-    except Exception as exc:
-        return _error_dict(f"Failed to check fulfillment alerts: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -9393,7 +8130,6 @@ def _get_generation_provider(provider: str = "meshy") -> GenerationProvider:
     return inst
 
 
-
 @mcp.tool()
 def list_generation_providers() -> dict:
     """List available text-to-3D generation providers.
@@ -9576,7 +8312,8 @@ def generate_model(
         return result_dict
     except GenerationAuthError as exc:
         return _error_dict(
-            f"Failed to generate model (auth): {exc}. Check your provider API key is set (KILN_MESHY_API_KEY, KILN_GEMINI_API_KEY).", code="AUTH_ERROR"
+            f"Failed to generate model (auth): {exc}. Check your provider API key is set (KILN_MESHY_API_KEY, KILN_GEMINI_API_KEY).",
+            code="AUTH_ERROR",
         )
     except GenerationError as exc:
         return _error_dict(f"Failed to generate model: {exc}", code=exc.code or "GENERATION_ERROR")
@@ -10097,29 +8834,6 @@ def generate_and_print(
 
 
 @mcp.tool()
-def validate_generated_mesh(file_path: str) -> dict:
-    """Validate a 3D mesh file for printing readiness.
-
-    Checks that the file is a valid STL, OBJ, or GLB, has reasonable
-    dimensions, an acceptable polygon count, and is manifold
-    (watertight).
-
-    Args:
-        file_path: Path to an STL, OBJ, or GLB file.
-    """
-    try:
-        result = validate_mesh(file_path)
-        return {
-            "success": True,
-            "validation": result.to_dict(),
-            "message": "Mesh is valid." if result.valid else f"Mesh has issues: {'; '.join(result.errors)}",
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in validate_generated_mesh")
-        return _error_dict(f"Unexpected error in validate_generated_mesh: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
 def render_model_preview(
     file_path: str,
     width: int = 800,
@@ -10153,8 +8867,7 @@ def render_model_preview(
             "width": width,
             "height": height,
             "message": (
-                f"Preview rendered to {views[0]['path']}. "
-                "TIP: Use visualize_model() for multi-angle previews."
+                f"Preview rendered to {views[0]['path']}. TIP: Use visualize_model() for multi-angle previews."
             ),
         }
     return _error_dict("No views rendered", code="RENDER_ERROR")
@@ -10209,7 +8922,11 @@ def visualize_model(
         if color:
             kwargs["color"] = color
         return _visualize(
-            file_path, angles=angles, width=width, height=height, **kwargs,
+            file_path,
+            angles=angles,
+            width=width,
+            height=height,
+            **kwargs,
         )
     except Exception as exc:
         logger.exception("Unexpected error in visualize_model")
@@ -10267,72 +8984,6 @@ def compare_renders(
 
 
 @mcp.tool()
-def rescale_model(
-    file_path: str,
-    target_height_mm: float | None = None,
-    scale_factor: float | None = None,
-    max_dimension_mm: float | None = None,
-    scale_x: float | None = None,
-    scale_y: float | None = None,
-    scale_z: float | None = None,
-) -> dict:
-    """Rescale an STL model to meet dimensional targets.
-
-    Useful when a generated model is the wrong size for the printer's
-    build volume or doesn't match the desired dimensions.
-
-    **Uniform scaling** — provide exactly ONE of:
-
-    - ``target_height_mm``: Scale so Z-axis equals this value.
-    - ``scale_factor``: Uniform multiplier (2.0 = double size).
-    - ``max_dimension_mm``: Scale down so largest axis fits this limit.
-
-    **Per-axis scaling** — provide ``scale_x``, ``scale_y``, and/or
-    ``scale_z``.  Omitted axes default to 1.0 (no change).
-
-    Cannot combine uniform and per-axis options.
-
-    Args:
-        file_path: Path to the STL file to rescale (modified in-place).
-        target_height_mm: Desired Z-axis height in mm.
-        scale_factor: Uniform scale multiplier.
-        max_dimension_mm: Maximum dimension on any axis.
-        scale_x: Per-axis X scale factor.
-        scale_y: Per-axis Y scale factor.
-        scale_z: Per-axis Z scale factor.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import rescale_stl
-
-        result = rescale_stl(
-            file_path,
-            target_height_mm=target_height_mm,
-            scale_factor=scale_factor,
-            max_dimension_mm=max_dimension_mm,
-            scale_x=scale_x,
-            scale_y=scale_y,
-            scale_z=scale_z,
-        )
-        return {
-            "success": True,
-            **result,
-            "message": (
-                f"Model rescaled by x={result['scale_applied']['x']}, "
-                f"y={result['scale_applied']['y']}, z={result['scale_applied']['z']}"
-                if isinstance(result["scale_applied"], dict)
-                else f"Model rescaled by {result['scale_applied']}x."
-            ),
-        }
-    except ValueError as exc:
-        return _error_dict(str(exc), code="INVALID_INPUT")
-    except Exception as exc:
-        logger.exception("Unexpected error in rescale_model")
-        return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
 def get_feedback_loop_status(model_id: str) -> dict:
     """Get the feedback loop history for a generated model.
 
@@ -10382,20 +9033,22 @@ def list_design_templates() -> dict:
         for key, tpl in data.items():
             if key.startswith("_"):
                 continue
-            templates.append({
-                "id": key,
-                "name": tpl["display_name"],
-                "description": tpl["description"],
-                "category": tpl.get("category", "general"),
-                "parameters": {
-                    k: {
-                        "default": v["default"],
-                        "description": v.get("description", ""),
-                        "unit": v.get("unit", ""),
-                    }
-                    for k, v in tpl.get("parameters", {}).items()
-                },
-            })
+            templates.append(
+                {
+                    "id": key,
+                    "name": tpl["display_name"],
+                    "description": tpl["description"],
+                    "category": tpl.get("category", "general"),
+                    "parameters": {
+                        k: {
+                            "default": v["default"],
+                            "description": v.get("description", ""),
+                            "unit": v.get("unit", ""),
+                        }
+                        for k, v in tpl.get("parameters", {}).items()
+                    },
+                }
+            )
 
         return {
             "success": True,
@@ -10586,218 +9239,6 @@ def smart_generate_from_template(
 
 
 @mcp.tool()
-def analyze_mesh_geometry(file_path: str) -> dict:
-    """Deep geometric and printability analysis of a 3D mesh.
-
-    Goes beyond basic validation to compute volume, surface area,
-    center of mass, overhang detection, connected components (floating
-    parts), degenerate triangles, and a composite printability score
-    (0-100).
-
-    Use this after generating a model to understand its geometry and
-    identify printability issues before sending to the slicer.
-
-    :param file_path: Path to .stl, .obj, or .glb file.
-    :returns: Dict with full mesh analysis metrics.
-    """
-    try:
-        from kiln.generation.validation import analyze_mesh
-
-        result = analyze_mesh(file_path)
-        return {"success": True, **result.to_dict()}
-    except Exception as exc:
-        return _error_dict(f"Mesh analysis failed: {exc}", code="ANALYSIS_ERROR")
-
-
-@mcp.tool()
-def detect_mesh_pockets(
-    file_path: str,
-    min_depth_mm: float = 0.3,
-) -> dict:
-    """Detect pockets and cavities in a mesh before multi-part composition.
-
-    Analyzes a base model to find recessed regions (circular or rectangular
-    pockets) on top and bottom faces. Call this before compose_models or
-    multi_material_print to know pocket dimensions for overlay geometry.
-
-    :param file_path: Path to the STL file to analyze.
-    :param min_depth_mm: Minimum pocket depth to report (default 0.3mm).
-    :returns: Dict with pocket list, dimensions, and positions.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import detect_mesh_pockets as _detect
-
-        result = _detect(file_path, min_depth_mm=min_depth_mm)
-        return {"success": True, **result}
-    except Exception as exc:
-        return _error_dict(f"Pocket detection failed: {exc}", code="DETECT_ERROR")
-
-
-@mcp.tool()
-def repair_mesh(file_path: str, output_path: str = "") -> dict:
-    """Basic mesh repair: fix degenerate triangles and bad normals (fast, safe).
-
-    For deeper repair with hole closing and boundary edge fixes, use
-    ``repair_mesh_advanced``. Removes zero-area triangles and recomputes
-    face normals.  Use this on meshes from AI generation providers before
-    slicing.
-
-    :param file_path: Path to the STL file to repair.
-    :param output_path: Output path.  Defaults to overwriting the input.
-    :returns: Dict with repair statistics.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import repair_stl
-
-        result = repair_stl(file_path, output_path=output_path or None)
-        return {"success": True, **result}
-    except Exception as exc:
-        return _error_dict(f"Mesh repair failed: {exc}", code="REPAIR_ERROR")
-
-
-@mcp.tool()
-def splice_mesh_at_z(
-    top_path: str,
-    bottom_path: str,
-    z_plane: float,
-    output_path: str = "",
-) -> dict:
-    """Splice two meshes at a z-plane: top from one STL, bottom from another.
-
-    Takes geometry ABOVE *z_plane* from *top_path* and geometry BELOW
-    *z_plane* from *bottom_path*.  Triangles crossing the boundary are
-    clipped cleanly.  No boolean ops — works on non-manifold meshes.
-
-    **Use case:** Combine a body with the correct top (e.g. logo from
-    v5.3) with a body that has the correct bottom (e.g. larger pocket
-    from v5.4) to create the next design iteration.
-
-    :param top_path: STL providing geometry above z_plane.
-    :param bottom_path: STL providing geometry below z_plane.
-    :param z_plane: Z height (mm) where the splice happens.
-    :param output_path: Output STL path. Auto-generated if empty.
-    :returns: Dict with splice stats and output path.
-    """
-    if err := _check_auth("design:merge"):
-        return err
-    try:
-        from kiln.generation.validation import splice_mesh_at_z as _splice
-
-        if not output_path:
-            import tempfile
-
-            _fd, output_path = tempfile.mkstemp(suffix=".stl", prefix="kiln_splice_")
-            os.close(_fd)
-
-        result = _splice(top_path, bottom_path, z_plane, output_path)
-        return {"success": True, **result}
-    except Exception as exc:
-        logger.exception("splice_mesh_at_z failed")
-        return _error_dict(f"Splice failed: {exc}", code="SPLICE_ERROR")
-
-
-@mcp.tool()
-def compose_models(file_paths: list[str], output_path: str) -> dict:
-    """Merge multiple mesh files into a single combined model.
-
-    Concatenates all triangle geometry from the input files into one
-    output STL.  No boolean operations — bodies are simply combined.
-    Useful for multi-part assemblies or adding components to a design.
-
-    :param file_paths: List of .stl/.obj/.glb file paths to merge.
-    :param output_path: Path for the combined output STL.
-    :returns: Dict with merge statistics.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import compose_stls
-
-        result = compose_stls(file_paths, output_path)
-        return {"success": True, **result}
-    except Exception as exc:
-        return _error_dict(f"Composition failed: {exc}", code="COMPOSE_ERROR")
-
-
-@mcp.tool()
-def export_model_3mf(file_path: str, output_path: str = "") -> dict:
-    """Export a mesh to 3MF format (preferred by modern slicers).
-
-    Converts STL/OBJ/GLB to 3MF, a ZIP-based XML format used by
-    PrusaSlicer, OrcaSlicer, and Bambu Studio.  3MF is more compact
-    and supports metadata better than STL.
-
-    :param file_path: Path to the input mesh file.
-    :param output_path: Output 3MF path.  Auto-generated if empty.
-    :returns: Dict with the output file path.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import export_3mf
-
-        out = export_3mf(file_path, output_path=output_path or None)
-        file_size = os.path.getsize(out)
-        return {
-            "success": True,
-            "path": out,
-            "file_size_bytes": file_size,
-            "message": f"Exported to 3MF ({file_size} bytes).",
-        }
-    except Exception as exc:
-        return _error_dict(f"3MF export failed: {exc}", code="EXPORT_ERROR")
-
-
-@mcp.tool()
-def extract_model_from_3mf(file_path: str, output_path: str = "") -> dict:
-    """Extract the embedded 3D model from a .3mf or .gcode.3mf file to STL.
-
-    3MF files are ZIP archives containing XML mesh geometry.  This tool
-    parses the embedded model, extracts all mesh objects, and writes a
-    binary STL file ready for slicing, multi-copy printing, or further
-    mesh operations.
-
-    .. note::
-        For extracting a single object's **G-code** from a multi-object
-        Bambu .gcode.3mf file, use ``extract_plate_object`` instead.
-        Use ``list_plate_objects`` to discover available objects.
-
-    Works with both standard 3MF files and Bambu Studio .gcode.3mf files
-    (which bundle both G-code and the source model).  When multiple
-    objects exist they are merged into a single STL.
-
-    :param file_path: Path to the .3mf or .gcode.3mf file.
-    :param output_path: Output STL path (auto-generated if empty).
-    :returns: Dict with output path, triangle/vertex counts, and dimensions.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import (
-            extract_model_from_3mf as _extract,
-        )
-
-        result = _extract(file_path, output_path=output_path or None)
-        return {"success": True, **result}
-    except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="FILE_NOT_FOUND")
-    except Exception as exc:
-        msg = f"3MF extraction failed: {exc}"
-        result = _error_dict(msg, code="EXTRACT_ERROR")
-        if "no mesh geometry" in str(exc).lower():
-            result["hint"] = (
-                "This .gcode.3mf has no mesh data. Use list_plate_objects() "
-                "to see what objects are on the plate, then "
-                "extract_plate_object() to extract one object's G-code."
-            )
-        return result
-
-
-@mcp.tool()
 def list_plate_objects(file_path: str, plate_number: int = 1) -> dict:
     """List named objects on the build plate of a Bambu .gcode.3mf file.
 
@@ -10834,9 +9275,7 @@ def list_plate_objects(file_path: str, plate_number: int = 1) -> dict:
     except FileNotFoundError as exc:
         return _error_dict(str(exc), code="FILE_NOT_FOUND")
     except Exception as exc:
-        return _error_dict(
-            f"Failed to list plate objects: {exc}", code="PLATE_PARSE_ERROR"
-        )
+        return _error_dict(f"Failed to list plate objects: {exc}", code="PLATE_PARSE_ERROR")
 
 
 @mcp.tool()
@@ -10887,13 +9326,15 @@ def extract_plate_object(
             # Pass output_dir as parent; the implementation sanitises
             # the object name for the filename.
             safe_name = object_name.rsplit(".", 1)[0]
-            safe_name = "".join(
-                c if c.isalnum() or c in " _-" else "_" for c in safe_name
-            ).strip() or "extracted_object"
+            safe_name = (
+                "".join(c if c.isalnum() or c in " _-" else "_" for c in safe_name).strip() or "extracted_object"
+            )
             output_path = str(_Path(output_dir) / f"{safe_name}.gcode")
 
         result = extract_plate_object_gcode(
-            file_path, object_name, output_path=output_path,
+            file_path,
+            object_name,
+            output_path=output_path,
             plate_number=plate_number,
         )
         return {"success": True, **result}
@@ -10909,9 +9350,7 @@ def extract_plate_object(
             code = "VALIDATION_ERROR"
         return _error_dict(msg, code=code)
     except Exception as exc:
-        return _error_dict(
-            f"Failed to extract plate object: {exc}", code="EXTRACT_ERROR"
-        )
+        return _error_dict(f"Failed to extract plate object: {exc}", code="EXTRACT_ERROR")
 
 
 @mcp.tool()
@@ -10983,9 +9422,7 @@ def print_plate_object(
     except ValueError as exc:
         return _error_dict(str(exc), code="OBJECT_NOT_FOUND")
     except Exception as exc:
-        return _error_dict(
-            f"Failed to extract object: {exc}", code="EXTRACT_ERROR"
-        )
+        return _error_dict(f"Failed to extract object: {exc}", code="EXTRACT_ERROR")
 
     extracted_path = extract_result["output_path"]
     matched_object = extract_result["matched_object"]
@@ -11005,15 +9442,11 @@ def print_plate_object(
                 extracted_path,
                 threemf_path,
                 source_3mf_path=file_path,
-                estimated_time_minutes=extract_result.get(
-                    "estimated_time_minutes", 0
-                ),
+                estimated_time_minutes=extract_result.get("estimated_time_minutes", 0),
             )
             upload_path = threemf_path
         except Exception as exc:
-            logger.warning(
-                "3MF repackaging failed, falling back to raw gcode: %s", exc
-            )
+            logger.warning("3MF repackaging failed, falling back to raw gcode: %s", exc)
 
     # Step 2: Upload
     try:
@@ -11023,8 +9456,7 @@ def print_plate_object(
                 "status": "upload_failed",
                 "phase": "upload",
                 "message": (
-                    f"Upload failed. The extracted G-code is at: {extracted_path}. "
-                    f"Try upload_file() manually."
+                    f"Upload failed. The extracted G-code is at: {extracted_path}. Try upload_file() manually."
                 ),
                 "extracted_gcode": extracted_path,
                 "matched_object": matched_object,
@@ -11071,10 +9503,7 @@ def print_plate_object(
 
     return {
         "success": True,
-        "message": (
-            f"Printing '{matched_object['name']}' extracted from "
-            f"'{os.path.basename(file_path)}'."
-        ),
+        "message": (f"Printing '{matched_object['name']}' extracted from '{os.path.basename(file_path)}'."),
         "matched_object": matched_object,
         "all_objects": extract_result["all_objects"],
         "extracted_gcode": extracted_path,
@@ -11181,10 +9610,7 @@ def resolve_model_source(file_path: str) -> dict:
         if plate_json_raw is not None:
             plate_data = _json.loads(plate_json_raw.decode("utf-8"))
             objects = plate_data.get("bbox_objects", [])
-            generic["plate_objects"] = [
-                obj.get("name", f"object_{i}")
-                for i, obj in enumerate(objects)
-            ]
+            generic["plate_objects"] = [obj.get("name", f"object_{i}") for i, obj in enumerate(objects)]
 
         return {"success": True, **generic}
     except FileNotFoundError as exc:
@@ -11192,9 +9618,7 @@ def resolve_model_source(file_path: str) -> dict:
     except ValueError as exc:
         return _error_dict(str(exc), code="SOURCE_NOT_FOUND")
     except Exception as exc:
-        return _error_dict(
-            f"Failed to resolve model source: {exc}", code="RESOLVE_ERROR"
-        )
+        return _error_dict(f"Failed to resolve model source: {exc}", code="RESOLVE_ERROR")
 
 
 @mcp.tool()
@@ -11461,39 +9885,6 @@ def estimate_support_material(file_path: str) -> dict:
 
 
 @mcp.tool()
-def repair_mesh_advanced(
-    file_path: str,
-    output_path: str = "",
-    close_holes: bool = True,
-) -> dict:
-    """Deep mesh repair: degenerate removal + hole closing + boundary edge fixes.
-
-    Use when ``repair_mesh`` (basic) is not enough — e.g. mesh has open
-    holes or boundary edges.  Goes beyond basic repair by finding boundary
-    edges (edges shared by only one triangle) and closing small holes via
-    fan triangulation.
-
-    :param file_path: Path to the STL file.
-    :param output_path: Output path.  Defaults to overwriting the input.
-    :param close_holes: Whether to attempt closing holes (default True).
-    :returns: Dict with repair statistics.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import repair_stl_advanced
-
-        result = repair_stl_advanced(
-            file_path,
-            output_path=output_path or None,
-            close_holes=close_holes,
-        )
-        return {"success": True, **result}
-    except Exception as exc:
-        return _error_dict(f"Advanced repair failed: {exc}", code="REPAIR_ERROR")
-
-
-@mcp.tool()
 def generate_template_variations(
     template_id: str,
     variation_count: int = 3,
@@ -11623,11 +10014,13 @@ def design_advisor(prompt: str, printer_model: str = "") -> dict:
         for tid, keywords in template_keywords.items():
             if any(kw in prompt_lower for kw in keywords):
                 tpl = templates.get(tid, {})
-                matching_templates.append({
-                    "template_id": tid,
-                    "display_name": tpl.get("display_name", tid),
-                    "description": tpl.get("description", ""),
-                })
+                matching_templates.append(
+                    {
+                        "template_id": tid,
+                        "display_name": tpl.get("display_name", tid),
+                        "description": tpl.get("description", ""),
+                    }
+                )
 
         recommendations["matching_templates"] = matching_templates
     except Exception:
@@ -11637,17 +10030,43 @@ def design_advisor(prompt: str, printer_model: str = "") -> dict:
     is_geometric = any(
         w in prompt_lower
         for w in [
-            "box", "bracket", "mount", "holder", "clip", "hook",
-            "shelf", "stand", "frame", "enclosure", "gear", "hinge",
-            "screw", "nut", "bolt", "washer", "spacer", "bushing",
+            "box",
+            "bracket",
+            "mount",
+            "holder",
+            "clip",
+            "hook",
+            "shelf",
+            "stand",
+            "frame",
+            "enclosure",
+            "gear",
+            "hinge",
+            "screw",
+            "nut",
+            "bolt",
+            "washer",
+            "spacer",
+            "bushing",
         ]
     )
     is_organic = any(
         w in prompt_lower
         for w in [
-            "figure", "sculpture", "animal", "character", "face",
-            "statue", "bust", "organic", "creature", "dragon",
-            "plant", "flower", "tree", "body",
+            "figure",
+            "sculpture",
+            "animal",
+            "character",
+            "face",
+            "statue",
+            "bust",
+            "organic",
+            "creature",
+            "dragon",
+            "plant",
+            "flower",
+            "tree",
+            "body",
         ]
     )
     is_simple = len(prompt.split()) < 8 and not is_organic
@@ -11676,8 +10095,7 @@ def design_advisor(prompt: str, printer_model: str = "") -> dict:
     else:
         approach = "openscad" if is_simple else "meshy"
         approach_reason = (
-            "Could work with either approach. "
-            "OpenSCAD for precise dimensions, Meshy for complex/artistic shapes."
+            "Could work with either approach. OpenSCAD for precise dimensions, Meshy for complex/artistic shapes."
         )
         confidence = "low"
 
@@ -11753,31 +10171,9 @@ def design_advisor(prompt: str, printer_model: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Phase 4: Mesh comparison, failure prediction, simplification, scoring, cost
+# Phase 4: Mesh tools extracted → plugins/mesh_tools.py
+# Remaining: failure prediction, material cost, print readiness
 # ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def compare_mesh_versions(file_a: str, file_b: str) -> dict:
-    """Compare two mesh files and report geometric differences.
-
-    Computes volume change, surface area change, dimension deltas,
-    center-of-mass shift, printability delta, and an approximate
-    Hausdorff distance showing how far the meshes differ spatially.
-
-    Useful for verifying that a repair, rescale, or regeneration
-    actually improved the model.
-
-    :param file_a: Path to the reference (original) mesh.
-    :param file_b: Path to the modified mesh.
-    :returns: Dict with comparison metrics and ``meshes_identical`` flag.
-    """
-    try:
-        from kiln.generation.validation import compare_meshes
-
-        return {"success": True, **compare_meshes(file_a, file_b)}
-    except Exception as exc:
-        return _error_dict(f"Mesh comparison failed: {exc}")
 
 
 @mcp.tool()
@@ -11814,63 +10210,6 @@ def predict_print_failure(
         }
     except Exception as exc:
         return _error_dict(f"Failure prediction failed: {exc}")
-
-
-@mcp.tool()
-def simplify_mesh_model(
-    file_path: str,
-    target_ratio: float = 0.5,
-    output_path: str = "",
-) -> dict:
-    """Reduce mesh triangle count for faster preview or smaller files.
-
-    Uses vertex-clustering decimation to merge nearby vertices.
-    The result is a lower-resolution version of the same shape.
-
-    :param file_path: Path to the STL file.
-    :param target_ratio: Target fraction of original triangles (0.01-1.0).
-    :param output_path: Output path (defaults to ``<name>_simplified.stl``).
-    :returns: Dict with original/simplified triangle counts and reduction percentage.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import simplify_mesh
-
-        return {
-            "success": True,
-            **simplify_mesh(
-                file_path,
-                target_ratio=target_ratio,
-                output_path=output_path or None,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Mesh simplification failed: {exc}")
-
-
-@mcp.tool()
-def mesh_quality_scorecard(file_path: str) -> dict:
-    """Generate a multi-factor quality scorecard for a mesh.
-
-    Evaluates four dimensions:
-    - **Printability** (35%): overhangs, manifold, support needs
-    - **Structural** (25%): aspect ratio, base stability, component count
-    - **Efficiency** (20%): fill ratio, support waste
-    - **Quality** (20%): triangle density, degenerate count
-
-    Returns per-factor scores, an overall 0-100 score, and a letter
-    grade (A-F).
-
-    :param file_path: Path to mesh file (.stl, .obj, or .glb).
-    :returns: Dict with scores, grade, and per-factor notes.
-    """
-    try:
-        from kiln.generation.validation import design_scorecard
-
-        return {"success": True, **design_scorecard(file_path)}
-    except Exception as exc:
-        return _error_dict(f"Scorecard generation failed: {exc}")
 
 
 @mcp.tool()
@@ -11913,43 +10252,6 @@ def estimate_material_cost(
         }
     except Exception as exc:
         return _error_dict(f"Cost estimation failed: {exc}")
-
-
-@mcp.tool()
-def remove_mesh_floating_regions(
-    file_path: str,
-    output_path: str = "",
-    keep_largest: bool = True,
-    min_triangle_pct: float = 1.0,
-) -> dict:
-    """Remove small disconnected components (floating geometry).
-
-    Downloads and marketplace models often contain support pillars,
-    internal fragments, or other floating geometry.  This tool
-    identifies connected components and removes the small ones.
-
-    :param file_path: Path to the STL file.
-    :param output_path: Output path (defaults to overwriting input).
-    :param keep_largest: Keep only the largest component (default True).
-    :param min_triangle_pct: Min triangle % to keep (when keep_largest=False).
-    :returns: Dict with removal statistics.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import remove_floating_regions
-
-        return {
-            "success": True,
-            **remove_floating_regions(
-                file_path,
-                output_path=output_path or None,
-                keep_largest=keep_largest,
-                min_triangle_pct=min_triangle_pct,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Floating region removal failed: {exc}")
 
 
 @mcp.tool()
@@ -11997,226 +10299,9 @@ def check_print_readiness(
 
 
 # ---------------------------------------------------------------------------
-# Phase 5: Mirror, hollow, center, non-manifold analysis
+# Phase 5: Mesh tools extracted → plugins/mesh_tools.py
+# Remaining: structural analysis, design reasoning, reinforcements
 # ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def mirror_mesh_model(file_path: str, axis: str = "x", output_path: str = "") -> dict:
-    """Mirror (reflect) a mesh along an axis.
-
-    Creates a mirror image by negating coordinates on the chosen axis
-    and reversing triangle winding order to preserve correct normals.
-
-    :param file_path: Path to the STL file.
-    :param axis: Axis to mirror ("x", "y", or "z", default "x").
-    :param output_path: Output path (defaults to overwriting input).
-    :returns: Dict with mirror info.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import mirror_mesh
-
-        return {
-            "success": True,
-            **mirror_mesh(file_path, axis=axis, output_path=output_path or None),
-        }
-    except Exception as exc:
-        return _error_dict(f"Mirror failed: {exc}")
-
-
-@mcp.tool()
-def hollow_mesh_model(
-    file_path: str,
-    wall_thickness_mm: float = 2.0,
-    output_path: str = "",
-) -> dict:
-    """Create a hollow version of a mesh to save material.
-
-    Generates an inner offset shell and combines it with the outer
-    surface.  Reports estimated material savings.
-
-    :param file_path: Path to the STL file.
-    :param wall_thickness_mm: Wall thickness in mm (default 2.0).
-    :param output_path: Output path (defaults to ``<name>_hollow.stl``).
-    :returns: Dict with hollowing stats and material savings.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import hollow_mesh
-
-        return {
-            "success": True,
-            **hollow_mesh(
-                file_path,
-                wall_thickness_mm=wall_thickness_mm,
-                output_path=output_path or None,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Hollowing failed: {exc}")
-
-
-@mcp.tool()
-def thicken_mesh_walls(
-    file_path: str,
-    amount_mm: float = 0.5,
-    output_path: str = "",
-) -> dict:
-    """Thicken thin walls in a mesh by offsetting vertices outward.
-
-    Detects thin-wall regions and pushes vertices outward along their
-    averaged normals.  This is a **geometry-level fix** — the mesh is
-    surgically modified instead of regenerating from scratch.
-
-    Use after ``predict_print_failures()`` detects ``thin_walls`` or
-    after ``design_scorecard()`` flags wall thickness issues.
-
-    :param file_path: Path to the STL file.
-    :param amount_mm: Offset distance in mm (default 0.5).
-    :param output_path: Output path (defaults to ``<name>_thickened.stl``).
-    :returns: Dict with number of vertices modified, amounts, and output path.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import thicken_walls
-
-        return {
-            "success": True,
-            **thicken_walls(
-                file_path,
-                amount_mm=amount_mm,
-                output_path=output_path or None,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Wall thickening failed: {exc}")
-
-
-@mcp.tool()
-def add_mesh_fillet(
-    file_path: str,
-    radius_mm: float = 1.0,
-    angle_threshold_deg: float = 60.0,
-    output_path: str = "",
-) -> dict:
-    """Add fillets (rounded transitions) at sharp edges.
-
-    Detects edges where adjacent faces meet at a sharp angle and
-    inserts intermediate triangles to approximate a smooth fillet.
-    Reduces stress concentration at corners and improves printability.
-
-    Use after ``design_scorecard()`` flags sharp corners or
-    ``predict_print_failures()`` detects stress risers.
-
-    :param file_path: Path to the STL file.
-    :param radius_mm: Fillet radius in mm (default 1.0).
-    :param angle_threshold_deg: Edges sharper than this get filleted (default 60).
-    :param output_path: Output path (defaults to ``<name>_filleted.stl``).
-    :returns: Dict with sharp edge count, triangles added, and output path.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import add_fillet
-
-        return {
-            "success": True,
-            **add_fillet(
-                file_path,
-                radius_mm=radius_mm,
-                angle_threshold_deg=angle_threshold_deg,
-                output_path=output_path or None,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Fillet failed: {exc}")
-
-
-@mcp.tool()
-def add_mesh_chamfer(
-    file_path: str,
-    distance_mm: float = 0.5,
-    angle_threshold_deg: float = 60.0,
-    output_path: str = "",
-) -> dict:
-    """Add chamfers (flat bevels) at sharp edges.
-
-    Detects edges where adjacent faces meet at a sharp angle and
-    bevels them with a flat transition face.  Chamfers are faster
-    to print than fillets and reduce stress concentration.
-
-    :param file_path: Path to the STL file.
-    :param distance_mm: Chamfer distance from edge in mm (default 0.5).
-    :param angle_threshold_deg: Edges sharper than this get chamfered (default 60).
-    :param output_path: Output path (defaults to ``<name>_chamfered.stl``).
-    :returns: Dict with sharp edge count, triangles added, and output path.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import add_chamfer
-
-        return {
-            "success": True,
-            **add_chamfer(
-                file_path,
-                distance_mm=distance_mm,
-                angle_threshold_deg=angle_threshold_deg,
-                output_path=output_path or None,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Chamfer failed: {exc}")
-
-
-@mcp.tool()
-def boolean_mesh_op(
-    operation: str,
-    file_paths: list[str],
-    output_path: str = "",
-) -> dict:
-    """Perform a CSG boolean operation on two or more STL meshes.
-
-    Uses OpenSCAD's boolean engine to compute:
-    - **union**: combine multiple bodies into one
-    - **difference**: subtract subsequent bodies from the first
-    - **intersection**: keep only the overlapping region
-
-    Requires OpenSCAD installed on the system.
-
-    **Use cases:**
-    - Subtract a cylinder from a block to create a hole
-    - Combine multiple parts into a single printable body
-    - Create complex shapes from simple primitives
-
-    :param operation: ``"union"``, ``"difference"``, or ``"intersection"``.
-    :param file_paths: List of STL file paths (minimum 2).
-    :param output_path: Output path (defaults to a temp file).
-    :returns: Dict with result path, operation, and triangle count.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.openscad import boolean_mesh_operation
-
-        return {
-            "success": True,
-            **boolean_mesh_operation(
-                operation,
-                file_paths,
-                output_path=output_path or None,
-            ),
-        }
-    except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="FILE_NOT_FOUND")
-    except ValueError as exc:
-        return _error_dict(str(exc), code="INVALID_ARGS")
-    except Exception as exc:
-        return _error_dict(f"Boolean operation failed: {exc}")
 
 
 @mcp.tool()
@@ -12377,74 +10462,6 @@ def design_improvement_plan(
         return _error_dict(str(exc), code="INVALID_ARGS")
     except Exception as exc:
         return _error_dict(f"Improvement plan failed: {exc}")
-
-
-@mcp.tool()
-def compose_part_from_primitives(
-    operations: list[dict],
-    output_path: str = "",
-) -> dict:
-    """Build a functional part by composing geometric primitives with booleans.
-
-    The **CAD-aware generation path** — instead of asking text-to-mesh AI
-    to guess at geometry, describe parts as a tree of primitives combined
-    with boolean operations. Produces exact, deterministic, functional parts.
-
-    **Operation format** — each item is either a primitive or boolean:
-
-    Primitive: ``{"type": "primitive", "shape": "<shape>",
-    "params": {...}, "translate": [x,y,z], "rotate": [rx,ry,rz]}``
-
-    Boolean: ``{"type": "boolean", "operation": "union|difference|intersection",
-    "children": [op1, op2, ...]}``
-
-    **Primitive shapes and params:**
-    - cube: ``{"size": [x,y,z]}`` or ``{"size": scalar}``
-    - cylinder: ``{"h": height, "r": radius}`` or ``{"h", "r1", "r2"}``
-    - sphere: ``{"r": radius}``
-    - cone: ``{"h": height, "r1": bottom_r, "r2": top_r}``
-    - torus: ``{"major_r": ring_radius, "minor_r": tube_radius}``
-    - wedge: ``{"width": w, "depth": d, "height": h}``
-    - hex_prism: ``{"r": radius, "h": height}``  — hexagonal (for nuts)
-    - text: ``{"text": "string", "size": 10, "depth": 2}``
-    - rounded_cube: ``{"size": [x,y,z], "radius": 1}``
-    - pipe: ``{"h": height, "outer_r": 10, "inner_r": 8}``
-
-    **Example — L-bracket with mounting hole:**
-    ```json
-    [{"type": "boolean", "operation": "difference", "children": [
-        {"type": "boolean", "operation": "union", "children": [
-            {"type": "primitive", "shape": "cube", "params": {"size": [40, 5, 30]}},
-            {"type": "primitive", "shape": "cube", "params": {"size": [5, 30, 30]}}
-        ]},
-        {"type": "primitive", "shape": "cylinder",
-         "params": {"h": 10, "r": 3},
-         "translate": [20, -1, 15], "rotate": [-90, 0, 0]}
-    ]}]
-    ```
-
-    Requires OpenSCAD installed on the system.
-
-    :param operations: List of operation dicts (primitive/boolean tree).
-    :param output_path: Output path (defaults to temp file).
-    :returns: Dict with result path, SCAD code, and triangle count.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.openscad import compose_from_primitives
-
-        return {
-            "success": True,
-            **compose_from_primitives(
-                operations,
-                output_path=output_path or None,
-            ),
-        }
-    except ValueError as exc:
-        return _error_dict(str(exc), code="INVALID_ARGS")
-    except Exception as exc:
-        return _error_dict(f"Composition failed: {exc}")
 
 
 @mcp.tool()
@@ -12704,44 +10721,6 @@ def search_design_templates(
         return {"success": True, **result.to_dict()}
     except Exception as exc:
         return _error_dict(f"Template search failed: {exc}")
-
-
-@mcp.tool()
-def estimate_mesh_weight(
-    file_path: str,
-    material: str = "pla",
-    infill_percent: float = 20.0,
-    wall_thickness_mm: float = 1.2,
-) -> dict:
-    """Estimate the printed weight of an STL file.
-
-    Uses the divergence theorem to compute mesh volume, then applies
-    material density, infill ratio, and shell fraction for a realistic
-    weight estimate.
-
-    :param file_path: Path to an STL file.
-    :param material: Material name (pla, abs, petg, tpu, nylon, etc.).
-    :param infill_percent: Infill percentage 0-100 (default 20).
-    :param wall_thickness_mm: Perimeter wall thickness in mm (default 1.2).
-    :returns: Dict with volume, weight estimates, bounding box.
-    """
-    _check_auth("design:analyze")
-    try:
-        from kiln.design_reasoning import estimate_weight
-
-        result = estimate_weight(
-            file_path,
-            material=material,
-            infill_percent=infill_percent,
-            wall_thickness_mm=wall_thickness_mm,
-        )
-        return {"success": True, **result.to_dict()}
-    except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="FILE_NOT_FOUND")
-    except ValueError as exc:
-        return _error_dict(str(exc), code="INVALID_ARGS")
-    except Exception as exc:
-        return _error_dict(f"Weight estimation failed: {exc}")
 
 
 @mcp.tool()
@@ -13008,46 +10987,6 @@ def auto_arrange_parts_on_plate(
 
 
 @mcp.tool()
-def cross_section_view(
-    file_path: str,
-    plane: str = "z",
-    offset_ratio: float = 0.5,
-    offset_mm: str = "",
-) -> dict:
-    """Compute a 2D cross-section of a mesh at a cutting plane.
-
-    Slices the mesh perpendicular to the chosen axis and returns
-    contour polygons and cross-sectional area.  Useful for inspecting
-    internal geometry (e.g., wall thickness, hole placement).
-
-    :param file_path: Path to STL file.
-    :param plane: Axis perpendicular to the cut — "x", "y", or "z".
-    :param offset_ratio: Fractional position 0.0-1.0 (default 0.5 = midpoint).
-    :param offset_mm: If set, absolute position in mm (overrides offset_ratio).
-    :returns: Dict with contour_count, contour_points, cross_section_area_mm2.
-    """
-    _check_auth("design:analyze")
-    try:
-        from kiln.design_reasoning import cross_section_at_plane
-
-        kwargs: dict[str, Any] = {
-            "plane": plane,
-            "offset_ratio": offset_ratio,
-        }
-        if offset_mm:
-            kwargs["offset_mm"] = float(offset_mm)
-
-        result = cross_section_at_plane(file_path, **kwargs)
-        return {"success": True, **result.to_dict()}
-    except FileNotFoundError as exc:
-        return _error_dict(str(exc), code="FILE_NOT_FOUND")
-    except ValueError as exc:
-        return _error_dict(str(exc), code="INVALID_ARGS")
-    except Exception as exc:
-        return _error_dict(f"Cross-section failed: {exc}")
-
-
-@mcp.tool()
 def solve_template_constraints(
     template_id: str,
     constraints: str,
@@ -13079,180 +11018,6 @@ def solve_template_constraints(
         return {"success": True, **result.to_dict()}
     except Exception as exc:
         return _error_dict(f"Constraint solving failed: {exc}")
-
-
-@mcp.tool()
-def center_model_on_bed(
-    file_path: str,
-    bed_x_mm: float = 256.0,
-    bed_y_mm: float = 256.0,
-    output_path: str = "",
-) -> dict:
-    """Center a mesh on the build plate and place at z=0.
-
-    Translates the model so it sits centered on the bed with its
-    lowest point touching the build plate.
-
-    :param file_path: Path to the STL file.
-    :param bed_x_mm: Build plate X dimension (default 256).
-    :param bed_y_mm: Build plate Y dimension (default 256).
-    :param output_path: Output path (defaults to overwriting input).
-    :returns: Dict with translation applied.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import center_on_bed
-
-        return {
-            "success": True,
-            **center_on_bed(
-                file_path,
-                bed_x_mm=bed_x_mm,
-                bed_y_mm=bed_y_mm,
-                output_path=output_path or None,
-            ),
-        }
-    except Exception as exc:
-        return _error_dict(f"Centering failed: {exc}")
-
-
-@mcp.tool()
-def analyze_non_manifold_edges(file_path: str) -> dict:
-    """Count and classify non-manifold edges in a mesh.
-
-    Reports boundary edges (shared by 1 triangle), T-junction edges
-    (shared by 3+ triangles), and manifold edges (shared by exactly 2).
-
-    This is the diagnostic version of the manifold check — use it
-    to understand exactly how many edges are problematic before
-    deciding whether to repair.
-
-    :param file_path: Path to mesh file (.stl, .obj, or .glb).
-    :returns: Dict with edge count breakdown and watertight status.
-    """
-    try:
-        from kiln.generation.validation import count_non_manifold_edges
-
-        return {"success": True, **count_non_manifold_edges(file_path)}
-    except Exception as exc:
-        return _error_dict(f"Edge analysis failed: {exc}")
-
-
-@mcp.tool()
-def scale_mesh_to_fit(
-    file_path: str,
-    max_x_mm: float = 256.0,
-    max_y_mm: float = 256.0,
-    max_z_mm: float = 256.0,
-    output_path: str = "",
-) -> dict:
-    """Auto-scale a mesh to fit within a build volume while maintaining aspect ratio.
-
-    Useful when a model is too large for your printer — this uniformly
-    shrinks it to the largest size that fits.
-
-    :param file_path: Path to mesh file (.stl).
-    :param max_x_mm: Maximum X dimension of build volume.
-    :param max_y_mm: Maximum Y dimension of build volume.
-    :param max_z_mm: Maximum Z dimension of build volume.
-    :param output_path: Output path. Defaults to overwriting input.
-    :returns: Dict with original/new dimensions and scale factor.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import scale_to_fit
-
-        return {"success": True, **scale_to_fit(
-            file_path, max_x_mm=max_x_mm, max_y_mm=max_y_mm,
-            max_z_mm=max_z_mm, output_path=output_path or None,
-        )}
-    except Exception as exc:
-        return _error_dict(f"Scale failed: {exc}")
-
-
-@mcp.tool()
-def merge_mesh_files(
-    file_paths: list[str],
-    output_path: str,
-) -> dict:
-    """Combine multiple STL files into a single mesh file (simple concatenation).
-
-    For positioning parts with x/y/z offsets, use ``merge_stl`` instead.
-    Useful for composing multi-part designs into one printable file.
-
-    :param file_paths: List of STL file paths to merge.
-    :param output_path: Destination path for the merged file.
-    :returns: Dict with merge statistics.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import merge_stl_files
-
-        return {"success": True, **merge_stl_files(file_paths, output_path=output_path)}
-    except Exception as exc:
-        return _error_dict(f"Merge failed: {exc}")
-
-
-@mcp.tool()
-def split_mesh_by_component(
-    file_path: str,
-    output_dir: str = "",
-) -> dict:
-    """Split a multi-component mesh into separate STL files.
-
-    Identifies disconnected bodies (components) using shared-edge
-    analysis and writes each as a separate file.
-
-    :param file_path: Path to mesh file (.stl).
-    :param output_dir: Directory for output files. Defaults to input directory.
-    :returns: Dict with component count and file paths.
-    """
-    if err := _check_auth("generate"):
-        return err
-    try:
-        from kiln.generation.validation import split_by_component
-
-        return {"success": True, **split_by_component(
-            file_path, output_dir=output_dir or None,
-        )}
-    except Exception as exc:
-        return _error_dict(f"Split failed: {exc}")
-
-
-@mcp.tool()
-def estimate_mesh_print_time(
-    file_path: str,
-    layer_height_mm: float = 0.2,
-    print_speed_mm_s: float = 60.0,
-    material: str = "pla",
-) -> dict:
-    """Rough print time estimate from mesh geometry (STL/OBJ/GLB).
-
-    Uses model height, surface area, and layer count to approximate
-    print duration. This is a ballpark estimate — actual time depends
-    on slicer settings, infill density, supports, and acceleration.
-
-    Unlike estimate_print_time (which uses slicer profiles), this
-    works directly on mesh files before slicing.
-
-    :param file_path: Path to mesh file.
-    :param layer_height_mm: Layer height for slicing.
-    :param print_speed_mm_s: Average print speed in mm/s.
-    :param material: Material hint (affects per-layer overhead).
-    :returns: Dict with estimated time, layer count, and note.
-    """
-    try:
-        from kiln.generation.validation import estimate_print_time_from_mesh
-
-        return {"success": True, **estimate_print_time_from_mesh(
-            file_path, layer_height_mm=layer_height_mm,
-            print_speed_mm_s=print_speed_mm_s, material=material,
-        )}
-    except Exception as exc:
-        return _error_dict(f"Time estimate failed: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -14011,8 +11776,7 @@ class _PrintWatcher:
                             # broken telemetry script.
                             img_hash = hashlib.md5(image_data).hexdigest()  # noqa: S324 — not for security
                             camera_changed = (
-                                self._prev_snapshot_hash is not None
-                                and img_hash != self._prev_snapshot_hash
+                                self._prev_snapshot_hash is not None and img_hash != self._prev_snapshot_hash
                             )
                             self._prev_snapshot_hash = img_hash
 
@@ -14024,15 +11788,15 @@ class _PrintWatcher:
                                 and abs(job.completion - _last_completion) < 0.1
                                 and (time.time() - _last_progress_time) > self._poll_interval * 3
                             ):
-                                    telemetry_mismatch = True
-                                    logger.warning(
-                                        "[watch %s] Camera ground-truth mismatch: "
-                                        "image changed but telemetry stuck at %.1f%% "
-                                        "for %.0fs. Telemetry may be unreliable.",
-                                        self._watch_id,
-                                        job.completion,
-                                        time.time() - _last_progress_time,
-                                    )
+                                telemetry_mismatch = True
+                                logger.warning(
+                                    "[watch %s] Camera ground-truth mismatch: "
+                                    "image changed but telemetry stuck at %.1f%% "
+                                    "for %.0fs. Telemetry may be unreliable.",
+                                    self._watch_id,
+                                    job.completion,
+                                    time.time() - _last_progress_time,
+                                )
 
                             snap = {
                                 "captured_at": now,
@@ -14941,7 +12705,7 @@ def run_reslice_and_print(
                 parsed_overrides = json.loads(overrides)
                 if not isinstance(parsed_overrides, dict):
                     return _error_dict(
-                        "overrides must be a JSON object (e.g. {\"brim_width\": \"8\"})",
+                        'overrides must be a JSON object (e.g. {"brim_width": "8"})',
                         code="VALIDATION_ERROR",
                     )
             except json.JSONDecodeError as exc:
@@ -14972,6 +12736,7 @@ def run_reslice_and_print(
         if printer_id:
             try:
                 from kiln.printer_intelligence import get_slicer_speed_overrides
+
                 model_speeds = get_slicer_speed_overrides(printer_id)
                 if model_speeds:
                     if parsed_overrides is None:
@@ -15088,8 +12853,10 @@ def multi_copy_print(
         if use_duplicate_flag:
             # PrusaSlicer path: use --duplicate flag
             extra_args = [
-                "--duplicate", str(copies),
-                "--duplicate-distance", str(spacing_mm),
+                "--duplicate",
+                str(copies),
+                "--duplicate-distance",
+                str(spacing_mm),
             ]
             result = _pipeline_reslice_and_print(
                 model_path=model_path,
@@ -15821,6 +13588,7 @@ def main() -> None:
     # Anonymous daily heartbeat (one ping per day, daemon thread)
     try:
         from kiln.heartbeat import send_heartbeat_async
+
         send_heartbeat_async()
     except Exception:
         pass  # Never let telemetry failure affect startup
@@ -15995,8 +13763,7 @@ def get_material_properties(material_id: str) -> dict:
 
             available = [p.material_id for p in list_material_profiles()]
             return _error_dict(
-                f"Unknown material '{material_id}'. "
-                f"Available: {', '.join(available)}",
+                f"Unknown material '{material_id}'. Available: {', '.join(available)}",
                 code="NOT_FOUND",
             )
         return {"success": True, "material": profile.to_dict()}
@@ -16041,8 +13808,7 @@ def check_printer_material_support(
         if report is None:
             available = list_compatibility_printers()
             return _error_dict(
-                f"No compatibility data for '{printer_id}'. "
-                f"Available printers: {', '.join(available)}",
+                f"No compatibility data for '{printer_id}'. Available printers: {', '.join(available)}",
                 code="NOT_FOUND",
             )
         result: dict[str, Any] = {
@@ -16054,18 +13820,11 @@ def check_printer_material_support(
             mat_lower = material_id.lower()
             if mat_lower in report.materials:
                 mat_info = report.materials[mat_lower]
-                result["summary"] = (
-                    f"{material_id.upper()} is {mat_info.get('status', 'unknown')} "
-                    f"on {printer_id}"
-                )
+                result["summary"] = f"{material_id.upper()} is {mat_info.get('status', 'unknown')} on {printer_id}"
                 if mat_info.get("upgrades_needed"):
-                    result["summary"] += (
-                        f" (needs: {', '.join(mat_info['upgrades_needed'])})"
-                    )
+                    result["summary"] += f" (needs: {', '.join(mat_info['upgrades_needed'])})"
             else:
-                result["summary"] = (
-                    f"No compatibility data for '{material_id}' on {printer_id}"
-                )
+                result["summary"] = f"No compatibility data for '{material_id}' on {printer_id}"
         return result
     except Exception as exc:
         logger.exception("Error in check_printer_material_support")
@@ -16108,24 +13867,32 @@ def compare_material_properties(
 
         def _thermal_diff(a: dict, b: dict) -> dict:
             keys = [
-                "print_temp_range_c", "bed_temp_range_c",
-                "glass_transition_c", "heat_deflection_c",
-                "max_service_temp_c", "warping_tendency",
+                "print_temp_range_c",
+                "bed_temp_range_c",
+                "glass_transition_c",
+                "heat_deflection_c",
+                "max_service_temp_c",
+                "warping_tendency",
             ]
             return {k: {material_a: a.get(k), material_b: b.get(k)} for k in keys}
 
         def _mech_diff(a: dict, b: dict) -> dict:
             keys = [
-                "tensile_strength_mpa", "flexural_strength_mpa",
-                "elongation_at_break_pct", "impact_resistance",
-                "layer_adhesion", "creep_resistance",
+                "tensile_strength_mpa",
+                "flexural_strength_mpa",
+                "elongation_at_break_pct",
+                "impact_resistance",
+                "layer_adhesion",
+                "creep_resistance",
             ]
             return {k: {material_a: a.get(k), material_b: b.get(k)} for k in keys}
 
         def _design_diff(a: dict, b: dict) -> dict:
             keys = [
-                "min_wall_mm", "max_overhang_deg",
-                "max_bridge_mm", "min_hole_diameter_mm",
+                "min_wall_mm",
+                "max_overhang_deg",
+                "max_bridge_mm",
+                "min_hole_diameter_mm",
             ]
             return {k: {material_a: a.get(k), material_b: b.get(k)} for k in keys}
 
@@ -16150,10 +13917,7 @@ def compare_material_properties(
         warp_a = ta.get("warping_tendency", "unknown")
         warp_b = tb.get("warping_tendency", "unknown")
         if warp_a != warp_b:
-            summary_lines.append(
-                f"Warping: {prof_a.display_name} {warp_a} "
-                f"vs {prof_b.display_name} {warp_b}"
-            )
+            summary_lines.append(f"Warping: {prof_a.display_name} {warp_a} vs {prof_b.display_name} {warp_b}")
 
         return {
             "success": True,
@@ -16474,11 +14238,13 @@ def smart_reprint(
         # 1a. Check if file_name is already an absolute path that exists
         if _os.path.isfile(file_name):
             found_path = file_name
-            steps_log.append({
-                "step": "find_model",
-                "method": "direct_path",
-                "path": found_path,
-            })
+            steps_log.append(
+                {
+                    "step": "find_model",
+                    "method": "direct_path",
+                    "path": found_path,
+                }
+            )
         else:
             # 1b. Search common directories
             default_dirs = [
@@ -16524,12 +14290,14 @@ def smart_reprint(
                 # Pick the most recently modified match
                 candidates.sort(key=lambda x: x[1], reverse=True)
                 found_path = candidates[0][0]
-                steps_log.append({
-                    "step": "find_model",
-                    "method": "directory_search",
-                    "path": found_path,
-                    "candidates_found": len(candidates),
-                })
+                steps_log.append(
+                    {
+                        "step": "find_model",
+                        "method": "directory_search",
+                        "path": found_path,
+                        "candidates_found": len(candidates),
+                    }
+                )
             else:
                 # 1c. Check print history for file name hints
                 try:
@@ -16538,12 +14306,14 @@ def smart_reprint(
                         for rec in history["records"]:
                             rec_name = rec.get("file_name", "")
                             if base_name.lower() in rec_name.lower():
-                                steps_log.append({
-                                    "step": "find_model",
-                                    "method": "history_match",
-                                    "history_file": rec_name,
-                                    "note": "Found in history but source model not on disk",
-                                })
+                                steps_log.append(
+                                    {
+                                        "step": "find_model",
+                                        "method": "history_match",
+                                        "history_file": rec_name,
+                                        "note": "Found in history but source model not on disk",
+                                    }
+                                )
                                 break
                 except Exception:
                     pass
@@ -16620,29 +14390,35 @@ def smart_reprint(
                     if best_slot is not None:
                         detected_ams_mapping = _json.dumps([best_slot])
                         detected_use_ams = True
-                        steps_log.append({
-                            "step": "ams_detection",
-                            "found": True,
-                            "slot": best_slot,
-                            "tray_type": ams_slot_info["tray_type"] if ams_slot_info else "",
-                            "remain_pct": best_remain,
-                        })
+                        steps_log.append(
+                            {
+                                "step": "ams_detection",
+                                "found": True,
+                                "slot": best_slot,
+                                "tray_type": ams_slot_info["tray_type"] if ams_slot_info else "",
+                                "remain_pct": best_remain,
+                            }
+                        )
                     else:
-                        steps_log.append({
-                            "step": "ams_detection",
-                            "found": False,
-                            "note": (
-                                f"No AMS tray with {material_id.upper()} found. "
-                                "Printing without AMS mapping — load the material "
-                                "in an AMS slot or use the external spool holder."
-                            ),
-                        })
+                        steps_log.append(
+                            {
+                                "step": "ams_detection",
+                                "found": False,
+                                "note": (
+                                    f"No AMS tray with {material_id.upper()} found. "
+                                    "Printing without AMS mapping — load the material "
+                                    "in an AMS slot or use the external spool holder."
+                                ),
+                            }
+                        )
             except Exception:
-                steps_log.append({
-                    "step": "ams_detection",
-                    "found": False,
-                    "note": "AMS query failed (non-Bambu printer or not connected)",
-                })
+                steps_log.append(
+                    {
+                        "step": "ams_detection",
+                        "found": False,
+                        "note": "AMS query failed (non-Bambu printer or not connected)",
+                    }
+                )
 
         # ---------------------------------------------------------------
         # Step 3: Delegate to reprint_with_material
@@ -16793,8 +14569,14 @@ def multi_material_print(
             if not color:
                 # Use a distinct default color per filament index
                 default_colors = [
-                    "#FFFFFFFF", "#FF0000FF", "#0000FFFF", "#00FF00FF",
-                    "#000000FF", "#FFFF00FF", "#FF00FFFF", "#00FFFFFF",
+                    "#FFFFFFFF",
+                    "#FF0000FF",
+                    "#0000FFFF",
+                    "#00FF00FF",
+                    "#000000FF",
+                    "#FFFF00FF",
+                    "#FF00FFFF",
+                    "#00FFFFFF",
                 ]
                 # Assign a default based on how many filaments we've seen
                 color = default_colors[filament_idx % len(default_colors)]
@@ -16804,13 +14586,15 @@ def multi_material_print(
                 unique_filaments[filament_key] = filament_idx
                 filament_idx += 1
 
-            build_objects.append({
-                "file_path": obj["file_path"],
-                "filament_index": unique_filaments[filament_key],
-                "name": obj.get("name", _os.path.basename(obj["file_path"])),
-                "color": color,
-                "material_name": profile.display_name,
-            })
+            build_objects.append(
+                {
+                    "file_path": obj["file_path"],
+                    "filament_index": unique_filaments[filament_key],
+                    "name": obj.get("name", _os.path.basename(obj["file_path"])),
+                    "color": color,
+                    "material_name": profile.display_name,
+                }
+            )
 
         # Derive unique material IDs for thermal checks
         unique_mat_ids = {mat_id for mat_id, _color in unique_filaments}
@@ -16848,9 +14632,7 @@ def multi_material_print(
                 )
 
             # Check bed temp gap: >25C difference is risky
-            all_bed_temps = [
-                t for _, r in bed_ranges for t in r
-            ]
+            all_bed_temps = [t for _, r in bed_ranges for t in r]
             bed_spread = max(all_bed_temps) - min(all_bed_temps)
             if bed_spread > 40:
                 names = [f"{mid} ({r[0]}-{r[1]}C)" for mid, r in bed_ranges]
@@ -16918,12 +14700,18 @@ def multi_material_print(
                 ams_result = ams_status()
                 if ams_result.get("success"):
                     mat_type_map = {
-                        "pla": ["PLA"], "pla_plus": ["PLA", "PLA+"],
-                        "pla_matte": ["PLA"], "pla_tough": ["PLA"],
-                        "petg": ["PETG"], "petg_hf": ["PETG", "PETG-HF"],
-                        "cf_petg": ["PETG-CF"], "abs": ["ABS"],
-                        "asa": ["ASA"], "tpu": ["TPU"],
-                        "tpu_95a": ["TPU"], "tpu_85a": ["TPU"],
+                        "pla": ["PLA"],
+                        "pla_plus": ["PLA", "PLA+"],
+                        "pla_matte": ["PLA"],
+                        "pla_tough": ["PLA"],
+                        "petg": ["PETG"],
+                        "petg_hf": ["PETG", "PETG-HF"],
+                        "cf_petg": ["PETG-CF"],
+                        "abs": ["ABS"],
+                        "asa": ["ASA"],
+                        "tpu": ["TPU"],
+                        "tpu_95a": ["TPU"],
+                        "tpu_85a": ["TPU"],
                         "nylon": ["PA", "Nylon"],
                     }
 
@@ -16935,9 +14723,7 @@ def multi_material_print(
                         return h
 
                     # Sort filaments by index for deterministic mapping
-                    sorted_filaments = sorted(
-                        unique_filaments.items(), key=lambda kv: kv[1]
-                    )
+                    sorted_filaments = sorted(unique_filaments.items(), key=lambda kv: kv[1])
 
                     mapping = []
                     all_found = True
@@ -16949,14 +14735,8 @@ def multi_material_print(
                         for unit in ams_result.get("units", []):
                             for tray in unit.get("trays", []):
                                 ttype = (tray.get("tray_type") or "").strip()
-                                tray_color = _normalize_hex(
-                                    tray.get("tray_color") or tray.get("color") or ""
-                                )
-                                if (
-                                    ttype in expected
-                                    and tray_color == req_hex
-                                    and tray.get("slot") not in mapping
-                                ):
+                                tray_color = _normalize_hex(tray.get("tray_color") or tray.get("color") or "")
+                                if ttype in expected and tray_color == req_hex and tray.get("slot") not in mapping:
                                     found_slot = tray.get("slot", 0)
                                     break
                             if found_slot is not None:
@@ -16973,12 +14753,14 @@ def multi_material_print(
                                     break
                         if found_slot is not None:
                             mapping.append(found_slot)
-                            ams_info.append({
-                                "material": mat_id,
-                                "color": req_color,
-                                "slot": found_slot,
-                                "tray_type": (tray.get("tray_type") or "").strip(),
-                            })
+                            ams_info.append(
+                                {
+                                    "material": mat_id,
+                                    "color": req_color,
+                                    "slot": found_slot,
+                                    "tray_type": (tray.get("tray_type") or "").strip(),
+                                }
+                            )
                         else:
                             all_found = False
                             break
@@ -17214,13 +14996,13 @@ def multi_color_copies(
         n_copies = len(resolved_slots)
         if n_copies < 2:
             return _error_dict(
-                "Need at least 2 AMS slots for multi-color copies. "
-                "For single-color, use start_print directly.",
+                "Need at least 2 AMS slots for multi-color copies. For single-color, use start_print directly.",
                 code="VALIDATION_ERROR",
             )
         if n_copies > 16:
             return _error_dict(
-                "Maximum 16 copies supported.", code="VALIDATION_ERROR",
+                "Maximum 16 copies supported.",
+                code="VALIDATION_ERROR",
             )
 
         # Fill in colors if not provided
@@ -17228,15 +15010,25 @@ def multi_color_copies(
             resolved_colors = list(colors[:n_copies])
         # Pad colors if too few
         default_colors = [
-            "#FF0000", "#00FF00", "#0000FF", "#FFFF00",
-            "#FF00FF", "#00FFFF", "#FFFFFF", "#000000",
-            "#FF8000", "#8000FF", "#0080FF", "#FF0080",
-            "#80FF00", "#00FF80", "#808080", "#C0C0C0",
+            "#FF0000",
+            "#00FF00",
+            "#0000FF",
+            "#FFFF00",
+            "#FF00FF",
+            "#00FFFF",
+            "#FFFFFF",
+            "#000000",
+            "#FF8000",
+            "#8000FF",
+            "#0080FF",
+            "#FF0080",
+            "#80FF00",
+            "#00FF80",
+            "#808080",
+            "#C0C0C0",
         ]
         while len(resolved_colors) < n_copies:
-            resolved_colors.append(
-                default_colors[len(resolved_colors) % len(default_colors)]
-            )
+            resolved_colors.append(default_colors[len(resolved_colors) % len(default_colors)])
 
         # --- Build multi-material 3MF ---
         # Each copy gets a unique filament_index so the slicer treats them
@@ -17246,17 +15038,17 @@ def multi_color_copies(
         model_name = os.path.splitext(os.path.basename(model_path))[0]
         build_objects: list[dict[str, Any]] = []
         for i in range(n_copies):
-            build_objects.append({
-                "file_path": model_path,
-                "filament_index": i,
-                "name": f"{model_name}_color_{i + 1}",
-                "color": resolved_colors[i],
-                "material_name": material,
-            })
+            build_objects.append(
+                {
+                    "file_path": model_path,
+                    "filament_index": i,
+                    "name": f"{model_name}_color_{i + 1}",
+                    "color": resolved_colors[i],
+                    "material_name": material,
+                }
+            )
 
-        output_3mf = os.path.join(
-            tempfile.gettempdir(), f"kiln_multi_color_{model_name}.3mf"
-        )
+        output_3mf = os.path.join(tempfile.gettempdir(), f"kiln_multi_color_{model_name}.3mf")
         try:
             build_multi_material_3mf(build_objects, output_path=output_3mf)
         except Exception as exc:
@@ -17297,8 +15089,7 @@ def multi_color_copies(
                 for i, o in enumerate(build_objects)
             ]
             result["ams_mapping"] = [
-                {"copy": i + 1, "slot": s, "color": resolved_colors[i]}
-                for i, s in enumerate(resolved_slots)
+                {"copy": i + 1, "slot": s, "color": resolved_colors[i]} for i, s in enumerate(resolved_slots)
             ]
             result["multi_color_3mf"] = output_3mf
 
@@ -18174,607 +15965,12 @@ def list_snapshots(
         return _error_dict(f"Failed to list snapshots: {exc}", code="INTERNAL_ERROR")
 
 
-# ---------------------------------------------------------------------------
-# Enterprise tier tools
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def export_audit_trail(
-    start_time: float = 0,
-    end_time: float = 0,
-    format: str = "json",
-    tool_name: str = "",
-    action: str = "",
-    session_id: str = "",
-) -> dict:
-    """Export the safety audit trail as JSON or CSV.
-
-    Enterprise feature. Returns the full audit log with optional filters
-    for date range, tool name, action type, and session ID.
-
-    Args:
-        start_time: Unix timestamp lower bound (0 = no filter).
-        end_time: Unix timestamp upper bound (0 = no filter).
-        format: Output format, ``"json"`` or ``"csv"``.
-        tool_name: Filter by MCP tool name.
-        action: Filter by action (executed, blocked, etc.).
-        session_id: Filter by agent session ID.
-    """
-    if err := _check_auth("admin"):
-        return err
-    try:
-        db = get_db()
-        exported = db.export_audit_trail(
-            start_time=start_time if start_time > 0 else None,
-            end_time=end_time if end_time > 0 else None,
-            format=format,
-            tool_name=tool_name or None,
-            action=action or None,
-            session_id=session_id or None,
-        )
-        return {
-            "success": True,
-            "format": format,
-            "data": exported,
-        }
-    except Exception as exc:
-        logger.exception("Error in export_audit_trail")
-        return _error_dict(f"Failed to export audit trail: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def lock_safety_profile(printer_model: str) -> dict:
-    """Lock a safety profile so agents cannot modify its limits.
-
-    Enterprise feature. When locked, community profile updates for this
-    printer model are rejected. Only an admin can unlock.
-
-    Args:
-        printer_model: Profile identifier to lock (e.g. "ender3").
-    """
-    if err := _check_auth("admin"):
-        return err
-    try:
-        from kiln.safety_profiles import lock_safety_profile as _lock
-
-        _lock(printer_model)
-        return {
-            "success": True,
-            "message": f"Safety profile '{printer_model}' is now locked.",
-            "printer_model": printer_model,
-        }
-    except Exception as exc:
-        logger.exception("Error in lock_safety_profile")
-        return _error_dict(f"Failed to lock safety profile: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def unlock_safety_profile(printer_model: str) -> dict:
-    """Unlock a previously locked safety profile.
-
-    Enterprise feature. Allows community profile modifications for
-    this printer model again.
-
-    Args:
-        printer_model: Profile identifier to unlock.
-    """
-    if err := _check_auth("admin"):
-        return err
-    try:
-        from kiln.safety_profiles import unlock_safety_profile as _unlock
-
-        unlocked = _unlock(printer_model)
-        if not unlocked:
-            return {
-                "success": True,
-                "message": f"Profile '{printer_model}' was not locked.",
-                "printer_model": printer_model,
-            }
-        return {
-            "success": True,
-            "message": f"Safety profile '{printer_model}' is now unlocked.",
-            "printer_model": printer_model,
-        }
-    except Exception as exc:
-        logger.exception("Error in unlock_safety_profile")
-        return _error_dict(f"Failed to unlock safety profile: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def manage_team_member(
-    action: str,
-    email: str,
-    role: str = "engineer",
-) -> dict:
-    """Add, remove, or update a team member.
-
-    Enterprise feature. Manages team seats and role assignments.
-    Business tier supports up to 5 seats; Enterprise is unlimited.
-
-    Args:
-        action: One of ``"add"``, ``"remove"``, ``"set_role"``, ``"list"``.
-        email: Member email address (ignored for ``"list"``).
-        role: Role for add/set_role: ``"admin"``, ``"engineer"``, ``"operator"``.
-    """
-    if err := _check_auth("admin"):
-        return err
-    try:
-        from kiln.licensing import get_tier
-        from kiln.teams import TeamManager
-
-        mgr = TeamManager()
-        tier = get_tier().value
-
-        if action == "list":
-            members = mgr.list_members()
-            seat_info = mgr.seat_status(tier=tier)
-            return {
-                "success": True,
-                "members": [m.to_dict() for m in members],
-                "seats": seat_info,
-            }
-        elif action == "add":
-            member = mgr.add_member(email, role=role, tier=tier)
-            return {
-                "success": True,
-                "message": f"Added {email} as {role}.",
-                "member": member.to_dict(),
-            }
-        elif action == "remove":
-            removed = mgr.remove_member(email)
-            if not removed:
-                return _error_dict(f"No active member with email {email!r}.", code="NOT_FOUND")
-            return {
-                "success": True,
-                "message": f"Removed {email} from team.",
-            }
-        elif action == "set_role":
-            member = mgr.set_member_role(email, role)
-            return {
-                "success": True,
-                "message": f"Updated {email} role to {role}.",
-                "member": member.to_dict(),
-            }
-        else:
-            return _error_dict(
-                f"Unknown action: {action!r}. Use add, remove, set_role, or list.",
-                code="INVALID_INPUT",
-            )
-    except Exception as exc:
-        logger.exception("Error in manage_team_member")
-        return _error_dict(f"Team management failed: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def printer_usage_summary() -> dict:
-    """Show printer count, included allowance, and overage charges.
-
-    Enterprise feature. Enterprise base includes 20 printers.
-    Additional printers are $15/month each.
-    """
-    if err := _check_auth("read"):
-        return err
-    try:
-        from kiln.printer_billing import PrinterUsageBilling
-
-        billing = PrinterUsageBilling()
-        active_count = _get_registry().count
-        usage = billing.usage_summary(active_count)
-        estimate = billing.estimate_monthly_cost(active_count)
-
-        return {
-            "success": True,
-            "usage": usage.to_dict(),
-            "cost_estimate": estimate,
-        }
-    except Exception as exc:
-        logger.exception("Error in printer_usage_summary")
-        return _error_dict(f"Failed to get printer usage: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def uptime_report() -> dict:
-    """Get rolling uptime statistics and SLA status.
-
-    Enterprise feature. Shows uptime percentages for 1h, 24h, 7d,
-    and 30d windows, average response times, and whether the 99.9%
-    SLA target is being met.
-    """
-    if err := _check_auth("read"):
-        return err
-    try:
-        from kiln.uptime import get_uptime_tracker
-
-        tracker = get_uptime_tracker()
-        report = tracker.uptime_report()
-        incidents = tracker.recent_incidents(limit=5)
-
-        return {
-            "success": True,
-            "uptime": report,
-            "recent_incidents": incidents,
-        }
-    except Exception as exc:
-        logger.exception("Error in uptime_report")
-        return _error_dict(f"Failed to get uptime report: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def encryption_status() -> dict:
-    """Check G-code encryption status and configuration.
-
-    Enterprise feature. Reports whether encryption is active,
-    whether the encryption key is configured, and whether the
-    cryptography library is installed.
-    """
-    if err := _check_auth("read"):
-        return err
-    try:
-        from kiln.gcode_encryption import get_gcode_encryption
-
-        enc = get_gcode_encryption()
-        return {
-            "success": True,
-            "encryption": enc.status(),
-        }
-    except Exception as exc:
-        logger.exception("Error in encryption_status")
-        return _error_dict(f"Failed to get encryption status: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def rotate_encryption_key(
-    old_passphrase: str,
-    new_passphrase: str,
-    directory: str,
-    pattern: str = "*.gcode",
-    dry_run: bool = True,
-) -> dict:
-    """Rotate the G-code encryption key by re-encrypting all files.
-
-    Scans *directory* recursively for encrypted G-code files, decrypts
-    with the old passphrase, and re-encrypts with the new one.
-
-    **Run with ``dry_run=True`` first** to preview which files would be
-    affected.  Then call again with ``dry_run=False`` to execute.
-
-    After rotation, update the ``KILN_ENCRYPTION_KEY`` environment
-    variable to the new passphrase and restart the server.
-
-    Args:
-        old_passphrase: The current KILN_ENCRYPTION_KEY value.
-        new_passphrase: The new passphrase to encrypt with.
-        directory: Root directory to scan for encrypted G-code files.
-        pattern: Glob pattern for files to process (default ``"*.gcode"``).
-        dry_run: Preview only — don't modify files (default ``True``).
-
-    Requires Enterprise license and admin scope.
-    """
-    if err := _check_auth("admin"):
-        return err
-    try:
-        from kiln.gcode_encryption import GcodeEncryption
-
-        enc = GcodeEncryption()
-        result = enc.rotate_key(
-            old_passphrase=old_passphrase,
-            new_passphrase=new_passphrase,
-            directory=directory,
-            pattern=pattern,
-            dry_run=dry_run,
-        )
-        msg = f"{'Dry run: would rotate' if dry_run else 'Rotated'} {result['rotated']} file(s)."
-        if result["failed"]:
-            msg += f" {result['failed']} file(s) failed."
-        return {"success": result["failed"] == 0, "message": msg, **result}
-    except Exception as exc:
-        logger.exception("Error in rotate_encryption_key")
-        return _error_dict(f"Key rotation failed: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def database_status() -> dict:
-    """Check database backend status and configuration.
-
-    Reports whether Kiln is using SQLite or PostgreSQL, the connection
-    status, and key metrics.  Useful for verifying a PostgreSQL migration
-    or diagnosing connectivity issues.
-
-    Requires Enterprise license.
-    """
-    try:
-        db = get_db()
-        backend = "postgresql" if db._is_postgres else "sqlite"
-        info: dict[str, Any] = {
-            "success": True,
-            "backend": backend,
-        }
-        if backend == "sqlite":
-            info["db_path"] = db._db_path
-            info["note"] = (
-                "SQLite is single-writer. Set KILN_POSTGRES_DSN for multi-replica HA."
-            )
-        else:
-            info["note"] = "PostgreSQL backend active. Multi-replica scaling supported."
-
-        # Quick health check — count audit entries as a connectivity test.
-        try:
-            row = db._conn.execute("SELECT COUNT(*) FROM safety_audit_log").fetchone()
-            info["audit_entries"] = row[0] if row else 0
-            info["connected"] = True
-        except Exception:
-            info["connected"] = False
-
-        return info
-    except Exception as exc:
-        logger.exception("Error in database_status")
-        return _error_dict(f"Failed to get database status: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def report_printer_overage(
-    subscription_item_id: str,
-    active_printer_count: int | None = None,
-) -> dict:
-    """Report metered printer usage to Stripe for Enterprise billing.
-
-    Enterprise feature. The first 20 printers are included in the base
-    Enterprise price ($499/mo). This tool **automatically subtracts** the
-    20 included printers and reports only the overage count to Stripe's
-    ``active_printers`` meter at $15/printer/month.
-
-    If *active_printer_count* is omitted, the fleet registry is queried
-    automatically — no manual counting needed.
-
-    Args:
-        subscription_item_id: The Stripe SubscriptionItem ID (``si_...``) for
-            the metered printer overage line item on the customer's subscription.
-        active_printer_count: Total number of active printers.  Leave empty
-            to auto-detect from the fleet registry.
-
-    Example:
-        With 25 registered printers, this reports **5** to Stripe
-        (25 − 20 included = 5 overage × $15 = $75/mo).
-    """
-    if err := _check_auth("admin"):
-        return err
-    try:
-        from kiln.payments.stripe_provider import StripeProvider
-        from kiln.printer_billing import INCLUDED_PRINTERS
-
-        stripe_key = os.environ.get("KILN_STRIPE_SECRET_KEY", "")
-        if not stripe_key:
-            return _error_dict("Stripe not configured. Set KILN_STRIPE_SECRET_KEY.", code="CONFIG_MISSING")
-
-        # Auto-detect fleet size if not provided.
-        if active_printer_count is None:
-            active_printer_count = _get_registry().count
-            if active_printer_count == 0:
-                return _error_dict(
-                    "No printers registered in the fleet. Register printers first or pass active_printer_count explicitly.",
-                    code="NO_PRINTERS",
-                )
-
-        provider = StripeProvider(secret_key=stripe_key)
-        overage = max(0, active_printer_count - INCLUDED_PRINTERS)
-        result = provider.report_printer_usage(subscription_item_id, overage)
-
-        return {
-            "success": True,
-            "active_printers": active_printer_count,
-            "included": INCLUDED_PRINTERS,
-            "overage_reported_to_stripe": overage,
-            "overage_cost": f"${overage * 15:.2f}/mo",
-            "stripe_usage_record": result,
-            "note": f"Reported {overage} overage printers to Stripe (total {active_printer_count} minus {INCLUDED_PRINTERS} included).",
-        }
-    except Exception as exc:
-        logger.exception("Error in report_printer_overage")
-        return _error_dict(f"Failed to report usage: {exc}", code="PAYMENT_ERROR")
-
-
-# ---------------------------------------------------------------------------
-# SSO (Enterprise)
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def configure_sso(
-    issuer_url: str,
-    client_id: str,
-    protocol: str = "oidc",
-    client_secret: str = "",
-    redirect_uri: str = "",
-    allowed_domains: str = "",
-    role_mapping: str = "",
-) -> dict:
-    """Configure SSO (OIDC or SAML) for Enterprise authentication.
-
-    Enterprise feature. Sets up single sign-on with your identity provider
-    (Okta, Google Workspace, Azure AD, Auth0, etc.).
-
-    Args:
-        issuer_url: IdP issuer URL (e.g. ``https://accounts.google.com``).
-        client_id: OIDC client ID or SAML entity ID.
-        protocol: ``"oidc"`` or ``"saml"``.
-        client_secret: OIDC client secret (optional for public clients).
-        redirect_uri: Callback URL after auth. Default: ``http://localhost:8741/sso/callback``.
-        allowed_domains: Comma-separated email domains (e.g. ``"acme.com,partner.org"``).
-        role_mapping: JSON string mapping IdP groups to Kiln roles
-            (e.g. ``'{"admins":"admin","devs":"engineer"}'``).
-    """
-    if err := _check_auth("admin"):
-        return err
-    try:
-        from kiln.sso import SSOConfig, SSOProtocol, get_sso_manager
-
-        try:
-            proto = SSOProtocol(protocol.lower())
-        except ValueError:
-            return _error_dict(
-                f"Invalid protocol: {protocol!r}. Use 'oidc' or 'saml'.",
-                code="INVALID_INPUT",
-            )
-
-        domains = [d.strip() for d in allowed_domains.split(",") if d.strip()] if allowed_domains else []
-        mapping: dict[str, str] = {}
-        if role_mapping:
-            import json as _json
-
-            try:
-                mapping = _json.loads(role_mapping)
-            except _json.JSONDecodeError:
-                return _error_dict("role_mapping must be valid JSON.", code="INVALID_INPUT")
-
-        config = SSOConfig(
-            protocol=proto,
-            issuer_url=issuer_url,
-            client_id=client_id,
-            client_secret=client_secret or None,
-            redirect_uri=redirect_uri or "http://localhost:8741/sso/callback",
-            allowed_domains=domains,
-            role_mapping=mapping,
-        )
-
-        mgr = get_sso_manager()
-        mgr.configure(config)
-
-        return {
-            "success": True,
-            "protocol": proto.value,
-            "issuer_url": issuer_url,
-            "allowed_domains": domains,
-            "next_step": (
-                "SSO configured. Use 'sso_login_url' to get the IdP login URL, "
-                "then exchange the auth code with 'sso_exchange_code'."
-            ),
-        }
-    except Exception as exc:
-        logger.exception("Error in configure_sso")
-        return _error_dict(f"Failed to configure SSO: {exc}", code="SSO_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def sso_login_url(state: str = "") -> dict:
-    """Get the SSO login URL to redirect users to the identity provider.
-
-    Enterprise feature. Returns the IdP authorization URL for OIDC or
-    the SAML AuthnRequest redirect URL.
-
-    Args:
-        state: Optional opaque state parameter for CSRF protection.
-    """
-    if err := _check_auth("read"):
-        return err
-    try:
-        from kiln.sso import SSOProtocol, get_sso_manager
-
-        mgr = get_sso_manager()
-        config = mgr.get_config()
-        if config is None:
-            return _error_dict("SSO not configured. Use 'configure_sso' first.", code="CONFIG_MISSING")
-
-        if config.protocol == SSOProtocol.OIDC:
-            url = mgr.get_oidc_authorize_url(state=state or None)
-        else:
-            url = mgr.get_saml_login_url()
-
-        return {
-            "success": True,
-            "login_url": url,
-            "protocol": config.protocol.value,
-            "next_step": "Redirect the user to login_url. After auth, exchange the code with 'sso_exchange_code'.",
-        }
-    except Exception as exc:
-        logger.exception("Error in sso_login_url")
-        return _error_dict(f"Failed to generate login URL: {exc}", code="SSO_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def sso_exchange_code(code: str) -> dict:
-    """Exchange an SSO authorization code for user identity and role.
-
-    Enterprise feature. After the user completes IdP login, exchange
-    the auth code to get their identity, email, groups, and mapped
-    Kiln role.
-
-    Args:
-        code: The authorization code from the IdP callback.
-    """
-    if err := _check_auth("read"):
-        return err
-    try:
-        from kiln.sso import get_sso_manager, map_sso_user_to_role
-
-        mgr = get_sso_manager()
-        config = mgr.get_config()
-        if config is None:
-            return _error_dict("SSO not configured. Use 'configure_sso' first.", code="CONFIG_MISSING")
-
-        user = mgr.exchange_oidc_code(code)
-        kiln_role = map_sso_user_to_role(user)
-
-        return {
-            "success": True,
-            "user": user.to_dict(),
-            "kiln_role": kiln_role,
-            "next_step": f"User authenticated as {user.email} with role '{kiln_role}'.",
-        }
-    except Exception as exc:
-        logger.exception("Error in sso_exchange_code")
-        return _error_dict(f"SSO authentication failed: {exc}", code="SSO_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.ENTERPRISE)
-def sso_status() -> dict:
-    """Check current SSO configuration status.
-
-    Enterprise feature. Returns whether SSO is configured, the protocol,
-    issuer, allowed domains, and role mapping.
-    """
-    if err := _check_auth("read"):
-        return err
-    try:
-        from kiln.sso import get_sso_manager
-
-        mgr = get_sso_manager()
-        config = mgr.get_config()
-        if config is None:
-            return {
-                "success": True,
-                "configured": False,
-                "next_step": "SSO not configured. Use 'configure_sso' to set up OIDC or SAML.",
-            }
-
-        return {
-            "success": True,
-            "configured": True,
-            "protocol": config.protocol.value,
-            "issuer_url": config.issuer_url,
-            "client_id": config.client_id,
-            "allowed_domains": config.allowed_domains,
-            "role_mapping": config.role_mapping,
-            "redirect_uri": config.redirect_uri,
-        }
-    except Exception as exc:
-        logger.exception("Error in sso_status")
-        return _error_dict(f"Failed to get SSO status: {exc}", code="SSO_ERROR")
-
+# Enterprise admin tools -- moved to plugins/enterprise_tools.py
+# (export_audit_trail, lock_safety_profile, unlock_safety_profile,
+#  manage_team_member, printer_usage_summary, uptime_report,
+#  encryption_status, rotate_encryption_key, database_status,
+#  report_printer_overage, configure_sso, sso_login_url,
+#  sso_exchange_code, sso_status)
 
 # ---------------------------------------------------------------------------
 # Print trend analysis & ambient safety
@@ -18963,9 +16159,7 @@ def decorate_surface(
     # --- Check provenance sidecar for design recipe defaults ---
     _provenance_info: dict[str, Any] = {}
     try:
-        recipe_path = os.path.join(
-            os.path.dirname(os.path.abspath(model_path)), ".kiln_recipe.json"
-        )
+        recipe_path = os.path.join(os.path.dirname(os.path.abspath(model_path)), ".kiln_recipe.json")
         if os.path.isfile(recipe_path):
             from kiln.design_recipe import DesignRecipe
 
@@ -18983,17 +16177,14 @@ def decorate_surface(
             # Use recipe's design_id as template_id if caller didn't provide one
             if not template_id and _recipe.design_id:
                 template_id = _recipe.design_id
-                logger.debug(
-                    "Provenance: using design_id %r as template_id", template_id
-                )
+                logger.debug("Provenance: using design_id %r as template_id", template_id)
 
             # Pre-populate material from recipe if caller left the default.
             # Note: material=="PLA" is treated as "no explicit preference"
             # since PLA is the function's default.  If the recipe specifies
             # a different material, use it.
-            recipe_material = (
-                _recipe.parameters.get("material")
-                or (_recipe.provenance and _recipe.provenance.get("material"))
+            recipe_material = _recipe.parameters.get("material") or (
+                _recipe.provenance and _recipe.provenance.get("material")
             )
             if recipe_material and recipe_material != material and material == "PLA":
                 material = recipe_material
@@ -19044,7 +16235,10 @@ def decorate_surface(
                 template_profile_used = True
                 logger.info(
                     "Template %s decoration profile applied: face=%s depth=%.1f style=%s",
-                    template_id, face, depth_mm, image_style,
+                    template_id,
+                    face,
+                    depth_mm,
+                    image_style,
                 )
         except Exception:
             logger.debug("Template decoration profile lookup failed", exc_info=True)
@@ -19082,8 +16276,7 @@ def decorate_surface(
                     )
             else:
                 return _error_dict(
-                    f"Cannot resolve content: {content!r}. Provide a file path "
-                    f"or 'text:...' for text.",
+                    f"Cannot resolve content: {content!r}. Provide a file path or 'text:...' for text.",
                     code="INVALID_CONTENT",
                 )
 
@@ -19108,6 +16301,7 @@ def decorate_surface(
             # SVG logo decoration is a Pro feature
             try:
                 from kiln_pro.bridge import pro_features
+
                 if pro_features is None:
                     raise ImportError("kiln-pro not installed")
             except ImportError:
@@ -19213,10 +16407,7 @@ def decorate_surface(
         if not compile_result.get("success"):
             result_dict: dict[str, Any] = {
                 "status": "compile_failed",
-                "message": (
-                    f"OpenSCAD compilation failed. "
-                    f"Error: {compile_result.get('error', 'unknown')}"
-                ),
+                "message": (f"OpenSCAD compilation failed. Error: {compile_result.get('error', 'unknown')}"),
                 "scad_path": scad_result["scad_path"],
                 "compile_result": compile_result,
             }
@@ -19242,9 +16433,10 @@ def decorate_surface(
                 if _out_sz < _in_sz + 1000:
                     boolean_ok = False
                     logger.debug(
-                        "SVG boolean size delta too small (%d → %d, "
-                        "delta=%d < 1000) — treating as failed",
-                        _in_sz, _out_sz, _out_sz - _in_sz,
+                        "SVG boolean size delta too small (%d → %d, delta=%d < 1000) — treating as failed",
+                        _in_sz,
+                        _out_sz,
+                        _out_sz - _in_sz,
                     )
             except OSError:
                 pass
@@ -19290,8 +16482,7 @@ def decorate_surface(
                 )
                 if compile_result.get("success"):
                     warnings.append(
-                        "SVG boolean produced no geometry change. "
-                        "Fell back to heightmap rasterization (succeeded)."
+                        "SVG boolean produced no geometry change. Fell back to heightmap rasterization (succeeded)."
                     )
                 else:
                     warnings.append(
@@ -19300,14 +16491,10 @@ def decorate_surface(
                     )
             except Exception as fallback_exc:
                 logger.debug("SVG heightmap fallback failed: %s", fallback_exc)
-                warnings.append(
-                    "SVG boolean produced no geometry change. "
-                    "Convert to PNG and use content_type='image'."
-                )
+                warnings.append("SVG boolean produced no geometry change. Convert to PNG and use content_type='image'.")
         elif not boolean_ok:
             warnings.append(
-                "Output STL is similar in size to input — the boolean "
-                "may not have produced visible geometry changes."
+                "Output STL is similar in size to input — the boolean may not have produced visible geometry changes."
             )
 
         # --- Step 7: Build result ---
