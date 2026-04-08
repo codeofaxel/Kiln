@@ -168,15 +168,18 @@ except ImportError:
         def decorator(fn):
             @functools.wraps(fn)
             def wrapper(*args, **kwargs):
+                tool_name = fn.__name__
                 return {
                     "success": False,
                     "error": (
-                        f"This feature requires a Kiln {str(tier_label).title()} license. "
+                        f"{tool_name} requires a Kiln {str(tier_label).title()} license. "
                         "You're on the Free tier. "
                         "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
                     ),
-                    "code": "LICENSE_REQUIRED",
+                    "code": "TIER_REQUIRED",
                     "required_tier": str(tier_label),
+                    "tool": tool_name,
+                    "retryable": False,
                     "upgrade_url": "https://kiln3d.com/pro",
                 }
             return wrapper
