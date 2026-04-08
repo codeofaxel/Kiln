@@ -5337,6 +5337,13 @@ def download_and_upload(
                 f"Downloaded from {source} and uploaded to printer. Call start_print('{file_name}') to begin printing."
             )
 
+        # Telemetry: count marketplace download by source
+        try:
+            from kiln.daily_stats import record_event
+            record_event("downloads", detail=source or "unknown")
+        except Exception:
+            pass
+
         return resp
     except (ThingiverseNotFoundError, MktNotFoundError):
         return _error_dict(
@@ -12224,10 +12231,10 @@ def decorate_surface(
         if warnings:
             result_dict["warnings"] = warnings
 
-        # Telemetry: count decoration
+        # Telemetry: count decoration with type detail
         try:
             from kiln.daily_stats import record_event
-            record_event("decorations")
+            record_event("decorations", detail=ctype or "unknown")
         except Exception:
             pass
 

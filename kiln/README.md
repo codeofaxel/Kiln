@@ -100,7 +100,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 - **Multi-printer splitting** — round-robin and assembly-based job distribution across fleets
 - **Generation feedback loop** — failed print → improved prompt with printability constraints
 - **Smart material routing** — intent-based material recommendations (8 materials, printer capability aware)
-- **Community print registry** — opt-in crowd-sourced settings ("Waze for 3D printing")
+- **Community print registry** — opt-in crowd-sourced settings and success rates
 - **Fulfillment services** — outsource to Craftcloud (150+ print services, no API key required)
 - **Safety first** — pre-flight checks, G-code validation, temperature limits, optional auth
 - **Webhooks** — HMAC-signed event notifications for job lifecycle

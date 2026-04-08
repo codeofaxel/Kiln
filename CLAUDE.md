@@ -19,6 +19,7 @@
 - **Kiln is infrastructure, not software.** Never describe it as "automation software", "an API", or use cloud/SaaS framing. Kiln is local stdio-based infrastructure that AI agents use to control physical printers. It is not cloud-hosted.
 - **Correct framing**: "3D printing infrastructure for AI agents", "printer control layer", "MCP infrastructure"
 - **Wrong framing**: "automation software", "API platform", "cloud service", "printer management app"
+- **Never compare Kiln to other companies.** No "X for 3D printing", no "like Uber/Waze/Shopify but for...", no analogies to other products in code, docs, README, blog posts, or conversation. Kiln stands on its own. Describe what it does, not what it's "like".
 
 ## Code Discipline
 - **Root causes only.** Never apply band-aid fixes. Trace to the actual source of the problem.

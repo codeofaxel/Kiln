@@ -153,8 +153,17 @@ def _send_heartbeat() -> None:
             "p_generations_today": stats.get("generations", 0),
             "p_decorations_today": stats.get("decorations", 0),
             "p_textures_today": stats.get("textures", 0),
+            "p_slices_today": stats.get("slices", 0),
+            "p_downloads_today": stats.get("downloads", 0),
+            "p_print_hours_today": stats.get("print_hours", 0.0),
             "p_pro_installed": _is_pro_installed(),
             "p_os_platform": platform.system().lower(),
+            "p_details": json.dumps({
+                "texture_names": stats.get("texture_names", {}),
+                "decoration_types": stats.get("decoration_types", {}),
+                "slicer_profiles": stats.get("slicer_profiles", {}),
+                "marketplace_sources": stats.get("marketplace_sources", {}),
+            }),
         }).encode()
 
         req = urllib.request.Request(
