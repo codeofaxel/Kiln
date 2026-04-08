@@ -168,31 +168,50 @@ def _rotate_vec(
 # ---------------------------------------------------------------------------
 
 _LIGHT_DIR: _Vec3 = _normalize((0.3, -0.6, 0.7))
-_AMBIENT = 0.35
-_DIFFUSE = 0.65
+_AMBIENT = 0.45
+_DIFFUSE = 0.55
+
+# Rim light: faint edge glow so dark objects don't vanish against the
+# background.  Kicks in when the face normal is nearly perpendicular
+# to the camera direction (silhouette edges).
+_RIM_STRENGTH = 0.12
 
 
 def _compute_brightness(
     normal_cam: _Vec3,
     light_cam: _Vec3,
 ) -> float:
-    """Compute brightness with ambient + directional diffuse lighting.
+    """Compute brightness with ambient + directional diffuse + rim lighting.
 
-    Uses signed dot product clamped to [0, 1] for proper directional shading.
+    Rim light adds a subtle edge glow on silhouette faces so dark
+    materials remain visible against dark backgrounds.
     """
     ndl = _dot(normal_cam, light_cam)
     diffuse = max(0.0, ndl)
-    return min(1.0, _AMBIENT + _DIFFUSE * diffuse)
+
+    # Rim: brighten faces whose normal is nearly perpendicular to
+    # camera (view direction ≈ -Y in camera space → normal.y ≈ 0).
+    rim = (1.0 - abs(normal_cam[1])) ** 3 * _RIM_STRENGTH
+
+    return min(1.0, _AMBIENT + _DIFFUSE * diffuse + rim)
 
 
 def _apply_brightness(
     color: tuple[int, int, int],
     brightness: float,
 ) -> tuple[int, int, int]:
+    """Apply brightness while preserving color saturation in shadow.
+
+    Uses a blend toward a tinted dark rather than pure black so that
+    e.g. red stays reddish-dark instead of becoming brown.
+    """
+    # Floor at 30% of channel max prevents full crush to black/brown
+    floor = 0.30
+    effective = floor + (1.0 - floor) * brightness
     return (
-        max(0, min(255, int(color[0] * brightness))),
-        max(0, min(255, int(color[1] * brightness))),
-        max(0, min(255, int(color[2] * brightness))),
+        max(0, min(255, int(color[0] * effective))),
+        max(0, min(255, int(color[1] * effective))),
+        max(0, min(255, int(color[2] * effective))),
     )
 
 
@@ -308,14 +327,48 @@ def render_colored_mesh(
     half_rw = rw / 2.0
     half_rh = rh / 2.0
 
-    # --- Pass 2: Compute per-face data (normals, depth, screen coords) ---
+    # --- Pass 2: Build adjacency for same-color outline suppression --------
+    #
+    # Index triangles by their edges (as sorted vertex-index pairs from the
+    # original mesh) so we know which faces share an edge.  Only draw an
+    # outline segment on edges where the neighbor has a DIFFERENT source
+    # color — this eliminates the ugly diagonal seam across same-colored
+    # faces (e.g. the two triangles that make up one cube face).
+
+    # Map: edge (sorted pair of vertex coords) → list of face indices
+    _edge_to_faces: dict[tuple[_Vec3, _Vec3], list[int]] = {}
+    for i, tri in enumerate(triangles):
+        verts = (tri.v0, tri.v1, tri.v2)
+        for j in range(3):
+            edge = tuple(sorted((verts[j], verts[(j + 1) % 3])))
+            _edge_to_faces.setdefault(edge, []).append(i)  # type: ignore[arg-type]
+
+    # For each face, determine which of its 3 edges are color boundaries
+    _face_boundary_edges: dict[int, set[int]] = {}  # face_idx → set of edge vertex indices (0,1,2)
+    for i, tri in enumerate(triangles):
+        boundary: set[int] = set()
+        verts = (tri.v0, tri.v1, tri.v2)
+        for j in range(3):
+            edge = tuple(sorted((verts[j], verts[(j + 1) % 3])))
+            neighbors = _edge_to_faces.get(edge, [])  # type: ignore[arg-type]
+            is_boundary = True
+            for ni in neighbors:
+                if ni != i and triangles[ni].color == tri.color:
+                    is_boundary = False
+                    break
+            if is_boundary:
+                boundary.add(j)
+        _face_boundary_edges[i] = boundary
+
+    # --- Pass 3: Compute per-face render data ---
 
     face_data: list[
         tuple[
             float,  # depth (for sorting)
-            list[tuple[int, int]],  # screen polygon
+            list[tuple[int, int]],  # screen polygon (3 vertices)
             tuple[int, int, int],  # lit fill color
             tuple[int, int, int],  # outline color (darker)
+            set[int],  # which edges (0,1,2) are color boundaries
         ]
     ] = []
 
@@ -349,12 +402,12 @@ def render_colored_mesh(
         # Lighting
         brightness = _compute_brightness(normal, light_cam)
         lit_color = _apply_brightness(tri.color, brightness)
-        outline_color = _darken(lit_color, factor=0.75)
+        outline_color = _darken(lit_color, factor=0.70)
 
         unique_colors.add(tri.color)
-        face_data.append((depth, pts, lit_color, outline_color))
+        face_data.append((depth, pts, lit_color, outline_color, _face_boundary_edges.get(i, {0, 1, 2})))
 
-    # --- Pass 3: Sort back-to-front and draw ---
+    # --- Pass 4: Sort back-to-front and draw ---
 
     # Sort by depth descending (farthest first = largest Y first)
     face_data.sort(key=lambda fd: fd[0], reverse=True)
@@ -362,8 +415,16 @@ def render_colored_mesh(
     img = Image.new("RGB", (rw, rh), background)
     draw = ImageDraw.Draw(img)
 
-    for _depth, pts, fill, outline in face_data:
-        draw.polygon(pts, fill=fill, outline=outline)
+    for _depth, pts, fill, outline, boundary_edges in face_data:
+        # Fill the polygon without any outline — clean fill only
+        draw.polygon(pts, fill=fill)
+
+        # Draw outline ONLY on color-boundary edges (where neighbor
+        # has a different color).  This eliminates same-color seams.
+        for edge_idx in boundary_edges:
+            p0 = pts[edge_idx]
+            p1 = pts[(edge_idx + 1) % 3]
+            draw.line([p0, p1], fill=outline, width=1)
 
     # --- Downsample if supersampled ---
 

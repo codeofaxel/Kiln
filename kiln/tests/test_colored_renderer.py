@@ -110,8 +110,11 @@ class TestMathHelpers:
     def test_apply_brightness_clamps(self) -> None:
         # Full brightness
         assert _apply_brightness((255, 255, 255), 1.0) == (255, 255, 255)
-        # Zero brightness
-        assert _apply_brightness((255, 255, 255), 0.0) == (0, 0, 0)
+        # Zero brightness — shadow floor preserves color, never full black
+        r, g, b = _apply_brightness((255, 255, 255), 0.0)
+        assert r == g == b
+        assert r > 0  # shadow floor prevents crush to black
+        assert r < 128  # but still visibly dark
 
     def test_darken(self) -> None:
         assert _darken((200, 100, 50), factor=0.5) == (100, 50, 25)
