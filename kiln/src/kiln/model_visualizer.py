@@ -305,6 +305,58 @@ def visualize_model(
             "code": "UNSUPPORTED_FORMAT",
         }
 
+    # ------------------------------------------------------------------
+    # Colored 3MF fast path — use PIL-based renderer when per-face
+    # colors are present (OpenSCAD cannot render per-face colors).
+    # ------------------------------------------------------------------
+    if ext == ".3mf":
+        try:
+            from kiln.colored_renderer import render_colored_mesh_multi_angle
+            from kiln.threemf_parser import parse_colored_3mf
+
+            mesh = parse_colored_3mf(file_path)
+            if mesh.colors_found:
+                logger.debug(
+                    "3MF has per-face colors (%d unique) — using colored renderer",
+                    mesh.color_count,
+                )
+                colored_views = render_colored_mesh_multi_angle(
+                    mesh.triangles,
+                    output_dir=output_dir,
+                    width=width,
+                    height=height,
+                    angles=angles,
+                )
+                successful = [v for v in colored_views if v.get("path")]
+                failed = [v for v in colored_views if not v.get("path")]
+                return {
+                    "success": len(successful) > 0,
+                    "views": colored_views,
+                    "output_dir": output_dir or os.path.join(
+                        tempfile.gettempdir(), "kiln_visualizations",
+                    ),
+                    "file_path": file_path,
+                    "file_type": ext,
+                    "rendered": len(successful),
+                    "failed": len(failed),
+                    "message": (
+                        f"Rendered {len(successful)}/{len(colored_views)} angles "
+                        f"for {Path(file_path).name} with per-face colors. "
+                        + (
+                            "View ALL angles to check: shape, proportions, surface "
+                            "features, bottom flatness, and color placement."
+                            if len(successful) == len(colored_views)
+                            else f"{len(failed)} angle(s) failed to render."
+                        )
+                    ),
+                }
+            # No colors — fall through to OpenSCAD for uniform gray render
+            logger.debug("3MF has no per-face colors — falling through to OpenSCAD")
+        except ImportError:
+            logger.debug("Colored renderer not available — falling through to OpenSCAD")
+        except Exception:  # noqa: BLE001
+            logger.debug("Colored 3MF parse/render failed — falling through to OpenSCAD", exc_info=True)
+
     try:
         openscad = _find_openscad()
     except FileNotFoundError as exc:
