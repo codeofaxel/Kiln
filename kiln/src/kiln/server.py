@@ -4300,46 +4300,7 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
         return _error_dict(f"Unexpected error in send_gcode: {exc}", code="INTERNAL_ERROR")
 
 
-# ---------------------------------------------------------------------------
-# G-code validation tool
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def validate_gcode(commands: str) -> dict:
-    """Validate G-code syntax and basic safety (generic, no printer-specific limits).
-
-    For printer-specific safety validation (PTFE temp caps, speed limits),
-    use ``validate_gcode_safe`` with a ``printer_id`` instead.
-
-    Args:
-        commands: One or more G-code commands separated by newlines.
-
-    Returns a JSON object with:
-    - ``valid``: whether all commands passed safety checks
-    - ``commands``: the parsed command list
-    - ``errors``: blocking issues (temperature limits, firmware commands)
-    - ``warnings``: non-blocking advisories (Z below bed, high feedrate)
-    - ``blocked_commands``: specific commands that were blocked
-
-    Use this to preview what ``send_gcode`` would accept or reject.
-    """
-    raw_lines = re.split(r"[\n\r]+", commands.strip())
-    cmd_list = [line.strip() for line in raw_lines if line.strip()]
-
-    if not cmd_list:
-        return _error_dict("No commands provided.", code="INVALID_ARGS")
-
-    result = _validate_gcode_impl(cmd_list)
-    return {
-        "success": True,
-        "valid": result.valid,
-        "commands": result.commands,
-        "errors": result.errors,
-        "warnings": result.warnings,
-        "blocked_commands": result.blocked_commands,
-    }
-
+# validate_gcode — moved to plugins/gcode_validation_tools.py
 
 # ---------------------------------------------------------------------------
 # Safety audit tool
