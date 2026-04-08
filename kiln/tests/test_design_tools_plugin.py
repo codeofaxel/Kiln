@@ -66,7 +66,7 @@ class TestDesignToolsPlugin:
             printer_model="bambu_a1",
         )
 
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["readiness_score"] == 93
         assert result["ready_for_print"] is True
 
@@ -129,7 +129,7 @@ class TestDesignToolsPlugin:
             generation_prompt="a cube",
             provider="openscad",
         )
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["design_id"] == "d-abc123"
         assert result["has_source"] is True
 
@@ -139,7 +139,7 @@ class TestDesignToolsPlugin:
             file_path="/nonexistent/model.stl",
             scad_source="cube([10,10,10]);",
         )
-        assert result["status"] == "error"
+        assert result["success"] is False
 
     def test_get_design_source_found(self, registered_tools, monkeypatch) -> None:
         """Handler-level test: get_design_source returns source when present."""
@@ -155,7 +155,7 @@ class TestDesignToolsPlugin:
         )
 
         result = registered_tools["get_design_source"](design_id="d-xyz")
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["scad_source"] == "cube([5,5,5]);"
 
     def test_get_design_source_not_found(self, registered_tools, monkeypatch) -> None:
@@ -166,7 +166,7 @@ class TestDesignToolsPlugin:
         )
 
         result = registered_tools["get_design_source"](design_id="d-missing")
-        assert result["status"] == "error"
+        assert result["success"] is False
 
     def test_get_design_source_no_source_attached(self, registered_tools, monkeypatch) -> None:
         """Handler-level test: design exists but has no source."""
@@ -182,5 +182,5 @@ class TestDesignToolsPlugin:
         )
 
         result = registered_tools["get_design_source"](design_id="d-nosrc")
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["has_source"] is False

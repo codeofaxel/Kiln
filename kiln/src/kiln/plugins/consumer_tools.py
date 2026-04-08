@@ -78,7 +78,7 @@ class _ConsumerToolsPlugin:
                     jurisdiction,
                     business_tax_id=business_tax_id or None,
                 )
-                return {"status": "success", "tax": result.to_dict()}
+                return {"success": True, "tax": result.to_dict()}
             except Exception as exc:
                 return _error_dict(f"Tax calculation failed: {exc}")
 
@@ -99,7 +99,7 @@ class _ConsumerToolsPlugin:
                 calc = TaxCalculator()
                 jurisdictions = [j.to_dict() for j in calc.list_jurisdictions()]
                 return {
-                    "status": "success",
+                    "success": True,
                     "jurisdictions": jurisdictions,
                     "count": len(jurisdictions),
                 }
@@ -125,7 +125,7 @@ class _ConsumerToolsPlugin:
                     return _error_dict(
                         f"Unknown jurisdiction: {code}. Use tax_jurisdictions to see all supported codes."
                     )
-                return {"status": "success", "jurisdiction": jur.to_dict()}
+                return {"success": True, "jurisdiction": jur.to_dict()}
             except Exception as exc:
                 return _error_dict(f"Jurisdiction lookup failed: {exc}")
 

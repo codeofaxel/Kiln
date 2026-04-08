@@ -114,11 +114,11 @@ class _DesignToolsPlugin:
                     material=material,
                 )
                 result = brief.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 return result
             except Exception as exc:
                 _logger.error("Design brief failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def build_generation_prompt(
@@ -156,7 +156,7 @@ class _DesignToolsPlugin:
                     provider=provider,
                 )
                 return {
-                    "status": "success",
+                    "success": True,
                     "prompt": prompt.to_dict(),
                     "message": (
                         f"Built a design-aware prompt with "
@@ -166,7 +166,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("Build generation prompt failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def audit_original_design(
@@ -229,7 +229,7 @@ class _DesignToolsPlugin:
                     max_overhang_angle=max_overhang_angle,
                 )
                 result = audit.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 result["message"] = (
                     f"Original design readiness: {audit.readiness_score}/100 "
                     f"({audit.readiness_grade}). "
@@ -237,10 +237,10 @@ class _DesignToolsPlugin:
                 )
                 return result
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
             except Exception as exc:
                 _logger.error("Original design audit failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def get_material_design_profile(material: str) -> dict:
@@ -266,16 +266,16 @@ class _DesignToolsPlugin:
                 profile = get_material_profile(material)
                 if profile is None:
                     return {
-                        "status": "error",
+                        "success": False,
                         "error": f"Unknown material: {material}. "
                         "Available: pla, petg, abs, tpu, asa, nylon, polycarbonate.",
                     }
                 result = profile.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 return result
             except Exception as exc:
                 _logger.error("Material profile failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def list_design_materials() -> dict:
@@ -312,13 +312,13 @@ class _DesignToolsPlugin:
                         }
                     )
                 return {
-                    "status": "success",
+                    "success": True,
                     "materials": summaries,
                     "count": len(summaries),
                 }
             except Exception as exc:
                 _logger.error("List materials failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def recommend_design_material(
@@ -356,11 +356,11 @@ class _DesignToolsPlugin:
                     max_hotend_temp_c=max_hotend_temp_c,
                 )
                 result = rec.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 return result
             except Exception as exc:
                 _logger.error("Material recommendation failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def estimate_structural_load(
@@ -389,16 +389,16 @@ class _DesignToolsPlugin:
                 )
                 if estimate is None:
                     return {
-                        "status": "error",
+                        "success": False,
                         "error": f"Unknown load table material: {material}. "
                         "Available: pla, petg, abs, nylon, polycarbonate.",
                     }
                 result = estimate.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 return result
             except Exception as exc:
                 _logger.error("Load estimation failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def check_material_environment(material: str, environment: str) -> dict:
@@ -414,12 +414,12 @@ class _DesignToolsPlugin:
                 report = check_environment_compatibility(material, environment)
                 if report is None:
                     return {
-                        "status": "error",
+                        "success": False,
                         "error": f"Unknown material: {material}. "
                         "Available: pla, petg, abs, tpu, asa, nylon, polycarbonate.",
                     }
                 result = report.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 return result
             except Exception as exc:
                 _logger.error(
@@ -427,7 +427,7 @@ class _DesignToolsPlugin:
                     exc,
                     exc_info=True,
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def get_printer_design_capabilities(printer_id: str) -> dict:
@@ -446,12 +446,12 @@ class _DesignToolsPlugin:
                 if profile is None:
                     available = [p.printer_id for p in list_printer_profiles()]
                     return {
-                        "status": "error",
+                        "success": False,
                         "error": f"Unknown printer: {printer_id}. "
                         f"Available: {', '.join(available)}.",
                     }
                 result = profile.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 return result
             except Exception as exc:
                 _logger.error(
@@ -459,7 +459,7 @@ class _DesignToolsPlugin:
                     exc,
                     exc_info=True,
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def list_printer_design_profiles() -> dict:
@@ -469,7 +469,7 @@ class _DesignToolsPlugin:
             try:
                 profiles = list_printer_profiles()
                 return {
-                    "status": "success",
+                    "success": True,
                     "profiles": [p.to_dict() for p in profiles],
                     "count": len(profiles),
                 }
@@ -479,7 +479,7 @@ class _DesignToolsPlugin:
                     exc,
                     exc_info=True,
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def get_design_pattern_info(pattern: str) -> dict:
@@ -504,15 +504,15 @@ class _DesignToolsPlugin:
 
                     available = [dp.pattern_id for dp in list_design_patterns()]
                     return {
-                        "status": "error",
+                        "success": False,
                         "error": f"Unknown pattern: {pattern}. Available: {', '.join(available)}.",
                     }
                 result = p.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 return result
             except Exception as exc:
                 _logger.error("Design pattern failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def list_design_patterns_catalog() -> dict:
@@ -541,13 +541,13 @@ class _DesignToolsPlugin:
                         }
                     )
                 return {
-                    "status": "success",
+                    "success": True,
                     "patterns": summaries,
                     "count": len(summaries),
                 }
             except Exception as exc:
                 _logger.error("List patterns failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def find_design_patterns(use_case: str) -> dict:
@@ -565,13 +565,13 @@ class _DesignToolsPlugin:
             try:
                 patterns = find_patterns_for_use_case(use_case)
                 return {
-                    "status": "success",
+                    "success": True,
                     "patterns": [p.to_dict() for p in patterns],
                     "count": len(patterns),
                 }
             except Exception as exc:
                 _logger.error("Find patterns failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def match_design_requirements(description: str) -> dict:
@@ -594,13 +594,13 @@ class _DesignToolsPlugin:
             try:
                 matched = match_requirements(description)
                 return {
-                    "status": "success",
+                    "success": True,
                     "matched_requirements": [m.to_dict() for m in matched],
                     "count": len(matched),
                 }
             except Exception as exc:
                 _logger.error("Match requirements failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
 
         @mcp.tool()
@@ -634,13 +634,13 @@ class _DesignToolsPlugin:
                     material=material,
                 )
                 result = report.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 return result
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
             except Exception as exc:
                 _logger.error("Design validation failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
 
         # ── Troubleshooting, compatibility, and diagnostics ──────────────
@@ -681,17 +681,17 @@ class _DesignToolsPlugin:
 
                     available = ", ".join(list_troubleshooting_materials())
                     return {
-                        "status": "error",
+                        "success": False,
                         "error": f"No troubleshooting data for '{material}'. "
                         f"Available: {available}",
                     }
                 out = result.to_dict()
-                out["status"] = "success"
+                out["success"] = True
                 out["match_count"] = len(result.matched_issues)
                 return out
             except Exception as exc:
                 _logger.error("Troubleshoot failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def check_printer_material_compatibility(
@@ -728,12 +728,12 @@ class _DesignToolsPlugin:
                 if report is None:
                     available = ", ".join(list_compatibility_printers())
                     return {
-                        "status": "error",
+                        "success": False,
                         "error": f"No compatibility data for printer '{printer}'. "
                         f"Available: {available}",
                     }
                 out = report.to_dict()
-                out["status"] = "success"
+                out["success"] = True
 
                 # Add summary counts for the full-matrix case
                 if material is None:
@@ -749,7 +749,7 @@ class _DesignToolsPlugin:
                 return out
             except Exception as exc:
                 _logger.error("Compatibility check failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def get_post_processing_guide(material: str) -> dict:
@@ -772,15 +772,15 @@ class _DesignToolsPlugin:
                 guide = _get_pp(material)
                 if guide is None:
                     return {
-                        "status": "error",
+                        "success": False,
                         "error": f"No post-processing data for '{material}'.",
                     }
                 out = guide.to_dict()
-                out["status"] = "success"
+                out["success"] = True
                 return out
             except Exception as exc:
                 _logger.error("Post-processing guide failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def check_multi_material_pairing(
@@ -806,11 +806,11 @@ class _DesignToolsPlugin:
             try:
                 report = check_multi_material_compatibility(material_a, material_b)
                 out = report.to_dict()
-                out["status"] = "success"
+                out["success"] = True
                 return out
             except Exception as exc:
                 _logger.error("Multi-material check failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def get_print_diagnostic(
@@ -859,17 +859,17 @@ class _DesignToolsPlugin:
                 if result is None:
                     available = ", ".join(list_troubleshooting_materials())
                     return {
-                        "status": "error",
+                        "success": False,
                         "error": f"No data for material '{material}'. "
                         f"Available: {available}",
                     }
                 out = result.to_dict()
-                out["status"] = "success"
+                out["success"] = True
                 out["issue_count"] = len(result.matched_issues)
                 return out
             except Exception as exc:
                 _logger.error("Print diagnostic failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         # ── Cost estimation ─────────────────────────────────────────────────
 
@@ -927,17 +927,17 @@ class _DesignToolsPlugin:
                     printer_wattage=printer_wattage,
                 )
                 result = estimate.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 return result
             except FileNotFoundError as exc:
                 _logger.error("Cost estimation file not found: %s", exc)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
             except ValueError as exc:
                 _logger.error("Cost estimation invalid input: %s", exc)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
             except Exception as exc:
                 _logger.error("Cost estimation failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         # ── Parametric OpenSCAD tools ──────────────────────────────────────
 
@@ -970,7 +970,7 @@ class _DesignToolsPlugin:
                     printer_model=printer_model,
                 )
                 return {
-                    "status": "success",
+                    "success": True,
                     "prompt": prompt.to_dict(),
                     "message": (
                         f"Built parametric OpenSCAD prompt with "
@@ -979,7 +979,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("Build parametric prompt failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def parse_scad_parameters(scad_code: str) -> dict:
@@ -1000,14 +1000,14 @@ class _DesignToolsPlugin:
             try:
                 params = parse_openscad_parameters(scad_code)
                 return {
-                    "status": "success",
+                    "success": True,
                     "parameters": [p.to_dict() for p in params],
                     "count": len(params),
                     "message": f"Found {len(params)} adjustable parameters.",
                 }
             except Exception as exc:
                 _logger.error("Parse SCAD parameters failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def update_scad_parameter(
@@ -1031,15 +1031,15 @@ class _DesignToolsPlugin:
             try:
                 updated = update_openscad_parameter(scad_code, parameter_name, new_value)
                 return {
-                    "status": "success",
+                    "success": True,
                     "updated_code": updated,
                     "message": f"Updated {parameter_name} to {new_value}.",
                 }
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
             except Exception as exc:
                 _logger.error("Update SCAD parameter failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def validate_scad_parameters(
@@ -1062,7 +1062,7 @@ class _DesignToolsPlugin:
             try:
                 warnings = validate_openscad_parameters(scad_code, material=material)
                 return {
-                    "status": "success",
+                    "success": True,
                     "warnings": [w.to_dict() for w in warnings],
                     "count": len(warnings),
                     "valid": len(warnings) == 0,
@@ -1074,7 +1074,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("Validate SCAD parameters failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         # ── Library component tools ─────────────────────────────────────
 
@@ -1098,7 +1098,7 @@ class _DesignToolsPlugin:
             try:
                 components = list_components(category=category)
                 return {
-                    "status": "success",
+                    "success": True,
                     "components": [c.to_dict() for c in components],
                     "count": len(components),
                     "message": (
@@ -1108,7 +1108,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("List components failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def match_design_components(description: str) -> dict:
@@ -1132,7 +1132,7 @@ class _DesignToolsPlugin:
             try:
                 matches = match_components(description)
                 return {
-                    "status": "success",
+                    "success": True,
                     "matches": [m.to_dict() for m in matches],
                     "count": len(matches),
                     "message": (
@@ -1143,7 +1143,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("Match components failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         # ── Construction-scale tools ─────────────────────────────────────
 
@@ -1183,13 +1183,13 @@ class _DesignToolsPlugin:
                     material=material,
                 )
                 result = brief.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 return result
             except Exception as exc:
                 _logger.error(
                     "Construction design brief failed: %s", exc, exc_info=True
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def get_construction_material_profile(material: str) -> dict:
@@ -1221,12 +1221,12 @@ class _DesignToolsPlugin:
                         m.material_id for m in list_construction_materials()
                     ]
                     return {
-                        "status": "error",
+                        "success": False,
                         "error": f"Unknown construction material: {material}. "
                         f"Available: {', '.join(available)}.",
                     }
                 result = profile.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 return result
             except Exception as exc:
                 _logger.error(
@@ -1234,7 +1234,7 @@ class _DesignToolsPlugin:
                     exc,
                     exc_info=True,
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def list_construction_materials_catalog() -> dict:
@@ -1268,7 +1268,7 @@ class _DesignToolsPlugin:
                         }
                     )
                 return {
-                    "status": "success",
+                    "success": True,
                     "materials": summaries,
                     "count": len(summaries),
                 }
@@ -1278,7 +1278,7 @@ class _DesignToolsPlugin:
                     exc,
                     exc_info=True,
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def get_construction_pattern_info(pattern: str) -> dict:
@@ -1308,18 +1308,18 @@ class _DesignToolsPlugin:
                         cp.pattern_id for cp in list_construction_patterns()
                     ]
                     return {
-                        "status": "error",
+                        "success": False,
                         "error": f"Unknown construction pattern: {pattern}. "
                         f"Available: {', '.join(available)}.",
                     }
                 result = p.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 return result
             except Exception as exc:
                 _logger.error(
                     "Construction pattern failed: %s", exc, exc_info=True
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def list_construction_patterns_catalog() -> dict:
@@ -1346,7 +1346,7 @@ class _DesignToolsPlugin:
                         }
                     )
                 return {
-                    "status": "success",
+                    "success": True,
                     "patterns": summaries,
                     "count": len(summaries),
                 }
@@ -1356,7 +1356,7 @@ class _DesignToolsPlugin:
                     exc,
                     exc_info=True,
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def get_construction_building_requirement(requirement: str) -> dict:
@@ -1387,18 +1387,18 @@ class _DesignToolsPlugin:
                         for r in list_construction_requirements()
                     ]
                     return {
-                        "status": "error",
+                        "success": False,
                         "error": f"Unknown building requirement: {requirement}. "
                         f"Available: {', '.join(available)}.",
                     }
                 result = req.to_dict()
-                result["status"] = "success"
+                result["success"] = True
                 return result
             except Exception as exc:
                 _logger.error(
                     "Construction requirement failed: %s", exc, exc_info=True
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def list_construction_building_requirements() -> dict:
@@ -1426,7 +1426,7 @@ class _DesignToolsPlugin:
                         }
                     )
                 return {
-                    "status": "success",
+                    "success": True,
                     "requirements": summaries,
                     "count": len(summaries),
                 }
@@ -1436,7 +1436,7 @@ class _DesignToolsPlugin:
                     exc,
                     exc_info=True,
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def match_construction_building_requirements(
@@ -1461,7 +1461,7 @@ class _DesignToolsPlugin:
             try:
                 matched = match_construction_requirements(description)
                 return {
-                    "status": "success",
+                    "success": True,
                     "matched_requirements": [m.to_dict() for m in matched],
                     "count": len(matched),
                 }
@@ -1471,7 +1471,7 @@ class _DesignToolsPlugin:
                     exc,
                     exc_info=True,
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def compile_scad(scad_code: str = "", scad_path: str = "", timeout: int = 300) -> dict:
@@ -1497,23 +1497,23 @@ class _DesignToolsPlugin:
                 code = scad_code
                 if not code and scad_path:
                     if not os.path.isfile(scad_path):
-                        return {"status": "error", "error": f"File not found: {scad_path}"}
+                        return {"success": False, "error": f"File not found: {scad_path}"}
                     with open(scad_path, encoding="utf-8") as f:
                         code = f.read()
                 if not code:
-                    return {"status": "error", "error": "Provide scad_code or scad_path"}
+                    return {"success": False, "error": "Provide scad_code or scad_path"}
 
                 stl_path = compile_scad_code(code, timeout=timeout)
                 return {
-                    "status": "success",
+                    "success": True,
                     "stl_path": stl_path,
                     "message": f"Compiled to {stl_path}",
                 }
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
             except Exception as exc:
                 _logger.error("Compile SCAD failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def tweak_and_compile_scad(
@@ -1543,19 +1543,19 @@ class _DesignToolsPlugin:
                 warnings = result.get("warnings", [])
                 suffix = f" with {len(warnings)} warnings" if warnings else ""
                 return {
-                    "status": "success",
+                    "success": True,
                     **result,
                     "message": (
                         f"Updated {parameter_name}={new_value}, compiled to STL{suffix}."
                     ),
                 }
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
             except Exception as exc:
                 _logger.error(
                     "Tweak and compile failed: %s", exc, exc_info=True
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def analyze_scad_code(scad_code: str) -> dict:
@@ -1573,7 +1573,7 @@ class _DesignToolsPlugin:
             try:
                 structure = analyze_scad_structure(scad_code)
                 return {
-                    "status": "success",
+                    "success": True,
                     "structure": structure.to_dict(),
                     "message": (
                         f"Found {len(structure.parameters)} parameters and "
@@ -1584,7 +1584,7 @@ class _DesignToolsPlugin:
                 _logger.error(
                     "Analyze SCAD failed: %s", exc, exc_info=True
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def modify_scad_module(
@@ -1608,17 +1608,17 @@ class _DesignToolsPlugin:
             try:
                 updated = _modify(scad_code, module_name, new_module_code)
                 return {
-                    "status": "success",
+                    "success": True,
                     "updated_code": updated,
                     "message": f"Replaced module {module_name!r}.",
                 }
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
             except Exception as exc:
                 _logger.error(
                     "Modify SCAD module failed: %s", exc, exc_info=True
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def insert_into_scad(
@@ -1647,17 +1647,17 @@ class _DesignToolsPlugin:
                     scad_code, module_name, code_to_insert, position=position,
                 )
                 return {
-                    "status": "success",
+                    "success": True,
                     "updated_code": updated,
                     "message": f"Inserted code into module {module_name!r} at {position}.",
                 }
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
             except Exception as exc:
                 _logger.error(
                     "Insert into SCAD failed: %s", exc, exc_info=True
                 )
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
 
         # ── Design DNA ───────────────────────────────────────────────
@@ -1698,7 +1698,7 @@ class _DesignToolsPlugin:
                     provider=provider,
                 )
                 return {
-                    "status": "success",
+                    "success": True,
                     "design_id": entry.id,
                     "file_hash": entry.file_hash,
                     "has_source": entry.scad_source is not None,
@@ -1706,10 +1706,10 @@ class _DesignToolsPlugin:
                     "message": f"Cached design {entry.id} with parametric source.",
                 }
             except (FileNotFoundError, ValueError) as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
             except Exception as exc:
                 _logger.error("cache_design_with_source failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def get_design_source(design_id: str) -> dict:
@@ -1727,16 +1727,16 @@ class _DesignToolsPlugin:
                 cache = get_design_cache()
                 source_info = cache.get_source(design_id)
                 if source_info is None:
-                    return {"status": "error", "error": f"Design {design_id!r} not found."}
+                    return {"success": False, "error": f"Design {design_id!r} not found."}
                 if source_info["scad_source"] is None:
                     return {
-                        "status": "success",
+                        "success": True,
                         "design_id": design_id,
                         "has_source": False,
                         "message": "Design exists but has no parametric source attached.",
                     }
                 return {
-                    "status": "success",
+                    "success": True,
                     "design_id": design_id,
                     "has_source": True,
                     "scad_source": source_info["scad_source"],
@@ -1745,7 +1745,7 @@ class _DesignToolsPlugin:
                 }
             except Exception as exc:
                 _logger.error("get_design_source failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         @mcp.tool()
         def analyze_warping_risk(
@@ -1782,17 +1782,17 @@ class _DesignToolsPlugin:
                 report = analyze_printability(file_path, material=material)
                 if report.warping is not None:
                     result = report.warping.to_dict()
-                    result["status"] = "success"
+                    result["success"] = True
                     result["overall_score"] = report.score
                     result["overall_grade"] = report.grade
                     return result
                 return {
-                    "status": "error",
+                    "success": False,
                     "error": "Warping analysis not available for this model.",
                 }
             except Exception as exc:
                 _logger.error("Warping analysis failed: %s", exc, exc_info=True)
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
         # ---------------------------------------------------------------
         # Template decoration profiles and design styles are Pro features.

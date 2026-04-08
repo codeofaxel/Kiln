@@ -533,7 +533,7 @@ def _build_result(
         })
 
     result: dict[str, Any] = {
-        "status": "success",
+        "success": True,
         "method": method,
         "total_faces": total_faces,
         "num_colors": len(active_zones),
@@ -929,10 +929,10 @@ class _ColorToolsPlugin:
             """
             path = Path(input_path)
             if not path.exists():
-                return {"status": "error", "error": f"File not found: {input_path}"}
+                return {"success": False, "error": f"File not found: {input_path}"}
 
             if num_colors < 1:
-                return {"status": "error", "error": "num_colors must be >= 1"}
+                return {"success": False, "error": "num_colors must be >= 1"}
 
             palette = color_palette or _DEFAULT_PALETTE
             if len(palette) < num_colors:
@@ -942,10 +942,10 @@ class _ColorToolsPlugin:
             try:
                 triangles = _parse_binary_stl(input_path)
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
             if not triangles:
-                return {"status": "error", "error": "No triangles found in STL"}
+                return {"success": False, "error": "No triangles found in STL"}
 
             output_dir = tempfile.mkdtemp(prefix="kiln_color_")
             base_name = path.stem
@@ -996,16 +996,16 @@ class _ColorToolsPlugin:
             valid_methods = {"z_height", "normal", "random"}
             if method not in valid_methods:
                 return {
-                    "status": "error",
+                    "success": False,
                     "error": f"Unknown method '{method}'. Choose from: {sorted(valid_methods)}",
                 }
 
             path = Path(input_path)
             if not path.exists():
-                return {"status": "error", "error": f"File not found: {input_path}"}
+                return {"success": False, "error": f"File not found: {input_path}"}
 
             if num_colors < 1:
-                return {"status": "error", "error": "num_colors must be >= 1"}
+                return {"success": False, "error": "num_colors must be >= 1"}
 
             palette = color_palette or _DEFAULT_PALETTE
             if len(palette) < num_colors:
@@ -1014,10 +1014,10 @@ class _ColorToolsPlugin:
             try:
                 triangles = _parse_binary_stl(input_path)
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
             if not triangles:
-                return {"status": "error", "error": "No triangles found in STL"}
+                return {"success": False, "error": "No triangles found in STL"}
 
             output_dir = tempfile.mkdtemp(prefix="kiln_color_")
             base_name = path.stem
@@ -1069,7 +1069,7 @@ class _ColorToolsPlugin:
             """
             if not _PIL_AVAILABLE:
                 return {
-                    "status": "error",
+                    "success": False,
                     "error": (
                         "Pillow is required for texture-based multicolor. "
                         "Install with: pip install Pillow"
@@ -1078,22 +1078,22 @@ class _ColorToolsPlugin:
 
             path = Path(obj_path)
             if not path.exists():
-                return {"status": "error", "error": f"File not found: {obj_path}"}
+                return {"success": False, "error": f"File not found: {obj_path}"}
 
             if num_colors < 1:
-                return {"status": "error", "error": "num_colors must be >= 1"}
+                return {"success": False, "error": "num_colors must be >= 1"}
 
             # Parse OBJ
             try:
                 vertices, uvs, faces = _parse_obj(obj_path)
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"success": False, "error": str(exc)}
 
             if not faces:
-                return {"status": "error", "error": "No faces found in OBJ file"}
+                return {"success": False, "error": "No faces found in OBJ file"}
 
             if not vertices:
-                return {"status": "error", "error": "No vertices found in OBJ file"}
+                return {"success": False, "error": "No vertices found in OBJ file"}
 
             # Find and parse MTL for texture paths
             mtl_path = _find_mtl_path(obj_path)
@@ -1125,7 +1125,7 @@ class _ColorToolsPlugin:
 
             if not loaded_textures:
                 return {
-                    "status": "error",
+                    "success": False,
                     "error": (
                         "No texture images found. Ensure MTL + PNG files "
                         "are in the same directory as the OBJ."

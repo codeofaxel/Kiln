@@ -1005,7 +1005,7 @@ class TestMCPToolIntegration:
                 material="PLA",
             )
 
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["passed"] is True
 
     @patch("kiln.mesh_validation_pipeline.run_validation_pipeline")

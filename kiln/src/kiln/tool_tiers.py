@@ -51,7 +51,7 @@ TIER_STANDARD: list[str] = TIER_ESSENTIAL + [
     # Slicing
     "slice_model",
     "slice_and_print",
-    "find_slicer_tool",
+    "find_slicer",
     # Cost & materials
     "estimate_cost",
     "list_materials",
@@ -145,7 +145,7 @@ TIER_FULL: list[str] = [
     "list_model_categories",
     # --- Slicing ---
     "slice_model",
-    "find_slicer_tool",
+    "find_slicer",
     "slice_and_print",
     # --- Monitoring & snapshots ---
     "printer_snapshot",
@@ -249,8 +249,8 @@ TIER_FULL: list[str] = [
     "confirm_action",
     "get_started",
     # --- Slicer profiles ---
-    "list_slicer_profiles_tool",
-    "get_slicer_profile_tool",
+    "list_slicer_profiles",
+    "get_slicer_profile",
     # --- Printer intelligence ---
     "get_printer_intelligence",
     "get_material_recommendation",

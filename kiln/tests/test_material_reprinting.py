@@ -670,7 +670,7 @@ class TestSmartReprint:
         from kiln.server import smart_reprint
 
         mock_ams.return_value = {
-            "status": "success",
+            "success": True,
             "units": [{
                 "trays": [
                     {"slot": 0, "tray_type": "PLA", "tray_color": "000000FF", "remain": 80},

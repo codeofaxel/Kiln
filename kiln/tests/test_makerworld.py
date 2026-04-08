@@ -184,7 +184,7 @@ class TestMakerWorldAdapter:
 class TestResolveModelSourceGenericFallback:
     def test_generic_3mf_returns_unknown_source(self, generic_3mf):
         result = resolve_model_source(generic_3mf)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["source"] == "unknown"
         assert result["title"] == "Phone Stand"
         assert result["application"] == "PrusaSlicer-2.8.0"
@@ -192,7 +192,7 @@ class TestResolveModelSourceGenericFallback:
 
     def test_makerworld_3mf_returns_makerworld_source(self, makerworld_3mf):
         result = resolve_model_source(makerworld_3mf)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["source"] == "makerworld"
         assert result["title"] == "Dog Lead Accessories"
 

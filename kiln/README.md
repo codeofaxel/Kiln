@@ -84,8 +84,8 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ## Features
 
-- **462+ MCP tools** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
-- **136 CLI commands** with `--json` output for agent consumption
+- **539+ MCP tools** for design intelligence, model generation, printability analysis, slicing, printing, monitoring, failure recovery, fleet management, and fulfillment
+- **142 CLI commands** with `--json` output for agent consumption
 - **Multi-printer fleet** management with job queue and background scheduler
 - **Model marketplaces** — search/download from MyMiniFactory, Cults3D (Thingiverse deprecated — acquired by MMF, Feb 2026)
 - **Slicer integration** — PrusaSlicer and OrcaSlicer with auto-detection

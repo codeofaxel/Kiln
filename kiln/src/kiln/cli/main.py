@@ -9052,6 +9052,368 @@ def versions_rollback(design_id: str, version_id: str, json_mode: bool) -> None:
         sys.exit(1)
 
 
+# ---------------------------------------------------------------------------
+# ams
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def ams(ctx: click.Context, json_mode: bool) -> None:
+    """Show AMS filament status (trays, colors, material types)."""
+    try:
+        adapter = _get_adapter_from_ctx(ctx)
+        if not hasattr(adapter, "get_ams_status"):
+            click.echo(
+                format_error(
+                    "AMS status is only available on Bambu Lab printers with AMS.",
+                    code="UNSUPPORTED",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+        result = adapter.get_ams_status()
+        if json_mode:
+            click.echo(format_response("success", data=result, json_mode=True))
+        else:
+            ams_units = result.get("ams", [])
+            if not ams_units:
+                click.echo("No AMS units detected.")
+            else:
+                for unit in ams_units:
+                    click.echo(f"AMS #{unit.get('id', '?')}:")
+                    for tray in unit.get("trays", []):
+                        slot = tray.get("id", "?")
+                        color = tray.get("color", "unknown")
+                        material = tray.get("type", "unknown")
+                        remaining = tray.get("remaining", "?")
+                        click.echo(f"  Slot {slot}: {material} ({color}) — {remaining}% remaining")
+            tray_now = result.get("tray_now")
+            if tray_now and tray_now != "255":
+                click.echo(f"Active tray: {tray_now}")
+    except click.ClickException:
+        raise
+    except PrinterError as exc:
+        click.echo(
+            format_error(
+                f"Failed to get AMS status: {exc}. Verify the printer is online.",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to get AMS status: {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# speed
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.argument("profile", required=False)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def speed(ctx: click.Context, profile: str | None, json_mode: bool) -> None:
+    """Get or set printer speed profile (silent/standard/sport/ludicrous)."""
+    try:
+        adapter = _get_adapter_from_ctx(ctx)
+
+        if profile is not None:
+            # --- set speed profile ---
+            if not hasattr(adapter, "set_speed_profile"):
+                click.echo(
+                    format_error(
+                        "Speed profile control is only available on Bambu Lab printers.",
+                        code="UNSUPPORTED",
+                        json_mode=json_mode,
+                    )
+                )
+                sys.exit(1)
+            ok = adapter.set_speed_profile(profile)
+            data = {
+                "action": "set_speed_profile",
+                "profile": profile.strip().lower(),
+                "accepted": ok,
+            }
+            if json_mode:
+                click.echo(format_response("success", data=data, json_mode=True))
+            else:
+                click.echo(f"Speed profile set to '{profile.strip().lower()}'.")
+        else:
+            # --- get speed profile ---
+            if not hasattr(adapter, "get_speed_profile"):
+                click.echo(
+                    format_error(
+                        "Speed profile is only available on Bambu Lab printers.",
+                        code="UNSUPPORTED",
+                        json_mode=json_mode,
+                    )
+                )
+                sys.exit(1)
+            result = adapter.get_speed_profile()
+            if json_mode:
+                click.echo(format_response("success", data=result, json_mode=True))
+            else:
+                name = result.get("name", "unknown")
+                level = result.get("level", "?")
+                magnitude = result.get("speed_magnitude", "?")
+                click.echo(f"Speed profile: {name} (level {level}, {magnitude}%)")
+    except click.ClickException:
+        raise
+    except PrinterError as exc:
+        click.echo(
+            format_error(
+                f"Failed to manage speed profile: {exc}. Verify the printer is online.",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to manage speed profile: {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# health
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def health(ctx: click.Context, json_mode: bool) -> None:
+    """Check printer and system health status."""
+    try:
+        checks: dict[str, Any] = {}
+
+        # Printer connectivity
+        try:
+            adapter = _get_adapter_from_ctx(ctx)
+            state = adapter.get_state()
+            checks["printer_online"] = True
+            checks["printer_state"] = state.status.value if hasattr(state.status, "value") else str(state.status)
+        except (PrinterError, click.ClickException, Exception) as exc:
+            checks["printer_online"] = False
+            checks["printer_error"] = str(exc)
+
+        # Slicer availability
+        try:
+            from kiln.slicer import find_slicer
+
+            slicer_info = find_slicer()
+            checks["slicer_available"] = True
+            checks["slicer_name"] = slicer_info.name
+            checks["slicer_version"] = slicer_info.version
+        except Exception:
+            checks["slicer_available"] = False
+
+        # Kiln package version
+        try:
+            import kiln
+
+            checks["kiln_version"] = kiln.__version__
+        except Exception:
+            checks["kiln_version"] = "unknown"
+
+        healthy = checks.get("printer_online", False)
+        checks["healthy"] = healthy
+
+        if json_mode:
+            click.echo(format_response("success", data=checks, json_mode=True))
+        else:
+            mark_ok = "+"
+            mark_fail = "x"
+            click.echo("System Health:")
+            # Printer
+            if checks.get("printer_online"):
+                click.echo(f"  [{mark_ok}] Printer: online ({checks.get('printer_state', 'unknown')})")
+            else:
+                click.echo(f"  [{mark_fail}] Printer: offline ({checks.get('printer_error', 'unknown')})")
+            # Slicer
+            if checks.get("slicer_available"):
+                sname = checks.get("slicer_name", "unknown")
+                sver = checks.get("slicer_version") or "unknown"
+                click.echo(f"  [{mark_ok}] Slicer: {sname} ({sver})")
+            else:
+                click.echo(f"  [{mark_fail}] Slicer: not found")
+            # Kiln version
+            click.echo(f"  [*] Kiln: v{checks.get('kiln_version', 'unknown')}")
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to check system health: {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# preview
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.argument("file_path", type=click.Path(exists=True))
+@click.option("--open/--no-open", default=True, help="Open preview image after rendering.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def preview(file_path: str, open: bool, json_mode: bool) -> None:
+    """Render a visual preview of a 3D model (STL/3MF)."""
+    try:
+        from kiln.model_visualizer import visualize_model as _visualize
+
+        result = _visualize(file_path)
+        if not result.get("success"):
+            click.echo(
+                format_error(
+                    result.get("error", "Preview rendering failed."),
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+
+        views = result.get("views", [])
+        image_paths = [v["path"] for v in views if v.get("path")]
+
+        if json_mode:
+            click.echo(
+                format_response(
+                    "success",
+                    data={
+                        "images": image_paths,
+                        "output_dir": result.get("output_dir", ""),
+                        "rendered": result.get("rendered", 0),
+                        "failed": result.get("failed", 0),
+                    },
+                    json_mode=True,
+                )
+            )
+        else:
+            click.echo(f"Rendered {result.get('rendered', 0)} preview(s):")
+            for p in image_paths:
+                click.echo(f"  {p}")
+
+        if open and image_paths:
+            import subprocess
+
+            subprocess.run(["open", image_paths[0]], check=False)  # noqa: S603, S607
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to preview '{file_path}': {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# validate
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.argument("file_path", type=click.Path(exists=True))
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def validate(file_path: str, json_mode: bool) -> None:
+    """Check if a model is printable (geometry, overhangs, thin walls)."""
+    try:
+        from kiln.printability import analyze_printability as _analyze
+
+        report = _analyze(file_path)
+        if json_mode:
+            click.echo(
+                format_response("success", data={"report": report.to_dict()}, json_mode=True)
+            )
+        else:
+            status = "PASS" if report.printable else "FAIL"
+            click.echo(f"Printability: {status}  Score: {report.score}/100  Grade: {report.grade}")
+            if report.recommendations:
+                click.echo("Issues:")
+                for rec in report.recommendations:
+                    click.echo(f"  - {rec}")
+    except ValueError as exc:
+        click.echo(
+            format_error(
+                f"Validation failed for '{file_path}': {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Validation failed for '{file_path}': {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# repair
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.argument("file_path", type=click.Path(exists=True))
+@click.option("--output", "-o", default=None, help="Output path (default: <name>_repaired.stl).")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+def repair(file_path: str, output: str | None, json_mode: bool) -> None:
+    """Repair a mesh (fix holes, normals, degenerate faces)."""
+    try:
+        import os as _os
+
+        from kiln.generation.validation import repair_stl
+
+        if not output:
+            base, ext = _os.path.splitext(file_path)
+            output = f"{base}_repaired{ext or '.stl'}"
+
+        result = repair_stl(file_path, output_path=output)
+        if json_mode:
+            click.echo(
+                format_response("success", data=result, json_mode=True)
+            )
+        else:
+            click.echo(f"Repaired: {result.get('path', output)}")
+            click.echo(
+                f"  Triangles: {result.get('original_triangles', '?')} -> "
+                f"{result.get('cleaned_triangles', '?')}  "
+                f"(removed {result.get('degenerate_removed', 0)} degenerate, "
+                f"recomputed {result.get('normals_recomputed', 0)} normals)"
+            )
+    except ValueError as exc:
+        click.echo(
+            format_error(
+                f"Repair failed for '{file_path}': {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Repair failed for '{file_path}': {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
 def main() -> None:
     """CLI entry point."""
     cli()
