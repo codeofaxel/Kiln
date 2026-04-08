@@ -278,7 +278,7 @@ Add to `~/.config/Claude/claude_desktop_config.json`:
 
 ### Tool Catalog (Selected)
 
-Kiln exposes **461 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
+Kiln exposes **536 MCP tools** in total. The most commonly used tools are documented below by category. Run `kiln tools` for the complete list.
 
 #### Printer Control
 
@@ -306,7 +306,7 @@ Kiln exposes **461 MCP tools** in total. The most commonly used tools are docume
 | Tool | Input | Output |
 |---|---|---|
 | `slice_model` | `input_path`, `profile`, `output_dir` | G-code path, slicer info |
-| `find_slicer_tool` | — | Detected slicer path and version |
+| `find_slicer` | — | Detected slicer path and version |
 | `slice_and_print` | `input_path`, `profile` | Slice + upload + print result |
 
 #### Monitoring

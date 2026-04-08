@@ -50,7 +50,7 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 ### Why Kiln?
 
 - **One control plane, any printer** — OctoPrint, Moonraker, Bambu Lab, Prusa Link. Manage a mixed fleet from one place.
-- **AI-native** — 461 MCP tools built for AI agents. Not a web UI with an API bolted on.
+- **AI-native** — 536 MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
 - **Search → Slice → Print** — Search and download 3D models from Thingiverse, MyMiniFactory, and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
 - **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
@@ -133,11 +133,7 @@ Kiln only needs IP reachability on your local LAN. Ethernet-only printers are fu
 ### Kiln CLI
 
 ```bash
-# One-line install (clones repo + installs via pipx)
-git clone https://github.com/codeofaxel/Kiln.git ~/.kiln/src && ~/.kiln/src/install.sh
-
-# Or install manually from a local clone
-pip install -e ./kiln
+pip install kiln3d
 
 # Discover printers on your network (mDNS + HTTP probe)
 kiln discover
@@ -512,7 +508,7 @@ The Kiln MCP server (`kiln serve`) exposes **461 tools** to agents. Key tools ar
 | `print_plate_object` | Extract a single object and print it (extract → upload → print) |
 | `resolve_model_source` | Identify where a .3mf file came from (MakerWorld, etc.) |
 | `slice_model` | Slice an STL/3MF file to G-code |
-| `find_slicer_tool` | Detect installed slicer (PrusaSlicer/OrcaSlicer) |
+| `find_slicer` | Detect installed slicer (PrusaSlicer/OrcaSlicer) |
 | `slice_and_print` | Slice a model then upload and print in one step (auto-detects AMS material, auto-injects brim/raft) |
 | `slice_and_estimate` | Dry-run slice: time, filament, printability, and adhesion estimates without printing |
 | `analyze_printability` | Deep printability analysis: overhangs, thin walls, bridging, adhesion, support volume (score 0-100) |
@@ -578,8 +574,8 @@ The Kiln MCP server (`kiln serve`) exposes **461 tools** to agents. Key tools ar
 | `list_safety_profiles` | List all bundled printer safety profiles (28 models) |
 | `get_safety_profile` | Get temperature/feedrate/flow limits for a specific printer |
 | `validate_gcode_safe` | Validate G-code against printer-specific safety limits |
-| `list_slicer_profiles_tool` | List all bundled slicer profiles with recommended settings |
-| `get_slicer_profile_tool` | Get full slicer settings (speeds, retraction, temps) for a printer |
+| `list_slicer_profiles` | List all bundled slicer profiles with recommended settings |
+| `get_slicer_profile` | Get full slicer settings (speeds, retraction, temps) for a printer |
 | `get_printer_intelligence` | Firmware quirks, material compatibility, calibration guidance |
 | `get_material_recommendation` | Recommended hotend/bed/fan settings for a material on a printer |
 | `troubleshoot_printer` | Diagnose printer issues from known failure modes database |

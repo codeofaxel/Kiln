@@ -9,7 +9,7 @@ This threat model covers the following components of the Kiln system:
 
 | Component | Interface | Transport |
 |---|---|---|
-| MCP Server (`kiln serve`) | 461 MCP tools via FastMCP | stdio (local) |
+| MCP Server (`kiln serve`) | 536 MCP tools via FastMCP | stdio (local) |
 | REST API (`kiln rest`) | HTTP endpoints via FastAPI/uvicorn | TCP (local or network) |
 | CLI (`kiln`, `octoprint-cli`) | Click commands | Local process |
 | Printer Adapters | OctoPrint (HTTP), Moonraker (HTTP), Bambu Lab (MQTT/FTPS), Prusa Link (HTTP) | LAN or WAN |
@@ -204,7 +204,7 @@ The following are known gaps that have not been addressed in the current impleme
 
 1. **No formal penetration test.** The security model has not been validated by an external security firm. All mitigations are self-assessed.
 
-2. **No fuzz testing of MCP tools.** The 461 MCP tool handlers have not been subjected to automated fuzz testing for input validation edge cases, malformed JSON, or type confusion.
+2. **No fuzz testing of MCP tools.** The 536 MCP tool handlers have not been subjected to automated fuzz testing for input validation edge cases, malformed JSON, or type confusion.
 
 3. **No mTLS or certificate pinning for printer connections.** The Bambu adapter explicitly disables TLS certificate verification. OctoPrint and Moonraker connections rely on system CA stores. No certificate pinning is implemented for any adapter.
 
@@ -212,7 +212,7 @@ The following are known gaps that have not been addressed in the current impleme
 
 5. **Auth disabled by default.** The security model assumes local-only deployment when auth is off. No warning is emitted when the REST API binds to `0.0.0.0` (all interfaces) without authentication enabled.
 
-6. **No per-tool scope audit.** With 461 MCP tools, there is no automated verification that every tool correctly enforces its required auth scope. Manual review is the current approach.
+6. **No per-tool scope audit.** With 536 MCP tools, there is no automated verification that every tool correctly enforces its required auth scope. Manual review is the current approach.
 
 7. **Audit log does not detect deletion.** The HMAC scheme signs individual rows but does not chain hashes. An attacker with database access can delete audit entries without detection. A Merkle tree or hash chain would address this.
 
