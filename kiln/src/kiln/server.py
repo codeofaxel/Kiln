@@ -6688,71 +6688,7 @@ def webcam_stream(
         return _error_dict(f"Unexpected error in webcam_stream: {exc}", code="INTERNAL_ERROR")
 
 
-# ---------------------------------------------------------------------------
-# Cloud sync tools
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.PRO)
-def cloud_sync_status() -> dict:
-    """Get the current cloud sync status."""
-    cs = _get_cloud_sync()
-    if cs is None:
-        return {"success": True, "status": {"enabled": False, "last_sync_status": "not_configured"}}
-    return {"success": True, "status": cs.status().to_dict()}
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.PRO)
-def cloud_sync_now() -> dict:
-    """Trigger an immediate cloud sync cycle."""
-    if err := _check_auth("admin"):
-        return err
-    cs = _get_cloud_sync()
-    if cs is None:
-        return _error_dict("Cloud sync not configured.", code="NOT_CONFIGURED")
-    try:
-        result = cs.sync_now()
-        return {"success": True, **result}
-    except Exception as exc:
-        logger.exception("Unexpected error in cloud_sync_now")
-        return _error_dict(f"Unexpected error in cloud_sync_now: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.PRO)
-def cloud_sync_configure(
-    cloud_url: str,
-    api_key: str,
-    interval: float = 60.0,
-) -> dict:
-    """Configure and start cloud sync.
-
-    Args:
-        cloud_url: Base URL of the cloud sync endpoint.
-        api_key: API key for authentication.
-        interval: Sync interval in seconds (default 60).
-    """
-    if err := _check_auth("admin"):
-        return err
-    try:
-        config = SyncConfig(
-            cloud_url=cloud_url,
-            api_key=api_key,
-            sync_interval_seconds=interval,
-        )
-        new_mgr = CloudSyncManager(
-            db=get_db(),
-            event_bus=_get_event_bus(),
-            config=config,
-        )
-        _set_cloud_sync(new_mgr)
-        new_mgr.start()
-        return {"success": True, "config": config.to_dict()}
-    except Exception as exc:
-        logger.exception("Unexpected error in cloud_sync_configure")
-        return _error_dict(f"Unexpected error in cloud_sync_configure: {exc}", code="INTERNAL_ERROR")
+# Cloud sync tools — moved to plugins/cloud_sync_tools.py
 
 
 # ---------------------------------------------------------------------------
