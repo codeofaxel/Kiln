@@ -10,6 +10,15 @@ those definitions.
 
 Auto-discovered by :func:`~kiln.plugin_loader.register_all_plugins` —
 no manual imports needed.
+
+WARNING: watch_print, start_monitored_print, watch_print_status,
+stop_watch_print, first_layer_status, and monitor_print_vision are
+SHADOWED by server.py (dedup proxy drops these plugin copies). Do NOT
+update these copies — update server.py instead. Known issues with the
+plugin copies: (1) state isolation — plugin _watchers dict is separate
+from server.py _watchers, (2) start_monitored_print missing emergency
+latch safety check, (3) watch_print missing cancel_at_percent and
+camera ground-truth detection.
 """
 
 from __future__ import annotations
