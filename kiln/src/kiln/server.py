@@ -1684,16 +1684,13 @@ def _check_billing_auth(scope: str = "print") -> dict[str, Any] | None:
     setup, etc.) — even when global auth is disabled.
     """
     if not _auth.enabled:
-        return {
-            "error": (
-                "Authentication required for paid operations. "
-                "Enable auth with KILN_AUTH_ENABLED=1 and set "
-                "KILN_AUTH_KEY=<your-key> before using fulfillment services. "
-                "See: kiln auth setup"
-            ),
-            "status": "error",
-            "code": "AUTH_REQUIRED",
-        }
+        return _error_dict(
+            "Authentication required for paid operations. "
+            "Enable auth with KILN_AUTH_ENABLED=1 and set "
+            "KILN_AUTH_KEY=<your-key> before using fulfillment services. "
+            "See: kiln auth setup",
+            code="AUTH_REQUIRED",
+        )
     return _check_auth(scope)
 
 
@@ -2031,7 +2028,7 @@ def _generate_print_comment(
 def monitor_print(
     printer_name: str | None = None,
     include_snapshot: bool = True,
-) -> str:
+) -> str | dict:
     """One-shot print status report (human-readable text: progress, temps, speed, cost, ETA).
 
     Use for quick status checks. Returns a fixed-format text report with
@@ -2223,12 +2220,18 @@ def monitor_print(
         return report
 
     except PrinterNotFoundError:
-        return f"Error: Printer {printer_name!r} not found in registry."
+        return _error_dict(
+            f"Printer {printer_name!r} not found in registry.",
+            code="PRINTER_NOT_FOUND",
+        )
     except (PrinterError, RuntimeError) as exc:
-        return f"Error: Failed to monitor print: {exc}"
+        return _error_dict(f"Failed to monitor print: {exc}")
     except Exception as exc:
         logger.exception("Unexpected error in monitor_print")
-        return f"Error: Unexpected error in monitor_print: {exc}"
+        return _error_dict(
+            f"Unexpected error in monitor_print: {exc}",
+            code="INTERNAL_ERROR",
+        )
 
 
 @mcp.tool()
@@ -3282,7 +3285,7 @@ def ams_status() -> dict:
             )
         result = adapter.get_ams_status()
         _audit("ams_status", "queried")
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to query AMS status: {exc}")
     except Exception as exc:
@@ -3357,7 +3360,7 @@ def get_speed_profile() -> dict:
             )
         result = adapter.get_speed_profile()
         _audit("get_speed_profile", "queried")
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to get speed profile: {exc}")
     except Exception as exc:
@@ -3523,7 +3526,7 @@ def wrap_gcode_as_3mf(
                             zf.writestr(thumb_name, thumb_data)
         _audit("wrap_gcode_as_3mf", "executed", details={"gcode_path": gcode_path})
         return {
-            "status": "success",
+            "success": True,
             "output_path": output_path,
             "gcode_path": gcode_path,
             "filament_type": filament_type,
@@ -3575,7 +3578,7 @@ def get_bed_mesh() -> dict:
                 code="UNSUPPORTED",
             )
         _audit("get_bed_mesh", "queried")
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to get bed mesh: {exc}")
     except Exception as exc:
@@ -3611,7 +3614,7 @@ def get_filament_status() -> dict:
                 code="UNSUPPORTED",
             )
         _audit("get_filament_status", "queried")
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to get filament status: {exc}")
     except Exception as exc:
@@ -3650,7 +3653,7 @@ def get_tool_position() -> dict:
                 code="UNSUPPORTED",
             )
         _audit("get_tool_position", "queried")
-        return {"status": "success", "position": result}
+        return {"success": True, "position": result}
     except (PrinterError, RuntimeError) as exc:
         return _error_dict(f"Failed to get tool position: {exc}")
     except Exception as exc:
@@ -5184,7 +5187,7 @@ def billing_invoice(charge_id: str = "", job_id: str = "") -> dict:
         try:
             from kiln.billing_invoice import generate_invoice
         except ImportError:
-            return {"status": "error", "error": "This feature requires kiln-pro"}
+            return _error_dict("This feature requires kiln-pro", code="PRO_REQUIRED")
 
         if charge_id:
             charges = _billing.list_charges(limit=500)
@@ -5228,7 +5231,7 @@ def billing_export(format: str = "csv", limit: int = 100) -> dict:
         try:
             from kiln.billing_invoice import export_billing_csv, generate_invoices
         except ImportError:
-            return {"status": "error", "error": "This feature requires kiln-pro"}
+            return _error_dict("This feature requires kiln-pro", code="PRO_REQUIRED")
 
         charges = _billing.list_charges(limit=limit)
 
@@ -7063,7 +7066,7 @@ def rotate_model(
             )
 
         return {
-            "status": "success",
+            "success": True,
             "output_path": output_path,
             "rotations_applied": {
                 "x": rotation_x,
@@ -7081,29 +7084,25 @@ def rotate_model(
 @mcp.tool()
 async def check_orientation(
     model_path: str,
-) -> str:
+) -> dict:
     """Check if a model's orientation is stable for printing.
 
     Analyzes the height-to-base ratio and warns if the model is likely to
     wobble or fail mid-print.  Suggests reorientation if needed.
 
     :param model_path: Path to the STL or OBJ model file.
-    :returns: JSON with stability assessment.
+    :returns: Dict with stability assessment.
     """
     try:
-        import json
-
         from kiln.auto_orient import check_stability
 
         result = check_stability(model_path)
-        return json.dumps(result.to_dict(), indent=2)
+        return {"success": True, **result.to_dict()}
     except Exception as e:
-        import json
-
-        return json.dumps({"error": str(e), "status": "error"})
+        return _error_dict(f"Orientation check failed: {e}", code="ORIENTATION_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(name="find_slicer")
 def find_slicer_tool() -> dict:
     """Check if a slicer (PrusaSlicer/OrcaSlicer) is available on the system.
 
@@ -10432,7 +10431,7 @@ def smart_generate_from_template(
         settings = _infer_settings(stl_path, material=material)
 
         return {
-            "status": "success",
+            "success": True,
             "template": template_id,
             "parameters_used": gen_result.get("parameters_used", {}),
             "stl_path": stl_path,
@@ -10482,7 +10481,7 @@ def analyze_mesh_geometry(file_path: str) -> dict:
         from kiln.generation.validation import analyze_mesh
 
         result = analyze_mesh(file_path)
-        return {"status": "success", **result.to_dict()}
+        return {"success": True, **result.to_dict()}
     except Exception as exc:
         return _error_dict(f"Mesh analysis failed: {exc}", code="ANALYSIS_ERROR")
 
@@ -10508,7 +10507,7 @@ def detect_mesh_pockets(
         from kiln.generation.validation import detect_mesh_pockets as _detect
 
         result = _detect(file_path, min_depth_mm=min_depth_mm)
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except Exception as exc:
         return _error_dict(f"Pocket detection failed: {exc}", code="DETECT_ERROR")
 
@@ -10532,7 +10531,7 @@ def repair_mesh(file_path: str, output_path: str = "") -> dict:
         from kiln.generation.validation import repair_stl
 
         result = repair_stl(file_path, output_path=output_path or None)
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except Exception as exc:
         return _error_dict(f"Mesh repair failed: {exc}", code="REPAIR_ERROR")
 
@@ -10572,7 +10571,7 @@ def splice_mesh_at_z(
             os.close(_fd)
 
         result = _splice(top_path, bottom_path, z_plane, output_path)
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except Exception as exc:
         logger.exception("splice_mesh_at_z failed")
         return _error_dict(f"Splice failed: {exc}", code="SPLICE_ERROR")
@@ -10596,7 +10595,7 @@ def compose_models(file_paths: list[str], output_path: str) -> dict:
         from kiln.generation.validation import compose_stls
 
         result = compose_stls(file_paths, output_path)
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except Exception as exc:
         return _error_dict(f"Composition failed: {exc}", code="COMPOSE_ERROR")
 
@@ -10621,7 +10620,7 @@ def export_model_3mf(file_path: str, output_path: str = "") -> dict:
         out = export_3mf(file_path, output_path=output_path or None)
         file_size = os.path.getsize(out)
         return {
-            "status": "success",
+            "success": True,
             "path": out,
             "file_size_bytes": file_size,
             "message": f"Exported to 3MF ({file_size} bytes).",
@@ -10660,7 +10659,7 @@ def extract_model_from_3mf(file_path: str, output_path: str = "") -> dict:
         )
 
         result = _extract(file_path, output_path=output_path or None)
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except FileNotFoundError as exc:
         return _error_dict(str(exc), code="FILE_NOT_FOUND")
     except Exception as exc:
@@ -10708,7 +10707,7 @@ def list_plate_objects(file_path: str, plate_number: int = 1) -> dict:
             list_plate_objects as _list_plate,
         )
 
-        return {"status": "success", **_list_plate(file_path, plate_number=plate_number)}
+        return {"success": True, **_list_plate(file_path, plate_number=plate_number)}
     except FileNotFoundError as exc:
         return _error_dict(str(exc), code="FILE_NOT_FOUND")
     except Exception as exc:
@@ -10774,7 +10773,7 @@ def extract_plate_object(
             file_path, object_name, output_path=output_path,
             plate_number=plate_number,
         )
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except FileNotFoundError as exc:
         return _error_dict(str(exc), code="FILE_NOT_FOUND")
     except ValueError as exc:
@@ -10948,7 +10947,7 @@ def print_plate_object(
         }
 
     return {
-        "status": "success",
+        "success": True,
         "message": (
             f"Printing '{matched_object['name']}' extracted from "
             f"'{os.path.basename(file_path)}'."
@@ -10996,7 +10995,7 @@ def resolve_model_source(file_path: str) -> dict:
         # Try MakerWorld first
         result = resolve_makerworld_source(file_path)
         if result is not None:
-            return {"status": "success", **result}
+            return {"success": True, **result}
 
         # Fall back to generic 3MF metadata extraction
         import json as _json
@@ -11064,7 +11063,7 @@ def resolve_model_source(file_path: str) -> dict:
                 for i, obj in enumerate(objects)
             ]
 
-        return {"status": "success", **generic}
+        return {"success": True, **generic}
     except FileNotFoundError as exc:
         return _error_dict(str(exc), code="FILE_NOT_FOUND")
     except ValueError as exc:
@@ -11089,7 +11088,7 @@ def validate_openscad_code(code: str) -> dict:
     try:
         gen = _get_generation_provider("openscad")
         result = gen.validate_scad(code)
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except GenerationError as exc:
         return _error_dict(f"OpenSCAD validation failed: {exc}", code=exc.code or "VALIDATION_ERROR")
     except Exception as exc:
@@ -11124,7 +11123,7 @@ def estimate_print_time(
         # If already a gcode file, just parse it directly
         if file_path.lower().endswith((".gcode", ".gco", ".g")):
             result = _parse_gcode_estimates(file_path)
-            return {"status": "success", **result}
+            return {"success": True, **result}
 
         # Otherwise, slice first with the right profile
         from kiln.slicer import estimate_print
@@ -11140,7 +11139,7 @@ def estimate_print_time(
             profile=resolved_profile,
             slicer_path=slicer_path or None,
         )
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except Exception as exc:
         return _error_dict(f"Print estimation failed: {exc}", code="ESTIMATE_ERROR")
 
@@ -11288,7 +11287,7 @@ def iterate_design(
         return _error_dict("All iterations failed.", code="ITERATION_EXHAUSTED")
 
     return {
-        "status": "success",
+        "success": True,
         "iterations": iterations,
         "iteration_count": len(iterations),
         "best_score": best_score,
@@ -11314,7 +11313,7 @@ def optimize_print_orientation(file_path: str, output_path: str = "") -> dict:
         from kiln.generation.validation import optimize_orientation
 
         result = optimize_orientation(file_path, output_path=output_path or None)
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except Exception as exc:
         return _error_dict(f"Orientation optimization failed: {exc}", code="ORIENT_ERROR")
 
@@ -11333,7 +11332,7 @@ def estimate_support_material(file_path: str) -> dict:
         from kiln.generation.validation import estimate_support_volume
 
         result = estimate_support_volume(file_path)
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except Exception as exc:
         return _error_dict(f"Support estimation failed: {exc}", code="SUPPORT_ERROR")
 
@@ -11366,7 +11365,7 @@ def repair_mesh_advanced(
             output_path=output_path or None,
             close_holes=close_holes,
         )
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except Exception as exc:
         return _error_dict(f"Advanced repair failed: {exc}", code="REPAIR_ERROR")
 
@@ -11450,7 +11449,7 @@ def generate_template_variations(
             variations.append(var_entry)
 
         return {
-            "status": "success",
+            "success": True,
             "template": template_id,
             "variation_count": len(variations),
             "variations": variations,
@@ -11627,7 +11626,7 @@ def design_advisor(prompt: str, printer_model: str = "") -> dict:
             "8. Upload and print",
         ]
 
-    return {"status": "success", **recommendations}
+    return {"success": True, **recommendations}
 
 
 # ---------------------------------------------------------------------------
@@ -11653,7 +11652,7 @@ def compare_mesh_versions(file_a: str, file_b: str) -> dict:
     try:
         from kiln.generation.validation import compare_meshes
 
-        return {"status": "success", **compare_meshes(file_a, file_b)}
+        return {"success": True, **compare_meshes(file_a, file_b)}
     except Exception as exc:
         return _error_dict(f"Mesh comparison failed: {exc}")
 
@@ -11682,7 +11681,7 @@ def predict_print_failure(
         from kiln.generation.validation import predict_print_failures
 
         return {
-            "status": "success",
+            "success": True,
             **predict_print_failures(
                 file_path,
                 min_wall_mm=min_wall_mm,
@@ -11716,7 +11715,7 @@ def simplify_mesh_model(
         from kiln.generation.validation import simplify_mesh
 
         return {
-            "status": "success",
+            "success": True,
             **simplify_mesh(
                 file_path,
                 target_ratio=target_ratio,
@@ -11746,7 +11745,7 @@ def mesh_quality_scorecard(file_path: str) -> dict:
     try:
         from kiln.generation.validation import design_scorecard
 
-        return {"status": "success", **design_scorecard(file_path)}
+        return {"success": True, **design_scorecard(file_path)}
     except Exception as exc:
         return _error_dict(f"Scorecard generation failed: {exc}")
 
@@ -11780,7 +11779,7 @@ def estimate_material_cost(
         )
 
         return {
-            "status": "success",
+            "success": True,
             **_estimate_cost(
                 file_path,
                 material=material,
@@ -11818,7 +11817,7 @@ def remove_mesh_floating_regions(
         from kiln.generation.validation import remove_floating_regions
 
         return {
-            "status": "success",
+            "success": True,
             **remove_floating_regions(
                 file_path,
                 output_path=output_path or None,
@@ -11862,7 +11861,7 @@ def check_print_readiness(
         from kiln.generation.validation import can_print_now
 
         return {
-            "status": "success",
+            "success": True,
             **can_print_now(
                 file_path,
                 auto_fix=auto_fix,
@@ -11897,7 +11896,7 @@ def mirror_mesh_model(file_path: str, axis: str = "x", output_path: str = "") ->
         from kiln.generation.validation import mirror_mesh
 
         return {
-            "status": "success",
+            "success": True,
             **mirror_mesh(file_path, axis=axis, output_path=output_path or None),
         }
     except Exception as exc:
@@ -11926,7 +11925,7 @@ def hollow_mesh_model(
         from kiln.generation.validation import hollow_mesh
 
         return {
-            "status": "success",
+            "success": True,
             **hollow_mesh(
                 file_path,
                 wall_thickness_mm=wall_thickness_mm,
@@ -11963,7 +11962,7 @@ def thicken_mesh_walls(
         from kiln.generation.validation import thicken_walls
 
         return {
-            "status": "success",
+            "success": True,
             **thicken_walls(
                 file_path,
                 amount_mm=amount_mm,
@@ -12002,7 +12001,7 @@ def add_mesh_fillet(
         from kiln.generation.validation import add_fillet
 
         return {
-            "status": "success",
+            "success": True,
             **add_fillet(
                 file_path,
                 radius_mm=radius_mm,
@@ -12039,7 +12038,7 @@ def add_mesh_chamfer(
         from kiln.generation.validation import add_chamfer
 
         return {
-            "status": "success",
+            "success": True,
             **add_chamfer(
                 file_path,
                 distance_mm=distance_mm,
@@ -12082,7 +12081,7 @@ def boolean_mesh_op(
         from kiln.generation.openscad import boolean_mesh_operation
 
         return {
-            "status": "success",
+            "success": True,
             **boolean_mesh_operation(
                 operation,
                 file_paths,
@@ -12130,7 +12129,7 @@ def analyze_structural_risks(
             sharp_angle_threshold_deg=sharp_angle_threshold_deg,
         )
         return {
-            "status": "success",
+            "success": True,
             "risk_count": len(risks),
             "critical_count": sum(1 for r in risks if r.severity == "critical"),
             "warning_count": sum(1 for r in risks if r.severity == "warning"),
@@ -12169,7 +12168,7 @@ def recommend_design_reinforcements(
 
         recs = _recommend(file_path, min_cross_section_mm2=min_cross_section_mm2)
         return {
-            "status": "success",
+            "success": True,
             "recommendation_count": len(recs),
             "reinforcements": [r.to_dict() for r in recs],
         }
@@ -12203,7 +12202,7 @@ def assess_load_bearing(file_path: str) -> dict:
 
         analysis = _assess(file_path)
         return {
-            "status": "success",
+            "success": True,
             **analysis.to_dict(),
         }
     except ValueError as exc:
@@ -12248,7 +12247,7 @@ def design_improvement_plan(
             sharp_angle_threshold_deg=sharp_angle_threshold_deg,
         )
         return {
-            "status": "success",
+            "success": True,
             **plan.to_dict(),
         }
     except ValueError as exc:
@@ -12313,7 +12312,7 @@ def compose_part_from_primitives(
         from kiln.generation.openscad import compose_from_primitives
 
         return {
-            "status": "success",
+            "success": True,
             **compose_from_primitives(
                 operations,
                 output_path=output_path or None,
@@ -12368,7 +12367,7 @@ def apply_design_reinforcements(
             wall_thicken_mm=wall_thicken_mm,
             base_height_mm=base_height_mm,
         )
-        return {"status": "success", **result.to_dict()}
+        return {"success": True, **result.to_dict()}
     except ValueError as exc:
         return _error_dict(str(exc), code="INVALID_ARGS")
     except Exception as exc:
@@ -12406,7 +12405,7 @@ def infer_print_settings(
         from kiln.design_reasoning import infer_print_settings as _infer
 
         result = _infer(file_path, material=material)
-        return {"status": "success", **result.to_dict()}
+        return {"success": True, **result.to_dict()}
     except ValueError as exc:
         return _error_dict(str(exc), code="INVALID_ARGS")
     except Exception as exc:
@@ -12458,7 +12457,7 @@ def optimize_template_params(
             constraints=parsed_constraints,
             output_dir=output_dir or None,
         )
-        return {"status": "success", **result.to_dict()}
+        return {"success": True, **result.to_dict()}
     except ValueError as exc:
         return _error_dict(str(exc), code="INVALID_ARGS")
     except Exception as exc:
@@ -12504,7 +12503,7 @@ def arrange_parts_on_plate(
             spacing_mm=spacing_mm,
             copies=parsed_copies,
         )
-        return {"status": "success", **result.to_dict()}
+        return {"success": True, **result.to_dict()}
     except ValueError as exc:
         return _error_dict(str(exc), code="INVALID_ARGS")
     except Exception as exc:
@@ -12546,7 +12545,7 @@ def plan_design_from_description(
             target_size_mm=target_size_mm,
             material=material,
         )
-        return {"status": "success", **result.to_dict()}
+        return {"success": True, **result.to_dict()}
     except ValueError as exc:
         return _error_dict(str(exc), code="INVALID_ARGS")
     except Exception as exc:
@@ -12579,7 +12578,7 @@ def search_design_templates(
             max_results=max_results,
             category_filter=category_filter,
         )
-        return {"status": "success", **result.to_dict()}
+        return {"success": True, **result.to_dict()}
     except Exception as exc:
         return _error_dict(f"Template search failed: {exc}")
 
@@ -12613,7 +12612,7 @@ def estimate_mesh_weight(
             infill_percent=infill_percent,
             wall_thickness_mm=wall_thickness_mm,
         )
-        return {"status": "success", **result.to_dict()}
+        return {"success": True, **result.to_dict()}
     except FileNotFoundError as exc:
         return _error_dict(str(exc), code="FILE_NOT_FOUND")
     except ValueError as exc:
@@ -12657,7 +12656,7 @@ def design_to_gcode_pipeline(
             printer_model=printer_model,
             infill_percent=infill_percent,
         )
-        return {"status": "success" if result.success else "partial", **result.to_dict()}
+        return {"success": result.success, **result.to_dict()}
     except Exception as exc:
         return _error_dict(f"Design-to-gcode pipeline failed: {exc}")
 
@@ -12701,7 +12700,7 @@ def merge_stl(
         result = merge_stl_files(paths, output_path, positions=pos_list)
         if result.errors:
             return _error_dict("; ".join(result.errors), code="MERGE_FAILED")
-        return {"status": "success", **result.to_dict()}
+        return {"success": True, **result.to_dict()}
     except Exception as exc:
         return _error_dict(f"STL merge failed: {exc}")
 
@@ -12916,7 +12915,7 @@ def cross_section_view(
             kwargs["offset_mm"] = float(offset_mm)
 
         result = cross_section_at_plane(file_path, **kwargs)
-        return {"status": "success", **result.to_dict()}
+        return {"success": True, **result.to_dict()}
     except FileNotFoundError as exc:
         return _error_dict(str(exc), code="FILE_NOT_FOUND")
     except ValueError as exc:
@@ -12954,7 +12953,7 @@ def solve_template_constraints(
         from kiln.design_reasoning import solve_constraints
 
         result = solve_constraints(template_id, constraint_dict)
-        return {"status": "success", **result.to_dict()}
+        return {"success": True, **result.to_dict()}
     except Exception as exc:
         return _error_dict(f"Constraint solving failed: {exc}")
 
@@ -12983,7 +12982,7 @@ def center_model_on_bed(
         from kiln.generation.validation import center_on_bed
 
         return {
-            "status": "success",
+            "success": True,
             **center_on_bed(
                 file_path,
                 bed_x_mm=bed_x_mm,
@@ -13012,7 +13011,7 @@ def analyze_non_manifold_edges(file_path: str) -> dict:
     try:
         from kiln.generation.validation import count_non_manifold_edges
 
-        return {"status": "success", **count_non_manifold_edges(file_path)}
+        return {"success": True, **count_non_manifold_edges(file_path)}
     except Exception as exc:
         return _error_dict(f"Edge analysis failed: {exc}")
 
@@ -13042,7 +13041,7 @@ def scale_mesh_to_fit(
     try:
         from kiln.generation.validation import scale_to_fit
 
-        return {"status": "success", **scale_to_fit(
+        return {"success": True, **scale_to_fit(
             file_path, max_x_mm=max_x_mm, max_y_mm=max_y_mm,
             max_z_mm=max_z_mm, output_path=output_path or None,
         )}
@@ -13069,7 +13068,7 @@ def merge_mesh_files(
     try:
         from kiln.generation.validation import merge_stl_files
 
-        return {"status": "success", **merge_stl_files(file_paths, output_path=output_path)}
+        return {"success": True, **merge_stl_files(file_paths, output_path=output_path)}
     except Exception as exc:
         return _error_dict(f"Merge failed: {exc}")
 
@@ -13093,7 +13092,7 @@ def split_mesh_by_component(
     try:
         from kiln.generation.validation import split_by_component
 
-        return {"status": "success", **split_by_component(
+        return {"success": True, **split_by_component(
             file_path, output_dir=output_dir or None,
         )}
     except Exception as exc:
@@ -13125,7 +13124,7 @@ def estimate_mesh_print_time(
     try:
         from kiln.generation.validation import estimate_print_time_from_mesh
 
-        return {"status": "success", **estimate_print_time_from_mesh(
+        return {"success": True, **estimate_print_time_from_mesh(
             file_path, layer_height_mm=layer_height_mm,
             print_speed_mm_s=print_speed_mm_s, material=material,
         )}
@@ -14509,7 +14508,7 @@ def validate_gcode_safe(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(name="list_slicer_profiles")
 def list_slicer_profiles_tool() -> dict:
     """List all bundled slicer profiles for supported printers.
 
@@ -14517,7 +14516,7 @@ def list_slicer_profiles_tool() -> dict:
     minimum license tier required for each.  Free-tier profiles can be
     used by everyone; PRO profiles require a Kiln Pro license.
 
-    Use with ``get_slicer_profile_tool`` to see full settings, or
+    Use with ``get_slicer_profile`` to see full settings, or
     ``slice_model`` with printer_id for auto-profile selection.
     """
     if err := _check_auth("slicer"):
@@ -14544,7 +14543,7 @@ def list_slicer_profiles_tool() -> dict:
         return _error_dict(f"Unexpected error in list_slicer_profiles_tool: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(name="get_slicer_profile")
 def get_slicer_profile_tool(printer_id: str) -> dict:
     """Get the full bundled slicer profile for a printer model.
 
@@ -15534,7 +15533,7 @@ def get_skill_manifest() -> dict:
         from kiln.skill_manifest import generate_manifest
 
         manifest = generate_manifest()
-        return {"status": "success", "data": manifest.to_dict()}
+        return {"success": True, "data": manifest.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in get_skill_manifest")
         return _error_dict(f"Failed to generate manifest: {exc}", code="INTERNAL_ERROR")
@@ -16954,7 +16953,7 @@ def merge_multicolor_gcode(
             parsed_parts,
             output_path=output_path or None,
         )
-        return {"status": "success", **result}
+        return {"success": True, **result}
     except ValueError as exc:
         return _error_dict(str(exc))
     except Exception as exc:
@@ -19179,7 +19178,7 @@ def decorate_surface(
         file_size = compile_result.get("file_size", 0)
 
         result_dict = {
-            "status": "success",
+            "success": True,
             "message": (
                 f"Successfully {mode}ed content onto "
                 f"{face_info.get('face_name', 'surface')} face of "
