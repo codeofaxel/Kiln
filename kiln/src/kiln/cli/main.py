@@ -9052,6 +9052,215 @@ def versions_rollback(design_id: str, version_id: str, json_mode: bool) -> None:
         sys.exit(1)
 
 
+# ---------------------------------------------------------------------------
+# ams
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def ams(ctx: click.Context, json_mode: bool) -> None:
+    """Show AMS filament status (trays, colors, material types)."""
+    try:
+        adapter = _get_adapter_from_ctx(ctx)
+        if not hasattr(adapter, "get_ams_status"):
+            click.echo(
+                format_error(
+                    "AMS status is only available on Bambu Lab printers with AMS.",
+                    code="UNSUPPORTED",
+                    json_mode=json_mode,
+                )
+            )
+            sys.exit(1)
+        result = adapter.get_ams_status()
+        if json_mode:
+            click.echo(format_response("success", data=result, json_mode=True))
+        else:
+            ams_units = result.get("ams", [])
+            if not ams_units:
+                click.echo("No AMS units detected.")
+            else:
+                for unit in ams_units:
+                    click.echo(f"AMS #{unit.get('id', '?')}:")
+                    for tray in unit.get("trays", []):
+                        slot = tray.get("id", "?")
+                        color = tray.get("color", "unknown")
+                        material = tray.get("type", "unknown")
+                        remaining = tray.get("remaining", "?")
+                        click.echo(f"  Slot {slot}: {material} ({color}) — {remaining}% remaining")
+            tray_now = result.get("tray_now")
+            if tray_now and tray_now != "255":
+                click.echo(f"Active tray: {tray_now}")
+    except click.ClickException:
+        raise
+    except PrinterError as exc:
+        click.echo(
+            format_error(
+                f"Failed to get AMS status: {exc}. Verify the printer is online.",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to get AMS status: {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# speed
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.argument("profile", required=False)
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def speed(ctx: click.Context, profile: str | None, json_mode: bool) -> None:
+    """Get or set printer speed profile (silent/standard/sport/ludicrous)."""
+    try:
+        adapter = _get_adapter_from_ctx(ctx)
+
+        if profile is not None:
+            # --- set speed profile ---
+            if not hasattr(adapter, "set_speed_profile"):
+                click.echo(
+                    format_error(
+                        "Speed profile control is only available on Bambu Lab printers.",
+                        code="UNSUPPORTED",
+                        json_mode=json_mode,
+                    )
+                )
+                sys.exit(1)
+            ok = adapter.set_speed_profile(profile)
+            data = {
+                "action": "set_speed_profile",
+                "profile": profile.strip().lower(),
+                "accepted": ok,
+            }
+            if json_mode:
+                click.echo(format_response("success", data=data, json_mode=True))
+            else:
+                click.echo(f"Speed profile set to '{profile.strip().lower()}'.")
+        else:
+            # --- get speed profile ---
+            if not hasattr(adapter, "get_speed_profile"):
+                click.echo(
+                    format_error(
+                        "Speed profile is only available on Bambu Lab printers.",
+                        code="UNSUPPORTED",
+                        json_mode=json_mode,
+                    )
+                )
+                sys.exit(1)
+            result = adapter.get_speed_profile()
+            if json_mode:
+                click.echo(format_response("success", data=result, json_mode=True))
+            else:
+                name = result.get("name", "unknown")
+                level = result.get("level", "?")
+                magnitude = result.get("speed_magnitude", "?")
+                click.echo(f"Speed profile: {name} (level {level}, {magnitude}%)")
+    except click.ClickException:
+        raise
+    except PrinterError as exc:
+        click.echo(
+            format_error(
+                f"Failed to manage speed profile: {exc}. Verify the printer is online.",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to manage speed profile: {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# health
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def health(ctx: click.Context, json_mode: bool) -> None:
+    """Check printer and system health status."""
+    try:
+        checks: dict[str, Any] = {}
+
+        # Printer connectivity
+        try:
+            adapter = _get_adapter_from_ctx(ctx)
+            state = adapter.get_state()
+            checks["printer_online"] = True
+            checks["printer_state"] = state.status.value if hasattr(state.status, "value") else str(state.status)
+        except (PrinterError, click.ClickException, Exception) as exc:
+            checks["printer_online"] = False
+            checks["printer_error"] = str(exc)
+
+        # Slicer availability
+        try:
+            from kiln.slicer import find_slicer
+
+            slicer_info = find_slicer()
+            checks["slicer_available"] = True
+            checks["slicer_name"] = slicer_info.name
+            checks["slicer_version"] = slicer_info.version
+        except Exception:
+            checks["slicer_available"] = False
+
+        # Kiln package version
+        try:
+            import kiln
+
+            checks["kiln_version"] = kiln.__version__
+        except Exception:
+            checks["kiln_version"] = "unknown"
+
+        healthy = checks.get("printer_online", False)
+        checks["healthy"] = healthy
+
+        if json_mode:
+            click.echo(format_response("success", data=checks, json_mode=True))
+        else:
+            mark_ok = "+"
+            mark_fail = "x"
+            click.echo("System Health:")
+            # Printer
+            if checks.get("printer_online"):
+                click.echo(f"  [{mark_ok}] Printer: online ({checks.get('printer_state', 'unknown')})")
+            else:
+                click.echo(f"  [{mark_fail}] Printer: offline ({checks.get('printer_error', 'unknown')})")
+            # Slicer
+            if checks.get("slicer_available"):
+                sname = checks.get("slicer_name", "unknown")
+                sver = checks.get("slicer_version") or "unknown"
+                click.echo(f"  [{mark_ok}] Slicer: {sname} ({sver})")
+            else:
+                click.echo(f"  [{mark_fail}] Slicer: not found")
+            # Kiln version
+            click.echo(f"  [*] Kiln: v{checks.get('kiln_version', 'unknown')}")
+    except Exception as exc:
+        click.echo(
+            format_error(
+                f"Failed to check system health: {exc}",
+                json_mode=json_mode,
+            )
+        )
+        sys.exit(1)
+
+
 def main() -> None:
     """CLI entry point."""
     cli()
