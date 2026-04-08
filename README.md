@@ -445,7 +445,7 @@ pip install kiln3d[rest]
 
 When binding REST to non-localhost addresses (for hosted deployments), set `KILN_API_AUTH_TOKEN` or pass `--auth-token`.
 
-Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 461 tools are available via MCP (`kiln serve`).
+Tool tiers automatically match model capability: **essential** (15 tools) for smaller models, **standard** (46 tools) for mid-range, **full** (105 tools) for Claude/GPT-4/Gemini. All 539 tools are available via MCP (`kiln serve`).
 
 ### OctoPrint CLI
 
@@ -464,7 +464,7 @@ octoprint-cli print myfile.gcode --confirm
 
 ## MCP Tools (Selected)
 
-The Kiln MCP server (`kiln serve`) exposes **461 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
+The Kiln MCP server (`kiln serve`) exposes **539 tools** to agents. Key tools are listed below — run `kiln tools` for the complete catalog.
 
 | Tool | Description |
 |------|-------------|
