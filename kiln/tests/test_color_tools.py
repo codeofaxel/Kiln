@@ -232,7 +232,7 @@ class TestAutoColorByHeight:
         stl_path = _make_stl_file(tris)
         result = self._call_tool(input_path=stl_path, num_colors=4)
 
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["total_faces"] == 4
         assert result["num_colors"] == 4
         assert len(result["zones"]) == 4
@@ -257,20 +257,20 @@ class TestAutoColorByHeight:
             input_path=stl_path, num_colors=2, color_palette=palette,
         )
 
-        assert result["status"] == "success"
+        assert result["success"] is True
         colors = [z["color"] for z in result["zones"]]
         assert colors == palette
         os.unlink(stl_path)
 
     def test_file_not_found(self):
         result = self._call_tool(input_path="/nonexistent/model.stl")
-        assert result["status"] == "error"
+        assert result["success"] is False
 
     def test_single_color(self):
         tris = [_make_triangle(5, 5, 5)]
         stl_path = _make_stl_file(tris)
         result = self._call_tool(input_path=stl_path, num_colors=1)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["zones"][0]["face_count"] == 1
         os.unlink(stl_path)
 
@@ -300,7 +300,7 @@ class TestAutoColorByRegion:
         result = self._call_tool(
             input_path=stl_path, num_colors=2, method="z_height",
         )
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["method"] == "z_height"
         os.unlink(stl_path)
 
@@ -314,7 +314,7 @@ class TestAutoColorByRegion:
         result = self._call_tool(
             input_path=stl_path, num_colors=3, method="normal",
         )
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["method"] == "normal"
         face_sum = sum(z["face_count"] for z in result["zones"])
         assert face_sum == 3
@@ -326,7 +326,7 @@ class TestAutoColorByRegion:
         result = self._call_tool(
             input_path=stl_path, num_colors=4, method="random",
         )
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["method"] == "random"
         face_sum = sum(z["face_count"] for z in result["zones"])
         assert face_sum == 20
@@ -338,7 +338,7 @@ class TestAutoColorByRegion:
         result = self._call_tool(
             input_path=stl_path, method="invalid",
         )
-        assert result["status"] == "error"
+        assert result["success"] is False
         assert "Unknown method" in result["error"]
         os.unlink(stl_path)
 
@@ -371,7 +371,7 @@ class TestGracefulDegradation:
         stl_path = _make_stl_file(tris)
         result = self._call_tool(input_path=stl_path, num_colors=2)
 
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert "multicolor_3mf" not in result
         assert "hint" in result["next_action"]
         os.unlink(stl_path)
@@ -426,7 +426,7 @@ class TestEmptyZoneFiltering:
         stl_path = _make_stl_file(tris)
         result = self._call_tool(input_path=stl_path, num_colors=4)
 
-        assert result["status"] == "success"
+        assert result["success"] is True
         # Only zones with faces should appear
         for zone in result["zones"]:
             assert zone["face_count"] > 0
@@ -654,7 +654,7 @@ class TestBandHeightWarning:
         stl_path = _make_stl_file(tris)
         result = tools["auto_color_by_height"](input_path=stl_path, num_colors=4)
         os.unlink(stl_path)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert "warning" in result
 
     def test_no_warning_not_included_in_result(self):
@@ -682,7 +682,7 @@ class TestBandHeightWarning:
         stl_path = _make_stl_file(tris)
         result = tools["auto_color_by_height"](input_path=stl_path, num_colors=4)
         os.unlink(stl_path)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert "warning" not in result
 
 
@@ -771,7 +771,7 @@ class TestAmsMapping:
             input_path=stl_path, num_colors=3, color_palette=palette,
         )
         os.unlink(stl_path)
-        assert result["status"] == "success"
+        assert result["success"] is True
         mapping = result["ams_mapping"]
         # Keys must be slot_1, slot_2, ... matching num active zones
         for i in range(1, result["num_colors"] + 1):
@@ -816,7 +816,7 @@ class TestNormalMethodBowlShape:
             input_path=stl_path, num_colors=3, method="normal",
         )
         os.unlink(stl_path)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["num_colors"] == 3
         # Each zone must have exactly one face
         face_counts = {z["zone"]: z["face_count"] for z in result["zones"]}
@@ -834,7 +834,7 @@ class TestNormalMethodBowlShape:
             input_path=stl_path, num_colors=2, method="normal",
         )
         os.unlink(stl_path)
-        assert result["status"] == "success"
+        assert result["success"] is True
         # All 3 faces must be accounted for
         assert sum(z["face_count"] for z in result["zones"]) == 3
 
@@ -866,7 +866,7 @@ class TestEdgeCases:
         stl_path = _make_stl_file([_make_triangle(5.0, 5.0, 5.0)])
         result = self._call_height_tool(input_path=stl_path, num_colors=4)
         os.unlink(stl_path)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["total_faces"] == 1
         # Only one zone should be active
         assert result["num_colors"] == 1
@@ -878,7 +878,7 @@ class TestEdgeCases:
         stl_path = _make_stl_file(tris)
         result = self._call_height_tool(input_path=stl_path, num_colors=4)
         os.unlink(stl_path)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["total_faces"] == 1000
         face_sum = sum(z["face_count"] for z in result["zones"])
         assert face_sum == 1000
@@ -889,7 +889,7 @@ class TestEdgeCases:
         stl_path = _make_stl_file(tris)
         result = self._call_height_tool(input_path=stl_path, num_colors=1)
         os.unlink(stl_path)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["num_colors"] == 1
         assert len(result["zones"]) == 1
         assert result["zones"][0]["face_count"] == 10
@@ -1209,7 +1209,7 @@ class TestAutoMulticolorFromTexture:
         obj_path = _create_textured_obj_dir()
         result = self._call_tool(obj_path=obj_path, num_colors=2)
 
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["method"] == "texture"
         assert result["total_faces"] > 0
         assert len(result["zones"]) > 0
@@ -1225,7 +1225,7 @@ class TestAutoMulticolorFromTexture:
     def test_hex_colors_in_palette(self):
         obj_path = _create_textured_obj_dir()
         result = self._call_tool(obj_path=obj_path, num_colors=2)
-        assert result["status"] == "success"
+        assert result["success"] is True
         for zone in result["zones"]:
             assert zone["color"].startswith("#")
             assert len(zone["color"]) == 7
@@ -1233,20 +1233,20 @@ class TestAutoMulticolorFromTexture:
     def test_ams_mapping_present(self):
         obj_path = _create_textured_obj_dir()
         result = self._call_tool(obj_path=obj_path, num_colors=2)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert "ams_mapping" in result
         for key in result["ams_mapping"]:
             assert key.startswith("slot_")
 
     def test_file_not_found(self):
         result = self._call_tool(obj_path="/nonexistent/model.obj")
-        assert result["status"] == "error"
+        assert result["success"] is False
         assert "not found" in result["error"]
 
     def test_num_colors_zero(self):
         obj_path = _create_textured_obj_dir()
         result = self._call_tool(obj_path=obj_path, num_colors=0)
-        assert result["status"] == "error"
+        assert result["success"] is False
         assert "num_colors" in result["error"]
 
     def test_no_texture_returns_error(self):
@@ -1256,7 +1256,7 @@ class TestAutoMulticolorFromTexture:
             fh.write(_SIMPLE_OBJ)
         # No MTL or texture files
         result = self._call_tool(obj_path=obj_path)
-        assert result["status"] == "error"
+        assert result["success"] is False
         assert "texture" in result["error"].lower()
 
     def test_empty_obj_returns_error(self):
@@ -1266,20 +1266,20 @@ class TestAutoMulticolorFromTexture:
             fh.write("# empty\n")
         _create_test_texture(tmp_dir)
         result = self._call_tool(obj_path=obj_path)
-        assert result["status"] == "error"
+        assert result["success"] is False
         assert "No faces" in result["error"]
 
     def test_weight_and_time_estimates_present(self):
         obj_path = _create_textured_obj_dir()
         result = self._call_tool(obj_path=obj_path, num_colors=2)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert "total_weight_g" in result
         assert "print_time_estimate_min" in result
 
     def test_next_step_present(self):
         obj_path = _create_textured_obj_dir()
         result = self._call_tool(obj_path=obj_path, num_colors=2)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert "next_step" in result
         assert "next_action" in result
 
@@ -1289,7 +1289,7 @@ class TestAutoMulticolorFromTexture:
     )
     def test_no_pillow_returns_error(self):
         result = self._call_tool(obj_path="/tmp/fake.obj")
-        assert result["status"] == "error"
+        assert result["success"] is False
         assert "Pillow" in result["error"]
 
     def test_uniform_texture_single_zone(self):
@@ -1298,14 +1298,14 @@ class TestAutoMulticolorFromTexture:
             texture_colors=[(255, 0, 0)] * 4,
         )
         result = self._call_tool(obj_path=obj_path, num_colors=1)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["num_colors"] == 1
         assert result["zones"][0]["face_count"] == result["total_faces"]
 
     def test_summary_present(self):
         obj_path = _create_textured_obj_dir()
         result = self._call_tool(obj_path=obj_path, num_colors=2)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert "summary" in result
         assert "color zone" in result["summary"]
 
@@ -1322,4 +1322,4 @@ class TestAutoMulticolorFromTexture:
         # But there IS a PNG in the directory
         _create_test_texture(tmp_dir)
         result = self._call_tool(obj_path=obj_path, num_colors=2)
-        assert result["status"] == "success"
+        assert result["success"] is True

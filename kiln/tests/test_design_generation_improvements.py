@@ -927,7 +927,7 @@ class TestIterateDesign:
 
         result = iterate_design("cube(20);", provider="openscad", max_iterations=3)
 
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["best_score"] >= 0
         assert len(result["iterations"]) >= 1
 
@@ -1194,7 +1194,7 @@ class TestTemplateVariations:
         from kiln.server import generate_template_variations
 
         result = generate_template_variations("phone_stand", variation_count=3)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["variation_count"] == 3
         assert len(result["variations"]) == 3
 
@@ -4742,7 +4742,7 @@ class TestOptimizeTemplateParamsTool:
         mock_optimize.return_value = mock_result
 
         result = tool_fn("shelf_bracket", samples_per_param=2)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["best_score"] == 85
 
 
@@ -5007,7 +5007,7 @@ class TestPlanDesignFromDescriptionTool:
         from kiln.server import plan_design_from_description
 
         result = plan_design_from_description("")
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert len(result["primitives"]) >= 1
 
     @patch("kiln.server._check_auth", return_value=None)
@@ -5027,7 +5027,7 @@ class TestPlanDesignFromDescriptionTool:
         )
 
         result = plan_design_from_description("a cube")
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["complexity"] == "simple"
 
 
@@ -5064,7 +5064,7 @@ class TestArrangePartsOnPlateTool:
         )
 
         result = arrange_parts_on_plate('["/tmp/a.stl"]')
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["fitted_parts"] == 1
 
 
@@ -5139,7 +5139,7 @@ class TestSearchDesignTemplatesTool:
         from kiln.server import search_design_templates
 
         result = search_design_templates("")
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["matches"] == []
 
     @patch("kiln.server._check_auth", return_value=None)
@@ -5147,7 +5147,7 @@ class TestSearchDesignTemplatesTool:
         from kiln.server import search_design_templates
 
         result = search_design_templates("hook")
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert len(result["matches"]) > 0
 
 
@@ -5243,7 +5243,7 @@ class TestEstimateMeshWeightTool:
         cube_path = str(tmp_path / "cube.stl")
         _write_cube_stl(cube_path, 10.0)
         result = estimate_mesh_weight(cube_path)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["estimated_weight_g"] > 0
 
 
@@ -5322,7 +5322,7 @@ class TestDesignToGcodePipelineTool:
             success=True,
         )
         result = design_to_gcode_pipeline("test hook")
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["template_id"] == "hook"
 
 
@@ -5430,7 +5430,7 @@ class TestMergeStlTool:
         _write_cube_stl(c1, 10.0)
         out_path = str(tmp_path / "merged.stl")
         result = merge_stl(f'["{c1}"]', out_path)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["total_triangles"] == 12
 
 
@@ -5527,7 +5527,7 @@ class TestCrossSectionViewTool:
         cube_path = str(tmp_path / "cube.stl")
         _write_cube_stl(cube_path, 10.0)
         result = cross_section_view(cube_path)
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["contour_count"] >= 0
 
 
@@ -5613,5 +5613,5 @@ class TestSolveTemplateConstraintsTool:
             "shelf_bracket",
             '{"width": {"equals": 30}}',
         )
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["solved_params"]["width"] == 30.0
