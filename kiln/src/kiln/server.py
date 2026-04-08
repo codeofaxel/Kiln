@@ -476,7 +476,7 @@ def _build_instructions() -> str:
     agent through a conversational first-time setup so normie users never
     need to touch env vars or config files.
     """
-    printer_names = _registry.list_names()
+    printer_names = _get_registry().list_names()
     sources = _marketplace_registry.connected
     has_printer = len(printer_names) > 0
     has_marketplace = len(sources) > 0
@@ -867,7 +867,7 @@ def _resolve_effective_printer_name(printer_name: str | None = None) -> str:
     if printer_name:
         return printer_name
     try:
-        names = _registry.list_names()
+        names = _get_registry().list_names()
         if "default" in names:
             return "default"
         if names:
@@ -1042,7 +1042,7 @@ def _record_tool_block(tool_name: str) -> dict | None:
     escalation_msg = _tool_limiter.record_block(tool_name)
     if escalation_msg:
         _audit(tool_name, "escalated", details={"message": escalation_msg})
-        _event_bus.publish(
+        _get_event_bus().publish(
             EventType.SAFETY_ESCALATED,
             data={"tool": tool_name, "message": escalation_msg},
             source="rate_limiter",
@@ -1204,6 +1204,11 @@ def _get_event_bus() -> EventBus:
         _event_bus.subscribe(EventType.PRINT_COMPLETED, lambda _e: _get_heater_watchdog().notify_print_ended())
         _event_bus.subscribe(EventType.PRINT_FAILED, lambda _e: _get_heater_watchdog().notify_print_ended())
         _event_bus.subscribe(EventType.PRINT_CANCELLED, lambda _e: _get_heater_watchdog().notify_print_ended())
+        # Persistence and billing subscribers (previously wired at import time).
+        _event_bus.subscribe(None, _persist_event)
+        _event_bus.subscribe(EventType.JOB_COMPLETED, _billing_hook)
+        _event_bus.subscribe(EventType.JOB_COMPLETED, _log_print_completion)
+        _event_bus.subscribe(EventType.JOB_FAILED, _log_print_completion)
     return _event_bus
 
 
@@ -1396,7 +1401,7 @@ def _get_fulfillment_monitor() -> Any | None:
 
     _fulfillment_monitor = FulfillmentMonitor(
         db=get_db(),
-        event_bus=_event_bus,
+        event_bus=_get_event_bus(),
     )
     _fulfillment_monitor.start()
     return _fulfillment_monitor
@@ -1462,8 +1467,8 @@ def _get_payment_mgr():
     _payment_mgr = PaymentManager(
         db=get_db(),
         config=config,
-        event_bus=_event_bus,
-        ledger=_billing,
+        event_bus=_get_event_bus(),
+        ledger=_get_billing(),
     )
 
     # Auto-register providers from env vars.
@@ -1510,7 +1515,7 @@ def _get_billing_alert_mgr():
         return None
 
     if _billing_alert_mgr is None:
-        _billing_alert_mgr = BillingAlertManager(event_bus=_event_bus)
+        _billing_alert_mgr = BillingAlertManager(event_bus=_get_event_bus())
         _billing_alert_mgr.subscribe()
     return _billing_alert_mgr
 
@@ -1551,7 +1556,7 @@ def _refund_after_order_failure(
             )
             # Emit event for alert manager.
             try:
-                _event_bus.publish(
+                _get_event_bus().publish(
                     EventType.PAYMENT_FAILED,
                     {
                         "payment_id": payment_id,
@@ -1579,7 +1584,7 @@ def _refund_after_order_failure(
             )
             # Emit event for alert manager.
             try:
-                _event_bus.publish(
+                _get_event_bus().publish(
                     EventType.PAYMENT_FAILED,
                     {
                         "payment_id": payment_hold_id,
@@ -1774,11 +1779,11 @@ def _check_auth(scope: str) -> dict[str, Any] | None:
     This is intentionally a no-op when authentication is not configured so
     that existing deployments continue to work without changes.
     """
-    if not _auth.enabled:
+    if not _get_auth().enabled:
         return None
 
     token = _resolve_auth_token()
-    result = _auth.check_request(key=token, scope=scope)
+    result = _get_auth().check_request(key=token, scope=scope)
     if result.get("authenticated"):
         return None
     return _error_dict(
@@ -1794,7 +1799,7 @@ def _check_billing_auth(scope: str = "print") -> dict[str, Any] | None:
     operations that involve real money (fulfillment orders, payment
     setup, etc.) — even when global auth is disabled.
     """
-    if not _auth.enabled:
+    if not _get_auth().enabled:
         return _error_dict(
             "Authentication required for paid operations. "
             "Enable auth with KILN_AUTH_ENABLED=1 and set "
@@ -1833,7 +1838,7 @@ def _persist_event(event: Event) -> None:
     }
     if event.type in job_events and "job_id" in event.data:
         try:
-            job = _queue.get_job(event.data["job_id"])
+            job = _get_queue().get_job(event.data["job_id"])
             db = get_db()
             db.save_job(
                 {
@@ -1865,7 +1870,7 @@ def _billing_hook(event: Event) -> None:
     if network_cost is None:
         return  # Local job — free
     try:
-        fee_calc, _charge_id = _billing.calculate_and_record_fee(
+        fee_calc, _charge_id = _get_billing().calculate_and_record_fee(
             event.data["job_id"],
             float(network_cost),
         )
@@ -1889,7 +1894,7 @@ def _billing_hook(event: Event) -> None:
 def _log_print_completion(event: Event) -> None:
     """EventBus subscriber that logs completed/failed jobs to print_history."""
     try:
-        job = _queue.get_job(event.data["job_id"])
+        job = _get_queue().get_job(event.data["job_id"])
         duration = None
         if job.started_at and job.completed_at:
             duration = job.completed_at - job.started_at
@@ -1919,24 +1924,10 @@ def _log_print_completion(event: Event) -> None:
         logger.debug("Failed to log print completion for job %s", event.data.get("job_id"), exc_info=True)
 
 
-# Wire subscribers (runs automatically on import)
-_event_bus.subscribe(None, _persist_event)
-_event_bus.subscribe(EventType.JOB_COMPLETED, _billing_hook)
-_event_bus.subscribe(EventType.JOB_COMPLETED, _log_print_completion)
-_event_bus.subscribe(EventType.JOB_FAILED, _log_print_completion)
-
-# Wire billing alert manager (lazy init on first access).
-try:
-    _get_billing_alert_mgr()
-except Exception:
-    logger.debug("Billing alert manager not initialized", exc_info=True)
-
-# Start fulfillment order monitor if fulfillment is available.
-try:
-    monitor = _get_fulfillment_monitor()
-    monitor.start()
-except Exception:
-    logger.debug("Fulfillment monitor not started", exc_info=True)
+# NOTE: Event subscribers (_persist_event, _billing_hook, _log_print_completion)
+# and heater watchdog subscriptions are wired lazily inside _get_event_bus()
+# on first access, so importing this module no longer triggers DB connections
+# or network subscriptions.
 
 
 # ---------------------------------------------------------------------------
@@ -2153,7 +2144,7 @@ def monitor_print(
     """
     try:
         if printer_name:
-            adapter = _registry.get(printer_name)
+            adapter = _get_registry().get(printer_name)
         else:
             adapter = _get_adapter()
 
@@ -2845,7 +2836,7 @@ def start_print(
         if plate_number != 1:
             print_kwargs["plate_number"] = plate_number
         result = adapter.start_print(file_name, **print_kwargs)
-        _heater_watchdog.notify_print_started()
+        _get_heater_watchdog().notify_print_started()
         _audit("start_print", "executed", details={"file": file_name, **print_kwargs})
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
@@ -2879,7 +2870,7 @@ def cancel_print() -> dict:
     try:
         adapter = _get_adapter()
         result = adapter.cancel_print()
-        _heater_watchdog.notify_print_ended()
+        _get_heater_watchdog().notify_print_ended()
         _audit("cancel_print", "executed")
         return result.to_dict()
     except (PrinterError, RuntimeError) as exc:
@@ -3342,7 +3333,7 @@ def set_temperature(
 
         # Notify heater watchdog when heaters are turned on.
         if (tool_temp is not None and tool_temp > 0) or (bed_temp is not None and bed_temp > 0):
-            _heater_watchdog.notify_heater_set()
+            _get_heater_watchdog().notify_heater_set()
 
         _audit(
             "set_temperature",
@@ -3901,11 +3892,11 @@ def preflight_check(
             # 1) Check against loaded material (if material tracking is configured)
             try:
                 printer_name = "default"
-                if _registry.count > 0:
-                    names = _registry.list_names()
+                if _get_registry().count > 0:
+                    names = _get_registry().list_names()
                     if names:
                         printer_name = names[0]
-                warning = _material_tracker.check_match(printer_name, expected_material)
+                warning = _get_material_tracker().check_match(printer_name, expected_material)
                 if warning is not None:
                     mat_msg = warning.message
                     checks.append(
@@ -3969,8 +3960,8 @@ def preflight_check(
         # never blocks a print.
         try:
             _printer_name = None
-            if _registry.count > 0:
-                names = _registry.list_names()
+            if _get_registry().count > 0:
+                names = _get_registry().list_names()
                 if names:
                     _printer_name = names[0]
 
@@ -4532,7 +4523,7 @@ def safety_status() -> dict:
 
         # Auth status
         auth_info = {
-            "enabled": _auth.enabled if hasattr(_auth, "enabled") else False,
+            "enabled": _get_auth().enabled if hasattr(_get_auth(), "enabled") else False,
         }
 
         # Confirm mode
@@ -4600,14 +4591,14 @@ def fleet_status() -> dict:
     """
     try:
         # Auto-register the env-configured adapter if registry is empty
-        if _registry.count == 0:
+        if _get_registry().count == 0:
             try:
                 adapter = _get_adapter()
-                _registry.register("default", adapter)
+                _get_registry().register("default", adapter)
             except RuntimeError:
                 pass  # No adapter configured
 
-        if _registry.count == 0:
+        if _get_registry().count == 0:
             return {
                 "success": True,
                 "printers": [],
@@ -4615,8 +4606,8 @@ def fleet_status() -> dict:
                 "message": "No printers registered.",
             }
 
-        status = _registry.get_fleet_status()
-        idle = _registry.get_idle_printers()
+        status = _get_registry().get_fleet_status()
+        idle = _get_registry().get_idle_printers()
         connected_count = sum(1 for p in status if p.get("connected"))
         disconnected_count = len(status) - connected_count
 
@@ -4661,7 +4652,7 @@ def fleet_analytics() -> dict:
     Requires Kiln Pro or Business license.
     """
     try:
-        if _registry.count == 0:
+        if _get_registry().count == 0:
             return {
                 "success": True,
                 "printers": [],
@@ -4676,7 +4667,7 @@ def fleet_analytics() -> dict:
         success_sum = 0.0
         printers_with_data = 0
 
-        for name in _registry.list_names():
+        for name in _get_registry().list_names():
             stats = db.get_printer_stats(name)
             printer_stats.append(stats)
             total_prints += stats["total_prints"]
@@ -4688,7 +4679,7 @@ def fleet_analytics() -> dict:
         avg_success = round(success_sum / printers_with_data, 4) if printers_with_data > 0 else 0.0
 
         # Queue stats
-        queue_counts = _queue.summary()
+        queue_counts = _get_queue().summary()
 
         return {
             "success": True,
@@ -4697,7 +4688,7 @@ def fleet_analytics() -> dict:
                 "total_prints": total_prints,
                 "total_hours": round(total_hours, 2),
                 "avg_success_rate": avg_success,
-                "printer_count": _registry.count,
+                "printer_count": _get_registry().count,
             },
             "queue": queue_counts,
         }
@@ -4745,17 +4736,17 @@ def register_printer(
         # without a Pro license.  Replacing an existing printer doesn't
         # count against the limit.
         current_tier = get_tier()
-        if current_tier < LicenseTier.PRO and name not in _registry and _registry.count >= FREE_TIER_MAX_PRINTERS:
+        if current_tier < LicenseTier.PRO and name not in _get_registry() and _get_registry().count >= FREE_TIER_MAX_PRINTERS:
             return {
                 "success": False,
                 "error": (
                     f"Fleet registration is limited to {FREE_TIER_MAX_PRINTERS} printers on the Free tier "
-                    f"(you have {_registry.count}). "
+                    f"(you have {_get_registry().count}). "
                     "Kiln Pro unlocks unlimited printers with fleet orchestration. "
                     "Upgrade at https://kiln3d.com/pro or run 'kiln upgrade'."
                 ),
                 "code": "FREE_TIER_LIMIT",
-                "current_count": _registry.count,
+                "current_count": _get_registry().count,
                 "max_allowed": FREE_TIER_MAX_PRINTERS,
                 "upgrade_url": "https://kiln3d.com/pro",
             }
@@ -4830,13 +4821,13 @@ def register_printer(
         old_default = _adapter
         _adapter = adapter  # Update immediately so tools use the new one.
 
-        _registry.register(name, adapter)
+        _get_registry().register(name, adapter)
 
         # If the boot-time adapter was a different object (not in the
         # registry), disconnect it to stop orphaned MQTT threads.
         if old_default is not None and old_default is not adapter:
             in_registry = any(
-                old_default is a for a in _registry.list_all().values()
+                old_default is a for a in _get_registry().list_all().values()
             )
             if not in_registry:
                 _disc = getattr(old_default, "disconnect", None)
@@ -4904,10 +4895,10 @@ def list_fleet_sites() -> dict:
     Requires Enterprise license.
     """
     try:
-        sites = _registry.list_sites()
+        sites = _get_registry().list_sites()
         site_data = []
         for site in sites:
-            printers = _registry.get_printers_by_site(site)
+            printers = _get_registry().get_printers_by_site(site)
             site_data.append({"site": site, "printer_count": len(printers), "printers": printers})
         return {"success": True, "sites": site_data, "count": len(site_data)}
     except Exception as exc:
@@ -4927,7 +4918,7 @@ def fleet_status_by_site() -> dict:
     Requires Enterprise license.
     """
     try:
-        grouped = _registry.get_fleet_status_by_site()
+        grouped = _get_registry().get_fleet_status_by_site()
         result = {}
         for site, statuses in grouped.items():
             result[site] = {
@@ -4972,8 +4963,8 @@ def update_printer_site(
                     k, v = pair.split("=", 1)
                     parsed_tags[k.strip()] = v.strip()
 
-        _registry.update_printer_metadata(name, site=site, tags=parsed_tags)
-        meta = _registry.get_metadata(name)
+        _get_registry().update_printer_metadata(name, site=site, tags=parsed_tags)
+        meta = _get_registry().get_metadata(name)
         return {
             "success": True,
             "message": f"Printer {name!r} assigned to site {site!r}.",
@@ -5145,7 +5136,7 @@ def recent_events(limit: int = 20, *, type: str | None = None) -> dict:
     """
     try:
         capped = min(max(limit, 1), 100)
-        events = _event_bus.recent_events(
+        events = _get_event_bus().recent_events(
             limit=capped,
             event_type_prefix=type,
         )
@@ -5175,8 +5166,8 @@ def billing_summary() -> dict:
     Available on all tiers — anyone who transacts can view their billing.
     """
     try:
-        revenue = _billing.monthly_revenue()
-        policy = _billing._policy
+        revenue = _get_billing().monthly_revenue()
+        policy = _get_billing()._policy
         return {
             "success": True,
             "month_revenue": revenue,
@@ -5188,8 +5179,8 @@ def billing_summary() -> dict:
                 "free_tier_jobs": policy.free_tier_jobs,
                 "currency": policy.currency,
             },
-            "outsourced_jobs_this_month": _billing.network_jobs_this_month(),
-            "network_jobs_this_month": _billing.network_jobs_this_month(),
+            "outsourced_jobs_this_month": _get_billing().network_jobs_this_month(),
+            "network_jobs_this_month": _get_billing().network_jobs_this_month(),
         }
     except Exception as exc:
         logger.exception("Unexpected error in billing_summary")
@@ -5301,10 +5292,10 @@ def billing_invoice(charge_id: str = "", job_id: str = "") -> dict:
             return _error_dict("This feature requires kiln-pro", code="PRO_REQUIRED")
 
         if charge_id:
-            charges = _billing.list_charges(limit=500)
+            charges = _get_billing().list_charges(limit=500)
             charge = next((c for c in charges if c.get("id") == charge_id), None)
         elif job_id:
-            charges = _billing.list_charges(limit=500)
+            charges = _get_billing().list_charges(limit=500)
             charge = next((c for c in charges if c.get("job_id") == job_id), None)
         else:
             return _error_dict(
@@ -5344,7 +5335,7 @@ def billing_export(format: str = "csv", limit: int = 100) -> dict:
         except ImportError:
             return _error_dict("This feature requires kiln-pro", code="PRO_REQUIRED")
 
-        charges = _billing.list_charges(limit=limit)
+        charges = _get_billing().list_charges(limit=limit)
 
         if format == "csv":
             csv_data = export_billing_csv(charges)
@@ -5438,7 +5429,7 @@ def refund_payment(payment_id: str, reason: str = "") -> dict:
             try:
                 result = provider.refund_payment(payment_id)
                 # Emit refund event.
-                _event_bus.publish(
+                _get_event_bus().publish(
                     EventType.PAYMENT_REFUNDED,
                     {
                         "payment_id": payment_id,
@@ -5845,11 +5836,11 @@ def health_check() -> dict:
         "status": "healthy",
         "uptime": f"{hours}h {minutes}m {secs}s",
         "uptime_seconds": round(uptime_s, 1),
-        "printers_registered": _registry.count,
-        "queue_pending": _queue.pending_count(),
-        "queue_active": _queue.active_count(),
-        "queue_total": _queue.total_count,
-        "scheduler_running": _scheduler.is_running,
+        "printers_registered": _get_registry().count,
+        "queue_pending": _get_queue().pending_count(),
+        "queue_active": _get_queue().active_count(),
+        "queue_total": _get_queue().total_count,
+        "scheduler_running": _get_scheduler().is_running,
         "database_reachable": db_ok,
         "python_version": platform.python_version(),
         "platform": platform.system(),
@@ -6550,7 +6541,7 @@ def download_and_upload(
 
         # Resolve printer adapter once
         if printer_name:
-            adapter = _registry.get(printer_name)
+            adapter = _get_registry().get(printer_name)
         else:
             adapter = _get_adapter()
 
@@ -6680,7 +6671,7 @@ def download_and_upload(
                     code="PREFLIGHT_FAILED",
                 )
             print_res = adapter.start_print(file_name)
-            _heater_watchdog.notify_print_started()
+            _get_heater_watchdog().notify_print_started()
             print_data = print_res.to_dict()
             auto_printed = True
 
@@ -7301,7 +7292,7 @@ def slice_and_print(
         if material is None:
             try:
                 if printer_name:
-                    _adapter = _registry.get(printer_name)
+                    _adapter = _get_registry().get(printer_name)
                 else:
                     _adapter = _get_adapter()
                 if hasattr(_adapter, "get_ams_status"):
@@ -7407,7 +7398,7 @@ def slice_and_print(
         )
 
         if printer_name:
-            adapter = _registry.get(printer_name)
+            adapter = _get_registry().get(printer_name)
         else:
             adapter = _get_adapter()
 
@@ -7448,7 +7439,7 @@ def slice_and_print(
             )
 
         print_result = adapter.start_print(file_name)
-        _heater_watchdog.notify_print_started()
+        _get_heater_watchdog().notify_print_started()
 
         resp: dict[str, Any] = {
             "success": True,
@@ -7498,7 +7489,7 @@ def printer_snapshot(
     """
     try:
         if printer_name:
-            adapter = _registry.get(printer_name)
+            adapter = _get_registry().get(printer_name)
         else:
             adapter = _get_adapter()
 
@@ -7570,7 +7561,7 @@ def estimate_cost(
         printer_wattage: Printer power consumption in watts (default 200).
     """
     try:
-        estimate = _cost_estimator.estimate_from_file(
+        estimate = _get_cost_estimator().estimate_from_file(
             file_path,
             material=material,
             electricity_rate=electricity_rate,
@@ -7592,7 +7583,7 @@ def list_materials() -> dict:
     For loaded material, use ``get_material`` (software tracker) or
     ``get_active_material`` (live AMS hardware query).
     """
-    materials = _cost_estimator.materials
+    materials = _get_cost_estimator().materials
     return {
         "success": True,
         "materials": [m.to_dict() for m in materials.values()],
@@ -7624,7 +7615,7 @@ def set_material(
     if err := _check_auth("write"):
         return err
     try:
-        mat = _material_tracker.set_material(
+        mat = _get_material_tracker().set_material(
             printer_name=printer_name,
             material_type=material,
             color=color,
@@ -7649,7 +7640,7 @@ def get_material(printer_name: str | None = None) -> dict:
     """
     try:
         name = printer_name or "default"
-        materials = _material_tracker.get_all_materials(name)
+        materials = _get_material_tracker().get_all_materials(name)
         return {
             "success": True,
             "materials": [m.to_dict() for m in materials],
@@ -7672,7 +7663,7 @@ def check_material_match(
     """
     try:
         name = printer_name or "default"
-        warning = _material_tracker.check_match(name, expected_material)
+        warning = _get_material_tracker().check_match(name, expected_material)
         if warning:
             return {
                 "success": True,
@@ -7689,7 +7680,7 @@ def check_material_match(
 def list_spools() -> dict:
     """List all tracked filament spools in inventory."""
     try:
-        spools = _material_tracker.list_spools()
+        spools = _get_material_tracker().list_spools()
         return {
             "success": True,
             "spools": [s.to_dict() for s in spools],
@@ -7719,7 +7710,7 @@ def add_spool(
     if err := _check_auth("write"):
         return err
     try:
-        spool = _material_tracker.add_spool(
+        spool = _get_material_tracker().add_spool(
             material_type=material,
             color=color,
             brand=brand,
@@ -7742,7 +7733,7 @@ def remove_spool(spool_id: str) -> dict:
     if err := _check_auth("write"):
         return err
     try:
-        removed = _material_tracker.remove_spool(spool_id)
+        removed = _get_material_tracker().remove_spool(spool_id)
         if removed:
             return {"success": True, "message": f"Spool {spool_id} removed."}
         return _error_dict(f"Spool {spool_id!r} not found.", code="NOT_FOUND")
@@ -7765,7 +7756,7 @@ def bed_level_status(printer_name: str | None = None) -> dict:
     """
     try:
         name = printer_name or "default"
-        status = _bed_level_mgr.check_needed(name)
+        status = _get_bed_level_mgr().check_needed(name)
         return {"success": True, "status": status.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in bed_level_status")
@@ -7786,13 +7777,13 @@ def trigger_bed_level(printer_name: str | None = None) -> dict:
         return err
     try:
         if printer_name:
-            adapter = _registry.get(printer_name)
+            adapter = _get_registry().get(printer_name)
             name = printer_name
         else:
             adapter = _get_adapter()
             name = "default"
 
-        result = _bed_level_mgr.trigger_level(name, adapter, triggered_by="manual")
+        result = _get_bed_level_mgr().trigger_level(name, adapter, triggered_by="manual")
         return {"success": result["success"], **result}
     except PrinterNotFoundError:
         return _error_dict(f"Printer {printer_name!r} not found.", code="NOT_FOUND")
@@ -7830,7 +7821,7 @@ def set_leveling_policy(
             max_hours_between_levels=max_hours,
             gcode_command=gcode_command,
         )
-        _bed_level_mgr.set_policy(name, policy)
+        _get_bed_level_mgr().set_policy(name, policy)
         return {"success": True, "policy": policy.to_dict()}
     except Exception as exc:
         logger.exception("Unexpected error in set_leveling_policy")
@@ -7857,15 +7848,15 @@ def webcam_stream(
     """
     try:
         if action == "status":
-            return {"success": True, "stream": _stream_proxy.status().to_dict()}
+            return {"success": True, "stream": _get_stream_proxy().status().to_dict()}
 
         if action == "stop":
-            info = _stream_proxy.stop()
+            info = _get_stream_proxy().stop()
             return {"success": True, "stream": info.to_dict()}
 
         if action == "start":
             if printer_name:
-                adapter = _registry.get(printer_name)
+                adapter = _get_registry().get(printer_name)
             else:
                 adapter = _get_adapter()
 
@@ -7876,7 +7867,7 @@ def webcam_stream(
                     code="NO_STREAM",
                 )
 
-            info = _stream_proxy.start(
+            info = _get_stream_proxy().start(
                 source_url=stream_url,
                 port=port,
                 printer_name=printer_name or "default",
@@ -7955,7 +7946,7 @@ def cloud_sync_configure(
             _cloud_sync.stop()
         _cloud_sync = CloudSyncManager(
             db=get_db(),
-            event_bus=_event_bus,
+            event_bus=_get_event_bus(),
             config=config,
         )
         _cloud_sync.start()
@@ -7973,7 +7964,7 @@ def cloud_sync_configure(
 @mcp.tool()
 def list_plugins() -> dict:
     """List all discovered plugins and their status."""
-    plugins = _plugin_mgr.list_plugins()
+    plugins = _get_plugin_mgr().list_plugins()
     return {
         "success": True,
         "plugins": [p.to_dict() for p in plugins],
@@ -7987,7 +7978,7 @@ def plugin_info(name: str) -> dict:
     Args:
         name: Plugin name.
     """
-    info = _plugin_mgr.get_plugin_info(name)
+    info = _get_plugin_mgr().get_plugin_info(name)
     if info is None:
         return _error_dict(f"Plugin {name!r} not found.", code="NOT_FOUND")
     return {"success": True, "plugin": info.to_dict()}
@@ -8065,7 +8056,7 @@ def fulfillment_quote(
                 shipping_country=shipping_country,
             )
         )
-        fee_calc = _billing.calculate_fee(
+        fee_calc = _get_billing().calculate_fee(
             quote.total_price,
             currency=quote.currency,
         )
@@ -8172,7 +8163,7 @@ def fulfillment_order(
 
         # 1a. Early spend limit check (before any work).
         if estimated_price and estimated_price > 0:
-            fee_estimate = _billing.calculate_fee(
+            fee_estimate = _get_billing().calculate_fee(
                 estimated_price,
                 currency=currency,
                 jurisdiction=jurisdiction or None,
@@ -8191,7 +8182,7 @@ def fulfillment_order(
         # 2. Charge / capture payment BEFORE placing the order.
         if payment_hold_id or estimated_price > 0:
             if estimated_price > 0:
-                fee_calc = _billing.calculate_fee(
+                fee_calc = _get_billing().calculate_fee(
                     estimated_price,
                     currency=currency,
                     jurisdiction=jurisdiction or None,
@@ -8206,7 +8197,7 @@ def fulfillment_order(
                         if fee_calc is None:
                             # Hold exists but no price given — capture
                             # will use the amount from the original auth.
-                            fee_calc = _billing.calculate_fee(0.0)
+                            fee_calc = _get_billing().calculate_fee(0.0)
                         pay_result = mgr.capture_fee(
                             payment_hold_id,
                             quote_id,
@@ -8228,7 +8219,7 @@ def fulfillment_order(
                     # and record the fee to prevent free-tier race
                     # conditions.
                     if estimated_price > 0:
-                        fee_calc, _charge_id = _billing.calculate_and_record_fee(
+                        fee_calc, _charge_id = _get_billing().calculate_and_record_fee(
                             quote_id,
                             estimated_price,
                             currency=currency,
@@ -8281,7 +8272,7 @@ def fulfillment_order(
             # from the quote_id we used for the initial charge.
             if result.order_id and result.order_id != quote_id:
                 try:
-                    _billing.record_charge(
+                    _get_billing().record_charge(
                         result.order_id,
                         fee_calc,
                         payment_id=pay_result.payment_id,
@@ -8512,10 +8503,10 @@ def kiln_health() -> dict:
     mins, secs = divmod(rem, 60)
 
     modules = {
-        "scheduler": _scheduler.is_running,
-        "webhooks": _webhook_mgr.is_running,
+        "scheduler": _get_scheduler().is_running,
+        "webhooks": _get_webhook_mgr().is_running,
         "persistence": True,
-        "auth_enabled": _auth.enabled,
+        "auth_enabled": _get_auth().enabled,
         "billing": True,
         "thingiverse": bool(_THINGIVERSE_TOKEN),
     }
@@ -8532,10 +8523,10 @@ def kiln_health() -> dict:
         "version": kiln.__version__,
         "uptime_seconds": int(uptime_secs),
         "uptime_human": f"{hours}h {mins}m {secs}s",
-        "printers_registered": _registry.count,
-        "queue_depth": _queue.total_count,
-        "scheduler_running": _scheduler.is_running,
-        "webhook_endpoints": len(_webhook_mgr.list_endpoints()),
+        "printers_registered": _get_registry().count,
+        "queue_depth": _get_queue().total_count,
+        "scheduler_running": _get_scheduler().is_running,
+        "webhook_endpoints": len(_get_webhook_mgr().list_endpoints()),
         "modules": modules,
         "healthy": True,
     }
@@ -8564,7 +8555,7 @@ def register_webhook(
     if err := _check_auth("admin"):
         return err
     try:
-        endpoint = _webhook_mgr.register(
+        endpoint = _get_webhook_mgr().register(
             url=url,
             events=events,
             secret=secret,
@@ -8591,7 +8582,7 @@ def list_webhooks() -> dict:
     delivery statistics.
     """
     try:
-        endpoints = _webhook_mgr.list_endpoints()
+        endpoints = _get_webhook_mgr().list_endpoints()
         return {
             "success": True,
             "endpoints": [
@@ -8624,7 +8615,7 @@ def delete_webhook(endpoint_id: str) -> dict:
     if err := _check_auth("admin"):
         return err
     try:
-        removed = _webhook_mgr.unregister(endpoint_id)
+        removed = _get_webhook_mgr().unregister(endpoint_id)
         if removed:
             return {
                 "success": True,
@@ -8685,7 +8676,7 @@ def await_print_completion(
             # --- Job-based tracking (via queue) ---
             if job_id is not None:
                 try:
-                    job = _queue.get_job(job_id)
+                    job = _get_queue().get_job(job_id)
                 except JobNotFoundError:
                     return _error_dict(f"Job {job_id!r} not found.", code="JOB_NOT_FOUND")
 
@@ -8804,7 +8795,7 @@ def compare_print_options(
     local_estimate = None
     local_error = None
     try:
-        estimate = _cost_estimator.estimate_from_file(
+        estimate = _get_cost_estimator().estimate_from_file(
             file_path,
             material=material,
             electricity_rate=electricity_rate,
@@ -8836,7 +8827,7 @@ def compare_print_options(
                     shipping_country=shipping_country,
                 )
             )
-            fee_calc = _billing.calculate_fee(
+            fee_calc = _get_billing().calculate_fee(
                 quote.total_price,
                 currency=quote.currency,
             )
@@ -8906,7 +8897,7 @@ def analyze_print_failure(job_id: str) -> dict:
     """
     try:
         try:
-            job = _queue.get_job(job_id)
+            job = _get_queue().get_job(job_id)
         except JobNotFoundError:
             return _error_dict(f"Job {job_id!r} not found.", code="JOB_NOT_FOUND")
 
@@ -8920,7 +8911,7 @@ def analyze_print_failure(job_id: str) -> dict:
             )
 
         # Gather related events for this job
-        all_events = _event_bus.recent_events(limit=200)
+        all_events = _get_event_bus().recent_events(limit=200)
         job_events = [e.to_dict() for e in all_events if e.data.get("job_id") == job_id]
 
         # Analyze symptoms
@@ -9027,12 +9018,12 @@ def validate_print_quality(
         target_job = None
         if job_id:
             try:
-                target_job = _queue.get_job(job_id)
+                target_job = _get_queue().get_job(job_id)
             except JobNotFoundError:
                 return _error_dict(f"Job {job_id!r} not found.", code="JOB_NOT_FOUND")
         else:
             # Find most recent completed job
-            recent = _queue.list_jobs(limit=20)
+            recent = _get_queue().list_jobs(limit=20)
             for j in recent:
                 if j.status == JobStatus.COMPLETED:
                     target_job = j
@@ -9047,7 +9038,7 @@ def validate_print_quality(
 
         # Gather adapter for snapshot
         if printer_name:
-            adapter = _registry.get(printer_name)
+            adapter = _get_registry().get(printer_name)
         else:
             try:
                 adapter = _get_adapter()
@@ -9084,7 +9075,7 @@ def validate_print_quality(
                 snapshot_info = {"available": False, "error": str(snap_exc)}
 
         # Gather related events
-        all_events = _event_bus.recent_events(limit=200)
+        all_events = _get_event_bus().recent_events(limit=200)
         job_events = [e.to_dict() for e in all_events if e.data.get("job_id") == target_job.id]
 
         # Analyse quality indicators
@@ -9173,8 +9164,8 @@ def resource_status() -> str:
 
     # Fleet
     printers: list[dict[str, Any]] = []
-    if _registry.count > 0:
-        printers = _registry.get_fleet_status()
+    if _get_registry().count > 0:
+        printers = _get_registry().get_fleet_status()
     elif _PRINTER_HOST:
         try:
             adapter = _get_adapter()
@@ -9191,10 +9182,10 @@ def resource_status() -> str:
             logger.debug("Failed to get default printer info for dashboard: %s", exc)
 
     # Queue
-    q_summary = _queue.summary()
+    q_summary = _get_queue().summary()
 
     # Events
-    events = _event_bus.recent_events(limit=10)
+    events = _get_event_bus().recent_events(limit=10)
 
     return json.dumps(
         {
@@ -9202,9 +9193,9 @@ def resource_status() -> str:
             "printer_count": len(printers),
             "queue": {
                 "counts": q_summary,
-                "pending": _queue.pending_count(),
-                "active": _queue.active_count(),
-                "total": _queue.total_count,
+                "pending": _get_queue().pending_count(),
+                "active": _get_queue().active_count(),
+                "total": _get_queue().total_count,
             },
             "recent_events": [e.to_dict() for e in events],
         },
@@ -9217,15 +9208,15 @@ def resource_printers() -> str:
     """Fleet status for all registered printers."""
     import json
 
-    if _registry.count == 0:
+    if _get_registry().count == 0:
         try:
             adapter = _get_adapter()
-            _registry.register("default", adapter)
+            _get_registry().register("default", adapter)
         except RuntimeError:
             pass
 
-    printers = _registry.get_fleet_status() if _registry.count > 0 else []
-    idle = _registry.get_idle_printers() if _registry.count > 0 else []
+    printers = _get_registry().get_fleet_status() if _get_registry().count > 0 else []
+    idle = _get_registry().get_idle_printers() if _get_registry().count > 0 else []
 
     return json.dumps(
         {
@@ -9243,7 +9234,7 @@ def resource_printer_detail(printer_name: str) -> str:
     import json
 
     try:
-        adapter = _registry.get(printer_name)
+        adapter = _get_registry().get(printer_name)
         state = adapter.get_state()
         job = adapter.get_job()
         caps = adapter.capabilities
@@ -9268,16 +9259,16 @@ def resource_queue() -> str:
     """Current job queue summary and recent jobs."""
     import json
 
-    summary = _queue.summary()
-    next_job = _queue.next_job()
-    recent = _queue.list_jobs(limit=20)
+    summary = _get_queue().summary()
+    next_job = _get_queue().next_job()
+    recent = _get_queue().list_jobs(limit=20)
 
     return json.dumps(
         {
             "counts": summary,
-            "pending": _queue.pending_count(),
-            "active": _queue.active_count(),
-            "total": _queue.total_count,
+            "pending": _get_queue().pending_count(),
+            "active": _get_queue().active_count(),
+            "total": _get_queue().total_count,
             "next_job": next_job.to_dict() if next_job else None,
             "recent_jobs": [j.to_dict() for j in recent],
         },
@@ -9291,7 +9282,7 @@ def resource_job_detail(job_id: str) -> str:
     import json
 
     try:
-        job = _queue.get_job(job_id)
+        job = _get_queue().get_job(job_id)
         return json.dumps({"job": job.to_dict()}, default=str)
     except JobNotFoundError:
         return json.dumps({"error": f"Job {job_id!r} not found"})
@@ -9302,7 +9293,7 @@ def resource_events() -> str:
     """Recent events from the Kiln event bus (last 50)."""
     import json
 
-    events = _event_bus.recent_events(limit=50)
+    events = _get_event_bus().recent_events(limit=50)
     return json.dumps(
         {
             "events": [e.to_dict() for e in events],
@@ -9942,7 +9933,7 @@ def generate_and_print(
             _build_vol = None
             try:
                 if printer_name:
-                    _adapter = _registry.get(printer_name)
+                    _adapter = _get_registry().get(printer_name)
                 else:
                     _adapter = _get_adapter()
                 _printer_info = _adapter.get_printer_info()
@@ -10001,7 +9992,7 @@ def generate_and_print(
 
         # Step 6: Upload (but do NOT auto-start — require explicit start_print)
         if printer_name:
-            adapter = _registry.get(printer_name)
+            adapter = _get_registry().get(printer_name)
         else:
             adapter = _get_adapter()
 
@@ -10045,7 +10036,7 @@ def generate_and_print(
                     code="PREFLIGHT_FAILED",
                 )
             print_result = adapter.start_print(file_name)
-            _heater_watchdog.notify_print_started()
+            _get_heater_watchdog().notify_print_started()
             print_data = print_result.to_dict()
             auto_printed = True
 
@@ -13540,7 +13531,7 @@ def monitor_print_vision(
     if err := _check_auth("monitoring"):
         return err
     try:
-        adapter = _registry.get(printer_name) if printer_name else _get_adapter()
+        adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
         state = adapter.get_state()
         job = adapter.get_job()
         is_printing = state.state == PrinterStatus.PRINTING
@@ -13647,7 +13638,7 @@ def monitor_print_vision(
             result["cost_estimate"] = cost_info
 
         # Publish vision check event
-        _event_bus.publish(
+        _get_event_bus().publish(
             EventType.VISION_CHECK,
             {
                 "printer_name": printer_name or "default",
@@ -13660,7 +13651,7 @@ def monitor_print_vision(
         )
 
         if auto_paused:
-            _event_bus.publish(
+            _get_event_bus().publish(
                 EventType.VISION_ALERT,
                 {
                     "printer_name": printer_name or "default",
@@ -13798,7 +13789,7 @@ class _PrintWatcher:
             self._outcome = result.get("outcome", "unknown")
         if self._event_bus is not None:
             try:
-                self._event_bus.publish(
+                self._get_event_bus().publish(
                     EventType.PRINT_TERMINAL,
                     {
                         "watch_id": self._watch_id,
@@ -13895,7 +13886,7 @@ class _PrintWatcher:
                         stall_duration = round(time.time() - _last_progress_time, 1)
                         if self._event_bus is not None:
                             try:
-                                self._event_bus.publish(
+                                self._get_event_bus().publish(
                                     EventType.VISION_ALERT,
                                     {
                                         "printer_name": self._printer_name,
@@ -13946,7 +13937,7 @@ class _PrintWatcher:
                 if state.state in (PrinterStatus.ERROR, PrinterStatus.OFFLINE):
                     if self._event_bus is not None:
                         try:
-                            self._event_bus.publish(
+                            self._get_event_bus().publish(
                                 EventType.VISION_ALERT,
                                 {
                                     "printer_name": self._printer_name,
@@ -14085,7 +14076,7 @@ class _PrintWatcher:
                                 self._snapshots.append(snap)
                             if self._event_bus is not None:
                                 try:
-                                    self._event_bus.publish(
+                                    self._get_event_bus().publish(
                                         EventType.VISION_CHECK,
                                         {
                                             "printer_name": self._printer_name,
@@ -14202,7 +14193,7 @@ def watch_print(
     if err := _check_auth("monitoring"):
         return err
     try:
-        adapter = _registry.get(printer_name) if printer_name else _get_adapter()
+        adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
 
         # Early exit: if printer is idle with no active job, don't start
         initial_state = adapter.get_state()
@@ -14227,7 +14218,7 @@ def watch_print(
             max_snapshots=max_snapshots,
             timeout=timeout,
             poll_interval=poll_interval,
-            event_bus=_event_bus,
+            event_bus=_get_event_bus(),
             stall_timeout=stall_timeout,
             save_to_disk=save_to_disk,
             cancel_at_percent=cancel_at_percent,
@@ -14357,7 +14348,7 @@ def start_monitored_print(
     if block := _emergency_latch_error("start_monitored_print", _resolve_effective_printer_name(printer_name)):
         return block
     try:
-        adapter = _registry.get(printer_name) if printer_name else _get_adapter()
+        adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
 
         # -- Automatic pre-flight safety gate (mandatory) --
         pf = preflight_check()
@@ -14379,7 +14370,7 @@ def start_monitored_print(
 
         # Start the print
         print_result = adapter.start_print(file_name)
-        _heater_watchdog.notify_print_started()
+        _get_heater_watchdog().notify_print_started()
         _audit("start_monitored_print", "print_started", details={"file": file_name})
 
         # Set up first-layer monitoring in background
@@ -15755,10 +15746,10 @@ def main() -> None:
 
     # Auto-register the env-configured printer so the scheduler can
     # dispatch jobs even if no explicit register_printer call is made.
-    if _PRINTER_HOST and _registry.count == 0:
+    if _PRINTER_HOST and _get_registry().count == 0:
         try:
             adapter = _get_adapter()
-            _registry.register("default", adapter)
+            _get_registry().register("default", adapter)
             logger.info("Auto-registered env-configured printer as 'default'")
         except Exception as exc:
             logger.debug(
@@ -15772,15 +15763,15 @@ def main() -> None:
         logger.info("Marketplace sources: %s", ", ".join(_marketplace_registry.connected))
 
     # Subscribe bed level manager to job events
-    _bed_level_mgr.subscribe_events()
+    _get_bed_level_mgr().subscribe_events()
 
     # Discover and activate third-party plugins (entry-point based)
-    _plugin_mgr.discover()
-    _plugin_mgr.activate_all(
+    _get_plugin_mgr().discover()
+    _get_plugin_mgr().activate_all(
         PluginContext(
-            event_bus=_event_bus,
-            registry=_registry,
-            queue=_queue,
+            event_bus=_get_event_bus(),
+            registry=_get_registry(),
+            queue=_get_queue(),
             mcp=mcp,
             db=get_db(),
         )
@@ -15809,7 +15800,7 @@ def main() -> None:
         try:
             _cloud_sync = CloudSyncManager(
                 db=get_db(),
-                event_bus=_event_bus,
+                event_bus=_get_event_bus(),
                 config=SyncConfig.from_dict(_json.loads(_saved_sync)),
             )
             _cloud_sync.start()
@@ -15834,10 +15825,24 @@ def main() -> None:
     except Exception:
         pass  # Never let telemetry failure affect startup
 
+    # Wire billing alert manager (lazy init on first access).
+    try:
+        _get_billing_alert_mgr()
+    except Exception:
+        logger.debug("Billing alert manager not initialized", exc_info=True)
+
+    # Start fulfillment order monitor if fulfillment is available.
+    try:
+        monitor = _get_fulfillment_monitor()
+        if monitor is not None:
+            monitor.start()
+    except Exception:
+        logger.debug("Fulfillment monitor not started", exc_info=True)
+
     # Start background services
-    _scheduler.start()
-    _webhook_mgr.start()
-    _heater_watchdog.start()
+    _get_scheduler().start()
+    _get_webhook_mgr().start()
+    _get_heater_watchdog().start()
     logger.info("Kiln scheduler, webhook delivery, and heater watchdog started")
 
     # Graceful shutdown handler
@@ -15847,10 +15852,10 @@ def main() -> None:
         except (ValueError, AttributeError):
             sig_name = f"signal {signum}"
         logger.info("Received %s — shutting down gracefully...", sig_name)
-        _scheduler.stop()
-        _webhook_mgr.stop()
-        _heater_watchdog.stop()
-        _stream_proxy.stop()
+        _get_scheduler().stop()
+        _get_webhook_mgr().stop()
+        _get_heater_watchdog().stop()
+        _get_stream_proxy().stop()
         if _cloud_sync is not None:
             _cloud_sync.stop()
         # Stop all active print watchers
@@ -15865,10 +15870,10 @@ def main() -> None:
     signal.signal(signal.SIGINT, _shutdown_handler)
 
     # Atexit as fallback
-    atexit.register(_scheduler.stop)
-    atexit.register(_webhook_mgr.stop)
-    atexit.register(_heater_watchdog.stop)
-    atexit.register(_stream_proxy.stop)
+    atexit.register(_get_scheduler().stop)
+    atexit.register(_get_webhook_mgr().stop)
+    atexit.register(_get_heater_watchdog().stop)
+    atexit.register(_get_stream_proxy().stop)
     if _cloud_sync is not None:
         atexit.register(_cloud_sync.stop)
 
@@ -17462,7 +17467,7 @@ def firmware_resume_print(
         return block
 
     try:
-        adapter = _registry.get(printer_name) if printer_name else _get_adapter()
+        adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
 
         # Verify this is an OctoPrint adapter (firmware resume is Marlin-specific)
         if adapter.name != "octoprint":
@@ -18095,7 +18100,7 @@ def print_status_lite(printer_name: str | None = None) -> dict:
         printer_name: Target printer.  Omit for the default printer.
     """
     try:
-        adapter = _registry.get(printer_name) if printer_name else _get_adapter()
+        adapter = _get_registry().get(printer_name) if printer_name else _get_adapter()
         state = adapter.get_state()
         job = adapter.get_job()
 
@@ -18359,7 +18364,7 @@ def printer_usage_summary() -> dict:
         from kiln.printer_billing import PrinterUsageBilling
 
         billing = PrinterUsageBilling()
-        active_count = _registry.count if _registry else 0
+        active_count = _get_registry().count
         usage = billing.usage_summary(active_count)
         estimate = billing.estimate_monthly_cost(active_count)
 
@@ -18554,7 +18559,7 @@ def report_printer_overage(
 
         # Auto-detect fleet size if not provided.
         if active_printer_count is None:
-            active_printer_count = _registry.count
+            active_printer_count = _get_registry().count
             if active_printer_count == 0:
                 return _error_dict(
                     "No printers registered in the fleet. Register printers first or pass active_printer_count explicitly.",
