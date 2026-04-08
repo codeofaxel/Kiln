@@ -170,27 +170,40 @@ _LIGHT_DIR: _Vec3 = _normalize((0.3, -0.6, 0.7))
 _AMBIENT = 0.45
 _DIFFUSE = 0.55
 
-# Rim light: faint edge glow so dark objects don't vanish against the
+# Rim light: edge glow so dark objects don't vanish against the
 # background.  Kicks in when the face normal is nearly perpendicular
-# to the camera direction (silhouette edges).
-_RIM_STRENGTH = 0.12
+# to the camera direction (silhouette edges).  Fresnel-inspired:
+# dark materials get stronger rim (physically: dark surfaces show
+# stronger relative edge reflection because there's less diffuse to
+# compete with).
+_RIM_BASE = 0.08
+_RIM_DARK_BOOST = 0.30  # extra rim for very dark faces
 
 
 def _compute_brightness(
     normal_cam: _Vec3,
     light_cam: _Vec3,
+    *,
+    face_luminance: float = 128.0,
 ) -> float:
-    """Compute brightness with ambient + directional diffuse + rim lighting.
+    """Compute brightness with ambient + directional diffuse + adaptive rim.
 
-    Rim light adds a subtle edge glow on silhouette faces so dark
-    materials remain visible against dark backgrounds.
+    Rim strength scales inversely with face luminance — dark materials
+    get a strong Fresnel-like edge glow while bright materials get
+    minimal rim (they already have contrast against the background).
+
+    :param face_luminance: Perceptual luminance of the face color (0-255).
     """
     ndl = _dot(normal_cam, light_cam)
     diffuse = max(0.0, ndl)
 
     # Rim: brighten faces whose normal is nearly perpendicular to
     # camera (view direction ≈ -Y in camera space → normal.y ≈ 0).
-    rim = (1.0 - abs(normal_cam[1])) ** 3 * _RIM_STRENGTH
+    rim_factor = (1.0 - abs(normal_cam[1])) ** 2.5
+    # Adaptive strength: dark faces (lum < 60) get much stronger rim
+    darkness = max(0.0, min(1.0, 1.0 - face_luminance / 120.0))
+    rim_strength = _RIM_BASE + _RIM_DARK_BOOST * darkness
+    rim = rim_factor * rim_strength
 
     return min(1.0, _AMBIENT + _DIFFUSE * diffuse + rim)
 
@@ -342,22 +355,49 @@ def render_colored_mesh(
             edge = tuple(sorted((verts[j], verts[(j + 1) % 3])))
             _edge_to_faces.setdefault(edge, []).append(i)  # type: ignore[arg-type]
 
-    # For each face, determine which of its 3 edges are color boundaries
-    _face_boundary_edges: dict[int, set[int]] = {}  # face_idx → set of edge vertex indices (0,1,2)
+    # Boundary edges are computed AFTER back-face culling (Pass 3)
+    # so that silhouette edges (neighbor culled) are NOT marked as
+    # color boundaries — they get the silhouette treatment instead.
+
+    # --- Pass 2b: Compute smooth normals for lighting --------------------
+    #
+    # Raw face normals cause visible faceting on curved surfaces (each
+    # triangle is a flat tile with uniform brightness).  Smooth normals
+    # average each face's normal with its same-color neighbors, giving
+    # a Gouraud-like gradual shading transition without per-pixel
+    # interpolation.  We still use the raw normal for back-face culling
+    # (must be exact) but use the smoothed normal for lighting only.
+
+    # Pre-compute all camera-space face normals
+    _raw_normals: list[_Vec3] = []
+    for i in range(n):
+        t0, t1, t2 = transformed[i]
+        _raw_normals.append(_face_normal(t0, t1, t2))
+
+    # Build neighbor sets (same-color faces sharing an edge)
+    _same_color_neighbors: dict[int, list[int]] = {}
     for i, tri in enumerate(triangles):
-        boundary: set[int] = set()
+        neighbors: list[int] = []
         verts = (tri.v0, tri.v1, tri.v2)
         for j in range(3):
             edge = tuple(sorted((verts[j], verts[(j + 1) % 3])))
-            neighbors = _edge_to_faces.get(edge, [])  # type: ignore[arg-type]
-            is_boundary = True
-            for ni in neighbors:
+            for ni in _edge_to_faces.get(edge, []):  # type: ignore[arg-type]
                 if ni != i and triangles[ni].color == tri.color:
-                    is_boundary = False
-                    break
-            if is_boundary:
-                boundary.add(j)
-        _face_boundary_edges[i] = boundary
+                    neighbors.append(ni)
+        _same_color_neighbors[i] = neighbors
+
+    # Smooth: average face normal with neighbors' normals
+    _smooth_normals: list[_Vec3] = []
+    for i in range(n):
+        nx, ny, nz = _raw_normals[i]
+        count = 1
+        for ni in _same_color_neighbors.get(i, []):
+            nn = _raw_normals[ni]
+            nx += nn[0]
+            ny += nn[1]
+            nz += nn[2]
+            count += 1
+        _smooth_normals.append(_normalize((nx / count, ny / count, nz / count)))
 
     # --- Pass 3: Compute per-face render data ---
 
@@ -373,18 +413,20 @@ def render_colored_mesh(
 
     unique_colors: set[tuple[int, int, int]] = set()
 
+    # Track which face indices survive culling for boundary detection
+    _visible_faces: set[int] = set()
+
     for i in range(n):
         t0, t1, t2 = transformed[i]
         tri = triangles[i]
 
-        # Face normal in camera space
-        normal = _face_normal(t0, t1, t2)
+        raw_normal = _raw_normals[i]
 
-        # Back-face culling: skip faces whose normal points away from camera.
-        # Camera looks along -Y in our coordinate system (after transforms),
-        # so faces with normal Y > threshold are facing away.
-        if normal[1] > 0.1:
+        # Back-face culling uses RAW normal (must be exact)
+        if raw_normal[1] > 0.1:
             continue
+
+        _visible_faces.add(i)
 
         # Depth for painter's algorithm (mean Y of the three vertices)
         depth = (t0[1] + t1[1] + t2[1]) / 3.0
@@ -398,13 +440,63 @@ def render_colored_mesh(
             for v in (t0, t1, t2)
         ]
 
-        # Lighting
-        brightness = _compute_brightness(normal, light_cam)
+        # Lighting uses SMOOTH normal for gradual shading on curves
+        smooth_normal = _smooth_normals[i]
+        face_lum = (tri.color[0] * 299 + tri.color[1] * 587 + tri.color[2] * 114) / 1000
+        brightness = _compute_brightness(smooth_normal, light_cam, face_luminance=face_lum)
         lit_color = _apply_brightness(tri.color, brightness)
-        outline_color = _darken(lit_color, factor=0.70)
+        # Neutral dark outline for color boundaries — a fixed dark gray
+        # prevents colored artifacts on curved surfaces where tinted
+        # outlines (green*0.7) create visible colored lines along zone
+        # transitions.  The color contrast between zones already
+        # communicates the boundary — the line just separates cleanly.
+        outline_color = (18, 18, 18)
 
         unique_colors.add(tri.color)
-        face_data.append((depth, pts, lit_color, outline_color, _face_boundary_edges.get(i, {0, 1, 2})))
+        face_data.append((depth, pts, lit_color, outline_color, set()))  # boundaries filled below
+
+    # --- Pass 3b: Compute color boundary edges (post-culling) ---
+    # Only mark an edge as a color boundary when BOTH adjacent faces
+    # are visible and have different colors.  Silhouette edges (neighbor
+    # culled or missing) are NOT boundaries — they get silhouette treatment.
+    _face_boundary_edges: dict[int, set[int]] = {}
+    for i in _visible_faces:
+        tri = triangles[i]
+        boundary: set[int] = set()
+        verts = (tri.v0, tri.v1, tri.v2)
+        for j in range(3):
+            edge = tuple(sorted((verts[j], verts[(j + 1) % 3])))
+            neighbors = _edge_to_faces.get(edge, [])  # type: ignore[arg-type]
+            has_visible_same_color = False
+            has_visible_diff_color = False
+            for ni in neighbors:
+                if ni == i:
+                    continue
+                if ni not in _visible_faces:
+                    continue  # culled neighbor — skip, not a boundary
+                if triangles[ni].color == tri.color:
+                    has_visible_same_color = True
+                else:
+                    has_visible_diff_color = True
+            # Mark as boundary ONLY if there's a visible neighbor with
+            # different color.  Same-color or no visible neighbor → no outline.
+            if has_visible_diff_color and not has_visible_same_color:
+                boundary.add(j)
+        _face_boundary_edges[i] = boundary
+
+    # Patch boundary sets into face_data (indexed by draw order)
+    _vis_list = sorted(_visible_faces)
+    _vis_to_draw: dict[int, int] = {}
+    draw_idx = 0
+    for i in range(n):
+        if i in _visible_faces:
+            _vis_to_draw[i] = draw_idx
+            draw_idx += 1
+    for i, boundary in _face_boundary_edges.items():
+        if boundary and i in _vis_to_draw:
+            di = _vis_to_draw[i]
+            old = face_data[di]
+            face_data[di] = (old[0], old[1], old[2], old[3], boundary)
 
     # --- Pass 4: Sort back-to-front and draw ---
 
@@ -416,6 +508,20 @@ def render_colored_mesh(
     img = Image.new("RGB", (rw, rh), background)
     draw = ImageDraw.Draw(img)
 
+    # --- Gradient background: vertical gradient for spatial context.
+    # Top is slightly darker, bottom lighter — simulates ambient
+    # environment light and a ground plane so objects don't float
+    # in a featureless void.
+    bg_r, bg_g, bg_b = background
+    for row in range(rh):
+        t = row / max(1, rh - 1)  # 0=top, 1=bottom
+        # Full gradient: top darkened by -8, bottom lifted by +30
+        shift = int(-8 + 38 * t)
+        lr = max(0, min(255, bg_r + shift))
+        lg = max(0, min(255, bg_g + shift))
+        lb = max(0, min(255, bg_b + shift))
+        draw.line([(0, row), (rw, row)], fill=(lr, lg, lb))
+
     for _depth, pts, fill, outline, boundary_edges in face_data:
         # Fill the polygon without any outline — clean fill only
         draw.polygon(pts, fill=fill)
@@ -426,6 +532,49 @@ def render_colored_mesh(
             p0 = pts[edge_idx]
             p1 = pts[(edge_idx + 1) % 3]
             draw.line([p0, p1], fill=outline, width=1)
+
+    # --- Adaptive silhouette contour ---
+    # Draw a subtle edge around the object outline so dark materials
+    # remain visible against the background.  The edge is ADAPTIVE:
+    # strong on dark faces (which need contrast), invisible on bright
+    # faces (which already pop against the background).
+    #
+    # Detect silhouette edges: edges belonging to only ONE visible
+    # face (boundary between drawn face and culled/missing face).
+    _edge_info: dict[
+        tuple[tuple[int, int], tuple[int, int]],
+        list[tuple[int, int, int]],  # lit fill colors of adjacent visible faces
+    ] = {}
+    for _depth, pts, fill, _outline, _be in face_data:
+        for ei in range(3):
+            p0 = pts[ei]
+            p1 = pts[(ei + 1) % 3]
+            edge_key = (min(p0, p1), max(p0, p1))
+            _edge_info.setdefault(edge_key, []).append(fill)
+
+    for edge_key, fills in _edge_info.items():
+        if len(fills) != 1:
+            continue  # interior edge, skip
+        # Silhouette edge — compute adaptive brightness.
+        # Dark faces get a strong contour, bright faces get none.
+        face_lum = (fills[0][0] * 299 + fills[0][1] * 587 + fills[0][2] * 114) / 1000
+        # Only draw contour if face is darker than the background
+        bg_lum = (bg_r * 299 + bg_g * 587 + bg_b * 114) / 1000
+        if face_lum > bg_lum + 30:
+            continue  # bright face — already has contrast, skip
+        # Strength: max for very dark faces, fading as face approaches bg
+        strength = max(0.0, min(1.0, 1.0 - (face_lum / max(1, bg_lum + 40))))
+        lift = int(50 * strength)
+        if lift < 5:
+            continue
+        sc = (
+            min(255, bg_r + lift + 20),
+            min(255, bg_g + lift + 20),
+            min(255, bg_b + lift + 20),
+        )
+        # Width scales with supersample factor so the contour survives
+        # LANCZOS downsampling (1px at 2x → invisible 0.5px otherwise)
+        draw.line([edge_key[0], edge_key[1]], fill=sc, width=max(1, ss))
 
     # --- Downsample if supersampled ---
 
