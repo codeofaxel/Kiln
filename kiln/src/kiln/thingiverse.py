@@ -357,7 +357,11 @@ class ThingiverseClient:
                 status_code=None,
             )
 
-        name = file_name or meta.get("name", f"file_{file_id}")
+        raw_name = file_name or meta.get("name", f"file_{file_id}")
+        # Sanitize: strip directory components to prevent path traversal
+        name = os.path.basename(raw_name)
+        if not name or name in {".", ".."}:
+            name = f"file_{file_id}"
         dest = Path(dest_dir)
         out_path = dest / name
 

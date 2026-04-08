@@ -36,6 +36,35 @@ from kiln.webhooks import DeliveryRecord, WebhookEndpoint, WebhookManager, _mask
 # Helpers
 # ---------------------------------------------------------------------------
 
+_POLL_INTERVAL = 0.005  # 5 ms between polls
+_POLL_TIMEOUT = 3.0  # generous upper bound for CI
+
+
+def _wait_for(predicate, *, timeout: float = _POLL_TIMEOUT, interval: float = _POLL_INTERVAL) -> None:
+    """Block until *predicate()* returns True, or raise on timeout.
+
+    Replaces flaky ``time.sleep(0.2)`` calls with deterministic polling.
+    """
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() > deadline:
+            raise AssertionError(
+                f"_wait_for timed out after {timeout}s waiting for predicate"
+            )
+        time.sleep(interval)
+
+
+def _wait_for_queue_drain(manager: WebhookManager, *, timeout: float = _POLL_TIMEOUT) -> None:
+    """Wait until the manager's delivery queue is empty and processed.
+
+    Useful for 'nothing should happen' assertions -- after the queue is
+    drained we know the background thread has had a chance to process
+    everything that was enqueued.
+    """
+    _wait_for(lambda: manager._delivery_queue.empty(), timeout=timeout)
+    # Give the worker one more cycle to finish any in-flight delivery.
+    time.sleep(0.02)
+
 
 @pytest.fixture(autouse=True)
 def _bypass_url_validation(monkeypatch):
@@ -275,7 +304,7 @@ class TestEventFiltering:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED, data={"job": "1"}))
-            time.sleep(0.2)
+            _wait_for(lambda: sender.call_count >= 1)
             assert sender.call_count == 1
         finally:
             mgr.stop()
@@ -291,7 +320,7 @@ class TestEventFiltering:
 
         try:
             bus.publish(Event(type=EventType.JOB_FAILED, data={"job": "1"}))
-            time.sleep(0.2)
+            _wait_for_queue_drain(mgr)
             assert sender.call_count == 0
         finally:
             mgr.stop()
@@ -309,7 +338,7 @@ class TestEventFiltering:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
             bus.publish(Event(type=EventType.JOB_FAILED))
             bus.publish(Event(type=EventType.PRINT_STARTED))
-            time.sleep(0.3)
+            _wait_for(lambda: sender.call_count >= 3)
             assert sender.call_count == 3
         finally:
             mgr.stop()
@@ -326,7 +355,7 @@ class TestEventFiltering:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.2)
+            _wait_for(lambda: sender.call_count >= 2)
             # Both endpoints match job.completed
             assert sender.call_count == 2
         finally:
@@ -366,7 +395,7 @@ class TestHMACSignature:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED, data={"x": 1}))
-            time.sleep(0.2)
+            _wait_for(lambda: sender.call_count >= 1)
 
             assert sender.call_count == 1
             _url, payload, headers, _timeout = sender.call_args[0]
@@ -392,7 +421,7 @@ class TestHMACSignature:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.2)
+            _wait_for(lambda: sender.call_count >= 1)
 
             assert sender.call_count == 1
             _url, _payload, headers, _timeout = sender.call_args[0]
@@ -419,7 +448,7 @@ class TestDeliveryRetries:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.2)
+            _wait_for(lambda: sender.call_count >= 1)
             assert sender.call_count == 1
 
             records = mgr.recent_deliveries()
@@ -441,7 +470,7 @@ class TestDeliveryRetries:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.3)
+            _wait_for(lambda: sender.call_count >= 3)
             assert sender.call_count == 3
 
             records = mgr.recent_deliveries()
@@ -463,7 +492,7 @@ class TestDeliveryRetries:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.3)
+            _wait_for(lambda: sender.call_count >= 3)
             assert sender.call_count == 3
 
             records = mgr.recent_deliveries()
@@ -487,7 +516,7 @@ class TestDeliveryRetries:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.3)
+            _wait_for(lambda: sender.call_count >= 3)
             assert sender.call_count == 3
 
             records = mgr.recent_deliveries()
@@ -508,7 +537,7 @@ class TestDeliveryRetries:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.2)
+            _wait_for(lambda: sender.call_count >= 2)
             assert sender.call_count == 2
 
             records = mgr.recent_deliveries()
@@ -529,7 +558,7 @@ class TestDeliveryRetries:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.2)
+            _wait_for(lambda: sender.call_count >= 2)
             assert sender.call_count == 2
 
             records = mgr.recent_deliveries()
@@ -591,7 +620,9 @@ class TestStartStopLifecycle:
         mgr.stop()
 
         bus.publish(Event(type=EventType.JOB_COMPLETED))
-        time.sleep(0.2)
+        # Manager is stopped; queue won't be processed. Brief pause to
+        # confirm nothing sneaks through.
+        time.sleep(0.05)
         assert sender.call_count == 0
 
     def test_restart_works(self):
@@ -604,14 +635,14 @@ class TestStartStopLifecycle:
 
         mgr.start()
         bus.publish(Event(type=EventType.JOB_COMPLETED))
-        time.sleep(0.2)
+        _wait_for(lambda: sender.call_count >= 1)
         mgr.stop()
 
         assert sender.call_count == 1
 
         mgr.start()
         bus.publish(Event(type=EventType.JOB_COMPLETED))
-        time.sleep(0.2)
+        _wait_for(lambda: sender.call_count >= 2)
         mgr.stop()
 
         assert sender.call_count == 2
@@ -639,7 +670,7 @@ class TestDeliveryHistory:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.2)
+            _wait_for(lambda: sender.call_count >= 1)
 
             records = mgr.recent_deliveries()
             assert len(records) == 1
@@ -661,9 +692,9 @@ class TestDeliveryHistory:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.1)
+            _wait_for(lambda: sender.call_count >= 1)
             bus.publish(Event(type=EventType.JOB_FAILED))
-            time.sleep(0.2)
+            _wait_for(lambda: sender.call_count >= 2)
 
             records = mgr.recent_deliveries()
             assert len(records) == 2
@@ -685,7 +716,7 @@ class TestDeliveryHistory:
         try:
             for _ in range(5):
                 bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.5)
+            _wait_for(lambda: sender.call_count >= 5)
 
             records = mgr.recent_deliveries(limit=2)
             assert len(records) == 2
@@ -734,7 +765,7 @@ class TestInactiveEndpoints:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.2)
+            _wait_for_queue_drain(mgr)
             assert sender.call_count == 0
         finally:
             mgr.stop()
@@ -752,7 +783,7 @@ class TestInactiveEndpoints:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.2)
+            _wait_for(lambda: sender.call_count >= 1)
             assert sender.call_count == 1
             called_url = sender.call_args[0][0]
             assert called_url == "https://active.com"
@@ -878,7 +909,7 @@ class TestPayloadCorrectness:
                 source="test",
             )
             bus.publish(event)
-            time.sleep(0.2)
+            _wait_for(lambda: sender.call_count >= 1)
 
             assert sender.call_count == 1
             _url, payload_str, _headers, _timeout = sender.call_args[0]
@@ -902,7 +933,7 @@ class TestPayloadCorrectness:
 
         try:
             bus.publish(Event(type=EventType.JOB_COMPLETED))
-            time.sleep(0.2)
+            _wait_for(lambda: sender.call_count >= 1)
 
             _url, _payload, headers, _timeout = sender.call_args[0]
             assert headers["Content-Type"] == "application/json"

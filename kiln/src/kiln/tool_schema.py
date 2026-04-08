@@ -26,8 +26,6 @@ import typing
 from collections.abc import Callable
 from typing import Any, Union
 
-from kiln.tool_tiers import TIERS, get_tier
-
 # ---------------------------------------------------------------------------
 # Internal registry (lazily populated)
 # ---------------------------------------------------------------------------
@@ -343,6 +341,8 @@ def get_all_tool_schemas(tier: str = "full") -> list[dict]:
         # Bypass the allowlist — return schemas for every registered tool.
         return list(_SCHEMA_CACHE.values())
 
+    from kiln.tool_tiers import get_tier
+
     tool_names = get_tier(tier)
     schemas = []
     for name in tool_names:
@@ -363,6 +363,8 @@ def get_all_registered_tool_names() -> list[str]:
 
 def _find_tier_for_tool(name: str) -> str | None:
     """Return the lowest tier that contains *name*, or ``None``."""
+    from kiln.tool_tiers import TIERS
+
     for tier_name in ("essential", "standard", "full"):
         if name in TIERS.get(tier_name, []):
             return tier_name
@@ -375,6 +377,8 @@ def _suggest_alternatives(name: str, current_tier: str) -> list[str]:
     Uses simple keyword overlap on tool names (split on ``_``) to find
     tools in the agent's tier that serve a similar purpose.
     """
+    from kiln.tool_tiers import TIERS
+
     keywords = set(name.split("_"))
     tier_tools = TIERS.get(current_tier, [])
     scored = []

@@ -2777,9 +2777,7 @@ class BambuAdapter(PrinterAdapter):
                 "Neither is available. Install ffmpeg if using an X1 printer."
             )
 
-        stream_url = self.get_stream_url()
-        if not stream_url:
-            return None
+        stream_url = self._raw_stream_url()
 
         try:
             result = subprocess.run(
@@ -2814,14 +2812,22 @@ class BambuAdapter(PrinterAdapter):
                 "Retry with `get_snapshot()`.",
             ) from exc
 
+    def _raw_stream_url(self) -> str:
+        """Return the real RTSPS URL with embedded credentials (internal use only)."""
+        return f"rtsps://bblp:{self._access_code}@{self._host}:322/streaming/live/1"
+
     def get_stream_url(self) -> str | None:
         """Return the RTSPS stream URL for X1 series printers.
 
         X1C/X1 printers expose an RTSP stream at port 322.  A1/P1
         printers use port 6000 with a proprietary JPEG protocol instead
         (handled by :meth:`_capture_jpeg_frame`).
+
+        The access code is masked so the URL is safe for logging and
+        tool responses.  Internal methods that need the real credential
+        call :meth:`_raw_stream_url` directly.
         """
-        return f"rtsps://bblp:{self._access_code}@{self._host}:322/streaming/live/1"
+        return f"rtsps://bblp:****@{self._host}:322/streaming/live/1"
 
     # ------------------------------------------------------------------
     # Cleanup

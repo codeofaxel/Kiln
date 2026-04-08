@@ -180,7 +180,11 @@ class MyMiniFactoryAdapter(MarketplaceAdapter):
                 f"No download URL for file {file_id}.  MyMiniFactory may require OAuth2 authentication for downloads.",
             )
 
-        name = file_name or meta.get("filename", f"file_{file_id}")
+        raw_name = file_name or meta.get("filename", f"file_{file_id}")
+        # Sanitize: strip directory components to prevent path traversal
+        name = os.path.basename(raw_name)
+        if not name or name in {".", ".."}:
+            name = f"file_{file_id}"
         dest = Path(dest_dir)
         out_path = dest / name
 
