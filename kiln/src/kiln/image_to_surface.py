@@ -9,12 +9,15 @@ PGM P5 (binary Portable Gray Map) is the format OpenSCAD's surface() reads.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import re
 import struct
 import subprocess
 import zlib
 from pathlib import Path
+
+_logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # PNG pure-Python decoder (RGB, RGBA, Gray, Gray+Alpha, filter types 0-4)
@@ -201,40 +204,43 @@ def _load_image_as_grayscale(image_path: str) -> tuple[list[list[int]], int, int
     if ext in (".jpg", ".jpeg"):
         import tempfile
 
-        tmp_png = os.path.join(tempfile.gettempdir(), "_kiln_jpeg_conv.png")
+        fd, tmp_png = tempfile.mkstemp(suffix=".png", prefix="kiln_jpeg_")
+        os.close(fd)
 
-        # Try macOS sips
         try:
-            subprocess.run(
-                ["sips", "-s", "format", "png", abs_path, "--out", tmp_png],
-                check=True,
-                capture_output=True,
-                timeout=30,
-            )
-            result = _read_png_pixels(tmp_png)
-            os.unlink(tmp_png)
-            return result
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            pass
+            # Try macOS sips
+            try:
+                subprocess.run(
+                    ["sips", "-s", "format", "png", abs_path, "--out", tmp_png],
+                    check=True,
+                    capture_output=True,
+                    timeout=30,
+                )
+                result = _read_png_pixels(tmp_png)
+                return result
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                pass
 
-        # Try ImageMagick convert
-        try:
-            subprocess.run(
-                ["convert", abs_path, tmp_png],
-                check=True,
-                capture_output=True,
-                timeout=30,
-            )
-            result = _read_png_pixels(tmp_png)
-            os.unlink(tmp_png)
-            return result
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            pass
+            # Try ImageMagick convert
+            try:
+                subprocess.run(
+                    ["convert", abs_path, tmp_png],
+                    check=True,
+                    capture_output=True,
+                    timeout=30,
+                )
+                result = _read_png_pixels(tmp_png)
+                return result
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                pass
 
-        raise RuntimeError(
-            "Cannot decode JPEG without Pillow, macOS sips, or ImageMagick. "
-            "Install Pillow: pip install Pillow"
-        )
+            raise RuntimeError(
+                "Cannot decode JPEG without Pillow, macOS sips, or ImageMagick. "
+                "Install Pillow: pip install Pillow"
+            )
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_png)
 
     raise ValueError(f"Unsupported image format: {ext}")
 
@@ -390,7 +396,10 @@ def prepare_image_for_emboss(
             image_path = preprocessed
             edge_enhance = False  # don't edge enhance posterized images
         except ImportError:
-            pass  # fall through to default if no PIL
+            _logger.warning(
+                "Style 'photo' requires Pillow. Install with: pip install pillow. "
+                "Falling back to default processing."
+            )
 
     elif style == "stencil":
         # Bold binary silhouette — high contrast, two levels only.
@@ -407,7 +416,10 @@ def prepare_image_for_emboss(
             image_path = preprocessed
             edge_enhance = False
         except ImportError:
-            pass
+            _logger.warning(
+                "Style 'stencil' requires Pillow. Install with: pip install pillow. "
+                "Falling back to default processing."
+            )
 
     elif style == "lithophane":
         # Full grayscale gradient — for backlit/translucent prints.
@@ -425,7 +437,10 @@ def prepare_image_for_emboss(
             edge_enhance = False
             invert = True  # lithophanes: thin = bright
         except ImportError:
-            pass
+            _logger.warning(
+                "Style 'lithophane' requires Pillow. Install with: pip install pillow. "
+                "Falling back to default processing."
+            )
 
     elif style == "coin":
         # PROVEN pipeline (v11 Ash coaster, 2026-04-02):
@@ -515,7 +530,10 @@ def prepare_image_for_emboss(
             image_path = preprocessed
             edge_enhance = False
         except ImportError:
-            pass
+            _logger.warning(
+                "Style 'coin' requires Pillow. Install with: pip install pillow. "
+                "Falling back to default processing."
+            )
 
     elif style == "portrait":
         # Edge-detected portrait: equalize + edge detection + dilation.
@@ -563,7 +581,10 @@ def prepare_image_for_emboss(
             image_path = preprocessed
             edge_enhance = False
         except ImportError:
-            pass
+            _logger.warning(
+                "Style 'portrait' requires Pillow. Install with: pip install pillow. "
+                "Falling back to default processing."
+            )
 
     elif style == "composite":
         # Hybrid: posterized base (volume) + edge overlay (definition).
@@ -603,7 +624,10 @@ def prepare_image_for_emboss(
             image_path = preprocessed
             edge_enhance = False
         except ImportError:
-            pass
+            _logger.warning(
+                "Style 'composite' requires Pillow. Install with: pip install pillow. "
+                "Falling back to default processing."
+            )
 
     elif style == "medallion":
         # Coin with raised border ring — like a commemorative medal.
@@ -663,7 +687,10 @@ def prepare_image_for_emboss(
             image_path = preprocessed
             edge_enhance = False
         except ImportError:
-            pass
+            _logger.warning(
+                "Style 'medallion' requires Pillow. Install with: pip install pillow. "
+                "Falling back to default processing."
+            )
 
     # style == "default" — no preprocessing, use existing behavior
 
