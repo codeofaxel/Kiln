@@ -1018,7 +1018,7 @@ _TOOL_RATE_LIMITS: dict[str, tuple[int, int]] = {
     "upload_file": (2000, 10),
     "pause_print": (5000, 6),
     "resume_print": (5000, 6),
-    "run_calibration": (10000, 2),
+    "calibrate_direct": (10000, 2),
 }
 
 
@@ -2778,12 +2778,12 @@ def cancel_print() -> dict:
         return _error_dict(f"Unexpected error in cancel_print: {exc}", code="INTERNAL_ERROR")
 
 
-@mcp.tool()
+@mcp.tool(name="calibrate_direct")
 def run_calibration(options: list[str] | None = None) -> dict:
-    """Send calibration commands directly to the printer (adapter-level, specific options).
+    """Send calibration commands directly to the printer adapter.
 
     For a full guided calibration pipeline (home + bed level + intelligence
-    guidance), use ``run_calibrate`` instead. Sends calibration commands via
+    guidance), use ``run_calibrate`` instead. This tool sends raw calibration commands via
     MQTT (Bambu) or G-code (OctoPrint/Moonraker) automatically. The printer
     must be idle — calibration cannot run during a print.
 
@@ -2801,7 +2801,7 @@ def run_calibration(options: list[str] | None = None) -> dict:
     """
     if err := _check_auth("print"):
         return err
-    if err := _check_rate_limit("run_calibration"):
+    if err := _check_rate_limit("calibrate_direct"):
         return err
     try:
         adapter = _get_adapter()
@@ -15028,7 +15028,7 @@ def run_calibrate(
 ) -> dict:
     """Full calibration pipeline: home + bed level + printer-specific guidance (recommended).
 
-    Higher-level than ``run_calibration`` — orchestrates the full sequence and
+    Higher-level than ``calibrate_direct`` — orchestrates the full sequence and
     returns intelligence-based calibration tips. Performs physical calibration
     steps (homing, auto bed leveling) and returns printer-specific calibration
     guidance from the intelligence database.
