@@ -253,16 +253,7 @@ from kiln.printers import (
 )
 from kiln.queue import JobNotFoundError, JobStatus, PrintQueue
 from kiln.registry import PrinterNotFoundError, PrinterRegistry
-from kiln.safety_profiles import (
-    add_community_profile,
-    get_profile,
-    list_profiles,
-    profile_to_dict,
-    validate_safety_profile,
-)
-from kiln.safety_profiles import (
-    export_profile as _export_profile,
-)
+from kiln.safety_profiles import export_profile as _export_profile
 from kiln.scheduler import JobScheduler
 from kiln.slicer_profiles import (
     get_slicer_profile,
@@ -4302,42 +4293,7 @@ def send_gcode(commands: str, dry_run: bool = False) -> dict:
 
 # validate_gcode — moved to plugins/gcode_validation_tools.py
 
-# ---------------------------------------------------------------------------
-# Safety audit tool
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def safety_audit(
-    action: str | None = None,
-    tool_name: str | None = None,
-    limit: int = 25,
-) -> dict:
-    """Query the safety audit log.
-
-    Returns a record of all safety-relevant operations: tool executions,
-    blocked attempts, rate-limit violations, and preflight failures.
-
-    Args:
-        action: Filter by action type.  Options: ``"executed"``,
-            ``"blocked"``, ``"rate_limited"``, ``"auth_denied"``,
-            ``"preflight_failed"``, ``"dry_run"``.  Omit for all.
-        tool_name: Filter by MCP tool name (e.g. ``"send_gcode"``).
-        limit: Maximum number of records to return (default 25, max 100).
-    """
-    limit = min(max(1, limit), 100)
-    try:
-        db = get_db()
-        entries = db.query_audit(action=action, tool_name=tool_name, limit=limit)
-        summary = db.audit_summary()
-        return {
-            "success": True,
-            "entries": entries,
-            "summary": summary,
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in safety_audit")
-        return _error_dict(f"Unexpected error in safety_audit: {exc}", code="INTERNAL_ERROR")
+# safety_audit — moved to plugins/safety_tools.py
 
 
 @mcp.tool()
@@ -4430,94 +4386,7 @@ def confirm_action(token: str) -> dict:
         _CONFIRM_MODE = saved
 
 
-# ---------------------------------------------------------------------------
-# Safety dashboard tool
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def safety_status() -> dict:
-    """Get a comprehensive snapshot of all active safety measures.
-
-    Returns a single summary showing: the active safety profile, temperature
-    limits, rate-limit configuration, recent blocked actions, authentication
-    status, and confirmation-mode status.  Use this to answer "is my printer
-    safe right now?" in a single call.
-    """
-    try:
-        # Active safety profile
-        profile_info: dict[str, Any] = {"printer_model": _PRINTER_MODEL or "not configured"}
-        max_tool, max_bed = _get_temp_limits()
-        profile_info["max_hotend_temp"] = max_tool
-        profile_info["max_bed_temp"] = max_bed
-        if _PRINTER_MODEL:
-            try:
-                profile = get_profile(_PRINTER_MODEL)
-                profile_info["profile_id"] = profile.id
-                profile_info["display_name"] = profile.display_name
-                profile_info["max_feedrate"] = profile.max_feedrate
-                if profile.build_volume:
-                    profile_info["build_volume"] = profile.build_volume
-            except KeyError:
-                profile_info["profile_id"] = "default (no specific profile found)"
-
-        # Rate limit configuration
-        rate_limits = {}
-        for tool_name, (interval_ms, per_min) in _TOOL_RATE_LIMITS.items():
-            rate_limits[tool_name] = f"{interval_ms}ms cooldown, {per_min}/min"
-
-        # Confirm-level tools (from tool_safety.json)
-        confirm_tools = sorted(
-            name for name, meta in _TOOL_SAFETY.items() if meta.get("level") in ("confirm", "emergency")
-        )
-
-        # Auth status
-        auth_info = {
-            "enabled": _get_auth().enabled if hasattr(_get_auth(), "enabled") else False,
-        }
-
-        # Confirm mode
-        confirm_mode = os.environ.get("KILN_CONFIRM_MODE", "").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-
-        # Recent blocked actions (from audit log)
-        recent_blocked: list[dict[str, Any]] = []
-        try:
-            db = get_db()
-            summary = db.audit_summary(window_seconds=3600.0)
-            recent_blocked = summary.get("recent_blocked", [])
-        except Exception as exc:
-            logger.debug("Failed to fetch audit summary for safety status: %s", exc)
-
-        # G-code blocked command list
-        from kiln.gcode import _BLOCKED_COMMANDS  # noqa: E402
-
-        blocked_gcode_commands = sorted(_BLOCKED_COMMANDS.keys())
-
-        return {
-            "success": True,
-            "safety_profile": profile_info,
-            "temperature_limits": {"max_hotend": max_tool, "max_bed": max_bed},
-            "rate_limits": rate_limits,
-            "confirm_level_tools": confirm_tools,
-            "auth": auth_info,
-            "confirm_mode_enabled": confirm_mode,
-            "blocked_gcode_commands": blocked_gcode_commands,
-            "recent_blocked_actions": recent_blocked,
-            "summary": (
-                f"Safety profile: {profile_info.get('display_name', _PRINTER_MODEL or 'default')}. "
-                f"Temp limits: {max_tool}°C hotend / {max_bed}°C bed. "
-                f"{len(rate_limits)} rate-limited tools. "
-                f"{len(confirm_tools)} confirm-level tools. "
-                f"{len(recent_blocked)} blocked action(s) in last hour."
-            ),
-        }
-    except Exception as exc:
-        logger.exception("Unexpected error in safety_status")
-        return _error_dict(f"Unexpected error in safety_status: {exc}", code="INTERNAL_ERROR")
+# safety_status — moved to plugins/safety_tools.py
 
 
 # ---------------------------------------------------------------------------
@@ -5375,53 +5244,7 @@ def restart_server() -> dict:
     }
 
 
-@mcp.tool()
-def safety_settings() -> dict:
-    """Show current safety and auto-print settings.
-
-    Displays whether auto-print is enabled for marketplace downloads
-    and AI-generated models, along with guidance on how to change them.
-    Call this early in a session to understand what safety protections
-    are active.
-    """
-    return {
-        "success": True,
-        "auto_print_marketplace": {
-            "enabled": _AUTO_PRINT_MARKETPLACE,
-            "env_var": "KILN_AUTO_PRINT_MARKETPLACE",
-            "risk_level": "moderate",
-            "description": (
-                "When enabled, marketplace models are auto-printed after "
-                "download+upload. When disabled (default), models are "
-                "uploaded but require explicit start_print call."
-            ),
-        },
-        "auto_print_generated": {
-            "enabled": _AUTO_PRINT_GENERATED,
-            "env_var": "KILN_AUTO_PRINT_GENERATED",
-            "risk_level": "high",
-            "description": (
-                "When enabled, AI-generated models are auto-printed after "
-                "generation+validation+slicing+upload. When disabled "
-                "(default), models are uploaded but require explicit "
-                "start_print call. Higher risk than marketplace models."
-            ),
-        },
-        "recommendations": [
-            "Prefer downloading proven community models over generating new ones.",
-            "Always validate meshes before printing (validate_generated_mesh).",
-            "Review model dimensions against your printer's build volume.",
-            "Keep auto-print disabled unless you understand the risks.",
-            "AI model generation is experimental — generated geometry may "
-            "have thin walls, non-manifold faces, or impossible overhangs.",
-        ],
-        "how_to_change": (
-            "Set environment variables before starting the MCP server:\n"
-            "  export KILN_AUTO_PRINT_MARKETPLACE=true   # moderate risk\n"
-            "  export KILN_AUTO_PRINT_GENERATED=true     # higher risk\n"
-            "Or run 'kiln setup' to configure interactively."
-        ),
-    }
+# safety_settings — moved to plugins/safety_tools.py
 
 
 @mcp.tool()
@@ -12010,110 +11833,7 @@ def first_layer_status(monitor_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------------------
-# Safety profile tools
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-def list_safety_profiles() -> dict:
-    """List all available printer safety profiles.
-
-    Returns a list of profile IDs and display names from the bundled
-    safety database.  Use with ``get_safety_profile`` to inspect limits
-    for a specific printer, or ``validate_gcode_safe`` to validate
-    commands against a printer's limits.
-    """
-    if err := _check_auth("safety"):
-        return err
-    try:
-        ids = list_profiles()
-        profiles = []
-        for pid in ids:
-            try:
-                p = get_profile(pid)
-                profiles.append(
-                    {
-                        "id": p.id,
-                        "display_name": p.display_name,
-                        "max_hotend_temp": p.max_hotend_temp,
-                        "max_bed_temp": p.max_bed_temp,
-                    }
-                )
-            except KeyError:
-                continue
-        return {"success": True, "count": len(profiles), "profiles": profiles}
-    except Exception as exc:
-        logger.exception("Unexpected error in list_safety_profiles")
-        return _error_dict(f"Unexpected error in list_safety_profiles: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-def get_safety_profile(printer_id: str) -> dict:
-    """Get the full safety profile for a specific printer model.
-
-    Returns temperature limits, feedrate limits, volumetric flow,
-    build volume, and safety notes.  Falls back to the default
-    profile if the printer_id is not found.
-
-    Args:
-        printer_id: Printer model identifier (e.g. ``"ender3"``,
-            ``"bambu_x1c"``, ``"prusa_mk4"``).
-    """
-    if err := _check_auth("safety"):
-        return err
-    try:
-        profile = get_profile(printer_id)
-        return {"success": True, "profile": profile_to_dict(profile)}
-    except KeyError:
-        return _error_dict(
-            f"No safety profile for '{printer_id}' and no default available.",
-            code="NOT_FOUND",
-        )
-    except Exception as exc:
-        logger.exception("Unexpected error in get_safety_profile")
-        return _error_dict(f"Unexpected error in get_safety_profile: {exc}", code="INTERNAL_ERROR")
-
-
-@mcp.tool()
-@requires_tier(LicenseTier.BUSINESS)
-def add_safety_profile(printer_model: str, profile: dict) -> dict:
-    """Add a community safety profile for a printer model.
-
-    Validates the profile and saves it to the user-local community
-    profiles file (``~/.kiln/community_profiles.json``).  Community
-    profiles take precedence over bundled profiles, allowing users to
-    contribute limits for printers not in the built-in database.
-
-    Args:
-        printer_model: Short identifier for the printer (e.g.
-            ``"my_custom_corexy"``).
-        profile: Dict containing at least ``max_hotend_temp``,
-            ``max_bed_temp``, ``max_feedrate``, and ``build_volume``
-            (a list of 3 positive numbers ``[X, Y, Z]``).  Optional
-            fields: ``display_name``, ``max_chamber_temp``, ``min_safe_z``,
-            ``max_volumetric_flow``, ``notes``.
-    """
-    if err := _check_auth("safety"):
-        return err
-    try:
-        errors = validate_safety_profile(profile)
-        if errors:
-            return _error_dict(
-                f"Validation failed: {'; '.join(errors)}",
-                code="VALIDATION_ERROR",
-            )
-        add_community_profile(printer_model, profile)
-        return {
-            "success": True,
-            "printer_model": printer_model.lower().replace("-", "_").strip(),
-            "message": "Community safety profile saved successfully.",
-        }
-    except ValueError as exc:
-        return _error_dict(f"Failed to add safety profile: {exc}", code="VALIDATION_ERROR")
-    except Exception as exc:
-        logger.exception("Unexpected error in add_safety_profile")
-        return _error_dict(f"Unexpected error in add_safety_profile: {exc}", code="INTERNAL_ERROR")
+# list_safety_profiles, get_safety_profile, add_safety_profile — moved to plugins/safety_tools.py
 
 
 @mcp.tool()
