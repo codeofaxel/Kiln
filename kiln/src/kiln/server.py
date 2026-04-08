@@ -10052,6 +10052,14 @@ def visualize_model(
     OBJ, or SCAD.  Returns PNG images from 6 angles: isometric, front,
     right, top, bottom, and back.
 
+    **Colored 3MF support:** Multicolor 3MF files (with per-face color
+    groups from BambuStudio, PrusaSlicer, or procedural textures) are
+    automatically rendered with per-face colors — no slicer needed to
+    see what the multicolor print will look like.  Colorless 3MF and
+    STL/OBJ files render in uniform color via OpenSCAD as before.
+    Dark models get an adaptive lighter background for visibility.
+    Each view includes a ``quality_score`` and ``dark_material`` flag.
+
     Use this BEFORE printing to verify the model looks correct from all
     sides.  Both agents and humans should review the output.
 
@@ -10070,6 +10078,7 @@ def visualize_model(
         color: Hex color for the model (e.g. ``"#F72323"`` for red).
             Defaults to neutral grey.  Pass the filament color to see
             a realistic preview matching the printed result.
+            Ignored for colored 3MF files (per-face colors used instead).
     """
     try:
         from kiln.model_visualizer import visualize_model as _visualize
