@@ -10,7 +10,7 @@
 
 ## Abstract
 
-We present Kiln, a protocol and reference implementation that enables autonomous AI agents to transform ideas -- expressed as natural language, sketches, or parametric specifications -- into physical objects through 3D printing. Kiln bridges the gap between digital intelligence and physical fabrication by providing: (1) a Design Intelligence layer with 52 materials, 20 design patterns, and 70+ templates; (2) text-to-3D and sketch-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, Stability AI, and OpenSCAD; (3) 7-dimension printability analysis before parts reach a slicer; (4) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link adapters; (5) fulfillment routing through third-party providers such as Craftcloud; and (6) multi-part assembly planning with clearance validation and tolerance stacking. The system exposes 539+ MCP tools and 138 CLI commands, enforces safety invariants at the protocol level across 29 printer safety profiles, and preserves parametric Design DNA for iterative refinement. Kiln does not operate its own marketplace or manufacturing network -- it searches existing 3rd-party marketplaces and routes to existing fulfillment providers.
+We present Kiln, a protocol and reference implementation that enables autonomous AI agents to transform ideas -- expressed as natural language, sketches, or parametric specifications -- into physical objects through 3D printing. Kiln bridges the gap between digital intelligence and physical fabrication by providing: (1) a Design Intelligence layer with 52 materials, 20 design patterns, and 70+ templates; (2) text-to-3D and sketch-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, Stability AI, and OpenSCAD; (3) 7-dimension printability analysis before parts reach a slicer; (4) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link adapters; (5) fulfillment routing through third-party providers such as Craftcloud; and (6) multi-part assembly planning with clearance validation and tolerance stacking. The system exposes 539+ MCP tools and 142 CLI commands, enforces safety invariants at the protocol level across 29 printer safety profiles, and preserves parametric Design DNA for iterative refinement. Kiln does not operate its own marketplace or manufacturing network -- it searches existing 3rd-party marketplaces and routes to existing fulfillment providers.
 
 ## 1. Introduction
 
@@ -32,7 +32,7 @@ Kiln solves the entire pipeline:
 
 4. **Unified Adapter Layer.** A single `PrinterAdapter` abstract interface normalizes OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link APIs into consistent Python dataclasses. Adding a new backend requires implementing ~12 methods; all upstream consumers work automatically.
 
-5. **Agent-Native Interface.** 539+ typed MCP tools with structured JSON input/output make Kiln a first-class tool for any MCP-compatible agent. 138 CLI commands with `--json` flags cover the same surface for scripting.
+5. **Agent-Native Interface.** 539+ typed MCP tools with structured JSON input/output make Kiln a first-class tool for any MCP-compatible agent. 142 CLI commands with `--json` flags cover the same surface for scripting.
 
 6. **Safety-First Design.** Pre-flight checks, G-code validation, temperature limits, and confirmation gates are enforced at the protocol layer. 29 safety profiles define hardware-specific limits. An agent cannot bypass safety checks even if instructed to.
 

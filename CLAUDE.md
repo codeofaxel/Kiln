@@ -258,7 +258,7 @@ kiln/                           — MCP Server package
     openrouter.py               — OpenRouter integration + model catalog
     rest_api.py                 — FastAPI REST wrapper for MCP tools
     cli/
-      main.py                   — Click CLI (114 commands)
+      main.py                   — Click CLI (142 commands)
       config.py                 — Config management (YAML/env/flags)
       discovery.py              — mDNS printer scanning
       output.py                 — JSON/text output formatting
