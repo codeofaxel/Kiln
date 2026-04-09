@@ -27,7 +27,7 @@ class _ConsumerToolsPlugin:
         - donate_info
         - consumer_onboarding
         - validate_shipping_address
-        - recommend_material
+        - suggest_material_for_order
         - estimate_price
         - estimate_timeline
         - supported_shipping_countries
@@ -214,7 +214,7 @@ class _ConsumerToolsPlugin:
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool()
-        def recommend_material(
+        def suggest_material_for_order(
             use_case: str,
             budget: str = "",
             need_weather_resistant: bool = False,
@@ -222,12 +222,16 @@ class _ConsumerToolsPlugin:
             need_high_detail: bool = False,
             need_high_strength: bool = False,
         ) -> dict:
-            """Recommend material for non-technical users (considers ease-of-use, safety, finish).
+            """Suggest a material when ordering a print from a fulfillment provider.
 
-            Use this when the user doesn't have deep 3D printing knowledge.
-            For engineering/functional part material selection, use ``recommend_design_material``.
-            For intent-based recommendation with printer DNA data, use the intelligence
-            plugin's ``recommend_material``.
+            Use this when routing a print job to a service (Sculpteo, Craftcloud)
+            and need to pick the right material + technology for the order.
+
+            **Which material tool to use:**
+
+            - Ordering a print from a service? → ``suggest_material_for_order`` (this tool)
+            - Designing a part and need engineering specs? → ``recommend_design_material``
+            - Quick intent-based pick for your own printer? → ``recommend_material``
 
             Args:
                 use_case: What the part is for. Options: decorative, functional,
@@ -262,7 +266,7 @@ class _ConsumerToolsPlugin:
             except ValueError as exc:
                 return _error_dict(str(exc), code="INVALID_INPUT")
             except Exception as exc:
-                _logger.exception("Unexpected error in recommend_material")
+                _logger.exception("Unexpected error in suggest_material_for_order")
                 return _error_dict(f"Unexpected error: {exc}", code="INTERNAL_ERROR")
 
         @mcp.tool()

@@ -622,7 +622,7 @@ The Kiln MCP server (`kiln serve`) exposes **544 tools** to agents. Key tools ar
 | `pipeline_retry_step` | Retry the failed step in a pipeline |
 | `consumer_onboarding` | Step-by-step guide for users without a 3D printer |
 | `validate_shipping_address` | Validate and normalize a shipping address |
-| `recommend_material` | Recommend material by use case (decorative, functional, outdoor, etc.) |
+| `suggest_material_for_order` | Suggest material for fulfillment orders by use case (decorative, functional, outdoor, etc.) |
 | `estimate_price` | Instant price estimate before requesting a full quote |
 | `estimate_timeline` | Order-to-delivery timeline with per-stage breakdown |
 | `fulfillment_compare_providers` | Side-by-side quotes from all fulfillment providers |
@@ -709,7 +709,8 @@ The Kiln MCP server (`kiln serve`) exposes **544 tools** to agents. Key tools ar
 | `start_print_recovery` | Begin a guided print recovery session |
 | `confirm_print_recovery` | Confirm a recovery step has been completed |
 | `complete_print_recovery` | Mark a recovery session as complete |
-| `plan_print_recovery` | Plan recovery steps before starting |
+| `plan_print_recovery` | Plan recovery from checkpoint (printer_name + job_id) |
+| `plan_failure_recovery` | Plan recovery from detected failure (failure_id) |
 | `cancel_print_recovery` | Cancel an in-progress recovery session |
 | `get_recovery_session_status` | Check status of a recovery session |
 | `get_recovery_statistics` | View historical recovery success rates |
@@ -1044,7 +1045,7 @@ export KILN_CRAFTCLOUD_BASE_URL=https://api-stg.craftcloud3d.com
 export KILN_FULFILLMENT_PROVIDER=craftcloud
 ```
 
-Agents use the consumer workflow MCP tools: `consumer_onboarding` for guided setup, `recommend_material` for material selection, `estimate_price` / `estimate_timeline` for quick estimates, `fulfillment_compare_providers` for cross-provider quotes, `fulfillment_batch_quote` for multi-part assemblies, and `fulfillment_order_history` / `fulfillment_reorder` for repeat orders.
+Agents use the consumer workflow MCP tools: `consumer_onboarding` for guided setup, `suggest_material_for_order` for material selection, `estimate_price` / `estimate_timeline` for quick estimates, `fulfillment_compare_providers` for cross-provider quotes, `fulfillment_batch_quote` for multi-part assemblies, and `fulfillment_order_history` / `fulfillment_reorder` for repeat orders.
 
 ## Development
 

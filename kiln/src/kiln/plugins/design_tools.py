@@ -319,13 +319,16 @@ class _DesignToolsPlugin:
         ) -> dict:
             """Recommend material for engineering/functional parts (strength, heat, environment).
 
-            Use this for design briefs and functional requirements. For non-technical
-            consumer use cases, use the consumer plugin's ``recommend_material``.
-
             Analyzes functional requirements and recommends the optimal
             material considering mechanical needs, environmental exposure,
             printer capabilities, and ease of printing.  Returns the top
             recommendation with reasoning, warnings, and alternatives.
+
+            **Which material tool to use:**
+
+            - Designing a part and need engineering specs? → ``recommend_design_material`` (this tool)
+            - Quick intent-based pick for your own printer? → ``recommend_material``
+            - Ordering a print from a service? → ``suggest_material_for_order``
 
             Args:
                 requirements: What the object needs to do (e.g. "hold 5 kg

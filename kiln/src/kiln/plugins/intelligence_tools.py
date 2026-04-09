@@ -421,13 +421,16 @@ class _IntelligenceToolsPlugin:
         ) -> dict:
             """Recommend material from intent + printer capabilities (considers enclosure, bed, budget).
 
-            Uses printer DNA + historical data. For non-technical consumer use cases,
-            use the consumer plugin's ``recommend_material``. For engineering/functional
-            parts, use ``recommend_design_material``.
+            Uses printer DNA + historical data to translate natural language
+            intent (e.g. ``"make it strong"``, ``"make it pretty"``,
+            ``"make it cheap"``) into an optimal material recommendation
+            with settings.
 
-            Translates natural language intent (e.g. ``"make it strong"``,
-            ``"make it pretty"``, ``"make it cheap"``) into an optimal
-            material recommendation with settings.
+            **Which material tool to use:**
+
+            - Quick intent-based pick for your own printer? → ``recommend_material`` (this tool)
+            - Designing a part and need engineering specs? → ``recommend_design_material``
+            - Ordering a print from a service? → ``suggest_material_for_order``
 
             Args:
                 intent: User intent text (e.g. ``"strong"``, ``"pretty"``).

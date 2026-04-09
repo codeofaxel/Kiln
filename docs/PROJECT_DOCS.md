@@ -502,7 +502,7 @@ Routes manufacturing to third-party fulfillment providers (Craftcloud). Kiln act
 |---|---|---|
 | `consumer_onboarding` | — | Step-by-step guide from idea to delivered product |
 | `validate_shipping_address` | `street`, `city`, `country`, `state`, `postal_code` | Address validation with normalization |
-| `recommend_material` | `use_case`, `budget`, constraints | Ranked material recommendations with reasoning |
+| `suggest_material_for_order` | `use_case`, `budget`, constraints | Ranked material recommendations with reasoning |
 | `estimate_price` | `technology`, `volume_cm3` or `dimensions` | Instant price range (no API call) |
 | `estimate_timeline` | `technology`, `quantity`, `country` | Order-to-delivery timeline with stage breakdown |
 | `supported_shipping_countries` | — | Supported shipping countries (23+ countries) |
@@ -598,7 +598,8 @@ When designs are generated via OpenSCAD (parametric), the pipeline preserves the
 | `start_print_recovery` | Begin a guided print recovery session |
 | `confirm_print_recovery` | Confirm a recovery step has been completed |
 | `complete_print_recovery` | Mark a recovery session as complete |
-| `plan_print_recovery` | Plan recovery steps before starting |
+| `plan_print_recovery` | Plan recovery from checkpoint (printer_name + job_id) |
+| `plan_failure_recovery` | Plan recovery from detected failure (failure_id) |
 | `cancel_print_recovery` | Cancel an in-progress recovery session |
 | `get_recovery_session_status` | Check status of a recovery session |
 | `get_recovery_statistics` | View historical recovery success rates |

@@ -31,7 +31,7 @@ class _RecoveryToolsPlugin:
         - improve_generation_prompt
         - generation_feedback_loop_status
         - detect_print_failure
-        - plan_print_recovery
+        - plan_failure_recovery
         - start_print_recovery
         - confirm_print_recovery
         - cancel_print_recovery
@@ -634,7 +634,7 @@ class _RecoveryToolsPlugin:
                 )
 
         @mcp.tool()
-        def plan_print_recovery(
+        def plan_failure_recovery(
             failure_id: str,
             printer_capabilities: dict[str, Any] | None = None,
             safety_profile: dict[str, Any] | None = None,
@@ -645,6 +645,11 @@ class _RecoveryToolsPlugin:
             to look up the failure report and generate an appropriate recovery
             strategy with preparation steps, parameter adjustments, and risk
             assessment.
+
+            **Which recovery tool to use:**
+
+            - Have a printer_name + job_id from a failed print? → ``plan_print_recovery``
+            - Have a failure_id from ``detect_print_failure``? → ``plan_failure_recovery`` (this tool)
 
             Args:
                 failure_id: The failure_id from a detect_print_failure result.
@@ -675,7 +680,7 @@ class _RecoveryToolsPlugin:
                 )
                 return {"success": True, "plan": plan.to_dict()}
             except Exception as exc:
-                _logger.exception("Unexpected error in plan_print_recovery")
+                _logger.exception("Unexpected error in plan_failure_recovery")
                 return _srv._error_dict(
                     f"Unexpected error: {exc}", code="INTERNAL_ERROR"
                 )
@@ -687,7 +692,7 @@ class _RecoveryToolsPlugin:
             Creates a recovery session that tracks the recovery lifecycle.
 
             Args:
-                plan_id: The plan_id from a plan_print_recovery result.
+                plan_id: The plan_id from a plan_failure_recovery result.
                 failure_id: The failure_id this recovery addresses.
             """
             import kiln.server as _srv

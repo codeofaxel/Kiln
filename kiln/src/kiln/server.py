@@ -11332,6 +11332,11 @@ def plan_print_recovery(
     Analyzes the last checkpoint and failure type to recommend whether to
     resume, restart, or abort the print.
 
+    **Which recovery tool to use:**
+
+    - Have a printer_name + job_id from a failed print? → ``plan_print_recovery`` (this tool)
+    - Have a failure_id from ``detect_print_failure``? → ``plan_failure_recovery``
+
     Args:
         printer_name: Name of the printer that failed.
         job_id: The failed job's identifier.

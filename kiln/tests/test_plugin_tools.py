@@ -350,7 +350,7 @@ class TestRecoveryPluginMeta:
             "improve_generation_prompt",
             "generation_feedback_loop_status",
             "detect_print_failure",
-            "plan_print_recovery",
+            "plan_failure_recovery",
             "start_print_recovery",
             "confirm_print_recovery",
             "cancel_print_recovery",

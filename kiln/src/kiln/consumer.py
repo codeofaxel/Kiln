@@ -898,8 +898,8 @@ def get_onboarding() -> ConsumerOnboarding:
                 "Based on your item's purpose, we recommend the best material "
                 "and manufacturing technology for your needs and budget."
             ),
-            tool="recommend_material",
-            example='recommend_material(use_case="functional", budget="budget")',
+            tool="suggest_material_for_order",
+            example='suggest_material_for_order(use_case="functional", budget="budget")',
         ),
         OnboardingStep(
             step=3,
