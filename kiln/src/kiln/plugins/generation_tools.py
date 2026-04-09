@@ -271,6 +271,10 @@ class _GenerationToolsPlugin:
         ) -> dict:
             """Full validation pipeline: validate, repair, analyze, and prepare a mesh for printing.
 
+            **See also:** ``validate_and_prepare`` for a more comprehensive
+            10-step pipeline (format, mesh, scale, repair, printability,
+            structural, bed-fit, material, and cost estimation).
+
             Runs every AI-generated mesh through Kiln's engineering review before
             it reaches the slicer or printer.  Chains validation → auto-repair →
             printability analysis → build volume check into a single quality gate.

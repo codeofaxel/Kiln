@@ -96,6 +96,9 @@ class _UtilityToolsPlugin:
 
             No authentication required.  Useful for container healthchecks,
             dashboards, and verifying the server is responsive.
+
+            **See also:** ``kiln_health`` for version info, module
+            availability, scheduler status, and webhook configuration.
             """
             import platform
 

@@ -294,6 +294,9 @@ class _EstimateToolsPlugin:
             For **already-sliced** G-code files, pass the ``.gcode`` path
             directly — it will be parsed without re-slicing.
 
+            **See also:** ``slice_and_estimate`` for a fuller analysis that
+            includes printability scoring and adhesion recommendations.
+
             :param file_path: Path to STL/3MF/OBJ or .gcode file.
             :param profile: Optional slicer profile path.
             :param printer_id: Optional printer model ID for bundled profile
@@ -345,6 +348,9 @@ class _EstimateToolsPlugin:
 
             Computes filament weight, length, and cost based on mesh volume,
             infill percentage, wall shell count, and material density.
+
+            **See also:** ``estimate_print_cost_from_mesh`` for a richer
+            estimate that includes support material, adhesion, and electricity.
 
             Supported materials: pla, petg, abs, tpu, asa, nylon, pc, pla+,
             carbon_fiber_pla.

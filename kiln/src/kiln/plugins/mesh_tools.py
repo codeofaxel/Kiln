@@ -686,8 +686,12 @@ class _MeshToolsPlugin:
             """Merge multiple mesh files into a single combined model.
 
             Concatenates all triangle geometry from the input files into one
-            output STL.  No boolean operations -- bodies are simply combined.
+            output STL.  No boolean operations — bodies are simply combined.
             Useful for multi-part assemblies or adding components to a design.
+
+            **See also:** ``merge_mesh_files`` for the same operation with
+            a different parameter style, or ``merge_stl`` for positional
+            offset support.
 
             :param file_paths: List of .stl/.obj/.glb file paths to merge.
             :param output_path: Path for the combined output STL.
