@@ -16,7 +16,6 @@ Coverage areas:
 - Post-processing: techniques, paintability, strengthening
 - Multi-material compatibility: co-print, support pairs, dissolution
 - Cross-file print diagnostic: combined troubleshooting + compatibility
-- Construction domain: materials, patterns, requirements, briefs
 - Edge cases: unknown materials, empty text, no matches
 - Generation feedback enhancement integration
 """
@@ -26,10 +25,6 @@ from __future__ import annotations
 import pytest
 
 from kiln.design_intelligence import (
-    ConstructionDesignBrief,
-    ConstructionMaterialProfile,
-    ConstructionPattern,
-    ConstructionRequirement,
     DesignBrief,
     EnvironmentReport,
     LoadEstimate,
@@ -45,10 +40,6 @@ from kiln.design_intelligence import (
     check_printer_material_compatibility,
     estimate_load_capacity,
     find_patterns_for_use_case,
-    get_construction_design_brief,
-    get_construction_material,
-    get_construction_pattern,
-    get_construction_requirement,
     get_design_constraints,
     get_design_pattern,
     get_material_profile,
@@ -57,14 +48,10 @@ from kiln.design_intelligence import (
     get_printer_design_profile,
     get_support_material_options,
     list_compatibility_printers,
-    list_construction_materials,
-    list_construction_patterns,
-    list_construction_requirements,
     list_design_patterns,
     list_material_profiles,
     list_printer_profiles,
     list_troubleshooting_materials,
-    match_construction_requirements,
     match_requirements,
     recommend_material_for_design,
     troubleshoot_print_issue,
@@ -742,273 +729,6 @@ class TestKnowledgeBaseIsolation:
         assert p2 is not None
         assert p2.material_id == "pla"
 
-    def test_reset_clears_construction_cache(self):
-        m1 = get_construction_material("standard_concrete_mix")
-        assert m1 is not None
-
-        _reset_knowledge_base()
-
-        m2 = get_construction_material("standard_concrete_mix")
-        assert m2 is not None
-        assert m2.material_id == "standard_concrete_mix"
-
-
-# ---------------------------------------------------------------------------
-# Construction domain — materials
-# ---------------------------------------------------------------------------
-
-
-class TestConstructionMaterials:
-    def test_get_standard_concrete(self):
-        m = get_construction_material("standard_concrete_mix")
-        assert isinstance(m, ConstructionMaterialProfile)
-        assert m.category == "cementitious"
-        assert m.mechanical["compressive_strength_28d_mpa"] == 35
-
-    def test_get_icon_carbonx(self):
-        m = get_construction_material("icon_carbonx")
-        assert m is not None
-        assert m.category == "proprietary_cementitious"
-        assert m.mechanical["interlayer_bond_strength_mpa"] == 2.0
-        assert m.sustainability is not None
-        assert m.sustainability["embodied_carbon_reduction_vs_cmu_pct"] == 31
-
-    def test_get_geopolymer(self):
-        m = get_construction_material("geopolymer_concrete")
-        assert m is not None
-        assert m.mechanical["compressive_strength_28d_mpa"] == 45
-        assert m.cost["material_cost_per_m3_usd"] == 120
-
-    def test_get_earth_based(self):
-        m = get_construction_material("earth_based_mix")
-        assert m is not None
-        assert m.cost["material_cost_per_m3_usd"] == 30
-        assert m.design_limits["max_stories"] == 1
-
-    def test_unknown_construction_material_returns_none(self):
-        assert get_construction_material("moon_regolith") is None
-
-    def test_list_construction_materials_returns_all(self):
-        materials = list_construction_materials()
-        assert len(materials) >= 4
-        ids = {m.material_id for m in materials}
-        assert "standard_concrete_mix" in ids
-        assert "icon_carbonx" in ids
-        assert "geopolymer_concrete" in ids
-        assert "earth_based_mix" in ids
-
-    def test_every_construction_material_has_guidance(self):
-        for m in list_construction_materials():
-            assert len(m.agent_guidance) > 0, f"{m.material_id} missing guidance"
-
-    def test_every_construction_material_has_process(self):
-        for m in list_construction_materials():
-            assert "open_time_minutes" in m.process, (
-                f"{m.material_id} missing open_time_minutes"
-            )
-            assert "cure_time_days" in m.process, (
-                f"{m.material_id} missing cure_time_days"
-            )
-
-    def test_every_construction_material_has_compliance(self):
-        for m in list_construction_materials():
-            assert "applicable_codes" in m.compliance, (
-                f"{m.material_id} missing applicable_codes"
-            )
-
-    def test_construction_material_to_dict(self):
-        m = get_construction_material("standard_concrete_mix")
-        assert m is not None
-        d = m.to_dict()
-        assert d["material_id"] == "standard_concrete_mix"
-        assert "mechanical" in d
-        assert "process" in d
-        assert "cost" in d
-
-    def test_sustainability_omitted_when_none(self):
-        m = get_construction_material("standard_concrete_mix")
-        assert m is not None
-        d = m.to_dict()
-        assert "sustainability" not in d
-
-
-# ---------------------------------------------------------------------------
-# Construction domain — patterns
-# ---------------------------------------------------------------------------
-
-
-class TestConstructionPatterns:
-    def test_get_load_bearing_wall(self):
-        p = get_construction_pattern("load_bearing_wall")
-        assert isinstance(p, ConstructionPattern)
-        assert "wall" in p.display_name.lower()
-        assert p.wall_profiles is not None
-        assert "double_bead" in p.wall_profiles
-
-    def test_get_curved_wall(self):
-        p = get_construction_pattern("curved_wall")
-        assert p is not None
-        assert p.design_rules["min_radius_m"] == 0.5
-
-    def test_get_window_opening(self):
-        p = get_construction_pattern("window_opening")
-        assert p is not None
-        assert "header" in p.display_name.lower() or "opening" in p.display_name.lower()
-
-    def test_unknown_pattern_returns_none(self):
-        assert get_construction_pattern("flying_buttress") is None
-
-    def test_list_construction_patterns_returns_all(self):
-        patterns = list_construction_patterns()
-        assert len(patterns) >= 8
-        ids = {p.pattern_id for p in patterns}
-        assert "load_bearing_wall" in ids
-        assert "curved_wall" in ids
-        assert "insulated_wall_system" in ids
-
-    def test_every_construction_pattern_has_guidance(self):
-        for p in list_construction_patterns():
-            assert len(p.agent_guidance) > 0, f"{p.pattern_id} missing guidance"
-
-    def test_construction_pattern_to_dict(self):
-        p = get_construction_pattern("load_bearing_wall")
-        assert p is not None
-        d = p.to_dict()
-        assert "design_rules" in d
-        assert "wall_profiles" in d
-
-
-# ---------------------------------------------------------------------------
-# Construction domain — requirements
-# ---------------------------------------------------------------------------
-
-
-class TestConstructionRequirements:
-    def test_get_single_family_residential(self):
-        r = get_construction_requirement("single_family_residential")
-        assert isinstance(r, ConstructionRequirement)
-        assert r.program_requirements["min_sqft"] == 600
-        assert r.code_requirements is not None
-
-    def test_get_military_defense(self):
-        r = get_construction_requirement("military_defense")
-        assert r is not None
-        assert r.structural_constraints["wall_type"] == "triple_bead"
-        assert r.compliance_requirements is not None
-
-    def test_get_affordable_housing(self):
-        r = get_construction_requirement("affordable_housing")
-        assert r is not None
-        assert r.program_requirements["cost_target_per_sqft_usd"] == 100
-
-    def test_get_disaster_relief(self):
-        r = get_construction_requirement("disaster_relief_shelter")
-        assert r is not None
-        assert r.program_requirements["deployment_time_critical"] is True
-
-    def test_get_commercial(self):
-        r = get_construction_requirement("commercial_single_story")
-        assert r is not None
-        assert r.program_requirements["ada_compliance"] is True
-
-    def test_unknown_requirement_returns_none(self):
-        assert get_construction_requirement("space_habitat") is None
-
-    def test_list_construction_requirements_returns_all(self):
-        reqs = list_construction_requirements()
-        assert len(reqs) >= 5
-        ids = {r.requirement_id for r in reqs}
-        assert "single_family_residential" in ids
-        assert "affordable_housing" in ids
-        assert "military_defense" in ids
-        assert "disaster_relief_shelter" in ids
-        assert "commercial_single_story" in ids
-
-    def test_match_house_triggers(self):
-        results = match_construction_requirements("build a single family house")
-        ids = {r.requirement_id for r in results}
-        assert "single_family_residential" in ids
-
-    def test_match_affordable_triggers(self):
-        results = match_construction_requirements("affordable housing for low income families")
-        ids = {r.requirement_id for r in results}
-        assert "affordable_housing" in ids
-
-    def test_match_military_triggers(self):
-        results = match_construction_requirements("military barracks for forward operating base")
-        ids = {r.requirement_id for r in results}
-        assert "military_defense" in ids
-
-    def test_match_disaster_triggers(self):
-        results = match_construction_requirements("emergency disaster relief shelter after hurricane")
-        ids = {r.requirement_id for r in results}
-        assert "disaster_relief_shelter" in ids
-
-    def test_no_match_returns_empty(self):
-        results = match_construction_requirements("something unrelated to construction")
-        assert len(results) == 0
-
-    def test_construction_requirement_to_dict(self):
-        r = get_construction_requirement("single_family_residential")
-        assert r is not None
-        d = r.to_dict()
-        assert "program_requirements" in d
-        assert "structural_constraints" in d
-        assert "agent_guidance" in d
-
-
-# ---------------------------------------------------------------------------
-# Construction domain — design brief
-# ---------------------------------------------------------------------------
-
-
-class TestConstructionDesignBrief:
-    def test_basic_house_brief(self):
-        brief = get_construction_design_brief("build a single family home")
-        assert isinstance(brief, ConstructionDesignBrief)
-        assert brief.requirement is not None
-        assert brief.requirement.requirement_id == "single_family_residential"
-        assert len(brief.materials) > 0
-        assert len(brief.combined_guidance) > 0
-
-    def test_affordable_brief_has_cost_target(self):
-        brief = get_construction_design_brief("affordable social housing")
-        assert brief.requirement is not None
-        assert brief.requirement.program_requirements["cost_target_per_sqft_usd"] == 100
-
-    def test_military_brief_has_structural_constraints(self):
-        brief = get_construction_design_brief("military barracks")
-        assert brief.requirement is not None
-        assert brief.combined_rules["wall_type"] == "triple_bead"
-
-    def test_material_override(self):
-        brief = get_construction_design_brief(
-            "build a house",
-            material="geopolymer_concrete",
-        )
-        assert len(brief.materials) == 1
-        assert brief.materials[0].material_id == "geopolymer_concrete"
-
-    def test_disaster_brief_finds_patterns(self):
-        brief = get_construction_design_brief(
-            "emergency shelter with curved walls"
-        )
-        pattern_ids = {p.pattern_id for p in brief.applicable_patterns}
-        assert "curved_wall" in pattern_ids
-
-    def test_vague_requirements_still_works(self):
-        brief = get_construction_design_brief("build something")
-        assert isinstance(brief, ConstructionDesignBrief)
-        assert len(brief.materials) > 0
-
-    def test_brief_to_dict(self):
-        brief = get_construction_design_brief("single family residence")
-        d = brief.to_dict()
-        assert "requirement" in d
-        assert "materials" in d
-        assert "applicable_patterns" in d
-        assert "combined_guidance" in d
-        assert "combined_rules" in d
 
 
 # ---------------------------------------------------------------------------
