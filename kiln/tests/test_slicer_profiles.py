@@ -234,7 +234,7 @@ class TestSlicerProfilesJSON:
     def test_all_profiles_have_settings_dict(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
         for key, data in raw.items():
-            if key == "_meta":
+            if key.startswith("_"):
                 continue
             assert "settings" in data, f"Profile '{key}' missing 'settings'"
             assert isinstance(data["settings"], dict)
@@ -242,7 +242,7 @@ class TestSlicerProfilesJSON:
     def test_all_profiles_have_required_settings_keys(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
         for key, data in raw.items():
-            if key == "_meta":
+            if key.startswith("_"):
                 continue
             settings = data["settings"]
             for req_key in self.REQUIRED_SETTINGS_KEYS:
@@ -253,7 +253,7 @@ class TestSlicerProfilesJSON:
     def test_all_profiles_have_display_name(self) -> None:
         raw = json.loads(_DATA_FILE.read_text(encoding="utf-8"))
         for key, data in raw.items():
-            if key == "_meta":
+            if key.startswith("_"):
                 continue
             assert "display_name" in data, f"Profile '{key}' missing 'display_name'"
 

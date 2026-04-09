@@ -92,7 +92,7 @@ def _load() -> None:
         return
 
     for key, data in raw.items():
-        if key == "_meta":
+        if key.startswith("_"):
             continue
         try:
             tier = "free" if key in _FREE_PROFILES else "pro"
