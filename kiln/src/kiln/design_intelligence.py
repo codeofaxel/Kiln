@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -116,6 +116,7 @@ class MaterialRecommendation:
     warnings: list[str]
     design_limits_summary: dict[str, Any]
     alternatives: list[dict[str, Any]]
+    recommended_brands: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -615,6 +616,31 @@ def recommend_material_for_design(
                 }
             )
 
+    # Build brand recommendations for the top material
+    recommended_brands: list[dict[str, Any]] = []
+    try:
+        brand_profiles = list_brand_filament_profiles(parent_material=top_mid)
+        for bp in brand_profiles:
+            brand_entry: dict[str, Any] = {
+                "profile_id": bp.profile_id,
+                "brand": bp.brand,
+                "product_name": bp.product_name,
+                "nozzle_temp_optimal_c": bp.nozzle_temp_optimal_c,
+                "bed_temp_optimal_c": bp.bed_temp_optimal_c,
+                "density_g_cm3": bp.density_g_cm3,
+            }
+            if bp.hardened_nozzle_required:
+                brand_entry["hardened_nozzle_required"] = True
+            if bp.enclosure_required:
+                brand_entry["enclosure_required"] = True
+            if bp.ams_compatible is not None:
+                brand_entry["ams_compatible"] = bp.ams_compatible
+            if bp.drying_temp_c:
+                brand_entry["drying"] = f"{bp.drying_temp_c}°C / {bp.drying_time_hours}h"
+            recommended_brands.append(brand_entry)
+    except Exception:
+        pass  # Brand profiles not available — continue without
+
     return MaterialRecommendation(
         material=top_profile,
         score=round(top_score, 1),
@@ -622,6 +648,7 @@ def recommend_material_for_design(
         warnings=top_warnings,
         design_limits_summary=top_profile.design_limits,
         alternatives=alternatives,
+        recommended_brands=recommended_brands,
     )
 
 
@@ -691,6 +718,204 @@ def _build_brand_profile(
         notes=data.get("notes"),
         source=data["source"],
     )
+
+
+# ---------------------------------------------------------------------------
+# Public API — Unified filament resolver
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ResolvedFilament:
+    """Unified filament profile — brand-specific when available, parent fallback.
+
+    This is the single source of truth for filament properties anywhere in
+    the pipeline.  Consumers (estimator, preflight, slicer, recommender)
+    should call :func:`resolve_filament` instead of looking up materials
+    or brand profiles directly.
+    """
+
+    # Identity
+    material_id: str  # parent material key (e.g. "pla", "tpu")
+    brand_profile_id: str | None  # brand key if resolved (e.g. "bambu_pla_basic")
+    display_name: str  # "Bambu Lab PLA Basic" or "PLA (generic)"
+    is_brand_specific: bool
+
+    # Physical properties (brand overrides parent when available)
+    density_g_per_cm3: float
+    cost_per_kg_usd: float
+    filament_diameter_mm: float
+
+    # Printing parameters (brand-specific or parent defaults)
+    nozzle_temp_optimal_c: int
+    nozzle_temp_range_c: list[int]
+    bed_temp_optimal_c: int
+    bed_temp_range_c: list[int]
+    max_volumetric_speed_mm3s: float | None
+    max_print_speed_mms: int | None
+
+    # Drying
+    drying_temp_c: int | None
+    drying_time_hours: int | None
+
+    # Printer requirements
+    enclosure_required: bool
+    hardened_nozzle_required: bool
+    ams_compatible: bool | None
+
+    # Warnings for preflight
+    warnings: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def resolve_filament(
+    material_or_brand: str,
+    *,
+    printer_id: str | None = None,
+) -> ResolvedFilament:
+    """Resolve a material name or brand profile ID to a unified filament profile.
+
+    Accepts either:
+    - A parent material ID (e.g. ``"PLA"``, ``"tpu"``, ``"PETG"``) → returns
+      generic parent properties from ``cost_estimator.BUILTIN_MATERIALS``.
+    - A brand profile ID (e.g. ``"bambu_pla_basic"``, ``"prusament_tpu_95a"``)
+      → returns brand-specific properties with higher accuracy.
+
+    When ``printer_id`` is provided, generates compatibility warnings
+    (enclosure, nozzle, AMS) for the resolved filament.
+
+    :param material_or_brand: Material ID or brand profile ID.
+    :param printer_id: Optional printer model for compatibility warnings.
+    :returns: :class:`ResolvedFilament` with unified properties.
+    """
+    from kiln.cost_estimator import BUILTIN_MATERIALS
+
+    key = material_or_brand.strip().lower()
+    warnings: list[str] = []
+
+    # --- Try brand profile first ---
+    brand = get_brand_filament_profile(key)
+    if brand is not None:
+        # Get parent material cost as fallback (brand profiles don't store cost)
+        parent_mat = BUILTIN_MATERIALS.get(brand.parent_material.upper())
+        cost = parent_mat.cost_per_kg_usd if parent_mat else 25.0
+        diameter = parent_mat.filament_diameter_mm if parent_mat else 1.75
+
+        # Build printer compatibility warnings
+        if printer_id:
+            warnings = _check_filament_printer_compat(brand, printer_id)
+
+        return ResolvedFilament(
+            material_id=brand.parent_material,
+            brand_profile_id=brand.profile_id,
+            display_name=f"{brand.brand} {brand.product_name}",
+            is_brand_specific=True,
+            density_g_per_cm3=brand.density_g_cm3 or (parent_mat.density_g_per_cm3 if parent_mat else 1.24),
+            cost_per_kg_usd=cost,
+            filament_diameter_mm=diameter,
+            nozzle_temp_optimal_c=brand.nozzle_temp_optimal_c,
+            nozzle_temp_range_c=brand.nozzle_temp_range_c,
+            bed_temp_optimal_c=brand.bed_temp_optimal_c or 60,
+            bed_temp_range_c=brand.bed_temp_range_c,
+            max_volumetric_speed_mm3s=brand.max_volumetric_speed_mm3s,
+            max_print_speed_mms=brand.max_print_speed_mms,
+            drying_temp_c=brand.drying_temp_c,
+            drying_time_hours=brand.drying_time_hours,
+            enclosure_required=brand.enclosure_required,
+            hardened_nozzle_required=brand.hardened_nozzle_required,
+            ams_compatible=brand.ams_compatible,
+            warnings=warnings,
+        )
+
+    # --- Fall back to parent material ---
+    mat_upper = key.upper().replace("-", "_")
+    parent = BUILTIN_MATERIALS.get(mat_upper)
+    if parent is None:
+        # Try common aliases
+        _ALIASES = {"PLA+": "PLA", "PLA_PLUS": "PLA", "NYLON": "NYLON"}
+        parent = BUILTIN_MATERIALS.get(_ALIASES.get(mat_upper, "PLA"))
+
+    if parent is None:
+        parent = BUILTIN_MATERIALS["PLA"]
+
+    return ResolvedFilament(
+        material_id=key,
+        brand_profile_id=None,
+        display_name=f"{parent.name} (generic)",
+        is_brand_specific=False,
+        density_g_per_cm3=parent.density_g_per_cm3,
+        cost_per_kg_usd=parent.cost_per_kg_usd,
+        filament_diameter_mm=parent.filament_diameter_mm,
+        nozzle_temp_optimal_c=int(parent.tool_temp_default),
+        nozzle_temp_range_c=[int(parent.tool_temp_default) - 20, int(parent.tool_temp_default) + 20],
+        bed_temp_optimal_c=int(parent.bed_temp_default),
+        bed_temp_range_c=[int(parent.bed_temp_default) - 10, int(parent.bed_temp_default) + 10],
+        max_volumetric_speed_mm3s=None,
+        max_print_speed_mms=None,
+        drying_temp_c=None,
+        drying_time_hours=None,
+        enclosure_required=False,
+        hardened_nozzle_required=False,
+        ams_compatible=None,
+        warnings=["Generic material profile — pass a brand ID (e.g. 'bambu_pla_basic') for exact specs."],
+    )
+
+
+def _check_filament_printer_compat(
+    brand: BrandFilamentProfile,
+    printer_id: str,
+) -> list[str]:
+    """Check brand filament compatibility with a specific printer.
+
+    Returns a list of human-readable warnings (empty = all clear).
+    """
+    warnings: list[str] = []
+
+    try:
+        from kiln.printer_intelligence import get_printer_intel
+        intel = get_printer_intel(printer_id)
+    except Exception:
+        return warnings
+
+    if intel is None:
+        return warnings
+
+    # Enclosure check
+    if brand.enclosure_required:
+        has_enclosure = intel.get("has_enclosure", False) if isinstance(intel, dict) else getattr(intel, "has_enclosure", False)
+        if not has_enclosure:
+            warnings.append(
+                f"{brand.brand} {brand.product_name} requires an enclosed printer. "
+                f"'{printer_id}' may not have an enclosure."
+            )
+
+    # Hardened nozzle check
+    if brand.hardened_nozzle_required:
+        warnings.append(
+            f"{brand.brand} {brand.product_name} requires a hardened steel nozzle "
+            f"(HRC >= 40). Printing with brass will destroy the nozzle rapidly."
+        )
+
+    # AMS compatibility check (Bambu printers only)
+    if brand.ams_compatible is False and "bambu" in printer_id.lower():
+        warnings.append(
+            f"{brand.brand} {brand.product_name} is NOT AMS compatible. "
+            f"Feed directly, not through AMS."
+        )
+
+    # Temperature check
+    max_hotend = getattr(intel, "max_hotend_temp", None)
+    if max_hotend is None and isinstance(intel, dict):
+        max_hotend = intel.get("max_hotend_temp")
+    if max_hotend and brand.nozzle_temp_optimal_c > max_hotend:
+        warnings.append(
+            f"{brand.brand} {brand.product_name} needs {brand.nozzle_temp_optimal_c}°C "
+            f"but '{printer_id}' max hotend is {max_hotend}°C."
+        )
+
+    return warnings
 
 
 # ---------------------------------------------------------------------------

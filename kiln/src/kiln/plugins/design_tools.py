@@ -1507,6 +1507,58 @@ class _DesignToolsPlugin:
             }
 
         # ---------------------------------------------------------------
+        # resolve_filament — unified filament resolver
+        # ---------------------------------------------------------------
+
+        @mcp.tool()
+        def resolve_filament_profile(
+            material_or_brand: str,
+            printer_id: str = "",
+        ) -> dict:
+            """Resolve a material name or brand ID to a unified filament profile.
+
+            Accepts EITHER a generic material (``"PLA"``, ``"TPU"``) OR a
+            specific brand profile ID (``"bambu_pla_basic"``,
+            ``"prusament_tpu_95a"``).  Brand profiles return manufacturer-exact
+            specs (density, temps, drying, nozzle/enclosure requirements).
+            Generic materials return conservative defaults.
+
+            When ``printer_id`` is provided, also checks compatibility and
+            returns warnings (e.g. "needs hardened nozzle", "needs enclosure",
+            "not AMS compatible").
+
+            Use this BEFORE slicing or printing to get exact filament specs.
+            Pass the result to ``estimate_before_design`` for brand-accurate
+            cost/time estimates.
+
+            :param material_or_brand: Material name (``"PLA"``) or brand
+                profile ID (``"bambu_petg_cf"``).
+            :param printer_id: Optional printer model for compatibility checks.
+            """
+            import kiln.server as _srv
+
+            try:
+                from kiln.design_intelligence import resolve_filament
+
+                eff_printer = printer_id if printer_id.strip() else None
+                resolved = resolve_filament(
+                    material_or_brand,
+                    printer_id=eff_printer,
+                )
+                return {
+                    "success": True,
+                    "filament": resolved.to_dict(),
+                    "is_brand_specific": resolved.is_brand_specific,
+                    "warnings": resolved.warnings,
+                }
+            except Exception as exc:
+                _logger.exception("Error in resolve_filament_profile")
+                return _srv._error_dict(
+                    f"Failed to resolve filament: {exc}",
+                    code="INTERNAL_ERROR",
+                )
+
+        # ---------------------------------------------------------------
         # Template decoration profiles and design styles are Pro features.
         # See kiln_pro/plugins/template_decoration_tools.py and
         # kiln_pro/plugins/design_styles_tools.py.

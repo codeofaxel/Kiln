@@ -4136,6 +4136,31 @@ def preflight_check(
         if _cost_time_s is not None and _cost_time_s > 0:
             cost_estimate = _estimate_print_cost(_cost_time_s, 0, material=expected_material)
 
+        # -- Brand filament compatibility (advisory) ----------------------
+        if expected_material is not None:
+            try:
+                from kiln.design_intelligence import resolve_filament
+
+                resolved = resolve_filament(
+                    expected_material,
+                    printer_id=_PRINTER_MODEL,
+                )
+                if resolved.warnings:
+                    for w in resolved.warnings:
+                        # Skip the generic "pass a brand ID" hint
+                        if "Generic material profile" in w:
+                            continue
+                        checks.append(
+                            {
+                                "name": "filament_compatibility",
+                                "passed": True,  # Advisory — never blocks
+                                "message": w,
+                                "advisory": True,
+                            }
+                        )
+            except Exception as exc:
+                logger.debug("Brand filament compat check skipped: %s", exc)
+
         # -- Summary -------------------------------------------------------
         ready = all(c["passed"] for c in checks)
         summary = (

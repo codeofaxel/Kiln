@@ -212,6 +212,41 @@ def slicer_profile_to_dict(profile: SlicerProfile) -> dict[str, Any]:
     }
 
 
+def brand_overrides_for_slicer(brand_id: str) -> dict[str, str] | None:
+    """Generate slicer setting overrides from a brand filament profile.
+
+    Returns a dict of PrusaSlicer INI key-value pairs that override the
+    default profile temperatures with brand-specific optimal values.
+    Returns ``None`` if the brand profile is not found.
+
+    Usage::
+
+        overrides = brand_overrides_for_slicer("bambu_petg_cf")
+        if overrides:
+            ini_path = resolve_slicer_profile("bambu_a1", overrides=overrides)
+
+    :param brand_id: Brand profile ID (e.g. ``"prusament_tpu_95a"``).
+    """
+    try:
+        from kiln.design_intelligence import resolve_filament
+
+        resolved = resolve_filament(brand_id)
+        if not resolved.is_brand_specific:
+            return None
+
+        overrides: dict[str, str] = {
+            "temperature": str(resolved.nozzle_temp_optimal_c),
+            "first_layer_temperature": str(resolved.nozzle_temp_optimal_c),
+            "bed_temperature": str(resolved.bed_temp_optimal_c),
+            "first_layer_bed_temperature": str(resolved.bed_temp_optimal_c),
+        }
+
+        return overrides
+    except Exception:
+        logger.debug("brand_overrides_for_slicer failed for '%s'", brand_id)
+        return None
+
+
 def validate_profile_for_printer(profile_id: str, printer_model: str) -> dict[str, Any]:
     """Check if a slicer profile is compatible with a printer model.
 
