@@ -15,18 +15,22 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import kiln.server as _srv_mod
+
 from kiln.server import (
-    _event_bus,
-    _queue,
-    _registry,
-    _scheduler,
-    _webhook_mgr,
     delete_webhook,
     kiln_health,
     list_webhooks,
     main,
     register_webhook,
 )
+
+# These start as None and get updated by the _clean_singletons fixture.
+_registry = None
+_queue = None
+_event_bus = None
+_scheduler = None
+_webhook_mgr = None
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -41,6 +45,7 @@ def _clean_singletons():
     from kiln.queue import PrintQueue
     from kiln.events import EventBus
     from kiln.webhooks import WebhookManager
+    from kiln.scheduler import JobScheduler
 
     # Initialize singletons if they haven't been created yet (no main() call)
     if _srv._registry is None:
@@ -51,6 +56,17 @@ def _clean_singletons():
         _srv._event_bus = EventBus()
     if _srv._webhook_mgr is None:
         _srv._webhook_mgr = WebhookManager(_srv._event_bus)
+    if _srv._scheduler is None:
+        _srv._scheduler = JobScheduler(_srv._queue, _srv._registry, _srv._event_bus)
+
+    # Update this test module's globals so tests can reference them directly
+    import sys
+    _this = sys.modules[__name__]
+    _this._registry = _srv._registry
+    _this._queue = _srv._queue
+    _this._event_bus = _srv._event_bus
+    _this._scheduler = _srv._scheduler
+    _this._webhook_mgr = _srv._webhook_mgr
 
     # Re-read module-level refs now that they're guaranteed non-None
     reg = _srv._registry
