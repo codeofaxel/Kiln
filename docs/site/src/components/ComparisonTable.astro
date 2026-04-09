@@ -1,52 +1,99 @@
 ---
 interface Row {
-  feature: string;
-  kiln: string;
-  octoprint: string;
-  cura: string;
-  prusa: string;
+  capability: string;
+  without: string;
+  withKiln: string;
 }
 
-const check = '\u2713';
-const cross = '\u2014';
-const partial = '\u00BD';
-
 const rows: Row[] = [
-  { feature: 'Agent / AI Support',        kiln: check, octoprint: cross,   cura: cross,   prusa: cross   },
-  { feature: 'Multi-Printer Fleet',       kiln: check, octoprint: partial, cura: cross,   prusa: check   },
-  { feature: 'Unified API',               kiln: check, octoprint: cross,   cura: cross,   prusa: cross   },
-  { feature: 'Safety Validation',         kiln: check, octoprint: cross,   cura: cross,   prusa: partial },
-  { feature: 'Integrated Slicing',        kiln: check, octoprint: cross,   cura: check,   prusa: partial },
-  { feature: 'Search 3rd-Party Marketplaces', kiln: check, octoprint: cross,   cura: partial, prusa: cross   },
-  { feature: 'Route to Fulfillment Providers', kiln: check, octoprint: cross,   cura: partial, prusa: cross   },
-  { feature: 'REST API',                  kiln: check, octoprint: check,   cura: cross,   prusa: check   },
+  {
+    capability: 'Create a 3D object',
+    without: 'Learn Fusion 360, Tinkercad, or OnShape \u2014 or browse Thingiverse manually',
+    withKiln: 'Describe it or sketch it \u2014 Kiln generates, validates, and prepares it',
+  },
+  {
+    capability: 'Validate before printing',
+    without: 'Slicer warnings + experience + wasted filament',
+    withKiln: '7-dimension scoring (0\u2013100), auto-repair, mesh fix, auto-scale for AI models',
+  },
+  {
+    capability: 'Add decorations',
+    without: 'Blender or Photoshop, then re-import and hope it prints',
+    withKiln: 'QR codes, photos, logos, text \u2014 emboss or deboss with one command',
+  },
+  {
+    capability: 'Add surface textures',
+    without: 'UV mapping skills + texture software \u2014 not practical for most users',
+    withKiln: 'Tiger stripe, marble, snakeskin, wood grain, carbon fiber, etc. \u2014 applied directly to any model',
+  },
+  {
+    capability: 'Multicolor printing',
+    without: 'Manually configure AMS slots in Bambu Studio or paint regions in PrusaSlicer',
+    withKiln: 'Automatic color segmentation, AMS slot mapping, and multi-gcode merging',
+  },
+  {
+    capability: 'Product templates',
+    without: 'Design every coaster, keychain, and ornament from scratch',
+    withKiln: 'One command: "make me a coaster" \u2014 with QR codes, logos, and textures built in',
+  },
+  {
+    capability: 'Control your printer',
+    without: 'OctoPrint, Bambu Studio, or Prusa Connect \u2014 one tool per brand',
+    withKiln: 'One interface for all 6 backends \u2014 same commands, any printer',
+  },
+  {
+    capability: 'Monitor for failures',
+    without: 'Bambu\u2019s built-in camera or add-on webcam \u2014 no AI analysis, no auto-recovery',
+    withKiln: 'AI vision analysis across any printer with automatic failure recovery',
+  },
+  {
+    capability: 'Manage a fleet',
+    without: 'One dashboard per brand, no cross-brand routing or learning',
+    withKiln: 'Unified fleet with smart job routing, failure rerouting, and cross-printer learning',
+  },
+  {
+    capability: 'Learn from past prints',
+    without: 'Start fresh every time \u2014 your experience stays in your head',
+    withKiln: 'Kiln learns what worked \u2014 same material + printer = better settings next time',
+  },
+  {
+    capability: 'Safety beyond firmware',
+    without: 'Firmware basics (thermal runaway, current limits)',
+    withKiln: '29 printer profiles + G-code validation + preflight checks + real-time interception',
+  },
+  {
+    capability: 'Outsource to pros',
+    without: 'Visit Craftcloud or other services, compare quotes yourself',
+    withKiln: 'Route to 150+ 3rd-party services via Craftcloud directly from your workflow',
+  },
+  {
+    capability: 'Let AI run the whole thing',
+    without: 'Not possible',
+    withKiln: 'Full pipeline via MCP \u2014 any AI agent, any printer, start to finish',
+  },
 ];
 ---
 
-<section class="bordered">
+<section class="cmp-section">
   <div class="container">
-    <h2>How Kiln compares</h2>
-    <p class="lead">Kiln is purpose-built for AI agents. Existing tools weren't.</p>
+    <h2 class="cmp-heading">Before and after Kiln</h2>
+    <p class="cmp-sub">One tool instead of a dozen. One conversation instead of a dozen tabs.</p>
 
-    <div class="table-wrap">
-      <table>
+    <div class="cmp-table-outer">
+      <table class="cmp-table">
         <thead>
           <tr>
-            <th>Feature</th>
-            <th class="highlight">Kiln</th>
-            <th>OctoPrint</th>
-            <th>Cura</th>
-            <th>Prusa&nbsp;Connect</th>
+            <th>Capability</th>
+            <th>Without Kiln</th>
+            <th class="cmp-th-with">With Kiln</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr>
-              <td class="feature-name">{r.feature}</td>
-              <td class="highlight cell-check">{r.kiln}</td>
-              <td class="cell-val">{r.octoprint}</td>
-              <td class="cell-val">{r.cura}</td>
-              <td class="cell-val">{r.prusa}</td>
+          {rows.map((r, i) => (
+            <tr class={i === rows.length - 1 ? 'cmp-last' : ''}>
+              <td class="cmp-cap">{r.capability}</td>
+              <td class="cmp-old">{r.without}</td>
+              <td class="cmp-new">{r.withKiln}</td>
             </tr>
           ))}
         </tbody>
@@ -56,68 +103,160 @@ const rows: Row[] = [
 </section>
 
 <style>
-  .bordered {
+  .cmp-section {
     border-top: 1px solid var(--border);
-  }
-  .table-wrap {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 14px;
-  }
-  th, td {
-    padding: 14px 18px;
-    text-align: center;
-    border-bottom: 1px solid var(--border);
-  }
-  th {
-    font-weight: 600;
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-muted);
-    background: var(--bg-code);
-  }
-  th:first-child, td:first-child {
-    text-align: left;
-  }
-  .feature-name {
-    font-weight: 500;
-    color: var(--text);
-  }
-  .highlight {
-    background: rgba(255, 107, 43, 0.06);
-    color: var(--accent);
-    font-weight: 600;
-  }
-  th.highlight {
-    color: var(--accent);
-  }
-  .cell-check {
-    color: var(--accent);
-    font-size: 18px;
-  }
-  .cell-val {
-    color: var(--text-muted);
-    font-size: 16px;
-  }
-  tbody tr:last-child td {
-    border-bottom: none;
-  }
-  tbody tr {
-    transition: background 0.1s;
-  }
-  tbody tr:hover {
-    background: rgba(255, 255, 255, 0.02);
+    padding: 80px 0;
   }
 
-  @media (max-width: 640px) {
-    th, td {
-      padding: 10px 12px;
+  .cmp-heading {
+    font-size: clamp(24px, 4vw, 40px);
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+
+  .cmp-sub {
+    color: var(--text-muted);
+    font-size: 18px;
+    margin-bottom: 48px;
+  }
+
+  .cmp-table-outer {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 100%);
+  }
+
+  .cmp-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  /* ---- Header ---- */
+  .cmp-table thead tr {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .cmp-table th {
+    padding: 18px 28px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .cmp-th-with {
+    color: var(--accent) !important;
+  }
+
+  /* ---- Body cells ---- */
+  .cmp-table td {
+    padding: 20px 28px;
+    vertical-align: top;
+    font-size: 14px;
+    line-height: 1.6;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  }
+
+  .cmp-cap {
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    width: 20%;
+    font-size: 15px;
+  }
+
+  .cmp-old {
+    color: rgba(255, 255, 255, 0.35);
+    width: 38%;
+    font-size: 13.5px;
+  }
+
+  .cmp-new {
+    color: var(--text);
+    width: 42%;
+    font-size: 13.5px;
+    background: rgba(255, 107, 43, 0.035);
+    border-left: 2px solid rgba(255, 107, 43, 0.15);
+  }
+
+  /* ---- Alternating rows ---- */
+  .cmp-table tbody tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.015);
+  }
+
+  .cmp-table tbody tr:nth-child(even) .cmp-new {
+    background: rgba(255, 107, 43, 0.05);
+  }
+
+  /* ---- Hover ---- */
+  .cmp-table tbody tr {
+    transition: background 0.15s ease;
+  }
+
+  .cmp-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .cmp-table tbody tr:hover .cmp-new {
+    background: rgba(255, 107, 43, 0.07);
+  }
+
+  /* ---- Last row (no bottom border) ---- */
+  .cmp-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* ---- Mic-drop row ---- */
+  .cmp-last {
+    background: rgba(255, 107, 43, 0.06) !important;
+  }
+
+  .cmp-last .cmp-cap {
+    color: var(--accent);
+    font-size: 15px;
+  }
+
+  .cmp-last .cmp-old {
+    color: rgba(255, 255, 255, 0.18);
+    font-style: italic;
+  }
+
+  .cmp-last .cmp-new {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 14px;
+    background: rgba(255, 107, 43, 0.1) !important;
+    border-left-color: var(--accent);
+  }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 768px) {
+    .cmp-section {
+      padding: 56px 0;
+    }
+
+    .cmp-table th {
+      padding: 14px 16px;
+      font-size: 10px;
+    }
+
+    .cmp-table td {
+      padding: 14px 16px;
+    }
+
+    .cmp-cap {
+      white-space: normal;
       font-size: 13px;
+    }
+
+    .cmp-old, .cmp-new {
+      font-size: 12px;
     }
   }
 </style>

@@ -13,7 +13,7 @@ const features = [
   {
     icon: '\u{1F52C}',
     title: 'Printability Engine',
-    desc: 'Every model is analyzed across 7 dimensions: overhangs, thin walls, bridging, bed adhesion, support volume, warping risk, and thermal stress. Auto-orientation and adhesion recommendations included.',
+    desc: 'Analyze models across 7 dimensions (overhangs, thin walls, bridging, adhesion, supports, warping, thermal stress), score 0\u2013100, auto-orient, repair broken meshes, and auto-scale AI-generated models. Problems get fixed, not just flagged.',
   },
   {
     icon: '\u{1F9E9}',
@@ -28,7 +28,7 @@ const features = [
   {
     icon: '\u{1F504}',
     title: 'Print \u2192 Monitor \u2192 Recover',
-    desc: 'Full lifecycle: slice, validate safety, upload, print, monitor with camera vision, detect failures, diagnose root cause, auto-fix slicer settings, and retry. One conversation, start to finish.',
+    desc: 'Full lifecycle: slice, validate safety, upload, print, control speed with natural language, monitor with camera vision, detect failures, diagnose root cause, auto-fix slicer settings, and retry. One conversation, start to finish.',
   },
   {
     icon: '\u{1F6E1}\uFE0F',
@@ -43,17 +43,17 @@ const features = [
   {
     icon: '\u{1F3A8}',
     title: 'Surface Decoration',
-    desc: 'Add QR codes, photos, logos, procedural textures (tiger stripe, camo, marble, lava, wood), and text to any model. Multicolor printing support for Bambu AMS. 3 decorations/month free, unlimited with Pro.',
+    desc: 'Emboss or deboss QR codes, photos, logos, and text onto any model. Multicolor printing support for Bambu AMS. 3 decorations/month free, unlimited with Pro.',
   },
   {
-    icon: '\u{1F527}',
-    title: 'Mesh Tools',
-    desc: 'Repair non-manifold geometry, boolean operations (union, subtract, intersect), hollowing, chamfers, fillets, wall thickening, mesh merge, and floating region removal. Fix broken STLs before they waste filament.',
+    icon: '\u{1F30A}',
+    title: 'Surface Textures',
+    desc: 'Tiger stripe, marble, snakeskin, lava, wood grain, and more. Procedural and geometric patterns applied directly to any model with zero cloud dependencies. Pro feature.',
   },
   {
-    icon: '\u{1F9EA}',
-    title: 'Material Catalog',
-    desc: '56 real-world filaments from Hatchbox, Prusament, eSun, Polymaker, Bambu, and more. Purchase links, compatibility matching, and side-by-side property comparison. Know exactly which spool to buy.',
+    icon: '\u{1F9F0}',
+    title: 'Material & Mesh Intelligence',
+    desc: '56 brand-specific filaments with purchase links and compatibility matching. Plus mesh repair, boolean ops, hollowing, chamfers, fillets, and wall thickening. Know what spool to buy and fix broken STLs.',
   },
   {
     icon: '\u{1F9F0}',
@@ -87,19 +87,6 @@ const printerBackends = [
           <p>{f.desc}</p>
         </div>
       ))}
-    </div>
-
-    <div class="compat-strip">
-      <p class="compat-title">Works with your printer</p>
-      <div class="compat-list">
-        {printerBackends.map((name, i) => (
-          <>
-            <span class="compat-name">{name}</span>
-            {i < printerBackends.length - 1 && <span class="compat-dot">&middot;</span>}
-          </>
-        ))}
-      </div>
-      <p class="compat-sub">Native adapters for 6 printer backends. Same commands work across all of them.</p>
     </div>
   </div>
 </section>
