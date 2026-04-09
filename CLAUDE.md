@@ -213,85 +213,7 @@ If you're unsure how to proceed, work through this list before asking the user:
 
 ## File Lookup Rule (MANDATORY)
 - **Internal working docs live in `.dev/`.** When the user references a file by name (e.g., "longterm_vision_tasks", "tasks", "lessons learned", "completed tasks", "swarm guide"), look in `.dev/` first — never glob the entire repo.
-- **Consult the Project Structure Quick Reference below** before searching for any file. The layout is documented; don't rediscover it every session.
-
-## Project Structure Quick Reference
-```
-kiln/                           — MCP Server package
-  src/kiln/
-    __init__.py
-    __main__.py                 — Entry point (python -m kiln)
-    server.py                   — FastMCP server, 544 MCP tools (132 here + 341 in plugins/ + 71 in kiln-pro)
-    slicer.py                   — PrusaSlicer/OrcaSlicer integration
-    slicer_profiles.py          — Bundled slicer profiles per printer
-    safety_profiles.py          — Per-printer safety limits (28 models)
-    printer_intelligence.py     — Printer knowledge base (quirks, materials, fixes)
-    design_intelligence.py      — Design knowledge queries (materials, patterns, constraints)
-    design_validator.py         — Design validation + feedback bridge
-    pipelines.py                — Pre-validated print pipelines (quick_print, calibrate, benchmark)
-    registry.py                 — Fleet printer registry
-    queue.py                    — Priority job queue
-    scheduler.py                — Background job dispatcher
-    events.py                   — Pub/sub event bus
-    persistence.py              — SQLite storage (jobs, events, print history, agent memory)
-    webhooks.py                 — Webhook delivery with HMAC
-    auth.py                     — API key authentication
-    billing.py                  — Fee tracking
-    gcode.py                    — G-code safety validator (per-printer limits)
-    data/
-      safety_profiles.json      — Per-printer safety limits database
-      slicer_profiles.json      — Per-printer slicer settings
-      printer_intelligence.json — Firmware quirks, materials, failure modes
-      design_knowledge/         — Design intelligence data (materials, patterns, troubleshooting)
-    printers/
-      base.py                   — Abstract PrinterAdapter, enums, dataclasses
-      octoprint.py              — OctoPrint REST adapter
-      moonraker.py              — Moonraker REST adapter
-      bambu.py                  — Bambu Lab MQTT adapter
-    marketplaces/
-      base.py                   — Marketplace adapter interface
-      thingiverse.py            — Thingiverse API client
-      myminifactory.py          — MyMiniFactory API client
-      cults3d.py                — Cults3D API client
-    tool_schema.py              — OpenAI function-calling schema converter
-    tool_tiers.py               — Tool tier definitions (essential/standard/full)
-    agent_loop.py               — Generic agent loop for OpenAI-compatible APIs
-    openrouter.py               — OpenRouter integration + model catalog
-    rest_api.py                 — FastAPI REST wrapper for MCP tools
-    cli/
-      main.py                   — Click CLI (113 commands)
-      config.py                 — Config management (YAML/env/flags)
-      discovery.py              — mDNS printer scanning
-      output.py                 — JSON/text output formatting
-  tests/                        — pytest tests (8,100+)
-  pyproject.toml
-
-octoprint-cli/                  — CLI Tool package
-  src/octoprint_cli/
-    cli.py                      — Click CLI entry point
-    client.py                   — OctoPrint REST client
-    config.py                   — Config management
-    output.py                   — JSON/text output formatting
-    safety.py                   — Pre-flight checks
-    exit_codes.py               — Standard exit codes
-  tests/                        — pytest tests (239)
-  pyproject.toml
-
-docs/                           — Public documentation
-  WHITEPAPER.md                 — Technical whitepaper
-  PROJECT_DOCS.md               — Full project documentation
-  LITEPAPER.md                  — Non-technical overview
-  PRINT_FLOW.md                 — End-to-end flow diagram
-
-.dev/                           — Internal working docs (not public-facing)
-  COMPLETED_TASKS.md            — Shipped features log
-  TASKS.md                      — Open backlog
-  LESSONS_LEARNED.md            — Hard-won patterns (auto-updated)
-  SWARM_GUIDE.md                — Agent swarm system guide
-  PROMPT_GUIDE.md               — Prompt engineering reference
-  SKILL.md                      — Skill system reference
-  roles/                        — Swarm teammate role references
-```
+- **Key directories:** `kiln/src/kiln/` (MCP server), `kiln/src/kiln/cli/` (CLI), `kiln/src/kiln/printers/` (adapters), `kiln/src/kiln/data/` (JSON data files), `kiln/tests/` (pytest), `octoprint-cli/` (CLI tool package), `docs/` (public docs), `.dev/` (internal working docs)
 
 ## Desktop App (forge-internal/kiln-desktop)
 
@@ -305,15 +227,6 @@ When pushing new Kiln version releases:
 - Build and test: `cd forge-internal/kiln-desktop && swift build`
 
 The `forge-internal/CLAUDE.md` has the full desktop app architecture reference (key files, tier system, build instructions).
-
-## Common Bug Patterns
-- **Function name collisions**: When adding new functions to `server.py` or any file with existing tool registrations, always `grep "^def \|^async def "` the target file first to verify no name clashes. This has caused 10+ collisions in a single session. Check before writing, not after tests fail.
-- **Stale hardcoded counts**: MCP tool counts and CLI command counts are hardcoded in multiple files (CLAUDE.md, README.md, kiln/README.md, server.json, THREAT_MODEL.md, PROJECT_DOCS.md, GitHub description, SKILL.md, TASKS.md, website pages). After adding new tools or commands, `grep -rn "\\d\\+ MCP tools" . --include="*.md"` across the repo to find and update ALL stale references. The GitHub description must also be updated via `gh api repos/codeofaxel/Kiln -X PATCH -f description="..."`. **Counting methodology (see LESSONS_LEARNED.md for full commands):** MCP tools use TWO registration patterns — `@mcp.tool(` decorators AND `mcp.tool()(fn)` call-pattern inside `register()` methods. Must count both, exclude `__init__.py` false positives. CLI commands = leaf `@X.command(` (102) + Click groups (11) + `add_command` aliases (1) = 113. As of 2026-04-08: **544 MCP tools, 114 CLI commands, 9,800+ tests.**
-- **State mapping gaps**: OctoPrint returns flag combinations not covered by `_map_state()` → defaults to UNKNOWN
-- **Nested dict access**: OctoPrint API responses have deeply nested optional fields — use safe access helpers or `.get()` chains
-- **File path handling**: Upload paths differ between local filesystem and OctoPrint's virtual filesystem
-- **Retry logic masking errors**: HTTP retry on 502/503/504 can mask persistent backend failures — check retry exhaustion paths
-- **Config precedence confusion**: CLI flags → env vars → config file — bugs often come from the wrong layer winning
 
 ## Hard Laws (crash/data-loss prevention — never violate these)
 
