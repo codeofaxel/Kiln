@@ -40,6 +40,11 @@
       "retract_speed": "45",
       "retract_lift": "0.2",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "Generic default \u2014 manual M600 pause assumed"
     }
   },
   "ender3": {
@@ -81,6 +86,11 @@
       "bed_shape": "0x0,220x0,220x220,0x220",
       "max_print_height": "250",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "ender3_s1": {
@@ -116,6 +126,11 @@
       "bed_shape": "0x0,220x0,220x220,0x220",
       "max_print_height": "270",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "k1": {
@@ -151,6 +166,11 @@
       "bed_shape": "0x0,220x0,220x220,0x220",
       "max_print_height": "250",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "prusa_mk3s": {
@@ -187,6 +207,11 @@
       "bed_shape": "0x0,250x0,250x210,0x210",
       "max_print_height": "210",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 75,
+      "tool_changer": "mmu2s",
+      "tool_change_notes": "Prusa MMU2S: PrusaSlicer bundled profiles use 15s load + 12s unload = 27s mechanical + ~48s purge. Capped at MMU3 FW 3.0.3 (no speed boost). High variance. Source: PrusaSlicer PrusaResearch.ini."
     }
   },
   "prusa_mk4": {
@@ -222,6 +247,11 @@
       "bed_shape": "0x0,250x0,250x210,0x210",
       "max_print_height": "220",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 65,
+      "tool_changer": "mmu3",
+      "tool_change_notes": "Prusa MMU3: 42s mechanical (FW 3.0.4, 20% speedup from 52s) + ~23s purge. Source: Prusa blog 2025, FW 6.5.3 + MMU3 FW 3.0.4."
     }
   },
   "prusa_mini": {
@@ -257,12 +287,17 @@
       "bed_shape": "0x0,180x0,180x180,0x180",
       "max_print_height": "180",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 0,
+      "tool_changer": "none",
+      "tool_change_notes": "Prusa Mini is NOT compatible with MMU2S or MMU3. Official Prusa MMU targets MK3.9/MK4 only. M600 manual pause only. Source: Prusa MMU3 compatibility page."
     }
   },
   "bambu_x1c": {
     "display_name": "Bambu Lab X1 Carbon",
     "slicer": "prusaslicer",
-    "notes": "Enclosed CoreXY. Hardened nozzle. High speeds. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode — Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence. Without these, extrusion silently fails.",
+    "notes": "Enclosed CoreXY. Hardened nozzle. High speeds. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode \u2014 Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence. Without these, extrusion silently fails.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -295,12 +330,17 @@
       "bed_shape": "0x0,256x0,256x256,0x256",
       "max_print_height": "256",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 97,
+      "tool_changer": "ams",
+      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge (default 400mm\u00b3). Source: BambuStudio fdm_machine_common.json + X1C 0.4 nozzle.json."
     }
   },
   "bambu_p1s": {
     "display_name": "Bambu Lab P1S",
     "slicer": "prusaslicer",
-    "notes": "Enclosed CoreXY. Same toolhead as X1C without LiDAR. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode — Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence.",
+    "notes": "Enclosed CoreXY. Same toolhead as X1C without LiDAR. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode \u2014 Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -333,12 +373,17 @@
       "bed_shape": "0x0,256x0,256x256,0x256",
       "max_print_height": "256",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 97,
+      "tool_changer": "ams",
+      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge. Same AMS as X1C. Source: BambuStudio P1S 0.4 nozzle.json."
     }
   },
   "bambu_a1": {
     "display_name": "Bambu Lab A1",
     "slicer": "prusaslicer",
-    "notes": "Open-frame bed-slinger. All-metal hotend. CRITICAL: Bambu A1 requires use_relative_e_distances (M83) for the T1000 virtual tool. Start/end gcode MUST be empty — Kiln's bambu_3mf module injects BambuStudio's proprietary 620-line init sequence (M620 M motor enable, AMS load, extrusion calibration, bed leveling) and end sequence (AMS retract, cooldown, finish sound). Without these, G1 E commands are silently ignored. Speeds proven on A1 Combo firmware 01.08.03.00.",
+    "notes": "Open-frame bed-slinger. All-metal hotend. CRITICAL: Bambu A1 requires use_relative_e_distances (M83) for the T1000 virtual tool. Start/end gcode MUST be empty \u2014 Kiln's bambu_3mf module injects BambuStudio's proprietary 620-line init sequence (M620 M motor enable, AMS load, extrusion calibration, bed leveling) and end sequence (AMS retract, cooldown, finish sound). Without these, G1 E commands are silently ignored. Speeds proven on A1 Combo firmware 01.08.03.00.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -372,6 +417,11 @@
       "bed_shape": "0x0,256x0,256x256,0x256",
       "max_print_height": "256",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 94,
+      "tool_changer": "ams_lite",
+      "tool_change_notes": "Bambu AMS Lite: 29s unload + 25s load = 54s mechanical + ~40s purge. Shorter PTFE path than AMS. Source: BambuStudio A1 0.4 nozzle.json."
     }
   },
   "voron_2": {
@@ -407,6 +457,11 @@
       "bed_shape": "0x0,350x0,350x350,0x350",
       "max_print_height": "350",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 45,
+      "tool_changer": "ercf",
+      "tool_change_notes": "ERCF V2 + Happy Hare: all-time avg 63s, single-job avg 36-42s. Using 45s as middle estimate. Source: Happy Hare mmu.py statistics + wiki examples."
     }
   },
   "elegoo_neptune4": {
@@ -442,6 +497,11 @@
       "bed_shape": "0x0,235x0,235x235,0x235",
       "max_print_height": "265",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "elegoo_centauri_carbon": {
@@ -477,6 +537,11 @@
       "bed_shape": "0x0,256x0,256x256,0x256",
       "max_print_height": "256",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer available at launch. M600 manual pause only."
     }
   },
   "elegoo_orangestorm_giga": {
@@ -512,6 +577,11 @@
       "bed_shape": "0x0,800x0,800x800,0x800",
       "max_print_height": "1000",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. Large-format printer, M600 manual pause only."
     }
   },
   "sovol_sv06": {
@@ -547,6 +617,11 @@
       "bed_shape": "0x0,220x0,220x220,0x220",
       "max_print_height": "250",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "qidi_x_plus3": {
@@ -582,6 +657,11 @@
       "bed_shape": "0x0,280x0,280x280,0x280",
       "max_print_height": "270",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "ender5": {
@@ -618,6 +698,11 @@
       "bed_shape": "0x0,350x0,350x350,0x350",
       "max_print_height": "400",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "cr10": {
@@ -654,6 +739,11 @@
       "bed_shape": "0x0,300x0,300x300,0x300",
       "max_print_height": "400",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "voron_0": {
@@ -689,6 +779,11 @@
       "bed_shape": "0x0,120x0,120x120,0x120",
       "max_print_height": "120",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 45,
+      "tool_changer": "ercf",
+      "tool_change_notes": "ERCF V2 optional. Same Happy Hare firmware timing as Voron 2.4 (~45s avg). Stock has no multi-material."
     }
   },
   "ratrig_vcore3": {
@@ -724,6 +819,11 @@
       "bed_shape": "0x0,300x0,300x300,0x300",
       "max_print_height": "300",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No standard automatic tool changer. ERCF possible as custom mod but not common."
     }
   },
   "elegoo_neptune3": {
@@ -759,6 +859,11 @@
       "bed_shape": "0x0,220x0,220x220,0x220",
       "max_print_height": "280",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "anker_m5": {
@@ -794,6 +899,11 @@
       "bed_shape": "0x0,235x0,235x235,0x235",
       "max_print_height": "250",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. Anker AnkerMake M5 uses proprietary firmware, M600 manual pause."
     }
   },
   "artillery_sw_x3": {
@@ -829,6 +939,11 @@
       "bed_shape": "0x0,300x0,300x300,0x300",
       "max_print_height": "400",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "sovol_sv07": {
@@ -864,6 +979,11 @@
       "bed_shape": "0x0,220x0,220x220,0x220",
       "max_print_height": "250",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. M600 manual pause only."
     }
   },
   "flashforge_adventurer5m": {
@@ -899,6 +1019,11 @@
       "bed_shape": "0x0,220x0,220x220,0x220",
       "max_print_height": "220",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "No automatic tool changer. FlashForge proprietary firmware, manual filament change."
     }
   },
   "prusa_xl": {
@@ -934,12 +1059,17 @@
       "bed_shape": "0x0,360x0,360x360,0x360",
       "max_print_height": "360",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 3,
+      "tool_changer": "tool_changer",
+      "tool_change_notes": "Prusa XL tool changer: ~3s per swap. Physical toolhead dock \u2014 no purge needed (separate nozzles). Fastest mechanism available. Source: Prusa official specs."
     }
   },
   "bambu_p1p": {
     "display_name": "Bambu Lab P1P",
     "slicer": "prusaslicer",
-    "notes": "Open-frame CoreXY. Same mechanics as P1S without enclosure. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode — Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence.",
+    "notes": "Open-frame CoreXY. Same mechanics as P1S without enclosure. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode \u2014 Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -972,12 +1102,17 @@
       "bed_shape": "0x0,256x0,256x256,0x256",
       "max_print_height": "256",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 97,
+      "tool_changer": "ams",
+      "tool_change_notes": "Bambu AMS: 28s unload + 29s load = 57s mechanical + ~40s purge. Same AMS as X1C. Source: BambuStudio P1P 0.4 nozzle.json."
     }
   },
   "bambu_a1_mini": {
     "display_name": "Bambu Lab A1 Mini",
     "slicer": "prusaslicer",
-    "notes": "Compact bed-slinger. Same hotend as A1 but smaller build volume (180x180x180). AMS Lite compatible. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode — Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence.",
+    "notes": "Compact bed-slinger. Same hotend as A1 but smaller build volume (180x180x180). AMS Lite compatible. CRITICAL: All Bambu printers require use_relative_e_distances (M83) and empty start/end gcode \u2014 Kiln's bambu_3mf module injects BambuStudio's proprietary init sequence.",
     "settings": {
       "layer_height": "0.2",
       "first_layer_height": "0.2",
@@ -1010,6 +1145,11 @@
       "bed_shape": "0x0,180x0,180x180,0x180",
       "max_print_height": "180",
       "gcode_flavor": "marlin"
+    },
+    "tool_change": {
+      "tool_change_seconds": 102,
+      "tool_changer": "ams_lite",
+      "tool_change_notes": "Bambu AMS Lite: 34s unload + 28s load = 62s mechanical + ~40s purge. Slower than A1 despite same AMS Lite. Source: BambuStudio A1 Mini 0.4 nozzle.json."
     }
   },
   "klipper_generic": {
@@ -1047,6 +1187,11 @@
       "start_gcode": "START_PRINT EXTRUDER_TEMP={temperature} BED_TEMP={bed_temperature}",
       "end_gcode": "END_PRINT",
       "gcode_flavor": "klipper"
+    },
+    "tool_change": {
+      "tool_change_seconds": 90,
+      "tool_changer": "none",
+      "tool_change_notes": "Generic Klipper printer. Tool changer depends on hardware config. Default assumes manual M600."
     }
   }
 }

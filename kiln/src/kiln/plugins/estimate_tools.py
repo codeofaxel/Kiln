@@ -60,6 +60,7 @@ class _EstimateToolsPlugin:
         - estimate_print_time
         - estimate_material_cost
         - estimate_print_progress
+        - estimate_before_design
     """
 
     @property
@@ -424,6 +425,182 @@ class _EstimateToolsPlugin:
                 _logger.exception("Error in estimate_print_progress")
                 return _srv._error_dict(
                     f"Failed to estimate print progress: {exc}", code="PROGRESS_ERROR"
+                )
+
+        # ------------------------------------------------------------------
+        # estimate_before_design
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def estimate_before_design(
+            width_mm: float = 0.0,
+            depth_mm: float = 0.0,
+            height_mm: float = 0.0,
+            template_id: str = "",
+            template_overrides: str = "",
+            materials: str = "PLA",
+            material_fractions: str = "",
+            material_roles: str = "",
+            infill_percent: float = -1.0,
+            layer_height_mm: float = 0.0,
+            nozzle_mm: float = 0.4,
+            wall_layers: int = 3,
+            printer_id: str = "",
+            electricity_rate: float = 0.12,
+            printer_wattage: float = 200.0,
+        ) -> dict:
+            """Estimate print time, cost, and filament usage BEFORE generating a model.
+
+            Works from dimensions alone — no file, no slicing, no generation
+            needed.  Use this to answer "how long will it take?", "how much
+            will it cost?", and "how much filament?" before committing to a
+            design.
+
+            **Two ways to specify dimensions:**
+
+            1. **Direct dimensions** — provide ``width_mm``, ``depth_mm``,
+               ``height_mm`` explicitly.
+            2. **Template** — provide ``template_id`` (e.g. ``"phone_stand"``,
+               ``"box_with_lid"``) and optional ``template_overrides`` to use
+               the template's default dimensions.
+
+            **Multi-material prints:** Pass comma-separated materials
+            (e.g. ``"PLA,PLA"`` for two-color) with optional fractions
+            (e.g. ``"0.85,0.15"`` for body + accent).  The tool estimates
+            per-filament usage and tool change overhead automatically.
+
+            Returns time estimate, per-filament weight/length/cost breakdown,
+            electricity cost, total cost, and tool swap count.
+
+            :param width_mm: Part width (X) in mm.  Required if no template.
+            :param depth_mm: Part depth (Y) in mm.  Required if no template.
+            :param height_mm: Part height (Z) in mm.  Required if no template.
+            :param template_id: Design template ID (e.g. ``"phone_stand"``).
+                Resolves dimensions from template defaults.  Overrides
+                width/depth/height if provided.
+            :param template_overrides: JSON string of template parameter
+                overrides (e.g. ``'{"phone_width": 85}'``).
+            :param materials: Comma-separated material names
+                (e.g. ``"PLA"`` or ``"PLA,PLA"`` for two-color).
+            :param material_fractions: Comma-separated volume fractions
+                (e.g. ``"0.85,0.15"``).  Must match materials count and sum
+                to 1.0.  Default: body gets 85%, accents split the rest.
+            :param material_roles: Comma-separated role labels
+                (e.g. ``"body,accent"``).  Default: auto-generated.
+            :param infill_percent: Infill density override (0-100).
+                Default: from printer profile or 20%.  Pass ``-1`` for auto.
+            :param layer_height_mm: Layer height override.  ``0`` = auto.
+            :param nozzle_mm: Nozzle diameter in mm (default 0.4).
+            :param wall_layers: Number of perimeter shells (default 3).
+            :param printer_id: Printer model for speed/setting lookup
+                (e.g. ``"bambu_a1"``, ``"prusa_mk4"``).
+            :param electricity_rate: Cost per kWh in USD (default 0.12).
+            :param printer_wattage: Printer power in watts (default 200).
+            """
+            import json as _json
+
+            import kiln.server as _srv
+
+            try:
+                from kiln.pre_estimate import (
+                    estimate_from_dimensions,
+                    estimate_from_template,
+                )
+
+                # Parse comma-separated inputs
+                mat_list = [m.strip() for m in materials.split(",") if m.strip()]
+                if not mat_list:
+                    mat_list = ["PLA"]
+
+                frac_list: list[float] | None = None
+                if material_fractions.strip():
+                    frac_list = [float(f.strip()) for f in material_fractions.split(",")]
+
+                role_list: list[str] | None = None
+                if material_roles.strip():
+                    role_list = [r.strip() for r in material_roles.split(",")]
+
+                eff_infill: float | None = None if infill_percent < 0 else infill_percent
+                eff_layer: float | None = layer_height_mm if layer_height_mm > 0 else None
+                eff_printer: str | None = printer_id if printer_id else None
+
+                # Parse template overrides
+                tpl_overrides: dict[str, Any] | None = None
+                if template_overrides.strip():
+                    tpl_overrides = _json.loads(template_overrides)
+
+                # Route to template or direct estimation
+                if template_id.strip():
+                    est = estimate_from_template(
+                        template_id.strip(),
+                        param_overrides=tpl_overrides,
+                        materials=mat_list,
+                        material_fractions=frac_list,
+                        material_roles=role_list,
+                        infill_percent=eff_infill,
+                        layer_height_mm=eff_layer,
+                        nozzle_mm=nozzle_mm,
+                        wall_layers=wall_layers,
+                        printer_id=eff_printer,
+                        electricity_rate=electricity_rate,
+                        printer_wattage=printer_wattage,
+                    )
+                else:
+                    if width_mm <= 0 or depth_mm <= 0 or height_mm <= 0:
+                        return _srv._error_dict(
+                            "Provide positive width_mm/depth_mm/height_mm "
+                            "or a template_id.",
+                            code="MISSING_DIMENSIONS",
+                        )
+                    est = estimate_from_dimensions(
+                        width_mm,
+                        depth_mm,
+                        height_mm,
+                        materials=mat_list,
+                        material_fractions=frac_list,
+                        material_roles=role_list,
+                        infill_percent=eff_infill,
+                        layer_height_mm=eff_layer,
+                        nozzle_mm=nozzle_mm,
+                        wall_layers=wall_layers,
+                        printer_id=eff_printer,
+                        electricity_rate=electricity_rate,
+                        printer_wattage=printer_wattage,
+                    )
+
+                # Build human-readable summary
+                parts: list[str] = [
+                    f"Estimated {est.estimated_time_human}",
+                    f"{est.total_weight_grams}g total filament",
+                    f"${est.total_cost_usd:.2f} total cost",
+                ]
+                if est.tool_changes > 0:
+                    parts.append(
+                        f"{est.tool_changes} tool swaps "
+                        f"({est.tool_change_type}, "
+                        f"+{_format_time(est.tool_change_time_seconds)})"
+                    )
+
+                filament_summary = []
+                for f in est.filaments:
+                    filament_summary.append(
+                        f"{f.material} ({f.role}): {f.weight_grams}g, "
+                        f"{f.length_meters}m, ${f.cost_usd:.2f}"
+                    )
+
+                return {
+                    "success": True,
+                    "estimate": est.to_dict(),
+                    "message": " | ".join(parts),
+                    "filament_summary": filament_summary,
+                }
+
+            except ValueError as exc:
+                return _srv._error_dict(str(exc), code="INVALID_INPUT")
+            except Exception as exc:
+                _logger.exception("Unexpected error in estimate_before_design")
+                return _srv._error_dict(
+                    f"Unexpected error: {exc}", code="INTERNAL_ERROR"
                 )
 
         _logger.debug("Registered estimate tools")

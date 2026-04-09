@@ -5067,6 +5067,161 @@ def cost(
         sys.exit(1)
 
 
+@cli.command("estimate-before-design")
+@click.option("--width", "width_mm", type=float, default=0.0, help="Part width (X) in mm.")
+@click.option("--depth", "depth_mm", type=float, default=0.0, help="Part depth (Y) in mm.")
+@click.option("--height", "height_mm", type=float, default=0.0, help="Part height (Z) in mm.")
+@click.option("--template", "template_id", default="", help='Design template ID (e.g. "phone_stand").')
+@click.option("--template-overrides", default="", help='JSON template param overrides (e.g. \'{"phone_width": 85}\').')
+@click.option("--materials", "-m", default="PLA", help='Comma-separated materials (e.g. "PLA,PLA").')
+@click.option("--fractions", default="", help='Comma-separated volume fractions (e.g. "0.85,0.15").')
+@click.option("--roles", default="", help='Comma-separated role labels (e.g. "body,accent").')
+@click.option("--infill", type=float, default=-1.0, help="Infill percent (0-100). -1 = auto.")
+@click.option("--layer-height", type=float, default=0.0, help="Layer height in mm. 0 = auto.")
+@click.option("--nozzle", type=float, default=0.4, help="Nozzle diameter in mm.")
+@click.option("--walls", type=int, default=3, help="Number of perimeter shells.")
+@click.option("--printer", "printer_id", default="", help='Printer model ID (e.g. "bambu_a1").')
+@click.option("--electricity-rate", type=float, default=0.12, help="USD per kWh.")
+@click.option("--printer-wattage", type=float, default=200.0, help="Printer power in watts.")
+@click.option("--json", "json_mode", is_flag=True, help="Output JSON.")
+@click.pass_context
+def estimate_before_design_cmd(
+    ctx: click.Context,
+    width_mm: float,
+    depth_mm: float,
+    height_mm: float,
+    template_id: str,
+    template_overrides: str,
+    materials: str,
+    fractions: str,
+    roles: str,
+    infill: float,
+    layer_height: float,
+    nozzle: float,
+    walls: int,
+    printer_id: str,
+    electricity_rate: float,
+    printer_wattage: float,
+    json_mode: bool,
+) -> None:
+    """Estimate print time, cost, and filament usage BEFORE generating a model.
+
+    No file needed — works from dimensions or a template ID alone.
+
+    Examples:
+
+        kiln estimate-before-design --width 120 --depth 120 --height 15 --printer bambu_a1
+
+        kiln estimate-before-design --template phone_stand --printer bambu_a1
+
+        kiln estimate-before-design --width 90 --depth 90 --height 12 -m "PLA,PLA" --fractions "0.85,0.15" --printer bambu_a1
+    """
+    import json as _json
+
+    from kiln.pre_estimate import estimate_from_dimensions, estimate_from_template
+
+    try:
+        mat_list = [m.strip() for m in materials.split(",") if m.strip()]
+        if not mat_list:
+            mat_list = ["PLA"]
+
+        frac_list: list[float] | None = None
+        if fractions.strip():
+            frac_list = [float(f.strip()) for f in fractions.split(",")]
+
+        role_list: list[str] | None = None
+        if roles.strip():
+            role_list = [r.strip() for r in roles.split(",")]
+
+        eff_infill: float | None = None if infill < 0 else infill
+        eff_layer: float | None = layer_height if layer_height > 0 else None
+        eff_printer: str | None = printer_id if printer_id else None
+
+        tpl_overrides: dict | None = None
+        if template_overrides.strip():
+            tpl_overrides = _json.loads(template_overrides)
+
+        if template_id.strip():
+            est = estimate_from_template(
+                template_id.strip(),
+                param_overrides=tpl_overrides,
+                materials=mat_list,
+                material_fractions=frac_list,
+                material_roles=role_list,
+                infill_percent=eff_infill,
+                layer_height_mm=eff_layer,
+                nozzle_mm=nozzle,
+                wall_layers=walls,
+                printer_id=eff_printer,
+                electricity_rate=electricity_rate,
+                printer_wattage=printer_wattage,
+            )
+        else:
+            if width_mm <= 0 or depth_mm <= 0 or height_mm <= 0:
+                raise click.UsageError(
+                    "Provide --width/--depth/--height or --template."
+                )
+            est = estimate_from_dimensions(
+                width_mm,
+                depth_mm,
+                height_mm,
+                materials=mat_list,
+                material_fractions=frac_list,
+                material_roles=role_list,
+                infill_percent=eff_infill,
+                layer_height_mm=eff_layer,
+                nozzle_mm=nozzle,
+                wall_layers=walls,
+                printer_id=eff_printer,
+                electricity_rate=electricity_rate,
+                printer_wattage=printer_wattage,
+            )
+
+        if json_mode:
+            click.echo(_json.dumps({"status": "success", "data": est.to_dict()}, indent=2))
+        else:
+            click.echo("\n  Pre-Design Estimate")
+            click.echo(f"  Dimensions: {est.width_mm} × {est.depth_mm} × {est.height_mm} mm")
+            click.echo(f"  Volume: ~{est.volume_mm3:.0f} mm³")
+            click.echo(f"  Time: {est.estimated_time_human}")
+            if est.tool_changes > 0:
+                tc_time = est.tool_change_time_seconds
+                tc_h, tc_rem = divmod(tc_time, 3600)
+                tc_m = tc_rem // 60
+                tc_str = f"{tc_h}h {tc_m}m" if tc_h else f"{tc_m}m"
+                click.echo(
+                    f"  Tool swaps: {est.tool_changes} ({est.tool_change_type}, +{tc_str})"
+                )
+            click.echo("\n  Filament:")
+            for f in est.filaments:
+                click.echo(
+                    f"    {f.material} ({f.role}): {f.weight_grams}g, "
+                    f"{f.length_meters}m — ${f.cost_usd:.2f}"
+                )
+            click.echo("\n  Cost:")
+            click.echo(f"    Filament: ${est.filament_cost_usd:.2f}")
+            click.echo(f"    Electricity: ${est.electricity_cost_usd:.2f}")
+            click.echo(f"    Total: ${est.total_cost_usd:.2f}")
+            click.echo(f"\n  Settings: {est.infill_percent:.0f}% infill, {est.layer_height_mm}mm layers, {est.nozzle_mm}mm nozzle")
+            if est.printer_id:
+                click.echo(f"  Printer: {est.printer_id}")
+            click.echo(f"  Confidence: {est.confidence}")
+            for note in est.confidence_notes:
+                click.echo(f"    - {note}")
+            for warn in est.warnings:
+                click.echo(f"  ⚠ {warn}")
+            click.echo()
+
+    except click.UsageError:
+        raise
+    except ValueError as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(format_error(str(exc), json_mode=json_mode))
+        sys.exit(1)
+
+
 @cli.command("compare-cost")
 @click.argument("file_path", type=click.Path(exists=True))
 @click.option("--material", "-m", default="PLA", help="Filament material for local estimate.")

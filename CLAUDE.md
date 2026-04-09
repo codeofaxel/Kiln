@@ -221,7 +221,7 @@ kiln/                           — MCP Server package
   src/kiln/
     __init__.py
     __main__.py                 — Entry point (python -m kiln)
-    server.py                   — FastMCP server, 543 MCP tools (132 here + 340 in plugins/ + 71 in kiln-pro)
+    server.py                   — FastMCP server, 544 MCP tools (132 here + 341 in plugins/ + 71 in kiln-pro)
     slicer.py                   — PrusaSlicer/OrcaSlicer integration
     slicer_profiles.py          — Bundled slicer profiles per printer
     safety_profiles.py          — Per-printer safety limits (28 models)
@@ -308,7 +308,7 @@ The `forge-internal/CLAUDE.md` has the full desktop app architecture reference (
 
 ## Common Bug Patterns
 - **Function name collisions**: When adding new functions to `server.py` or any file with existing tool registrations, always `grep "^def \|^async def "` the target file first to verify no name clashes. This has caused 10+ collisions in a single session. Check before writing, not after tests fail.
-- **Stale hardcoded counts**: MCP tool counts and CLI command counts are hardcoded in multiple files (CLAUDE.md, README.md, kiln/README.md, server.json, THREAT_MODEL.md, PROJECT_DOCS.md, GitHub description, SKILL.md, TASKS.md, website pages). After adding new tools or commands, `grep -rn "\\d\\+ MCP tools" . --include="*.md"` across the repo to find and update ALL stale references. The GitHub description must also be updated via `gh api repos/codeofaxel/Kiln -X PATCH -f description="..."`. **Counting methodology (see LESSONS_LEARNED.md for full commands):** MCP tools use TWO registration patterns — `@mcp.tool(` decorators AND `mcp.tool()(fn)` call-pattern inside `register()` methods. Must count both, exclude `__init__.py` false positives. CLI commands = leaf `@X.command(` (102) + Click groups (11) + `add_command` aliases (1) = 113. As of 2026-04-08: **543 MCP tools, 113 CLI commands, 9,600+ tests.**
+- **Stale hardcoded counts**: MCP tool counts and CLI command counts are hardcoded in multiple files (CLAUDE.md, README.md, kiln/README.md, server.json, THREAT_MODEL.md, PROJECT_DOCS.md, GitHub description, SKILL.md, TASKS.md, website pages). After adding new tools or commands, `grep -rn "\\d\\+ MCP tools" . --include="*.md"` across the repo to find and update ALL stale references. The GitHub description must also be updated via `gh api repos/codeofaxel/Kiln -X PATCH -f description="..."`. **Counting methodology (see LESSONS_LEARNED.md for full commands):** MCP tools use TWO registration patterns — `@mcp.tool(` decorators AND `mcp.tool()(fn)` call-pattern inside `register()` methods. Must count both, exclude `__init__.py` false positives. CLI commands = leaf `@X.command(` (102) + Click groups (11) + `add_command` aliases (1) = 113. As of 2026-04-08: **544 MCP tools, 114 CLI commands, 9,600+ tests.**
 - **State mapping gaps**: OctoPrint returns flag combinations not covered by `_map_state()` → defaults to UNKNOWN
 - **Nested dict access**: OctoPrint API responses have deeply nested optional fields — use safe access helpers or `.get()` chains
 - **File path handling**: Upload paths differ between local filesystem and OctoPrint's virtual filesystem
