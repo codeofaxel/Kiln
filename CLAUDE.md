@@ -43,7 +43,6 @@ These encode how Adam wants code to look and feel. Follow these even when not ex
 - **Type hints everywhere.** Use `Optional[T]` for nullable, `dict[str, Any]` for flexible dicts, never bare `dict`.
 - **Dataclasses for return types**, never raw dicts from adapters or tools. Include `.to_dict()` method with enum → string conversion.
 - **Enums use string values** for JSON serialization (`PrinterStatus.IDLE = "idle"`).
-- **Import grouping**: stdlib → third-party → local, with blank lines between groups.
 - **Docstrings**: ReST format when documenting Args/Returns/Raises. Brief one-liner if the function name is self-explanatory.
 - **No class inheritance unless it's the adapter pattern.** Prefer composition and plain functions.
 - **Keyword-only args** for optional parameters: `def foo(required, *, optional=None)`.
