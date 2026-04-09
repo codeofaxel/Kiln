@@ -1110,7 +1110,7 @@ pip install -e "./octoprint-cli[dev]"
 ### Running Tests
 
 ```bash
-cd kiln && python3 -m pytest tests/ -v    # 9,600+ tests
+cd kiln && python3 -m pytest tests/ -v    # 9,800+ tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 

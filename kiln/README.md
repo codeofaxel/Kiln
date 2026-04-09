@@ -128,7 +128,7 @@ Prusa   Voron    X1C/P1S  MK4/XL
 
 ```bash
 pip install -e ".[dev]"
-cd kiln && python -m pytest tests/ -v  # 8,000+ tests
+cd kiln && python -m pytest tests/ -v  # 8,100+ tests
 ```
 
 ## License

@@ -1056,8 +1056,8 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e "./kiln[dev]"
 pip install -e "./octoprint-cli[dev]"
 
-# Run tests (8,000+ total)
-cd kiln && python3 -m pytest tests/ -v        # 8,000+ tests
+# Run tests (9,800+ total)
+cd kiln && python3 -m pytest tests/ -v        # 8,100+ tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
