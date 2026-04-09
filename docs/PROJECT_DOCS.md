@@ -43,6 +43,7 @@ All three modes use the same MCP tools and CLI commands.
 | Bambu Lab | MQTT/LAN | X1C, P1S, A1 | Stable |
 | Prusa Link | HTTP REST | MK4, XL, Mini+ | Stable |
 | Elegoo | WebSocket/SDCP | Centauri Carbon, Saturn, Mars series. Neptune 4/OrangeStorm Giga use Moonraker. | Stable |
+| USB Direct | Serial | Any Marlin/RepRapFirmware printer over USB (Ender 3, Prusa MK3, CR-10, etc.) | Stable |
 
 ### Key Concepts
 
