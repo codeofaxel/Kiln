@@ -5101,6 +5101,9 @@ def marketplace_info() -> dict:
     capabilities (search, download support, etc.).  Configure
     marketplaces via environment variables.
 
+    **See also:** ``marketplace_status`` for per-credential diagnostics,
+    or ``marketplace_diagnostics`` for live connectivity probes.
+
     **Safety note:** Community-uploaded models are unverified.  Always
     review model dimensions and preview prints before starting.
     Proven, popular models with high download counts are safer choices
@@ -9933,6 +9936,9 @@ def check_printer_material_support(
     Returns compatibility status (``"compatible"`` or ``"needs_upgrade"``),
     required hardware upgrades (enclosure, hardened nozzle, dry box, etc.),
     and material-specific notes for the printer.
+
+    **See also:** ``check_printer_material_compatibility`` for the same
+    check with design-intelligence context and alternative suggestions.
 
     If ``material_id`` is omitted, returns the full compatibility matrix
     for the printer — useful for seeing everything you can print on it.
