@@ -499,7 +499,76 @@
       "Excellent for vibration damping — motor mounts, anti-vibration feet, shock absorbers.",
       "Good for: phone cases, gaskets, seals, flexible joints, vibration dampeners, shoe insoles, protective covers, grip surfaces.",
       "Bad for: structural parts, precise fitments, gears, anything requiring rigidity."
-    ]
+    ],
+    "brand_profiles": {
+      "bambu_tpu_95a": {
+        "brand": "Bambu Lab",
+        "product_name": "TPU 95A",
+        "nozzle_temp_range_c": [
+          200,
+          250
+        ],
+        "nozzle_temp_optimal_c": 230,
+        "bed_temp_range_c": [
+          35,
+          45
+        ],
+        "bed_temp_optimal_c": 45,
+        "max_volumetric_speed_mm3s": 3.6,
+        "density_g_cm3": 1.22,
+        "drying_temp_c": 65,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": false,
+        "notes": "Not AMS compatible — TPU 95A is too soft for AMS feeding. Direct drive only.",
+        "source": "BambuStudio GitHub filament profiles (fdm_filament_tpu.json + Bambu TPU 95A @base.json)"
+      },
+      "prusament_tpu_95a": {
+        "brand": "Prusa Research",
+        "product_name": "Prusament TPU 95A",
+        "nozzle_temp_range_c": [
+          220,
+          240
+        ],
+        "nozzle_temp_optimal_c": 230,
+        "bed_temp_range_c": [
+          55,
+          75
+        ],
+        "bed_temp_optimal_c": 65,
+        "max_volumetric_speed_mm3s": 2.5,
+        "density_g_cm3": 1.23,
+        "drying_temp_c": 60,
+        "drying_time_hours": 4,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "notes": "MK4 0.4mm nozzle max 2.5 mm³/s. MK3S capped at 1.35 mm³/s.",
+        "source": "PrusaSlicer bundled profiles (PrusaResearch.ini) + Prusament product page"
+      },
+      "polymaker_polyflex_tpu95": {
+        "brand": "Polymaker",
+        "product_name": "PolyFlex TPU95",
+        "nozzle_temp_range_c": [
+          210,
+          230
+        ],
+        "nozzle_temp_optimal_c": 220,
+        "bed_temp_range_c": [
+          25,
+          60
+        ],
+        "bed_temp_optimal_c": 50,
+        "max_print_speed_mms": 50,
+        "density_g_cm3": 1.22,
+        "drying_temp_c": 70,
+        "drying_time_hours": 8,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "notes": "Print speed ≤50 mm/s on 0.4mm nozzle for best results. Density range 1.20–1.24; using midpoint.",
+        "source": "Polymaker technical data sheet (wiki.polymaker.com/polymaker-products/documents/technical-data-sheets/tpu/polyflex-tm-tpu95)"
+      }
+    }
   },
   "asa": {
     "display_name": "ASA (Acrylonitrile Styrene Acrylate)",
@@ -719,7 +788,98 @@
       "Chemical resistant to oils, greases, fuels, and many solvents. Good for automotive and industrial environments.",
       "Good for: gears, bearings, hinges, clips, jigs, fixtures, functional mechanical parts, tools, industrial prototypes.",
       "Bad for: watertight parts (moisture absorption), cosmetic-critical parts, beginners, printers without enclosure or dry storage."
-    ]
+    ],
+    "brand_profiles": {
+      "bambu_pa6_cf": {
+        "brand": "Bambu Lab",
+        "product_name": "PA6-CF",
+        "nozzle_temp_range_c": [
+          260,
+          300
+        ],
+        "nozzle_temp_optimal_c": 275,
+        "bed_temp_range_c": [
+          90,
+          100
+        ],
+        "bed_temp_optimal_c": 100,
+        "max_volumetric_speed_mm3s": 10,
+        "density_g_cm3": 1.1,
+        "drying_temp_c": 85,
+        "drying_time_hours": 12,
+        "enclosure_required": true,
+        "hardened_nozzle_required": true,
+        "ams_compatible": true,
+        "notes": "Carbon fiber reinforced PA6. Requires enclosed printer (X1C, P1S, X1E) and hardened nozzle (HRC ≥ 40). AMS compatible.",
+        "source": "BambuStudio GitHub filament profiles (Bambu PA6-CF @base.json + fdm_filament_pa.json)"
+      },
+      "prusament_pa11_cf": {
+        "brand": "Prusa Research",
+        "product_name": "Prusament PA11 Carbon Fiber",
+        "nozzle_temp_range_c": [
+          275,
+          295
+        ],
+        "nozzle_temp_optimal_c": 285,
+        "bed_temp_range_c": [
+          100,
+          120
+        ],
+        "bed_temp_optimal_c": 110,
+        "max_volumetric_speed_mm3s": 6.5,
+        "density_g_cm3": 1.11,
+        "drying_temp_c": 90,
+        "drying_time_hours": 5,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "notes": "Bio-based PA11 with carbon fiber. Hardened steel nozzle required. Enclosure recommended but not required. 0.4mm nozzle max 6.5 mm³/s.",
+        "source": "PrusaSlicer bundled profiles (PrusaResearch.ini) + Prusament PA11-CF product page (prusa3d.com)"
+      },
+      "polymaker_fiberon_pa6_gf": {
+        "brand": "Polymaker",
+        "product_name": "Fiberon PA6-GF25",
+        "nozzle_temp_range_c": [
+          280,
+          300
+        ],
+        "nozzle_temp_optimal_c": 300,
+        "bed_temp_range_c": [
+          40,
+          50
+        ],
+        "bed_temp_optimal_c": 40,
+        "max_volumetric_speed_mm3s": 12,
+        "density_g_cm3": 1.2,
+        "drying_temp_c": 100,
+        "drying_time_hours": 10,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "notes": "25% glass fiber reinforced PA6. Room temp chamber (no enclosure needed). Hardened steel nozzle required — brass wears in ~9h. Annealing recommended: 100°C for 16h.",
+        "source": "Fiberon TDS V1.1 (fiberon.polymaker.com/wp-content/uploads/TDS_FIBERON-PA6-GF25_V1.1_EN.pdf)"
+      },
+      "polymaker_fiberon_pa12_cf": {
+        "brand": "Polymaker",
+        "product_name": "Fiberon PA12-CF10",
+        "nozzle_temp_range_c": [
+          280,
+          300
+        ],
+        "nozzle_temp_optimal_c": 300,
+        "bed_temp_range_c": [
+          40,
+          50
+        ],
+        "bed_temp_optimal_c": 40,
+        "max_volumetric_speed_mm3s": 14,
+        "density_g_cm3": 1.06,
+        "drying_temp_c": 100,
+        "drying_time_hours": 10,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "notes": "10% carbon fiber reinforced PA12. Lower moisture absorption (1.5%) than PA6. Room temp chamber. Annealing recommended: 100°C for 16h.",
+        "source": "Fiberon TDS V1.0 (fiberon.polymaker.com/wp-content/uploads/TDS_FIBERON-PA12-CF10_V1.0_EN.pdf)"
+      }
+    }
   },
   "polycarbonate": {
     "display_name": "Polycarbonate (PC)",
@@ -1052,7 +1212,54 @@
       "confidence": "high",
       "_review_needed": []
     },
-    "_notes": "Standard ~15% CF loading. Values based on Prusament specs cross-referenced with Bambu Lab. Less variation across brands than CF-PLA."
+    "_notes": "Standard ~15% CF loading. Values based on Prusament specs cross-referenced with Bambu Lab. Less variation across brands than CF-PLA.",
+    "brand_profiles": {
+      "bambu_petg_cf": {
+        "brand": "Bambu Lab",
+        "product_name": "PETG-CF",
+        "nozzle_temp_range_c": [
+          240,
+          270
+        ],
+        "nozzle_temp_optimal_c": 255,
+        "bed_temp_range_c": [
+          65,
+          75
+        ],
+        "bed_temp_optimal_c": 70,
+        "max_volumetric_speed_mm3s": 14,
+        "density_g_cm3": 1.25,
+        "drying_temp_c": 65,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "ams_compatible": true,
+        "notes": "Carbon fiber reinforced PETG. Hardened nozzle required (HRC ≥ 40). AMS compatible (Gen 1). Base max 14 mm³/s, X1C 11.5 mm³/s.",
+        "source": "BambuStudio GitHub filament profiles (Bambu PETG-CF @base.json + fdm_filament_pet.json)"
+      },
+      "polymaker_fiberon_petg_rcf": {
+        "brand": "Polymaker",
+        "product_name": "Fiberon PETG-rCF08",
+        "nozzle_temp_range_c": [
+          240,
+          270
+        ],
+        "nozzle_temp_optimal_c": 270,
+        "bed_temp_range_c": [
+          60,
+          70
+        ],
+        "bed_temp_optimal_c": 70,
+        "max_volumetric_speed_mm3s": 12,
+        "density_g_cm3": 1.3,
+        "drying_temp_c": 65,
+        "drying_time_hours": 3,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "notes": "8% recycled carbon fiber PETG. Room temp chamber. Cooling fan 0-50%. Low moisture absorption (0.55%).",
+        "source": "Fiberon TDS V1.0 (fiberon.polymaker.com/wp-content/uploads/TDS_FIBERON-PETG-rCF08_V1.0_EN.pdf)"
+      }
+    }
   },
   "cf_nylon": {
     "display_name": "Carbon Fiber Nylon (PA-CF)",
@@ -1288,7 +1495,31 @@
         "heat_deflection_c"
       ]
     },
-    "_notes": "PET-CF is newer to market with fewer datasheets. Tensile and Young's modulus well-documented; compressive strength and HDT extrapolated from PET base polymer data. Values may shift as more manufacturers publish specs."
+    "_notes": "PET-CF is newer to market with fewer datasheets. Tensile and Young's modulus well-documented; compressive strength and HDT extrapolated from PET base polymer data. Values may shift as more manufacturers publish specs.",
+    "brand_profiles": {
+      "polymaker_fiberon_pet_cf17": {
+        "brand": "Polymaker",
+        "product_name": "Fiberon PET-CF17",
+        "nozzle_temp_range_c": [
+          270,
+          300
+        ],
+        "nozzle_temp_optimal_c": 300,
+        "bed_temp_range_c": [
+          70,
+          80
+        ],
+        "bed_temp_optimal_c": 70,
+        "max_print_speed_mms": 300,
+        "density_g_cm3": 1.34,
+        "drying_temp_c": 100,
+        "drying_time_hours": 10,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "notes": "17% carbon fiber PET (not PETG). Room temp chamber. Cooling fan OFF. Annealing recommended: 120°C/10h. HDT 105°C.",
+        "source": "Fiberon TDS V1.0 (fiberon.polymaker.com/wp-content/uploads/TDS_FIBERON-PET-CF17_V1.0_EN.pdf)"
+      }
+    }
   },
   "silk_pla": {
     "display_name": "Silk PLA",
@@ -1521,7 +1752,7 @@
       }
     },
     "_validation": {
-      "source": "Hatchbox Wood PLA, eSun Wood PLA, Polymaker PolyWood datasheets",
+      "source": "eSun Wood PLA, Polymaker PolyWood datasheets",
       "verified_date": "2026-03-02",
       "confidence": "medium",
       "_review_needed": [
@@ -1530,88 +1761,6 @@
       ]
     },
     "_notes": "Wood fiber content varies 15-30% across brands (used 20% baseline). Higher wood content = weaker parts. Flexural and compressive values extrapolated — few manufacturers publish these for wood fill."
-  },
-  "hips": {
-    "display_name": "HIPS (High Impact Polystyrene)",
-    "category": "thermoplastic",
-    "mechanical": {
-      "tensile_strength_mpa": 25,
-      "flexural_strength_mpa": 40,
-      "compressive_strength_mpa": 35,
-      "elongation_at_break_pct": 30,
-      "youngs_modulus_gpa": 2.0,
-      "impact_resistance": "good",
-      "layer_adhesion": "good",
-      "creep_resistance": "moderate",
-      "fatigue_resistance": "moderate"
-    },
-    "thermal": {
-      "glass_transition_c": 95,
-      "heat_deflection_c": 85,
-      "max_service_temp_c": 80,
-      "print_temp_range_c": [
-        220,
-        245
-      ],
-      "bed_temp_range_c": [
-        90,
-        110
-      ],
-      "warping_tendency": "moderate"
-    },
-    "chemical": {
-      "uv_resistance": "poor",
-      "moisture_absorption": "low",
-      "chemical_resistance": "moderate",
-      "food_safe": "no",
-      "biodegradable": false,
-      "outgassing": "moderate"
-    },
-    "design_limits": {
-      "min_wall_thickness_mm": 1.0,
-      "recommended_wall_thickness_mm": 1.4,
-      "max_unsupported_overhang_deg": 50,
-      "max_bridge_length_mm": 10,
-      "min_hole_diameter_mm": 2.5,
-      "min_embossed_text_height_mm": 0.8,
-      "min_engraved_text_depth_mm": 0.5,
-      "snap_fit_tolerance_mm": 0.3,
-      "press_fit_interference_mm": 0.1,
-      "thread_min_pitch_mm": 1.5,
-      "living_hinge_viable": false,
-      "max_cantilever_length_mm": 25,
-      "min_pin_diameter_mm": 3.0
-    },
-    "use_case_ratings": {
-      "structural_load_bearing": "poor",
-      "outdoor_use": "poor",
-      "food_contact": "no",
-      "high_temp_environment": "moderate",
-      "impact_resistance": "good",
-      "repeated_flexing": "moderate",
-      "cosmetic_finish": "moderate",
-      "dimensional_accuracy": "moderate",
-      "prototyping": "moderate",
-      "snap_fits": "moderate",
-      "gears_and_bearings": "poor",
-      "water_tight": "moderate"
-    },
-    "agent_guidance": [
-      "PRIMARY USE: DISSOLVABLE SUPPORT FOR ABS. HIPS dissolves in limonene (d-limonene citrus solvent). Pair with ABS for complex dual-extrusion prints.",
-      "REQUIRES ENCLOSURE. Prints like ABS — similar temps, similar warping. Ventilation recommended due to styrene fumes.",
-      "Good impact resistance despite low tensile strength — polystyrene base absorbs energy rather than transmitting it. Parts dent rather than crack.",
-      "Lightweight — lower density than most filaments. Good for large hollow parts where weight matters.",
-      "As a STANDALONE material it's mediocre — lower strength than PLA, needs enclosure like ABS, poor UV resistance. Only choose HIPS standalone if you specifically need its impact/weight properties.",
-      "Limonene dissolution takes 12-24 hours for full support removal. Warm limonene (35-40C) speeds the process significantly.",
-      "Good for: ABS support material, lightweight parts, impact-absorbing housings. Bad for: structural parts, outdoor use, standalone use when PLA/PETG would work."
-    ],
-    "_validation": {
-      "source": "eSun HIPS, Polymaker PolySmooth HIPS datasheets, MatWeb HIPS polymer data",
-      "verified_date": "2026-03-02",
-      "confidence": "high",
-      "_review_needed": []
-    },
-    "_notes": "Well-established material with decades of polymer data. FDM-specific values (design limits) based on community testing. Primarily used as ABS support material."
   },
   "pva": {
     "display_name": "PVA (Polyvinyl Alcohol)",
@@ -1847,92 +1996,31 @@
         "living_hinge_viable"
       ]
     },
-    "_notes": "Well-characterized industrial blend. Values based on Covestro Bayblend (OEM source) cross-referenced with Polymaker specs. Living hinge viability is theoretical based on elongation — limited FDM-specific testing."
-  },
-  "asa_plus": {
-    "display_name": "ASA+ (Enhanced UV-Resistant ASA)",
-    "category": "thermoplastic",
-    "mechanical": {
-      "tensile_strength_mpa": 48,
-      "flexural_strength_mpa": 75,
-      "compressive_strength_mpa": 62,
-      "elongation_at_break_pct": 35,
-      "youngs_modulus_gpa": 2.2,
-      "impact_resistance": "good",
-      "layer_adhesion": "good",
-      "creep_resistance": "moderate",
-      "fatigue_resistance": "moderate"
-    },
-    "thermal": {
-      "glass_transition_c": 108,
-      "heat_deflection_c": 100,
-      "max_service_temp_c": 95,
-      "print_temp_range_c": [
-        240,
-        265
-      ],
-      "bed_temp_range_c": [
-        90,
-        110
-      ],
-      "warping_tendency": "moderate"
-    },
-    "chemical": {
-      "uv_resistance": "excellent",
-      "moisture_absorption": "low",
-      "chemical_resistance": "moderate",
-      "food_safe": "no",
-      "biodegradable": false,
-      "outgassing": "moderate"
-    },
-    "design_limits": {
-      "min_wall_thickness_mm": 1.0,
-      "recommended_wall_thickness_mm": 1.4,
-      "max_unsupported_overhang_deg": 45,
-      "max_bridge_length_mm": 10,
-      "min_hole_diameter_mm": 2.5,
-      "min_embossed_text_height_mm": 0.8,
-      "min_engraved_text_depth_mm": 0.5,
-      "snap_fit_tolerance_mm": 0.4,
-      "press_fit_interference_mm": 0.12,
-      "thread_min_pitch_mm": 1.5,
-      "living_hinge_viable": false,
-      "max_cantilever_length_mm": 35,
-      "min_pin_diameter_mm": 3.0
-    },
-    "use_case_ratings": {
-      "structural_load_bearing": "moderate",
-      "outdoor_use": "outstanding",
-      "food_contact": "no",
-      "high_temp_environment": "good",
-      "impact_resistance": "good",
-      "repeated_flexing": "moderate",
-      "cosmetic_finish": "good",
-      "dimensional_accuracy": "good",
-      "prototyping": "moderate",
-      "snap_fits": "good",
-      "gears_and_bearings": "moderate",
-      "water_tight": "good"
-    },
-    "agent_guidance": [
-      "THE OUTDOOR MATERIAL. Enhanced UV stabilizers make this the #1 choice for parts exposed to direct sunlight. Retains color and strength for years outdoors.",
-      "Improvement over standard ASA — better UV stability, slightly improved layer adhesion, and more consistent color retention under weathering.",
-      "REQUIRES ENCLOSURE. Prints like ABS/ASA — moderate warping, fumes, and sensitivity to drafts. Enclosed heated chamber recommended.",
-      "UV resistance rated 'excellent' — parts survive multi-year direct sun exposure without significant yellowing or embrittlement. Standard ASA is 'good'; ASA+ is a step above.",
-      "Heat deflection at 100C means outdoor parts survive hot car interiors, direct sun on dark surfaces, and industrial outdoor environments.",
-      "Ventilation recommended — ASA produces styrene fumes during printing. Use in a well-ventilated area or with a filtration system.",
-      "Good for: outdoor signage, garden fixtures, automotive exterior trim, weatherproof housings, solar mount brackets. Bad for: beginners, open printers, food contact, indoor cosmetic models."
-    ],
-    "_validation": {
-      "source": "Polymaker PolyLite ASA, Prusament ASA datasheets",
-      "verified_date": "2026-03-02",
-      "confidence": "medium",
-      "_review_needed": [
-        "glass_transition_c",
-        "max_service_temp_c"
-      ]
-    },
-    "_notes": "ASA+ is a marketing term — no universal standard. Values represent enhanced ASA formulations (Polymaker, Prusament). Thermal values 5-10C above standard ASA based on manufacturer claims; independent verification limited."
+    "_notes": "Well-characterized industrial blend. Values based on Covestro Bayblend (OEM source) cross-referenced with Polymaker specs. Living hinge viability is theoretical based on elongation — limited FDM-specific testing.",
+    "brand_profiles": {
+      "polymaker_pc_abs": {
+        "brand": "Polymaker",
+        "product_name": "Polymaker PC-ABS",
+        "nozzle_temp_range_c": [
+          250,
+          270
+        ],
+        "nozzle_temp_optimal_c": 260,
+        "bed_temp_range_c": [
+          90,
+          105
+        ],
+        "bed_temp_optimal_c": 100,
+        "max_print_speed_mms": 250,
+        "density_g_cm3": 1.1,
+        "drying_temp_c": 75,
+        "drying_time_hours": 6,
+        "enclosure_required": true,
+        "hardened_nozzle_required": false,
+        "notes": "Requires 90-100°C heated chamber — industrial-tier, not desktop FDM. Optimal temps are midpoints of TDS ranges (250-270 nozzle, 90-105 bed). Tg 109°C, HDT 106°C. Post-anneal: 90°C/2h.",
+        "source": "Polymaker TDS (wiki.polymaker.com/polymaker-products/documents/technical-data-sheets/polycarbonate/polymaker-pc-abs)"
+      }
+    }
   },
   "pla_plus": {
     "display_name": "PLA+ (PLA Pro)",
@@ -2009,7 +2097,7 @@
       "Good for: stronger prototypes, functional PLA parts, snap fits, clips, phone cases, tool handles. Bad for: outdoor use, high-temp, heavy structural loads, parts that need PETG/ABS properties."
     ],
     "_validation": {
-      "source": "eSun PLA+, Polymaker PolyTerra PLA+, Overture PLA Pro datasheets",
+      "source": "eSun PLA+, Polymaker PolyTerra PLA+ datasheets",
       "verified_date": "2026-03-02",
       "confidence": "medium",
       "_review_needed": [
@@ -2017,7 +2105,77 @@
         "impact_resistance"
       ]
     },
-    "_notes": "PLA+ is not standardized — toughness additives vary wildly across brands. Mechanical improvement range is 5-30% over standard PLA. Used middle-ground values. Some brands' PLA+ is barely different from standard PLA."
+    "_notes": "PLA+ is not standardized — toughness additives vary wildly across brands. Mechanical improvement range is 5-30% over standard PLA. Used middle-ground values. Some brands' PLA+ is barely different from standard PLA.",
+    "brand_profiles": {
+      "bambu_pla_basic": {
+        "brand": "Bambu Lab",
+        "product_name": "PLA Basic",
+        "nozzle_temp_range_c": [
+          190,
+          240
+        ],
+        "nozzle_temp_optimal_c": 220,
+        "bed_temp_range_c": [
+          35,
+          65
+        ],
+        "bed_temp_optimal_c": 55,
+        "max_volumetric_speed_mm3s": 21,
+        "density_g_cm3": 1.26,
+        "drying_temp_c": 45,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "notes": "Bambu's flagship PLA with enhanced toughness. AMS compatible. Functionally a PLA+ — higher impact resistance than standard PLA.",
+        "source": "BambuStudio GitHub filament profiles (Bambu PLA Basic @base.json + fdm_filament_pla.json)"
+      },
+      "polymaker_polylite_pla_pro": {
+        "brand": "Polymaker",
+        "product_name": "PolyLite PLA Pro",
+        "nozzle_temp_range_c": [
+          190,
+          220
+        ],
+        "nozzle_temp_optimal_c": 205,
+        "bed_temp_range_c": [
+          30,
+          60
+        ],
+        "bed_temp_optimal_c": 45,
+        "max_print_speed_mms": 200,
+        "density_g_cm3": 1.22,
+        "drying_temp_c": 55,
+        "drying_time_hours": 6,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "notes": "Toughened PLA with higher impact resistance than standard PLA. Density 1.22 (slightly lower than standard PLA due to impact modifiers). Tensile strength 49.8 MPa.",
+        "source": "Polymaker technical data sheet (wiki.polymaker.com/polymaker-products/documents/technical-data-sheets/pla/polylite-tm-pla-pro)"
+      },
+      "esun_pla_plus": {
+        "brand": "eSun",
+        "product_name": "PLA+",
+        "nozzle_temp_range_c": [
+          210,
+          230
+        ],
+        "nozzle_temp_optimal_c": 220,
+        "bed_temp_range_c": [
+          45,
+          60
+        ],
+        "bed_temp_optimal_c": 55,
+        "max_volumetric_speed_mm3s": 16,
+        "density_g_cm3": 1.23,
+        "drying_temp_c": 45,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "notes": "Most popular PLA+ on Amazon. Density from eSun product page (1.23). Drying from BambuStudio official eSun PLA+ profile (inherits PLA base: 45°C/12h). Nozzle/bed temps from eSun product page.",
+        "source": "eSun product page (esun3d.com/pla-pro-product) + BambuStudio eSun PLA+ profile (drying)"
+      }
+    }
   },
   "petg_cf": {
     "display_name": "PETG-CF (High Carbon Fiber PETG)",
@@ -2724,7 +2882,7 @@
       }
     },
     "_validation": {
-      "source": "Bambu Lab TPU 95A, Overture TPU, NinjaTek NinjaFlex datasheets",
+      "source": "Bambu Lab TPU 95A, NinjaTek NinjaFlex datasheets",
       "verified_date": "2026-03-11",
       "confidence": "high",
       "_review_needed": []
@@ -2841,89 +2999,6 @@
       ]
     },
     "_notes": "Shore 85A TPU has limited manufacturer datasheets for FDM-specific properties. Mechanical values are approximate and vary more than 95A across brands. Flexural and compressive values extrapolated from Shore hardness scaling. Extremely difficult to print — not recommended for novice users or budget printers."
-  },
-  "pp": {
-    "display_name": "Polypropylene (PP)",
-    "category": "specialty",
-    "mechanical": {
-      "tensile_strength_mpa": 30,
-      "flexural_strength_mpa": 35,
-      "compressive_strength_mpa": 40,
-      "elongation_at_break_pct": 400,
-      "youngs_modulus_gpa": 1.2,
-      "impact_resistance": "excellent",
-      "layer_adhesion": "poor",
-      "creep_resistance": "good",
-      "fatigue_resistance": "excellent"
-    },
-    "thermal": {
-      "glass_transition_c": 0,
-      "heat_deflection_c": 100,
-      "max_service_temp_c": 100,
-      "print_temp_range_c": [
-        220,
-        240
-      ],
-      "bed_temp_range_c": [
-        85,
-        100
-      ],
-      "warping_tendency": "very_high"
-    },
-    "chemical": {
-      "uv_resistance": "moderate",
-      "moisture_absorption": "very_low",
-      "chemical_resistance": "excellent",
-      "food_safe": "yes",
-      "biodegradable": false,
-      "outgassing": "minimal"
-    },
-    "design_limits": {
-      "min_wall_thickness_mm": 1.2,
-      "recommended_wall_thickness_mm": 2.0,
-      "max_unsupported_overhang_deg": 40,
-      "max_bridge_length_mm": 6,
-      "min_hole_diameter_mm": 3.0,
-      "min_embossed_text_height_mm": 1.0,
-      "min_engraved_text_depth_mm": 0.8,
-      "snap_fit_tolerance_mm": 0.3,
-      "press_fit_interference_mm": 0.2,
-      "thread_min_pitch_mm": 2.0,
-      "living_hinge_viable": true,
-      "max_cantilever_length_mm": 40,
-      "min_pin_diameter_mm": 4.0
-    },
-    "use_case_ratings": {
-      "structural_load_bearing": "moderate",
-      "outdoor_use": "good",
-      "food_contact": "good",
-      "high_temp_environment": "moderate",
-      "impact_resistance": "excellent",
-      "repeated_flexing": "excellent",
-      "cosmetic_finish": "poor",
-      "dimensional_accuracy": "poor",
-      "prototyping": "poor",
-      "snap_fits": "good",
-      "gears_and_bearings": "poor",
-      "water_tight": "excellent"
-    },
-    "agent_guidance": [
-      "NOTORIOUSLY DIFFICULT TO PRINT. PP has terrible bed adhesion — a dedicated PP adhesion sheet is absolutely required. Standard build plates (PEI, glass, textured) will not work.",
-      "EXTREME WARPING. PP shrinks significantly during cooling. Use an enclosure, slow cooling, brim of 10mm+, and keep bed temp high. Even with precautions, warping is common on larger parts.",
-      "THE LIVING HINGE CHAMPION. PP is the best FDM material for living hinges — it can flex thousands of cycles without fatigue failure. Design living hinges 0.3-0.5mm thick.",
-      "Excellent fatigue resistance — PP can endure repeated flexing and stress cycles far better than PLA, PETG, or ABS. Ideal for snap-fit containers and hinged lids.",
-      "Food-safe and chemically resistant. PP resists acids, bases, solvents, and most household chemicals. One of the best FDM materials for food containers and chemical storage.",
-      "Very low moisture absorption — PP is essentially waterproof. Excellent for water-tight containers, outdoor applications, and humid environments.",
-      "Poor layer adhesion makes PP parts weaker along the Z-axis than most materials. Compensate with thicker walls (2mm+) and orient parts to minimize Z-axis stress.",
-      "Good for: living hinges, snap-fit containers, food containers, chemical-resistant vessels, water-tight enclosures, fatigue-resistant parts. Bad for: precise parts, cosmetic prints, beginners, anything requiring good bed adhesion without a PP sheet."
-    ],
-    "_validation": {
-      "source": "eSun PP, Verbatim PP datasheets",
-      "verified_date": "2026-03-24",
-      "confidence": "high",
-      "_review_needed": []
-    },
-    "_notes": "PP is a semi-crystalline polymer with excellent chemical resistance and fatigue life but notoriously poor printability. Bed adhesion requires dedicated PP adhesion sheets or PP tape. Warping is extreme even with enclosure. Mechanical values represent typical FDM-printed properties. Elongation range 300-500% depending on print orientation and layer adhesion."
   },
   "pvb": {
     "display_name": "PVB (Polyvinyl Butyral)",
