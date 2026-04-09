@@ -61,6 +61,7 @@ class _EstimateToolsPlugin:
         - estimate_material_cost
         - estimate_print_progress
         - estimate_before_design
+        - list_multi_material_addons
     """
 
     @property
@@ -446,6 +447,7 @@ class _EstimateToolsPlugin:
             nozzle_mm: float = 0.4,
             wall_layers: int = 3,
             printer_id: str = "",
+            tool_changer_addon: str = "",
             electricity_rate: float = 0.12,
             printer_wattage: float = 200.0,
         ) -> dict:
@@ -494,6 +496,13 @@ class _EstimateToolsPlugin:
             :param wall_layers: Number of perimeter shells (default 3).
             :param printer_id: Printer model for speed/setting lookup
                 (e.g. ``"bambu_a1"``, ``"prusa_mk4"``).
+            :param tool_changer_addon: Optional multi-material add-on ID.
+                Overrides the printer's built-in tool change timing.
+                Examples: ``"creality_cfs"`` (K1 series),
+                ``"mosaic_palette3"`` (universal), ``"coprint_kcm"``
+                (Klipper printers), ``"chameleon_mk4"`` (universal),
+                ``"elegoo_canvas"`` (Centauri Carbon 2).
+                Use ``list_multi_material_addons`` to see all options.
             :param electricity_rate: Cost per kWh in USD (default 0.12).
             :param printer_wattage: Printer power in watts (default 200).
             """
@@ -523,6 +532,7 @@ class _EstimateToolsPlugin:
                 eff_infill: float | None = None if infill_percent < 0 else infill_percent
                 eff_layer: float | None = layer_height_mm if layer_height_mm > 0 else None
                 eff_printer: str | None = printer_id if printer_id else None
+                eff_addon: str | None = tool_changer_addon if tool_changer_addon.strip() else None
 
                 # Parse template overrides
                 tpl_overrides: dict[str, Any] | None = None
@@ -542,6 +552,7 @@ class _EstimateToolsPlugin:
                         nozzle_mm=nozzle_mm,
                         wall_layers=wall_layers,
                         printer_id=eff_printer,
+                        tool_changer_addon=eff_addon,
                         electricity_rate=electricity_rate,
                         printer_wattage=printer_wattage,
                     )
@@ -564,6 +575,7 @@ class _EstimateToolsPlugin:
                         nozzle_mm=nozzle_mm,
                         wall_layers=wall_layers,
                         printer_id=eff_printer,
+                        tool_changer_addon=eff_addon,
                         electricity_rate=electricity_rate,
                         printer_wattage=printer_wattage,
                     )
@@ -575,9 +587,10 @@ class _EstimateToolsPlugin:
                     f"${est.total_cost_usd:.2f} total cost",
                 ]
                 if est.tool_changes > 0:
+                    changer_label = est.tool_changer_addon_name or est.tool_change_type
                     parts.append(
                         f"{est.tool_changes} tool swaps "
-                        f"({est.tool_change_type}, "
+                        f"({changer_label}, "
                         f"+{_format_time(est.tool_change_time_seconds)})"
                     )
 
@@ -601,6 +614,56 @@ class _EstimateToolsPlugin:
                 _logger.exception("Unexpected error in estimate_before_design")
                 return _srv._error_dict(
                     f"Unexpected error: {exc}", code="INTERNAL_ERROR"
+                )
+
+        # ------------------------------------------------------------------
+        # list_multi_material_addons
+        # ------------------------------------------------------------------
+
+        @mcp.tool()
+        def list_multi_material_addons(
+            printer_id: str = "",
+        ) -> dict:
+            """List available multi-material add-on systems for 3D printers.
+
+            Returns a catalog of optional multi-material add-ons (Creality CFS,
+            Mosaic Palette, Co Print KCM, 3D Chameleon, Elegoo CANVAS) with
+            their tool change times, color capacity, and compatibility info.
+
+            When a ``printer_id`` is provided, only add-ons compatible with
+            that printer are returned.  Universal add-ons (Palette, Chameleon)
+            appear for all printers.  Klipper-only add-ons (KCM) appear only
+            for Klipper-based printers.
+
+            Use the returned ``id`` values as the ``tool_changer_addon``
+            parameter in ``estimate_before_design`` to model multi-material
+            prints on printers that don't have a built-in tool changer.
+
+            :param printer_id: Optional printer model to filter by compatibility
+                (e.g. ``"k1"``, ``"ender3"``, ``"voron_2"``).
+            """
+            import kiln.server as _srv
+
+            try:
+                from kiln.pre_estimate import list_addons
+
+                eff_printer: str | None = printer_id if printer_id.strip() else None
+                addons = list_addons(printer_id=eff_printer)
+
+                return {
+                    "success": True,
+                    "count": len(addons),
+                    "addons": addons,
+                    "message": (
+                        f"{len(addons)} add-on(s) available"
+                        + (f" for {printer_id}" if eff_printer else "")
+                        + ". Pass the 'id' as tool_changer_addon in estimate_before_design."
+                    ),
+                }
+            except Exception as exc:
+                _logger.exception("Error in list_multi_material_addons")
+                return _srv._error_dict(
+                    f"Failed to list add-ons: {exc}", code="INTERNAL_ERROR"
                 )
 
         _logger.debug("Registered estimate tools")

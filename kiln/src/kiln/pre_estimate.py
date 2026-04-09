@@ -161,16 +161,39 @@ def _get_printer_infill(printer_id: str | None) -> float:
     return 20.0
 
 
-def _get_printer_tool_change(printer_id: str | None) -> dict[str, Any]:
+def _get_printer_tool_change(
+    printer_id: str | None,
+    *,
+    tool_changer_addon: str | None = None,
+) -> dict[str, Any]:
     """Return tool change data for a printer model from slicer_profiles.json.
+
+    If ``tool_changer_addon`` is provided, the add-on's timing overrides
+    the printer's built-in tool change data.  This supports printers that
+    ship without multi-material but accept optional add-on systems (e.g.
+    Creality CFS for K1, Mosaic Palette for any printer).
 
     Returns a dict with keys:
         tool_change_seconds (int): Total per-swap wall-clock time including purge.
-        tool_changer (str): "ams", "ams_lite", "mmu3", "mmu2s", "ercf", "none".
+        tool_changer (str): "ams", "ams_lite", "mmu3", "mmu2s", "ercf",
+            "cfs", "palette", "kcm", "chameleon", "canvas", or "none".
         has_auto_tool_change (bool): True if the printer has an auto changer.
+        addon (str | None): The add-on ID if one was applied.
+        addon_display_name (str | None): Human-readable add-on name.
+        max_colors (int | None): Maximum simultaneous colors supported.
     """
+    profiles = _load_slicer_profiles()
+
+    # --- Check for add-on override ---
+    if tool_changer_addon:
+        addon_info = _resolve_addon(
+            tool_changer_addon, printer_id, profiles,
+        )
+        if addon_info is not None:
+            return addon_info
+
+    # --- Built-in tool changer (default path) ---
     if printer_id:
-        profiles = _load_slicer_profiles()
         profile = profiles.get(printer_id, {})
         tc = profile.get("tool_change", {})
         if tc:
@@ -179,13 +202,137 @@ def _get_printer_tool_change(printer_id: str | None) -> dict[str, Any]:
                 "tool_change_seconds": int(tc.get("tool_change_seconds", _DEFAULT_TOOL_CHANGE_SECONDS)),
                 "tool_changer": changer,
                 "has_auto_tool_change": changer != "none",
+                "addon": None,
+                "addon_display_name": None,
+                "max_colors": None,
             }
 
     return {
         "tool_change_seconds": _DEFAULT_TOOL_CHANGE_SECONDS,
         "tool_changer": "none",
         "has_auto_tool_change": False,
+        "addon": None,
+        "addon_display_name": None,
+        "max_colors": None,
     }
+
+
+def _resolve_addon(
+    addon_id: str,
+    printer_id: str | None,
+    profiles: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Resolve a multi-material add-on by ID.
+
+    Validates compatibility with the specified printer.  Returns None if
+    the add-on is not found.
+
+    Raises:
+        ValueError: If the add-on exists but is incompatible with the printer.
+    """
+    addons = profiles.get("_multi_material_addons", {})
+    addon = addons.get(addon_id)
+    if addon is None:
+        _logger.warning("Unknown multi-material add-on '%s'", addon_id)
+        return None
+
+    # Validate compatibility
+    compatible = addon.get("compatible_printers", [])
+    if "_universal" not in compatible:
+        is_klipper_addon = "_klipper" in compatible
+        printer_listed = printer_id in compatible if printer_id else False
+
+        if not printer_id:
+            # No printer specified — can't validate, allow with warning in the caller
+            _logger.info(
+                "Add-on '%s' used without printer_id — skipping compatibility check",
+                addon_id,
+            )
+        elif not printer_listed:
+            # For Klipper add-ons, check if the printer is Klipper-based
+            if is_klipper_addon and printer_id:
+                klipper_printers = _get_klipper_printer_ids(profiles)
+                if printer_id not in klipper_printers:
+                    raise ValueError(
+                        f"Add-on '{addon_id}' requires Klipper firmware, "
+                        f"but printer '{printer_id}' is not Klipper-based. "
+                        f"Compatible Klipper printers: {', '.join(sorted(klipper_printers))}"
+                    )
+            elif not is_klipper_addon and printer_id:
+                raise ValueError(
+                    f"Add-on '{addon_id}' is not compatible with printer "
+                    f"'{printer_id}'. Compatible printers: {', '.join(compatible)}"
+                )
+
+    return {
+        "tool_change_seconds": int(addon["tool_change_seconds"]),
+        "tool_changer": addon["tool_changer"],
+        "has_auto_tool_change": True,
+        "addon": addon_id,
+        "addon_display_name": addon.get("display_name", addon_id),
+        "max_colors": addon.get("max_colors"),
+    }
+
+
+def _get_klipper_printer_ids(profiles: dict[str, Any]) -> set[str]:
+    """Return printer IDs that use Klipper firmware."""
+    klipper_ids: set[str] = set()
+    for pid, profile in profiles.items():
+        if pid.startswith("_"):
+            continue
+        # Klipper printers: Voron, Neptune 4, K1, RatRig, Sovol SV07, generic
+        slicer = profile.get("slicer", "")
+        notes = profile.get("notes", "").lower()
+        if "klipper" in slicer.lower() or "klipper" in notes:
+            klipper_ids.add(pid)
+    # Hardcoded known Klipper printers not always tagged in profiles
+    _KNOWN_KLIPPER = {
+        "voron_2", "voron_0", "k1", "elegoo_neptune4",
+        "ratrig_vcore3", "sovol_sv07", "klipper_generic",
+    }
+    klipper_ids.update(_KNOWN_KLIPPER)
+    return klipper_ids
+
+
+def list_addons(*, printer_id: str | None = None) -> list[dict[str, Any]]:
+    """List available multi-material add-ons, optionally filtered by printer.
+
+    Returns a list of add-on dicts, each with keys: id, display_name,
+    tool_change_seconds, tool_changer, max_colors, compatible,
+    requires_klipper.
+    """
+    profiles = _load_slicer_profiles()
+    addons = profiles.get("_multi_material_addons", {})
+    results: list[dict[str, Any]] = []
+
+    for addon_id, addon in addons.items():
+        if addon_id.startswith("_"):
+            continue
+
+        compatible = addon.get("compatible_printers", [])
+        is_universal = "_universal" in compatible
+        is_klipper = "_klipper" in compatible
+
+        # Filter by printer compatibility if requested
+        if printer_id and not is_universal:
+            if is_klipper:
+                klipper_ids = _get_klipper_printer_ids(profiles)
+                if printer_id not in klipper_ids:
+                    continue
+            elif printer_id not in compatible:
+                continue
+
+        results.append({
+            "id": addon_id,
+            "display_name": addon.get("display_name", addon_id),
+            "tool_change_seconds": addon["tool_change_seconds"],
+            "tool_changer": addon["tool_changer"],
+            "max_colors": addon.get("max_colors"),
+            "compatible": "universal" if is_universal else ("klipper" if is_klipper else compatible),
+            "requires_klipper": addon.get("requires_klipper", False),
+        })
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +437,10 @@ class PreEstimate:
     estimated_time_human: str
     tool_changes: int
     tool_change_time_seconds: int
-    tool_change_type: str  # "ams", "mmu", "manual", "none"
+    tool_change_type: str  # "ams", "mmu", "manual", "none", or add-on type
+    tool_changer_addon: str | None  # add-on ID if one was applied
+    tool_changer_addon_name: str | None  # human-readable add-on name
+    max_colors: int | None  # max simultaneous colors (from add-on or built-in)
 
     # Filament breakdown
     filaments: list[FilamentUsage]
@@ -330,6 +480,7 @@ def estimate_from_dimensions(
     nozzle_mm: float = 0.4,
     wall_layers: int = 3,
     printer_id: str | None = None,
+    tool_changer_addon: str | None = None,
     electricity_rate: float = 0.12,
     printer_wattage: float = 200.0,
 ) -> PreEstimate:
@@ -362,6 +513,12 @@ def estimate_from_dimensions(
         wall_layers: Number of perimeter shells (default 3).
         printer_id: Optional printer model ID for speed/setting lookup
             (e.g. ``"bambu_a1"``, ``"prusa_mk4"``).
+        tool_changer_addon: Optional multi-material add-on ID.  Overrides
+            the printer's built-in tool change data.  Supported add-ons:
+            ``"creality_cfs"`` (K1 series), ``"mosaic_palette3"`` (universal),
+            ``"coprint_kcm"`` (Klipper printers), ``"chameleon_mk4"``
+            (universal), ``"elegoo_canvas"`` (Centauri Carbon 2).
+            See :func:`list_addons` for the full catalog.
         electricity_rate: Cost per kWh in USD (default 0.12).
         printer_wattage: Printer power draw in watts (default 200).
 
@@ -528,6 +685,9 @@ def estimate_from_dimensions(
     tool_changes = 0
     tool_change_time_s = 0
     tool_change_type = "none"
+    addon_id: str | None = None
+    addon_display: str | None = None
+    max_colors: int | None = None
 
     if num_materials > 1:
         # Estimate tool changes: happens every time the extruder switches.
@@ -553,12 +713,22 @@ def estimate_from_dimensions(
         tool_changes = multicolor_layers * (num_materials - 1)
 
         # Look up per-printer tool change data from slicer_profiles.json
-        tc_info = _get_printer_tool_change(printer_id)
+        tc_info = _get_printer_tool_change(printer_id, tool_changer_addon=tool_changer_addon)
         tc_seconds = tc_info["tool_change_seconds"]
         tool_change_type = tc_info["tool_changer"]
 
+        addon_id = tc_info.get("addon")
+        addon_display = tc_info.get("addon_display_name")
+        max_colors = tc_info.get("max_colors")
+
         if tc_info["has_auto_tool_change"]:
             tool_change_time_s = tool_changes * tc_seconds
+            # Check color capacity warning
+            if max_colors and num_materials > max_colors:
+                warnings.append(
+                    f"Print uses {num_materials} materials but "
+                    f"{addon_display or tool_change_type} supports max {max_colors} colors."
+                )
         elif printer_id:
             # Printer exists but has no auto tool changer — manual M600
             tool_change_type = "manual"
@@ -567,10 +737,16 @@ def estimate_from_dimensions(
                 f"Printer '{printer_id}' has no automatic tool changer. "
                 f"Estimated {tool_changes} manual filament swaps at ~{_MANUAL_TOOL_CHANGE_SECONDS}s each."
             )
+            addon_id = None
+            addon_display = None
+            max_colors = None
         else:
             # No printer specified — assume generic auto changer
             tool_change_type = "auto"
             tool_change_time_s = tool_changes * _DEFAULT_TOOL_CHANGE_SECONDS
+            addon_id = None
+            addon_display = None
+            max_colors = None
 
     total_time_s = int(print_time_s + tool_change_time_s)
 
@@ -601,6 +777,9 @@ def estimate_from_dimensions(
         tool_changes=tool_changes,
         tool_change_time_seconds=tool_change_time_s,
         tool_change_type=tool_change_type,
+        tool_changer_addon=addon_id,
+        tool_changer_addon_name=addon_display,
+        max_colors=max_colors,
         filaments=filaments,
         total_weight_grams=round(total_weight_g, 1),
         total_filament_meters=round(total_length_m, 2),
@@ -629,6 +808,7 @@ def estimate_from_template(
     nozzle_mm: float = 0.4,
     wall_layers: int = 3,
     printer_id: str | None = None,
+    tool_changer_addon: str | None = None,
     electricity_rate: float = 0.12,
     printer_wattage: float = 200.0,
 ) -> PreEstimate:
@@ -650,6 +830,7 @@ def estimate_from_template(
         nozzle_mm: Nozzle diameter.
         wall_layers: Number of perimeter shells.
         printer_id: Printer model ID.
+        tool_changer_addon: Optional multi-material add-on ID.
         electricity_rate: USD per kWh.
         printer_wattage: Printer watts.
 
@@ -670,6 +851,7 @@ def estimate_from_template(
         nozzle_mm=nozzle_mm,
         wall_layers=wall_layers,
         printer_id=printer_id,
+        tool_changer_addon=tool_changer_addon,
         electricity_rate=electricity_rate,
         printer_wattage=printer_wattage,
     )
