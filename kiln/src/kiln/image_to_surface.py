@@ -353,6 +353,7 @@ def prepare_image_for_emboss(
     edge_enhance: bool = True,
     style: str = "default",
     flip_rows: bool = False,
+    mask: str = "auto",
 ) -> dict:
     """Convert a PNG/JPG image to a grayscale PGM heightmap for OpenSCAD surface().
 
@@ -368,6 +369,12 @@ def prepare_image_for_emboss(
         If True, flip light/dark (switch between deboss and emboss).
     edge_enhance : bool
         If True, apply a sharpening kernel for crisper edges.
+    mask : str
+        Final crop mask shape. ``"auto"`` (default) uses the style's
+        native mask (circle for coin, none for others).  ``"circle"``
+        forces circular medallion framing.  ``"rectangle"`` skips
+        masking entirely — full rectangular image.  ``"rounded_rectangle"``
+        applies soft rounded corners (corner_radius = 8% of size).
 
     Returns
     -------
@@ -514,19 +521,36 @@ def prepare_image_for_emboss(
             step = 256 // 8
             img = img.point(lambda x: (x // step) * step * 255 // (step * 7))
 
-            # Circular mask for medallion framing
-            mask = Image.new("L", img.size, 0)
-            from PIL import ImageDraw
+            # Apply mask shape (circle, rectangle, rounded_rectangle)
+            # "auto" for coin style defaults to circle (proven Ash coaster recipe)
+            effective_mask = mask if mask != "auto" else "circle"
+            if effective_mask == "circle":
+                from PIL import ImageDraw
+                _mask = Image.new("L", img.size, 0)
+                draw = ImageDraw.Draw(_mask)
+                cx, cy = img.size[0] // 2, img.size[1] // 2
+                r = min(cx, cy) - 2
+                draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
+                result = Image.new("L", img.size, 0)
+                result.paste(img, mask=_mask)
+                img = result
+            elif effective_mask == "rounded_rectangle":
+                from PIL import ImageDraw
+                _mask = Image.new("L", img.size, 0)
+                draw = ImageDraw.Draw(_mask)
+                corner_r = int(min(img.size) * 0.08)
+                draw.rounded_rectangle(
+                    [0, 0, img.size[0] - 1, img.size[1] - 1],
+                    radius=corner_r, fill=255,
+                )
+                result = Image.new("L", img.size, 0)
+                result.paste(img, mask=_mask)
+                img = result
+            # "rectangle" — no mask, keep full image as-is
 
-            draw = ImageDraw.Draw(mask)
-            cx, cy = img.size[0] // 2, img.size[1] // 2
-            r = min(cx, cy) - 2
-            draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
-            result = Image.new("L", img.size, 0)
-            result.paste(img, mask=mask)
             preprocessed = os.path.join(output_dir, "preprocessed_coin.png")
             os.makedirs(output_dir, exist_ok=True)
-            result.save(preprocessed)
+            img.save(preprocessed)
             image_path = preprocessed
             edge_enhance = False
         except ImportError:
