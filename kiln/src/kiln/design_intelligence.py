@@ -833,9 +833,13 @@ def resolve_filament(
     mat_upper = key.upper().replace("-", "_")
     parent = BUILTIN_MATERIALS.get(mat_upper)
     if parent is None:
-        # Try common aliases
-        _ALIASES = {"PLA+": "PLA", "PLA_PLUS": "PLA", "NYLON": "NYLON"}
-        parent = BUILTIN_MATERIALS.get(_ALIASES.get(mat_upper, "PLA"))
+        # Try common aliases (PLA_PLUS → PLA+, CF_PLA → CF-PLA, etc.)
+        _ALIASES = {
+            "PLA_PLUS": "PLA+",
+            "CF_PLA": "CF-PLA",
+            "SILK_PLA": "SILK-PLA",
+        }
+        parent = BUILTIN_MATERIALS.get(_ALIASES.get(mat_upper, mat_upper))
 
     if parent is None:
         parent = BUILTIN_MATERIALS["PLA"]
@@ -875,6 +879,7 @@ def _check_filament_printer_compat(
 
     try:
         from kiln.printer_intelligence import get_printer_intel
+
         intel = get_printer_intel(printer_id)
     except Exception:
         return warnings
@@ -884,7 +889,7 @@ def _check_filament_printer_compat(
 
     # Enclosure check
     if brand.enclosure_required:
-        has_enclosure = intel.get("has_enclosure", False) if isinstance(intel, dict) else getattr(intel, "has_enclosure", False)
+        has_enclosure = getattr(intel, "has_enclosure", False)
         if not has_enclosure:
             warnings.append(
                 f"{brand.brand} {brand.product_name} requires an enclosed printer. "
@@ -907,8 +912,6 @@ def _check_filament_printer_compat(
 
     # Temperature check
     max_hotend = getattr(intel, "max_hotend_temp", None)
-    if max_hotend is None and isinstance(intel, dict):
-        max_hotend = intel.get("max_hotend_temp")
     if max_hotend and brand.nozzle_temp_optimal_c > max_hotend:
         warnings.append(
             f"{brand.brand} {brand.product_name} needs {brand.nozzle_temp_optimal_c}°C "

@@ -146,6 +146,29 @@ class TestEstimatorBrandIntegration:
         assert result["name"] == "PLA"
         assert result["density_g_per_cm3"] > 0
 
+    def test_brand_density_flows_to_estimate(self):
+        """Brand density should flow through to estimate_from_dimensions."""
+        from kiln.pre_estimate import estimate_from_dimensions
+
+        # Bambu PLA Basic (1.26) vs generic PLA (1.24) — brand should be heavier
+        est_brand = estimate_from_dimensions(
+            100, 100, 50, materials=["bambu_pla_basic"]
+        )
+        est_generic = estimate_from_dimensions(
+            100, 100, 50, materials=["PLA"]
+        )
+        assert est_brand.total_weight_grams > est_generic.total_weight_grams
+
+    def test_nylon_brand_density_in_estimate(self):
+        """PA6-CF (1.10) should weigh less than generic Nylon (assumed ~1.14)."""
+        from kiln.pre_estimate import estimate_from_dimensions
+
+        est = estimate_from_dimensions(
+            100, 100, 50, materials=["bambu_pa6_cf"]
+        )
+        assert est.total_weight_grams > 0
+        assert est.filaments[0].material == "Bambu Lab PA6-CF"
+
 
 # ---------------------------------------------------------------------------
 # Slicer temp override integration
