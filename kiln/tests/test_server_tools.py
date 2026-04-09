@@ -36,27 +36,45 @@ from kiln.server import (
 @pytest.fixture(autouse=True)
 def _clean_singletons():
     """Reset module-level singletons before each test so tests are isolated."""
-    # Save state
-    old_printers = dict(_registry._printers)
-    old_jobs = dict(_queue._jobs)
-    old_history = list(_event_bus._history)
+    import kiln.server as _srv
+    from kiln.registry import PrinterRegistry
+    from kiln.queue import PrintQueue
+    from kiln.events import EventBus
+    from kiln.webhooks import WebhookManager
 
-    # Save webhook endpoints
-    old_endpoints = dict(_webhook_mgr._endpoints)
+    # Initialize singletons if they haven't been created yet (no main() call)
+    if _srv._registry is None:
+        _srv._registry = PrinterRegistry()
+    if _srv._queue is None:
+        _srv._queue = PrintQueue()
+    if _srv._event_bus is None:
+        _srv._event_bus = EventBus()
+    if _srv._webhook_mgr is None:
+        _srv._webhook_mgr = WebhookManager(_srv._event_bus)
+
+    # Re-read module-level refs now that they're guaranteed non-None
+    reg = _srv._registry
+    queue = _srv._queue
+    bus = _srv._event_bus
+    wmgr = _srv._webhook_mgr
+
+    # Save state
+    old_printers = dict(reg._printers)
+    old_jobs = dict(queue._jobs)
+    old_history = list(bus._history)
+    old_endpoints = dict(wmgr._endpoints)
 
     yield
 
     # Restore state
-    _registry._printers.clear()
-    _registry._printers.update(old_printers)
-    _queue._jobs.clear()
-    _queue._jobs.update(old_jobs)
-    _event_bus._history.clear()
-    _event_bus._history.extend(old_history)
-
-    # Restore webhook endpoints
-    _webhook_mgr._endpoints.clear()
-    _webhook_mgr._endpoints.update(old_endpoints)
+    reg._printers.clear()
+    reg._printers.update(old_printers)
+    queue._jobs.clear()
+    queue._jobs.update(old_jobs)
+    bus._history.clear()
+    bus._history.extend(old_history)
+    wmgr._endpoints.clear()
+    wmgr._endpoints.update(old_endpoints)
 
 
 @pytest.fixture(autouse=True)
@@ -68,7 +86,8 @@ def _bypass_url_validation_and_auth(monkeypatch):
     )
     # Disable auth so tool calls succeed without a valid token
     from kiln.server import _auth
-    monkeypatch.setattr(_auth, "_enabled", False)
+    if _auth is not None:
+        monkeypatch.setattr(_auth, "_enabled", False)
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +239,8 @@ class TestWebhookTools:
                 if hasattr(fn, "__wrapped__"):
                     monkeypatch.setattr(_mod, fn_name, fn.__wrapped__)
             # Also reset webhook manager between tests
-            _webhook_mgr._endpoints.clear()
+            if _webhook_mgr is not None:
+                _webhook_mgr._endpoints.clear()
             yield
 
     # -- register_webhook --------------------------------------------------

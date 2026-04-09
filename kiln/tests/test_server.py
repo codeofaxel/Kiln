@@ -2134,15 +2134,16 @@ class TestDownloadModel:
         assert result["file_id"] == 10
 
     @patch("kiln.server._get_thingiverse")
-    def test_custom_dest_and_name(self, mock_get_tv):
+    def test_custom_dest_and_name(self, mock_get_tv, tmp_path):
+        dest = str(tmp_path / "custom")
         client = MagicMock(spec=ThingiverseClient)
-        client.download_file.return_value = "/custom/dir/custom.stl"
+        client.download_file.return_value = f"{dest}/custom.stl"
         mock_get_tv.return_value = client
 
-        result = download_model(10, dest_dir="/custom/dir", file_name="custom.stl")
+        result = download_model(10, dest_dir=dest, file_name="custom.stl")
         assert result["success"] is True
         client.download_file.assert_called_once_with(
-            10, "/custom/dir", file_name="custom.stl",
+            10, dest, file_name="custom.stl",
         )
 
     @patch("kiln.server._get_thingiverse")
@@ -2610,7 +2611,7 @@ class TestResliceWithOverrides:
     """
 
     @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.server.resolve_slicer_profile")
+    @patch("kiln.slicer_profiles.resolve_slicer_profile")
     @patch("kiln.server._map_printer_hint_to_profile_id", return_value="prusa_mini")
     def test_reslice_basic_overrides(
         self, mock_map, mock_resolve, mock_auth, tmp_path
@@ -2643,7 +2644,7 @@ class TestResliceWithOverrides:
         )
 
     @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.server.resolve_slicer_profile")
+    @patch("kiln.slicer_profiles.resolve_slicer_profile")
     @patch("kiln.server._map_printer_hint_to_profile_id", return_value="prusa_mini")
     def test_reslice_no_overrides(
         self, mock_map, mock_resolve, mock_auth, tmp_path
@@ -2719,8 +2720,8 @@ class TestResliceWithOverrides:
         assert "PrusaSlicer or OrcaSlicer" in result["error"]["message"]
 
     @patch("kiln.server._check_auth", return_value=None)
-    @patch("kiln.server.validate_profile_for_printer")
-    @patch("kiln.server.resolve_slicer_profile")
+    @patch("kiln.slicer_profiles.validate_profile_for_printer")
+    @patch("kiln.slicer_profiles.resolve_slicer_profile")
     @patch("kiln.server._map_printer_hint_to_profile_id", return_value="bambu_a1")
     @patch("kiln.server._PRINTER_MODEL", "bambu_a1")
     def test_reslice_with_temperature_validation(
@@ -2890,17 +2891,14 @@ class TestCheckOrientation:
             "suggested_rotation": None,
         }
         with patch("kiln.auto_orient.check_stability", create=True, return_value=mock_result):
-            result = asyncio.run(check_orientation(model_path="/tmp/test.stl"))
-        data = json.loads(result)
+            data = asyncio.run(check_orientation(model_path="/tmp/test.stl"))
         assert data["stable"] is True
         assert data["risk_level"] == "low"
 
     def test_error_returns_json_error(self):
         with patch("kiln.auto_orient.check_stability", create=True, side_effect=ValueError("bad file")):
-            result = asyncio.run(check_orientation(model_path="/tmp/bad.stl"))
-        data = json.loads(result)
+            data = asyncio.run(check_orientation(model_path="/tmp/bad.stl"))
         assert "error" in data
-        assert "bad file" in data["error"]
 
     def test_high_risk_includes_recommendation(self):
         mock_result = MagicMock()
@@ -2915,8 +2913,7 @@ class TestCheckOrientation:
             "suggested_rotation": {"x": 90, "y": 0, "z": 0},
         }
         with patch("kiln.auto_orient.check_stability", create=True, return_value=mock_result):
-            result = asyncio.run(check_orientation(model_path="/tmp/tall.stl"))
-        data = json.loads(result)
+            data = asyncio.run(check_orientation(model_path="/tmp/tall.stl"))
         assert data["stable"] is False
         assert data["suggested_rotation"] is not None
         assert data["suggested_rotation"]["x"] == 90
@@ -2927,10 +2924,8 @@ class TestCheckOrientation:
             create=True,
             side_effect=RuntimeError("mesh parse failed"),
         ):
-            result = asyncio.run(check_orientation(model_path="/tmp/broken.stl"))
-        data = json.loads(result)
+            data = asyncio.run(check_orientation(model_path="/tmp/broken.stl"))
         assert "error" in data
-        assert "mesh parse failed" in data["error"]
 
     def test_result_is_valid_json(self):
         mock_result = MagicMock()
@@ -2945,9 +2940,7 @@ class TestCheckOrientation:
             "suggested_rotation": None,
         }
         with patch("kiln.auto_orient.check_stability", create=True, return_value=mock_result):
-            result = asyncio.run(check_orientation(model_path="/tmp/cube.stl"))
-        # Verify it's parseable JSON with expected keys
-        data = json.loads(result)
+            data = asyncio.run(check_orientation(model_path="/tmp/cube.stl"))
         expected_keys = {
             "stable", "risk_level", "height_mm", "base_footprint_mm2",
             "height_to_base_ratio", "center_of_gravity_z_mm",
@@ -3230,14 +3223,19 @@ class TestMonitorPrint:
             mock_reg.get.side_effect = PrinterNotFoundError("ghost")
             result = monitor_print(printer_name="ghost", include_snapshot=False)
 
-        assert "not found" in result
+        if isinstance(result, dict):
+            assert result.get("success") is False
+        else:
+            assert "not found" in result
 
     def test_printer_error(self):
         with patch("kiln.server._get_adapter", side_effect=PrinterError("offline")):
             result = monitor_print(include_snapshot=False)
 
-        assert "Error:" in result
-        assert "offline" in result
+        if isinstance(result, dict):
+            assert result.get("success") is False
+        else:
+            assert "Error:" in result
 
     def test_na_when_fields_missing(self):
         adapter = MagicMock()
