@@ -472,12 +472,11 @@ def prepare_image_for_emboss(
                 bg.paste(img_rgba, mask=img_rgba.split()[3])
                 img = bg.convert("L")
             except ImportError:
-                _logger.warning(
-                    "rembg is not installed — background removal skipped. "
-                    "Photo emboss quality will be significantly degraded "
-                    "for photos with busy backgrounds. Install with: "
-                    "pip install rembg onnxruntime"
-                )
+                raise ImportError(
+                    "Photo emboss (style='coin') requires background removal. "
+                    "Install with: pip install kiln[emboss]  "
+                    "(or: pip install rembg onnxruntime)"
+                ) from None
 
             # Step 3: Foreground crop with 8% padding
             bbox = img.getbbox()
