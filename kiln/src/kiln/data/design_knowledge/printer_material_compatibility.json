@@ -58,26 +58,12 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "needs_upgrade",
       "upgrades_needed": [
         "direct_drive"
       ],
       "notes": "Bowden extruder cannot reliably push flexible filament. Direct drive upgrade required."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -176,14 +162,6 @@
       ],
       "notes": "Bowden extruder cannot reliably push ultra-soft TPU 85A. Direct drive upgrade required."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -244,24 +222,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -350,14 +314,6 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
-    },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     },
     "pvb": {
       "status": "compatible",
@@ -419,24 +375,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -525,14 +467,6 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
-    },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     },
     "pvb": {
       "status": "compatible",
@@ -594,24 +528,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -700,14 +620,6 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
-    },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     },
     "pvb": {
       "status": "compatible",
@@ -769,24 +681,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -876,14 +774,6 @@
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -940,20 +830,10 @@
       "upgrades_needed": [],
       "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
     },
-    "asa_plus": {
-      "status": "compatible",
-      "upgrades_needed": [],
-      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "compatible",
-      "upgrades_needed": [],
-      "notes": "Dissolves in limonene for support removal. Prints like ABS — enclosed chamber recommended."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -1038,13 +918,6 @@
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -1097,20 +970,10 @@
       "upgrades_needed": [],
       "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
     },
-    "asa_plus": {
-      "status": "compatible",
-      "upgrades_needed": [],
-      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "compatible",
-      "upgrades_needed": [],
-      "notes": "Dissolves in limonene for support removal. Prints like ABS — enclosed chamber recommended."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -1189,13 +1052,6 @@
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -1260,28 +1116,12 @@
       ],
       "notes": "ASA: PTFE degrades at ASA temps (240-260C), open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "all_metal_hotend",
-        "enclosure"
-      ],
-      "notes": "ASA+: PTFE hotend not rated for ASA+ temps, enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "needs_upgrade",
       "upgrades_needed": [
         "direct_drive"
       ],
       "notes": "TPU buckles in bowden tubes — direct drive extruder required for reliable feeding."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "all_metal_hotend",
-        "enclosure"
-      ],
-      "notes": "HIPS: PTFE hotend not rated for HIPS temps (230-250C), warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -1382,14 +1222,6 @@
       ],
       "notes": "TPU 85A requires direct drive extruder. Too soft for Bowden systems."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -1450,24 +1282,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -1561,14 +1379,6 @@
       ],
       "notes": "TPU 85A requires direct drive extruder. Too soft for Bowden systems."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -1625,20 +1435,10 @@
       "upgrades_needed": [],
       "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
     },
-    "asa_plus": {
-      "status": "compatible",
-      "upgrades_needed": [],
-      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "compatible",
-      "upgrades_needed": [],
-      "notes": "Dissolves in limonene for support removal. Prints like ABS — enclosed chamber recommended."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -1723,13 +1523,6 @@
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -1794,28 +1587,12 @@
       ],
       "notes": "ASA: PTFE degrades at ASA temps (240-260C), open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "all_metal_hotend",
-        "enclosure"
-      ],
-      "notes": "ASA+: PTFE hotend not rated for ASA+ temps, enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "needs_upgrade",
       "upgrades_needed": [
         "direct_drive"
       ],
       "notes": "Bowden extruder cannot reliably push flexible filament. Direct drive upgrade required."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "all_metal_hotend",
-        "enclosure"
-      ],
-      "notes": "HIPS: PTFE hotend not rated for HIPS temps (230-250C), warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -1915,14 +1692,6 @@
       ],
       "notes": "TPU 85A requires direct drive extruder. Too soft for Bowden systems."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -1983,24 +1752,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -2089,14 +1844,6 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
-    },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     },
     "pvb": {
       "status": "compatible",
@@ -2158,24 +1905,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -2264,14 +1997,6 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
-    },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     },
     "pvb": {
       "status": "compatible",
@@ -2337,28 +2062,12 @@
       ],
       "notes": "ASA: PTFE degrades at ASA temps (240-260C), open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "all_metal_hotend",
-        "enclosure"
-      ],
-      "notes": "ASA+: PTFE hotend not rated for ASA+ temps, enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "needs_upgrade",
       "upgrades_needed": [
         "direct_drive"
       ],
       "notes": "TPU buckles in bowden tubes — direct drive extruder required for reliable feeding."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "all_metal_hotend",
-        "enclosure"
-      ],
-      "notes": "HIPS: PTFE hotend not rated for HIPS temps (230-250C), warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -2459,14 +2168,6 @@
       ],
       "notes": "TPU 85A requires direct drive extruder. Too soft for Bowden systems."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -2527,24 +2228,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -2634,14 +2321,6 @@
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -2706,28 +2385,12 @@
       ],
       "notes": "ASA: PTFE degrades at ASA temps (240-260C), open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "all_metal_hotend",
-        "enclosure"
-      ],
-      "notes": "ASA+: PTFE hotend not rated for ASA+ temps, enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "needs_upgrade",
       "upgrades_needed": [
         "direct_drive"
       ],
       "notes": "TPU buckles in bowden tubes — direct drive extruder required for reliable feeding."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "all_metal_hotend",
-        "enclosure"
-      ],
-      "notes": "HIPS: PTFE hotend not rated for HIPS temps (230-250C), warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -2828,14 +2491,6 @@
       ],
       "notes": "TPU 85A requires direct drive extruder. Too soft for Bowden systems."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -2898,24 +2553,10 @@
       ],
       "notes": "ASA: PTFE degrades at ASA temps (240-260C)."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "all_metal_hotend"
-      ],
-      "notes": "ASA+: PTFE hotend not rated for ASA+ temps."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "all_metal_hotend"
-      ],
-      "notes": "HIPS: PTFE hotend not rated for HIPS temps (230-250C)."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -3006,13 +2647,6 @@
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -3073,24 +2707,10 @@
       ],
       "notes": "ASA: open frame causes warping. Enclosure required."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA PLUS: open frame causes warping. Enclosure required."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: open frame causes warping. Enclosure required."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -3180,14 +2800,6 @@
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -3248,24 +2860,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -3355,14 +2953,6 @@
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -3427,28 +3017,12 @@
       ],
       "notes": "ASA: PTFE degrades at ASA temps (240-260C), open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "all_metal_hotend",
-        "enclosure"
-      ],
-      "notes": "ASA+: PTFE hotend not rated for ASA+ temps, enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "needs_upgrade",
       "upgrades_needed": [
         "direct_drive"
       ],
       "notes": "TPU buckles in bowden tubes — direct drive extruder required for reliable feeding."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "all_metal_hotend",
-        "enclosure"
-      ],
-      "notes": "HIPS: PTFE hotend not rated for HIPS temps (230-250C), warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -3549,14 +3123,6 @@
       ],
       "notes": "TPU 85A requires direct drive extruder. Too soft for Bowden systems."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -3617,24 +3183,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -3723,14 +3275,6 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
-    },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     },
     "pvb": {
       "status": "compatible",
@@ -3792,24 +3336,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -3898,14 +3428,6 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
-    },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     },
     "pvb": {
       "status": "compatible",
@@ -3967,24 +3489,10 @@
       ],
       "notes": "ASA: open frame causes warping. Enclosure sold separately, required for this material."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA PLUS: open frame causes warping. Enclosure sold separately, required for this material."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: open frame causes warping. Enclosure sold separately, required for this material."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -4073,14 +3581,6 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
-    },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     },
     "pvb": {
       "status": "compatible",
@@ -4138,20 +3638,10 @@
       "upgrades_needed": [],
       "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
     },
-    "asa_plus": {
-      "status": "compatible",
-      "upgrades_needed": [],
-      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "compatible",
-      "upgrades_needed": [],
-      "notes": "Dissolves in limonene for support removal. Prints like ABS — enclosed chamber recommended."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -4235,13 +3725,6 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
-    },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
     },
     "pvb": {
       "status": "compatible",
@@ -4303,24 +3786,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -4409,14 +3878,6 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
-    },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     },
     "pvb": {
       "status": "compatible",
@@ -4478,24 +3939,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -4584,14 +4031,6 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
-    },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
     },
     "pvb": {
       "status": "compatible",
@@ -4653,24 +4092,10 @@
       ],
       "notes": "ASA: open frame causes warping similar to ABS."
     },
-    "asa_plus": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "ASA+: enclosure needed to prevent warping."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure"
-      ],
-      "notes": "HIPS: warps without enclosure like ABS."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -4760,14 +4185,6 @@
       "upgrades_needed": [],
       "notes": "Direct drive extruder handles flexible filament well. Print slowly (15-25mm/s)."
     },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "enclosure",
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion, and enclosure to manage extreme warping."
-    },
     "pvb": {
       "status": "compatible",
       "upgrades_needed": [],
@@ -4824,20 +4241,10 @@
       "upgrades_needed": [],
       "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
     },
-    "asa_plus": {
-      "status": "compatible",
-      "upgrades_needed": [],
-      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "compatible",
-      "upgrades_needed": [],
-      "notes": "Dissolves in limonene for support removal. Prints like ABS — enclosed chamber recommended."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -4921,13 +4328,6 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
-    },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
     },
     "pvb": {
       "status": "compatible",
@@ -4985,20 +4385,10 @@
       "upgrades_needed": [],
       "notes": "UV-resistant alternative to ABS. Enclosed chamber prevents warping."
     },
-    "asa_plus": {
-      "status": "compatible",
-      "upgrades_needed": [],
-      "notes": "Enhanced ASA with better layer adhesion. Same print conditions as standard ASA."
-    },
     "tpu": {
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Direct drive handles TPU well. Print slowly (20-30mm/s) with minimal retraction."
-    },
-    "hips": {
-      "status": "compatible",
-      "upgrades_needed": [],
-      "notes": "Dissolves in limonene for support removal. Prints like ABS — enclosed chamber recommended."
     },
     "pva": {
       "status": "needs_upgrade",
@@ -5082,13 +4472,6 @@
       "status": "compatible",
       "upgrades_needed": [],
       "notes": "Very soft TPU. Print at 15-20mm/s. Almost zero retraction. Challenging even on direct drive."
-    },
-    "pp": {
-      "status": "needs_upgrade",
-      "upgrades_needed": [
-        "pp_adhesion_sheet"
-      ],
-      "notes": "PP: requires PP-specific adhesion sheet for bed adhesion. Enclosure helps with extreme warping."
     },
     "pvb": {
       "status": "compatible",

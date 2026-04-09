@@ -7,7 +7,14 @@
   "snap_fit_cantilever": {
     "display_name": "Cantilever Snap Fit",
     "description": "A flexible arm with a hook that deflects during assembly and snaps into a mating feature. The most common snap fit type.",
-    "use_cases": ["enclosures", "battery_covers", "cable_management", "removable_panels", "phone_cases", "electronics_housings"],
+    "use_cases": [
+      "enclosures",
+      "battery_covers",
+      "cable_management",
+      "removable_panels",
+      "phone_cases",
+      "electronics_housings"
+    ],
     "design_rules": {
       "arm_length_to_deflection_ratio": 5.0,
       "max_deflection_pct_of_length": 2.0,
@@ -18,9 +25,19 @@
       "fillet_radius_at_base_mm": 0.5
     },
     "material_compatibility": {
-      "excellent": ["petg", "nylon", "tpu"],
-      "good": ["abs", "asa", "polycarbonate", "pp"],
-      "poor": ["pla"],
+      "excellent": [
+        "petg",
+        "nylon",
+        "tpu"
+      ],
+      "good": [
+        "abs",
+        "asa",
+        "polycarbonate"
+      ],
+      "poor": [
+        "pla"
+      ],
       "avoid": []
     },
     "print_orientation": "arm_in_xy_plane",
@@ -36,9 +53,19 @@
   "press_fit": {
     "display_name": "Press Fit / Interference Fit",
     "description": "A joint where one part is slightly larger than the hole it fits into, creating a friction-based connection. No fasteners needed.",
-    "use_cases": ["axle_bearings", "dowel_joints", "insert_holders", "magnet_pockets", "bearing_seats", "pin_connections"],
+    "use_cases": [
+      "axle_bearings",
+      "dowel_joints",
+      "insert_holders",
+      "magnet_pockets",
+      "bearing_seats",
+      "pin_connections"
+    ],
     "design_rules": {
-      "interference_range_mm": [0.05, 0.2],
+      "interference_range_mm": [
+        0.05,
+        0.2
+      ],
       "min_wall_around_hole_mm": 2.0,
       "chamfer_entry_angle_deg": 45,
       "chamfer_depth_mm": 0.5,
@@ -46,9 +73,19 @@
       "surface_finish_matters": true
     },
     "material_compatibility": {
-      "excellent": ["petg", "abs", "asa", "nylon"],
-      "good": ["pla", "polycarbonate"],
-      "poor": ["tpu", "pp"],
+      "excellent": [
+        "petg",
+        "abs",
+        "asa",
+        "nylon"
+      ],
+      "good": [
+        "pla",
+        "polycarbonate"
+      ],
+      "poor": [
+        "tpu"
+      ],
       "avoid": []
     },
     "print_orientation": "hole_axis_vertical",
@@ -64,19 +101,38 @@
   "living_hinge": {
     "display_name": "Living Hinge",
     "description": "A thin flexible section connecting two rigid sections, allowing repeated bending at a defined axis. Like the hinge on a shampoo bottle cap.",
-    "use_cases": ["flip_lids", "foldable_parts", "one_piece_enclosures", "articulated_joints", "deployable_structures"],
+    "use_cases": [
+      "flip_lids",
+      "foldable_parts",
+      "one_piece_enclosures",
+      "articulated_joints",
+      "deployable_structures"
+    ],
     "design_rules": {
-      "hinge_thickness_mm": [0.3, 0.8],
+      "hinge_thickness_mm": [
+        0.3,
+        0.8
+      ],
       "hinge_width_min_mm": 5.0,
       "radius_at_fold_mm": 1.0,
       "max_bend_angle_deg": 180,
       "min_rigid_section_mm": 10
     },
     "material_compatibility": {
-      "excellent": ["tpu", "nylon", "pp"],
-      "good": ["polycarbonate"],
+      "excellent": [
+        "tpu",
+        "nylon"
+      ],
+      "good": [
+        "polycarbonate"
+      ],
       "poor": [],
-      "avoid": ["pla", "petg", "abs", "asa"]
+      "avoid": [
+        "pla",
+        "petg",
+        "abs",
+        "asa"
+      ]
     },
     "print_orientation": "hinge_line_perpendicular_to_layers",
     "print_orientation_reason": "Layer adhesion is the weak point. Hinge must flex along layer lines, not across them, or it snaps on first bend.",
@@ -91,7 +147,14 @@
   "threaded_connection": {
     "display_name": "Printed Threads",
     "description": "Screw threads printed directly into the part. Can be external (bolt) or internal (nut). Works for both mating printed parts and accepting standard fasteners.",
-    "use_cases": ["adjustment_screws", "containers_with_lids", "camera_mounts", "tripod_adapters", "connector_housings", "leveling_feet"],
+    "use_cases": [
+      "adjustment_screws",
+      "containers_with_lids",
+      "camera_mounts",
+      "tripod_adapters",
+      "connector_housings",
+      "leveling_feet"
+    ],
     "design_rules": {
       "min_pitch_mm": 1.5,
       "recommended_pitch_mm": 2.0,
@@ -102,9 +165,19 @@
       "chamfer_entry_both_sides": true
     },
     "material_compatibility": {
-      "excellent": ["petg", "abs", "asa", "nylon"],
-      "good": ["pla", "polycarbonate"],
-      "poor": ["tpu", "pp"],
+      "excellent": [
+        "petg",
+        "abs",
+        "asa",
+        "nylon"
+      ],
+      "good": [
+        "pla",
+        "polycarbonate"
+      ],
+      "poor": [
+        "tpu"
+      ],
       "avoid": []
     },
     "print_orientation": "thread_axis_vertical",
@@ -120,7 +193,14 @@
   "cantilever_bracket": {
     "display_name": "Cantilever / Shelf Bracket",
     "description": "A rigid bracket that supports weight while mounted to a wall or surface. Must resist bending and shear loads.",
-    "use_cases": ["shelf_brackets", "monitor_arms", "phone_mounts", "tool_holders", "display_stands", "equipment_mounts"],
+    "use_cases": [
+      "shelf_brackets",
+      "monitor_arms",
+      "phone_mounts",
+      "tool_holders",
+      "display_stands",
+      "equipment_mounts"
+    ],
     "design_rules": {
       "gusset_required_above_mm": 80,
       "gusset_angle_deg": 45,
@@ -132,10 +212,20 @@
       "fillet_at_joint_radius_mm": 3
     },
     "material_compatibility": {
-      "excellent": ["petg", "abs", "asa", "nylon", "polycarbonate"],
-      "good": ["pp"],
-      "poor": ["pla"],
-      "avoid": ["tpu"]
+      "excellent": [
+        "petg",
+        "abs",
+        "asa",
+        "nylon",
+        "polycarbonate"
+      ],
+      "good": [],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "tpu"
+      ]
     },
     "print_orientation": "bracket_flat_on_bed",
     "print_orientation_reason": "Strongest orientation places layer lines parallel to the wall surface. The load then compresses across layers rather than pulling them apart.",
@@ -152,7 +242,15 @@
   "watertight_container": {
     "display_name": "Watertight Container / Vessel",
     "description": "A container designed to hold liquid without leaking through the print walls or seams.",
-    "use_cases": ["vases", "planters", "cups", "funnels", "reservoirs", "drainage_channels", "water_tanks"],
+    "use_cases": [
+      "vases",
+      "planters",
+      "cups",
+      "funnels",
+      "reservoirs",
+      "drainage_channels",
+      "water_tanks"
+    ],
     "design_rules": {
       "min_wall_thickness_mm": 1.6,
       "recommended_wall_shells": 4,
@@ -163,9 +261,18 @@
       "draft_angle_for_demolding_deg": 3
     },
     "material_compatibility": {
-      "excellent": ["petg", "tpu"],
-      "good": ["pla", "abs", "asa", "pp"],
-      "poor": ["nylon"],
+      "excellent": [
+        "petg",
+        "tpu"
+      ],
+      "good": [
+        "pla",
+        "abs",
+        "asa"
+      ],
+      "poor": [
+        "nylon"
+      ],
       "avoid": []
     },
     "print_orientation": "opening_up",
@@ -183,7 +290,14 @@
   "enclosure_box": {
     "display_name": "Electronics Enclosure / Project Box",
     "description": "A multi-part box designed to house electronics, with provisions for cable routing, mounting, ventilation, and assembly.",
-    "use_cases": ["raspberry_pi_cases", "sensor_housings", "control_boxes", "led_controller_housings", "battery_enclosures", "iot_devices"],
+    "use_cases": [
+      "raspberry_pi_cases",
+      "sensor_housings",
+      "control_boxes",
+      "led_controller_housings",
+      "battery_enclosures",
+      "iot_devices"
+    ],
     "design_rules": {
       "wall_thickness_mm": 2.0,
       "pcb_standoff_height_mm": 3.0,
@@ -198,9 +312,19 @@
       "corner_fillet_radius_mm": 2
     },
     "material_compatibility": {
-      "excellent": ["petg", "abs", "asa"],
-      "good": ["pla", "nylon", "polycarbonate", "pp"],
-      "poor": ["tpu"],
+      "excellent": [
+        "petg",
+        "abs",
+        "asa"
+      ],
+      "good": [
+        "pla",
+        "nylon",
+        "polycarbonate"
+      ],
+      "poor": [
+        "tpu"
+      ],
       "avoid": []
     },
     "print_orientation": "opening_up",
@@ -218,7 +342,15 @@
   "gear": {
     "display_name": "Spur Gear / Mechanical Gear",
     "description": "A toothed wheel designed to mesh with another gear to transmit rotational motion and torque.",
-    "use_cases": ["gear_trains", "actuators", "toys", "mechanical_art", "clock_mechanisms", "robot_joints", "adjustable_mechanisms"],
+    "use_cases": [
+      "gear_trains",
+      "actuators",
+      "toys",
+      "mechanical_art",
+      "clock_mechanisms",
+      "robot_joints",
+      "adjustable_mechanisms"
+    ],
     "design_rules": {
       "min_module": 1.0,
       "recommended_module": 1.5,
@@ -231,10 +363,21 @@
       "key_slot_clearance_mm": 0.2
     },
     "material_compatibility": {
-      "excellent": ["nylon"],
-      "good": ["petg", "abs", "asa", "polycarbonate"],
-      "poor": ["pla", "pp"],
-      "avoid": ["tpu"]
+      "excellent": [
+        "nylon"
+      ],
+      "good": [
+        "petg",
+        "abs",
+        "asa",
+        "polycarbonate"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "tpu"
+      ]
     },
     "print_orientation": "gear_face_on_bed",
     "print_orientation_reason": "Teeth printed vertically (face on bed) have consistent profiles. Teeth printed sideways have layer stairstepping that creates rough meshing and accelerated wear.",
@@ -252,11 +395,22 @@
   "heat_set_insert_boss": {
     "display_name": "Heat-Set Insert Boss",
     "description": "A cylindrical boss designed to accept M2-M5 brass heat-set threaded inserts, providing strong metal threads in a printed part for repeated screw assembly.",
-    "use_cases": ["electronics_enclosures", "panel_mounting", "structural_assemblies", "jigs_and_fixtures", "robot_chassis", "camera_housings", "modular_furniture"],
+    "use_cases": [
+      "electronics_enclosures",
+      "panel_mounting",
+      "structural_assemblies",
+      "jigs_and_fixtures",
+      "robot_chassis",
+      "camera_housings",
+      "modular_furniture"
+    ],
     "design_rules": {
       "boss_od_to_insert_od_ratio": 2.0,
       "min_boss_wall_mm": 1.5,
-      "hole_diameter_undersized_mm": [0.1, 0.2],
+      "hole_diameter_undersized_mm": [
+        0.1,
+        0.2
+      ],
       "insertion_depth_mm": 4.0,
       "chamfer_entry_deg": 45,
       "min_boss_height_mm": 5.0,
@@ -264,10 +418,23 @@
       "chamfer_depth_mm": 0.5
     },
     "material_compatibility": {
-      "excellent": ["abs", "asa", "nylon"],
-      "good": ["petg", "polycarbonate", "pc_abs"],
-      "poor": ["pla", "pla_plus"],
-      "avoid": ["tpu"]
+      "excellent": [
+        "abs",
+        "asa",
+        "nylon"
+      ],
+      "good": [
+        "petg",
+        "polycarbonate",
+        "pc_abs"
+      ],
+      "poor": [
+        "pla",
+        "pla_plus"
+      ],
+      "avoid": [
+        "tpu"
+      ]
     },
     "print_orientation": "boss_axis_vertical",
     "print_orientation_reason": "Vertical boss axis gives the best hole roundness and allows the soldering iron to press straight down, melting plastic evenly around the insert.",
@@ -282,11 +449,24 @@
   "cable_management_clip": {
     "display_name": "Cable Management Clip",
     "description": "A snap-on clip that secures cables to surfaces or panels, using a flexible arm that opens to accept the cable and snaps closed to retain it.",
-    "use_cases": ["desk_cable_routing", "server_racks", "3d_printer_wiring", "automotive_harness", "wall_cable_runs", "panel_wire_management"],
+    "use_cases": [
+      "desk_cable_routing",
+      "server_racks",
+      "3d_printer_wiring",
+      "automotive_harness",
+      "wall_cable_runs",
+      "panel_wire_management"
+    ],
     "design_rules": {
       "clip_inner_radius_mm": "cable_radius_plus_0.5",
-      "wall_thickness_mm": [1.5, 2.0],
-      "snap_arm_length_mm": [8, 12],
+      "wall_thickness_mm": [
+        1.5,
+        2.0
+      ],
+      "snap_arm_length_mm": [
+        8,
+        12
+      ],
       "deflection_mm": 1.5,
       "mounting_hole_diameter_mm": 4.2,
       "clip_gap_mm": "cable_diameter_times_0.8",
@@ -294,10 +474,23 @@
       "arm_taper_pct": 10
     },
     "material_compatibility": {
-      "excellent": ["petg", "nylon", "tpu"],
-      "good": ["asa", "abs", "pla_plus"],
-      "poor": ["pla"],
-      "avoid": ["cf_pla", "cf_petg"]
+      "excellent": [
+        "petg",
+        "nylon",
+        "tpu"
+      ],
+      "good": [
+        "asa",
+        "abs",
+        "pla_plus"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "cf_pla",
+        "cf_petg"
+      ]
     },
     "print_orientation": "clip_opening_up",
     "print_orientation_reason": "Printing with the clip opening facing up keeps the snap arms in the XY plane, where layer adhesion supports the flex cycle without delamination.",
@@ -312,7 +505,15 @@
   "wall_mount_bracket": {
     "display_name": "Wall Mount Bracket",
     "description": "A flat or L-shaped bracket for mounting objects to walls or surfaces using screws, with provisions for screw clearance and load distribution.",
-    "use_cases": ["shelf_mounting", "tool_holders", "light_fixtures", "speaker_mounts", "curtain_rod_brackets", "picture_hangers", "equipment_mounting"],
+    "use_cases": [
+      "shelf_mounting",
+      "tool_holders",
+      "light_fixtures",
+      "speaker_mounts",
+      "curtain_rod_brackets",
+      "picture_hangers",
+      "equipment_mounting"
+    ],
     "design_rules": {
       "min_thickness_mm": 3.0,
       "screw_hole_diameter_mm": 4.2,
@@ -324,10 +525,24 @@
       "fillet_at_bend_radius_mm": 3.0
     },
     "material_compatibility": {
-      "excellent": ["petg", "abs", "asa", "nylon"],
-      "good": ["cf_pla", "cf_petg", "polycarbonate", "pla_plus"],
-      "poor": ["pla"],
-      "avoid": ["tpu"]
+      "excellent": [
+        "petg",
+        "abs",
+        "asa",
+        "nylon"
+      ],
+      "good": [
+        "cf_pla",
+        "cf_petg",
+        "polycarbonate",
+        "pla_plus"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "tpu"
+      ]
     },
     "print_orientation": "flat_face_on_bed",
     "print_orientation_reason": "Printing the mounting face flat on the bed maximizes cross-sectional strength across layers and gives a smooth surface for flush wall contact.",
@@ -342,7 +557,14 @@
   "phone_stand": {
     "display_name": "Phone / Tablet Stand",
     "description": "An angled stand that holds a phone or tablet at a comfortable viewing angle, with a front lip for retention and a stable base to prevent tipping.",
-    "use_cases": ["desk_phone_holder", "kitchen_recipe_stand", "video_call_stand", "bedside_charging_dock", "tablet_drawing_stand", "point_of_sale_display"],
+    "use_cases": [
+      "desk_phone_holder",
+      "kitchen_recipe_stand",
+      "video_call_stand",
+      "bedside_charging_dock",
+      "tablet_drawing_stand",
+      "point_of_sale_display"
+    ],
     "design_rules": {
       "min_viewing_angle_deg": 30,
       "max_viewing_angle_deg": 75,
@@ -355,10 +577,21 @@
       "base_thickness_mm": 4.0
     },
     "material_compatibility": {
-      "excellent": ["pla", "petg", "pla_plus"],
-      "good": ["abs", "asa", "cf_pla", "silk_pla"],
+      "excellent": [
+        "pla",
+        "petg",
+        "pla_plus"
+      ],
+      "good": [
+        "abs",
+        "asa",
+        "cf_pla",
+        "silk_pla"
+      ],
       "poor": [],
-      "avoid": ["tpu"]
+      "avoid": [
+        "tpu"
+      ]
     },
     "print_orientation": "back_panel_flat_on_bed",
     "print_orientation_reason": "Printing with the back panel flat on the bed avoids supports for the angled face and produces a smooth rear surface for desk contact.",
@@ -373,11 +606,24 @@
   "ball_joint_socket": {
     "display_name": "Ball and Socket Joint",
     "description": "A spherical joint allowing multi-axis rotation, consisting of a ball on one part and a receiving socket on another. Can be print-in-place or assembled.",
-    "use_cases": ["articulated_figures", "camera_mounts", "adjustable_lamp_arms", "robot_limbs", "poseable_models", "gimbal_mechanisms"],
+    "use_cases": [
+      "articulated_figures",
+      "camera_mounts",
+      "adjustable_lamp_arms",
+      "robot_limbs",
+      "poseable_models",
+      "gimbal_mechanisms"
+    ],
     "design_rules": {
       "ball_diameter_mm": 10,
-      "socket_clearance_mm": [0.4, 0.6],
-      "socket_opening_pct": [65, 75],
+      "socket_clearance_mm": [
+        0.4,
+        0.6
+      ],
+      "socket_opening_pct": [
+        65,
+        75
+      ],
       "wall_thickness_mm": 2.0,
       "retention_lip_mm": 0.5,
       "print_as_assembly": true,
@@ -385,10 +631,22 @@
       "support_bridge_thickness_mm": 0.3
     },
     "material_compatibility": {
-      "excellent": ["nylon", "petg"],
-      "good": ["tpu", "abs", "asa"],
-      "poor": ["pla"],
-      "avoid": ["cf_pla", "cf_nylon"]
+      "excellent": [
+        "nylon",
+        "petg"
+      ],
+      "good": [
+        "tpu",
+        "abs",
+        "asa"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "cf_pla",
+        "cf_nylon"
+      ]
     },
     "print_orientation": "socket_opening_up",
     "print_orientation_reason": "Printing with the socket opening upward allows the ball interior to bridge cleanly and avoids supports inside the socket that would fuse the joint.",
@@ -403,22 +661,51 @@
   "dovetail_joint": {
     "display_name": "Sliding Dovetail Joint",
     "description": "A trapezoidal tongue-and-groove joint that slides together for tool-free mechanical assembly. Resists pull-apart forces perpendicular to the slide direction.",
-    "use_cases": ["modular_assemblies", "drawer_slides", "rail_systems", "tool_free_mounting", "stackable_modules", "adjustable_fixtures"],
+    "use_cases": [
+      "modular_assemblies",
+      "drawer_slides",
+      "rail_systems",
+      "tool_free_mounting",
+      "stackable_modules",
+      "adjustable_fixtures"
+    ],
     "design_rules": {
-      "taper_angle_deg": [10, 15],
+      "taper_angle_deg": [
+        10,
+        15
+      ],
       "min_dovetail_width_mm": 8,
-      "depth_mm": [4, 6],
-      "clearance_mm": [0.2, 0.3],
+      "depth_mm": [
+        4,
+        6
+      ],
+      "clearance_mm": [
+        0.2,
+        0.3
+      ],
       "length_mm": 20,
       "slide_direction": "perpendicular_to_layers",
       "base_width_to_top_width_ratio": 1.5,
       "entry_chamfer_mm": 0.5
     },
     "material_compatibility": {
-      "excellent": ["pla", "petg", "cf_pla"],
-      "good": ["abs", "asa", "pla_plus", "cf_petg"],
-      "poor": ["nylon"],
-      "avoid": ["tpu"]
+      "excellent": [
+        "pla",
+        "petg",
+        "cf_pla"
+      ],
+      "good": [
+        "abs",
+        "asa",
+        "pla_plus",
+        "cf_petg"
+      ],
+      "poor": [
+        "nylon"
+      ],
+      "avoid": [
+        "tpu"
+      ]
     },
     "print_orientation": "slide_axis_horizontal",
     "print_orientation_reason": "The slide axis should be horizontal (parallel to bed) so the dovetail cross-section is printed accurately in the XY plane, avoiding stairstepping on the tapered faces.",
@@ -433,22 +720,48 @@
   "battery_compartment": {
     "display_name": "Battery Compartment",
     "description": "A holder designed to securely house standard battery cells with contact terminals, polarity guides, and a retaining lid for easy replacement.",
-    "use_cases": ["remote_controls", "portable_devices", "sensor_nodes", "led_projects", "toy_electronics", "emergency_lights", "iot_devices"],
+    "use_cases": [
+      "remote_controls",
+      "portable_devices",
+      "sensor_nodes",
+      "led_projects",
+      "toy_electronics",
+      "emergency_lights",
+      "iot_devices"
+    ],
     "design_rules": {
       "cell_clearance_mm": 0.5,
       "contact_spring_recess_depth_mm": 2.0,
-      "lid_retention_type": ["snap", "slide"],
+      "lid_retention_type": [
+        "snap",
+        "slide"
+      ],
       "min_wall_thickness_mm": 1.5,
       "terminal_slot_width_mm": 3.0,
-      "common_sizes": ["AA", "AAA", "18650", "CR2032"],
+      "common_sizes": [
+        "AA",
+        "AAA",
+        "18650",
+        "CR2032"
+      ],
       "positive_terminal_bump_height_mm": 1.0,
       "polarity_marking_depth_mm": 0.4
     },
     "material_compatibility": {
-      "excellent": ["petg", "abs", "pla_plus"],
-      "good": ["pla", "asa", "nylon"],
+      "excellent": [
+        "petg",
+        "abs",
+        "pla_plus"
+      ],
+      "good": [
+        "pla",
+        "asa",
+        "nylon"
+      ],
       "poor": [],
-      "avoid": ["tpu"]
+      "avoid": [
+        "tpu"
+      ]
     },
     "print_orientation": "opening_up",
     "print_orientation_reason": "Printing with the battery opening facing up creates the cell cavity without supports and gives a smooth bed-contact surface for the compartment floor.",
@@ -463,23 +776,48 @@
   "pcb_enclosure_standoff": {
     "display_name": "PCB Mounting Standoff",
     "description": "Cylindrical posts that elevate a PCB above the enclosure floor, providing clearance for bottom-side components and secure mounting via screws or snap-fit nubs.",
-    "use_cases": ["electronics_enclosures", "raspberry_pi_mounts", "arduino_shields", "custom_pcb_housings", "sensor_boards", "led_driver_mounts"],
+    "use_cases": [
+      "electronics_enclosures",
+      "raspberry_pi_mounts",
+      "arduino_shields",
+      "custom_pcb_housings",
+      "sensor_boards",
+      "led_driver_mounts"
+    ],
     "design_rules": {
-      "standoff_height_mm": [3.0, 5.0],
+      "standoff_height_mm": [
+        3.0,
+        5.0
+      ],
       "hole_diameter_m2_mm": 2.2,
       "hole_diameter_m2_5_mm": 2.7,
       "hole_diameter_m3_mm": 3.2,
-      "outer_diameter_mm": [5.0, 7.0],
+      "outer_diameter_mm": [
+        5.0,
+        7.0
+      ],
       "screw_engagement_depth_mm": 4.0,
       "snap_fit_nub_height_mm": 0.5,
       "base_fillet_radius_mm": 0.5,
       "min_standoff_wall_mm": 1.5
     },
     "material_compatibility": {
-      "excellent": ["petg", "abs", "asa"],
-      "good": ["pla_plus", "nylon", "polycarbonate"],
-      "poor": ["pla"],
-      "avoid": ["tpu"]
+      "excellent": [
+        "petg",
+        "abs",
+        "asa"
+      ],
+      "good": [
+        "pla_plus",
+        "nylon",
+        "polycarbonate"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "tpu"
+      ]
     },
     "print_orientation": "standoffs_vertical",
     "print_orientation_reason": "Printing standoffs vertically produces round, accurate holes and avoids the need for supports inside the screw holes.",
@@ -494,11 +832,22 @@
   "gopro_mount": {
     "display_name": "GoPro-Compatible Mount",
     "description": "A quick-release mounting interface compatible with the GoPro two/three-prong system, allowing attachment to the extensive ecosystem of GoPro accessories.",
-    "use_cases": ["action_cameras", "bike_mounts", "helmet_mounts", "drone_gimbals", "vehicle_dashcams", "tripod_adapters", "chest_harness_adapters"],
+    "use_cases": [
+      "action_cameras",
+      "bike_mounts",
+      "helmet_mounts",
+      "drone_gimbals",
+      "vehicle_dashcams",
+      "tripod_adapters",
+      "chest_harness_adapters"
+    ],
     "design_rules": {
       "finger_width_mm": 3.0,
       "finger_spacing_mm": 3.5,
-      "finger_count": [2, 3],
+      "finger_count": [
+        2,
+        3
+      ],
       "mounting_hole_diameter_mm": 5.5,
       "tab_thickness_mm": 2.5,
       "locking_tab_height_mm": 1.5,
@@ -506,10 +855,25 @@
       "total_interface_width_mm": 16.5
     },
     "material_compatibility": {
-      "excellent": ["petg", "abs", "asa", "nylon", "cf_pla"],
-      "good": ["polycarbonate", "cf_petg", "cf_nylon", "pla_plus"],
-      "poor": ["pla"],
-      "avoid": ["tpu"]
+      "excellent": [
+        "petg",
+        "abs",
+        "asa",
+        "nylon",
+        "cf_pla"
+      ],
+      "good": [
+        "polycarbonate",
+        "cf_petg",
+        "cf_nylon",
+        "pla_plus"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "tpu"
+      ]
     },
     "print_orientation": "fingers_vertical",
     "print_orientation_reason": "Printing with fingers oriented vertically produces the most accurate finger spacing and width, which is critical for mating with standard GoPro accessories.",
@@ -524,7 +888,14 @@
   "pegboard_hook": {
     "display_name": "Pegboard Hook / Accessory",
     "description": "Hooks and holders designed to insert into standard 25.4mm (1-inch) spaced pegboard holes for tool and accessory organization.",
-    "use_cases": ["tool_organization", "workshop_storage", "craft_room_hooks", "retail_displays", "garage_organizers", "kitchen_utensil_holders"],
+    "use_cases": [
+      "tool_organization",
+      "workshop_storage",
+      "craft_room_hooks",
+      "retail_displays",
+      "garage_organizers",
+      "kitchen_utensil_holders"
+    ],
     "design_rules": {
       "peg_diameter_mm": 4.0,
       "peg_spacing_mm": 25.4,
@@ -537,10 +908,21 @@
       "min_hook_radius_mm": 5.0
     },
     "material_compatibility": {
-      "excellent": ["petg", "abs", "cf_pla", "pla_plus"],
-      "good": ["asa", "nylon", "pla"],
+      "excellent": [
+        "petg",
+        "abs",
+        "cf_pla",
+        "pla_plus"
+      ],
+      "good": [
+        "asa",
+        "nylon",
+        "pla"
+      ],
       "poor": [],
-      "avoid": ["tpu"]
+      "avoid": [
+        "tpu"
+      ]
     },
     "print_orientation": "peg_axis_vertical",
     "print_orientation_reason": "Printing with the peg axis vertical produces round, accurate pegs that slide smoothly into pegboard holes. Horizontal pegs are oval from layer stacking.",
@@ -555,23 +937,51 @@
   "hinge_pin": {
     "display_name": "Pin Hinge",
     "description": "A rotation joint using alternating knuckles held together by a cylindrical pin, allowing controlled rotation for doors, lids, and flip mechanisms.",
-    "use_cases": ["enclosure_lids", "flip_covers", "door_hinges", "fold_out_supports", "adjustable_panels", "access_hatches"],
+    "use_cases": [
+      "enclosure_lids",
+      "flip_covers",
+      "door_hinges",
+      "fold_out_supports",
+      "adjustable_panels",
+      "access_hatches"
+    ],
     "design_rules": {
-      "pin_diameter_mm": [3.0, 5.0],
+      "pin_diameter_mm": [
+        3.0,
+        5.0
+      ],
       "pin_clearance_mm": 0.3,
       "knuckle_wall_thickness_mm": 2.0,
-      "knuckle_count": [3, 5],
-      "pin_retention": ["cap", "friction"],
+      "knuckle_count": [
+        3,
+        5
+      ],
+      "pin_retention": [
+        "cap",
+        "friction"
+      ],
       "max_rotation_deg": 270,
       "knuckle_spacing_mm": 0.3,
       "knuckle_length_mm": 8.0,
       "pin_chamfer_mm": 0.5
     },
     "material_compatibility": {
-      "excellent": ["petg", "nylon", "abs"],
-      "good": ["asa", "polycarbonate", "pla_plus"],
-      "poor": ["pla"],
-      "avoid": ["tpu"]
+      "excellent": [
+        "petg",
+        "nylon",
+        "abs"
+      ],
+      "good": [
+        "asa",
+        "polycarbonate",
+        "pla_plus"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "tpu"
+      ]
     },
     "print_orientation": "hinge_axis_horizontal",
     "print_orientation_reason": "Printing with the hinge axis horizontal (parallel to the bed) puts layer lines along the knuckle length, making them strongest against the rotational shear forces.",
@@ -586,23 +996,52 @@
   "latch_clasp": {
     "display_name": "Mechanical Latch / Clasp",
     "description": "A lever-actuated latch mechanism for securing lids, doors, and panels on enclosures. Uses a hook-and-catch system with a spring arm to maintain engagement.",
-    "use_cases": ["tool_boxes", "equipment_cases", "waterproof_enclosures", "storage_containers", "access_panels", "instrument_housings"],
+    "use_cases": [
+      "tool_boxes",
+      "equipment_cases",
+      "waterproof_enclosures",
+      "storage_containers",
+      "access_panels",
+      "instrument_housings"
+    ],
     "design_rules": {
-      "hook_depth_mm": [1.5, 2.0],
-      "lever_length_mm": [15, 25],
+      "hook_depth_mm": [
+        1.5,
+        2.0
+      ],
+      "lever_length_mm": [
+        15,
+        25
+      ],
       "lever_thickness_mm": 2.0,
       "pivot_pin_diameter_mm": 3.0,
       "spring_arm_thickness_mm": 1.0,
-      "engagement_force_n": [3, 8],
+      "engagement_force_n": [
+        3,
+        8
+      ],
       "release_angle_deg": 30,
       "catch_fillet_radius_mm": 0.5,
       "lever_clearance_mm": 0.3
     },
     "material_compatibility": {
-      "excellent": ["petg", "nylon", "abs", "asa"],
-      "good": ["polycarbonate", "pla_plus", "pc_abs"],
-      "poor": ["pla"],
-      "avoid": ["tpu"]
+      "excellent": [
+        "petg",
+        "nylon",
+        "abs",
+        "asa"
+      ],
+      "good": [
+        "polycarbonate",
+        "pla_plus",
+        "pc_abs"
+      ],
+      "poor": [
+        "pla"
+      ],
+      "avoid": [
+        "tpu"
+      ]
     },
     "print_orientation": "lever_flat_on_bed",
     "print_orientation_reason": "Printing the lever flat on the bed aligns layer lines along the lever length, maximizing bending strength in the spring arm and pivot area.",
