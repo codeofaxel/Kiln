@@ -30,6 +30,8 @@ htmlcov/
 # Development tooling
 tools/
 .DS_Store
+node_modules/
+.astro/
 CLAUDE.md
 .claude/
 .mcp.json
