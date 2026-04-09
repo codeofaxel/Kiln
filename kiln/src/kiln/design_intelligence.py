@@ -270,6 +270,33 @@ class PrintDiagnostic:
         return asdict(self)
 
 
+@dataclass
+class BrandFilamentProfile:
+    """Brand-specific filament profile with printing parameters."""
+
+    profile_id: str
+    brand: str
+    product_name: str
+    parent_material: str
+    nozzle_temp_range_c: list[int]
+    nozzle_temp_optimal_c: int
+    bed_temp_range_c: list[int]
+    bed_temp_optimal_c: int | None
+    max_volumetric_speed_mm3s: float | None
+    max_print_speed_mms: int | None
+    density_g_cm3: float | None
+    drying_temp_c: int | None
+    drying_time_hours: int | None
+    enclosure_required: bool
+    hardened_nozzle_required: bool
+    ams_compatible: bool | None
+    notes: str | None
+    source: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 # ---------------------------------------------------------------------------
 # Knowledge base loader (lazy singleton)
 # ---------------------------------------------------------------------------
@@ -595,6 +622,74 @@ def recommend_material_for_design(
         warnings=top_warnings,
         design_limits_summary=top_profile.design_limits,
         alternatives=alternatives,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public API — Brand filament profiles
+# ---------------------------------------------------------------------------
+
+
+def get_brand_filament_profile(profile_id: str) -> BrandFilamentProfile | None:
+    """Get a specific brand filament profile by ID.
+
+    :param profile_id: Profile key (e.g. ``"bambu_pla_basic"``, ``"prusament_petg"``).
+    """
+    kb = _get_kb()
+    for _mid, mat_data in kb.materials.items():
+        brand_profiles = mat_data.get("brand_profiles", {})
+        if profile_id.lower() in brand_profiles:
+            return _build_brand_profile(profile_id.lower(), _mid, brand_profiles[profile_id.lower()])
+    return None
+
+
+def list_brand_filament_profiles(
+    *,
+    brand: str | None = None,
+    parent_material: str | None = None,
+) -> list[BrandFilamentProfile]:
+    """List brand filament profiles, optionally filtered by brand or parent material.
+
+    :param brand: Filter by brand name (case-insensitive partial match).
+    :param parent_material: Filter by parent material ID (e.g. ``"pla"``, ``"petg"``).
+    """
+    kb = _get_kb()
+    results: list[BrandFilamentProfile] = []
+    for mid, mat_data in sorted(kb.materials.items()):
+        if parent_material and mid != parent_material.lower():
+            continue
+        for pid, pdata in sorted(mat_data.get("brand_profiles", {}).items()):
+            if brand and brand.lower() not in pdata.get("brand", "").lower():
+                continue
+            results.append(_build_brand_profile(pid, mid, pdata))
+    return results
+
+
+def _build_brand_profile(
+    profile_id: str,
+    parent_material: str,
+    data: dict[str, Any],
+) -> BrandFilamentProfile:
+    """Construct a BrandFilamentProfile from raw JSON data."""
+    return BrandFilamentProfile(
+        profile_id=profile_id,
+        brand=data["brand"],
+        product_name=data["product_name"],
+        parent_material=parent_material,
+        nozzle_temp_range_c=data["nozzle_temp_range_c"],
+        nozzle_temp_optimal_c=data["nozzle_temp_optimal_c"],
+        bed_temp_range_c=data["bed_temp_range_c"],
+        bed_temp_optimal_c=data.get("bed_temp_optimal_c"),
+        max_volumetric_speed_mm3s=data.get("max_volumetric_speed_mm3s"),
+        max_print_speed_mms=data.get("max_print_speed_mms"),
+        density_g_cm3=data.get("density_g_cm3"),
+        drying_temp_c=data.get("drying_temp_c"),
+        drying_time_hours=data.get("drying_time_hours"),
+        enclosure_required=data.get("enclosure_required", False),
+        hardened_nozzle_required=data.get("hardened_nozzle_required", False),
+        ams_compatible=data.get("ams_compatible"),
+        notes=data.get("notes"),
+        source=data["source"],
     )
 
 

@@ -255,5 +255,41 @@
       "rating": "excellent",
       "notes": "Robust wear resistance when printed with high interlayer fusion quality."
     }
+  },
+  "pvb": {
+    "uv_resistance": {
+      "rating": "poor",
+      "hours_to_noticeable_degradation": 60,
+      "notes": "PVB degrades rapidly under UV exposure — yellowing, embrittlement, and surface crazing. Indoor use only."
+    },
+    "temperature_range": {
+      "min_service_c": -5,
+      "max_service_c": 55,
+      "notes": "Low heat deflection temperature limits PVB to cool indoor environments. Softens noticeably above 55C."
+    },
+    "moisture": {
+      "rating": "poor",
+      "immersion_safe": false,
+      "absorption_pct": 2.0,
+      "swelling_risk": "high",
+      "notes": "Extremely hygroscopic. PVB absorbs moisture aggressively, causing dimensional swelling and mechanical degradation. Not suitable for wet or humid environments."
+    },
+    "chemicals": {
+      "household_cleaners": "poor",
+      "oils_greases": "poor",
+      "fuels": "poor",
+      "solvents": "poor",
+      "acids": "poor",
+      "notes": "PVB dissolves in isopropyl alcohol and many common solvents. Very poor chemical resistance overall. Avoid contact with alcohols, ketones, and most organic solvents."
+    },
+    "vibration_fatigue": {
+      "rating": "poor",
+      "cycle_life_estimate": "~5k low-amplitude cycles before crack initiation",
+      "notes": "Weak interlayer adhesion makes PVB prone to delamination under cyclic loading. Not suitable for vibration-prone applications."
+    },
+    "abrasion_resistance": {
+      "rating": "poor",
+      "notes": "Softer than PLA. Surface wears quickly under sliding contact. IPA-smoothed surfaces are slightly more durable but still not suitable for wear applications."
+    }
   }
 }
