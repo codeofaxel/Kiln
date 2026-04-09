@@ -120,7 +120,7 @@ class SkillManifest:
             "design_intelligence": [
                 "get_design_brief(requirements) — functional requirements analysis",
                 "get_material_design_profile(material) — material-specific design rules",
-                "find_design_patterns(use_case) — proven design patterns (37+ patterns)",
+                "find_design_patterns(use_case) — proven design patterns (20 patterns)",
                 "estimate_structural_load(geometry, material) — load capacity analysis",
                 "validate_design_for_requirements(design, reqs) — verification",
                 "get_post_processing_guide(material) — finishing guidance",
