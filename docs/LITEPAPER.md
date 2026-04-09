@@ -34,7 +34,7 @@ Kiln acts as a universal intelligence layer between AI agents and physical fabri
 
 **Three ways to print.** Once a design is ready, Kiln routes it through three co-equal paths:
 
-1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Bambu Lab, Elegoo, Prusa Link, or any Marlin/RepRap printer via USB/Serial on your local network -- or remotely via Bambu Cloud. Kiln handles the protocol translation.
+1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Bambu Lab, Elegoo, Prusa Link, or any Marlin/RepRap printer via Direct USB on your local network -- or remotely via Bambu Cloud. Kiln handles the protocol translation.
 
 2. **Search 3rd-party marketplaces.** Find existing models across Thingiverse, MyMiniFactory, and Cults3D. Download, slice, and print -- or use them as starting points for custom designs.
 
@@ -76,7 +76,7 @@ Before any print starts, Kiln runs pre-flight checks: validating temperatures ag
 You (or your agent) --> Kiln --> Design Intelligence (materials, patterns, templates)
                                  Generation (Gemini, Meshy, Tripo3D, Stability, OpenSCAD)
                                  Printability Analysis (7-dimension validation)
-                                 Your Printers (OctoPrint, Moonraker, Bambu, Elegoo, Prusa, USB/Serial)
+                                 Your Printers (OctoPrint, Moonraker, Bambu, Elegoo, Prusa, Direct USB)
                                  Fulfillment Providers (Craftcloud)
 ```
 

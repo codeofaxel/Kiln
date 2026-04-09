@@ -121,9 +121,9 @@ Before installing Kiln, you need your printer's LAN details (Ethernet or Wi-Fi):
 | **Klipper/Moonraker** | `moonraker` | Moonraker URL (usually `http://<ip>:7125`) |
 | **Bambu Lab** | `bambu` | IP address + LAN access code + serial number (all on the printer's LCD) |
 | **Elegoo** (SDCP printers) | `elegoo` | IP address only — no authentication required. For Neptune 4/OrangeStorm Giga, use `moonraker` instead. |
-| **USB Direct** (Marlin) | `serial` | USB cable only — no network, no OctoPrint, no Klipper. Works with Ender 3, Prusa MK3, CR-10, any Marlin/RepRapFirmware printer. |
+| **Direct USB** (Marlin) | `serial` | USB cable only — no network, no OctoPrint, no Klipper. Works with Ender 3, Prusa MK3, CR-10, any Marlin/RepRapFirmware printer. |
 
-Kiln only needs IP reachability on your local LAN. Ethernet-only printers are fully supported. USB Direct printers just need a USB cable — no network at all.
+Kiln only needs IP reachability on your local LAN. Ethernet-only printers are fully supported. Direct USB printers just need a USB cable — no network at all.
 
 **Optional:** Install [PrusaSlicer](https://www.prusa3d.com/prusaslicer/) or OrcaSlicer to slice STL files directly from Kiln (`brew install --cask prusaslicer` on macOS).
 
@@ -779,7 +779,7 @@ The legacy `network_*` CLI commands and MCP tool aliases were deprecated in `v0.
 | **Bambu** | Stable | Bambu Lab X1C, P1S, A1 (via LAN MQTT) |
 | **Prusa Link** | Stable | Prusa MK4, XL, Mini+ (local REST API — type: `prusaconnect`) |
 | **Elegoo** | Stable | Centauri Carbon, Saturn, Mars series (via LAN WebSocket/SDCP). Neptune 4/OrangeStorm Giga use Moonraker. |
-| **USB Direct** | Stable | Any Marlin-based printer over USB (Ender 3, Prusa MK3, CR-10, etc.). No OctoPrint or Klipper needed — just a USB cable. Type: `serial`. |
+| **Direct USB** | Stable | Any Marlin-based printer over USB (Ender 3, Prusa MK3, CR-10, etc.). No OctoPrint or Klipper needed — just a USB cable. Type: `serial`. |
 
 ## MCP Resources
 

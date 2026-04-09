@@ -13,7 +13,7 @@ labels: printer-support
 
 ## Connection Method
 
-- [ ] USB serial
+- [ ] Direct USB
 - [ ] Network (Wi-Fi / Ethernet)
 - [ ] Cloud API
 - [ ] Other: ___
