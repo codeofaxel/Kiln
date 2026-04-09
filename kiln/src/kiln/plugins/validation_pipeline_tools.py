@@ -154,29 +154,86 @@ def _inline_stl_analysis(file_path: str) -> dict[str, Any]:
     """Extract triangle count, bounding box, and dimensions from an STL.
 
     Delegates to the canonical STL parser in
-    :mod:`kiln.generation.validation` rather than maintaining a separate
-    binary/ASCII parser.
+    :mod:`kiln.generation.validation` when available; falls back to a
+    minimal inline binary parser otherwise.
     """
-    from kiln.generation.validation import (
-        _compute_bounding_box,
-        _parse_stl,
-    )
-
     path = Path(file_path)
     if not path.is_file():
         return {"error": f"File not found: {file_path}"}
 
-    errors: list[str] = []
-    triangles, vertices = _parse_stl(path, errors)
-    if errors:
-        return {"error": "; ".join(errors)}
+    try:
+        from kiln.generation.validation import (
+            _compute_bounding_box,
+            _parse_stl,
+        )
 
-    result: dict[str, Any] = {"triangle_count": len(triangles)}
+        errors: list[str] = []
+        triangles, vertices = _parse_stl(path, errors)
+        if errors:
+            return {"error": "; ".join(errors)}
 
-    bbox = _compute_bounding_box(vertices)
-    if bbox:
-        dims = bbox.pop("dimensions_mm")
-        result["bounding_box"] = bbox
+        result: dict[str, Any] = {"triangle_count": len(triangles)}
+
+        bbox = _compute_bounding_box(vertices)
+        if bbox:
+            dims = bbox.pop("dimensions_mm")
+            result["bounding_box"] = bbox
+            result["dimensions_mm"] = dims
+            vol = dims["x"] * dims["y"] * dims["z"]
+            result["bounding_box_volume_cm3"] = round(vol / 1000.0, 2)
+
+        return result
+    except (ImportError, ModuleNotFoundError):
+        return _inline_stl_binary_fallback(path)
+
+
+def _inline_stl_binary_fallback(path: Path) -> dict[str, Any]:
+    """Minimal binary STL parser — no external dependencies."""
+    import struct as _struct
+
+    data = path.read_bytes()
+
+    # ASCII STL detection — only return triangle count (no bounding box)
+    if data[:5] == b"solid" and b"facet" in data[:1000]:
+        count = data.count(b"endfacet")
+        if count > 0:
+            return {"triangle_count": count}
+        return {"error": "Could not parse ASCII STL"}
+
+    # Binary STL: 80-byte header + 4-byte count + 50 bytes per triangle
+    if len(data) < 84:
+        return {"error": f"File too small for binary STL: {len(data)} bytes"}
+
+    tri_count = _struct.unpack_from("<I", data, 80)[0]
+    expected_size = 84 + tri_count * 50
+    if len(data) < expected_size:
+        return {"error": f"Truncated STL: expected {expected_size} bytes, got {len(data)}"}
+
+    result: dict[str, Any] = {"triangle_count": tri_count}
+
+    if tri_count > 0:
+        x_min = y_min = z_min = float("inf")
+        x_max = y_max = z_max = float("-inf")
+
+        for i in range(tri_count):
+            offset = 84 + i * 50 + 12  # skip normal vector
+            for _ in range(3):
+                x, y, z = _struct.unpack_from("<fff", data, offset)
+                x_min, x_max = min(x_min, x), max(x_max, x)
+                y_min, y_max = min(y_min, y), max(y_max, y)
+                z_min, z_max = min(z_min, z), max(z_max, z)
+                offset += 12
+
+        dims = {
+            "x": round(x_max - x_min, 2),
+            "y": round(y_max - y_min, 2),
+            "z": round(z_max - z_min, 2),
+        }
+        result["bounding_box"] = {
+            "x_min": round(x_min, 2), "x_max": round(x_max, 2),
+            "y_min": round(y_min, 2), "y_max": round(y_max, 2),
+            "z_min": round(z_min, 2), "z_max": round(z_max, 2),
+        }
         result["dimensions_mm"] = dims
         vol = dims["x"] * dims["y"] * dims["z"]
         result["bounding_box_volume_cm3"] = round(vol / 1000.0, 2)

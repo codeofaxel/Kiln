@@ -389,8 +389,11 @@ class TestFeedbackLoopPersistence:
             )
         """)
         conn.commit()
+        conn.row_factory = __import__("sqlite3").Row
         db = MagicMock()
         db._conn = conn
+        db.execute = conn.execute
+        db.commit = conn.commit
         return db
 
     @patch("kiln.persistence.get_db")

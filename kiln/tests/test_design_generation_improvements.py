@@ -39,6 +39,34 @@ from kiln.generation_feedback import (
 )
 
 # ---------------------------------------------------------------------------
+# Plugin tool registration helpers
+# ---------------------------------------------------------------------------
+
+
+class _MockMCP:
+    """Minimal MCP mock that captures registered tools by name."""
+
+    def __init__(self):
+        self.tools: dict[str, callable] = {}
+
+    def tool(self):
+        def decorator(fn):
+            self.tools[fn.__name__] = fn
+            return fn
+        return decorator
+
+
+def _get_plugin_tool(plugin_module: str, tool_name: str) -> callable:
+    """Register a plugin and return a single tool function by name."""
+    import importlib
+
+    mod = importlib.import_module(f"kiln.plugins.{plugin_module}")
+    mcp = _MockMCP()
+    mod.plugin.register(mcp)
+    return mcp.tools[tool_name]
+
+
+# ---------------------------------------------------------------------------
 # GLB test helpers
 # ---------------------------------------------------------------------------
 
@@ -923,7 +951,7 @@ class TestIterateDesign:
         mock_provider.download_result.return_value = mock_result
         mock_get_provider.return_value = mock_provider
 
-        from kiln.server import iterate_design
+        iterate_design = _get_plugin_tool("design_reasoning_tools", "iterate_design")
 
         result = iterate_design("cube(20);", provider="openscad", max_iterations=3)
 
@@ -939,7 +967,7 @@ class TestIterateDesign:
         mock_provider.generate.side_effect = Exception("compile error")
         mock_get_provider.return_value = mock_provider
 
-        from kiln.server import iterate_design
+        iterate_design = _get_plugin_tool("design_reasoning_tools", "iterate_design")
 
         result = iterate_design("bad code;", provider="openscad", max_iterations=1)
 
@@ -1131,7 +1159,7 @@ class TestDesignAdvisor:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_geometric_prompt_recommends_openscad(self, _mock_auth):
-        from kiln.server import design_advisor
+        design_advisor = _get_plugin_tool("design_reasoning_tools", "design_advisor")
 
         result = design_advisor("a shelf bracket for my desk")
         assert result["recommended_approach"] in ("template", "openscad")
@@ -1139,7 +1167,7 @@ class TestDesignAdvisor:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_organic_prompt_recommends_meshy(self, _mock_auth):
-        from kiln.server import design_advisor
+        design_advisor = _get_plugin_tool("design_reasoning_tools", "design_advisor")
 
         result = design_advisor("a dragon sculpture with detailed wings")
         assert result["recommended_approach"] == "meshy"
@@ -1147,7 +1175,7 @@ class TestDesignAdvisor:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_template_match_found(self, _mock_auth):
-        from kiln.server import design_advisor
+        design_advisor = _get_plugin_tool("design_reasoning_tools", "design_advisor")
 
         result = design_advisor("I need a phone stand for my desk")
         assert result["recommended_approach"] == "template"
@@ -1156,7 +1184,7 @@ class TestDesignAdvisor:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_complexity_estimate(self, _mock_auth):
-        from kiln.server import design_advisor
+        design_advisor = _get_plugin_tool("design_reasoning_tools", "design_advisor")
 
         simple = design_advisor("a box")
         assert simple["estimated_complexity"] == "simple"
@@ -1191,7 +1219,7 @@ class TestTemplateVariations:
         mock_provider.download_result.return_value = mock_result
         mock_get_provider.return_value = mock_provider
 
-        from kiln.server import generate_template_variations
+        generate_template_variations = _get_plugin_tool("generation_ai_tools", "generate_template_variations")
 
         result = generate_template_variations("phone_stand", variation_count=3)
         assert result["success"] is True
@@ -1200,7 +1228,7 @@ class TestTemplateVariations:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_unknown_template_returns_error(self, _mock_auth):
-        from kiln.server import generate_template_variations
+        generate_template_variations = _get_plugin_tool("generation_ai_tools", "generate_template_variations")
 
         result = generate_template_variations("nonexistent_template_xyz")
         assert "error" in result or result.get("status") == "error"
@@ -4231,7 +4259,7 @@ class TestSmartGenerateFromTemplate:
     @patch("kiln.server._get_generation_provider")
     def test_valid_template_returns_full_pipeline(self, mock_gen, mock_auth, tmp_path):
         """A valid template should return STL + analysis + settings."""
-        from kiln.server import smart_generate_from_template
+        smart_generate_from_template = _get_plugin_tool("generation_ai_tools", "smart_generate_from_template")
 
         # Set up mock provider that returns a generated file
         stl_path = str(tmp_path / "result.stl")
@@ -4278,7 +4306,7 @@ class TestSmartGenerateFromTemplate:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_invalid_template_returns_error(self, mock_auth):
-        from kiln.server import smart_generate_from_template
+        smart_generate_from_template = _get_plugin_tool("generation_ai_tools", "smart_generate_from_template")
 
         result = smart_generate_from_template("nonexistent_template_xyz")
         # Should propagate the error from generate_from_template
@@ -4288,7 +4316,7 @@ class TestSmartGenerateFromTemplate:
     @patch("kiln.server._get_generation_provider")
     def test_material_propagates(self, mock_gen, mock_auth, tmp_path):
         """Material parameter should affect recommended settings."""
-        from kiln.server import smart_generate_from_template
+        smart_generate_from_template = _get_plugin_tool("generation_ai_tools", "smart_generate_from_template")
 
         stl_path = str(tmp_path / "result.stl")
         _write_cube_stl(stl_path, 20.0)
@@ -4710,7 +4738,7 @@ class TestOptimizeTemplateParamsTool:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_invalid_template_returns_error(self, mock_auth):
-        from kiln.server import optimize_template_params
+        optimize_template_params = _get_plugin_tool("design_reasoning_tools", "optimize_template_params")
 
         result = optimize_template_params("nonexistent_abc")
         assert result["success"] is False
@@ -4718,7 +4746,7 @@ class TestOptimizeTemplateParamsTool:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_invalid_constraints_json_returns_error(self, mock_auth):
-        from kiln.server import optimize_template_params
+        optimize_template_params = _get_plugin_tool("design_reasoning_tools", "optimize_template_params")
 
         result = optimize_template_params("shelf_bracket", constraints="not json{")
         assert result["success"] is False
@@ -4726,7 +4754,7 @@ class TestOptimizeTemplateParamsTool:
     @patch("kiln.server._check_auth", return_value=None)
     @patch("kiln.design_reasoning.optimize_template_params")
     def test_success_returns_result_dict(self, mock_optimize, mock_auth):
-        from kiln.server import optimize_template_params as tool_fn
+        tool_fn = _get_plugin_tool("design_reasoning_tools", "optimize_template_params")
 
         mock_result = MagicMock()
         mock_result.to_dict.return_value = {
@@ -5004,7 +5032,7 @@ class TestPlanDesignFromDescriptionTool:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_empty_description_still_works(self, mock_auth):
-        from kiln.server import plan_design_from_description
+        plan_design_from_description = _get_plugin_tool("design_reasoning_tools", "plan_design_from_description")
 
         result = plan_design_from_description("")
         assert result["success"] is True
@@ -5014,7 +5042,7 @@ class TestPlanDesignFromDescriptionTool:
     @patch("kiln.design_reasoning.plan_composition_from_description")
     def test_success_returns_result(self, mock_plan, mock_auth):
         from kiln.design_reasoning import CompositionPlan
-        from kiln.server import plan_design_from_description
+        plan_design_from_description = _get_plugin_tool("design_reasoning_tools", "plan_design_from_description")
 
         mock_plan.return_value = CompositionPlan(
             description="a cube",
@@ -5036,14 +5064,14 @@ class TestArrangePartsOnPlateTool:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_invalid_json_returns_error(self, mock_auth):
-        from kiln.server import arrange_parts_on_plate
+        arrange_parts_on_plate = _get_plugin_tool("design_reasoning_tools", "arrange_parts_on_plate")
 
         result = arrange_parts_on_plate("not json[")
         assert result["success"] is False
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_missing_file_returns_error(self, mock_auth):
-        from kiln.server import arrange_parts_on_plate
+        arrange_parts_on_plate = _get_plugin_tool("design_reasoning_tools", "arrange_parts_on_plate")
 
         result = arrange_parts_on_plate('["/nonexistent/file.stl"]')
         assert result["success"] is False
@@ -5053,7 +5081,7 @@ class TestArrangePartsOnPlateTool:
     @patch("kiln.design_reasoning.arrange_on_plate")
     def test_success_returns_result(self, mock_arrange, mock_auth):
         from kiln.design_reasoning import PlateArrangement
-        from kiln.server import arrange_parts_on_plate
+        arrange_parts_on_plate = _get_plugin_tool("design_reasoning_tools", "arrange_parts_on_plate")
 
         mock_arrange.return_value = PlateArrangement(
             arranged_parts=[{"path": "/tmp/a.stl", "x": 0, "y": 0, "width": 20, "depth": 20, "height": 10}],
@@ -5230,7 +5258,7 @@ class TestEstimateMeshWeightTool:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_file_not_found(self, mock_auth):
-        from kiln.server import estimate_mesh_weight
+        estimate_mesh_weight = _get_plugin_tool("mesh_tools", "estimate_mesh_weight")
 
         result = estimate_mesh_weight("/nonexistent.stl")
         assert result["success"] is False
@@ -5238,7 +5266,7 @@ class TestEstimateMeshWeightTool:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_success(self, mock_auth, tmp_path):
-        from kiln.server import estimate_mesh_weight
+        estimate_mesh_weight = _get_plugin_tool("mesh_tools", "estimate_mesh_weight")
 
         cube_path = str(tmp_path / "cube.stl")
         _write_cube_stl(cube_path, 10.0)
@@ -5305,8 +5333,8 @@ class TestDesignToGcodePipelineTool:
         from kiln.server import design_to_gcode_pipeline
 
         result = design_to_gcode_pipeline("")
-        # Empty description → pipeline returns partial/success but with errors
-        assert "status" in result
+        # Empty description → pipeline returns success=False with errors
+        assert result["success"] is False
 
     @patch("kiln.server._check_auth", return_value=None)
     @patch("kiln.design_reasoning.design_to_gcode")
@@ -5506,14 +5534,14 @@ class TestCrossSectionViewTool:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_file_not_found(self, mock_auth):
-        from kiln.server import cross_section_view
+        cross_section_view = _get_plugin_tool("mesh_tools", "cross_section_view")
 
         result = cross_section_view("/nonexistent.stl")
         assert result["success"] is False
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_invalid_plane(self, mock_auth, tmp_path):
-        from kiln.server import cross_section_view
+        cross_section_view = _get_plugin_tool("mesh_tools", "cross_section_view")
 
         cube_path = str(tmp_path / "cube.stl")
         _write_cube_stl(cube_path, 10.0)
@@ -5522,7 +5550,7 @@ class TestCrossSectionViewTool:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_success(self, mock_auth, tmp_path):
-        from kiln.server import cross_section_view
+        cross_section_view = _get_plugin_tool("mesh_tools", "cross_section_view")
 
         cube_path = str(tmp_path / "cube.stl")
         _write_cube_stl(cube_path, 10.0)
@@ -5599,7 +5627,9 @@ class TestSolveTemplateConstraintsTool:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_invalid_json(self, mock_auth):
-        from kiln.server import solve_template_constraints
+        solve_template_constraints = _get_plugin_tool(
+            "design_reasoning_tools", "solve_template_constraints",
+        )
 
         result = solve_template_constraints("shelf_bracket", "not json")
         assert result["success"] is False
@@ -5607,7 +5637,9 @@ class TestSolveTemplateConstraintsTool:
 
     @patch("kiln.server._check_auth", return_value=None)
     def test_success(self, mock_auth):
-        from kiln.server import solve_template_constraints
+        solve_template_constraints = _get_plugin_tool(
+            "design_reasoning_tools", "solve_template_constraints",
+        )
 
         result = solve_template_constraints(
             "shelf_bracket",

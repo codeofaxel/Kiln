@@ -2967,7 +2967,7 @@
       "max_unsupported_overhang_deg": 55,
       "max_bridge_length_mm": 10,
       "min_hole_diameter_mm": 2.5,
-      "min_engraved_text_height_mm": 3.0,
+      "min_embossed_text_height_mm": 3.0,
       "min_engraved_text_depth_mm": 0.5,
       "snap_fit_tolerance_mm": 0.3,
       "press_fit_interference_mm": 0.05,

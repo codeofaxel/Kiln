@@ -541,7 +541,9 @@ class TestInlineStlFallback:
         from kiln.plugins.validation_pipeline_tools import _inline_stl_analysis
 
         stl = _make_binary_stl(tmp_path, triangles=42)
-        result = _inline_stl_analysis(stl)
+
+        with patch.dict("sys.modules", {"kiln.generation.validation": None}):
+            result = _inline_stl_analysis(stl)
 
         assert result["triangle_count"] == 42
         assert "bounding_box" in result
@@ -552,7 +554,9 @@ class TestInlineStlFallback:
 
         tiny = tmp_path / "tiny.stl"
         tiny.write_bytes(b"\x00" * 10)
-        result = _inline_stl_analysis(str(tiny))
+
+        with patch.dict("sys.modules", {"kiln.generation.validation": None}):
+            result = _inline_stl_analysis(str(tiny))
 
         assert "error" in result
 
@@ -582,7 +586,9 @@ endsolid test
 """
         stl_path = tmp_path / "ascii.stl"
         stl_path.write_text(ascii_stl)
-        result = _inline_stl_analysis(str(stl_path))
+
+        with patch.dict("sys.modules", {"kiln.generation.validation": None}):
+            result = _inline_stl_analysis(str(stl_path))
 
         # Should report 2 triangles (one per "facet normal" line)
         assert result.get("triangle_count") == 2

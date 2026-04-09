@@ -102,110 +102,64 @@ READ_ONLY_TOOLS: set[str] = {
     "printer_files",
     "analyze_print_file",
     "preflight_check",
-    "validate_gcode",
     "fleet_status",
-    "fleet_analytics",
     "recent_events",
-    "firmware_status",
     "bed_level_status",
-    "cloud_sync_status",
     "list_plugins",
-    "plugin_info",
     "list_materials",
     "get_material",
     "check_material_match",
     "list_spools",
     "webcam_stream",
     "printer_snapshot",
-    "estimate_cost",
-    "kiln_health",
-    "health_check",
 
     # Safety / audit (read-only inspections)
-    "safety_audit",
-    "get_session_log",
-    "safety_status",
-    "safety_settings",
     "get_autonomy_level",
     "check_autonomy",
 
     # Billing read-only
-    "billing_summary",
-    "billing_alerts",
 
     # License read-only
     "license_status",
 
     # Marketplace read-only (searches / metadata)
-    "search_all_models",
     "marketplace_info",
-    "search_models",
-    "model_details",
-    "model_files",
-    "browse_models",
-    "list_model_categories",
 
     # Slicer discovery (read-only)
-    "find_slicer",
 
     # Fulfillment read-only
-    "fulfillment_materials",
-    "fulfillment_quote",
-    "fulfillment_order_status",
-    "fulfillment_alerts",
 
     # Monitoring / analysis (read-only)
     "list_webhooks",
     "compare_print_options",
     "analyze_print_failure",
-    "validate_print_quality",
-    "list_generation_providers",
-    "validate_generated_mesh",
     "render_model_preview",
     "visualize_model",
     "get_feedback_loop_status",
     "list_design_templates",
-    "analyze_mesh_geometry",
     "validate_openscad_code",
-    "estimate_print_time",
-    "estimate_support_material",
-    "design_advisor",
 
     # Onboarding / help (no side effects)
-    "get_started",
 
     # Discovery / scan (no mutation)
-    "discover_printers",
 
     # Skill manifest (read-only metadata)
-    "get_skill_manifest",
 
     # Utility read-only helpers
     "find_material_substitute",
     "get_best_material_substitute",
     "extract_file_metadata",
-    "estimate_print_progress",
-    "fleet_utilization",
-    "list_cached_designs",
-    "get_cached_design",
-    "list_credentials",
-    "retrieve_credential",
     "analyze_print_snapshot",
     "get_fulfillment_quote_cached",
-    "check_firmware_status",
     "print_status_lite",
     "list_snapshots",
-    "fleet_job_status",
     "check_printer_health",
 
     # Fleet site grouping / cost reporting (read-only)
-    "list_fleet_sites",
-    "fleet_status_by_site",
     "project_cost_summary",
     "client_cost_report",
 
     # Database / infrastructure status (read-only)
-    "database_status",
 
     # Ambient / trend analysis (read-only)
     "check_ambient_conditions",
@@ -216,23 +170,13 @@ READ_ONLY_TOOLS: set[str] = {
     "check_orientation",
 
     # Design generation analysis — Phase 4 (read-only)
-    "compare_mesh_versions",
     "predict_print_failure",
-    "mesh_quality_scorecard",
-    "estimate_material_cost",
 
     # Design generation analysis — Phase 5 (read-only)
-    "analyze_non_manifold_edges",
 
     # Design generation analysis — Phase 6 (read-only)
-    "estimate_mesh_print_time",
 
     # Design reasoning engine (read-only structural analysis)
-    "analyze_structural_risks",
-    "recommend_design_reinforcements",
-    "assess_load_bearing",
-    "design_improvement_plan",
-    "infer_print_settings",
 
     # Render comparison (read-only)
     "compare_renders",

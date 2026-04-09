@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+import kiln.server as _srv
 from kiln.events import EventType
 from kiln.printers.base import (
     JobProgress,
@@ -24,9 +25,6 @@ from kiln.printers.base import (
     PrinterStatus,
 )
 from kiln.server import (
-    _event_bus,
-    _queue,
-    _registry,
     resource_events,
     resource_job_detail,
     resource_printer_detail,
@@ -58,26 +56,35 @@ def _make_mock_adapter(name="test-printer", state=PrinterStatus.IDLE):
 
 @pytest.fixture(autouse=True)
 def _clean_singletons():
-    """Reset the module-level singletons before each test."""
+    """Reset the module-level singletons before each test.
+
+    Must access via ``_srv._get_*()`` (not imported bindings) because the
+    singletons are lazily initialised — the module-level names start as
+    ``None`` and are only assigned by the getter functions.
+    """
+    registry = _srv._get_registry()
+    queue = _srv._get_queue()
+    event_bus = _srv._get_event_bus()
+
     # Save state
-    old_printers = dict(_registry._printers)
-    old_jobs = dict(_queue._jobs)
-    old_history = list(_event_bus._history)
+    old_printers = dict(registry._printers)
+    old_jobs = dict(queue._jobs)
+    old_history = list(event_bus._history)
 
     # Start each test with a clean slate
-    _registry._printers.clear()
-    _queue._jobs.clear()
-    _event_bus._history.clear()
+    registry._printers.clear()
+    queue._jobs.clear()
+    event_bus._history.clear()
 
     yield
 
     # Restore state
-    _registry._printers.clear()
-    _registry._printers.update(old_printers)
-    _queue._jobs.clear()
-    _queue._jobs.update(old_jobs)
-    _event_bus._history.clear()
-    _event_bus._history.extend(old_history)
+    registry._printers.clear()
+    registry._printers.update(old_printers)
+    queue._jobs.clear()
+    queue._jobs.update(old_jobs)
+    event_bus._history.clear()
+    event_bus._history.extend(old_history)
 
 
 # ---------------------------------------------------------------------------
@@ -96,22 +103,22 @@ class TestResourceStatus:
 
     def test_with_registered_printer(self):
         adapter = _make_mock_adapter("octoprint")
-        _registry.register("my-printer", adapter)
+        _srv._get_registry().register("my-printer", adapter)
 
         result = json.loads(resource_status())
         assert result["printer_count"] == 1
         assert result["printers"][0]["name"] == "my-printer"
 
     def test_with_queued_jobs(self):
-        _queue.submit("test.gcode", printer_name="p1")
-        _queue.submit("test2.gcode")
+        _srv._get_queue().submit("test.gcode", printer_name="p1")
+        _srv._get_queue().submit("test2.gcode")
 
         result = json.loads(resource_status())
         assert result["queue"]["pending"] == 2
         assert result["queue"]["total"] == 2
 
     def test_with_events(self):
-        _event_bus.publish(EventType.JOB_SUBMITTED, {"job_id": "abc"}, source="test")
+        _srv._get_event_bus().publish(EventType.JOB_SUBMITTED, {"job_id": "abc"}, source="test")
 
         result = json.loads(resource_status())
         assert result["recent_events"][0]["type"] == "job.submitted"
@@ -142,8 +149,8 @@ class TestResourcePrinters:
         assert result["printers"] == []
 
     def test_with_printers(self):
-        _registry.register("p1", _make_mock_adapter("octoprint"))
-        _registry.register("p2", _make_mock_adapter("moonraker"))
+        _srv._get_registry().register("p1", _make_mock_adapter("octoprint"))
+        _srv._get_registry().register("p2", _make_mock_adapter("moonraker"))
 
         result = json.loads(resource_printers())
         assert result["count"] == 2
@@ -151,7 +158,7 @@ class TestResourcePrinters:
         assert names == {"p1", "p2"}
 
     def test_idle_printers_listed(self):
-        _registry.register("idle-one", _make_mock_adapter("octoprint", PrinterStatus.IDLE))
+        _srv._get_registry().register("idle-one", _make_mock_adapter("octoprint", PrinterStatus.IDLE))
 
         result = json.loads(resource_printers())
         assert "idle-one" in result["idle_printers"]
@@ -166,7 +173,7 @@ class TestResourcePrinterDetail:
     """Tests for the kiln://printers/{name} resource."""
 
     def test_found(self):
-        _registry.register("voron", _make_mock_adapter("octoprint"))
+        _srv._get_registry().register("voron", _make_mock_adapter("octoprint"))
 
         result = json.loads(resource_printer_detail("voron"))
         assert result["name"] == "voron"
@@ -182,7 +189,7 @@ class TestResourcePrinterDetail:
     def test_adapter_error(self):
         adapter = _make_mock_adapter("octoprint")
         adapter.get_state.side_effect = RuntimeError("connection refused")
-        _registry.register("broken", adapter)
+        _srv._get_registry().register("broken", adapter)
 
         result = json.loads(resource_printer_detail("broken"))
         assert "error" in result
@@ -205,8 +212,8 @@ class TestResourceQueue:
         assert result["recent_jobs"] == []
 
     def test_with_jobs(self):
-        _queue.submit("a.gcode", submitted_by="agent")
-        _queue.submit("b.gcode", submitted_by="agent", priority=5)
+        _srv._get_queue().submit("a.gcode", submitted_by="agent")
+        _srv._get_queue().submit("b.gcode", submitted_by="agent", priority=5)
 
         result = json.loads(resource_queue())
         assert result["total"] == 2
@@ -215,8 +222,8 @@ class TestResourceQueue:
         assert result["next_job"]["file_name"] == "b.gcode"
 
     def test_counts_by_status(self):
-        job_id = _queue.submit("c.gcode")
-        _queue.mark_starting(job_id)
+        job_id = _srv._get_queue().submit("c.gcode")
+        _srv._get_queue().mark_starting(job_id)
 
         result = json.loads(resource_queue())
         assert result["active"] == 1
@@ -232,7 +239,7 @@ class TestResourceJobDetail:
     """Tests for the kiln://queue/{job_id} resource."""
 
     def test_found(self):
-        job_id = _queue.submit("test.gcode", printer_name="p1")
+        job_id = _srv._get_queue().submit("test.gcode", printer_name="p1")
 
         result = json.loads(resource_job_detail(job_id))
         assert result["job"]["id"] == job_id
@@ -259,8 +266,8 @@ class TestResourceEvents:
         assert result["events"] == []
 
     def test_with_events(self):
-        _event_bus.publish(EventType.JOB_SUBMITTED, {"job_id": "1"}, source="test")
-        _event_bus.publish(EventType.PRINT_STARTED, {"job_id": "1"}, source="test")
+        _srv._get_event_bus().publish(EventType.JOB_SUBMITTED, {"job_id": "1"}, source="test")
+        _srv._get_event_bus().publish(EventType.PRINT_STARTED, {"job_id": "1"}, source="test")
 
         result = json.loads(resource_events())
         assert result["count"] == 2
@@ -270,7 +277,7 @@ class TestResourceEvents:
 
     def test_max_50_events(self):
         for i in range(60):
-            _event_bus.publish(EventType.PRINT_PROGRESS, {"i": i}, source="test")
+            _srv._get_event_bus().publish(EventType.PRINT_PROGRESS, {"i": i}, source="test")
 
         result = json.loads(resource_events())
         assert result["count"] == 50

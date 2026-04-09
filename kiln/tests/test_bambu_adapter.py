@@ -1329,7 +1329,7 @@ class TestBambuAdapterSnapshot:
     def test_get_stream_url(self) -> None:
         adapter = _adapter()
         url = adapter.get_stream_url()
-        assert url == f"rtsps://bblp:{ACCESS_CODE}@{HOST}:322/streaming/live/1"
+        assert url == f"rtsps://bblp:****@{HOST}:322/streaming/live/1"
 
     @mock.patch("kiln.printers.bambu._find_ffmpeg", return_value="/usr/bin/ffmpeg")
     @mock.patch("kiln.printers.bambu.subprocess.run")
@@ -1768,7 +1768,8 @@ class TestBambuAdapterRTSPAuth:
     def test_stream_url_includes_credentials(self) -> None:
         adapter = _adapter()
         url = adapter.get_stream_url()
-        assert f"bblp:{ACCESS_CODE}@" in url
+        # Public URL masks the access code for safety
+        assert "bblp:****@" in url
         assert url.startswith("rtsps://")
         assert url.endswith("/streaming/live/1")
 

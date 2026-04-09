@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from kiln.printers.base import (
     FirmwareComponent,
     FirmwareStatus,
@@ -59,6 +61,29 @@ def _make_update_result(
 
 
 # ---------------------------------------------------------------------------
+# Plugin registration fixture
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def _firmware_tools():
+    """Register the firmware plugin on a mock MCP and return captured tools."""
+    tools: dict[str, callable] = {}
+
+    class _MockMCP:
+        def tool(self):
+            def decorator(fn):
+                tools[fn.__name__] = fn
+                return fn
+            return decorator
+
+    from kiln.plugins.firmware_tools import plugin
+
+    plugin.register(_MockMCP())
+    return tools
+
+
+# ---------------------------------------------------------------------------
 # firmware_status
 # ---------------------------------------------------------------------------
 
@@ -66,8 +91,8 @@ def _make_update_result(
 class TestFirmwareStatusTool:
     """Tests for the firmware_status MCP tool."""
 
-    def test_returns_component_info(self) -> None:
-        from kiln.server import firmware_status
+    def test_returns_component_info(self, _firmware_tools) -> None:
+        firmware_status = _firmware_tools["firmware_status"]
 
         mock_adapter = MagicMock()
         mock_adapter.capabilities = _make_caps(can_update=True)
@@ -81,8 +106,8 @@ class TestFirmwareStatusTool:
         assert len(result["components"]) == 1
         assert result["components"][0]["name"] == "klipper"
 
-    def test_unsupported_printer(self) -> None:
-        from kiln.server import firmware_status
+    def test_unsupported_printer(self, _firmware_tools) -> None:
+        firmware_status = _firmware_tools["firmware_status"]
 
         mock_adapter = MagicMock()
         mock_adapter.capabilities = _make_caps(can_update=False)
@@ -93,8 +118,8 @@ class TestFirmwareStatusTool:
         assert result["success"] is False
         assert "UNSUPPORTED" in result["error"]["code"]
 
-    def test_status_unavailable(self) -> None:
-        from kiln.server import firmware_status
+    def test_status_unavailable(self, _firmware_tools) -> None:
+        firmware_status = _firmware_tools["firmware_status"]
 
         mock_adapter = MagicMock()
         mock_adapter.capabilities = _make_caps(can_update=True)
@@ -106,8 +131,8 @@ class TestFirmwareStatusTool:
         assert result["success"] is False
         assert "UNAVAILABLE" in result["error"]["code"]
 
-    def test_printer_error_handled(self) -> None:
-        from kiln.server import firmware_status
+    def test_printer_error_handled(self, _firmware_tools) -> None:
+        firmware_status = _firmware_tools["firmware_status"]
 
         mock_adapter = MagicMock()
         mock_adapter.capabilities = _make_caps(can_update=True)

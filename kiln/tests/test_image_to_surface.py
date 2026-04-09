@@ -189,6 +189,10 @@ class TestPrepareImageForEmboss:
         assert os.path.isfile(result["dat_path"])
 
 
+@pytest.mark.skipif(
+    not __import__("importlib").util.find_spec("rembg"),
+    reason="rembg not installed — coin pipeline requires background removal",
+)
 class TestCoinStyle:
     """Test the proven coin-relief pipeline (v11 Ash coaster)."""
 
