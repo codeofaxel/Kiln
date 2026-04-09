@@ -90,7 +90,7 @@ class TestSearchMaterialCatalog:
     """Tests for search_material_catalog tool."""
 
     def test_search_returns_results(self, registered_tools) -> None:
-        result = registered_tools["search_material_catalog"]("Hatchbox")
+        result = registered_tools["search_material_catalog"]("Prusament")
         assert result["success"] is True
         assert result["count"] >= 1
         assert len(result["results"]) >= 1
@@ -109,10 +109,10 @@ class TestGetMaterialInfo:
     """Tests for get_material_info tool."""
 
     def test_known_material(self, registered_tools) -> None:
-        result = registered_tools["get_material_info"]("hatchbox_pla")
+        result = registered_tools["get_material_info"]("prusament_pla")
         assert result["success"] is True
-        assert result["material"]["id"] == "hatchbox_pla"
-        assert result["material"]["vendor"] == "Hatchbox"
+        assert result["material"]["id"] == "prusament_pla"
+        assert result["material"]["vendor"] == "Prusament"
 
     def test_unknown_material(self, registered_tools) -> None:
         result = registered_tools["get_material_info"]("nonexistent_xyz")
@@ -125,8 +125,8 @@ class TestListMaterialCatalog:
     def test_returns_ids(self, registered_tools) -> None:
         result = registered_tools["list_material_catalog"]()
         assert result["success"] is True
-        assert result["count"] >= 50
-        assert "hatchbox_pla" in result["material_ids"]
+        assert result["count"] >= 40
+        assert "prusament_pla" in result["material_ids"]
 
 
 class TestGetCompatibleMaterials:
@@ -148,13 +148,13 @@ class TestGetMaterialPurchaseUrls:
     """Tests for get_material_purchase_urls tool."""
 
     def test_known_material_urls(self, registered_tools) -> None:
-        result = registered_tools["get_material_purchase_urls"]("hatchbox_pla")
+        result = registered_tools["get_material_purchase_urls"]("prusament_pla")
         assert result["success"] is True
         assert "amazon" in result["urls"]
         assert "manufacturer" in result["urls"]
 
     def test_with_color(self, registered_tools) -> None:
-        result = registered_tools["get_material_purchase_urls"]("hatchbox_pla", color="blue")
+        result = registered_tools["get_material_purchase_urls"]("prusament_pla", color="blue")
         assert result["success"] is True
         assert result["color"] == "blue"
         assert "blue" in result["urls"]["amazon"]
@@ -168,10 +168,10 @@ class TestFindMaterialMatch:
     """Tests for find_material_match tool."""
 
     def test_vendor_match(self, registered_tools) -> None:
-        result = registered_tools["find_material_match"](vendor="Hatchbox", material_type="PLA")
+        result = registered_tools["find_material_match"](vendor="Prusament", material_type="PLA")
         assert result["success"] is True
         assert result["match"] is not None
-        assert result["match"]["vendor"] == "Hatchbox"
+        assert result["match"]["vendor"] == "Prusament"
 
     def test_no_match(self, registered_tools) -> None:
         result = registered_tools["find_material_match"](vendor="NonexistentBrandXYZ")
