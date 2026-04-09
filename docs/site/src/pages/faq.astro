@@ -42,7 +42,7 @@ const sections: Section[] = [
     items: [
       {
         q: "What printers does Kiln support?",
-        a: "Kiln supports printers running OctoPrint, Moonraker (Klipper), Bambu Lab (X1C, P1S, P1P, A1, A1 Mini), Elegoo (Centauri Carbon, Saturn, Mars via SDCP; Neptune 4 and OrangeStorm Giga via Moonraker), and Prusa Link (MK4, MK3.9, Mini, XL). If your printer runs one of these, Kiln can control it. Safety profiles cover 30+ printer models with per-model temperature and speed limits."
+        a: "Kiln supports printers running OctoPrint, Moonraker (Klipper), Bambu Lab (X1C, P1S, P1P, A1, A1 Mini), Elegoo (Centauri Carbon, Saturn, Mars via SDCP; Neptune 4 and OrangeStorm Giga via Moonraker), Prusa Link (MK4, MK3.9, Mini, XL), and any Marlin-based printer over USB (Ender 3, CR-10, Prusa MK3, etc.). Safety profiles cover 29 printer models with per-model temperature and speed limits."
       },
       {
         q: "How do I install Kiln?",
@@ -58,7 +58,7 @@ const sections: Section[] = [
       },
       {
         q: "Can I use Kiln without AI, just as a CLI or API?",
-        a: "Yes. Kiln includes a full command-line interface with 136 commands and a REST API. You can manage printers, queue jobs, slice files, and run print operations entirely from the terminal or your own scripts — no AI agent required."
+        a: "Yes. Kiln includes a full command-line interface with 142 commands and a REST API. You can manage printers, queue jobs, slice files, and run print operations entirely from the terminal or your own scripts — no AI agent required."
       },
     ]
   },
@@ -67,11 +67,11 @@ const sections: Section[] = [
     items: [
       {
         q: "Can the AI damage my printer?",
-        a: "Kiln is built around the principle that AI should never have unchecked access to hardware. Every print operation passes through a safety layer that enforces per-printer temperature limits, validates G-code commands, runs pre-flight checks before prints, and blocks dangerous operations. Safety profiles cover 30+ printer models with manufacturer-specified limits."
+        a: "Kiln is built around the principle that AI should never have unchecked access to hardware. Every print operation passes through a safety layer that enforces per-printer temperature limits, validates G-code commands, runs pre-flight checks before prints, and blocks dangerous operations. Safety profiles cover 29 printer models with manufacturer-specified limits."
       },
       {
         q: "What safety guardrails are in place?",
-        a: "Kiln enforces multiple layers: per-printer temperature and speed limits from a validated safety profile database, G-code command validation that blocks unsafe operations (raw heater commands, dangerous moves), mandatory pre-flight checks before every print, and structured error handling that never silently fails. The <a href='/whitepaper'>whitepaper</a> covers the full safety architecture."
+        a: "Kiln enforces multiple layers: per-printer temperature and speed limits from a validated safety profile database (29 printer models), G-code command validation that blocks unsafe operations, real-time G-code interception for in-flight filtering, mandatory pre-flight checks before every print, and structured error handling that never silently fails. The <a href='/whitepaper'>whitepaper</a> covers the full safety architecture."
       },
       {
         q: "Does Kiln send my data to the cloud?",
@@ -100,7 +100,7 @@ const sections: Section[] = [
       },
       {
         q: "Does Kiln support model marketplaces?",
-        a: "Yes. Kiln searches third-party model marketplaces — Thingiverse, MyMiniFactory, and Cults3D — so your AI agent can discover existing models, download files, and send them to your printer in one workflow. Kiln does not operate its own marketplace; it provides search and download adapters for these external platforms."
+        a: "Yes. Kiln searches third-party model marketplaces — MyMiniFactory (search + download, works out of the box), Cults3D (search only, requires your own API key), and Thingiverse (deprecated). Your AI agent can discover existing models, download from supported sources, and send them to your printer in one workflow."
       },
       {
         q: "Can I automate recurring prints or batch jobs?",
@@ -108,11 +108,11 @@ const sections: Section[] = [
       },
       {
         q: "Can Kiln generate 3D models from text or sketches?",
-        a: "Yes. Kiln supports text-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, and Stability AI, plus parametric code-as-CAD generation via OpenSCAD with a 14-component catalog (threads, gears, boxes, brackets, etc). You can also upload a napkin sketch for image-to-3D conversion. Providers are auto-discovered from environment variables — just set your API key and Kiln finds it."
+        a: "Yes. Kiln supports text-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, and Stability AI, plus parametric code-as-CAD generation via OpenSCAD. You can also upload a napkin sketch for image-to-3D conversion. Providers are auto-discovered from environment variables — just set your API key and Kiln finds it."
       },
       {
         q: "What is Design Intelligence?",
-        a: "Design Intelligence is Kiln's engineering knowledge base — 52 materials with mechanical/thermal/chemical properties, 20 proven design patterns (snap-fits, living hinges, threads, press-fits), 70 parametric templates, and structural load estimation. When you describe what you want to print, Kiln uses this knowledge to select the right material, apply proven patterns, and validate that the design will actually work before generating geometry."
+        a: "Design Intelligence is Kiln's engineering knowledge base — 26 FDM materials with full mechanical/thermal/chemical properties, 56 brand-specific filament profiles, 20 proven design patterns (snap-fits, living hinges, threads, press-fits), and structural load estimation. When you describe what you want to print, Kiln uses this knowledge to select the right material, apply proven patterns, and validate that the design will actually work before generating geometry."
       },
       {
         q: "What does the Printability Engine do?",

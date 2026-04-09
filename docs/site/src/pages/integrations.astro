@@ -50,6 +50,14 @@ const printerIntegrations: Integration[] = [
     icon: '⬛',
     tag: 'REST API',
   },
+  {
+    name: 'usb',
+    title: 'USB Direct',
+    description:
+      'Connect any Marlin-based printer over USB — no OctoPrint or Klipper needed. Plug in a cable and go. Works with Ender 3, Prusa MK3, CR-10, and any printer running Marlin or RepRapFirmware.',
+    icon: '🔌',
+    tag: 'USB',
+  },
 ];
 
 const ecosystemIntegrations: Integration[] = [
@@ -62,10 +70,10 @@ const ecosystemIntegrations: Integration[] = [
     tag: 'Fulfillment',
   },
   {
-    name: 'thingiverse',
+    name: 'marketplaces',
     title: 'Search 3rd-Party Marketplaces',
     description:
-      'Search and download 3D models from Thingiverse, MyMiniFactory, and Cults3D (search only). Find existing blueprints before generating from scratch.',
+      'Search and download 3D models from MyMiniFactory (works out of the box) and Cults3D (search only, requires your own API key). Find existing blueprints before generating from scratch.',
     icon: '🔍',
     tag: 'Discovery',
   },
@@ -140,7 +148,7 @@ const integrationSchema = {
       </p>
       <div class="stat-row">
         <div class="stat">
-          <span class="stat-num">5</span>
+          <span class="stat-num">6</span>
           <span class="stat-label">Printer backends</span>
         </div>
         <div class="stat">
@@ -148,7 +156,7 @@ const integrationSchema = {
           <span class="stat-label">Fulfillment providers</span>
         </div>
         <div class="stat">
-          <span class="stat-num">3</span>
+          <span class="stat-num">2</span>
           <span class="stat-label">3rd-party marketplaces</span>
         </div>
         <div class="stat">
@@ -168,7 +176,7 @@ const integrationSchema = {
       </div>
       <div class="printer-grid">
         {printerIntegrations.map((integration, i) => (
-          <article class={`card integration-card${i === 4 ? ' card-wide' : ''}`} id={integration.name}>
+          <article class="card integration-card" id={integration.name}>
             <div class="card-inner">
               <div class="card-top">
                 <span class="card-icon">{integration.icon}</span>
@@ -304,38 +312,14 @@ const integrationSchema = {
     max-width: 600px;
   }
 
-  /* Printer grid: 2-col, 5th card spans full width */
+  /* Printer grid: 3x2 */
   .printer-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 16px;
   }
 
-  .card-wide {
-    grid-column: 1 / -1;
-  }
-
-  /* When wide card, lay out inner content horizontally */
-  .card-wide .card-inner {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    grid-template-rows: auto auto;
-    column-gap: 24px;
-    align-items: start;
-  }
-
-  .card-wide .card-top {
-    grid-row: 1;
-    grid-column: 1;
-    align-items: center;
-  }
-
-  .card-wide h3 {
-    grid-row: 1;
-    grid-column: 2;
-    align-self: center;
-    margin-bottom: 0;
-  }
+  /* Legacy wide card styles removed — 6 backends = clean 3x2 */
 
   .card-wide p {
     grid-row: 2;
@@ -442,14 +426,6 @@ const integrationSchema = {
     .printer-grid,
     .ecosystem-grid {
       grid-template-columns: 1fr;
-    }
-
-    .card-wide {
-      grid-column: 1;
-    }
-
-    .card-wide .card-inner {
-      display: block;
     }
 
     .integrations-section {

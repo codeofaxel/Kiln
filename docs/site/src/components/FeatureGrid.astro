@@ -3,17 +3,17 @@ const features = [
   {
     icon: '\u{1F4A1}',
     title: 'Design Intelligence',
-    desc: '52 materials with mechanical properties, 20 proven design patterns (snap-fits, living hinges, threads), 70 parametric templates, and structural load estimation. Kiln understands what makes a good print before generating anything.',
+    desc: '26 FDM materials with full engineering properties, 56 brand-specific filament profiles, 20 proven design patterns (snap-fits, living hinges, threads), and structural load estimation. Kiln understands what makes a good print before generating anything.',
   },
   {
     icon: '\u2728',
     title: 'Text & Sketch to 3D',
-    desc: 'Describe what you want or sketch it. Kiln generates printable models via Gemini Deep Think, Meshy, Tripo3D, Stability AI, or parametric OpenSCAD with a 14-component catalog. Design DNA preserves the source for iteration.',
+    desc: 'Describe what you want or sketch it. Kiln generates printable models via Gemini Deep Think, Meshy, Tripo3D, Stability AI, or parametric OpenSCAD with a 14-component catalog (gears, threads, hinges, bearings). Design DNA preserves the source for iteration.',
   },
   {
     icon: '\u{1F52C}',
     title: 'Printability Engine',
-    desc: 'Every model is analyzed across 7 dimensions: overhangs, thin walls, bridging, bed adhesion, support volume, warping risk, and thermal stress. Auto-orientation and adhesion recommendations included.',
+    desc: 'Analyze models across 7 dimensions (overhangs, thin walls, bridging, adhesion, supports, warping, thermal stress), score 0\u2013100, auto-orient, repair broken meshes, and auto-scale AI-generated models. Problems get fixed, not just flagged.',
   },
   {
     icon: '\u{1F9E9}',
@@ -28,17 +28,32 @@ const features = [
   {
     icon: '\u{1F504}',
     title: 'Print \u2192 Monitor \u2192 Recover',
-    desc: 'Full lifecycle: slice, validate safety, upload, print, monitor with camera vision, detect failures, diagnose root cause, auto-fix slicer settings, and retry. One conversation, start to finish.',
+    desc: 'Full lifecycle: slice, validate safety, upload, print, control speed with natural language, monitor with camera vision, detect failures, diagnose root cause, auto-fix slicer settings, and retry. One conversation, start to finish.',
   },
   {
     icon: '\u{1F6E1}\uFE0F',
     title: 'Safety at Every Step',
-    desc: "29 per-printer safety profiles with temperature and speed limits. G-code validation before every send. Preflight checks, emergency stop, heater watchdog. Agents can\u2019t bypass safety.",
+    desc: "29 per-printer safety profiles with temperature and speed limits. G-code validation before every send. Preflight checks, emergency stop, heater watchdog, G-code interception. Agents can\u2019t bypass safety.",
   },
   {
     icon: '\u{1F30D}',
     title: 'Fleet & Fulfillment',
-    desc: "Multi-printer fleet with job routing, scheduling, and failure rerouting. No local printer? Outsource to Craftcloud\u2019s 150+ third-party services. Same tools, same safety.",
+    desc: "Multi-printer fleet with job routing, scheduling, and failure rerouting. Print recovery with automatic retry. No local printer? Outsource to Craftcloud\u2019s 150+ third-party services. Same tools, same safety.",
+  },
+  {
+    icon: '\u{1F3A8}',
+    title: 'Surface Decoration',
+    desc: 'Emboss or deboss QR codes, photos, logos, and text onto any model. Multicolor printing support for Bambu AMS. 3 decorations/month free, unlimited with Pro.',
+  },
+  {
+    icon: '\u{1F30A}',
+    title: 'Surface Textures',
+    desc: 'Tiger stripe, marble, snakeskin, lava, wood grain, and more. Procedural and geometric patterns applied directly to any model with zero cloud dependencies. Pro feature.',
+  },
+  {
+    icon: '\u{1F9F0}',
+    title: 'Material & Mesh Intelligence',
+    desc: '56 brand-specific filaments with purchase links and compatibility matching. Plus mesh repair, boolean ops, hollowing, chamfers, fillets, and wall thickening. Know what spool to buy and fix broken STLs.',
   },
   {
     icon: '\u{1F9F0}',
@@ -53,6 +68,7 @@ const printerBackends = [
   'Bambu Lab',
   'Prusa Link',
   'Elegoo',
+  'USB Direct',
 ];
 ---
 
@@ -71,19 +87,6 @@ const printerBackends = [
           <p>{f.desc}</p>
         </div>
       ))}
-    </div>
-
-    <div class="compat-strip">
-      <p class="compat-title">Works with your printer</p>
-      <div class="compat-list">
-        {printerBackends.map((name, i) => (
-          <>
-            <span class="compat-name">{name}</span>
-            {i < printerBackends.length - 1 && <span class="compat-dot">&middot;</span>}
-          </>
-        ))}
-      </div>
-      <p class="compat-sub">Native adapters for 5 printer backends. Same commands work across all of them.</p>
     </div>
   </div>
 </section>

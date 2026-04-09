@@ -4,13 +4,13 @@
 
 # Kiln: The Intelligence Layer Between Ideas and Physical Objects
 
-**Version 0.4.2 — March 2026**
+**Version 0.5.0 — April 2026**
 
 > Describe it or draw it. Kiln makes it real.
 
 ## Abstract
 
-We present Kiln, a protocol and reference implementation that enables autonomous AI agents to transform ideas -- expressed as natural language, sketches, or parametric specifications -- into physical objects through 3D printing. Kiln bridges the gap between digital intelligence and physical fabrication by providing: (1) a Design Intelligence layer with 52 materials, 20 design patterns, and 70+ templates; (2) text-to-3D and sketch-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, Stability AI, and OpenSCAD; (3) 7-dimension printability analysis before parts reach a slicer; (4) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link adapters; (5) fulfillment routing through third-party providers such as Craftcloud; and (6) multi-part assembly planning with clearance validation and tolerance stacking. The system exposes 533+ MCP tools and 142 CLI commands, enforces safety invariants at the protocol level across 29 printer safety profiles, and preserves parametric Design DNA for iterative refinement. Kiln does not operate its own marketplace or manufacturing network -- it searches existing 3rd-party marketplaces and routes to existing fulfillment providers.
+We present Kiln, a protocol and reference implementation that enables autonomous AI agents to transform ideas -- expressed as natural language, sketches, or parametric specifications -- into physical objects through 3D printing. Kiln bridges the gap between digital intelligence and physical fabrication by providing: (1) a Design Intelligence layer with 26 FDM materials with full engineering properties, 56 brand-specific filament profiles, and 20 proven design patterns; (2) text-to-3D and sketch-to-3D generation via Gemini Deep Think, Meshy, Tripo3D, Stability AI, and OpenSCAD; (3) 7-dimension printability analysis before parts reach a slicer; (4) direct control of local printers via OctoPrint, Moonraker, Bambu Lab, Elegoo, and Prusa Link adapters; (5) fulfillment routing through third-party providers such as Craftcloud; (6) multi-part assembly planning with clearance validation and tolerance stacking; and (7) real-time G-code interception for in-flight safety filtering. The system enforces safety invariants at the protocol level across 29 printer safety profiles, and preserves parametric Design DNA for iterative refinement. Kiln does not operate its own marketplace or manufacturing network -- it searches existing 3rd-party marketplaces and routes to existing fulfillment providers.
 
 ## 1. Introduction
 
@@ -24,9 +24,9 @@ AI agents are now capable enough to plan and execute multi-step physical tasks. 
 
 Kiln solves the entire pipeline:
 
-1. **Design Intelligence.** A structured knowledge base of 52 materials, 20 design patterns, and 70+ templates informs material selection, structural design, joint types, and reinforcement strategies. The system provides material-aware design recommendations and structural load estimation.
+1. **Design Intelligence.** A structured knowledge base of 26 FDM materials with full engineering properties, 56 brand-specific filament profiles, and 20 proven design patterns informs material selection, structural design, joint types, and reinforcement strategies. The system provides material-aware design recommendations and structural load estimation.
 
-2. **Text & Sketch to 3D.** Five generation backends convert ideas into printable geometry. Gemini Deep Think uses AI reasoning to produce precise OpenSCAD code from text or sketch descriptions. Meshy, Tripo3D, and Stability AI handle organic shapes via cloud APIs. A local OpenSCAD provider compiles parametric code with zero API cost. A 14-component parametric catalog provides proven primitives for assembly composition.
+2. **Text & Sketch to 3D.** Five generation backends convert ideas into printable geometry. Gemini Deep Think uses AI reasoning to produce precise OpenSCAD code from text or sketch descriptions. Meshy, Tripo3D, and Stability AI handle organic shapes via cloud APIs. A local OpenSCAD provider compiles parametric code with zero API cost. A 14-component parametric catalog provides proven primitives (gears, threads, hinges, bearings, etc.) for assembly composition.
 
 3. **Printability Engine.** 7-dimension analysis -- overhangs, thin walls, bridging, bed adhesion, supports, warping, and thermal stress -- catches problems before they waste filament. Thermal stress heuristics and adhesion force estimation provide quantitative risk assessment.
 
@@ -55,9 +55,9 @@ Kiln solves the entire pipeline:
                    /     |     |     |     \
         [Design    [Generation [Print-  [Your      [Fulfillment
         Intelligence] Backends] ability] Printers]  Providers]
-         52 mats    Gemini DT   7-dim   OP/MR/BL   Craftcloud
-         20 patterns Meshy      analysis PL/EG
-         70+ templates Tripo3D
+         26 mats    Gemini DT   7-dim   OP/MR/BL   Craftcloud
+         56 filaments Meshy     analysis PL/EG
+         20 patterns Tripo3D
                     Stability
                     OpenSCAD
 
@@ -103,7 +103,7 @@ An agent may request any operation, but Kiln will refuse operations that violate
 
 ### 3.1 Material Knowledge Base
 
-The Design Intelligence layer maintains structured data on 52 materials spanning FDM, SLA, SLS, and specialty processes. Each material entry includes mechanical properties (tensile strength, elongation, impact resistance), thermal properties (glass transition, heat deflection, print temperatures), design constraints (minimum wall thickness, maximum overhang angle, bridging distance), and recommended applications.
+The Design Intelligence layer maintains structured data on 26 FDM materials with full engineering properties and 56 brand-specific filament profiles. Each material entry includes mechanical properties (tensile strength, elongation, impact resistance), thermal properties (glass transition, heat deflection, print temperatures), design constraints (minimum wall thickness, maximum overhang angle, bridging distance), and recommended applications. The brand catalog maps real-world filaments (Hatchbox PLA, Prusament PETG, eSun PLA+, etc.) to engineering properties and purchase sources.
 
 Agents query this knowledge base when selecting materials for a design. The system can recommend materials based on functional requirements (outdoor use, food safety, flexibility, heat resistance) and flag incompatibilities between material choice and design geometry.
 
@@ -111,7 +111,7 @@ Agents query this knowledge base when selecting materials for a design. The syst
 
 20 design patterns codify reusable structural solutions: snap fits, living hinges, press-fit joints, threaded inserts, cantilever beams, and others. Each pattern includes recommended dimensions, material compatibility, and printability notes.
 
-70+ templates provide parametric starting points for common objects. Templates preserve their parametric source, enabling agents to customize dimensions while maintaining structural integrity.
+Templates provide parametric starting points for common objects. Templates preserve their parametric source, enabling agents to customize dimensions while maintaining structural integrity.
 
 ### 3.3 Structural Analysis
 
@@ -131,7 +131,7 @@ A `GenerationProvider` abstract base class defines `generate()`, `get_job_status
 
 **Stability AI (cloud).** Synchronous 3D generation -- the endpoint returns the model directly in the response body. Returns GLB format.
 
-**OpenSCAD (local).** Agents write OpenSCAD code directly. The provider compiles `.scad` scripts to STL using the local OpenSCAD binary. Zero API cost, deterministic parametric geometry ideal for mechanical parts. A 14-component parametric catalog provides proven primitives (gears, enclosures, brackets, connectors, etc.) for assembly composition.
+**OpenSCAD (local).** Agents write OpenSCAD code directly. The provider compiles `.scad` scripts to STL using the local OpenSCAD binary. Zero API cost, deterministic parametric geometry ideal for mechanical parts. A 14-component parametric catalog provides proven primitives (gears, threads, hinges, bearings, joiners) for assembly composition.
 
 New providers can be integrated in under 100 lines by implementing the `GenerationProvider` interface.
 
@@ -279,7 +279,7 @@ On-premises deployment via Kubernetes manifests and Helm chart with namespace is
 Local printer control is free and unrestricted. Kiln uses a four-tier model:
 
 - **Free** -- All local printing, design intelligence, generation, and printability analysis. Up to 2 printers, 10-job queue.
-- **Pro ($29/mo, $23/mo annual)** -- Unlimited printers, fleet orchestration, analytics, cloud sync.
+- **Pro ($29/mo, $23/mo annual)** -- Unlimited printers, fleet orchestration, analytics, cloud sync, product templates, procedural textures, decoration system, speed control, print learning, and cross-printer intelligence.
 - **Business ($99/mo, $79/mo annual)** -- Up to 50 printers, 5 team seats, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles.
 - **Enterprise (from $499/mo, $399/mo annual)** -- Unlimited printers (20 included, $15/mo each additional), unlimited team seats, dedicated MCP server, on-premises deployment, SSO, RBAC, audit trail, encrypted G-code, 99.9% SLA.
 

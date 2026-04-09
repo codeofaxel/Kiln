@@ -1,83 +1,43 @@
 ---
 const steps = [
-  {
-    title: 'Install & discover',
-    desc: 'One command installs Kiln. kiln setup auto-discovers printers on your LAN (Ethernet or Wi-Fi), or you can register directly by IP.',
-  },
-  {
-    title: 'Agent reads the skill',
-    desc: 'Your AI agent reads SKILL.md \u2014 a structured document defining every command, safety level, and workflow pattern.',
-  },
-  {
-    title: 'Safely operate hardware',
-    desc: 'The agent slices, uploads, prints, and monitors \u2014 with Kiln enforcing temperature limits, G-code validation, and pre-flight checks at every step.',
-  },
-  {
-    title: 'Human stays in control',
-    desc: 'Irreversible actions (start print, cancel, raw G-code) require human confirmation. The agent asks, the human approves.',
-  },
+  { icon: '\u{1F4AC}', label: 'Idea' },
+  { icon: '\u{1F4A1}', label: 'Design' },
+  { icon: '\u2728', label: 'Generate' },
+  { icon: '\u{1F52C}', label: 'Validate' },
+  { icon: '\u{1F3A8}', label: 'Decorate' },
+  { icon: '\u2702\uFE0F', label: 'Slice' },
+  { icon: '\u{1F5A8}', label: 'Print' },
+  { icon: '\u{1F4F7}', label: 'Monitor' },
 ];
 ---
 
-<section id="how-it-works" class="bordered">
+<section id="how-it-works" style="border-top: 1px solid var(--border); padding: 56px 0;">
   <div class="container">
-    <h2>How it works</h2>
-    <p class="lead">
-      Install Kiln, connect your printer, and let your AI agent handle the rest.
-    </p>
+    <h2 style="font-size: clamp(24px, 4vw, 40px); font-weight: 700; margin-bottom: 8px;">How it works</h2>
+    <p style="color: var(--text-muted); font-size: 17px; margin-bottom: 36px;">From idea to physical object — one conversation.</p>
 
-    <div class="steps">
-      {steps.map((s) => (
-        <div class="step">
-          <h3>{s.title}</h3>
-          <p>{s.desc}</p>
-        </div>
+    <div style="display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: nowrap;">
+      {steps.map((s, i) => (
+        <>
+          <div style="display: flex; flex-direction: column; align-items: center; text-align: center;">
+            <div style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 18px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 6px;">
+              {s.icon}
+            </div>
+            <div style="font-size: 11px; font-weight: 600; color: var(--text); line-height: 1.2;">
+              {s.label}
+            </div>
+          </div>
+          {i < steps.length - 1 && (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,107,43,0.4)" stroke-width="2" stroke-linecap="round" style="flex-shrink: 0; margin-top: -12px;">
+              <polyline points="9 6 15 12 9 18" />
+            </svg>
+          )}
+        </>
       ))}
     </div>
+
+    <p style="text-align: center; color: var(--text-muted); font-size: 12px; margin-top: 24px;">
+      Every step is an MCP tool. Agents compose the pipeline. Humans can run any step from the CLI.
+    </p>
   </div>
 </section>
-
-<style>
-  .bordered {
-    border-top: 1px solid var(--border);
-  }
-  .steps {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 20px;
-    counter-reset: step;
-  }
-  .step {
-    position: relative;
-    padding: 28px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-  }
-  .step::before {
-    counter-increment: step;
-    content: counter(step);
-    display: block;
-    width: 32px;
-    height: 32px;
-    line-height: 32px;
-    text-align: center;
-    background: var(--accent);
-    color: #fff;
-    border-radius: 50%;
-    font-weight: 700;
-    font-size: 14px;
-    margin-bottom: 14px;
-  }
-  .step h3 {
-    font-size: 15px;
-    font-weight: 600;
-    margin-bottom: 6px;
-  }
-  .step p {
-    font-size: 13px;
-    color: var(--text-muted);
-    line-height: 1.5;
-    text-align: justify;
-  }
-</style>

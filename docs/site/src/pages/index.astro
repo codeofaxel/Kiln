@@ -4,7 +4,6 @@ import Hero from '../components/Hero.astro';
 import Terminal from '../components/Terminal.astro';
 import FeatureGrid from '../components/FeatureGrid.astro';
 import Steps from '../components/Steps.astro';
-import PrinterGrid from '../components/PrinterGrid.astro';
 import ComparisonTable from '../components/ComparisonTable.astro';
 import CTA from '../components/CTA.astro';
 
@@ -50,6 +49,23 @@ $ kiln compare-cost model.gcode --fulfillment-material pla_standard --json
     </div>
   </section>
 
+  <section class="compat-strip-section bordered">
+    <div class="container">
+      <div class="compat-strip-inline">
+        <p class="compat-title-inline">Works with your printer</p>
+        <div class="compat-list-inline">
+          <span class="printer-pill">OctoPrint</span>
+          <span class="printer-pill">Moonraker/Klipper</span>
+          <span class="printer-pill">Bambu Lab</span>
+          <span class="printer-pill">Prusa Link</span>
+          <span class="printer-pill">Elegoo</span>
+          <span class="printer-pill">USB Direct</span>
+        </div>
+        <p class="compat-sub-inline">6 native adapters. Same commands work across all of them.</p>
+      </div>
+    </div>
+  </section>
+
   <section class="topic-hub bordered">
     <div class="container">
       <h2>Explore Kiln by topic</h2>
@@ -87,7 +103,6 @@ $ kiln compare-cost model.gcode --fulfillment-material pla_standard --json
   <Terminal />
   <FeatureGrid />
   <Steps />
-  <PrinterGrid />
   <ComparisonTable />
 
   <!-- Real Prints — social proof -->
@@ -332,4 +347,52 @@ $ kiln compare-cost model.gcode --fulfillment-material pla_standard --json
     font-size: 15px;
   }
   .proof-note a { color: var(--accent); }
+
+  /* Printer compat strip (after "What is Kiln 3D?") */
+  .compat-strip-section {
+    padding: 40px 0;
+  }
+  .compat-strip-inline {
+    text-align: center;
+    padding: 40px 32px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .compat-title-inline {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    margin-bottom: 20px;
+  }
+  .compat-list-inline {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .printer-pill {
+    display: inline-block;
+    padding: 8px 18px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  .printer-pill:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+  }
+  .compat-sub-inline {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
 </style>
