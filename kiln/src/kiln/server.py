@@ -12257,5 +12257,26 @@ def decorate_surface(
 _ensure_internal_tool_plugins_registered()
 
 
+# ---------------------------------------------------------------------------
+# Backward-compatible re-exports for functions that moved to plugins.
+# Tests and external code that import these names from kiln.server will
+# still work.  Each name is bound to the actual plugin function so that
+# ``patch("kiln.server.X")`` works correctly in tests.
+# ---------------------------------------------------------------------------
+
+_PLUGIN_REEXPORTS = [
+    "await_generation", "download_generated_model", "generate_and_print",
+    "generate_model", "generation_status", "list_generation_providers",
+    "validate_generated_mesh", "get_started", "reslice_with_overrides",
+    "kiln_health", "browse_models", "download_model", "list_model_categories",
+    "model_details", "model_files", "search_models", "validate_gcode",
+]
+
+for _name in _PLUGIN_REEXPORTS:
+    _tool = mcp._tool_manager._tools.get(_name)
+    if _tool is not None:
+        globals()[_name] = _tool.fn
+
+
 if __name__ == "__main__":
     main()

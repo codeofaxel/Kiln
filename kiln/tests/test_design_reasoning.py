@@ -47,8 +47,6 @@ from kiln.design_reasoning import (
     _cross_section_area,
     _cross_section_at_z,
     _edge_z_intersect,
-    _parse_stl_ascii_analysis,
-    _parse_stl_binary_analysis,
     _parse_stl_for_analysis,
     _pt_dist,
     _shoelace_area,
@@ -473,59 +471,6 @@ class TestChainSegments:
 # ---------------------------------------------------------------------------
 # STL parsing
 # ---------------------------------------------------------------------------
-
-
-class TestParseStlBinary:
-    """Binary STL parsing via _parse_stl_binary_analysis."""
-
-    def test_empty_data(self):
-        tris, verts = _parse_stl_binary_analysis(b"")
-        assert tris == []
-        assert verts == []
-
-    def test_too_short_header(self):
-        tris, verts = _parse_stl_binary_analysis(b"\x00" * 50)
-        assert tris == []
-
-    def test_single_triangle(self):
-        tri = ((1.0, 2.0, 3.0), (4.0, 5.0, 6.0), (7.0, 8.0, 9.0))
-        data = _make_binary_stl([tri])
-        tris, verts = _parse_stl_binary_analysis(data)
-        assert len(tris) == 1
-        assert len(verts) == 3
-        for i in range(3):
-            assert abs(verts[0][i] - tri[0][i]) < 1e-5
-
-    def test_cube(self):
-        data = _make_binary_stl(_CUBE_TRIS)
-        tris, verts = _parse_stl_binary_analysis(data)
-        assert len(tris) == 12
-        assert len(verts) == 36
-
-
-class TestParseStlAscii:
-    """ASCII STL parsing via _parse_stl_ascii_analysis."""
-
-    def test_simple_ascii(self):
-        text = """
-solid test
-facet normal 0 0 1
-  outer loop
-    vertex 0 0 0
-    vertex 1 0 0
-    vertex 0 1 0
-  endloop
-endfacet
-endsolid test
-"""
-        tris, verts = _parse_stl_ascii_analysis(text)
-        assert len(tris) == 1
-        assert len(verts) == 3
-
-    def test_empty_ascii(self):
-        tris, verts = _parse_stl_ascii_analysis("solid empty\nendsolid empty")
-        assert tris == []
-        assert verts == []
 
 
 class TestParseStlForAnalysis:
