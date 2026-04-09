@@ -458,21 +458,26 @@ def prepare_image_for_emboss(
         try:
             from PIL import Image, ImageFilter, ImageOps
 
-            img = Image.open(image_path).convert("L")
+            img = ImageOps.exif_transpose(Image.open(image_path)).convert("L")
 
-            # Step 1: EXIF-aware open (PIL handles orientation automatically)
+            # Step 1: EXIF-aware open + transpose
             # Step 2: Background removal via rembg (if available)
             try:
                 from rembg import remove as _rembg_remove
 
-                img_rgba = Image.open(image_path)
+                img_rgba = ImageOps.exif_transpose(Image.open(image_path))
                 img_rgba = _rembg_remove(img_rgba)
                 # Convert removed background (transparent) to white
                 bg = Image.new("RGBA", img_rgba.size, (255, 255, 255, 255))
                 bg.paste(img_rgba, mask=img_rgba.split()[3])
                 img = bg.convert("L")
             except ImportError:
-                pass  # rembg not installed — skip background removal
+                _logger.warning(
+                    "rembg is not installed — background removal skipped. "
+                    "Photo emboss quality will be significantly degraded "
+                    "for photos with busy backgrounds. Install with: "
+                    "pip install rembg onnxruntime"
+                )
 
             # Step 3: Foreground crop with 8% padding
             bbox = img.getbbox()
@@ -488,7 +493,12 @@ def prepare_image_for_emboss(
                 img = img.crop(crop_box)
 
             # Resize to target resolution
-            img = ImageOps.fit(img, (max_resolution, max_resolution), method=Image.LANCZOS)
+            # Circle mask needs square; rectangle/rounded_rectangle preserve aspect
+            effective_mask = mask if mask != "auto" else "circle"
+            if effective_mask == "circle":
+                img = ImageOps.fit(img, (max_resolution, max_resolution), method=Image.LANCZOS)
+            else:
+                img.thumbnail((max_resolution, max_resolution), Image.LANCZOS)
 
             # Step 4: Dodge+burn — local contrast normalization
             # pixel / local_average via GaussianBlur radius=22
