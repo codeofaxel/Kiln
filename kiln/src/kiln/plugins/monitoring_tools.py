@@ -1,24 +1,14 @@
-"""Print monitoring tools plugin.
+"""Print monitoring tools plugin — canonical implementations.
 
 Extracts vision monitoring, background print watching, and first-layer
 monitoring MCP tools from server.py into a focused plugin module.
 
-The ``_PrintWatcher`` class and its supporting state (``_watchers``,
-``_first_layer_monitors``, ``_PHASE_HINTS``, ``_detect_phase``) are
-reproduced here so the plugin is self-contained and server.py can shed
-those definitions.
+The ``_PrintWatcher`` class and its supporting state (``_PHASE_HINTS``,
+``_detect_phase``) live here.  The server.py stubs redirect to these
+plugin copies via the dedup proxy and re-export mechanism.
 
 Auto-discovered by :func:`~kiln.plugin_loader.register_all_plugins` —
 no manual imports needed.
-
-WARNING: watch_print, start_monitored_print, watch_print_status,
-stop_watch_print, first_layer_status, and monitor_print_vision are
-SHADOWED by server.py (dedup proxy drops these plugin copies). Do NOT
-update these copies — update server.py instead. Known issues with the
-plugin copies: (1) state isolation — plugin _watchers dict is separate
-from server.py _watchers, (2) start_monitored_print missing emergency
-latch safety check, (3) watch_print missing cancel_at_percent and
-camera ground-truth detection.
 """
 
 from __future__ import annotations
@@ -98,6 +88,7 @@ class _PrintWatcher:
         event_bus: Any | None = None,
         stall_timeout: int = 600,
         save_to_disk: bool = False,
+        cancel_at_percent: float = 0.0,
     ) -> None:
         self._watch_id = watch_id
         self._adapter = adapter
@@ -109,6 +100,7 @@ class _PrintWatcher:
         self._event_bus = event_bus
         self._stall_timeout = stall_timeout
         self._save_to_disk = save_to_disk
+        self._cancel_at_percent = cancel_at_percent
 
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
@@ -119,6 +111,7 @@ class _PrintWatcher:
         self._outcome: str = "running"
         self._start_time: float = 0.0
         self._thread: threading.Thread | None = None
+        self._prev_snapshot_hash: str | None = None
         self._save_dir: str | None = None
         if self._save_to_disk:
             self._save_dir = os.path.join(str(Path.home()), ".kiln", "timelapses", watch_id)
@@ -255,6 +248,41 @@ class _PrintWatcher:
                             }
                         )
 
+                # Auto-cancel at target percentage
+                if (
+                    self._cancel_at_percent > 0
+                    and job.completion is not None
+                    and job.completion >= self._cancel_at_percent
+                ):
+                    cancel_msg = (
+                        f"Auto-cancelling print at {job.completion:.1f}% "
+                        f"(cancel_at_percent={self._cancel_at_percent}%)."
+                    )
+                    _logger.info("[watch %s] %s", self._watch_id, cancel_msg)
+                    try:
+                        adapter.cancel_print()
+                    except Exception as cancel_exc:
+                        _logger.warning(
+                            "[watch %s] Auto-cancel failed: %s",
+                            self._watch_id,
+                            cancel_exc,
+                        )
+                    result = {
+                        "success": True,
+                        "watch_id": self._watch_id,
+                        "outcome": "auto_cancelled",
+                        "cancel_at_percent": self._cancel_at_percent,
+                        "cancelled_at_percent": job.completion,
+                        "elapsed_seconds": round(elapsed, 1),
+                        "progress_log": list(self._progress_log[-20:]),
+                        "snapshots": list(self._snapshots),
+                        "snapshot_failures": self._snapshot_failures,
+                        "final_state": state.to_dict(),
+                        "message": cancel_msg,
+                    }
+                    self._finish(result)
+                    return
+
                 # Stall detection — check if completion has changed
                 if job.completion is not None:
                     if _last_completion is None or abs(job.completion - _last_completion) > 0.1:
@@ -352,9 +380,7 @@ class _PrintWatcher:
                         "snapshots": list(self._snapshots),
                         "snapshot_failures": self._snapshot_failures,
                         "final_state": state.to_dict(),
-                        "message": (
-                            "Print is paused. Call resume_print to continue, or cancel_print to abort."
-                        ),
+                        "message": ("Print is paused. Call resume_print to continue, or cancel_print to abort."),
                     }
                     self._finish(result)
                     return
@@ -380,14 +406,53 @@ class _PrintWatcher:
                         image_data = adapter.get_snapshot()
                         if image_data and len(image_data) > 100:
                             import base64
+                            import hashlib
 
                             phase = _detect_phase(job.completion)
+
+                            # Camera ground-truth: hash this frame and
+                            # compare to the previous snapshot.  If images
+                            # change but telemetry reports no progress,
+                            # emit a warning so agents don't trust a
+                            # broken telemetry script.
+                            img_hash = hashlib.md5(image_data).hexdigest()  # noqa: S324
+                            camera_changed = (
+                                self._prev_snapshot_hash is not None and img_hash != self._prev_snapshot_hash
+                            )
+                            self._prev_snapshot_hash = img_hash
+
+                            telemetry_mismatch = False
+                            if (
+                                camera_changed
+                                and _last_completion is not None
+                                and job.completion is not None
+                                and abs(job.completion - _last_completion) < 0.1
+                                and (time.time() - _last_progress_time) > self._poll_interval * 3
+                            ):
+                                telemetry_mismatch = True
+                                _logger.warning(
+                                    "[watch %s] Camera ground-truth mismatch: "
+                                    "image changed but telemetry stuck at %.1f%% "
+                                    "for %.0fs. Telemetry may be unreliable.",
+                                    self._watch_id,
+                                    job.completion,
+                                    time.time() - _last_progress_time,
+                                )
+
                             snap = {
                                 "captured_at": now,
                                 "completion_percent": job.completion,
                                 "print_phase": phase,
                                 "image_base64": base64.b64encode(image_data).decode("ascii"),
+                                "camera_changed": camera_changed,
                             }
+                            if telemetry_mismatch:
+                                snap["telemetry_mismatch"] = True
+                                snap["telemetry_mismatch_message"] = (
+                                    f"Camera shows print bed changed but telemetry "
+                                    f"stuck at {job.completion:.1f}%. "
+                                    f"Progress data may be unreliable."
+                                )
 
                             # Persist to disk + DB when save_to_disk is enabled
                             if self._save_to_disk and self._save_dir is not None:
@@ -396,9 +461,7 @@ class _PrintWatcher:
 
                                     os.makedirs(self._save_dir, exist_ok=True)
                                     frame_idx = len(self._snapshots)
-                                    fpath = os.path.join(
-                                        self._save_dir, f"frame_{frame_idx:04d}.jpg"
-                                    )
+                                    fpath = os.path.join(self._save_dir, f"frame_{frame_idx:04d}.jpg")
                                     with open(fpath, "wb") as f:
                                         f.write(image_data)
                                     snap["saved_path"] = fpath
@@ -431,16 +494,12 @@ class _PrintWatcher:
                                         source="vision",
                                     )
                                 except Exception as exc:
-                                    _logger.debug(
-                                        "Failed to publish vision check event: %s", exc
-                                    )
+                                    _logger.debug("Failed to publish vision check event: %s", exc)
                         else:
                             with self._lock:
                                 self._snapshot_failures += 1
                     except Exception as exc:
-                        _logger.debug(
-                            "Failed to capture snapshot in print watcher: %s", exc
-                        )
+                        _logger.debug("Failed to capture snapshot in print watcher: %s", exc)
                         with self._lock:
                             self._snapshot_failures += 1
                     last_snapshot_time = now
@@ -514,10 +573,7 @@ class _MonitoringToolsPlugin:
 
     def register(self, mcp: Any) -> None:  # noqa: PLR0915
         """Register monitoring tools with the MCP server."""
-
-        # Per-plugin state registries (keyed by watch_id / monitor_id)
-        _watchers: dict[str, _PrintWatcher] = {}
-        _first_layer_monitors: dict[str, Any] = {}
+        import kiln.server as _srv
 
         @mcp.tool()
         def monitor_print_vision(
@@ -548,7 +604,6 @@ class _MonitoringToolsPlugin:
                     detected with confidence >= 0.8.  Defaults to the value of the
                     ``KILN_VISION_AUTO_PAUSE`` environment variable (default False).
             """
-            import kiln.server as _srv
             from kiln.events import EventType
             from kiln.printers import PrinterError, PrinterNotFoundError, PrinterStatus
 
@@ -556,7 +611,7 @@ class _MonitoringToolsPlugin:
                 return err
             try:
                 adapter = (
-                    _srv._registry.get(printer_name) if printer_name else _srv._get_adapter()
+                    _srv._get_registry().get(printer_name) if printer_name else _srv._get_adapter()
                 )
                 state = adapter.get_state()
                 job = adapter.get_job()
@@ -670,7 +725,7 @@ class _MonitoringToolsPlugin:
                     result["cost_estimate"] = cost_info
 
                 # Publish vision check event
-                _srv._event_bus.publish(
+                _srv._get_event_bus().publish(
                     EventType.VISION_CHECK,
                     {
                         "printer_name": printer_name or "default",
@@ -683,7 +738,7 @@ class _MonitoringToolsPlugin:
                 )
 
                 if auto_paused:
-                    _srv._event_bus.publish(
+                    _srv._get_event_bus().publish(
                         EventType.VISION_ALERT,
                         {
                             "printer_name": printer_name or "default",
@@ -720,23 +775,31 @@ class _MonitoringToolsPlugin:
             poll_interval: int = 15,
             stall_timeout: int = 600,
             save_to_disk: bool = False,
+            cancel_at_percent: float = 0.0,
         ) -> dict:
-            """Start persistent background monitoring thread for long unattended prints.
-
-            Returns immediately with a ``watch_id`` — monitoring runs in background.
-            Use ``watch_print_status`` to check progress, ``stop_watch_print`` to cancel.
-            For one-shot status, use ``monitor_print``. For AI vision inspection,
-            use ``monitor_print_vision``.
+            """Start background monitoring of an in-progress print.
 
             Launches a background thread that polls the printer state every
             *poll_interval* seconds and captures webcam snapshots every
-            *snapshot_interval* seconds.
+            *snapshot_interval* seconds.  Returns immediately with a
+            ``watch_id`` that can be used with ``watch_print_status`` and
+            ``stop_watch_print``.
 
             The watcher finishes automatically when:
 
-            1. **Print terminal state** — completed, failed, cancelled, or offline.
-            2. **Snapshot batch ready** — *max_snapshots* images collected.
-            3. **Timeout** — the print has not finished within *timeout* seconds.
+            1. **Print terminal state** -- completed, failed, cancelled, or offline.
+            2. **Snapshot batch ready** -- *max_snapshots* images collected.
+            3. **Timeout** -- the print has not finished within *timeout* seconds.
+            4. **cancel_at_percent** -- if set (> 0), auto-cancels when completion
+               reaches or exceeds this percentage.  Use this for test prints,
+               calibration runs, or any case where you want to stop at a specific
+               progress point without writing a polling script.
+
+            **Camera ground-truth**: each captured snapshot is hashed and compared to
+            the previous frame.  If the camera shows the print bed changing but
+            telemetry reports zero progress, the snapshot is flagged with
+            ``telemetry_mismatch: true`` so agents can detect broken monitoring
+            scripts and fall back to visual inspection.
 
             Args:
                 printer_name: Target printer.  Omit for the default printer.
@@ -750,15 +813,17 @@ class _MonitoringToolsPlugin:
                     ``~/.kiln/timelapses/<watch_id>/`` and persist metadata to the
                     database.  Use ``list_snapshots`` to query saved frames after
                     the print completes (default False).
+                cancel_at_percent: Auto-cancel when completion >= this value.
+                    Set to 0 (default) to disable.  Example: ``cancel_at_percent=50``
+                    cancels the print as soon as it reaches 50%.
             """
-            import kiln.server as _srv
             from kiln.printers import PrinterError, PrinterNotFoundError, PrinterStatus
 
             if err := _srv._check_auth("monitoring"):
                 return err
             try:
                 adapter = (
-                    _srv._registry.get(printer_name) if printer_name else _srv._get_adapter()
+                    _srv._get_registry().get(printer_name) if printer_name else _srv._get_adapter()
                 )
 
                 # Early exit: if printer is idle with no active job, don't start
@@ -784,11 +849,12 @@ class _MonitoringToolsPlugin:
                     max_snapshots=max_snapshots,
                     timeout=timeout,
                     poll_interval=poll_interval,
-                    event_bus=_srv._event_bus,
+                    event_bus=_srv._get_event_bus(),
                     stall_timeout=stall_timeout,
                     save_to_disk=save_to_disk,
+                    cancel_at_percent=cancel_at_percent,
                 )
-                _watchers[watch_id] = watcher
+                _srv._watchers[watch_id] = watcher
                 watcher.start()
 
                 resp: dict[str, Any] = {
@@ -802,6 +868,7 @@ class _MonitoringToolsPlugin:
                     "poll_interval": poll_interval,
                     "stall_timeout": stall_timeout,
                     "save_to_disk": save_to_disk,
+                    "cancel_at_percent": cancel_at_percent,
                     "message": (
                         f"Background watcher started (id={watch_id}). "
                         "Use watch_print_status to check progress, "
@@ -836,11 +903,9 @@ class _MonitoringToolsPlugin:
             Args:
                 watch_id: The watcher ID returned by ``watch_print``.
             """
-            import kiln.server as _srv
-
             if err := _srv._check_auth("monitoring"):
                 return err
-            watcher = _watchers.get(watch_id)
+            watcher = _srv._watchers.get(watch_id)
             if watcher is None:
                 return _srv._error_dict(
                     f"No active watcher with id {watch_id!r}. It may have already been stopped or never existed.",
@@ -858,11 +923,9 @@ class _MonitoringToolsPlugin:
             Args:
                 watch_id: The watcher ID returned by ``watch_print``.
             """
-            import kiln.server as _srv
-
             if err := _srv._check_auth("monitoring"):
                 return err
-            watcher = _watchers.pop(watch_id, None)
+            watcher = _srv._watchers.pop(watch_id, None)
             if watcher is None:
                 return _srv._error_dict(
                     f"No active watcher with id {watch_id!r}. It may have already been stopped or never existed.",
@@ -902,7 +965,6 @@ class _MonitoringToolsPlugin:
                 first_layer_interval: Seconds between snapshots (default 60).
                 auto_pause: Auto-pause if snapshot analysis detects failure (default True).
             """
-            import kiln.server as _srv
             from kiln.printers import PrinterError, PrinterNotFoundError
 
             if err := _srv._check_auth("print"):
@@ -911,9 +973,13 @@ class _MonitoringToolsPlugin:
                 return err
             if conf := _srv._check_confirmation("start_monitored_print", {"file_name": file_name}):
                 return conf
+            if block := _srv._emergency_latch_error(
+                "start_monitored_print", _srv._resolve_effective_printer_name(printer_name)
+            ):
+                return block
             try:
                 adapter = (
-                    _srv._registry.get(printer_name) if printer_name else _srv._get_adapter()
+                    _srv._get_registry().get(printer_name) if printer_name else _srv._get_adapter()
                 )
 
                 # -- Automatic pre-flight safety gate (mandatory) --
@@ -936,7 +1002,7 @@ class _MonitoringToolsPlugin:
 
                 # Start the print
                 print_result = adapter.start_print(file_name)
-                _srv._heater_watchdog.notify_print_started()
+                _srv._get_heater_watchdog().notify_print_started()
                 _srv._audit(
                     "start_monitored_print", "print_started", details={"file": file_name}
                 )
@@ -956,7 +1022,7 @@ class _MonitoringToolsPlugin:
                     policy=policy,
                     monitor_id=monitor_id,
                 )
-                _first_layer_monitors[monitor_id] = monitor
+                _srv._first_layer_monitors[monitor_id] = monitor
                 monitor.start()
 
                 return {
@@ -996,11 +1062,9 @@ class _MonitoringToolsPlugin:
             Args:
                 monitor_id: The monitor ID returned by ``start_monitored_print``.
             """
-            import kiln.server as _srv
-
             if err := _srv._check_auth("monitoring"):
                 return err
-            monitor = _first_layer_monitors.get(monitor_id)
+            monitor = _srv._first_layer_monitors.get(monitor_id)
             if monitor is None:
                 return _srv._error_dict(
                     f"No active first-layer monitor with id {monitor_id!r}. It may have already completed or never existed.",
@@ -1009,7 +1073,7 @@ class _MonitoringToolsPlugin:
             result = monitor.result()
             if result is not None:
                 # Clean up completed monitors
-                _first_layer_monitors.pop(monitor_id, None)
+                _srv._first_layer_monitors.pop(monitor_id, None)
                 return {"success": True, "monitor_id": monitor_id, "finished": True, **result.to_dict()}
             return {
                 "success": True,
