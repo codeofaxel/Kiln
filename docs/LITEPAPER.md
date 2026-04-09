@@ -26,7 +26,7 @@ Kiln acts as a universal intelligence layer between AI agents and physical fabri
 
 - **Sketch-to-3D generation.** Draw it on a napkin. Gemini Deep Think interprets rough sketches and converts them into precise, printable geometry.
 
-- **Design Intelligence.** A knowledge base of 26 FDM materials with full engineering properties, 56 brand-specific filament profiles, and 20 proven design patterns informs every design decision -- from material selection to structural reinforcement to joint design.
+- **Design Intelligence.** A knowledge base of 26 FDM materials with full engineering properties and 20 proven design patterns informs every design decision -- from material selection to structural reinforcement to joint design.
 
 - **Printability Engine.** Before anything reaches a slicer, Kiln runs 7-dimension printability analysis: overhangs, thin walls, bridging, bed adhesion, supports, warping, and thermal stress. Problems are caught and fixed in the design phase, not after a failed print.
 
@@ -34,7 +34,7 @@ Kiln acts as a universal intelligence layer between AI agents and physical fabri
 
 **Three ways to print.** Once a design is ready, Kiln routes it through three co-equal paths:
 
-1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Bambu Lab, Elegoo, or Prusa Link machines on your local network -- or remotely via Bambu Cloud. Kiln handles the protocol translation.
+1. **Your printers.** Control OctoPrint, Moonraker (Klipper), Bambu Lab, Elegoo, Prusa Link, or any Marlin/RepRap printer via USB/Serial on your local network -- or remotely via Bambu Cloud. Kiln handles the protocol translation.
 
 2. **Search 3rd-party marketplaces.** Find existing models across Thingiverse, MyMiniFactory, and Cults3D. Download, slice, and print -- or use them as starting points for custom designs.
 
@@ -52,13 +52,23 @@ An agent can prototype on your desk printer, send the production version to Craf
 
 - **Vision monitoring.** During a print, the agent analyzes webcam snapshots using its own vision capabilities to detect failures early -- spaghetti, layer shifts, adhesion problems -- and decides whether to pause or cancel.
 
+- **Adaptive slicing.** Analyzes model geometry to vary layer height per region -- thinner layers for fine detail, thicker for flat surfaces -- saving print time without sacrificing quality.
+
+- **Multi-color printing.** Automatic AMS slot detection, color-split generation, and G-code merging for printers with filament changers.
+
+- **Print recovery.** Automatic root cause analysis when prints fail, guided recovery workflows, and the ability to retry with corrective settings applied.
+
+- **Cloud sync.** Printer settings, print history, and agent knowledge stay synchronized across devices.
+
+- **Webhooks.** Notifications for print events enable integration with external monitoring, alerting, and automation systems.
+
 - **Structural analysis.** Load-bearing estimation and design reinforcement recommendations help agents create parts that actually survive real-world use.
 
 ## Safety
 
 Agents are powerful, but they shouldn't be trusted blindly with physical hardware. Kiln enforces safety at the protocol level -- not as an afterthought, but as a core design constraint.
 
-Before any print starts, Kiln runs pre-flight checks: validating temperatures against per-printer limits, scanning G-code for dangerous commands, and confirming the printer is in a safe state. These checks cannot be bypassed by the agent. 29 safety profiles cover popular printer models with hardware-specific limits. A background watchdog auto-cools idle heaters after 30 minutes to prevent fire hazards.
+Before any print starts, Kiln runs pre-flight checks: validating temperatures against per-printer limits, scanning G-code for dangerous commands, and confirming the printer is in a safe state. These checks cannot be bypassed by the agent. 29 safety profiles cover popular printer models with hardware-specific limits. A background watchdog auto-cools idle heaters after 30 minutes to prevent fire hazards. Real-time G-code interception lets agents monitor and modify printer commands on the fly -- blocking unsafe operations before they reach the hardware.
 
 ## How It Works
 
@@ -66,7 +76,7 @@ Before any print starts, Kiln runs pre-flight checks: validating temperatures ag
 You (or your agent) --> Kiln --> Design Intelligence (materials, patterns, templates)
                                  Generation (Gemini, Meshy, Tripo3D, Stability, OpenSCAD)
                                  Printability Analysis (7-dimension validation)
-                                 Your Printers (OctoPrint, Moonraker, Bambu, Elegoo, Prusa)
+                                 Your Printers (OctoPrint, Moonraker, Bambu, Elegoo, Prusa, USB/Serial)
                                  Fulfillment Providers (Craftcloud)
 ```
 
@@ -79,7 +89,7 @@ Local printing with Kiln is free and always will be. The core infrastructure is 
 Revenue comes from optional services:
 
 - **Free tier** -- All local printing features, up to 2 printers and a 10-job queue. No cost, no account required.
-- **Pro ($29/month)** -- Unlimited printers, fleet orchestration, analytics, cloud sync, product templates (coasters, keychains, ornaments), procedural textures, decoration system, speed control, print learning, and cross-printer intelligence. Annual: $23/mo.
+- **Pro ($29/month)** -- Unlimited printers, fleet orchestration, analytics, cloud sync, product templates for consumer goods (coasters, keychains, ornaments, pet tags, jewelry trays, and more -- with built-in QR code embedding and batch generation), procedural textures (marble, tiger stripe, wood grain, ocean, lava, and more -- applied directly to mesh surfaces with 2D preview before printing), decoration system, speed control, print learning, and cross-printer intelligence. Annual: $23/mo.
 - **Business ($99/month)** -- Up to 50 printers, 5 team seats, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles. Annual: $79/mo.
 - **Enterprise (from $499/month)** -- Unlimited printers (20 included, $15/mo each additional) and unlimited team seats, dedicated single-tenant MCP server, on-premises deployment via Kubernetes and Helm (air-gapped support included), single sign-on via OIDC and SAML, role-based access control, full audit trail with JSON/CSV export, lockable safety profiles, encrypted G-code at rest, 99.9% uptime SLA, and dedicated support channel with onboarding. Annual: $399/mo.
 

@@ -53,7 +53,7 @@ All three modes use the same MCP tools and CLI commands. An agent can seamlessly
 - **AI-native** — 543 MCP tools built for AI agents. Not a web UI with an API bolted on.
 - **Prints don't fail silently** — Cross-printer learning, automatic failure rerouting, preflight safety checks on every job.
 - **Search → Slice → Print** — Search and download 3D models from Thingiverse, MyMiniFactory, and Cults3D (search only), auto-slice with PrusaSlicer or OrcaSlicer, print — all from one agent conversation.
-- **Safety at scale** — 28 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
+- **Safety at scale** — 29 per-printer safety profiles, G-code validation, heater watchdog, tamper-proof audit logs. Enterprise adds encrypted G-code at rest with key rotation, lockable profiles, RBAC, SSO, fleet site grouping, per-project cost tracking, and PostgreSQL HA.
 
 ## Architecture
 
@@ -572,7 +572,7 @@ The Kiln MCP server (`kiln serve`) exposes **543 tools** to agents. Key tools ar
 | `save_agent_note` | Save a persistent note/preference that survives across sessions |
 | `get_agent_context` | Retrieve all stored agent memory for context |
 | `delete_agent_note` | Remove a stored note or preference |
-| `list_safety_profiles` | List all bundled printer safety profiles (28 models) |
+| `list_safety_profiles` | List all bundled printer safety profiles (29 models) |
 | `get_safety_profile` | Get temperature/feedrate/flow limits for a specific printer |
 | `validate_gcode_safe` | Validate G-code against printer-specific safety limits |
 | `list_slicer_profiles` | List all bundled slicer profiles with recommended settings |
@@ -675,6 +675,97 @@ The Kiln MCP server (`kiln serve`) exposes **543 tools** to agents. Key tools ar
 | `check_multi_material_pairing` | Check if two materials can be co-printed in dual extrusion |
 | `get_print_diagnostic` | Comprehensive print diagnostic combining multiple knowledge sources |
 
+### Adaptive Slicing
+
+| Tool | Description |
+|------|-------------|
+| `generate_adaptive_slicing_plan` | Analyze geometry and generate per-region layer height optimization |
+| `quick_adaptive_plan` | All-in-one analyze + plan for adaptive slicing |
+| `export_adaptive_slicer_config` | Export adaptive plan to PrusaSlicer, OrcaSlicer, or Cura format |
+| `estimate_adaptive_time_savings` | Estimate time savings vs uniform layer height |
+| `get_adaptive_plan_summary` | Human-readable summary of an adaptive slicing plan |
+
+### G-code Interception
+
+| Tool | Description |
+|------|-------------|
+| `start_gcode_interception` | Begin intercepting G-code commands sent to a printer |
+| `stop_gcode_interception` | Stop G-code interception |
+| `add_interception_rule` | Add a rule to modify, block, or log specific G-code commands |
+| `remove_interception_rule` | Remove an interception rule |
+| `intercept_gcode_command` | Manually intercept and modify a specific G-code command |
+| `get_interception_status` | Check current interception session status |
+| `get_interception_history` | View history of intercepted commands |
+| `list_interception_sessions` | List all interception sessions |
+| `load_safety_interception_rules` | Load predefined safety rules for interception |
+| `update_interception_telemetry` | Update telemetry for an interception session |
+
+### Print Recovery & Failure Analysis
+
+| Tool | Description |
+|------|-------------|
+| `analyze_print_failure_smart` | Automated root cause analysis of a print failure |
+| `get_recovery_plan` | Get recovery options for a specific failure type |
+| `start_print_recovery` | Begin a guided print recovery session |
+| `confirm_print_recovery` | Confirm a recovery step has been completed |
+| `complete_print_recovery` | Mark a recovery session as complete |
+| `plan_print_recovery` | Plan recovery steps before starting |
+| `cancel_print_recovery` | Cancel an in-progress recovery session |
+| `get_recovery_session_status` | Check status of a recovery session |
+| `get_recovery_statistics` | View historical recovery success rates |
+| `retry_print_with_fix` | Re-slice with corrections and reprint |
+| `detect_print_failure` | Detect if a print has failed |
+| `diagnose_print_failure_live` | Real-time failure diagnosis during printing |
+| `predict_print_failure` | Pre-print failure risk prediction |
+| `save_print_checkpoint` | Save mid-print state for potential recovery |
+| `firmware_resume_print` | Resume after power loss via firmware recovery |
+| `failure_history` | View history of failures and resolutions |
+
+### QR Code & Product Generation (Pro Tier)
+
+| Tool | Description |
+|------|-------------|
+| `add_qr_to_product` | Embed a QR code onto a product surface |
+| `print_qr_product` | Generate and print a QR-coded product in one step |
+| `generate_coaster` | Generate a printable coaster with optional decoration |
+| `generate_keychain` | Generate a printable keychain |
+| `generate_bookmark` | Generate a printable bookmark |
+| `generate_fridge_magnet` | Generate a printable fridge magnet |
+| `generate_ornament` | Generate a printable ornament |
+| `generate_pet_tag` | Generate a printable pet tag |
+| `generate_pet_bowl` | Generate a printable pet bowl |
+| `generate_jewelry_tray` | Generate a printable jewelry tray |
+| `generate_ashtray` | Generate a printable ashtray |
+| `generate_wall_plaque` | Generate a printable wall plaque |
+| `batch_generate_products` | Bulk-generate multiple products from templates |
+| `generate_decorated_product` | Generate a decorated product in one step |
+
+### Warping Analysis (Pro Tier)
+
+| Tool | Description |
+|------|-------------|
+| `analyze_warping_risk` | Physics-based warping risk analysis using thermal simulation |
+
+### Plate Optimization (Pro Tier)
+
+| Tool | Description |
+|------|-------------|
+| `arrange_parts_on_plate` | Arrange multiple parts on a build plate with MaxRects bin-packing |
+| `auto_arrange_parts_on_plate` | Auto-arrange with rotation and multi-plate fallback |
+
+### Print Learning (Pro Tier)
+
+| Tool | Description |
+|------|-------------|
+| `record_completed_print` | Record print outcome for the learning engine |
+| `get_print_learning_summary` | View learned insights for a printer/material combo |
+| `get_optimal_settings` | Get auto-tuned settings based on print history |
+| `get_material_success_rates` | Success rates by material across the fleet |
+| `get_maintenance_prediction` | Predict maintenance needs from failure patterns |
+| `get_material_warnings` | Get warnings for materials with high failure rates |
+| `get_auto_tuned_settings` | Get automatically tuned slicer settings |
+| `get_print_confidence` | Confidence score for a print succeeding |
+
 ### Provider Tools
 
 The legacy `network_*` CLI commands and MCP tool aliases were deprecated in `v0.2.0` and have been removed. Use the canonical provider integration tools instead: `connect_provider_account`, `sync_provider_capacity`, `list_provider_capacity`, `find_provider_capacity`, `submit_provider_job`, `provider_job_status`.
@@ -730,7 +821,7 @@ The server also exposes read-only resources that agents can use for context:
 | `cloud_sync.py` | Cloud sync for printer configs and job history |
 | `plugins.py` | Plugin system with entry-point discovery |
 | `gcode.py` | G-code safety validator with per-printer limits |
-| `safety_profiles.py` | Bundled safety database (30 printer models, temps/feedrates/flow) |
+| `safety_profiles.py` | Bundled safety database (29 printer models, temps/feedrates/flow) |
 | `slicer_profiles.py` | Bundled slicer profiles (auto-generates .ini files per printer) |
 | `printer_intelligence.py` | Printer knowledge base (firmware quirks, materials, failure modes) |
 | `pipelines.py` | Pre-validated print pipelines (quick_print, calibrate, benchmark) |
@@ -988,7 +1079,7 @@ For provider-routed orders, the provider remains merchant of record and support 
 | Tier | Price | What You Get |
 |------|-------|-------------|
 | **Free** | $0 | All local printing, slicing, marketplace, safety profiles. Job queue (10 jobs). Up to 2 printers. Billing visibility. |
-| **Pro** | $29/mo | Unlimited printers + fleet orchestration, fleet analytics, unlimited queue depth, cloud sync, priority scheduler. Annual: $23/mo ($276/yr). |
+| **Pro** | $29/mo | Unlimited printers + fleet orchestration, fleet analytics, unlimited queue depth, cloud sync, priority scheduler, product templates (coasters, keychains, bookmarks, ornaments, fridge magnets, pet tags, pet bowls, jewelry trays, ashtrays, wall plaques) with QR code embedding and batch generation. Annual: $23/mo ($276/yr). |
 | **Business** | $99/mo | Everything in Pro + up to 50 printers, 5 team seats, unlimited fulfillment orders (5% orchestration fee), shared hosted MCP server, priority support, custom safety profiles, webhook integrations. Annual: $79/mo ($948/yr). |
 | **Enterprise** | From $499/mo | Everything in Business + unlimited printers (20 included, $15/mo each after), unlimited seats, role-based access control, dedicated single-tenant MCP server, on-prem/cloud/hybrid deployment, SSO (SAML/OIDC), full audit trail with export, lockable safety profiles, encrypted G-code at rest, 99.9% uptime SLA, dedicated Slack channel. Annual: $399/mo ($4,788/yr). |
 

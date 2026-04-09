@@ -8,7 +8,7 @@
 
 ### Overview
 
-Kiln is the intelligence layer between idea and physical object. It provides a unified interface for AI agents to design, validate, and manufacture 3D-printed parts — controlling local printers, searching third-party model marketplaces (Thingiverse, MyMiniFactory, Cults3D), and routing jobs to fulfillment providers (Craftcloud) — all through the Model Context Protocol (MCP) or a 136-command CLI.
+Kiln is the intelligence layer between idea and physical object. It provides a unified interface for AI agents to design, validate, and manufacture 3D-printed parts — controlling local printers, searching third-party model marketplaces (Thingiverse, MyMiniFactory, Cults3D), and routing jobs to fulfillment providers (Craftcloud) — all through the Model Context Protocol (MCP) or a 113-command CLI.
 
 **Clarification:** Kiln does **not** operate its own marketplace or manufacturing network. It integrates with third-party marketplaces for model discovery and third-party fulfillment providers for outsourced manufacturing. Kiln is orchestration and agent infrastructure, not a supply-side platform.
 
@@ -404,7 +404,7 @@ See [Cost Estimation](#cost-estimation) below for the full tool set including `s
 |---|---|---|
 | `webcam_stream` | `printer_name`, `action`, `port` | Stream status |
 
-#### Cloud Sync
+#### Cloud Sync (Pro Tier)
 
 | Tool | Input | Output |
 |---|---|---|
@@ -419,7 +419,7 @@ See [Cost Estimation](#cost-estimation) below for the full tool set including `s
 | `list_plugins` | — | Plugin list |
 | `plugin_info` | `name` | Plugin details |
 
-#### Billing & Payments
+#### Billing & Payments (Business Tier)
 
 | Tool | Input | Output |
 |---|---|---|
@@ -452,7 +452,31 @@ Kiln does not operate its own marketplace or manufacturing network. These tools 
 | `safety_settings` | — | Current safety/auto-print settings |
 | `safety_status` | — | Comprehensive safety status |
 
-#### Fulfillment Services (Third-Party Providers)
+#### G-code Interception
+
+| Tool | Description |
+|---|---|
+| `start_gcode_interception` | Begin intercepting G-code commands sent to a printer |
+| `stop_gcode_interception` | Stop G-code interception |
+| `add_interception_rule` | Add a rule to modify, block, or log specific G-code commands |
+| `remove_interception_rule` | Remove an interception rule |
+| `intercept_gcode_command` | Manually intercept and modify a specific G-code command |
+| `get_interception_status` | Check current interception session status |
+| `get_interception_history` | View history of intercepted commands |
+| `list_interception_sessions` | List all interception sessions |
+| `load_safety_interception_rules` | Load predefined safety rules for G-code interception |
+| `update_interception_telemetry` | Update telemetry data for an interception session |
+
+#### Emergency System
+
+| Tool | Description |
+|---|---|
+| `emergency_stop` | Immediately stop a printer (hardware e-stop) |
+| `emergency_status` | Check emergency stop state for a printer or the fleet |
+| `clear_emergency_stop` | Clear an emergency stop and allow printing to resume |
+| `emergency_trip_input` | Trigger an emergency stop from an external input source |
+
+#### Fulfillment Services (Business Tier) — Third-Party Providers
 
 Routes manufacturing to third-party fulfillment providers (Craftcloud). Kiln acts as an API client to these providers — it does not operate manufacturing capacity or act as merchant of record.
 
@@ -565,6 +589,28 @@ When designs are generated via OpenSCAD (parametric), the pipeline preserves the
 | `analyze_print_failure` | `job_id` | Failure diagnosis with causes and recommendations |
 | `validate_print_quality` | `job_id` | Quality assessment with snapshot and event analysis |
 
+#### Print Recovery & Failure Analysis
+
+| Tool | Description |
+|---|---|
+| `analyze_print_failure_smart` | Automated root cause analysis of a print failure |
+| `get_recovery_plan` | Get recovery options for a specific failure type |
+| `start_print_recovery` | Begin a guided print recovery session |
+| `confirm_print_recovery` | Confirm a recovery step has been completed |
+| `complete_print_recovery` | Mark a recovery session as complete |
+| `plan_print_recovery` | Plan recovery steps before starting |
+| `cancel_print_recovery` | Cancel an in-progress recovery session |
+| `get_recovery_session_status` | Check status of a recovery session |
+| `get_recovery_statistics` | View historical recovery success rates |
+| `record_recovery_check` | Record a recovery checkpoint |
+| `retry_print_with_fix` | Re-slice with corrections and reprint |
+| `detect_print_failure` | Detect if a print has failed |
+| `diagnose_print_failure_live` | Real-time failure diagnosis during printing |
+| `predict_print_failure` | Pre-print failure risk prediction |
+| `save_print_checkpoint` | Save a mid-print state snapshot for potential recovery |
+| `firmware_resume_print` | Resume a print after power loss via firmware recovery |
+| `failure_history` | View history of print failures and their resolutions |
+
 #### Firmware Updates
 
 | Tool | Input | Output |
@@ -584,7 +630,7 @@ Kiln provides structured monitoring data (webcam snapshots, temperatures, print 
 | `watch_print_status` | `watch_id` | Current progress, snapshots, outcome of background watcher |
 | `stop_watch_print` | `watch_id` | Stops background watcher and returns final state |
 
-#### Cross-Printer Learning
+#### Cross-Printer Learning (Pro Tier)
 
 | Tool | Input | Output |
 |---|---|---|
@@ -617,6 +663,22 @@ The last two dimensions (thermal stress and adhesion force) are material-aware h
 | `estimate_supports` | `file_path` | Support volume and weight estimate |
 
 Adhesion intelligence includes a decision matrix combining contact percentage, material warp tendency (`_HIGH_WARP_MATERIALS`: ABS, ASA, PA, PC, etc.), bed-slinger detection, enclosure status, and model height to produce concrete slicer overrides (`brim_width`, `brim_type`, `raft_layers`).
+
+#### Adaptive Slicing
+
+| Tool | Description |
+|---|---|
+| `generate_adaptive_slicing_plan` | Analyze model geometry and generate per-region layer height optimization |
+| `quick_adaptive_plan` | All-in-one analyze + plan for adaptive slicing |
+| `export_adaptive_slicer_config` | Export adaptive plan to PrusaSlicer, OrcaSlicer, or Cura format |
+| `estimate_adaptive_time_savings` | Estimate print time savings vs uniform layer height |
+| `get_adaptive_plan_summary` | Human-readable summary of an adaptive slicing plan |
+
+#### Warping Analysis (Pro Tier)
+
+| Tool | Description |
+|---|---|
+| `analyze_warping_risk` | Physics-based warping risk analysis using thermal simulation |
 
 #### Multi-Part Assembly & Job Splitting
 
@@ -701,6 +763,50 @@ Constraint-aware design reasoning — agents query material properties, design p
 | `get_post_processing_guide` | `material` | Post-processing techniques for finishing a printed part |
 | `check_multi_material_pairing` | `material_a`, `material_b` | Dual extrusion co-print compatibility check |
 | `get_print_diagnostic` | `material`, `printer`, `symptom` | Comprehensive diagnostic combining multiple knowledge sources |
+
+#### Procedural Textures (Pro Tier)
+
+| Tool | Description |
+|---|---|
+| `apply_procedural_texture` | Apply a named procedural texture (tiger_stripe, marble, lava, ocean, wood, etc.) to a mesh surface |
+| `list_procedural_textures` | List all available procedural texture types and their presets |
+| `preview_texture_2d` | Render a 2D preview of a procedural texture before applying |
+| `save_custom_palette` | Save a custom color palette for procedural textures |
+| `list_custom_palettes` | List saved custom palettes |
+| `delete_custom_palette` | Delete a saved custom palette |
+
+#### Surface Decoration (Pro Tier)
+
+| Tool | Description |
+|---|---|
+| `decorate_surface` | Apply embossed/debossed decoration (image, SVG, or text) to any face of a model |
+| `apply_decoration` | Apply a saved decoration preset to a model |
+| `save_decoration` | Save a decoration configuration as a reusable preset |
+| `list_decorations` | List all saved decoration presets |
+| `decoration_info` | Get details about a saved decoration preset |
+| `iterate_decoration` | Iteratively refine a decoration based on print results |
+| `rollback_decoration` | Roll back to a previous decoration version |
+| `decoration_history` | View the iteration history of a decoration |
+| `record_decoration_success` | Record that a decoration printed successfully for learning |
+
+#### QR Code & Product Generation (Pro Tier)
+
+| Tool | Description |
+|---|---|
+| `add_qr_to_product` | Embed a QR code onto a product surface as a raised/recessed feature |
+| `print_qr_product` | Generate and print a QR-coded product in one step |
+| `generate_coaster` | Generate a printable coaster with optional decoration |
+| `generate_keychain` | Generate a printable keychain |
+| `generate_bookmark` | Generate a printable bookmark |
+| `generate_fridge_magnet` | Generate a printable fridge magnet |
+| `generate_ornament` | Generate a printable ornament |
+| `generate_pet_tag` | Generate a printable pet tag |
+| `generate_pet_bowl` | Generate a printable pet bowl |
+| `generate_jewelry_tray` | Generate a printable jewelry tray |
+| `generate_ashtray` | Generate a printable ashtray |
+| `generate_wall_plaque` | Generate a printable wall plaque |
+| `batch_generate_products` | Bulk-generate multiple products from templates |
+| `generate_decorated_product` | Generate a decorated product in one step |
 
 #### Enterprise Features (Enterprise Tier)
 
@@ -1004,7 +1110,7 @@ pip install -e "./octoprint-cli[dev]"
 ### Running Tests
 
 ```bash
-cd kiln && python3 -m pytest tests/ -v    # 8,000+ tests
+cd kiln && python3 -m pytest tests/ -v    # 9,600+ tests
 cd ../octoprint-cli && python3 -m pytest tests/ -v  # 239 tests
 ```
 
