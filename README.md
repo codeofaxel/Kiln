@@ -673,14 +673,6 @@ The Kiln MCP server (`kiln serve`) exposes **533 tools** to agents. Key tools ar
 | `get_post_processing_guide` | Post-processing techniques for finishing a 3D printed part |
 | `check_multi_material_pairing` | Check if two materials can be co-printed in dual extrusion |
 | `get_print_diagnostic` | Comprehensive print diagnostic combining multiple knowledge sources |
-| `get_construction_design_brief` | Design brief for construction-scale 3D printing |
-| `get_construction_material_profile` | Engineering properties for a construction printing material |
-| `list_construction_materials_catalog` | List all available construction printing materials |
-| `get_construction_pattern_info` | Design rules for a construction printing pattern |
-| `list_construction_patterns_catalog` | List all available construction printing patterns |
-| `get_construction_building_requirement` | Detailed building program requirements |
-| `list_construction_building_requirements` | List all available building program requirement profiles |
-| `match_construction_building_requirements` | Match a building description to known program requirements |
 
 ### Provider Tools
 

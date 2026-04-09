@@ -50,6 +50,14 @@ const printerIntegrations: Integration[] = [
     icon: '⬛',
     tag: 'REST API',
   },
+  {
+    name: 'usb',
+    title: 'USB Direct',
+    description:
+      'Connect any Marlin-based printer over USB — no OctoPrint or Klipper needed. Plug in a cable and go. Works with Ender 3, Prusa MK3, CR-10, and any printer running Marlin or RepRapFirmware.',
+    icon: '🔌',
+    tag: 'USB',
+  },
 ];
 
 const ecosystemIntegrations: Integration[] = [
@@ -140,7 +148,7 @@ const integrationSchema = {
       </p>
       <div class="stat-row">
         <div class="stat">
-          <span class="stat-num">5</span>
+          <span class="stat-num">6</span>
           <span class="stat-label">Printer backends</span>
         </div>
         <div class="stat">

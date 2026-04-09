@@ -4,7 +4,7 @@
 
 # Kiln
 
-### Litepaper -- March 2026
+### Litepaper -- April 2026
 
 > Describe it or draw it. Kiln makes it real.
 
@@ -22,11 +22,11 @@ Kiln acts as a universal intelligence layer between AI agents and physical fabri
 
 **From idea to object.** Kiln gives agents multiple paths to turn a thought into a physical part:
 
-- **Text-to-3D generation.** Describe what you need in plain language. Kiln routes to the best generation backend -- Gemini Deep Think for precise parametric geometry via OpenSCAD, Meshy, Tripo3D, or Stability AI for organic shapes. An OpenSCAD parametric catalog with 14 component types lets agents compose complex assemblies from proven primitives.
+- **Text-to-3D generation.** Describe what you need in plain language. Kiln routes to the best generation backend -- Gemini Deep Think for precise parametric geometry via OpenSCAD, Meshy, Tripo3D, or Stability AI for organic shapes.
 
 - **Sketch-to-3D generation.** Draw it on a napkin. Gemini Deep Think interprets rough sketches and converts them into precise, printable geometry.
 
-- **Design Intelligence.** A knowledge base of 52 materials, 20 design patterns, and 70+ templates informs every design decision -- from material selection to structural reinforcement to joint design.
+- **Design Intelligence.** A knowledge base of 26 FDM materials with full engineering properties, 56 brand-specific filament profiles, and 20 proven design patterns informs every design decision -- from material selection to structural reinforcement to joint design.
 
 - **Printability Engine.** Before anything reaches a slicer, Kiln runs 7-dimension printability analysis: overhangs, thin walls, bridging, bed adhesion, supports, warping, and thermal stress. Problems are caught and fixed in the design phase, not after a failed print.
 
@@ -70,7 +70,7 @@ You (or your agent) --> Kiln --> Design Intelligence (materials, patterns, templ
                                  Fulfillment Providers (Craftcloud)
 ```
 
-Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. There's also a full CLI with 136 commands and a REST API for custom integrations.
+Kiln uses the Model Context Protocol (MCP), an open standard for connecting AI agents to external tools. Any MCP-compatible agent can talk to Kiln natively. There's also a full CLI and a REST API for custom integrations.
 
 ## Business Model
 
@@ -79,7 +79,7 @@ Local printing with Kiln is free and always will be. The core infrastructure is 
 Revenue comes from optional services:
 
 - **Free tier** -- All local printing features, up to 2 printers and a 10-job queue. No cost, no account required.
-- **Pro ($29/month)** -- Unlimited printers, fleet orchestration, analytics, and cloud sync. Annual: $23/mo.
+- **Pro ($29/month)** -- Unlimited printers, fleet orchestration, analytics, cloud sync, product templates (coasters, keychains, ornaments), procedural textures, decoration system, speed control, print learning, and cross-printer intelligence. Annual: $23/mo.
 - **Business ($99/month)** -- Up to 50 printers, 5 team seats, fulfillment brokering, shared hosted MCP server, priority support, custom safety profiles. Annual: $79/mo.
 - **Enterprise (from $499/month)** -- Unlimited printers (20 included, $15/mo each additional) and unlimited team seats, dedicated single-tenant MCP server, on-premises deployment via Kubernetes and Helm (air-gapped support included), single sign-on via OIDC and SAML, role-based access control, full audit trail with JSON/CSV export, lockable safety profiles, encrypted G-code at rest, 99.9% uptime SLA, and dedicated support channel with onboarding. Annual: $399/mo.
 
@@ -99,5 +99,5 @@ Full documentation, CLI reference, and the technical whitepaper are available in
 
 ---
 
-Kiln is open-source infrastructure released under the AGPL-3.0 License. Version 0.4.2, March 2026.
+Kiln is open-source infrastructure released under the AGPL-3.0 License. Version 0.5.0, April 2026.
 Kiln is a project of Hadron Labs Inc.

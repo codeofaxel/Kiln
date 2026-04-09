@@ -701,19 +701,6 @@ Constraint-aware design reasoning — agents query material properties, design p
 | `check_multi_material_pairing` | `material_a`, `material_b` | Dual extrusion co-print compatibility check |
 | `get_print_diagnostic` | `material`, `printer`, `symptom` | Comprehensive diagnostic combining multiple knowledge sources |
 
-#### Construction-Scale Design Intelligence
-
-| Tool | Input | Output |
-|---|---|---|
-| `get_construction_design_brief` | `requirements` | Design brief for construction-scale 3D printing |
-| `get_construction_material_profile` | `material` | Engineering properties for a construction material |
-| `list_construction_materials_catalog` | — | All available construction printing materials |
-| `get_construction_pattern_info` | `pattern` | Design rules for a construction printing pattern |
-| `list_construction_patterns_catalog` | — | All available construction printing patterns |
-| `get_construction_building_requirement` | `requirement` | Detailed building program requirements |
-| `list_construction_building_requirements` | — | All building program requirement profiles |
-| `match_construction_building_requirements` | `description` | Match a building description to known program requirements |
-
 #### Enterprise Features (Enterprise Tier)
 
 | Tool | Input | Output |

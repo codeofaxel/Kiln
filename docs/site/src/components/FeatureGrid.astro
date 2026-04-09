@@ -3,12 +3,12 @@ const features = [
   {
     icon: '\u{1F4A1}',
     title: 'Design Intelligence',
-    desc: '52 materials with mechanical properties, 20 proven design patterns (snap-fits, living hinges, threads), 70 parametric templates, and structural load estimation. Kiln understands what makes a good print before generating anything.',
+    desc: '26 FDM materials with full engineering properties, 56 brand-specific filament profiles, 20 proven design patterns (snap-fits, living hinges, threads), and structural load estimation. Kiln understands what makes a good print before generating anything.',
   },
   {
     icon: '\u2728',
     title: 'Text & Sketch to 3D',
-    desc: 'Describe what you want or sketch it. Kiln generates printable models via Gemini Deep Think, Meshy, Tripo3D, Stability AI, or parametric OpenSCAD with a 14-component catalog. Design DNA preserves the source for iteration.',
+    desc: 'Describe what you want or sketch it. Kiln generates printable models via Gemini Deep Think, Meshy, Tripo3D, Stability AI, or parametric OpenSCAD with a 14-component catalog (gears, threads, hinges, bearings). Design DNA preserves the source for iteration.',
   },
   {
     icon: '\u{1F52C}',
@@ -33,12 +33,27 @@ const features = [
   {
     icon: '\u{1F6E1}\uFE0F',
     title: 'Safety at Every Step',
-    desc: "29 per-printer safety profiles with temperature and speed limits. G-code validation before every send. Preflight checks, emergency stop, heater watchdog. Agents can\u2019t bypass safety.",
+    desc: "29 per-printer safety profiles with temperature and speed limits. G-code validation before every send. Preflight checks, emergency stop, heater watchdog, G-code interception. Agents can\u2019t bypass safety.",
   },
   {
     icon: '\u{1F30D}',
     title: 'Fleet & Fulfillment',
-    desc: "Multi-printer fleet with job routing, scheduling, and failure rerouting. No local printer? Outsource to Craftcloud\u2019s 150+ third-party services. Same tools, same safety.",
+    desc: "Multi-printer fleet with job routing, scheduling, and failure rerouting. Print recovery with automatic retry. No local printer? Outsource to Craftcloud\u2019s 150+ third-party services. Same tools, same safety.",
+  },
+  {
+    icon: '\u{1F3A8}',
+    title: 'Surface Decoration',
+    desc: 'Add QR codes, photos, logos, procedural textures (tiger stripe, camo, marble, lava, wood), and text to any model. Multicolor printing support for Bambu AMS. 3 decorations/month free, unlimited with Pro.',
+  },
+  {
+    icon: '\u{1F527}',
+    title: 'Mesh Tools',
+    desc: 'Repair non-manifold geometry, boolean operations (union, subtract, intersect), hollowing, chamfers, fillets, wall thickening, mesh merge, and floating region removal. Fix broken STLs before they waste filament.',
+  },
+  {
+    icon: '\u{1F9EA}',
+    title: 'Material Catalog',
+    desc: '56 real-world filaments from Hatchbox, Prusament, eSun, Polymaker, Bambu, and more. Purchase links, compatibility matching, and side-by-side property comparison. Know exactly which spool to buy.',
   },
   {
     icon: '\u{1F9F0}',
@@ -53,6 +68,7 @@ const printerBackends = [
   'Bambu Lab',
   'Prusa Link',
   'Elegoo',
+  'USB Direct',
 ];
 ---
 
@@ -83,7 +99,7 @@ const printerBackends = [
           </>
         ))}
       </div>
-      <p class="compat-sub">Native adapters for 5 printer backends. Same commands work across all of them.</p>
+      <p class="compat-sub">Native adapters for 6 printer backends. Same commands work across all of them.</p>
     </div>
   </div>
 </section>
