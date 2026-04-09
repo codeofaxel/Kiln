@@ -605,7 +605,8 @@ class _MonitoringToolsPlugin:
                     ``KILN_VISION_AUTO_PAUSE`` environment variable (default False).
             """
             from kiln.events import EventType
-            from kiln.printers import PrinterError, PrinterNotFoundError, PrinterStatus
+            from kiln.printers import PrinterError, PrinterStatus
+            from kiln.registry import PrinterNotFoundError
 
             if err := _srv._check_auth("monitoring"):
                 return err
@@ -817,7 +818,8 @@ class _MonitoringToolsPlugin:
                     Set to 0 (default) to disable.  Example: ``cancel_at_percent=50``
                     cancels the print as soon as it reaches 50%.
             """
-            from kiln.printers import PrinterError, PrinterNotFoundError, PrinterStatus
+            from kiln.printers import PrinterError, PrinterStatus
+            from kiln.registry import PrinterNotFoundError
 
             if err := _srv._check_auth("monitoring"):
                 return err
@@ -965,7 +967,8 @@ class _MonitoringToolsPlugin:
                 first_layer_interval: Seconds between snapshots (default 60).
                 auto_pause: Auto-pause if snapshot analysis detects failure (default True).
             """
-            from kiln.printers import PrinterError, PrinterNotFoundError
+            from kiln.printers import PrinterError
+            from kiln.registry import PrinterNotFoundError
 
             if err := _srv._check_auth("print"):
                 return err

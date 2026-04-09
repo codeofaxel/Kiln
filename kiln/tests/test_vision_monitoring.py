@@ -203,45 +203,50 @@ class TestVisionMonitoringData:
 class TestMonitorPrintVisionTool:
     """Integration tests for the monitor_print_vision MCP tool."""
 
+    def _make_registry(self, adapter: mock.MagicMock) -> mock.MagicMock:
+        reg = mock.MagicMock()
+        reg.get.return_value = adapter
+        return reg
+
     def test_idle_printer_includes_not_printing_flag(self) -> None:
         """monitor_print_vision should flag when printer is not printing."""
         from kiln.printers.base import JobProgress, PrinterAdapter, PrinterCapabilities, PrinterState, PrinterStatus
-        from kiln.server import _registry, monitor_print_vision
+        from kiln.server import monitor_print_vision
 
         adapter = mock.MagicMock(spec=PrinterAdapter)
         adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.IDLE)
         adapter.get_job.return_value = JobProgress()
         adapter.capabilities = PrinterCapabilities(can_snapshot=False)
 
-        with mock.patch.object(_registry, 'get', return_value=adapter):
+        with mock.patch("kiln.server._get_registry", return_value=self._make_registry(adapter)):
             result = monitor_print_vision(printer_name="test")
         assert result["success"] is True
         assert result["monitoring_context"]["is_printing"] is False
 
     def test_printing_printer_has_is_printing_true(self) -> None:
         from kiln.printers.base import JobProgress, PrinterAdapter, PrinterCapabilities, PrinterState, PrinterStatus
-        from kiln.server import _registry, monitor_print_vision
+        from kiln.server import monitor_print_vision
 
         adapter = mock.MagicMock(spec=PrinterAdapter)
         adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.PRINTING)
         adapter.get_job.return_value = JobProgress(completion=45.0)
         adapter.capabilities = PrinterCapabilities(can_snapshot=False)
 
-        with mock.patch.object(_registry, 'get', return_value=adapter):
+        with mock.patch("kiln.server._get_registry", return_value=self._make_registry(adapter)):
             result = monitor_print_vision(printer_name="test")
         assert result["success"] is True
         assert result["monitoring_context"]["is_printing"] is True
 
     def test_snapshot_skipped_when_no_capability(self) -> None:
         from kiln.printers.base import JobProgress, PrinterAdapter, PrinterCapabilities, PrinterState, PrinterStatus
-        from kiln.server import _registry, monitor_print_vision
+        from kiln.server import monitor_print_vision
 
         adapter = mock.MagicMock(spec=PrinterAdapter)
         adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.PRINTING)
         adapter.get_job.return_value = JobProgress(completion=50.0)
         adapter.capabilities = PrinterCapabilities(can_snapshot=False)
 
-        with mock.patch.object(_registry, 'get', return_value=adapter):
+        with mock.patch("kiln.server._get_registry", return_value=self._make_registry(adapter)):
             result = monitor_print_vision(printer_name="test", include_snapshot=True)
         assert result["snapshot"]["available"] is False
         assert result["snapshot"].get("reason") == "no_capability"
@@ -251,16 +256,21 @@ class TestMonitorPrintVisionTool:
 class TestWatchPrintTool:
     """Integration tests for watch_print edge cases."""
 
+    def _make_registry(self, adapter: mock.MagicMock) -> mock.MagicMock:
+        reg = mock.MagicMock()
+        reg.get.return_value = adapter
+        return reg
+
     def test_paused_printer_returns_paused_outcome(self) -> None:
         from kiln.printers.base import JobProgress, PrinterAdapter, PrinterCapabilities, PrinterState, PrinterStatus
-        from kiln.server import _registry, _watchers, watch_print, watch_print_status
+        from kiln.server import _watchers, watch_print, watch_print_status
 
         adapter = mock.MagicMock(spec=PrinterAdapter)
         adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.PAUSED)
         adapter.get_job.return_value = JobProgress(completion=50.0)
         adapter.capabilities = PrinterCapabilities(can_snapshot=False)
 
-        with mock.patch.object(_registry, 'get', return_value=adapter):
+        with mock.patch("kiln.server._get_registry", return_value=self._make_registry(adapter)):
             result = watch_print(printer_name="test", poll_interval=1, timeout=60)
         assert result["success"] is True
         watch_id = result["watch_id"]
@@ -274,14 +284,14 @@ class TestWatchPrintTool:
 
     def test_idle_with_no_active_job_returns_no_active_print(self) -> None:
         from kiln.printers.base import JobProgress, PrinterAdapter, PrinterCapabilities, PrinterState, PrinterStatus
-        from kiln.server import _registry, watch_print
+        from kiln.server import watch_print
 
         adapter = mock.MagicMock(spec=PrinterAdapter)
         adapter.get_state.return_value = PrinterState(connected=True, state=PrinterStatus.IDLE)
         adapter.get_job.return_value = JobProgress()  # No active job (completion is None)
         adapter.capabilities = PrinterCapabilities(can_snapshot=False)
 
-        with mock.patch.object(_registry, 'get', return_value=adapter):
+        with mock.patch("kiln.server._get_registry", return_value=self._make_registry(adapter)):
             result = watch_print(printer_name="test")
         assert result["outcome"] == "no_active_print"
 
@@ -522,6 +532,11 @@ class TestStopWatchPrintTool:
 class TestWatchPrintCancelAt:
     """Tests for the cancel_at_percent feature of watch_print."""
 
+    def _make_registry(self, adapter: mock.MagicMock) -> mock.MagicMock:
+        reg = mock.MagicMock()
+        reg.get.return_value = adapter
+        return reg
+
     def test_cancel_at_triggers_auto_cancel(self) -> None:
         """Watcher should auto-cancel when completion >= cancel_at_percent."""
         from kiln.printers.base import (
@@ -531,7 +546,7 @@ class TestWatchPrintCancelAt:
             PrinterState,
             PrinterStatus,
         )
-        from kiln.server import _registry, _watchers, watch_print, watch_print_status
+        from kiln.server import _watchers, watch_print, watch_print_status
 
         adapter = mock.MagicMock(spec=PrinterAdapter)
         # Simulate: first poll at 45%, second at 52%
@@ -548,7 +563,7 @@ class TestWatchPrintCancelAt:
             to_dict=lambda: {"status": "ok"},
         )
 
-        with mock.patch.object(_registry, "get", return_value=adapter):
+        with mock.patch("kiln.server._get_registry", return_value=self._make_registry(adapter)):
             result = watch_print(
                 printer_name="test",
                 poll_interval=1,
@@ -579,7 +594,7 @@ class TestWatchPrintCancelAt:
             PrinterState,
             PrinterStatus,
         )
-        from kiln.server import _registry, _watchers, watch_print
+        from kiln.server import _watchers, watch_print
 
         adapter = mock.MagicMock(spec=PrinterAdapter)
         # Simulate print completing normally
@@ -591,7 +606,7 @@ class TestWatchPrintCancelAt:
         adapter.get_job.return_value = JobProgress(completion=100.0)
         adapter.capabilities = PrinterCapabilities(can_snapshot=False)
 
-        with mock.patch.object(_registry, "get", return_value=adapter):
+        with mock.patch("kiln.server._get_registry", return_value=self._make_registry(adapter)):
             result = watch_print(
                 printer_name="test",
                 poll_interval=1,
@@ -630,7 +645,7 @@ class TestWatchPrintCancelAt:
             PrinterState,
             PrinterStatus,
         )
-        from kiln.server import _registry, _watchers, watch_print, watch_print_status
+        from kiln.server import _watchers, watch_print, watch_print_status
 
         adapter = mock.MagicMock(spec=PrinterAdapter)
         adapter.get_state.return_value = PrinterState(
@@ -643,7 +658,7 @@ class TestWatchPrintCancelAt:
             to_dict=lambda: {"status": "ok"},
         )
 
-        with mock.patch.object(_registry, "get", return_value=adapter):
+        with mock.patch("kiln.server._get_registry", return_value=self._make_registry(adapter)):
             result = watch_print(
                 printer_name="test",
                 poll_interval=1,
@@ -669,6 +684,11 @@ class TestWatchPrintCancelAt:
 class TestCameraGroundTruth:
     """Tests for camera-based telemetry mismatch detection in _PrintWatcher."""
 
+    def _make_registry(self, adapter: mock.MagicMock) -> mock.MagicMock:
+        reg = mock.MagicMock()
+        reg.get.return_value = adapter
+        return reg
+
     def test_prev_snapshot_hash_initialized_none(self) -> None:
         from kiln.printers.base import PrinterAdapter
         from kiln.server import _PrintWatcher
@@ -690,7 +710,7 @@ class TestCameraGroundTruth:
             PrinterState,
             PrinterStatus,
         )
-        from kiln.server import _registry, _watchers, watch_print, watch_print_status
+        from kiln.server import _watchers, watch_print, watch_print_status
 
         # Two different images → camera_changed should be True on second
         img1 = b"\x89PNG" + b"\x00" * 200
@@ -711,7 +731,7 @@ class TestCameraGroundTruth:
         adapter.capabilities = PrinterCapabilities(can_snapshot=True)
         adapter.get_snapshot.side_effect = [img1, img2]
 
-        with mock.patch.object(_registry, "get", return_value=adapter):
+        with mock.patch("kiln.server._get_registry", return_value=self._make_registry(adapter)):
             result = watch_print(
                 printer_name="test",
                 poll_interval=1,
