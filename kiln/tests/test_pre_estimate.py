@@ -29,6 +29,7 @@ from kiln.pre_estimate import (
     _resolve_template_dimensions,
     estimate_from_dimensions,
     estimate_from_template,
+    list_addons,
 )
 
 # ---------------------------------------------------------------------------
@@ -757,3 +758,264 @@ class TestRealisticScenarios:
             printer_id="bambu_a1",
         )
         assert est.estimated_time_seconds < 3600  # under 1 hour
+
+
+# ---------------------------------------------------------------------------
+# Multi-material add-on system
+# ---------------------------------------------------------------------------
+
+
+class TestListAddons:
+    """Tests for list_addons() — catalog of available add-ons."""
+
+    def test_returns_all_addons(self):
+        addons = list_addons()
+        assert len(addons) >= 5
+        ids = {a["id"] for a in addons}
+        assert "creality_cfs" in ids
+        assert "mosaic_palette3" in ids
+        assert "coprint_kcm" in ids
+        assert "chameleon_mk4" in ids
+        assert "elegoo_canvas" in ids
+
+    def test_addon_has_required_fields(self):
+        for addon in list_addons():
+            assert "id" in addon
+            assert "display_name" in addon
+            assert "tool_change_seconds" in addon
+            assert "tool_changer" in addon
+            assert "max_colors" in addon
+            assert addon["tool_change_seconds"] > 0
+
+    def test_filter_by_compatible_printer_k1(self):
+        addons = list_addons(printer_id="k1")
+        ids = {a["id"] for a in addons}
+        # CFS is K1-specific, palette + chameleon are universal
+        assert "creality_cfs" in ids
+        assert "mosaic_palette3" in ids
+        assert "chameleon_mk4" in ids
+
+    def test_filter_excludes_incompatible(self):
+        addons = list_addons(printer_id="ender3")
+        ids = {a["id"] for a in addons}
+        # CFS is K1-only, CANVAS is Centauri-only
+        assert "creality_cfs" not in ids
+        assert "elegoo_canvas" not in ids
+        # Universal add-ons should still be present
+        assert "mosaic_palette3" in ids
+        assert "chameleon_mk4" in ids
+
+    def test_klipper_addons_for_klipper_printer(self):
+        addons = list_addons(printer_id="voron_2")
+        ids = {a["id"] for a in addons}
+        assert "coprint_kcm" in ids  # Klipper-only, Voron is Klipper
+
+    def test_klipper_addons_excluded_for_non_klipper(self):
+        addons = list_addons(printer_id="ender3")
+        ids = {a["id"] for a in addons}
+        assert "coprint_kcm" not in ids  # Ender 3 is not Klipper
+
+    def test_no_filter_returns_all(self):
+        all_addons = list_addons()
+        filtered = list_addons(printer_id="k1")
+        assert len(all_addons) >= len(filtered)
+
+
+class TestGetPrinterToolChangeWithAddon:
+    """Tests for _get_printer_tool_change() with add-on overrides."""
+
+    def test_cfs_overrides_k1_default(self):
+        tc = _get_printer_tool_change("k1", tool_changer_addon="creality_cfs")
+        assert tc["tool_changer"] == "cfs"
+        assert tc["has_auto_tool_change"] is True
+        assert tc["addon"] == "creality_cfs"
+        assert tc["max_colors"] == 16
+
+    def test_palette_works_with_any_printer(self):
+        tc = _get_printer_tool_change("ender3", tool_changer_addon="mosaic_palette3")
+        assert tc["tool_changer"] == "palette"
+        assert tc["has_auto_tool_change"] is True
+        assert tc["addon"] == "mosaic_palette3"
+
+    def test_kcm_works_with_klipper_printer(self):
+        tc = _get_printer_tool_change("voron_2", tool_changer_addon="coprint_kcm")
+        assert tc["tool_changer"] == "kcm"
+        assert tc["has_auto_tool_change"] is True
+
+    def test_kcm_rejects_non_klipper_printer(self):
+        with pytest.raises(ValueError, match="Klipper"):
+            _get_printer_tool_change("ender3", tool_changer_addon="coprint_kcm")
+
+    def test_cfs_rejects_non_k1_printer(self):
+        with pytest.raises(ValueError, match="not compatible"):
+            _get_printer_tool_change("ender3", tool_changer_addon="creality_cfs")
+
+    def test_canvas_works_with_centauri(self):
+        tc = _get_printer_tool_change(
+            "elegoo_centauri_carbon", tool_changer_addon="elegoo_canvas",
+        )
+        assert tc["tool_changer"] == "canvas"
+        assert tc["has_auto_tool_change"] is True
+
+    def test_chameleon_universal(self):
+        tc = _get_printer_tool_change("prusa_mini", tool_changer_addon="chameleon_mk4")
+        assert tc["tool_changer"] == "chameleon"
+        assert tc["addon"] == "chameleon_mk4"
+        assert tc["max_colors"] == 4
+
+    def test_unknown_addon_returns_builtin(self):
+        """Unknown add-on ID falls back to the printer's built-in data."""
+        tc = _get_printer_tool_change("bambu_a1", tool_changer_addon="nonexistent_xyz")
+        # Should fall back to AMS Lite since addon wasn't found
+        assert tc["tool_changer"] == "ams_lite"
+        assert tc["addon"] is None
+
+    def test_no_addon_returns_builtin(self):
+        tc = _get_printer_tool_change("bambu_a1", tool_changer_addon=None)
+        assert tc["tool_changer"] == "ams_lite"
+        assert tc["addon"] is None
+
+    def test_addon_display_name_present(self):
+        tc = _get_printer_tool_change("k1", tool_changer_addon="creality_cfs")
+        assert "Creality CFS" in tc["addon_display_name"]
+
+
+class TestEstimateWithAddon:
+    """Tests for estimate_from_dimensions with tool_changer_addon."""
+
+    def test_k1_with_cfs_two_color(self):
+        est = estimate_from_dimensions(
+            100, 100, 15,
+            materials=["PLA", "PLA"],
+            printer_id="k1",
+            tool_changer_addon="creality_cfs",
+        )
+        assert est.tool_change_type == "cfs"
+        assert est.tool_changer_addon == "creality_cfs"
+        assert est.tool_changes > 0
+        assert est.tool_change_time_seconds > 0
+        assert est.max_colors == 16
+
+    def test_k1_without_addon_is_manual(self):
+        """K1 with no add-on should fall back to manual M600."""
+        est = estimate_from_dimensions(
+            100, 100, 15,
+            materials=["PLA", "PLA"],
+            printer_id="k1",
+        )
+        assert est.tool_change_type == "manual"
+        assert est.tool_changer_addon is None
+
+    def test_cfs_faster_than_manual(self):
+        """CFS add-on should be faster than manual M600 swaps."""
+        est_addon = estimate_from_dimensions(
+            100, 100, 15,
+            materials=["PLA", "PLA"],
+            printer_id="k1",
+            tool_changer_addon="creality_cfs",
+        )
+        est_manual = estimate_from_dimensions(
+            100, 100, 15,
+            materials=["PLA", "PLA"],
+            printer_id="k1",
+        )
+        assert est_addon.tool_change_time_seconds < est_manual.tool_change_time_seconds
+
+    def test_palette_with_ender3(self):
+        """Mosaic Palette should work with Ender 3 (universal)."""
+        est = estimate_from_dimensions(
+            100, 100, 15,
+            materials=["PLA", "PLA"],
+            printer_id="ender3",
+            tool_changer_addon="mosaic_palette3",
+        )
+        assert est.tool_change_type == "palette"
+        assert est.tool_changer_addon == "mosaic_palette3"
+        assert est.tool_change_time_seconds > 0
+
+    def test_palette_fastest_addon(self):
+        """Palette should be the fastest add-on (pre-splicing)."""
+        est_palette = estimate_from_dimensions(
+            100, 100, 15,
+            materials=["PLA", "PLA"],
+            printer_id="ender3",
+            tool_changer_addon="mosaic_palette3",
+        )
+        est_chameleon = estimate_from_dimensions(
+            100, 100, 15,
+            materials=["PLA", "PLA"],
+            printer_id="ender3",
+            tool_changer_addon="chameleon_mk4",
+        )
+        assert est_palette.tool_change_time_seconds < est_chameleon.tool_change_time_seconds
+
+    def test_kcm_with_neptune4(self):
+        """KCM add-on should work with Neptune 4 (Klipper)."""
+        est = estimate_from_dimensions(
+            100, 100, 15,
+            materials=["PLA", "PLA"],
+            printer_id="elegoo_neptune4",
+            tool_changer_addon="coprint_kcm",
+        )
+        assert est.tool_change_type == "kcm"
+        assert est.tool_changer_addon == "coprint_kcm"
+
+    def test_incompatible_addon_raises(self):
+        """CFS with Ender 3 should raise."""
+        with pytest.raises(ValueError, match="not compatible"):
+            estimate_from_dimensions(
+                100, 100, 15,
+                materials=["PLA", "PLA"],
+                printer_id="ender3",
+                tool_changer_addon="creality_cfs",
+            )
+
+    def test_single_material_ignores_addon(self):
+        """Single-material print shouldn't use the add-on."""
+        est = estimate_from_dimensions(
+            100, 100, 15,
+            materials=["PLA"],
+            printer_id="k1",
+            tool_changer_addon="creality_cfs",
+        )
+        assert est.tool_changes == 0
+        assert est.tool_changer_addon is None
+
+    def test_color_capacity_warning(self):
+        """Using more colors than the add-on supports should warn."""
+        est = estimate_from_dimensions(
+            100, 100, 15,
+            materials=["PLA"] * 5,  # 5 colors
+            material_fractions=[0.5, 0.15, 0.15, 0.1, 0.1],
+            printer_id="ender3",
+            tool_changer_addon="chameleon_mk4",  # max 4 colors
+        )
+        assert any("max 4 colors" in w for w in est.warnings)
+
+    def test_addon_in_serialized_output(self):
+        """Add-on info should appear in to_dict() output."""
+        est = estimate_from_dimensions(
+            100, 100, 15,
+            materials=["PLA", "PLA"],
+            printer_id="k1",
+            tool_changer_addon="creality_cfs",
+        )
+        d = est.to_dict()
+        assert d["tool_changer_addon"] == "creality_cfs"
+        assert d["tool_changer_addon_name"] is not None
+        assert d["max_colors"] == 16
+
+
+class TestEstimateFromTemplateWithAddon:
+    """Tests for estimate_from_template with tool_changer_addon."""
+
+    def test_template_with_addon(self):
+        est = estimate_from_template(
+            "phone_stand",
+            materials=["PLA", "PLA"],
+            printer_id="k1",
+            tool_changer_addon="creality_cfs",
+        )
+        assert est.tool_change_type == "cfs"
+        assert est.tool_changer_addon == "creality_cfs"
+        assert est.tool_changes > 0

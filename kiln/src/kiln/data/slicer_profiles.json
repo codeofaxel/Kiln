@@ -1,8 +1,56 @@
 {
   "_meta": {
-    "version": "1.0.0",
-    "description": "Bundled PrusaSlicer/OrcaSlicer settings keyed by printer_id. Each profile contains INI-style key-value pairs that can be written to a temporary .ini file and passed to the slicer via --load.",
-    "updated": "2025-02-11"
+    "version": "1.1.0",
+    "description": "Bundled PrusaSlicer/OrcaSlicer settings keyed by printer_id. Each profile contains INI-style key-value pairs that can be written to a temporary .ini file and passed to the slicer via --load. Also includes multi-material add-on definitions under _multi_material_addons.",
+    "updated": "2026-04-09"
+  },
+  "_multi_material_addons": {
+    "_description": "Optional multi-material add-on systems that can be attached to printers without built-in tool changers. Each add-on overrides the printer's default tool_change data when specified via tool_changer_addon parameter.",
+    "creality_cfs": {
+      "display_name": "Creality CFS (Creality Filament System)",
+      "tool_change_seconds": 38,
+      "tool_changer": "cfs",
+      "max_colors": 16,
+      "compatible_printers": ["k1"],
+      "requires_klipper": false,
+      "notes": "Creality's proprietary multi-color system for K1 series. 16-color capacity with RFID filament detection and external cutter. Requires Creality Print slicer integration and CFS firmware. Source: Creality CFS product specs + community benchmarks (2025)."
+    },
+    "mosaic_palette3": {
+      "display_name": "Mosaic Palette 3 Pro",
+      "tool_change_seconds": 28,
+      "tool_changer": "palette",
+      "max_colors": 8,
+      "compatible_printers": ["_universal"],
+      "requires_klipper": false,
+      "notes": "Pre-splicing system — filament is joined upstream before reaching the nozzle, so actual print pause is near-zero. 28s is the splice time; purge tower extrusion adds wall-clock time at print speed. Works with virtually any single-extruder FDM printer. Source: Mosaic product specs + splice tuning documentation."
+    },
+    "coprint_kcm": {
+      "display_name": "Co Print KCM2",
+      "tool_change_seconds": 30,
+      "tool_changer": "kcm",
+      "max_colors": 8,
+      "compatible_printers": ["_klipper"],
+      "requires_klipper": true,
+      "notes": "Klipper Chroma Module — 4s mechanical swap via 8-in-1 hub, plus ~26s purge. Compatible with any Klipper printer (Neptune 4, Voron, Sovol SV08, etc). Requires hardware install + custom Klipper macros. Source: Co Print product page + community benchmarks."
+    },
+    "chameleon_mk4": {
+      "display_name": "3D Chameleon Mk4",
+      "tool_change_seconds": 60,
+      "tool_changer": "chameleon",
+      "max_colors": 4,
+      "compatible_printers": ["_universal"],
+      "requires_klipper": false,
+      "notes": "Open-source universal multi-material system. Button-pulse timing at ~1 inch/sec filament movement. 30-35s mechanical swap + purge. Slowest add-on but cheapest and most universal. Up to 4 colors. Source: 3D Chameleon FAQ + GitHub Mk4 documentation."
+    },
+    "elegoo_canvas": {
+      "display_name": "Elegoo CANVAS",
+      "tool_change_seconds": 70,
+      "tool_changer": "canvas",
+      "max_colors": 4,
+      "compatible_printers": ["elegoo_centauri_carbon"],
+      "requires_klipper": false,
+      "notes": "Integrated multi-color system for Elegoo Centauri Carbon 2 Combo. Not a retrofit add-on — built into the CC2 Combo variant. 70s average per color change. RFID filament detection. Source: NotebookCheck CC2 review (Jan 2026)."
+    }
   },
   "default": {
     "display_name": "Generic FDM Defaults",
