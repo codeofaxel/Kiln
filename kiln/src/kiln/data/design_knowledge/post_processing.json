@@ -1569,5 +1569,67 @@
         "tradeoffs": "Long anneal time required (2-4 hours). Modest strength and stiffness improvement. No chemical smoothing options exist for PP — acetone, IPA, and other common solvents do not dissolve polypropylene."
       }
     ]
+  },
+  "pvb": {
+    "techniques": [
+      {
+        "name": "IPA Vapor Smoothing",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "isopropyl alcohol (IPA, 90%+ concentration)",
+          "airtight glass or metal container",
+          "wire rack or hook to suspend part",
+          "nitrile gloves",
+          "respirator"
+        ],
+        "procedure": "Pour a shallow pool of IPA (1-2cm deep) into the bottom of an airtight container. Suspend the part on a wire rack above the liquid — the part must not touch the IPA. Seal the container and leave at room temperature for 30-60 minutes. Check periodically — PVB dissolves in IPA, so over-exposure will erode fine details. Remove part and let dry in open air for 1-2 hours.",
+        "result": "Glossy, smooth, semi-transparent finish with layer lines fully dissolved. The signature post-process for PVB — achieves results comparable to acetone-smoothed ABS but with a safer solvent.",
+        "safety_notes": "IPA vapor is flammable — no open flames or sparks. Work in a well-ventilated area or fume hood. Wear nitrile gloves and a respirator. Do not heat the IPA to accelerate the process — fire risk."
+      },
+      {
+        "name": "Manual IPA Brushing",
+        "difficulty": "easy",
+        "tools_needed": [
+          "isopropyl alcohol (IPA, 90%+ concentration)",
+          "soft brush (natural bristle or foam)",
+          "nitrile gloves"
+        ],
+        "procedure": "Dip a soft brush in IPA and apply to targeted areas where smoothing is desired. Work quickly — PVB dissolves in IPA, so prolonged contact will erode the surface. Apply in thin, even strokes. Let dry for 30-60 minutes between passes. 2-3 passes typically produce a smooth, glossy finish on the treated areas.",
+        "result": "Targeted smoothing of specific surfaces without affecting the entire part. Useful for smoothing visible faces while preserving dimensional accuracy on mating surfaces.",
+        "safety_notes": "Wear nitrile gloves. Work in a ventilated area. IPA evaporates quickly but is flammable."
+      },
+      {
+        "name": "Sanding",
+        "difficulty": "easy",
+        "tools_needed": [
+          "320-grit sandpaper",
+          "600-grit sandpaper",
+          "800-grit sandpaper",
+          "water for wet sanding"
+        ],
+        "procedure": "Start at 320 grit to remove visible layer lines. Progress to 600, then 800 for a smooth finish. Wet sand at 600+ grit to reduce dust. PVB sands easily but is softer than PLA — use light pressure to avoid gouging.",
+        "result": "Smooth matte finish. Can be followed by IPA vapor smoothing for a combined sanded-then-smoothed finish that rivals injection molding.",
+        "safety_notes": "Wear a dust mask. PVB dust is not toxic but irritates lungs."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Filler primer (Rust-Oleum 2-in-1, Tamiya Surface Primer)",
+      "paint_types": [
+        "spray_paint",
+        "acrylic",
+        "enamel"
+      ],
+      "notes": "PVB takes paint well after sanding and primer, similar to PLA. However, IPA vapor smoothing alone often produces a finish good enough that painting is unnecessary. If painting over a vapor-smoothed surface, lightly scuff with 800-grit first for primer adhesion."
+    },
+    "strengthening": [
+      {
+        "method": "IPA Vapor Smoothing (Structural)",
+        "applicable": true,
+        "procedure": "IPA vapor smoothing slightly increases surface density by re-flowing the outer layer, which can seal micro-voids and improve water resistance. However, it does not significantly improve bulk mechanical properties.",
+        "strength_gain_pct": 5,
+        "tradeoffs": "Marginal strength improvement. The primary benefit is surface quality, not structural. Over-exposure to IPA vapors erodes detail and can weaken thin walls. PVB is inherently weaker than PLA — no post-process will close that gap."
+      }
+    ]
   }
 }

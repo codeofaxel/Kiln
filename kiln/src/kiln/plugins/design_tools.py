@@ -1458,6 +1458,55 @@ class _DesignToolsPlugin:
                 return {"success": False, "error": str(exc)}
 
         # ---------------------------------------------------------------
+        # Brand filament profiles
+        # ---------------------------------------------------------------
+
+        @mcp.tool()
+        def get_brand_filament_profile(profile_id: str) -> dict:
+            """Get printing parameters for a specific brand filament.
+
+            Returns brand-specific nozzle temp, bed temp, speed, density,
+            drying requirements, and hardware requirements (hardened nozzle,
+            enclosure, AMS compatibility).
+
+            Args:
+                profile_id: Brand filament ID (e.g. "bambu_pla_basic",
+                    "prusament_petg", "polymaker_polyterra_pla")
+            """
+            from kiln.design_intelligence import get_brand_filament_profile as _get
+
+            profile = _get(profile_id)
+            if profile is None:
+                return {"error": f"Brand filament profile '{profile_id}' not found", "status": "error"}
+            return {"status": "success", "data": profile.to_dict()}
+
+        @mcp.tool()
+        def list_brand_filament_profiles(
+            brand: str = "",
+            parent_material: str = "",
+        ) -> dict:
+            """List available brand-specific filament profiles.
+
+            Returns all known brand filament profiles, optionally filtered
+            by brand name or parent material type.
+
+            Args:
+                brand: Filter by brand (e.g. "Bambu", "Prusament", "Polymaker")
+                parent_material: Filter by parent material (e.g. "pla", "petg", "abs")
+            """
+            from kiln.design_intelligence import list_brand_filament_profiles as _list
+
+            profiles = _list(
+                brand=brand or None,
+                parent_material=parent_material or None,
+            )
+            return {
+                "status": "success",
+                "count": len(profiles),
+                "data": [p.to_dict() for p in profiles],
+            }
+
+        # ---------------------------------------------------------------
         # Template decoration profiles and design styles are Pro features.
         # See kiln_pro/plugins/template_decoration_tools.py and
         # kiln_pro/plugins/design_styles_tools.py.

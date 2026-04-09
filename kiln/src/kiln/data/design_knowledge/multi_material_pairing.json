@@ -74,6 +74,13 @@
       "dissolution_method": "Submerge in warm water (40-50C) for 4-12 hours.",
       "interface_adhesion": "moderate",
       "notes": "PVA works as soluble support for TPU but the interface can bond too aggressively — PVA tends to embed into the soft TPU surface. Use 2-3 interface layers with reduced density. Dissolution may leave a rough texture on the TPU contact surface that needs trimming."
+    },
+    {
+      "model_material": "pvb",
+      "support_material": "pva",
+      "dissolution_method": "Submerge in warm water (40-50C) for 2-12 hours. Agitation speeds dissolution.",
+      "interface_adhesion": "excellent",
+      "notes": "PVA is an excellent soluble support for PVB. Both print at similar temperatures (190-220C) so thermal stress on PVA is minimal. PVA dissolves cleanly in water without affecting PVB. Keep both filaments bone-dry — both are extremely hygroscopic."
     }
   ],
   "co_print_compatibility": {
@@ -122,6 +129,11 @@
         "compatible": false,
         "interface_adhesion": "none",
         "notes": "No adhesion. PP's low surface energy prevents chemical bonding with PLA. Parts delaminate immediately at the interface."
+      },
+      "pvb": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "Same temperature range (190-220C). PLA as structural core with PVB as IPA-smoothable decorative shell is the ideal pairing. Good chemical bonding at the interface."
       }
     },
     "abs": {
@@ -344,6 +356,38 @@
         "compatible": false,
         "interface_adhesion": "none",
         "notes": "No adhesion. PP's low surface energy prevents chemical bonding with Polycarbonate. Parts delaminate immediately at the interface."
+      }
+    },
+    "pvb": {
+      "pla": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "Same temperature range (190-220C). PVB as a decorative shell with PLA as the structural core is the ideal pairing — PVB provides IPA-smoothable surfaces while PLA provides strength. Good chemical bonding at the interface."
+      },
+      "pla_plus": {
+        "compatible": true,
+        "interface_adhesion": "good",
+        "notes": "Same temperature range. PLA Plus provides better impact resistance as the structural core under a PVB decorative shell."
+      },
+      "pva": {
+        "compatible": true,
+        "interface_adhesion": "excellent",
+        "notes": "PVA is an excellent soluble support for PVB. Both print at similar temperatures. PVA dissolves in water without affecting PVB. Keep both filaments dry — both are extremely hygroscopic."
+      },
+      "petg": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Different polymer families with incompatible shrinkage rates. PETG prints 20-30C hotter than PVB's ideal range, risking PVB degradation at the interface."
+      },
+      "abs": {
+        "compatible": false,
+        "interface_adhesion": "poor",
+        "notes": "Very different print temps (60C+ gap). ABS requires enclosure and high bed temps that can warp PVB. Do not combine."
+      },
+      "tpu": {
+        "compatible": true,
+        "interface_adhesion": "moderate",
+        "notes": "Works for soft-touch grips on PVB parts. Adhesion is mechanical rather than chemical — use interlocking geometry at the interface."
       }
     }
   },

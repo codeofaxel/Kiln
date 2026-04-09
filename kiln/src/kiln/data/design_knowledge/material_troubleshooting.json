@@ -4065,5 +4065,140 @@
       "PP is ideal for living hinges, chemical-resistant containers, food-safe applications, and flexible snap-fit parts. Its fatigue resistance is exceptional.",
       "Post-processing is very difficult \u2014 PP resists paint, glue, and solvents. Flame treatment or PP-specific adhesion promoters are needed for bonding or painting."
     ]
+  },
+  "pvb": {
+    "common_issues": [
+      {
+        "symptom": "Stringing between features",
+        "severity": "moderate",
+        "root_cause": "PVB is extremely hygroscopic. Absorbed moisture vaporizes during extrusion, lowering melt viscosity and causing persistent stringing and oozing even at correct temperatures.",
+        "fixes": [
+          {
+            "action": "Dry filament at 50C for 6-8 hours immediately before printing",
+            "priority": 1
+          },
+          {
+            "action": "Lower nozzle temperature by 5-10C (try 195-205C)",
+            "priority": 2
+          },
+          {
+            "action": "Increase retraction distance to 5-6mm at 40mm/s for Bowden, 1.5-2mm at 30mm/s for direct drive",
+            "priority": 3
+          },
+          {
+            "action": "Print from a dry box with active desiccation to prevent re-absorption during the print",
+            "priority": 4
+          }
+        ],
+        "prevention": "Always store PVB in a vacuum-sealed bag with desiccant. Print from a dry box if ambient humidity exceeds 40%. PVB absorbs moisture faster than PLA."
+      },
+      {
+        "symptom": "Poor layer adhesion and delamination",
+        "severity": "major",
+        "root_cause": "PVB has inherently weaker interlayer bonding than PLA due to its polymer chemistry. Insufficient nozzle temperature or excessive cooling worsens the problem significantly.",
+        "fixes": [
+          {
+            "action": "Increase nozzle temperature by 5-10C (try 210-220C)",
+            "priority": 1
+          },
+          {
+            "action": "Reduce part cooling fan to 30-50% \u2014 PVB needs slower cooling for layer fusion",
+            "priority": 2
+          },
+          {
+            "action": "Reduce print speed to 30-40mm/s to increase heat input per layer",
+            "priority": 3
+          },
+          {
+            "action": "Increase line width to 120% of nozzle diameter for more contact area between layers",
+            "priority": 4
+          }
+        ],
+        "prevention": "PVB will never match PLA's layer adhesion strength. Design for it \u2014 use thicker walls (4+ perimeters) and avoid thin vertical features that rely on interlayer strength."
+      },
+      {
+        "symptom": "Warping on cold beds",
+        "severity": "moderate",
+        "root_cause": "PVB shrinks more than PLA during cooling. Bed temperatures below 70C allow the base to cool too quickly, causing corners and edges to lift.",
+        "fixes": [
+          {
+            "action": "Increase bed temperature to 70-80C",
+            "priority": 1
+          },
+          {
+            "action": "Apply glue stick to build plate for additional adhesion",
+            "priority": 2
+          },
+          {
+            "action": "Add a brim of 8-10mm width in slicer",
+            "priority": 3
+          },
+          {
+            "action": "Reduce part cooling fan to 30-50% for the first 10 layers",
+            "priority": 4
+          }
+        ],
+        "prevention": "Use a PEI or textured build surface at 75C. Avoid drafty environments. PVB warps more than PLA but less than ABS."
+      },
+      {
+        "symptom": "Bubbling and popping during extrusion",
+        "severity": "major",
+        "root_cause": "Moisture absorbed by the filament turns to steam inside the hotend, creating visible bubbles, audible popping sounds, and rough surface texture.",
+        "fixes": [
+          {
+            "action": "Dry filament at 50C for 6-8 hours \u2014 this is almost always the sole cause",
+            "priority": 1
+          },
+          {
+            "action": "Print from a dry box to prevent re-absorption during long prints",
+            "priority": 2
+          },
+          {
+            "action": "Lower nozzle temperature by 5C to reduce steam pressure if drying is not immediately possible",
+            "priority": 3
+          }
+        ],
+        "prevention": "PVB is one of the most hygroscopic FDM filaments. Never leave it exposed to air for more than a few hours. A dry box with active desiccation is strongly recommended for reliable results."
+      },
+      {
+        "symptom": "Cloudy or hazy transparency instead of clear",
+        "severity": "moderate",
+        "root_cause": "PVB can achieve near-transparent prints, but wrong nozzle temperature, wet filament, or excessive cooling creates micro-voids and crystallization that scatter light and produce a cloudy, frosted appearance.",
+        "fixes": [
+          {
+            "action": "Dry filament thoroughly \u2014 moisture is the most common cause of cloudiness",
+            "priority": 1
+          },
+          {
+            "action": "Increase nozzle temperature to 215-220C to improve layer fusion and reduce micro-voids",
+            "priority": 2
+          },
+          {
+            "action": "Reduce part cooling fan to 20-30% to allow layers to fuse more completely",
+            "priority": 3
+          },
+          {
+            "action": "Print at 0.1mm layer height or lower \u2014 thinner layers reduce light scattering at layer boundaries",
+            "priority": 4
+          }
+        ],
+        "prevention": "For maximum transparency: bone-dry filament, 0.1mm layers, minimal cooling, and IPA vapor smoothing as a post-process."
+      }
+    ],
+    "storage_requirements": {
+      "humidity_sensitive": true,
+      "max_humidity_pct": 15,
+      "storage_method": "Vacuum-sealed bag with desiccant or active dry box. PVB absorbs moisture faster than PLA \u2014 never leave exposed to air for more than 2-3 hours.",
+      "drying_temp_c": 50,
+      "drying_time_hours": 6
+    },
+    "break_in_tips": [
+      "Start with a nozzle temperature of 200-215C and bed at 70-80C. Most PVB brands print well in this range.",
+      "Dry the filament before your first print \u2014 PVB ships in sealed bags but may have absorbed moisture in transit.",
+      "Reduce part cooling fan to 30-50%. PVB needs less cooling than PLA for good layer adhesion.",
+      "Print a temperature tower (195-225C in 5C steps) to find the sweet spot between transparency and stringing.",
+      "PVB's killer feature is IPA vapor smoothing. Print your first test piece and try a 30-minute IPA vapor bath to see the effect.",
+      "PVB is weaker than PLA \u2014 design accordingly. Use thicker walls and more infill for structural parts."
+    ]
   }
 }

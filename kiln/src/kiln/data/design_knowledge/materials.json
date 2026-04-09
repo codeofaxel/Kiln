@@ -1,10 +1,10 @@
 {
   "_meta": {
-    "version": "1.1.0",
+    "version": "1.2.0",
     "domain": "fdm",
-    "description": "Mechanical, thermal, and chemical properties for FDM materials with design limits. Agent-consumable \u2014 structured for constraint reasoning, not human reference.",
+    "description": "Mechanical, thermal, and chemical properties for FDM materials with design limits. Includes brand-specific filament profiles with per-brand printing parameters. Agent-consumable — structured for constraint reasoning, not human reference.",
     "_data_quality": {
-      "last_audit_date": "2026-03-02",
+      "last_audit_date": "2026-04-09",
       "primary_sources": [
         "Bambu Lab filament datasheets (2024-2025)",
         "Prusament technical data sheets (2024)",
@@ -85,12 +85,80 @@
     "agent_guidance": [
       "DEFAULT RECOMMENDATION for beginners and when no specific requirements override it. Easiest to print, best surface finish, lowest cost.",
       "Z-axis (layer direction) is ALWAYS the weakest axis. Orient parts so primary loads are perpendicular to layer lines.",
-      "PLA creeps under sustained load \u2014 NOT suitable for shelf brackets, clamps, spring clips, or anything under constant mechanical stress.",
+      "PLA creeps under sustained load — NOT suitable for shelf brackets, clamps, spring clips, or anything under constant mechanical stress.",
       "Glass transition at 60C means PLA deforms in hot cars, near windows in direct sunlight, dishwashers, or near heat sources.",
       "Snap fits will break after 2-3 cycles. For anything that clips/unclips repeatedly, use PETG or Nylon.",
       "Good for: prototypes, display models, toys, cosplay, decorative objects, architectural models, teaching aids.",
       "Bad for: outdoor use, mechanical parts, anything near heat, anything under sustained load, anything that flexes."
-    ]
+    ],
+    "brand_profiles": {
+      "bambu_pla_basic": {
+        "brand": "Bambu Lab",
+        "product_name": "PLA Basic",
+        "nozzle_temp_range_c": [
+          190,
+          240
+        ],
+        "nozzle_temp_optimal_c": 220,
+        "bed_temp_range_c": [
+          40,
+          55
+        ],
+        "bed_temp_optimal_c": 55,
+        "max_volumetric_speed_mm3s": 21,
+        "density_g_cm3": 1.26,
+        "drying_temp_c": 45,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "notes": "Bambu's flagship PLA. AMS compatible.",
+        "source": "BambuStudio GitHub slicer profiles"
+      },
+      "prusament_pla": {
+        "brand": "Prusa Research",
+        "product_name": "Prusament PLA",
+        "nozzle_temp_range_c": [
+          200,
+          220
+        ],
+        "nozzle_temp_optimal_c": 210,
+        "bed_temp_range_c": [
+          40,
+          60
+        ],
+        "bed_temp_optimal_c": 60,
+        "max_print_speed_mms": 200,
+        "density_g_cm3": 1.24,
+        "drying_temp_c": 45,
+        "drying_time_hours": 6,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "notes": "Diameter tolerance ±0.02mm.",
+        "source": "Prusament technical data sheets"
+      },
+      "polymaker_polylite_pla": {
+        "brand": "Polymaker",
+        "product_name": "PolyLite PLA",
+        "nozzle_temp_range_c": [
+          190,
+          230
+        ],
+        "nozzle_temp_optimal_c": 205,
+        "bed_temp_range_c": [
+          25,
+          60
+        ],
+        "bed_temp_optimal_c": 40,
+        "max_print_speed_mms": 200,
+        "density_g_cm3": 1.17,
+        "drying_temp_c": 55,
+        "drying_time_hours": 6,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "source": "Polymaker technical data sheets"
+      }
+    }
   },
   "petg": {
     "display_name": "PETG (Polyethylene Terephthalate Glycol)",
@@ -161,12 +229,80 @@
       "THE WORKHORSE. When PLA isn't strong enough and you don't need an enclosure, PETG is the answer.",
       "Excellent layer adhesion makes it the best choice for watertight prints and functional parts under moderate stress.",
       "Higher elongation (23% vs PLA's 6%) means snap fits survive repeated use. Good for enclosures, clips, and latches.",
-      "Stringing is worse than PLA \u2014 increase retraction, reduce travel speed, or accept minor post-processing.",
+      "Stringing is worse than PLA — increase retraction, reduce travel speed, or accept minor post-processing.",
       "Slightly worse overhang performance than PLA. Design with 50-55 degree max overhangs or add supports.",
       "Food safe (PETG is the same polymer family as water bottles). Good for kitchen tools, containers, cookie cutters.",
       "Good for: functional parts, snap-fit enclosures, food-contact items, water-tight containers, outdoor-tolerant parts.",
       "Bad for: high-temp environments (> 65C), parts requiring high dimensional precision, cosmetic parts where stringing matters."
-    ]
+    ],
+    "brand_profiles": {
+      "bambu_petg_basic": {
+        "brand": "Bambu Lab",
+        "product_name": "PETG Basic",
+        "nozzle_temp_range_c": [
+          230,
+          270
+        ],
+        "nozzle_temp_optimal_c": 255,
+        "bed_temp_range_c": [
+          55,
+          70
+        ],
+        "bed_temp_optimal_c": 70,
+        "max_volumetric_speed_mm3s": 8,
+        "density_g_cm3": 1.25,
+        "drying_temp_c": 65,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "source": "BambuStudio GitHub slicer profiles"
+      },
+      "prusament_petg": {
+        "brand": "Prusa Research",
+        "product_name": "Prusament PETG",
+        "nozzle_temp_range_c": [
+          240,
+          260
+        ],
+        "nozzle_temp_optimal_c": 250,
+        "bed_temp_range_c": [
+          70,
+          90
+        ],
+        "bed_temp_optimal_c": 90,
+        "max_print_speed_mms": 200,
+        "density_g_cm3": 1.27,
+        "drying_temp_c": 55,
+        "drying_time_hours": 6,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "notes": "Low moisture absorption. Glue stick on smooth PEI.",
+        "source": "Prusament technical data sheets"
+      },
+      "polymaker_polylite_petg": {
+        "brand": "Polymaker",
+        "product_name": "PolyLite PETG",
+        "nozzle_temp_range_c": [
+          230,
+          240
+        ],
+        "nozzle_temp_optimal_c": 240,
+        "bed_temp_range_c": [
+          70,
+          80
+        ],
+        "bed_temp_optimal_c": 80,
+        "max_print_speed_mms": 50,
+        "density_g_cm3": 1.25,
+        "drying_temp_c": 65,
+        "drying_time_hours": 6,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "notes": "Narrow 10°C nozzle range. Fan OFF to 20%.",
+        "source": "Polymaker technical data sheets"
+      }
+    }
   },
   "abs": {
     "display_name": "ABS (Acrylonitrile Butadiene Styrene)",
@@ -235,14 +371,59 @@
     },
     "agent_guidance": [
       "REQUIRES ENCLOSURE. Do not recommend unless printer has an enclosed build chamber. Warping is severe without one.",
-      "Best impact resistance of common materials \u2014 LEGO is made from ABS. Good for parts that get dropped or hit.",
-      "Acetone smoothing is possible for cosmetic finish \u2014 dip or vapor smooth for a glossy, injection-molded look.",
-      "Emits fumes during printing \u2014 recommend ventilation. Not suitable for poorly ventilated spaces.",
-      "Higher heat resistance than PLA/PETG \u2014 survives in cars, near electronics, in warm environments.",
+      "Best impact resistance of common materials — LEGO is made from ABS. Good for parts that get dropped or hit.",
+      "Acetone smoothing is possible for cosmetic finish — dip or vapor smooth for a glossy, injection-molded look.",
+      "Emits fumes during printing — recommend ventilation. Not suitable for poorly ventilated spaces.",
+      "Higher heat resistance than PLA/PETG — survives in cars, near electronics, in warm environments.",
       "UV degrades ABS. For outdoor use, prefer ASA instead (same properties, UV stable).",
       "Good for: impact-resistant parts, automotive, enclosures, heat-tolerant fixtures, mechanical parts.",
       "Bad for: outdoor (UV), food contact, printers without enclosure, poorly ventilated rooms."
-    ]
+    ],
+    "brand_profiles": {
+      "bambu_abs": {
+        "brand": "Bambu Lab",
+        "product_name": "ABS",
+        "nozzle_temp_range_c": [
+          240,
+          280
+        ],
+        "nozzle_temp_optimal_c": 270,
+        "bed_temp_range_c": [
+          80,
+          90
+        ],
+        "bed_temp_optimal_c": 90,
+        "max_volumetric_speed_mm3s": 28.6,
+        "density_g_cm3": 1.04,
+        "drying_temp_c": 65,
+        "drying_time_hours": 12,
+        "enclosure_required": true,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "source": "BambuStudio GitHub slicer profiles"
+      },
+      "polymaker_polylite_abs": {
+        "brand": "Polymaker",
+        "product_name": "PolyLite ABS",
+        "nozzle_temp_range_c": [
+          245,
+          265
+        ],
+        "nozzle_temp_optimal_c": 255,
+        "bed_temp_range_c": [
+          90,
+          100
+        ],
+        "bed_temp_optimal_c": 100,
+        "max_print_speed_mms": 50,
+        "density_g_cm3": 1.12,
+        "drying_temp_c": 70,
+        "drying_time_hours": 6,
+        "enclosure_required": true,
+        "hardened_nozzle_required": false,
+        "source": "Polymaker technical data sheets"
+      }
+    }
   },
   "tpu": {
     "display_name": "TPU (Thermoplastic Polyurethane)",
@@ -313,9 +494,9 @@
       "THE FLEXIBLE MATERIAL. Use for anything that needs to bend, flex, compress, or absorb impact.",
       "Requires direct drive extruder for reliable printing. Bowden tube setups (like some Enders) will struggle or fail.",
       "Print SLOW (15-25 mm/s). Flexible filament buckles in the extruder at higher speeds.",
-      "Dimensional accuracy is poor \u2014 TPU squishes. Add 0.5mm tolerance on mating surfaces. Forget tight tolerances.",
-      "Living hinges are viable in TPU \u2014 one of the few FDM materials where a printed hinge lasts thousands of cycles.",
-      "Excellent for vibration damping \u2014 motor mounts, anti-vibration feet, shock absorbers.",
+      "Dimensional accuracy is poor — TPU squishes. Add 0.5mm tolerance on mating surfaces. Forget tight tolerances.",
+      "Living hinges are viable in TPU — one of the few FDM materials where a printed hinge lasts thousands of cycles.",
+      "Excellent for vibration damping — motor mounts, anti-vibration feet, shock absorbers.",
       "Good for: phone cases, gaskets, seals, flexible joints, vibration dampeners, shoe insoles, protective covers, grip surfaces.",
       "Bad for: structural parts, precise fitments, gears, anything requiring rigidity."
     ]
@@ -387,13 +568,81 @@
     },
     "agent_guidance": [
       "THE OUTDOOR MATERIAL. ABS but UV-stable. First choice for anything exposed to sunlight.",
-      "REQUIRES ENCLOSURE. Same warping tendency as ABS \u2014 enclosed build chamber is mandatory.",
-      "UV resistance is the key differentiator \u2014 parts hold color and strength for years in direct sunlight.",
-      "Same fume concerns as ABS \u2014 print with ventilation.",
+      "REQUIRES ENCLOSURE. Same warping tendency as ABS — enclosed build chamber is mandatory.",
+      "UV resistance is the key differentiator — parts hold color and strength for years in direct sunlight.",
+      "Same fume concerns as ABS — print with ventilation.",
       "Slightly better layer adhesion than ABS, slightly less impact resistance. Net win for most outdoor applications.",
       "Good for: garden fixtures, outdoor signs, planters, car accessories, weatherproof enclosures, exterior mounting hardware.",
-      "Bad for: indoor-only parts (use PETG instead \u2014 easier to print), food contact, printers without enclosure."
-    ]
+      "Bad for: indoor-only parts (use PETG instead — easier to print), food contact, printers without enclosure."
+    ],
+    "brand_profiles": {
+      "bambu_asa": {
+        "brand": "Bambu Lab",
+        "product_name": "ASA",
+        "nozzle_temp_range_c": [
+          240,
+          280
+        ],
+        "nozzle_temp_optimal_c": 270,
+        "bed_temp_range_c": [
+          90,
+          100
+        ],
+        "bed_temp_optimal_c": 100,
+        "max_volumetric_speed_mm3s": 18,
+        "density_g_cm3": 1.05,
+        "drying_temp_c": 65,
+        "drying_time_hours": 12,
+        "enclosure_required": true,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "source": "BambuStudio GitHub slicer profiles"
+      },
+      "prusament_asa": {
+        "brand": "Prusa Research",
+        "product_name": "Prusament ASA",
+        "nozzle_temp_range_c": [
+          250,
+          270
+        ],
+        "nozzle_temp_optimal_c": 260,
+        "bed_temp_range_c": [
+          105,
+          115
+        ],
+        "bed_temp_optimal_c": 110,
+        "max_print_speed_mms": 200,
+        "density_g_cm3": 1.07,
+        "drying_temp_c": 80,
+        "drying_time_hours": 4,
+        "enclosure_required": true,
+        "hardened_nozzle_required": false,
+        "notes": "Acetone-soluble. Contains styrene — ventilate.",
+        "source": "Prusament technical data sheets"
+      },
+      "polymaker_polylite_asa": {
+        "brand": "Polymaker",
+        "product_name": "PolyLite ASA",
+        "nozzle_temp_range_c": [
+          240,
+          260
+        ],
+        "nozzle_temp_optimal_c": 260,
+        "bed_temp_range_c": [
+          75,
+          95
+        ],
+        "bed_temp_optimal_c": 80,
+        "max_print_speed_mms": 200,
+        "density_g_cm3": 1.13,
+        "drying_temp_c": 70,
+        "drying_time_hours": 7,
+        "enclosure_required": true,
+        "hardened_nozzle_required": false,
+        "notes": "UV resistant. All-metal hotend recommended.",
+        "source": "Polymaker technical data sheets"
+      }
+    }
   },
   "nylon": {
     "display_name": "Nylon (PA6/PA12)",
@@ -462,11 +711,11 @@
     },
     "agent_guidance": [
       "THE ENGINEERING MATERIAL. Highest overall mechanical performance of common FDM materials.",
-      "REQUIRES ENCLOSURE AND DRY FILAMENT. Nylon absorbs moisture aggressively \u2014 must be dried before printing and ideally printed from a dry box.",
-      "Excellent fatigue resistance \u2014 gears, hinges, snap fits, anything with repeated mechanical cycles.",
-      "Living hinges are viable in Nylon \u2014 flex life in the tens of thousands of cycles.",
-      "Self-lubricating surface \u2014 excellent for gears, bearings, sliding surfaces, and bushings.",
-      "Dimensional accuracy suffers from moisture absorption \u2014 parts swell. Design with 0.3-0.5mm extra clearance on critical dimensions.",
+      "REQUIRES ENCLOSURE AND DRY FILAMENT. Nylon absorbs moisture aggressively — must be dried before printing and ideally printed from a dry box.",
+      "Excellent fatigue resistance — gears, hinges, snap fits, anything with repeated mechanical cycles.",
+      "Living hinges are viable in Nylon — flex life in the tens of thousands of cycles.",
+      "Self-lubricating surface — excellent for gears, bearings, sliding surfaces, and bushings.",
+      "Dimensional accuracy suffers from moisture absorption — parts swell. Design with 0.3-0.5mm extra clearance on critical dimensions.",
       "Chemical resistant to oils, greases, fuels, and many solvents. Good for automotive and industrial environments.",
       "Good for: gears, bearings, hinges, clips, jigs, fixtures, functional mechanical parts, tools, industrial prototypes.",
       "Bad for: watertight parts (moisture absorption), cosmetic-critical parts, beginners, printers without enclosure or dry storage."
@@ -540,13 +789,82 @@
     "agent_guidance": [
       "THE TOUGHEST MATERIAL. Bulletproof glass is made from polycarbonate. Highest impact resistance of any FDM material.",
       "REQUIRES HIGH-TEMP PRINTER (270-310C hotend, 100-120C bed) AND ENCLOSURE. Most consumer printers cannot print PC.",
-      "Highest heat deflection temp of common materials \u2014 survives 120C+ continuous service. Use near engines, electronics, heat sources.",
-      "110% elongation at break \u2014 nearly unbreakable in impact. Parts deform rather than shatter.",
-      "Warping is extreme \u2014 even with enclosure, large flat parts are challenging. Design with rounded corners, fillets, avoid large flat surfaces.",
-      "Absorbs moisture \u2014 dry before printing, print from dry box.",
+      "Highest heat deflection temp of common materials — survives 120C+ continuous service. Use near engines, electronics, heat sources.",
+      "110% elongation at break — nearly unbreakable in impact. Parts deform rather than shatter.",
+      "Warping is extreme — even with enclosure, large flat parts are challenging. Design with rounded corners, fillets, avoid large flat surfaces.",
+      "Absorbs moisture — dry before printing, print from dry box.",
       "Good for: safety equipment, high-temp fixtures, impact-resistant housings, industrial tooling, automotive under-hood parts.",
       "Bad for: beginners, printers without high-temp hotend + enclosure, cosmetic parts, cost-sensitive projects ($45+/kg)."
-    ]
+    ],
+    "brand_profiles": {
+      "bambu_pc": {
+        "brand": "Bambu Lab",
+        "product_name": "PC",
+        "nozzle_temp_range_c": [
+          260,
+          290
+        ],
+        "nozzle_temp_optimal_c": 280,
+        "bed_temp_range_c": [
+          100,
+          110
+        ],
+        "bed_temp_optimal_c": 110,
+        "max_volumetric_speed_mm3s": 18,
+        "density_g_cm3": 1.185,
+        "drying_temp_c": 65,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "notes": "Highest bed temp of any Bambu filament. Enclosure recommended in practice.",
+        "source": "BambuStudio GitHub slicer profiles"
+      },
+      "prusament_pc_blend": {
+        "brand": "Prusa Research",
+        "product_name": "Prusament PC Blend",
+        "nozzle_temp_range_c": [
+          265,
+          285
+        ],
+        "nozzle_temp_optimal_c": 275,
+        "bed_temp_range_c": [
+          100,
+          120
+        ],
+        "bed_temp_optimal_c": 115,
+        "max_print_speed_mms": 200,
+        "density_g_cm3": 1.22,
+        "drying_temp_c": 85,
+        "drying_time_hours": 5,
+        "enclosure_required": true,
+        "hardened_nozzle_required": false,
+        "notes": "Low hygroscopicity (0.13%). Glue stick required.",
+        "source": "Prusament technical data sheets"
+      },
+      "polymaker_polymax_pc": {
+        "brand": "Polymaker",
+        "product_name": "PolyMax PC",
+        "nozzle_temp_range_c": [
+          250,
+          270
+        ],
+        "nozzle_temp_optimal_c": 260,
+        "bed_temp_range_c": [
+          90,
+          105
+        ],
+        "bed_temp_optimal_c": 105,
+        "max_print_speed_mms": 200,
+        "density_g_cm3": 1.19,
+        "drying_temp_c": 75,
+        "drying_time_hours": 6,
+        "enclosure_required": true,
+        "hardened_nozzle_required": false,
+        "notes": "Post-print annealing recommended 90°C/2h. Magigoo PC for adhesion.",
+        "source": "Polymaker technical data sheets"
+      }
+    }
   },
   "cf_pla": {
     "display_name": "Carbon Fiber PLA",
@@ -615,20 +933,44 @@
     },
     "agent_guidance": [
       "STIFFEST PLA VARIANT. ~15% chopped carbon fiber increases rigidity by ~70% over standard PLA. Use when parts must resist deflection.",
-      "REQUIRES HARDENED STEEL NOZZLE. Carbon fiber is extremely abrasive \u2014 a brass nozzle will wear out in hours. Hardened steel or ruby nozzle mandatory.",
+      "REQUIRES HARDENED STEEL NOZZLE. Carbon fiber is extremely abrasive — a brass nozzle will wear out in hours. Hardened steel or ruby nozzle mandatory.",
       "Very low elongation (~3%) means parts are BRITTLE. Stiffer but snaps under impact. Never use for parts that take sudden loads or drops.",
-      "Excellent dimensional stability \u2014 very low warping and shrinkage. Great for jigs, fixtures, camera mounts, drone frames where rigidity matters.",
+      "Excellent dimensional stability — very low warping and shrinkage. Great for jigs, fixtures, camera mounts, drone frames where rigidity matters.",
       "Matte surface finish with visible fiber texture. Cannot be smoothed like standard PLA. Looks industrial/technical, not glossy.",
       "Layer adhesion is weaker than standard PLA due to fiber disruption. Increase wall count and use higher print temps (210-220C) for better bonding.",
       "Good for: drone frames, camera mounts, jigs and fixtures, stiff brackets, lightweight structural parts. Bad for: snap fits, living hinges, impact parts, food contact."
     ],
+    "brand_profiles": {
+      "bambu_pla_cf": {
+        "brand": "Bambu Lab",
+        "product_name": "PLA-CF",
+        "nozzle_temp_range_c": [
+          210,
+          250
+        ],
+        "nozzle_temp_optimal_c": 220,
+        "bed_temp_range_c": [
+          40,
+          55
+        ],
+        "bed_temp_optimal_c": 55,
+        "max_volumetric_speed_mm3s": 12,
+        "density_g_cm3": 1.22,
+        "drying_temp_c": 45,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "ams_compatible": true,
+        "source": "BambuStudio GitHub slicer profiles"
+      }
+    },
     "_validation": {
       "source": "eSun ePLA-CF, Polymaker PolyLite PLA-CF datasheets",
       "verified_date": "2026-03-02",
       "confidence": "high",
       "_review_needed": []
     },
-    "_notes": "Well-characterized material. CF content varies 10-20% across brands; used 15% baseline. Mechanical values conservative \u2014 some brands claim higher tensile."
+    "_notes": "Well-characterized material. CF content varies 10-20% across brands; used 15% baseline. Mechanical values conservative — some brands claim higher tensile."
   },
   "cf_petg": {
     "display_name": "Carbon Fiber PETG",
@@ -698,10 +1040,10 @@
     "agent_guidance": [
       "STEP UP FROM CF-PLA. Better heat resistance and toughness than CF-PLA while retaining stiffness. Good middle-ground engineering composite.",
       "REQUIRES HARDENED STEEL NOZZLE. Carbon fiber shreds brass nozzles within hours. Non-negotiable.",
-      "Better impact resistance than CF-PLA \u2014 PETG base gives some ductility. Still more brittle than plain PETG.",
-      "Handles ~75C continuous service \u2014 suitable for under-hood automotive brackets, electronics enclosures near heat sources.",
+      "Better impact resistance than CF-PLA — PETG base gives some ductility. Still more brittle than plain PETG.",
+      "Handles ~75C continuous service — suitable for under-hood automotive brackets, electronics enclosures near heat sources.",
       "Low warping tendency makes it easier to print large parts than ABS-based composites. Enclosed chamber helpful but not strictly required.",
-      "Moisture absorption is low but still present \u2014 store sealed with desiccant for best results.",
+      "Moisture absorption is low but still present — store sealed with desiccant for best results.",
       "Good for: functional brackets, electronics housings, automotive parts, tooling. Bad for: snap fits, flexible parts, food contact, cosmetic/glossy finish."
     ],
     "_validation": {
@@ -781,11 +1123,80 @@
       "TOP-TIER ENGINEERING COMPOSITE. Closest FDM gets to injection-molded nylon. Extremely stiff and strong with good fatigue life.",
       "REQUIRES: enclosed printer, hardened nozzle, dry box feeding, 260C+ hotend. Bambu X1C with AMS is ideal. Most budget printers cannot handle this.",
       "MOISTURE IS THE ENEMY. PA-CF absorbs water aggressively. Print from a sealed dry box. Wet filament produces popping, stringing, and catastrophic layer adhesion failure.",
-      "Young's modulus ~8 GPa \u2014 stiffer than aluminum in some orientations. Use for jigs, fixtures, end-use tooling that replaces CNC parts.",
+      "Young's modulus ~8 GPa — stiffer than aluminum in some orientations. Use for jigs, fixtures, end-use tooling that replaces CNC parts.",
       "Heat deflection at 150C makes this suitable for under-hood automotive, near-motor applications, and industrial environments.",
       "Cost is high ($40-60/kg) and print difficulty is high. Only use when PLA/PETG/CF-PLA genuinely cannot meet the requirements.",
       "Good for: end-use industrial parts, automotive components, high-temp fixtures, gears, tooling. Bad for: beginners, budget printers, cosmetic models, food contact."
     ],
+    "brand_profiles": {
+      "bambu_pa6_cf": {
+        "brand": "Bambu Lab",
+        "product_name": "PA6-CF",
+        "nozzle_temp_range_c": [
+          260,
+          300
+        ],
+        "nozzle_temp_optimal_c": 275,
+        "bed_temp_range_c": [
+          90,
+          100
+        ],
+        "bed_temp_optimal_c": 100,
+        "max_volumetric_speed_mm3s": 8,
+        "density_g_cm3": 1.1,
+        "drying_temp_c": 65,
+        "drying_time_hours": 12,
+        "enclosure_required": true,
+        "hardened_nozzle_required": true,
+        "ams_compatible": true,
+        "notes": "High heat resistance (Tg 170°C). Risk of nozzle clogging.",
+        "source": "BambuStudio GitHub slicer profiles"
+      },
+      "prusament_pa11_cf": {
+        "brand": "Prusa Research",
+        "product_name": "Prusament PA11-CF",
+        "nozzle_temp_range_c": [
+          280,
+          290
+        ],
+        "nozzle_temp_optimal_c": 285,
+        "bed_temp_range_c": [
+          100,
+          120
+        ],
+        "bed_temp_optimal_c": 115,
+        "max_print_speed_mms": 100,
+        "density_g_cm3": 1.11,
+        "drying_temp_c": 90,
+        "drying_time_hours": 6,
+        "enclosure_required": true,
+        "hardened_nozzle_required": true,
+        "notes": "Bio-based PA11. Special PA nylon spring sheet required. No alcohol cleaners.",
+        "source": "Prusament technical data sheets"
+      },
+      "polymaker_polymide_pa6_cf": {
+        "brand": "Polymaker",
+        "product_name": "PolyMide PA6-CF",
+        "nozzle_temp_range_c": [
+          280,
+          300
+        ],
+        "nozzle_temp_optimal_c": 300,
+        "bed_temp_range_c": [
+          40,
+          50
+        ],
+        "bed_temp_optimal_c": 50,
+        "max_print_speed_mms": 300,
+        "density_g_cm3": 1.17,
+        "drying_temp_c": 100,
+        "drying_time_hours": 10,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "notes": "Now sold as Fiberon PA6-CF20. Pre-print drying critical.",
+        "source": "Polymaker technical data sheets"
+      }
+    },
     "_validation": {
       "source": "Bambu Lab PA-CF, Polymaker PolyMide PA6-CF datasheets",
       "verified_date": "2026-03-02",
@@ -862,10 +1273,10 @@
     "agent_guidance": [
       "BUDGET CF ALTERNATIVE. PET-CF is cheaper than PETG-CF or PA-CF while offering solid stiffness. Good value engineering composite.",
       "REQUIRES HARDENED STEEL NOZZLE. Like all carbon fiber filaments, brass nozzles will be destroyed.",
-      "Lower moisture sensitivity than PA-CF \u2014 easier to store and handle. Still benefits from dry storage but is more forgiving.",
+      "Lower moisture sensitivity than PA-CF — easier to store and handle. Still benefits from dry storage but is more forgiving.",
       "PET base gives decent chemical resistance and low warping. Easier to print than nylon-based composites.",
-      "Stiffness (~5 GPa) sits between CF-PLA and CF-PETG \u2014 a solid mid-range option when budget matters.",
-      "Print temps are higher than PETG (250-280C) \u2014 verify your hotend can handle this range.",
+      "Stiffness (~5 GPa) sits between CF-PLA and CF-PETG — a solid mid-range option when budget matters.",
+      "Print temps are higher than PETG (250-280C) — verify your hotend can handle this range.",
       "Good for: cost-conscious stiff parts, electronics housings, brackets, replacement parts. Bad for: snap fits, flexible parts, food contact, high-temp (>70C) applications."
     ],
     "_validation": {
@@ -949,10 +1360,35 @@
       "WEAKER THAN STANDARD PLA (~20% lower tensile). The additives that create the sheen reduce mechanical strength. Never use for structural parts.",
       "Print settings similar to standard PLA (190-230C). Slightly slower speeds (40-50mm/s) give the best surface quality.",
       "The silk effect is most visible on curved surfaces and large flat areas. Small detailed parts don't showcase the finish well.",
-      "Layer lines are less visible than standard PLA due to the reflective surface \u2014 one of the few filaments where layer lines become a feature.",
-      "Not food safe \u2014 the silk additives are not certified for food contact. Use standard PLA for food-contact applications.",
+      "Layer lines are less visible than standard PLA due to the reflective surface — one of the few filaments where layer lines become a feature.",
+      "Not food safe — the silk additives are not certified for food contact. Use standard PLA for food-contact applications.",
       "Good for: display models, vases, decorative objects, gifts, cosplay props, artistic prints. Bad for: anything structural, outdoor use, functional parts, food contact."
     ],
+    "brand_profiles": {
+      "bambu_pla_silk": {
+        "brand": "Bambu Lab",
+        "product_name": "PLA Silk",
+        "nozzle_temp_range_c": [
+          190,
+          240
+        ],
+        "nozzle_temp_optimal_c": 230,
+        "bed_temp_range_c": [
+          40,
+          55
+        ],
+        "bed_temp_optimal_c": 55,
+        "max_volumetric_speed_mm3s": 12,
+        "density_g_cm3": 1.32,
+        "drying_temp_c": 45,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "notes": "Slow outer wall to 40-60 mm/s for higher gloss.",
+        "source": "BambuStudio GitHub slicer profiles"
+      }
+    },
     "_validation": {
       "source": "eSun Silk PLA, Polymaker PolyTerra Silk datasheets",
       "verified_date": "2026-03-02",
@@ -1032,12 +1468,58 @@
     "agent_guidance": [
       "LOOKS AND FEELS LIKE WOOD. ~20% wood fiber fill. Can be sanded, stained, and finished like real wood. Unique aesthetic.",
       "USE 0.6mm+ NOZZLE. Wood fibers clog 0.4mm nozzles frequently. A 0.6mm or 0.8mm nozzle is strongly recommended. Avoid nozzles below 0.5mm entirely.",
-      "WEAKEST MATERIAL IN THIS DATABASE. ~30% weaker than standard PLA. Purely decorative \u2014 never use for structural or load-bearing parts.",
+      "WEAKEST MATERIAL IN THIS DATABASE. ~30% weaker than standard PLA. Purely decorative — never use for structural or load-bearing parts.",
       "Vary print temperature between layers (185-215C) to create natural wood grain color variation. Higher temps produce darker 'rings'.",
       "Absorbs moisture more than standard PLA due to wood fiber content. Store sealed. Wet wood PLA produces excessive stringing and rough surfaces.",
-      "Sandable and stainable \u2014 post-processing with wood stain produces remarkably realistic wood appearance.",
+      "Sandable and stainable — post-processing with wood stain produces remarkably realistic wood appearance.",
       "Good for: decorative items, planters, picture frames, models, artistic pieces. Bad for: anything structural, outdoor use (swells with moisture), precision parts, food contact."
     ],
+    "brand_profiles": {
+      "bambu_pla_wood": {
+        "brand": "Bambu Lab",
+        "product_name": "PLA Wood",
+        "nozzle_temp_range_c": [
+          190,
+          240
+        ],
+        "nozzle_temp_optimal_c": 220,
+        "bed_temp_range_c": [
+          40,
+          55
+        ],
+        "bed_temp_optimal_c": 55,
+        "max_volumetric_speed_mm3s": 18,
+        "density_g_cm3": 1.21,
+        "drying_temp_c": 45,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "source": "BambuStudio GitHub slicer profiles"
+      },
+      "polymaker_polywood": {
+        "brand": "Polymaker",
+        "product_name": "PolyWood",
+        "nozzle_temp_range_c": [
+          190,
+          210
+        ],
+        "nozzle_temp_optimal_c": 210,
+        "bed_temp_range_c": [
+          25,
+          60
+        ],
+        "bed_temp_optimal_c": 50,
+        "max_print_speed_mms": 100,
+        "density_g_cm3": 0.9,
+        "drying_temp_c": 55,
+        "drying_time_hours": 6,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "notes": "Foamed PLA — no actual wood. Zero clog risk. Very low density.",
+        "source": "Polymaker technical data sheets"
+      }
+    },
     "_validation": {
       "source": "Hatchbox Wood PLA, eSun Wood PLA, Polymaker PolyWood datasheets",
       "verified_date": "2026-03-02",
@@ -1047,7 +1529,7 @@
         "compressive_strength_mpa"
       ]
     },
-    "_notes": "Wood fiber content varies 15-30% across brands (used 20% baseline). Higher wood content = weaker parts. Flexural and compressive values extrapolated \u2014 few manufacturers publish these for wood fill."
+    "_notes": "Wood fiber content varies 15-30% across brands (used 20% baseline). Higher wood content = weaker parts. Flexural and compressive values extrapolated — few manufacturers publish these for wood fill."
   },
   "hips": {
     "display_name": "HIPS (High Impact Polystyrene)",
@@ -1116,10 +1598,10 @@
     },
     "agent_guidance": [
       "PRIMARY USE: DISSOLVABLE SUPPORT FOR ABS. HIPS dissolves in limonene (d-limonene citrus solvent). Pair with ABS for complex dual-extrusion prints.",
-      "REQUIRES ENCLOSURE. Prints like ABS \u2014 similar temps, similar warping. Ventilation recommended due to styrene fumes.",
-      "Good impact resistance despite low tensile strength \u2014 polystyrene base absorbs energy rather than transmitting it. Parts dent rather than crack.",
-      "Lightweight \u2014 lower density than most filaments. Good for large hollow parts where weight matters.",
-      "As a STANDALONE material it's mediocre \u2014 lower strength than PLA, needs enclosure like ABS, poor UV resistance. Only choose HIPS standalone if you specifically need its impact/weight properties.",
+      "REQUIRES ENCLOSURE. Prints like ABS — similar temps, similar warping. Ventilation recommended due to styrene fumes.",
+      "Good impact resistance despite low tensile strength — polystyrene base absorbs energy rather than transmitting it. Parts dent rather than crack.",
+      "Lightweight — lower density than most filaments. Good for large hollow parts where weight matters.",
+      "As a STANDALONE material it's mediocre — lower strength than PLA, needs enclosure like ABS, poor UV resistance. Only choose HIPS standalone if you specifically need its impact/weight properties.",
       "Limonene dissolution takes 12-24 hours for full support removal. Warm limonene (35-40C) speeds the process significantly.",
       "Good for: ABS support material, lightweight parts, impact-absorbing housings. Bad for: structural parts, outdoor use, standalone use when PLA/PETG would work."
     ],
@@ -1199,12 +1681,82 @@
     "agent_guidance": [
       "SUPPORT MATERIAL ONLY. PVA dissolves in water. Pair with PLA or PETG for complex overhangs that need clean support removal.",
       "EXTREMELY MOISTURE SENSITIVE. PVA absorbs water from ambient air within hours. MUST be stored in a sealed dry box and printed from dry box. This is non-negotiable.",
-      "Dissolves in warm tap water (40-60C) in 2-12 hours depending on volume. Agitation speeds dissolution. No special chemicals needed \u2014 just water.",
+      "Dissolves in warm tap water (40-60C) in 2-12 hours depending on volume. Agitation speeds dissolution. No special chemicals needed — just water.",
       "Best paired with PLA (similar print temps). Can work with PETG but the temperature gap requires careful tuning of the dual-extrusion transition.",
-      "NEVER use as a structural material. PVA has no standalone use \u2014 it literally dissolves in water. Its only purpose is dissolvable support.",
+      "NEVER use as a structural material. PVA has no standalone use — it literally dissolves in water. Its only purpose is dissolvable support.",
       "Expensive ($50-80/kg) and has a short shelf life once opened. Only buy what you need for specific dual-extrusion projects.",
       "Good for: water-soluble supports for PLA/PETG. Bad for: literally everything else. Not a standalone material."
     ],
+    "brand_profiles": {
+      "bambu_pva": {
+        "brand": "Bambu Lab",
+        "product_name": "PVA",
+        "nozzle_temp_range_c": [
+          210,
+          250
+        ],
+        "nozzle_temp_optimal_c": 220,
+        "bed_temp_range_c": [
+          40,
+          55
+        ],
+        "bed_temp_optimal_c": 55,
+        "max_volumetric_speed_mm3s": 6,
+        "density_g_cm3": 1.27,
+        "drying_temp_c": 65,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "notes": "Water-soluble support only. Extremely hygroscopic.",
+        "source": "BambuStudio GitHub slicer profiles"
+      },
+      "bambu_support_w": {
+        "brand": "Bambu Lab",
+        "product_name": "Support W",
+        "nozzle_temp_range_c": [
+          190,
+          240
+        ],
+        "nozzle_temp_optimal_c": 220,
+        "bed_temp_range_c": [
+          40,
+          55
+        ],
+        "bed_temp_optimal_c": 55,
+        "max_volumetric_speed_mm3s": 12,
+        "density_g_cm3": 1.3,
+        "drying_temp_c": 45,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "notes": "PLA-based support. Not water-soluble but easy removal.",
+        "source": "BambuStudio GitHub slicer profiles"
+      },
+      "polymaker_polydissolve_s1": {
+        "brand": "Polymaker",
+        "product_name": "PolyDissolve S1",
+        "nozzle_temp_range_c": [
+          215,
+          225
+        ],
+        "nozzle_temp_optimal_c": 220,
+        "bed_temp_range_c": [
+          25,
+          60
+        ],
+        "bed_temp_optimal_c": null,
+        "max_print_speed_mms": 40,
+        "density_g_cm3": 1.13,
+        "drying_temp_c": 80,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "notes": "Water-soluble PVA support. Extremely hygroscopic — dry-box essential during printing.",
+        "source": "Polymaker technical data sheets"
+      }
+    },
     "_validation": {
       "source": "Ultimaker PVA, eSun PVA+, Polymaker PolySupport datasheets",
       "verified_date": "2026-03-02",
@@ -1281,10 +1833,10 @@
     "agent_guidance": [
       "BEST OF BOTH WORLDS. Combines PC's heat resistance and impact strength with ABS's ease of printing. The automotive industry's go-to FDM material.",
       "REQUIRES ENCLOSURE + HIGH TEMP HOTEND (250-280C). Warps significantly without an enclosed, heated chamber. Not for open-frame printers.",
-      "EXCELLENT impact resistance (40% elongation) \u2014 parts deform rather than shatter. Suitable for protective housings, bumpers, safety equipment.",
-      "Heat deflection at 110C \u2014 handles continuous automotive and industrial temperatures. Good for under-hood parts, electronics near heat sources.",
+      "EXCELLENT impact resistance (40% elongation) — parts deform rather than shatter. Suitable for protective housings, bumpers, safety equipment.",
+      "Heat deflection at 110C — handles continuous automotive and industrial temperatures. Good for under-hood parts, electronics near heat sources.",
       "Easier to print than pure PC while retaining most of its strength. If PC is too difficult, PC-ABS is the practical alternative.",
-      "Living hinges are viable due to high elongation \u2014 one of the few FDM materials that can handle repeated flexing at a fold line.",
+      "Living hinges are viable due to high elongation — one of the few FDM materials that can handle repeated flexing at a fold line.",
       "Good for: automotive parts, impact housings, snap-fit assemblies, high-temp enclosures, protective equipment. Bad for: beginners, open printers, cosmetic parts, food contact."
     ],
     "_validation": {
@@ -1295,7 +1847,7 @@
         "living_hinge_viable"
       ]
     },
-    "_notes": "Well-characterized industrial blend. Values based on Covestro Bayblend (OEM source) cross-referenced with Polymaker specs. Living hinge viability is theoretical based on elongation \u2014 limited FDM-specific testing."
+    "_notes": "Well-characterized industrial blend. Values based on Covestro Bayblend (OEM source) cross-referenced with Polymaker specs. Living hinge viability is theoretical based on elongation — limited FDM-specific testing."
   },
   "asa_plus": {
     "display_name": "ASA+ (Enhanced UV-Resistant ASA)",
@@ -1364,11 +1916,11 @@
     },
     "agent_guidance": [
       "THE OUTDOOR MATERIAL. Enhanced UV stabilizers make this the #1 choice for parts exposed to direct sunlight. Retains color and strength for years outdoors.",
-      "Improvement over standard ASA \u2014 better UV stability, slightly improved layer adhesion, and more consistent color retention under weathering.",
-      "REQUIRES ENCLOSURE. Prints like ABS/ASA \u2014 moderate warping, fumes, and sensitivity to drafts. Enclosed heated chamber recommended.",
-      "UV resistance rated 'excellent' \u2014 parts survive multi-year direct sun exposure without significant yellowing or embrittlement. Standard ASA is 'good'; ASA+ is a step above.",
+      "Improvement over standard ASA — better UV stability, slightly improved layer adhesion, and more consistent color retention under weathering.",
+      "REQUIRES ENCLOSURE. Prints like ABS/ASA — moderate warping, fumes, and sensitivity to drafts. Enclosed heated chamber recommended.",
+      "UV resistance rated 'excellent' — parts survive multi-year direct sun exposure without significant yellowing or embrittlement. Standard ASA is 'good'; ASA+ is a step above.",
       "Heat deflection at 100C means outdoor parts survive hot car interiors, direct sun on dark surfaces, and industrial outdoor environments.",
-      "Ventilation recommended \u2014 ASA produces styrene fumes during printing. Use in a well-ventilated area or with a filtration system.",
+      "Ventilation recommended — ASA produces styrene fumes during printing. Use in a well-ventilated area or with a filtration system.",
       "Good for: outdoor signage, garden fixtures, automotive exterior trim, weatherproof housings, solar mount brackets. Bad for: beginners, open printers, food contact, indoor cosmetic models."
     ],
     "_validation": {
@@ -1380,7 +1932,7 @@
         "max_service_temp_c"
       ]
     },
-    "_notes": "ASA+ is a marketing term \u2014 no universal standard. Values represent enhanced ASA formulations (Polymaker, Prusament). Thermal values 5-10C above standard ASA based on manufacturer claims; independent verification limited."
+    "_notes": "ASA+ is a marketing term — no universal standard. Values represent enhanced ASA formulations (Polymaker, Prusament). Thermal values 5-10C above standard ASA based on manufacturer claims; independent verification limited."
   },
   "pla_plus": {
     "display_name": "PLA+ (PLA Pro)",
@@ -1450,10 +2002,10 @@
     "agent_guidance": [
       "UPGRADED PLA. Toughness additives give ~10% stronger tensile, ~33% more elongation, and noticeably better impact resistance than standard PLA.",
       "SAME EASE OF PRINTING AS PLA. No enclosure needed, low warping, similar temps (slightly higher: 205-230C). Beginners can use this with confidence.",
-      "Still has PLA's thermal weakness \u2014 glass transition ~60C means parts soften in hot cars and direct sun. Not an outdoor or high-temp material.",
+      "Still has PLA's thermal weakness — glass transition ~60C means parts soften in hot cars and direct sun. Not an outdoor or high-temp material.",
       "The default recommendation when a user asks for 'something stronger than PLA but just as easy to print'. This is that material.",
       "Snap fits are viable (moderate rating) where standard PLA snaps would break. The extra elongation allows some flex before failure.",
-      "Food safety is 'conditional' \u2014 same as standard PLA, depends on specific brand certification and printing conditions.",
+      "Food safety is 'conditional' — same as standard PLA, depends on specific brand certification and printing conditions.",
       "Good for: stronger prototypes, functional PLA parts, snap fits, clips, phone cases, tool handles. Bad for: outdoor use, high-temp, heavy structural loads, parts that need PETG/ABS properties."
     ],
     "_validation": {
@@ -1465,7 +2017,7 @@
         "impact_resistance"
       ]
     },
-    "_notes": "PLA+ is not standardized \u2014 toughness additives vary wildly across brands. Mechanical improvement range is 5-30% over standard PLA. Used middle-ground values. Some brands' PLA+ is barely different from standard PLA."
+    "_notes": "PLA+ is not standardized — toughness additives vary wildly across brands. Mechanical improvement range is 5-30% over standard PLA. Used middle-ground values. Some brands' PLA+ is barely different from standard PLA."
   },
   "petg_cf": {
     "display_name": "PETG-CF (High Carbon Fiber PETG)",
@@ -1533,14 +2085,60 @@
       "water_tight": "moderate"
     },
     "agent_guidance": [
-      "HIGH-CF PETG VARIANT. Higher carbon fiber loading (~20%) than standard CF-PETG \u2014 stiffer and lighter but more brittle.",
+      "HIGH-CF PETG VARIANT. Higher carbon fiber loading (~20%) than standard CF-PETG — stiffer and lighter but more brittle.",
       "REQUIRES HARDENED STEEL NOZZLE. Higher fiber content means even faster nozzle wear. 0.5mm+ nozzle recommended to avoid clogging.",
       "The stiffest PETG variant available. Young's modulus ~4.8 GPa approaches CF-PLA territory but with better heat resistance.",
-      "Excellent dimensional accuracy \u2014 very low shrinkage and warping. Great for precision jigs, fixtures, and replacement parts where exact dimensions matter.",
-      "Lower elongation (~3%) than standard CF-PETG. The higher fiber loading trades impact resistance for stiffness \u2014 parts are rigid but snap under shock loads.",
+      "Excellent dimensional accuracy — very low shrinkage and warping. Great for precision jigs, fixtures, and replacement parts where exact dimensions matter.",
+      "Lower elongation (~3%) than standard CF-PETG. The higher fiber loading trades impact resistance for stiffness — parts are rigid but snap under shock loads.",
       "Print 10-15C hotter than standard CF-PETG (240-265C) due to higher fiber content. Slower speeds (30-40mm/s) improve surface quality.",
       "Good for: precision jigs, stiff brackets, gears, dimensional-critical parts. Bad for: impact-prone parts, snap fits, flexible assemblies, food contact."
     ],
+    "brand_profiles": {
+      "bambu_petg_cf": {
+        "brand": "Bambu Lab",
+        "product_name": "PETG-CF",
+        "nozzle_temp_range_c": [
+          240,
+          270
+        ],
+        "nozzle_temp_optimal_c": 255,
+        "bed_temp_range_c": [
+          55,
+          70
+        ],
+        "bed_temp_optimal_c": 70,
+        "max_volumetric_speed_mm3s": 14,
+        "density_g_cm3": 1.25,
+        "drying_temp_c": 65,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "ams_compatible": true,
+        "source": "BambuStudio GitHub slicer profiles"
+      },
+      "prusament_petg_cf": {
+        "brand": "Prusa Research",
+        "product_name": "Prusament PETG-CF",
+        "nozzle_temp_range_c": [
+          255,
+          275
+        ],
+        "nozzle_temp_optimal_c": 265,
+        "bed_temp_range_c": [
+          80,
+          100
+        ],
+        "bed_temp_optimal_c": 90,
+        "max_print_speed_mms": 200,
+        "density_g_cm3": 1.27,
+        "drying_temp_c": 55,
+        "drying_time_hours": 6,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "notes": "Carbon fibers from recycled industrial waste.",
+        "source": "Prusament technical data sheets"
+      }
+    },
     "_validation": {
       "source": "Prusament PETG-CF, Bambu Lab PETG-CF datasheets",
       "verified_date": "2026-03-02",
@@ -1550,7 +2148,7 @@
         "elongation_at_break_pct"
       ]
     },
-    "_notes": "Differentiated from cf_petg as a higher CF loading (~20%) variant. Higher CF content means stiffer but more brittle. Some values extrapolated from scaling cf_petg properties \u2014 limited manufacturer data for high-CF PETG specifically."
+    "_notes": "Differentiated from cf_petg as a higher CF loading (~20%) variant. Higher CF content means stiffer but more brittle. Some values extrapolated from scaling cf_petg properties — limited manufacturer data for high-CF PETG specifically."
   },
   "pa6_gf": {
     "display_name": "PA6-GF (Nylon 6 Glass Fiber)",
@@ -1619,13 +2217,37 @@
     },
     "agent_guidance": [
       "INDUSTRIAL WORKHORSE. PA6-GF is the FDM equivalent of injection-molded glass-filled nylon. Highest heat deflection (180C) of any material in this database.",
-      "REQUIRES: enclosed printer, hardened nozzle, dry box feeding, 260C+ hotend. Glass fiber is EXTREMELY abrasive \u2014 even harder on nozzles than carbon fiber.",
+      "REQUIRES: enclosed printer, hardened nozzle, dry box feeding, 260C+ hotend. Glass fiber is EXTREMELY abrasive — even harder on nozzles than carbon fiber.",
       "MOISTURE IS CRITICAL. Like all nylons, PA6-GF absorbs moisture aggressively. Dry at 80C for 6+ hours before printing. Print from sealed dry box.",
-      "Heat deflection at 180C \u2014 survives near-engine automotive, industrial ovens, and extreme thermal environments. The highest continuous service temp in this material set.",
-      "Glass fiber gives better impact resistance than carbon fiber equivalents \u2014 parts are tough AND stiff, not just stiff. Better for parts that take occasional hits.",
-      "Surface finish is rough and matte. Not suitable for cosmetic parts. Post-processing options are limited \u2014 painting is the main option.",
+      "Heat deflection at 180C — survives near-engine automotive, industrial ovens, and extreme thermal environments. The highest continuous service temp in this material set.",
+      "Glass fiber gives better impact resistance than carbon fiber equivalents — parts are tough AND stiff, not just stiff. Better for parts that take occasional hits.",
+      "Surface finish is rough and matte. Not suitable for cosmetic parts. Post-processing options are limited — painting is the main option.",
       "Good for: industrial end-use parts, high-temp fixtures, gears, bearings, automotive under-hood, tooling. Bad for: beginners, budget printers, cosmetic parts, quick prototypes."
     ],
+    "brand_profiles": {
+      "polymaker_polymide_pa6_gf": {
+        "brand": "Polymaker",
+        "product_name": "PolyMide PA6-GF",
+        "nozzle_temp_range_c": [
+          280,
+          300
+        ],
+        "nozzle_temp_optimal_c": 300,
+        "bed_temp_range_c": [
+          40,
+          50
+        ],
+        "bed_temp_optimal_c": 50,
+        "max_print_speed_mms": 300,
+        "density_g_cm3": 1.2,
+        "drying_temp_c": 100,
+        "drying_time_hours": 10,
+        "enclosure_required": false,
+        "hardened_nozzle_required": true,
+        "notes": "Now sold as Fiberon PA6-GF25.",
+        "source": "Polymaker technical data sheets"
+      }
+    },
     "_validation": {
       "source": "Polymaker PolyMide PA6-GF, Bambu Lab PA6-GF datasheets",
       "verified_date": "2026-03-02",
@@ -1634,7 +2256,7 @@
         "heat_deflection_c"
       ]
     },
-    "_notes": "Glass fiber nylon is well-characterized industrially. FDM values conservative vs injection-molded specs. HDT of 180C is the high end \u2014 some FDM prints may show lower due to layer adhesion limitations. Glass fiber is even more abrasive than carbon fiber on nozzles."
+    "_notes": "Glass fiber nylon is well-characterized industrially. FDM values conservative vs injection-molded specs. HDT of 180C is the high end — some FDM prints may show lower due to layer adhesion limitations. Glass fiber is even more abrasive than carbon fiber on nozzles."
   },
   "pla_matte": {
     "display_name": "PLA Matte",
@@ -1702,14 +2324,60 @@
       "water_tight": "moderate"
     },
     "agent_guidance": [
-      "BEST SURFACE FINISH. Matte PLA hides layer lines better than any other PLA variant \u2014 the matte additive diffuses light across layer boundaries.",
+      "BEST SURFACE FINISH. Matte PLA hides layer lines better than any other PLA variant — the matte additive diffuses light across layer boundaries.",
       "Matte finish hides layer lines better than any other PLA variant. Print at 210-220C for best matte effect. Lower temps may produce semi-matte finish.",
       "Slightly weaker than standard PLA (~45 MPa vs 50 MPa tensile) due to the matte additives. Not significant for most applications.",
-      "Same thermal limitations as standard PLA \u2014 glass transition 60C, parts soften in hot cars and direct sun.",
-      "Low warping, excellent dimensional accuracy \u2014 same printability as standard PLA with wider temp range (190-230C).",
+      "Same thermal limitations as standard PLA — glass transition 60C, parts soften in hot cars and direct sun.",
+      "Low warping, excellent dimensional accuracy — same printability as standard PLA with wider temp range (190-230C).",
       "Good for: display models, cosplay props, decorative objects, presentation prototypes, anything where visual quality matters most.",
       "Bad for: structural parts, outdoor use, high-temp, anything where strength matters more than appearance."
     ],
+    "brand_profiles": {
+      "bambu_pla_matte": {
+        "brand": "Bambu Lab",
+        "product_name": "PLA Matte",
+        "nozzle_temp_range_c": [
+          190,
+          240
+        ],
+        "nozzle_temp_optimal_c": 220,
+        "bed_temp_range_c": [
+          40,
+          55
+        ],
+        "bed_temp_optimal_c": 55,
+        "max_volumetric_speed_mm3s": 12,
+        "density_g_cm3": 1.32,
+        "drying_temp_c": 45,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "source": "BambuStudio GitHub slicer profiles"
+      },
+      "polymaker_polyterra_pla": {
+        "brand": "Polymaker",
+        "product_name": "PolyTerra PLA",
+        "nozzle_temp_range_c": [
+          190,
+          230
+        ],
+        "nozzle_temp_optimal_c": 200,
+        "bed_temp_range_c": [
+          25,
+          60
+        ],
+        "bed_temp_optimal_c": 60,
+        "max_print_speed_mms": 200,
+        "density_g_cm3": 1.31,
+        "drying_temp_c": 55,
+        "drying_time_hours": 6,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "notes": "Now sold as Panchroma Matte PLA. Higher density from bioplastic formulation.",
+        "source": "Polymaker technical data sheets"
+      }
+    },
     "_validation": {
       "source": "Bambu Lab PLA Matte, eSun Matte PLA datasheets",
       "verified_date": "2026-03-11",
@@ -1786,13 +2454,38 @@
     "agent_guidance": [
       "HIGH-SPEED PETG. High-flow PETG can print at 2x standard PETG speed (up to 300mm/s on Bambu printers). Ideal for large functional parts where print time matters.",
       "Use higher temps (240-250C) and lower retraction (2-3mm vs 4mm standard PETG). Fan speed 30-50% for best results.",
-      "Slightly weaker than standard PETG (~42 MPa vs 50 MPa tensile) \u2014 the flow-enhancing additives reduce strength marginally.",
+      "Slightly weaker than standard PETG (~42 MPa vs 50 MPa tensile) — the flow-enhancing additives reduce strength marginally.",
       "Less stringing than standard PETG due to improved flow characteristics. Still not as clean as PLA, but noticeably better than regular PETG.",
-      "Lower warping tendency than standard PETG \u2014 better for large flat parts. Bed adhesion remains excellent.",
-      "Same chemical and food-safety properties as standard PETG \u2014 PETG polymer family is inherently food-safe.",
+      "Lower warping tendency than standard PETG — better for large flat parts. Bed adhesion remains excellent.",
+      "Same chemical and food-safety properties as standard PETG — PETG polymer family is inherently food-safe.",
       "Good for: large functional parts, batch printing, enclosures, containers, anything where standard PETG works but faster.",
       "Bad for: parts requiring maximum tensile strength (use standard PETG), precision parts at extreme speed."
     ],
+    "brand_profiles": {
+      "bambu_petg_hf": {
+        "brand": "Bambu Lab",
+        "product_name": "PETG High Flow",
+        "nozzle_temp_range_c": [
+          230,
+          270
+        ],
+        "nozzle_temp_optimal_c": 245,
+        "bed_temp_range_c": [
+          55,
+          70
+        ],
+        "bed_temp_optimal_c": 70,
+        "max_volumetric_speed_mm3s": 21,
+        "density_g_cm3": 1.28,
+        "drying_temp_c": 65,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "notes": "High Flow — 2.6x faster than PETG Basic.",
+        "source": "BambuStudio GitHub slicer profiles"
+      }
+    },
     "_validation": {
       "source": "Bambu Lab PETG-HF, eSun PETG-HF datasheets",
       "verified_date": "2026-03-11",
@@ -1868,21 +2561,45 @@
     },
     "agent_guidance": [
       "IMPACT-RESISTANT PLA. Use PLA Tough when you need PLA's ease of printing but with much better impact resistance. Parts survive drops that would shatter standard PLA.",
-      "Distinct from PLA+ \u2014 PLA Tough has significantly higher impact resistance (20-25 kJ/m2 vs PLA+'s ~8 kJ/m2). PLA+ improves tensile; PLA Tough improves toughness.",
-      "Lower stiffness than standard PLA (Young's modulus 2.5 vs 3.5 GPa) \u2014 parts flex more before breaking. This is by design, not a defect.",
-      "Same thermal weakness as standard PLA \u2014 glass transition 60C. Parts still soften in hot cars and direct sunlight.",
+      "Distinct from PLA+ — PLA Tough has significantly higher impact resistance (20-25 kJ/m2 vs PLA+'s ~8 kJ/m2). PLA+ improves tensile; PLA Tough improves toughness.",
+      "Lower stiffness than standard PLA (Young's modulus 2.5 vs 3.5 GPa) — parts flex more before breaking. This is by design, not a defect.",
+      "Same thermal weakness as standard PLA — glass transition 60C. Parts still soften in hot cars and direct sunlight.",
       "Snap fits are viable and can handle repeated cycling. Good for phone cases, protective covers, functional clips.",
-      "Prints as easily as standard PLA \u2014 low warping, no enclosure needed, 200-230C nozzle temp.",
+      "Prints as easily as standard PLA — low warping, no enclosure needed, 200-230C nozzle temp.",
       "Good for: phone cases, protective covers, functional clips that get dropped, tool handles, cases, bumpers, snap-fit assemblies.",
-      "Bad for: outdoor use, high-temp, heavy structural loads \u2014 still PLA at its core."
+      "Bad for: outdoor use, high-temp, heavy structural loads — still PLA at its core."
     ],
+    "brand_profiles": {
+      "bambu_pla_tough": {
+        "brand": "Bambu Lab",
+        "product_name": "PLA Tough",
+        "nozzle_temp_range_c": [
+          190,
+          240
+        ],
+        "nozzle_temp_optimal_c": 220,
+        "bed_temp_range_c": [
+          40,
+          55
+        ],
+        "bed_temp_optimal_c": 55,
+        "max_volumetric_speed_mm3s": 12,
+        "density_g_cm3": 1.26,
+        "drying_temp_c": 45,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": true,
+        "source": "BambuStudio GitHub slicer profiles"
+      }
+    },
     "_validation": {
       "source": "Bambu Lab PLA Tough, Polymaker PolyTerra PLA+, eSun ePLA-Tough datasheets",
       "verified_date": "2026-03-11",
       "confidence": "high",
       "_review_needed": []
     },
-    "_notes": "Impact-modified PLA is distinct from PLA+ \u2014 different additive strategy targeting toughness over tensile strength. Impact resistance 4-5x standard PLA. Stiffness reduction is the trade-off. Some brands market these interchangeably, but the formulations differ."
+    "_notes": "Impact-modified PLA is distinct from PLA+ — different additive strategy targeting toughness over tensile strength. Impact resistance 4-5x standard PLA. Stiffness reduction is the trade-off. Some brands market these interchangeably, but the formulations differ."
   },
   "tpu_95a": {
     "display_name": "TPU 95A (Standard Flexible)",
@@ -1950,22 +2667,69 @@
       "water_tight": "good"
     },
     "agent_guidance": [
-      "STANDARD FLEXIBLE FILAMENT. Shore 95A hardness \u2014 similar to a car tire or shoe sole. The most common TPU hardness for FDM printing.",
-      "MUST print slowly \u2014 20-30mm/s maximum. Higher speeds cause filament buckling in the extruder. This is non-negotiable.",
-      "Minimal retraction \u2014 0.5-1.5mm at very slow retract speed. Excessive retraction causes jams. Accept some stringing and post-process.",
-      "DIRECT DRIVE EXTRUDER REQUIRED. Bowden setups cannot push flexible filament through the tube \u2014 it will buckle and jam. Bambu A1 and X1 are direct drive and work well.",
-      "Excellent for repeated flexing \u2014 phone cases, gaskets, vibration dampeners, protective bumpers, living hinges, wearable items.",
-      "Poor overhang and bridging performance \u2014 design with minimal overhangs (40 deg max) and very short bridges (5mm max). Use supports generously.",
+      "STANDARD FLEXIBLE FILAMENT. Shore 95A hardness — similar to a car tire or shoe sole. The most common TPU hardness for FDM printing.",
+      "MUST print slowly — 20-30mm/s maximum. Higher speeds cause filament buckling in the extruder. This is non-negotiable.",
+      "Minimal retraction — 0.5-1.5mm at very slow retract speed. Excessive retraction causes jams. Accept some stringing and post-process.",
+      "DIRECT DRIVE EXTRUDER REQUIRED. Bowden setups cannot push flexible filament through the tube — it will buckle and jam. Bambu A1 and X1 are direct drive and work well.",
+      "Excellent for repeated flexing — phone cases, gaskets, vibration dampeners, protective bumpers, living hinges, wearable items.",
+      "Poor overhang and bridging performance — design with minimal overhangs (40 deg max) and very short bridges (5mm max). Use supports generously.",
       "Good for: phone cases, gaskets, seals, bumpers, vibration dampeners, grips, wearables, living hinges, protective covers.",
       "Bad for: structural parts, precision parts, fast printing, Bowden extruder printers."
     ],
+    "brand_profiles": {
+      "bambu_tpu_95a": {
+        "brand": "Bambu Lab",
+        "product_name": "TPU 95A",
+        "nozzle_temp_range_c": [
+          200,
+          250
+        ],
+        "nozzle_temp_optimal_c": 230,
+        "bed_temp_range_c": [
+          30,
+          35
+        ],
+        "bed_temp_optimal_c": 35,
+        "max_volumetric_speed_mm3s": 15,
+        "density_g_cm3": 1.22,
+        "drying_temp_c": 65,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": false,
+        "notes": "Not AMS compatible — print from external spool.",
+        "source": "BambuStudio GitHub slicer profiles"
+      },
+      "polymaker_polyflex_tpu95": {
+        "brand": "Polymaker",
+        "product_name": "PolyFlex TPU95",
+        "nozzle_temp_range_c": [
+          210,
+          230
+        ],
+        "nozzle_temp_optimal_c": 225,
+        "bed_temp_range_c": [
+          25,
+          60
+        ],
+        "bed_temp_optimal_c": 50,
+        "max_print_speed_mms": 40,
+        "density_g_cm3": 1.22,
+        "drying_temp_c": 70,
+        "drying_time_hours": 8,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "notes": "Direct drive strongly recommended. Can stretch 3x.",
+        "source": "Polymaker technical data sheets"
+      }
+    },
     "_validation": {
       "source": "Bambu Lab TPU 95A, Overture TPU, NinjaTek NinjaFlex datasheets",
       "verified_date": "2026-03-11",
       "confidence": "high",
       "_review_needed": []
     },
-    "_notes": "Shore 95A is the standard TPU hardness for FDM. Mechanical values are approximate \u2014 TPU properties vary significantly with print speed, temperature, and layer adhesion. Elongation at break can exceed 500% in optimal conditions. Glass transition of -40C means TPU stays flexible in cold environments."
+    "_notes": "Shore 95A is the standard TPU hardness for FDM. Mechanical values are approximate — TPU properties vary significantly with print speed, temperature, and layer adhesion. Elongation at break can exceed 500% in optimal conditions. Glass transition of -40C means TPU stays flexible in cold environments."
   },
   "tpu_85a": {
     "display_name": "TPU 85A (Soft Flexible)",
@@ -2033,15 +2797,40 @@
       "water_tight": "good"
     },
     "agent_guidance": [
-      "EXTREMELY SOFT AND FLEXIBLE \u2014 like rubber. Shore 85A hardness, similar to a rubber band or soft eraser. Significantly softer than TPU 95A.",
+      "EXTREMELY SOFT AND FLEXIBLE — like rubber. Shore 85A hardness, similar to a rubber band or soft eraser. Significantly softer than TPU 95A.",
       "Print at 15-20mm/s MAXIMUM. Even slower than TPU 95A. The softer the filament, the more prone to buckling in the extruder.",
-      "Almost zero retraction \u2014 0-0.5mm. Any more will jam. Accept heavy stringing and post-process with a heat gun or lighter.",
-      "DIRECT DRIVE EXTRUDER MANDATORY \u2014 even then, may need manual feeding assist through tight spots. Not all direct drive extruders handle 85A well.",
+      "Almost zero retraction — 0-0.5mm. Any more will jam. Accept heavy stringing and post-process with a heat gun or lighter.",
+      "DIRECT DRIVE EXTRUDER MANDATORY — even then, may need manual feeding assist through tight spots. Not all direct drive extruders handle 85A well.",
       "Not for beginners. Requires patient tuning, slow speeds, and tolerance for stringing. Recommend starting with TPU 95A first.",
       "Excellent for: soft-touch grips, gaskets requiring high compression, vibration isolation mounts, wearable cushioning, very flexible living hinges.",
-      "Poor dimensional accuracy \u2014 soft material deforms during printing. Design with generous tolerances (+/- 0.5mm minimum).",
+      "Poor dimensional accuracy — soft material deforms during printing. Design with generous tolerances (+/- 0.5mm minimum).",
       "Good for: soft grips, compression gaskets, vibration isolators, wearable padding, cushioning inserts. Bad for: anything requiring precision, beginners, fast printing, Bowden extruders."
     ],
+    "brand_profiles": {
+      "bambu_tpu_85a": {
+        "brand": "Bambu Lab",
+        "product_name": "TPU 85A",
+        "nozzle_temp_range_c": [
+          200,
+          240
+        ],
+        "nozzle_temp_optimal_c": 225,
+        "bed_temp_range_c": [
+          30,
+          35
+        ],
+        "bed_temp_optimal_c": 35,
+        "max_volumetric_speed_mm3s": 2.2,
+        "density_g_cm3": 1.18,
+        "drying_temp_c": 65,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "ams_compatible": false,
+        "notes": "Very slow (MVS 2.2). External spool only.",
+        "source": "BambuStudio GitHub slicer profiles"
+      }
+    },
     "_validation": {
       "source": "NinjaTek Chinchilla 85A, SainSmart 85A TPU, Recreus Filaflex datasheets",
       "verified_date": "2026-03-11",
@@ -2051,7 +2840,7 @@
         "flexural_strength_mpa"
       ]
     },
-    "_notes": "Shore 85A TPU has limited manufacturer datasheets for FDM-specific properties. Mechanical values are approximate and vary more than 95A across brands. Flexural and compressive values extrapolated from Shore hardness scaling. Extremely difficult to print \u2014 not recommended for novice users or budget printers."
+    "_notes": "Shore 85A TPU has limited manufacturer datasheets for FDM-specific properties. Mechanical values are approximate and vary more than 95A across brands. Flexural and compressive values extrapolated from Shore hardness scaling. Extremely difficult to print — not recommended for novice users or budget printers."
   },
   "pp": {
     "display_name": "Polypropylene (PP)",
@@ -2119,12 +2908,12 @@
       "water_tight": "excellent"
     },
     "agent_guidance": [
-      "NOTORIOUSLY DIFFICULT TO PRINT. PP has terrible bed adhesion \u2014 a dedicated PP adhesion sheet is absolutely required. Standard build plates (PEI, glass, textured) will not work.",
+      "NOTORIOUSLY DIFFICULT TO PRINT. PP has terrible bed adhesion — a dedicated PP adhesion sheet is absolutely required. Standard build plates (PEI, glass, textured) will not work.",
       "EXTREME WARPING. PP shrinks significantly during cooling. Use an enclosure, slow cooling, brim of 10mm+, and keep bed temp high. Even with precautions, warping is common on larger parts.",
-      "THE LIVING HINGE CHAMPION. PP is the best FDM material for living hinges \u2014 it can flex thousands of cycles without fatigue failure. Design living hinges 0.3-0.5mm thick.",
-      "Excellent fatigue resistance \u2014 PP can endure repeated flexing and stress cycles far better than PLA, PETG, or ABS. Ideal for snap-fit containers and hinged lids.",
+      "THE LIVING HINGE CHAMPION. PP is the best FDM material for living hinges — it can flex thousands of cycles without fatigue failure. Design living hinges 0.3-0.5mm thick.",
+      "Excellent fatigue resistance — PP can endure repeated flexing and stress cycles far better than PLA, PETG, or ABS. Ideal for snap-fit containers and hinged lids.",
       "Food-safe and chemically resistant. PP resists acids, bases, solvents, and most household chemicals. One of the best FDM materials for food containers and chemical storage.",
-      "Very low moisture absorption \u2014 PP is essentially waterproof. Excellent for water-tight containers, outdoor applications, and humid environments.",
+      "Very low moisture absorption — PP is essentially waterproof. Excellent for water-tight containers, outdoor applications, and humid environments.",
       "Poor layer adhesion makes PP parts weaker along the Z-axis than most materials. Compensate with thicker walls (2mm+) and orient parts to minimize Z-axis stress.",
       "Good for: living hinges, snap-fit containers, food containers, chemical-resistant vessels, water-tight enclosures, fatigue-resistant parts. Bad for: precise parts, cosmetic prints, beginners, anything requiring good bed adhesion without a PP sheet."
     ],
@@ -2135,5 +2924,133 @@
       "_review_needed": []
     },
     "_notes": "PP is a semi-crystalline polymer with excellent chemical resistance and fatigue life but notoriously poor printability. Bed adhesion requires dedicated PP adhesion sheets or PP tape. Warping is extreme even with enclosure. Mechanical values represent typical FDM-printed properties. Elongation range 300-500% depending on print orientation and layer adhesion."
+  },
+  "pvb": {
+    "display_name": "PVB (Polyvinyl Butyral)",
+    "category": "thermoplastic",
+    "mechanical": {
+      "tensile_strength_mpa": 40,
+      "flexural_strength_mpa": 55,
+      "compressive_strength_mpa": 50,
+      "elongation_at_break_pct": 8,
+      "youngs_modulus_gpa": 2.5,
+      "impact_resistance": "low",
+      "layer_adhesion": "poor",
+      "creep_resistance": "poor",
+      "fatigue_resistance": "poor"
+    },
+    "thermal": {
+      "glass_transition_c": 70,
+      "heat_deflection_c": 60,
+      "max_service_temp_c": 55,
+      "print_temp_range_c": [
+        190,
+        230
+      ],
+      "bed_temp_range_c": [
+        25,
+        80
+      ],
+      "warping_tendency": "low"
+    },
+    "chemical": {
+      "uv_resistance": "poor",
+      "moisture_absorption": "high",
+      "chemical_resistance": "poor",
+      "food_safe": "no",
+      "biodegradable": false,
+      "outgassing": "minimal"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 0.8,
+      "recommended_wall_thickness_mm": 1.6,
+      "max_unsupported_overhang_deg": 55,
+      "max_bridge_length_mm": 10,
+      "min_hole_diameter_mm": 2.5,
+      "min_engraved_text_height_mm": 3.0,
+      "min_engraved_text_depth_mm": 0.5,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.05,
+      "thread_min_pitch_mm": 1.5,
+      "living_hinge_viable": false,
+      "max_cantilever_length_mm": 20,
+      "min_pin_diameter_mm": 3.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "poor",
+      "outdoor_use": "no",
+      "food_contact": "no",
+      "high_temp_environment": "poor",
+      "impact_resistance": "poor",
+      "repeated_flexing": "poor",
+      "cosmetic_finish": "outstanding",
+      "dimensional_accuracy": "moderate",
+      "prototyping": "good",
+      "snap_fits": "poor",
+      "gears_and_bearings": "no",
+      "water_tight": "moderate"
+    },
+    "agent_guidance": [
+      "PVB IS A DISPLAY-ONLY MATERIAL. Near-zero structural strength. Use only for decorative models, vases, transparent prints, and smoothed display pieces.",
+      "IPA VAPOR SMOOTHING is the key feature. Post-processing with isopropyl alcohol vapor eliminates layer lines for glass-like surface finish. Use the Polymaker Polysher or a DIY IPA vapor chamber.",
+      "HIGHLY HYGROSCOPIC. Must be stored sealed with desiccant. Print from a dry box if humidity is above 40%. Wet PVB produces bubbles, poor surface quality, and dramatically worse layer adhesion.",
+      "POOR LAYER ADHESION is the biggest printing challenge. Print slowly (40-60 mm/s walls), use higher temps (215-225°C), and ensure filament is bone dry. Layer adhesion is inherently worse than PLA.",
+      "BED TEMP VARIES BY BRAND. Prusament PVB needs 70-80°C. Polymaker PolySmooth works at 25-70°C. Always check brand-specific profiles.",
+      "TRANSPARENCY is possible with thick walls (2mm+), 0.8mm nozzle, vase mode, and higher temps. Thinner walls and multi-perimeter prints will be translucent, not transparent.",
+      "Good for: display models, decorative prints, transparent vases, smoothed figurines, visual prototypes. Bad for: structural parts, outdoor use, food contact, anything load-bearing, functional assemblies."
+    ],
+    "brand_profiles": {
+      "prusament_pvb": {
+        "brand": "Prusa Research",
+        "product_name": "Prusament PVB",
+        "nozzle_temp_range_c": [
+          205,
+          225
+        ],
+        "nozzle_temp_optimal_c": 215,
+        "bed_temp_range_c": [
+          70,
+          80
+        ],
+        "bed_temp_optimal_c": 75,
+        "max_print_speed_mms": 200,
+        "density_g_cm3": 1.1,
+        "drying_temp_c": 60,
+        "drying_time_hours": 8,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "notes": "IPA smoothable. Highly hygroscopic — dry before use. Larger nozzles (0.8mm) and vase mode improve transparency.",
+        "source": "Prusament PVB TDS PDF (prusament.com)"
+      },
+      "polymaker_polysmooth_pvb": {
+        "brand": "Polymaker",
+        "product_name": "PolySmooth PVB",
+        "nozzle_temp_range_c": [
+          190,
+          220
+        ],
+        "nozzle_temp_optimal_c": 220,
+        "bed_temp_range_c": [
+          25,
+          70
+        ],
+        "bed_temp_optimal_c": 60,
+        "max_print_speed_mms": 200,
+        "density_g_cm3": 1.1,
+        "drying_temp_c": 50,
+        "drying_time_hours": 12,
+        "enclosure_required": false,
+        "hardened_nozzle_required": false,
+        "notes": "IPA vapor smoothable via Polysher. Wider bed temp range than Prusament PVB — works at lower temps.",
+        "source": "Polymaker PolySmooth TDS V5.1 PDF"
+      }
+    },
+    "_validation": {
+      "source": "Prusament PVB TDS, Polymaker PolySmooth TDS V5.1, Prusa Knowledge Base",
+      "verified_date": "2026-04-09",
+      "confidence": "high",
+      "_review_needed": []
+    },
+    "_notes": "PVB (polyvinyl butyral) is chemically related to PVA but dissolves in IPA not water. Primary use case is IPA vapor smoothing for display-quality surface finish. Mechanical properties are PLA-class but with notably worse layer adhesion. Bed temp requirements vary significantly by brand — Prusament needs 70-80°C while Polymaker works at 25-70°C. Not food safe. Treat as a specialty display material."
   }
 }
