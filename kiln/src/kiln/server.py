@@ -8511,6 +8511,147 @@ class _DedupingToolRegistrationProxy:
         return decorator
 
 
+def _pro_api_call(tool_name: str, **kwargs) -> dict:
+    """Call a pro tool via the Kiln REST API server."""
+    api_url = os.environ.get("KILN_API_URL", "").strip()
+    if not api_url:
+        return {
+            "status": "error",
+            "error": (
+                f"'{tool_name}' is available through the Kiln server. "
+                "Set KILN_API_URL to your server address (e.g. http://localhost:8742) "
+                "or use the Kiln desktop app."
+            ),
+            "code": "PRO_TOOL_REQUIRES_SERVER",
+            "tool": tool_name,
+            "setup_hint": "export KILN_API_URL=http://localhost:8742",
+        }
+    import json
+    import urllib.request
+    try:
+        license_key = os.environ.get("KILN_LICENSE_KEY", "").strip()
+        headers = {"Content-Type": "application/json"}
+        if license_key:
+            headers["Authorization"] = f"Bearer {license_key}"
+        req = urllib.request.Request(
+            f"{api_url.rstrip('/')}/api/tools/{tool_name}",
+            data=json.dumps(kwargs).encode() if kwargs else None,
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())
+    except Exception as exc:
+        return {
+            "status": "error",
+            "error": f"Failed to reach Kiln server: {exc}",
+            "code": "SERVER_UNREACHABLE",
+        }
+
+
+def _register_pro_tool_stubs(mcp_instance) -> None:
+    """Register stub tools for pro features when kiln-pro isn't installed.
+
+    These let agents and users DISCOVER that textures, device intelligence,
+    and other pro features exist.  If KILN_API_URL is set, calls are
+    proxied to the REST API server where kiln-pro runs.  Otherwise, the
+    tool returns a helpful message explaining how to access the feature.
+    """
+
+    @mcp_instance.tool()
+    def apply_procedural_texture(
+        input_path: str,
+        texture: str = "camo",
+        num_colors: int = 4,
+        scale: float = 1.0,
+        seed: int = 0,
+        surface: str = "all",
+        save_to_library: bool = False,
+    ) -> dict:
+        """Apply a multicolor procedural texture (camo, marble, tiger stripe, etc.) to a 3D model.
+
+        Free tier: 3 decorations/month (shared with other decorations).
+        Pro tier: unlimited.
+
+        Produces per-zone STLs + multicolor 3MF ready for AMS/MMU printers.
+        """
+        return _pro_api_call(
+            "apply_procedural_texture",
+            input_path=input_path, texture=texture,
+            num_colors=num_colors, scale=scale, seed=seed,
+            surface=surface, save_to_library=save_to_library,
+        )
+
+    @mcp_instance.tool()
+    def list_procedural_textures() -> dict:
+        """List all available procedural texture types, palettes, and presets.
+
+        Available to all users (free and pro).
+        """
+        return _pro_api_call("list_procedural_textures")
+
+    @mcp_instance.tool()
+    def preview_texture_2d(
+        texture: str = "camo",
+        size: int = 512,
+        num_colors: int = 4,
+        scale: float = 1.0,
+        seed: int = 42,
+    ) -> dict:
+        """Render a flat 2D preview of a procedural texture as a PNG image.
+
+        Available to all users — no quota cost, no mesh required.
+        """
+        return _pro_api_call(
+            "preview_texture_2d",
+            texture=texture, size=size,
+            num_colors=num_colors, scale=scale, seed=seed,
+        )
+
+    @mcp_instance.tool()
+    def apply_geometric_texture(
+        input_path: str,
+        texture: str = "wood",
+        depth_mm: float = 1.2,
+        scale: float = 1.0,
+        mode: str = "deboss",
+        face: str = "auto",
+    ) -> dict:
+        """Apply a texture as physical surface relief (deboss/emboss). Wood, alligator, carbon fiber, etc.
+
+        Free tier: 3 decorations/month. Pro tier: unlimited.
+        Single-color print — no AMS/MMU needed.
+        """
+        return _pro_api_call(
+            "apply_geometric_texture",
+            input_path=input_path, texture=texture,
+            depth_mm=depth_mm, scale=scale, mode=mode, face=face,
+        )
+
+    @mcp_instance.tool()
+    def apply_image_texture(
+        input_path: str,
+        image_path: str,
+        tile_size_mm: float = 40.0,
+        depth_mm: float = 1.2,
+        mode: str = "deboss",
+        face: str = "auto",
+    ) -> dict:
+        """Apply a photo-based texture as tiled surface relief. Leather, stone, fabric, etc.
+
+        Free tier: 3 decorations/month. Pro tier: unlimited.
+        Single-color print — no AMS/MMU needed.
+        """
+        return _pro_api_call(
+            "apply_image_texture",
+            input_path=input_path, image_path=image_path,
+            tile_size_mm=tile_size_mm, depth_mm=depth_mm,
+            mode=mode, face=face,
+        )
+
+    logger.info("Pro tool stubs registered (textures via REST API proxy)")
+
+
 def _ensure_internal_tool_plugins_registered() -> None:
     """Register internal MCP tool plugins exactly once.
 
@@ -8539,7 +8680,9 @@ def _ensure_internal_tool_plugins_registered() -> None:
         )
         logger.info("kiln-pro plugins loaded successfully")
     except ImportError:
-        pass  # kiln-pro not installed — free tier, no pro plugins
+        # kiln-pro not installed — register lightweight stubs so agents
+        # and users can DISCOVER pro tools and call them via the REST API.
+        _register_pro_tool_stubs(mcp)
     except Exception as exc:
         logger.warning("Failed to load kiln-pro plugins: %s", exc)
 
