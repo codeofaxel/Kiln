@@ -81,6 +81,13 @@ def record_event(event_type: str, *, detail: str | None = None) -> None:
         For decorations: the content type (e.g. ``"qr"``).
         For slices: the slicer profile name.
         For downloads: the marketplace name (e.g. ``"thingiverse"``).
+
+    .. note::
+
+        ``textures`` events also increment ``decorations`` and record the
+        texture name in ``decoration_types`` (under the
+        ``procedural_texture`` key).  The separate ``textures`` counter is
+        kept for backward compatibility.
     """
     if event_type not in _VALID_EVENTS:
         return
@@ -89,6 +96,17 @@ def record_event(event_type: str, *, detail: str | None = None) -> None:
             data = _read()
             # Increment top-level counter
             data[event_type] = data.get(event_type, 0) + 1
+
+            # Textures are a decoration subtype — also increment decorations
+            if event_type == "textures":
+                data["decorations"] = data.get("decorations", 0) + 1
+                dec_types = data.get("decoration_types", {})
+                if not isinstance(dec_types, dict):
+                    dec_types = {}
+                dec_types["procedural_texture"] = (
+                    dec_types.get("procedural_texture", 0) + 1
+                )
+                data["decoration_types"] = dec_types
 
             # Increment breakdown if detail provided
             if detail:

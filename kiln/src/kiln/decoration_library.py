@@ -24,7 +24,16 @@ _logger = logging.getLogger(__name__)
 _MANIFEST_FILENAME = "manifest.json"
 _LIBRARY_DIR_NAME = "decorations"
 
-_VALID_CONTENT_TYPES = {"photo", "svg", "qr", "text"}
+_VALID_CONTENT_TYPES = {
+    "photo", "svg", "qr", "text",
+    "procedural_texture", "ai_texture",
+}
+
+# Decoration categories — groups content_types for filtering/display.
+DECORATION_CATEGORIES: dict[str, list[str]] = {
+    "surface": ["photo", "svg", "qr", "text"],
+    "texture": ["procedural_texture", "ai_texture"],
+}
 
 # Default settings per content type
 _DEFAULTS: dict[str, dict[str, Any]] = {
@@ -32,6 +41,8 @@ _DEFAULTS: dict[str, dict[str, Any]] = {
     "svg": {"depth_mm": 0.5, "mode": "deboss", "image_style": "auto"},
     "qr": {"depth_mm": 0.5, "mode": "emboss", "image_style": "auto"},
     "text": {"depth_mm": 0.4, "mode": "deboss", "image_style": "auto"},
+    "procedural_texture": {"depth_mm": 0.0, "mode": "multicolor", "image_style": "auto"},
+    "ai_texture": {"depth_mm": 0.0, "mode": "multicolor", "image_style": "auto"},
 }
 
 
@@ -97,6 +108,18 @@ class ProvenSetting:
         )
 
 
+def category_for(content_type: str) -> str:
+    """Return the decoration category for a given content_type.
+
+    :returns: ``"texture"`` for procedural/AI textures, ``"surface"`` for
+        photo/svg/qr/text, ``"unknown"`` for anything else.
+    """
+    for cat, types in DECORATION_CATEGORIES.items():
+        if content_type in types:
+            return cat
+    return "unknown"
+
+
 @dataclass
 class Decoration:
     """A saved surface decoration with metadata and proven settings."""
@@ -116,12 +139,19 @@ class Decoration:
     version: int = 1
     parent_version: int | None = None
     changes: dict[str, str] | None = None
+    texture_params: dict[str, Any] | None = None
+
+    @property
+    def category(self) -> str:
+        """The decoration category: ``"surface"`` or ``"texture"``."""
+        return category_for(self.content_type)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
             "name": self.name,
             "slug": self.slug,
             "content_type": self.content_type,
+            "category": self.category,
             "created": self.created,
             "source_file": self.source_file,
             "content_file": self.content_file,
@@ -140,6 +170,8 @@ class Decoration:
             d["parent_version"] = self.parent_version
         if self.changes is not None:
             d["changes"] = self.changes
+        if self.texture_params is not None:
+            d["texture_params"] = self.texture_params
         return d
 
     @classmethod
@@ -172,6 +204,7 @@ class Decoration:
             version=d.get("version", 1),
             parent_version=d.get("parent_version"),
             changes=d.get("changes"),
+            texture_params=d.get("texture_params"),
         )
 
 
@@ -366,11 +399,14 @@ def save_decoration(
 def list_decorations(
     *,
     content_type: str | None = None,
+    category: str | None = None,
     tag: str | None = None,
 ) -> list[Decoration]:
     """List all saved decorations, optionally filtered.
 
     :param content_type: Filter by content type (None = all).
+    :param category: Filter by category — ``"surface"`` or ``"texture"``
+        (None = all).
     :param tag: Filter by tag (None = all).
     :returns: List of Decoration objects, sorted by last-printed descending.
     """
@@ -392,6 +428,8 @@ def list_decorations(
             continue
 
         if content_type and dec.content_type != content_type:
+            continue
+        if category and dec.category != category:
             continue
         if tag and tag not in dec.tags:
             continue
