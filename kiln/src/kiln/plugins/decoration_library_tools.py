@@ -157,14 +157,19 @@ class _DecorationLibraryPlugin:
         @mcp.tool()
         def list_decorations(
             content_type: str = "",
+            category: str = "",
             tag: str = "",
         ) -> dict:
             """List all saved decorations in the library.
 
             Browse the decoration library to find reusable decorations.
-            Filter by content type (photo, svg, qr, text) or tag.
+            Filter by content type, category, or tag.
 
-            :param content_type: Filter by type (empty = show all).
+            :param content_type: Filter by type — ``photo``, ``svg``, ``qr``,
+                ``text``, ``procedural_texture``, ``ai_texture``
+                (empty = show all).
+            :param category: Filter by category — ``surface`` (photo/svg/qr/text)
+                or ``texture`` (procedural/AI textures).  Empty = show all.
             :param tag: Filter by tag (empty = show all).
             :returns: Dict with decoration count and list.
             """
@@ -172,7 +177,11 @@ class _DecorationLibraryPlugin:
                 list_decorations as _list,
             )
 
-            decorations = _list(content_type=content_type, tag=tag)
+            decorations = _list(
+                content_type=content_type or None,
+                category=category or None,
+                tag=tag or None,
+            )
             return {
                 "success": True,
                 "count": len(decorations),
