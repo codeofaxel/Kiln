@@ -15,6 +15,13 @@
 - **Brainstorm mode**: When the user says "brainstorm", "discuss", "think through", "talk about", or "let's explore" — stay in **conversation mode**. Do NOT jump into auditing code, proposing implementation plans, or executing changes. Ask questions, explore tradeoffs, and riff on ideas collaboratively. Only shift to execution when the user explicitly says to build/implement/fix something.
 - **Skip human-only tasks by default**: When given a task list, silently skip items requiring human action (account creation, App Store submissions, manual device testing, credential entry) unless explicitly told to include them. Focus on what you can execute autonomously.
 
+## Relationship to kiln-pro (IMPORTANT — read before moving code)
+- A **private** paid-tier companion repo (`kiln-pro`) adds premium features (textures, device intelligence, billing, fleet, etc.).
+- Kiln discovers pro features via `try: from kiln_pro.bridge import pro_features` with `except ImportError` fallback.
+- **Free users access pro tools via kiln-pro's REST API server** (`POST /api/tools/{tool_name}`), which runs server-side with all tools loaded. Free users never install kiln-pro locally.
+- **NEVER move proprietary code from kiln-pro into this repo to "make it available to free users."** The REST API proxy pattern keeps IP private while serving tools to any tier. To open a pro tool to free users, change its gate in kiln-pro (e.g., `check_pro()` → quota check), don't move the code here.
+- Quota enforcement (`decoration_quota.py`) lives here. Tier resolution calls `kiln.licensing` which kiln-pro provides; without kiln-pro, tier defaults to `"free"`.
+
 ## Project Identity
 - **Kiln is infrastructure, not software.** Never describe it as "automation software", "an API", or use cloud/SaaS framing. Kiln is local stdio-based infrastructure that AI agents use to control physical printers. It is not cloud-hosted.
 - **Correct framing**: "3D printing infrastructure for AI agents", "printer control layer", "MCP infrastructure"
