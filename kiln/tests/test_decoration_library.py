@@ -727,3 +727,93 @@ class TestDecorationHistory:
     def test_not_found_returns_empty(self):
         history = decoration_history("nonexistent-history")
         assert history == []
+
+
+# ---------------------------------------------------------------------------
+# Texture-as-decoration taxonomy
+# ---------------------------------------------------------------------------
+
+
+class TestDecorationCategory:
+    """Verify decoration category system (surface vs texture)."""
+
+    def test_photo_is_surface(self, tmp_path):
+        dec = _save_simple(tmp_path, content_type="photo")
+        assert dec.category == "surface"
+
+    def test_svg_is_surface(self, tmp_path):
+        dec = _save_simple(tmp_path, name="svg test", content_type="svg")
+        assert dec.category == "surface"
+
+    def test_qr_is_surface(self, tmp_path):
+        dec = _save_simple(tmp_path, name="qr test", content_type="qr")
+        assert dec.category == "surface"
+
+    def test_text_is_surface(self, tmp_path):
+        dec = _save_simple(tmp_path, name="text test", content_type="text")
+        assert dec.category == "surface"
+
+    def test_procedural_texture_is_texture(self, tmp_path):
+        dec = save_decoration(
+            "Tiger Stripe",
+            content_type="procedural_texture",
+            content_data="tiger_stripe",
+            texture_params={"texture": "tiger_stripe", "num_colors": 4},
+        )
+        assert dec.category == "texture"
+        assert dec.content_type == "procedural_texture"
+
+    def test_ai_texture_is_texture(self, tmp_path):
+        dec = save_decoration(
+            "AI Wood",
+            content_type="ai_texture",
+            content_data="wood grain",
+        )
+        assert dec.category == "texture"
+
+    def test_category_in_to_dict(self, tmp_path):
+        dec = _save_simple(tmp_path, content_type="photo")
+        d = dec.to_dict()
+        assert d["category"] == "surface"
+
+    def test_texture_params_roundtrip(self, tmp_path):
+        params = {"texture": "marble", "num_colors": 3, "scale": 1.5}
+        dec = save_decoration(
+            "Marble Test",
+            content_type="procedural_texture",
+            content_data="marble",
+            texture_params=params,
+        )
+        d = dec.to_dict()
+        assert d["texture_params"] == params
+        loaded = Decoration.from_dict(d)
+        assert loaded.texture_params == params
+        assert loaded.category == "texture"
+
+    def test_unknown_content_type_category(self):
+        from kiln.decoration_library import category_for
+        assert category_for("unknown_thing") == "unknown"
+
+
+class TestListByCategory:
+    """Filter decorations by category."""
+
+    def test_filter_surfaces_only(self, tmp_path):
+        _save_simple(tmp_path, name="photo1", content_type="photo")
+        save_decoration("tex1", content_type="procedural_texture", content_data="camo")
+        results = list_decorations(category="surface")
+        assert len(results) == 1
+        assert results[0].content_type == "photo"
+
+    def test_filter_textures_only(self, tmp_path):
+        _save_simple(tmp_path, name="photo2", content_type="photo")
+        save_decoration("tex2", content_type="procedural_texture", content_data="ocean")
+        results = list_decorations(category="texture")
+        assert len(results) == 1
+        assert results[0].content_type == "procedural_texture"
+
+    def test_no_category_returns_all(self, tmp_path):
+        _save_simple(tmp_path, name="photo3", content_type="photo")
+        save_decoration("tex3", content_type="procedural_texture", content_data="lava")
+        results = list_decorations()
+        assert len(results) == 2

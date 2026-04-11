@@ -322,6 +322,7 @@ def save_decoration(
     image_style: str = "auto",
     material: str | None = None,
     tags: list[str] | None = None,
+    texture_params: dict[str, Any] | None = None,
 ) -> Decoration:
     """Save a decoration to the library.
 
@@ -390,6 +391,7 @@ def save_decoration(
         proven_settings=proven,
         tags=tags or [],
         print_count=0,
+        texture_params=texture_params,
     )
     _write_manifest(slug, dec.to_dict())
     _logger.debug("Saved decoration %r to %s", name, deco_dir)
