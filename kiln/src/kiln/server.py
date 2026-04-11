@@ -10794,6 +10794,16 @@ def decorate_surface(
     if err := _check_auth("design:decorate"):
         return err
 
+    # --- Decoration quota (3/month for free tier) ---
+    try:
+        from kiln.decoration_quota import check_decoration_quota
+
+        ok, quota_err = check_decoration_quota()
+        if not ok:
+            return quota_err
+    except Exception:
+        pass  # Fail open — don't block on quota errors
+
     import tempfile
 
     # --- Check provenance sidecar for design recipe defaults ---
