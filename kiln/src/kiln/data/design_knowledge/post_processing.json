@@ -1442,5 +1442,71 @@
         "tradeoffs": "Marginal strength improvement. The primary benefit is surface quality, not structural. Over-exposure to IPA vapors erodes detail and can weaken thin walls. PVB is inherently weaker than PLA — no post-process will close that gap."
       }
     ]
+  },
+  "pp": {
+    "techniques": [
+      {
+        "name": "Flame Polishing",
+        "difficulty": "moderate",
+        "tools_needed": [
+          "butane torch or heat gun",
+          "heat-resistant gloves",
+          "fire extinguisher nearby"
+        ],
+        "procedure": "Pass a flame or heat gun quickly over the surface at 5-10cm distance. PP melts easily — multiple fast passes are better than one slow pass. Works best on flat or convex surfaces.",
+        "result": "Smoother surface with reduced layer lines. PP's low surface energy means it reflows cleanly when heat is applied correctly.",
+        "safety_notes": "Work in ventilated area. PP melts quickly — do not hold flame in one spot. Keep heat gun moving. PP combustion produces irritating fumes."
+      },
+      {
+        "name": "Mechanical Sanding",
+        "difficulty": "easy",
+        "tools_needed": [
+          "120-grit sandpaper",
+          "220-grit sandpaper",
+          "400-grit sandpaper"
+        ],
+        "procedure": "Sand dry — PP is hydrophobic so wet sanding offers no benefit. Start at 120 grit to remove layer lines, progress to 220, finish with 400. PP's flexibility means it sands differently than rigid materials — use even pressure.",
+        "result": "Significantly reduced layer lines. PP's soft surface responds well to sanding but gums up sandpaper quickly.",
+        "safety_notes": "Standard dust precautions. Replace sandpaper frequently as PP residue loads the grit quickly."
+      },
+      {
+        "name": "PP-Compatible Adhesive Bonding",
+        "difficulty": "hard",
+        "tools_needed": [
+          "PP-bonding primer (e.g., Loctite 770)",
+          "cyanoacrylate or structural adhesive",
+          "nitrile gloves",
+          "isopropyl alcohol for surface prep"
+        ],
+        "procedure": "PP's low surface energy makes standard glues fail. Apply PP-bonding primer first, allow to dry 60 seconds, then apply adhesive. Alternatively, use hot melt adhesive with PP-compatible sticks. Surface roughness from sanding improves adhesion.",
+        "result": "Functional bond between PP parts. Bond strength is lower than for PLA/PETG — design parts to use mechanical fasteners where possible.",
+        "safety_notes": "Primer contains adhesion promoter chemicals — ventilated area, nitrile gloves."
+      }
+    ],
+    "paintability": {
+      "primer_needed": true,
+      "recommended_primer": "Plastic adhesion promoter (e.g., Rust-Oleum Adhesion Promoter) — standard primers do not bond to PP's low-energy surface",
+      "paint_types": [
+        "flexible_paint",
+        "spray_paint_with_adhesion_promoter"
+      ],
+      "notes": "PP is extremely difficult to paint. Its low surface energy means paint adhesion is very poor without chemical adhesion promoter. Apply adhesion promoter, allow to flash off, then apply flexible paint. Rigid paints will crack as PP flexes. Most users leave PP unpainted."
+    },
+    "strengthening": [
+      {
+        "method": "Annealing",
+        "applicable": true,
+        "procedure": "Heat PP parts to 100-110°C for 30-45 minutes in a controlled oven. This increases crystallinity and improves stiffness and heat resistance. Support the part on a flat surface — PP softens significantly at these temperatures and will sag without support.",
+        "strength_gain_pct": 20,
+        "tradeoffs": "Significant dimensional change — warping and shrinkage occur. Only suitable for non-precision parts. Increases stiffness but slightly reduces the flex fatigue life that makes PP useful for living hinges. Anneal before final machining, not after."
+      },
+      {
+        "method": "Epoxy Coating",
+        "applicable": false,
+        "procedure": "Not recommended — standard epoxies do not bond to PP. Requires specialized PP-adhesion primer before any epoxy application, and the resulting bond is weak compared to other materials.",
+        "strength_gain_pct": 5,
+        "tradeoffs": "Very low bond strength even with primer. Epoxy may delaminate under stress. Use mechanical fasteners instead of adhesive strengthening for PP."
+      }
+    ]
   }
 }

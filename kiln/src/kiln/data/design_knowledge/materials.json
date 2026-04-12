@@ -3127,5 +3127,87 @@
       "_review_needed": []
     },
     "_notes": "PVB (polyvinyl butyral) is chemically related to PVA but dissolves in IPA not water. Primary use case is IPA vapor smoothing for display-quality surface finish. Mechanical properties are PLA-class but with notably worse layer adhesion. Bed temp requirements vary significantly by brand — Prusament needs 70-80°C while Polymaker works at 25-70°C. Not food safe. Treat as a specialty display material."
+  },
+  "pp": {
+    "display_name": "Polypropylene",
+    "category": "specialty",
+    "mechanical": {
+      "tensile_strength_mpa": 30,
+      "flexural_strength_mpa": 38,
+      "compressive_strength_mpa": 40,
+      "elongation_at_break_pct": 100,
+      "youngs_modulus_gpa": 1.3,
+      "impact_resistance": "high",
+      "layer_adhesion": "poor",
+      "creep_resistance": "moderate",
+      "fatigue_resistance": "excellent"
+    },
+    "thermal": {
+      "glass_transition_c": null,
+      "heat_deflection_c": 95,
+      "max_service_temp_c": 100,
+      "print_temp_range_c": [
+        220,
+        260
+      ],
+      "bed_temp_range_c": [
+        85,
+        100
+      ],
+      "warping_tendency": "high"
+    },
+    "chemical": {
+      "uv_resistance": "poor",
+      "moisture_absorption": "very_low",
+      "chemical_resistance": "excellent",
+      "food_safe": "conditional",
+      "biodegradable": false,
+      "outgassing": "low"
+    },
+    "design_limits": {
+      "min_wall_thickness_mm": 1.2,
+      "recommended_wall_thickness_mm": 2.0,
+      "max_unsupported_overhang_deg": 45,
+      "max_bridge_length_mm": 8,
+      "min_hole_diameter_mm": 2.0,
+      "min_embossed_text_height_mm": 1.0,
+      "min_engraved_text_depth_mm": 0.6,
+      "snap_fit_tolerance_mm": 0.3,
+      "press_fit_interference_mm": 0.1,
+      "thread_min_pitch_mm": 2.0,
+      "living_hinge_viable": true,
+      "max_cantilever_length_mm": 60,
+      "min_pin_diameter_mm": 3.0
+    },
+    "use_case_ratings": {
+      "structural_load_bearing": "poor",
+      "outdoor_use": "moderate",
+      "food_contact": "conditional",
+      "high_temp_environment": "moderate",
+      "impact_resistance": "excellent",
+      "repeated_flexing": "excellent",
+      "cosmetic_finish": "poor",
+      "dimensional_accuracy": "poor",
+      "prototyping": "moderate",
+      "snap_fits": "good",
+      "gears_and_bearings": "poor",
+      "water_tight": "good"
+    },
+    "agent_guidance": [
+      "LIVING HINGE KING. PP's unique semi-crystalline structure allows millions of flex cycles without fatigue failure. The only FDM material suitable for functional living hinges. Layer orientation must be perpendicular to the hinge flex axis.",
+      "ADHESION IS THE #1 CHALLENGE. PP is chemically inert — it bonds to almost nothing. Use PP-specific build surfaces (Magigoo PP, Bambu PP sheet, polypropylene tape) or a glue stick on bare glass. Bed temp 85-100°C mandatory. Enclosure strongly recommended to prevent warping.",
+      "NO GLASS TRANSITION. PP is semi-crystalline, not amorphous — it has a melting point (~165°C) not a Tg. Heat deflection is ~95°C but crystallization behavior means dimensional changes can occur near that temperature.",
+      "EXCELLENT CHEMICAL RESISTANCE. Resists acids, bases, alcohols, and most solvents. Ideal for chemical containers, lab equipment, and anything exposed to cleaning agents. Not compatible with strong oxidizers or aromatic hydrocarbons.",
+      "VERY LOW MOISTURE ABSORPTION. Near-zero water uptake makes PP ideal for wet environments, living hinge applications that get wet, and parts that must maintain dimensions in humid conditions.",
+      "WARPING IS SEVERE. PP shrinks significantly on cooling — even more than ABS. Enclosure is essential. Use a brim of at least 8-10mm. First layer must be slow (15-20mm/s) for adhesion.",
+      "POOR LAYER ADHESION and dimensional accuracy. PP is not a precision engineering material — expect significant warping and layer delamination without ideal conditions. Reserve for applications where its unique flex/chemical properties justify the difficulty."
+    ],
+    "_validation": {
+      "source": "Verbatim PP TDS, FormFutura Centaur PP datasheet, Prusa PP printing guide",
+      "verified_date": "2026-04-11",
+      "confidence": "high",
+      "_review_needed": []
+    },
+    "_notes": "PP is one of the hardest FDM materials to print reliably but uniquely suited for living hinges and chemical resistance. Living hinge viability is its standout feature over all other FDM materials."
   }
 }
