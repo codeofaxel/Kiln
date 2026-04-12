@@ -25,13 +25,6 @@ from typing import Any
 
 _logger = logging.getLogger(__name__)
 
-try:
-    from PIL import Image as _PILImage
-    _PIL_AVAILABLE = True
-except ImportError:  # pragma: no cover
-    _PILImage = None  # type: ignore[assignment,misc]
-    _PIL_AVAILABLE = False
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -891,7 +884,6 @@ class _ColorToolsPlugin:
     Tools:
         - auto_color_by_height
         - auto_color_by_region
-        - auto_multicolor_from_texture
     """
 
     @property
@@ -1045,136 +1037,6 @@ class _ColorToolsPlugin:
                 len(triangles), threemf_path,
                 compose_3mf_error=compose_err,
                 band_warning=warn,
-            )
-
-        @mcp.tool()
-        def auto_multicolor_from_texture(
-            obj_path: str,
-            num_colors: int = 4,
-        ) -> dict:
-            """Convert a textured OBJ into per-color STL zones for multicolor printing.
-
-            Takes an OBJ file with MTL + PNG textures (e.g. from Meshy
-            retexture/refine) and splits it into separate STL files per
-            dominant color, then composes into a multicolor 3MF ready for
-            AMS/MMU printers.
-
-            Requires Pillow (``pip install Pillow``) for texture sampling.
-
-            :param obj_path: Path to the textured ``.obj`` file.  The MTL
-                and texture PNG(s) must be in the same directory.
-            :param num_colors: Number of color zones to extract (default 4).
-            :returns: Dict with zone STL paths, hex colors, face counts,
-                AMS slot mapping, weight estimates, and optional 3MF path.
-            """
-            if not _PIL_AVAILABLE:
-                return {
-                    "success": False,
-                    "error": (
-                        "Pillow is required for texture-based multicolor. "
-                        "Install with: pip install Pillow"
-                    ),
-                }
-
-            path = Path(obj_path)
-            if not path.exists():
-                return {"success": False, "error": f"File not found: {obj_path}"}
-
-            if num_colors < 1:
-                return {"success": False, "error": "num_colors must be >= 1"}
-
-            # Parse OBJ
-            try:
-                vertices, uvs, faces = _parse_obj(obj_path)
-            except ValueError as exc:
-                return {"success": False, "error": str(exc)}
-
-            if not faces:
-                return {"success": False, "error": "No faces found in OBJ file"}
-
-            if not vertices:
-                return {"success": False, "error": "No vertices found in OBJ file"}
-
-            # Find and parse MTL for texture paths
-            mtl_path = _find_mtl_path(obj_path)
-            tex_map: dict[str, str] = {}
-            if mtl_path:
-                tex_map = _parse_mtl(mtl_path)
-
-            # Load texture images per material
-            obj_dir = os.path.dirname(os.path.abspath(obj_path))
-            loaded_textures: dict[str, Any] = {}
-            for mat_name, tex_file in tex_map.items():
-                tex_path = os.path.join(obj_dir, tex_file)
-                if os.path.isfile(tex_path):
-                    try:
-                        loaded_textures[mat_name] = _PILImage.open(tex_path).convert("RGB")
-                    except (OSError, ValueError):
-                        _logger.debug("Failed to open texture: %s", tex_path)
-
-            # If no textures loaded, try to find any PNG in the directory
-            if not loaded_textures:
-                for fname in os.listdir(obj_dir):
-                    if fname.lower().endswith((".png", ".jpg", ".jpeg")):
-                        try:
-                            img = _PILImage.open(os.path.join(obj_dir, fname)).convert("RGB")
-                            loaded_textures["_default"] = img
-                            break
-                        except (OSError, ValueError):
-                            continue
-
-            if not loaded_textures:
-                return {
-                    "success": False,
-                    "error": (
-                        "No texture images found. Ensure MTL + PNG files "
-                        "are in the same directory as the OBJ."
-                    ),
-                }
-
-            # Sample face colors from texture
-            face_colors: list[tuple[int, int, int]] = []
-            for face in faces:
-                # Pick the texture for this face's material
-                img = loaded_textures.get(face.material)
-                if img is None:
-                    # Fall back to first available texture
-                    img = next(iter(loaded_textures.values()))
-                w, h = img.size
-                color = _sample_face_color(face, uvs, img, w, h)
-                face_colors.append(color)
-
-            # Quantize to dominant colors
-            assignments, centroids = _quantize_colors(face_colors, num_colors)
-            palette = [_rgb_to_hex(c) for c in centroids]
-
-            # Convert OBJ faces to triangles and bucket by color zone
-            output_dir = tempfile.mkdtemp(prefix="kiln_texture_color_")
-            base_name = path.stem
-
-            zones: list[_ColorZone] = []
-            for i in range(num_colors):
-                color = palette[i] if i < len(palette) else palette[i % len(palette)]
-                zones.append(_ColorZone(index=i, color=color))
-
-            total_faces = 0
-            for face, zone_idx in zip(faces, assignments, strict=True):
-                tris = _obj_face_to_triangle(face, vertices)
-                zones[zone_idx].triangles.extend(tris)
-                total_faces += len(tris)
-
-            # Write per-zone STLs
-            for zone in zones:
-                stl_path = os.path.join(output_dir, f"{base_name}_zone{zone.index}.stl")
-                _write_binary_stl(zone.triangles, stl_path)
-
-            # Compose 3MF
-            threemf_path, compose_err = _try_compose_3mf(zones, output_dir, base_name)
-
-            return _build_result(
-                zones, output_dir, base_name, "texture",
-                total_faces, threemf_path,
-                compose_3mf_error=compose_err,
             )
 
         _logger.debug("Registered color tools")

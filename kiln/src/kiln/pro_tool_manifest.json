@@ -1,0 +1,2573 @@
+{
+  "version": 1,
+  "generated": "2026-04-12T00:19:06.395738+00:00",
+  "tool_count": 71,
+  "categories": {
+    "product_generators": {
+      "label": "Product Generators",
+      "pitch": "Generate ready-to-print products \u2014 coasters, keychains, ornaments, pet tags, and more \u2014 with one command."
+    },
+    "textures": {
+      "label": "Textures & Materials",
+      "pitch": "Apply procedural and image-based textures to any 3D model. Multicolor, deboss, emboss."
+    },
+    "decoration": {
+      "label": "Decoration Tools",
+      "pitch": "Batch decoration, template profiles, and auto-multicolor from texture maps."
+    },
+    "decoration_learning": {
+      "label": "Decoration Learning",
+      "pitch": "Track decoration outcomes, iterate parameters, and roll back to proven recipes automatically."
+    },
+    "print_intelligence": {
+      "label": "Print Intelligence",
+      "pitch": "Your printer learns from every print \u2014 optimal settings, failure prediction, maintenance alerts."
+    },
+    "cloud_sync": {
+      "label": "Cloud Sync",
+      "pitch": "Sync designs, settings, and print history across all your devices."
+    },
+    "design_versioning": {
+      "label": "Design Versioning",
+      "pitch": "Track every design iteration with mesh diffs, provenance, and full ancestry."
+    },
+    "speed_control": {
+      "label": "Speed Control",
+      "pitch": "Real-time printer speed control, scheduling, and fleet-wide adjustments."
+    },
+    "design_modification": {
+      "label": "Design Modification",
+      "pitch": "Change part colors, rebuild designs, and smart AI redesign."
+    },
+    "product_intelligence": {
+      "label": "Product Intelligence",
+      "pitch": "Smart product generation with proven recipes, QR codes, and batch operations."
+    },
+    "provenance_learning": {
+      "label": "Proven Recipes",
+      "pitch": "Record and recall proven recipes for any decoration + product combination."
+    }
+  },
+  "tools": [
+    {
+      "name": "cloud_sync_devices",
+      "description": "List all devices connected to your cloud sync account.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {},
+        "title": "cloud_sync_devicesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_sync_history",
+      "description": "View the sync operation log.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "limit": {
+            "default": 20,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "cloud_sync_historyArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cloud_sync_resolve_conflict",
+      "description": "Manually resolve a sync conflict.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "conflict_id": {
+            "title": "Conflict Id",
+            "type": "string"
+          },
+          "resolution": {
+            "title": "Resolution",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conflict_id",
+          "resolution"
+        ],
+        "title": "cloud_sync_resolve_conflictArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "auto_add_rubber_feet",
+      "description": "Add rubber foot positions to model bottom (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "arguments"
+        ],
+        "title": "auto_add_rubber_feetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "auto_recess_pocket",
+      "description": "Add recessed pocket to a face for bed-safe decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "arguments"
+        ],
+        "title": "auto_recess_pocketArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "batch_decorate",
+      "description": "Apply the same decoration to multiple models (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "arguments"
+        ],
+        "title": "batch_decorateArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "estimate_batch_cost",
+      "description": "Estimate total cost for a batch of decorated items (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "arguments"
+        ],
+        "title": "estimate_batch_costArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "estimate_decoration_cost",
+      "description": "Estimate cost impact of decorating a model (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "arguments"
+        ],
+        "title": "estimate_decoration_costArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_qr_decoration",
+      "description": "Generate a QR code heightmap for embossing onto 3D models (Pro) (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "arguments"
+        ],
+        "title": "generate_qr_decorationArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_template_decoration_profile",
+      "description": "Get the decoration profile for a design template (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "template_id": {
+            "title": "Template Id",
+            "type": "string"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template_id"
+        ],
+        "title": "get_template_decoration_profileArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_brand_assets",
+      "description": "List all registered brand assets (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "arguments"
+        ],
+        "title": "list_brand_assetsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_decoratable_templates",
+      "description": "List all design templates that have decoration profiles (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {},
+        "title": "list_decoratable_templatesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "register_brand_asset",
+      "description": "Register a logo/image as a named brand asset (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "arguments"
+        ],
+        "title": "register_brand_assetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "remove_brand_asset",
+      "description": "Remove a registered brand asset (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "arguments"
+        ],
+        "title": "remove_brand_assetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "resolve_template_decoration",
+      "description": "Resolve decoration settings for a template, merging profile defaults with overrides (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "template_id": {
+            "title": "Template Id",
+            "type": "string"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "face": {
+            "default": "",
+            "title": "Face",
+            "type": "string"
+          },
+          "depth_mm": {
+            "default": 0.0,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "mode": {
+            "default": "",
+            "title": "Mode",
+            "type": "string"
+          },
+          "scale": {
+            "default": 0.0,
+            "title": "Scale",
+            "type": "number"
+          },
+          "image_style": {
+            "default": "",
+            "title": "Image Style",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template_id"
+        ],
+        "title": "resolve_template_decorationArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "smart_decorate",
+      "description": "Intelligent decoration with auto-fix for printability (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "title": "Arguments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "arguments"
+        ],
+        "title": "smart_decorateArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "decoration_history",
+      "description": "Get the full version history of a decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration_learning",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "decoration_historyArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "iterate_decoration",
+      "description": "Create a new version of a decoration, archiving the current settings (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration_learning",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "content_path": {
+            "default": "",
+            "title": "Content Path",
+            "type": "string"
+          },
+          "depth_mm": {
+            "default": 0.0,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "mode": {
+            "default": "",
+            "title": "Mode",
+            "type": "string"
+          },
+          "image_style": {
+            "default": "",
+            "title": "Image Style",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "iterate_decorationArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_decoration_success",
+      "description": "Record a successful print, updating proven settings for a decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration_learning",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "depth_mm": {
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "mode": {
+            "default": "emboss",
+            "title": "Mode",
+            "type": "string"
+          },
+          "image_style": {
+            "default": "auto",
+            "title": "Image Style",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "material",
+          "depth_mm"
+        ],
+        "title": "record_decoration_successArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "rollback_decoration",
+      "description": "Restore a previous version of a decoration (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration_learning",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "title": "rollback_decorationArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "change_part_color",
+      "description": "Change a part's color in a design recipe and re-slice (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_modification",
+      "parameters": {
+        "properties": {
+          "recipe_path": {
+            "title": "Recipe Path",
+            "type": "string"
+          },
+          "part_name": {
+            "title": "Part Name",
+            "type": "string"
+          },
+          "new_color": {
+            "title": "New Color",
+            "type": "string"
+          },
+          "new_filament_slot": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "New Filament Slot"
+          }
+        },
+        "required": [
+          "recipe_path",
+          "part_name",
+          "new_color"
+        ],
+        "title": "change_part_colorArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "rebuild_design",
+      "description": "Re-execute the full build pipeline from a saved recipe (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_modification",
+      "parameters": {
+        "properties": {
+          "recipe_path": {
+            "title": "Recipe Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_path"
+        ],
+        "title": "rebuild_designArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "smart_redesign",
+      "description": "Interpret a natural language instruction and modify the design (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "tier": "business",
+      "category": "design_modification",
+      "parameters": {
+        "properties": {
+          "recipe_path": {
+            "title": "Recipe Path",
+            "type": "string"
+          },
+          "instruction": {
+            "title": "Instruction",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_path",
+          "instruction"
+        ],
+        "title": "smart_redesignArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "best_design_version",
+      "description": "Find the version with the highest success rate.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "version_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Version Ids",
+            "type": "array"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          },
+          "printer_id": {
+            "default": "",
+            "title": "Printer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_ids"
+        ],
+        "title": "best_design_versionArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "check_design_regression",
+      "description": "Check if the latest version of a design is printing worse.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "version_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Version Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "version_ids"
+        ],
+        "title": "check_design_regressionArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "compare_design_versions",
+      "description": "Compare print outcomes between two versions of a design.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "version_id_a": {
+            "title": "Version Id A",
+            "type": "string"
+          },
+          "version_id_b": {
+            "title": "Version Id B",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id_a",
+          "version_id_b"
+        ],
+        "title": "compare_design_versionsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "design_version_health",
+      "description": "Full health report for a design across all its versions.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "version_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Version Ids",
+            "type": "array"
+          },
+          "design_name": {
+            "default": "",
+            "title": "Design Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_ids"
+        ],
+        "title": "design_version_healthArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_design_ancestry",
+      "description": "Walk the parent chain from a recipe back to the root.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "recipe_path": {
+            "title": "Recipe Path",
+            "type": "string"
+          },
+          "max_depth": {
+            "default": 50,
+            "title": "Max Depth",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recipe_path"
+        ],
+        "title": "get_design_ancestryArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "read_design_sidecar",
+      "description": "Read provenance data from the sidecar next to an STL or recipe file.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "stl_path": {
+            "title": "Stl Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stl_path"
+        ],
+        "title": "read_design_sidecarArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "rename_design",
+      "description": "Rename a design while preserving full version history.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "old_design_id": {
+            "title": "Old Design Id",
+            "type": "string"
+          },
+          "new_design_id": {
+            "title": "New Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "old_design_id",
+          "new_design_id"
+        ],
+        "title": "rename_designArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_auto_tuned_settings",
+      "description": "Get auto-tuned print settings from historical success/failure analysis.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id",
+          "material"
+        ],
+        "title": "get_auto_tuned_settingsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_maintenance_prediction",
+      "description": "Predict when maintenance is likely needed for a printer.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id"
+        ],
+        "title": "get_maintenance_predictionArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_material_success_rates",
+      "description": "Get per-material success/fail breakdown for a printer.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id"
+        ],
+        "title": "get_material_success_ratesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_material_warnings",
+      "description": "Get warnings about printing a specific material on a printer.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id",
+          "material"
+        ],
+        "title": "get_material_warningsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_optimal_settings",
+      "description": "Predict the best print settings based on historical success.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "geometry_type": {
+            "default": "",
+            "title": "Geometry Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id",
+          "material"
+        ],
+        "title": "get_optimal_settingsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_print_confidence",
+      "description": "Predict how likely a print will succeed based on your print history.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "pipeline_result_json": {
+            "default": "{}",
+            "title": "Pipeline Result Json",
+            "type": "string"
+          },
+          "fleet_mode": {
+            "default": false,
+            "title": "Fleet Mode",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "printer_id",
+          "material"
+        ],
+        "title": "get_print_confidenceArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_print_learning_summary",
+      "description": "Get what the print learning system has learned about a printer.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id"
+        ],
+        "title": "get_print_learning_summaryArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_completed_print",
+      "description": "Record a completed print into the learning system.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "print_intelligence",
+      "parameters": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "failure_type": {
+            "default": "",
+            "title": "Failure Type",
+            "type": "string"
+          },
+          "settings": {
+            "default": "{}",
+            "title": "Settings",
+            "type": "string"
+          },
+          "temps": {
+            "default": "{}",
+            "title": "Temps",
+            "type": "string"
+          },
+          "speed": {
+            "default": 0,
+            "title": "Speed",
+            "type": "number"
+          },
+          "duration_s": {
+            "default": 0,
+            "title": "Duration S",
+            "type": "number"
+          },
+          "geometry_type": {
+            "default": "",
+            "title": "Geometry Type",
+            "type": "string"
+          },
+          "file_hash": {
+            "default": "",
+            "title": "File Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id",
+          "material"
+        ],
+        "title": "record_completed_printArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_ashtray",
+      "description": "Generate an ashtray with optional branding and QR code.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "top": {
+            "default": "",
+            "title": "Top",
+            "type": "string"
+          },
+          "bottom": {
+            "default": "plain",
+            "title": "Bottom",
+            "type": "string"
+          },
+          "diameter_mm": {
+            "default": 100.0,
+            "title": "Diameter Mm",
+            "type": "number"
+          },
+          "height_mm": {
+            "default": 35.0,
+            "title": "Height Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "white",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "shape": {
+            "default": "round",
+            "title": "Shape",
+            "type": "string"
+          },
+          "cigarette_rests": {
+            "default": 3,
+            "title": "Cigarette Rests",
+            "type": "integer"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "size": {
+            "default": "",
+            "title": "Size",
+            "type": "string"
+          },
+          "photo_mask": {
+            "default": "",
+            "title": "Photo Mask",
+            "type": "string"
+          }
+        },
+        "title": "generate_ashtrayArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_bookmark",
+      "description": "Generate a bookmark with optional decoration and page clip.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "decoration": {
+            "default": "",
+            "title": "Decoration",
+            "type": "string"
+          },
+          "width_mm": {
+            "default": 30.0,
+            "title": "Width Mm",
+            "type": "number"
+          },
+          "length_mm": {
+            "default": 120.0,
+            "title": "Length Mm",
+            "type": "number"
+          },
+          "thickness_mm": {
+            "default": 1.2,
+            "title": "Thickness Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "white",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "clip_depth_mm": {
+            "default": 15.0,
+            "title": "Clip Depth Mm",
+            "type": "number"
+          },
+          "corner_style": {
+            "default": "rounded",
+            "title": "Corner Style",
+            "type": "string"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "size": {
+            "default": "",
+            "title": "Size",
+            "type": "string"
+          }
+        },
+        "title": "generate_bookmarkArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_coaster",
+      "description": "Generate a coaster with optional branding and QR code.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "top": {
+            "default": "",
+            "title": "Top",
+            "type": "string"
+          },
+          "bottom": {
+            "default": "plain",
+            "title": "Bottom",
+            "type": "string"
+          },
+          "diameter_mm": {
+            "default": 90.0,
+            "title": "Diameter Mm",
+            "type": "number"
+          },
+          "thickness_mm": {
+            "default": 7.0,
+            "title": "Thickness Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "white",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "shape": {
+            "default": "round",
+            "title": "Shape",
+            "type": "string"
+          },
+          "photo_mask": {
+            "default": "",
+            "title": "Photo Mask",
+            "type": "string"
+          }
+        },
+        "title": "generate_coasterArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_fridge_magnet",
+      "description": "Generate a printable fridge magnet with front decoration.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "front": {
+            "default": "",
+            "title": "Front",
+            "type": "string"
+          },
+          "back": {
+            "default": "plain",
+            "title": "Back",
+            "type": "string"
+          },
+          "width_mm": {
+            "default": 50.0,
+            "title": "Width Mm",
+            "type": "number"
+          },
+          "height_mm": {
+            "default": 50.0,
+            "title": "Height Mm",
+            "type": "number"
+          },
+          "thickness_mm": {
+            "default": 4.0,
+            "title": "Thickness Mm",
+            "type": "number"
+          },
+          "magnet_diameter_mm": {
+            "default": 10.0,
+            "title": "Magnet Diameter Mm",
+            "type": "number"
+          },
+          "magnet_depth_mm": {
+            "default": 2.0,
+            "title": "Magnet Depth Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "white",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "shape": {
+            "default": "rectangle",
+            "title": "Shape",
+            "type": "string"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "size": {
+            "default": "",
+            "title": "Size",
+            "type": "string"
+          },
+          "photo_mask": {
+            "default": "",
+            "title": "Photo Mask",
+            "type": "string"
+          }
+        },
+        "title": "generate_fridge_magnetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_jewelry_tray",
+      "description": "Generate a jewelry tray with optional decoration and QR code.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "decoration": {
+            "default": "",
+            "title": "Decoration",
+            "type": "string"
+          },
+          "bottom": {
+            "default": "plain",
+            "title": "Bottom",
+            "type": "string"
+          },
+          "width_mm": {
+            "default": 120.0,
+            "title": "Width Mm",
+            "type": "number"
+          },
+          "depth_mm": {
+            "default": 80.0,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "height_mm": {
+            "default": 20.0,
+            "title": "Height Mm",
+            "type": "number"
+          },
+          "wall_mm": {
+            "default": 2.4,
+            "title": "Wall Mm",
+            "type": "number"
+          },
+          "corner_radius_mm": {
+            "default": 8.0,
+            "title": "Corner Radius Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "white",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "dividers_x": {
+            "default": 0,
+            "title": "Dividers X",
+            "type": "integer"
+          },
+          "dividers_y": {
+            "default": 0,
+            "title": "Dividers Y",
+            "type": "integer"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "size": {
+            "default": "",
+            "title": "Size",
+            "type": "string"
+          },
+          "variant": {
+            "default": "square",
+            "title": "Variant",
+            "type": "string"
+          },
+          "photo_mask": {
+            "default": "",
+            "title": "Photo Mask",
+            "type": "string"
+          }
+        },
+        "title": "generate_jewelry_trayArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_keychain",
+      "description": "Generate a 3D-printable keychain.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "front": {
+            "default": "",
+            "title": "Front",
+            "type": "string"
+          },
+          "back": {
+            "default": "plain",
+            "title": "Back",
+            "type": "string"
+          },
+          "width_mm": {
+            "default": 50.0,
+            "title": "Width Mm",
+            "type": "number"
+          },
+          "height_mm": {
+            "default": 30.0,
+            "title": "Height Mm",
+            "type": "number"
+          },
+          "thickness_mm": {
+            "default": 3.0,
+            "title": "Thickness Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "white",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "shape": {
+            "default": "rectangle",
+            "title": "Shape",
+            "type": "string"
+          },
+          "ring_diameter_mm": {
+            "default": 5.0,
+            "title": "Ring Diameter Mm",
+            "type": "number"
+          },
+          "corner_radius_mm": {
+            "default": 5.0,
+            "title": "Corner Radius Mm",
+            "type": "number"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "photo_mask": {
+            "default": "",
+            "title": "Photo Mask",
+            "type": "string"
+          }
+        },
+        "title": "generate_keychainArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_ornament",
+      "description": "Generate a hanging ornament with optional decoration.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "front": {
+            "default": "",
+            "title": "Front",
+            "type": "string"
+          },
+          "back": {
+            "default": "plain",
+            "title": "Back",
+            "type": "string"
+          },
+          "diameter_mm": {
+            "default": 70.0,
+            "title": "Diameter Mm",
+            "type": "number"
+          },
+          "thickness_mm": {
+            "default": 4.0,
+            "title": "Thickness Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "white",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "shape": {
+            "default": "circle",
+            "title": "Shape",
+            "type": "string"
+          },
+          "star_points": {
+            "default": 5,
+            "title": "Star Points",
+            "type": "integer"
+          },
+          "hole_diameter_mm": {
+            "default": 3.0,
+            "title": "Hole Diameter Mm",
+            "type": "number"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "photo_mask": {
+            "default": "",
+            "title": "Photo Mask",
+            "type": "string"
+          }
+        },
+        "title": "generate_ornamentArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_pet_bowl",
+      "description": "Generate a tapered pet bowl optimized for FDM printing.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "exterior": {
+            "default": "",
+            "title": "Exterior",
+            "type": "string"
+          },
+          "interior_bottom": {
+            "default": "plain",
+            "title": "Interior Bottom",
+            "type": "string"
+          },
+          "bottom": {
+            "default": "plain",
+            "title": "Bottom",
+            "type": "string"
+          },
+          "size": {
+            "default": "M",
+            "title": "Size",
+            "type": "string"
+          },
+          "material": {
+            "default": "PETG",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "white",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "wall_mm": {
+            "default": 3.0,
+            "title": "Wall Mm",
+            "type": "number"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "photo_mask": {
+            "default": "",
+            "title": "Photo Mask",
+            "type": "string"
+          }
+        },
+        "title": "generate_pet_bowlArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_pet_tag",
+      "description": "Generate a 3D-printable pet ID tag.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "front_text": {
+            "title": "Front Text",
+            "type": "string"
+          },
+          "front_line2": {
+            "default": "",
+            "title": "Front Line2",
+            "type": "string"
+          },
+          "back": {
+            "default": "plain",
+            "title": "Back",
+            "type": "string"
+          },
+          "diameter_mm": {
+            "default": 30.0,
+            "title": "Diameter Mm",
+            "type": "number"
+          },
+          "thickness_mm": {
+            "default": 3.0,
+            "title": "Thickness Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PETG",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "white",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "shape": {
+            "default": "circle",
+            "title": "Shape",
+            "type": "string"
+          },
+          "ring_diameter_mm": {
+            "default": 5.0,
+            "title": "Ring Diameter Mm",
+            "type": "number"
+          },
+          "ring_hole_mm": {
+            "default": 8.0,
+            "title": "Ring Hole Mm",
+            "type": "number"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          }
+        },
+        "required": [
+          "front_text"
+        ],
+        "title": "generate_pet_tagArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_wall_plaque",
+      "description": "Generate a wall-mountable photo plaque.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_generators",
+      "parameters": {
+        "properties": {
+          "photo": {
+            "title": "Photo",
+            "type": "string"
+          },
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string"
+          },
+          "width_mm": {
+            "default": 150.0,
+            "title": "Width Mm",
+            "type": "number"
+          },
+          "height_mm": {
+            "default": 100.0,
+            "title": "Height Mm",
+            "type": "number"
+          },
+          "thickness_mm": {
+            "default": 8.0,
+            "title": "Thickness Mm",
+            "type": "number"
+          },
+          "material": {
+            "default": "PLA",
+            "title": "Material",
+            "type": "string"
+          },
+          "body_color": {
+            "default": "white",
+            "title": "Body Color",
+            "type": "string"
+          },
+          "border_mm": {
+            "default": 5.0,
+            "title": "Border Mm",
+            "type": "number"
+          },
+          "mount_holes": {
+            "default": 2,
+            "title": "Mount Holes",
+            "type": "integer"
+          },
+          "color_overrides": {
+            "default": "",
+            "title": "Color Overrides",
+            "type": "string"
+          },
+          "size": {
+            "default": "",
+            "title": "Size",
+            "type": "string"
+          }
+        },
+        "required": [
+          "photo"
+        ],
+        "title": "generate_wall_plaqueArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "add_qr_to_product",
+      "description": "Add a scannable QR code to any product STL (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_intelligence",
+      "parameters": {
+        "properties": {
+          "product_stl_path": {
+            "title": "Product Stl Path",
+            "type": "string"
+          },
+          "qr_content": {
+            "title": "Qr Content",
+            "type": "string"
+          },
+          "placement": {
+            "default": "bottom",
+            "title": "Placement",
+            "type": "string"
+          },
+          "product_type": {
+            "default": "",
+            "title": "Product Type",
+            "type": "string"
+          },
+          "size_mm": {
+            "default": 0,
+            "title": "Size Mm",
+            "type": "number"
+          },
+          "pad_height_mm": {
+            "default": 0.5,
+            "title": "Pad Height Mm",
+            "type": "number"
+          },
+          "nozzle_mm": {
+            "default": 0.4,
+            "title": "Nozzle Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "product_stl_path",
+          "qr_content"
+        ],
+        "title": "add_qr_to_productArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "batch_generate_products",
+      "description": "Generate N decorated products from N photos in one call (Pro).\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_intelligence",
+      "parameters": {
+        "properties": {
+          "product_type": {
+            "title": "Product Type",
+            "type": "string"
+          },
+          "photos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Photos",
+            "type": "array"
+          },
+          "text_template": {
+            "default": "",
+            "title": "Text Template",
+            "type": "string"
+          },
+          "size_mm": {
+            "default": 0,
+            "title": "Size Mm",
+            "type": "number"
+          },
+          "thickness_mm": {
+            "default": 0,
+            "title": "Thickness Mm",
+            "type": "number"
+          },
+          "mode": {
+            "default": "auto",
+            "title": "Mode",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_type",
+          "photos"
+        ],
+        "title": "batch_generate_productsArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_decorated_product",
+      "description": "Generate a fully decorated product from a photo in one step (Pro).\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_intelligence",
+      "parameters": {
+        "properties": {
+          "product_type": {
+            "title": "Product Type",
+            "type": "string"
+          },
+          "photo_path": {
+            "title": "Photo Path",
+            "type": "string"
+          },
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string"
+          },
+          "size_mm": {
+            "default": 0,
+            "title": "Size Mm",
+            "type": "number"
+          },
+          "thickness_mm": {
+            "default": 0,
+            "title": "Thickness Mm",
+            "type": "number"
+          },
+          "mode": {
+            "default": "auto",
+            "title": "Mode",
+            "type": "string"
+          },
+          "material": {
+            "default": "",
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_type",
+          "photo_path"
+        ],
+        "title": "generate_decorated_productArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "generate_product_base",
+      "description": "Generate a 3D-printable product base shape from a template (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_intelligence",
+      "parameters": {
+        "properties": {
+          "product_type": {
+            "title": "Product Type",
+            "type": "string"
+          },
+          "size_mm": {
+            "default": 0,
+            "title": "Size Mm",
+            "type": "number"
+          },
+          "thickness_mm": {
+            "default": 0,
+            "title": "Thickness Mm",
+            "type": "number"
+          },
+          "size_preset": {
+            "default": "",
+            "title": "Size Preset",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_type"
+        ],
+        "title": "generate_product_baseArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_product_profile",
+      "description": "Get optimized pipeline profile for a product type (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_intelligence",
+      "parameters": {
+        "properties": {
+          "product_type": {
+            "title": "Product Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_type"
+        ],
+        "title": "get_product_profileArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "print_qr_product",
+      "description": "One-shot QR product pipeline: generate base, add QR, slice, merge, wrap 3MF, upload, and print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "product_intelligence",
+      "parameters": {
+        "properties": {
+          "product_type": {
+            "title": "Product Type",
+            "type": "string"
+          },
+          "qr_content": {
+            "title": "Qr Content",
+            "type": "string"
+          },
+          "size_preset": {
+            "default": "",
+            "title": "Size Preset",
+            "type": "string"
+          },
+          "body_color": {
+            "default": 0,
+            "title": "Body Color",
+            "type": "integer"
+          },
+          "qr_color": {
+            "default": 1,
+            "title": "Qr Color",
+            "type": "integer"
+          },
+          "auto_print": {
+            "default": false,
+            "title": "Auto Print",
+            "type": "boolean"
+          },
+          "printer_name": {
+            "default": "",
+            "title": "Printer Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_type",
+          "qr_content"
+        ],
+        "title": "print_qr_productArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "enable_auto_proven_recipes",
+      "description": "Toggle automatic proven recipe recording on print completion (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "provenance_learning",
+      "parameters": {
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "title": "enable_auto_proven_recipesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_proven_recipe",
+      "description": "Get the proven recipe for a decoration + product combination (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "provenance_learning",
+      "parameters": {
+        "properties": {
+          "decoration_type": {
+            "title": "Decoration Type",
+            "type": "string"
+          },
+          "product_type": {
+            "title": "Product Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decoration_type",
+          "product_type"
+        ],
+        "title": "get_proven_recipeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_proven_recipes",
+      "description": "List all proven recipes across all designs (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "provenance_learning",
+      "parameters": {
+        "properties": {
+          "limit": {
+            "default": 50,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "list_proven_recipesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_proven_recipe",
+      "description": "Record a design version's recipe as proven after a print (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "provenance_learning",
+      "parameters": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "decoration_type": {
+            "title": "Decoration Type",
+            "type": "string"
+          },
+          "product_type": {
+            "title": "Product Type",
+            "type": "string"
+          },
+          "success": {
+            "default": true,
+            "title": "Success",
+            "type": "boolean"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "parameters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parameters"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Version"
+          }
+        },
+        "required": [
+          "design_id",
+          "decoration_type",
+          "product_type"
+        ],
+        "title": "record_proven_recipeArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "cancel_speed_schedule",
+      "description": "Cancel the active speed schedule (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "speed_control",
+      "parameters": {
+        "properties": {},
+        "title": "cancel_speed_scheduleArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "fleet_set_speed",
+      "description": "Set speed across all registered printers in the fleet (Business).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "tier": "business",
+      "category": "speed_control",
+      "parameters": {
+        "properties": {
+          "percent": {
+            "title": "Percent",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "percent"
+        ],
+        "title": "fleet_set_speedArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_speed_schedule",
+      "description": "Get the current active speed schedule and status (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "speed_control",
+      "parameters": {
+        "properties": {},
+        "title": "get_speed_scheduleArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_speed_percent",
+      "description": "Set printer speed to a custom percentage (Pro feature).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "speed_control",
+      "parameters": {
+        "properties": {
+          "percent": {
+            "title": "Percent",
+            "type": "integer"
+          },
+          "printer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Name"
+          }
+        },
+        "required": [
+          "percent"
+        ],
+        "title": "set_speed_percentArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "set_speed_schedule",
+      "description": "Set layer-based speed schedule with automatic adjustments (Pro).\n\nRequires Kiln Business.\nLearn more: https://kiln3d.com/enterprise",
+      "tier": "business",
+      "category": "speed_control",
+      "parameters": {
+        "properties": {
+          "schedule": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Schedule",
+            "type": "array"
+          },
+          "printer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Name"
+          }
+        },
+        "required": [
+          "schedule"
+        ],
+        "title": "set_speed_scheduleArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "apply_geometric_texture",
+      "description": "Apply a procedural texture as physical surface relief.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "textures",
+      "parameters": {
+        "properties": {
+          "input_path": {
+            "title": "Input Path",
+            "type": "string"
+          },
+          "texture": {
+            "enum": [
+              "wood",
+              "lava",
+              "alligator",
+              "snakeskin_python",
+              "snakeskin_diamond",
+              "bamboo",
+              "carbon_fiber",
+              "brushed_metal"
+            ],
+            "title": "Texture",
+            "type": "string"
+          },
+          "depth_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Depth Mm"
+          },
+          "scale": {
+            "default": 1.0,
+            "title": "Scale",
+            "type": "number"
+          },
+          "seed": {
+            "default": 0,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "mode": {
+            "default": "deboss",
+            "title": "Mode",
+            "type": "string"
+          },
+          "resolution": {
+            "default": 200,
+            "title": "Resolution",
+            "type": "integer"
+          },
+          "face": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Face"
+          }
+        },
+        "required": [
+          "input_path",
+          "texture"
+        ],
+        "title": "apply_geometric_textureArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "apply_image_texture",
+      "description": "Apply a photo-based texture as a tiled deboss/emboss pattern.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "textures",
+      "parameters": {
+        "properties": {
+          "input_path": {
+            "title": "Input Path",
+            "type": "string"
+          },
+          "image_path": {
+            "title": "Image Path",
+            "type": "string"
+          },
+          "tile_size_mm": {
+            "default": 40.0,
+            "title": "Tile Size Mm",
+            "type": "number"
+          },
+          "depth_mm": {
+            "default": 1.2,
+            "title": "Depth Mm",
+            "type": "number"
+          },
+          "mode": {
+            "default": "deboss",
+            "title": "Mode",
+            "type": "string"
+          },
+          "resolution": {
+            "default": 200,
+            "title": "Resolution",
+            "type": "integer"
+          },
+          "face": {
+            "default": "auto",
+            "title": "Face",
+            "type": "string"
+          },
+          "num_panels": {
+            "default": 8,
+            "title": "Num Panels",
+            "type": "integer"
+          },
+          "style": {
+            "default": "posterized",
+            "title": "Style",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input_path",
+          "image_path"
+        ],
+        "title": "apply_image_textureArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "apply_procedural_texture",
+      "description": "Apply a procedural material texture to a 3D model for multicolor printing.\n\nFree tier: 3 decorations/month (shared quota). Pro: unlimited.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "textures",
+      "parameters": {
+        "properties": {
+          "input_path": {
+            "title": "Input Path",
+            "type": "string"
+          },
+          "texture": {
+            "enum": [
+              "camo",
+              "tiger_stripe",
+              "digital_camo",
+              "ocean",
+              "tie_dye",
+              "marble",
+              "lava",
+              "galaxy"
+            ],
+            "title": "Texture",
+            "type": "string"
+          },
+          "num_colors": {
+            "default": 4,
+            "title": "Num Colors",
+            "type": "integer"
+          },
+          "color_palette": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Color Palette"
+          },
+          "color_overrides": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Color Overrides"
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preset"
+          },
+          "custom_palette_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Custom Palette Name"
+          },
+          "scale": {
+            "default": 1.0,
+            "title": "Scale",
+            "type": "number"
+          },
+          "seed": {
+            "default": 0,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "surface": {
+            "default": "all",
+            "enum": [
+              "all",
+              "outside",
+              "walls",
+              "caps"
+            ],
+            "title": "Surface",
+            "type": "string"
+          },
+          "save_to_library": {
+            "default": false,
+            "title": "Save To Library",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "input_path",
+          "texture"
+        ],
+        "title": "apply_procedural_textureArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "delete_custom_palette",
+      "description": "Delete a saved custom color palette.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "textures",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "delete_custom_paletteArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_custom_palettes",
+      "description": "List all saved custom color palettes.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "textures",
+      "parameters": {
+        "properties": {},
+        "title": "list_custom_palettesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_procedural_textures",
+      "description": "List all available procedural texture types, palettes, and presets.",
+      "tier": "free",
+      "category": "textures",
+      "parameters": {
+        "properties": {},
+        "title": "list_procedural_texturesArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "preview_texture_2d",
+      "description": "Render a flat 2D preview of a procedural texture as a PNG image.",
+      "tier": "free",
+      "category": "textures",
+      "parameters": {
+        "properties": {
+          "texture": {
+            "enum": [
+              "camo",
+              "tiger_stripe",
+              "digital_camo",
+              "ocean",
+              "tie_dye",
+              "marble",
+              "lava",
+              "galaxy"
+            ],
+            "title": "Texture",
+            "type": "string"
+          },
+          "output_path": {
+            "default": "",
+            "title": "Output Path",
+            "type": "string"
+          },
+          "size": {
+            "default": 512,
+            "title": "Size",
+            "type": "integer"
+          },
+          "color_palette": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Color Palette"
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Preset"
+          },
+          "num_colors": {
+            "default": 4,
+            "title": "Num Colors",
+            "type": "integer"
+          },
+          "scale": {
+            "default": 1.0,
+            "title": "Scale",
+            "type": "number"
+          },
+          "seed": {
+            "default": 42,
+            "title": "Seed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "texture"
+        ],
+        "title": "preview_texture_2dArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "save_custom_palette",
+      "description": "Save a custom color palette for reuse with any texture.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "textures",
+      "parameters": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "colors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Colors",
+            "type": "array"
+          },
+          "texture": {
+            "default": "any",
+            "title": "Texture",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "colors"
+        ],
+        "title": "save_custom_paletteArguments",
+        "type": "object"
+      }
+    }
+  ]
+}

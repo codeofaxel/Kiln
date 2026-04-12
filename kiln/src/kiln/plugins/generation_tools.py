@@ -351,7 +351,7 @@ class _GenerationToolsPlugin:
             Takes any untextured mesh (STL, OBJ, GLB) and generates a
             UV-mapped texture based on the text description.  The textured
             model can then be processed with ``auto_multicolor_from_texture``
-            for multi-material printing.
+            (Kiln Pro) for multi-material printing.
 
             Requires a Meshy API key (``KILN_MESHY_API_KEY``).
 
@@ -404,7 +404,7 @@ class _GenerationToolsPlugin:
                     "next_steps": [
                         f"generation_status('{job.id}', provider='meshy')",
                         f"download_generated_model('{job.id}', provider='meshy')",
-                        "auto_multicolor_from_texture(<obj_path>) for multi-material printing",
+                        "auto_multicolor_from_texture(<obj_path>) for multi-material printing (Kiln Pro)",
                     ],
                 }
             except GenerationAuthError as exc:
