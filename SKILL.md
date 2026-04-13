@@ -29,7 +29,7 @@ pipx install kiln3d
 ## Key capabilities
 
 - **542 MCP tools** for full printer lifecycle control
-- **114 CLI commands** for human and agent use
+- **142 CLI commands** for human and agent use
 - **Model search** across MyMiniFactory, Cults3D, Thangs, GrabCAD, Etsy
 - **Text/sketch-to-3D generation** with multiple provider backends
 - **Auto-slicing** via PrusaSlicer or OrcaSlicer

@@ -843,7 +843,7 @@ The server also exposes read-only resources that agents can use for context:
 | `uptime.py` | Rolling uptime health monitoring (1h/24h/7d/30d windows, 99.9% SLA target) |
 | `project_costs.py` | Per-project cost tracking for manufacturing bureaus (material, labor, printer time, fulfillment) |
 | `wallets.py` | Crypto wallet configuration (Solana/Ethereum for donations and fees) |
-| `cli/` | Click CLI with 113 commands and JSON output |
+| `cli/` | Click CLI with 142 commands and JSON output |
 | `deploy/` | Kubernetes manifests and Helm chart for on-prem Enterprise deployment |
 
 ## Authentication (Optional)
