@@ -1475,7 +1475,7 @@ def _get_payment_mgr():
     circle_key = os.environ.get("KILN_CIRCLE_API_KEY", "")
     if circle_key:
         try:
-            from kiln.payments.circle_provider import CircleProvider
+            from kiln_pro.payments.circle_provider import CircleProvider
 
             circle_network = os.environ.get(
                 "KILN_CIRCLE_NETWORK",
