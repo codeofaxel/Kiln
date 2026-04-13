@@ -333,6 +333,30 @@ class _DecorationLibraryPlugin:
             info["library_path"] = str(_decoration_dir(decoration.slug))
             return info
 
+        @mcp.tool()
+        def decoration_quota_status() -> dict:
+            """Check your decoration quota — how many decorations you've used this month.
+
+            Free-tier users get 3 decorations per calendar month.  Pro, Business,
+            Enterprise, and Founder tiers have unlimited decorations.
+
+            Returns used count, limit, remaining, tier, and current month.
+            """
+            try:
+                from kiln.decoration_quota import (
+                    decoration_quota_status as _status,
+                )
+
+                result = _status()
+                result["success"] = True
+                return result
+            except Exception as exc:
+                _logger.debug("decoration_quota_status failed: %s", exc)
+                return {
+                    "success": False,
+                    "error": f"Failed to check decoration quota: {exc}",
+                }
+
         # Decoration versioning (iterate, history) and proven recipe
         # recording are Pro features.
         # See kiln_pro/plugins/decoration_learning_tools.py.
