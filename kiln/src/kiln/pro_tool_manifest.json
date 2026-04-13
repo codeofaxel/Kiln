@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "generated": "2026-04-12T00:19:06.395738+00:00",
-  "tool_count": 71,
+  "generated": "2026-04-13T20:00:54.294590+00:00",
+  "tool_count": 76,
   "categories": {
     "product_generators": {
       "label": "Product Generators",
-      "pitch": "Generate ready-to-print products \u2014 coasters, keychains, ornaments, pet tags, and more \u2014 with one command."
+      "pitch": "Generate ready-to-print products — coasters, keychains, ornaments, pet tags, and more — with one command."
     },
     "textures": {
       "label": "Textures & Materials",
@@ -21,7 +21,7 @@
     },
     "print_intelligence": {
       "label": "Print Intelligence",
-      "pitch": "Your printer learns from every print \u2014 optimal settings, failure prediction, maintenance alerts."
+      "pitch": "Your printer learns from every print — optimal settings, failure prediction, maintenance alerts."
     },
     "cloud_sync": {
       "label": "Cloud Sync",
@@ -49,6 +49,30 @@
     }
   },
   "tools": [
+    {
+      "name": "cloud_sync_configure",
+      "description": "Configure cloud sync endpoint and authentication.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {
+          "endpoint_url": {
+            "title": "Endpoint Url",
+            "type": "string"
+          },
+          "auth_token": {
+            "title": "Auth Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint_url",
+          "auth_token"
+        ],
+        "title": "cloud_sync_configureArguments",
+        "type": "object"
+      }
+    },
     {
       "name": "cloud_sync_devices",
       "description": "List all devices connected to your cloud sync account.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
@@ -78,6 +102,17 @@
       }
     },
     {
+      "name": "cloud_sync_now",
+      "description": "Push local changes and pull remote changes from all devices.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {},
+        "title": "cloud_sync_nowArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "cloud_sync_resolve_conflict",
       "description": "Manually resolve a sync conflict.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -102,6 +137,17 @@
       }
     },
     {
+      "name": "cloud_sync_status",
+      "description": "Show cloud sync status: last sync time, pending changes, config.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "cloud_sync",
+      "parameters": {
+        "properties": {},
+        "title": "cloud_sync_statusArguments",
+        "type": "object"
+      }
+    },
+    {
       "name": "auto_add_rubber_feet",
       "description": "Add rubber foot positions to model bottom (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
       "tier": "pro",
@@ -118,6 +164,74 @@
           "arguments"
         ],
         "title": "auto_add_rubber_feetArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "auto_multicolor_from_texture",
+      "description": "Segment a textured OBJ into discrete color zones for multi-material printing (Pro).\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "decoration",
+      "parameters": {
+        "properties": {
+          "obj_path": {
+            "title": "Obj Path",
+            "type": "string"
+          },
+          "n_colors": {
+            "default": 4,
+            "title": "N Colors",
+            "type": "integer"
+          },
+          "texture_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Texture Path"
+          },
+          "output_dir": {
+            "default": "",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "min_island_faces": {
+            "default": 3,
+            "title": "Min Island Faces",
+            "type": "integer"
+          },
+          "min_island_area_mm2": {
+            "default": 1.0,
+            "title": "Min Island Area Mm2",
+            "type": "number"
+          },
+          "compose_3mf": {
+            "default": true,
+            "title": "Compose 3Mf",
+            "type": "boolean"
+          },
+          "printer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Printer Id"
+          }
+        },
+        "required": [
+          "obj_path"
+        ],
+        "title": "auto_multicolor_from_textureArguments",
         "type": "object"
       }
     },
@@ -740,6 +854,70 @@
           "stl_path"
         ],
         "title": "read_design_sidecarArguments",
+        "type": "object"
+      }
+    },
+    {
+      "name": "record_print_outcome",
+      "description": "Record whether a print succeeded or failed for a design version.\n\nRequires Kiln Pro.\nUpgrade: https://kiln3d.com/pro",
+      "tier": "pro",
+      "category": "design_versioning",
+      "parameters": {
+        "properties": {
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          },
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "string"
+          },
+          "material": {
+            "title": "Material",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "warp_severity": {
+            "default": 0.0,
+            "title": "Warp Severity",
+            "type": "number"
+          },
+          "adhesion_issues": {
+            "default": false,
+            "title": "Adhesion Issues",
+            "type": "boolean"
+          },
+          "print_time_actual_s": {
+            "default": 0.0,
+            "title": "Print Time Actual S",
+            "type": "number"
+          },
+          "material_cost_usd": {
+            "default": 0.0,
+            "title": "Material Cost Usd",
+            "type": "number"
+          },
+          "electricity_cost_usd": {
+            "default": 0.0,
+            "title": "Electricity Cost Usd",
+            "type": "number"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "printer_id",
+          "material",
+          "success"
+        ],
+        "title": "record_print_outcomeArguments",
         "type": "object"
       }
     },
